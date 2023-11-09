@@ -195,6 +195,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "poseidon"
+version = "0.1.0"
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -287,10 +291,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
+name = "sumcheck"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "ff",
+ "goldilocks",
+ "multilinear_extensions",
+ "rayon",
+]
+
+[[package]]
 name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "transcript"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "ff",
+ "goldilocks",
+ "rayon",
+]
 
 [[package]]
 name = "windows-sys"

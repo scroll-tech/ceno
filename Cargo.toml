@@ -1,7 +1,10 @@
 [workspace]
 members = [
     "goldilocks",
-    "multilinear_extensions"
+    "multilinear_extensions",
+    "poseidon",
+    "sumcheck",
+    "transcript"
 ]
 
 [workspace.package]
