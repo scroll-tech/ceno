@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "goldilocks"
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+ff = "0.13"
+rand_core = "0.6.0"
+subtle = "2.2.1"
+criterion = { version = "0.5", features = ["html_reports"] }
+rand_xorshift = "0.3"
+ark-std = { version = "0.4", features = ["print-trace"] }
