@@ -1,5 +1,5 @@
 [package]
-name = "goldilocks"
+name = "multilinear_extensions"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,10 +8,10 @@ license.workspace = true
 
 [dependencies]
 ff.workspace = true
-rand_core.workspace = true
-subtle.workspace = true
-
-
-[dev-dependencies]
-rand_xorshift.workspace = true
 ark-std.workspace = true
+ark-poly.workspace = true
+rayon.workspace = true
+
+goldilocks = { path = "../goldilocks" }
+
+[dev.dependencies]

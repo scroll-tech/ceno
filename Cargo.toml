@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "goldilocks"
+    "goldilocks",
+    "multilinear_extensions"
 ]
 
 [workspace.package]
@@ -9,9 +10,11 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-ff = "0.13"
-rand_core = "0.6.0"
-subtle = "2.2.1"
-criterion = { version = "0.5", features = ["html_reports"] }
-rand_xorshift = "0.3"
 ark-std = { version = "0.4", features = ["print-trace"] }
+ark-poly = "0.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+ff = "0.13"
+subtle = "2.2.1"
+rand_core = "0.6.0"
+rand_xorshift = "0.3"
+rayon = "1.8"
