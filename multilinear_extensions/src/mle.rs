@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use ark_std::{end_timer, rand::RngCore, start_timer};
-// use ark_poly::DenseMultilinearExtension;
 use ff::Field;
 
 /// Stores a multilinear polynomial in dense evaluation form.

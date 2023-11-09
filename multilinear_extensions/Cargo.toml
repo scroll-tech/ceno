@@ -9,9 +9,7 @@ license.workspace = true
 [dependencies]
 ff.workspace = true
 ark-std.workspace = true
-ark-poly.workspace = true
 rayon.workspace = true
 
+[dev-dependencies]
 goldilocks = { path = "../goldilocks" }
-
-[dev.dependencies]
