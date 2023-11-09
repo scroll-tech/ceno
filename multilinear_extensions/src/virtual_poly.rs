@@ -369,7 +369,12 @@ pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
 /// This function takes `r.len()` steps, and for each step it requires a maximum
 /// `r.len()-1` multiplications.
 fn build_eq_x_r_helper<F: PrimeField>(r: &[F], buf: &mut Vec<F>) {
-    assert!(!r.is_empty(), "r length is 0");
+    // assert!(!r.is_empty(), "r length is 0");
+    if r.is_empty() {
+        buf.resize(1, F::ZERO);
+        buf[0] = F::ONE;
+        return;
+    }
 
     if r.len() == 1 {
         // initializing the buffer with [1-r_0, r_0]

@@ -1,6 +1,6 @@
 //! Poseidon hash function. This is modified from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom.
 
-use frontend::structs::CircuitBuilder;
+use frontend::structs::{CircuitBuilder, ConstantType};
 use goldilocks::{Goldilocks, SmallField};
 use mock_constant::{poseidon_c, poseidon_m, poseidon_p, poseidon_s};
 
@@ -23,12 +23,12 @@ const N_ROUNDS_P: [usize; 16] = [
 // }
 
 fn sigma<F: SmallField>(circuit_builder: &mut CircuitBuilder<F>, in_: usize) -> usize {
-    let one = F::from(1);
     let in2 = circuit_builder.create_cell();
     let in4 = circuit_builder.create_cell();
 
     let out = circuit_builder.create_cell();
 
+    let one = ConstantType::Field(F::ONE);
     circuit_builder.mul2(in2, in_, in_, one);
     circuit_builder.mul2(in4, in2, in2, one);
     circuit_builder.mul2(out, in4, in_, one);
@@ -51,13 +51,13 @@ fn ark<F: SmallField>(
     c: &[F],
     r: usize,
 ) -> Vec<usize> {
-    let one = F::from(1);
-
     let out = circuit_builder.create_cells(in_.len());
+
+    let one = ConstantType::Field(F::ONE);
 
     for i in 0..in_.len() {
         circuit_builder.add(out[i], in_[i], one);
-        circuit_builder.add_const(out[i], c[i + r]);
+        circuit_builder.add_const(out[i], ConstantType::Field(c[i + r]));
     }
 
     out
@@ -86,7 +86,7 @@ fn mix<F: SmallField>(
 
     for i in 0..in_.len() {
         for j in 0..in_.len() {
-            circuit_builder.add(out[i], in_[j], m[j][i]);
+            circuit_builder.add(out[i], in_[j], ConstantType::Field(m[j][i]));
         }
     }
 
@@ -113,7 +113,7 @@ fn mix_last<F: SmallField>(
     let out = circuit_builder.create_cell();
 
     for j in 0..in_.len() {
-        circuit_builder.add(out, in_[j], m[j][s]);
+        circuit_builder.add(out, in_[j], ConstantType::Field(m[j][s]));
     }
 
     out
@@ -139,16 +139,21 @@ fn mix_s<F: SmallField>(
     s: &[F],
     r: usize,
 ) -> Vec<usize> {
-    let one = F::from(1);
     let t = in_.len();
     let out = circuit_builder.create_cells(t);
 
+    let one = ConstantType::Field(F::ONE);
+
     for i in 0..in_.len() {
-        circuit_builder.add(out[0], in_[i], s[(t * 2 - 1) * r + i]);
+        circuit_builder.add(out[0], in_[i], ConstantType::Field(s[(t * 2 - 1) * r + i]));
     }
 
     for i in 1..t {
-        circuit_builder.add(out[i], in_[0], s[(t * 2 - 1) * r + t + i - 1]);
+        circuit_builder.add(
+            out[i],
+            in_[0],
+            ConstantType::Field(s[(t * 2 - 1) * r + t + i - 1]),
+        );
         circuit_builder.add(out[i], in_[i], one);
     }
 
@@ -262,6 +267,7 @@ fn poseidon_ex<F: SmallField>(
         ark_out[r + 1] = ark(circuit_builder, &sigma_f_in[r], &c, (r + 1) * t);
 
         mix_in[r] = ark_out[r + 1].clone();
+        mix_out[r] = mix(circuit_builder, &mix_in[r], &m_slices);
     }
 
     //     for (var j=0; j<t; j++) {
@@ -269,7 +275,6 @@ fn poseidon_ex<F: SmallField>(
     //         sigmaF[nRoundsF\2-1][j].in <== mix[nRoundsF\2-2].out[j];
     //     }
 
-    mix_out[n_rounds_f / 2 - 2] = mix(circuit_builder, &mix_in[n_rounds_f / 2 - 2], &m_slices);
     for j in 0..t {
         sigma_f_in[n_rounds_f / 2 - 1][j] = mix_out[n_rounds_f / 2 - 2][j];
         sigma_f_out[n_rounds_f / 2 - 1][j] =
@@ -321,6 +326,7 @@ fn poseidon_ex<F: SmallField>(
     //         }
     //     }
 
+    let one = ConstantType::Field(F::ONE);
     for r in 0..n_rounds_p {
         sigma_p_in[r] = if r == 0 {
             mix_out[n_rounds_f / 2 - 1][0]
@@ -332,8 +338,9 @@ fn poseidon_ex<F: SmallField>(
         for j in 0..t {
             mix_s_in[r].push(if j == 0 {
                 let cell = circuit_builder.create_cell();
-                circuit_builder.add(cell, sigma_p_out[r], F::from(1));
-                circuit_builder.add_const(cell, c[(n_rounds_f / 2 + 1) * t + r]);
+                circuit_builder.add(cell, sigma_p_out[r], one);
+                circuit_builder
+                    .add_const(cell, ConstantType::Field(c[(n_rounds_f / 2 + 1) * t + r]));
                 cell
             } else {
                 if r == 0 {
@@ -390,6 +397,7 @@ fn poseidon_ex<F: SmallField>(
         );
 
         mix_in[n_rounds_f / 2 + r] = ark_out[n_rounds_f / 2 + r + 1].clone();
+        mix_out[n_rounds_f / 2 + r] = mix(circuit_builder, &mix_in[n_rounds_f / 2 + r], &m_slices);
     }
 
     //     for (var j=0; j<t; j++) {
@@ -411,7 +419,7 @@ fn poseidon_ex<F: SmallField>(
     //     }
     for i in 0..n_outs {
         for j in 0..t {
-            mix_last_in[i][j] = sigma_f_out[n_rounds_f - 1][j];
+            mix_last_in[i].push(sigma_f_out[n_rounds_f - 1][j]);
         }
         mix_last_out[i] = mix_last(circuit_builder, &mix_last_in[i], &m_slices, i);
     }
@@ -421,16 +429,17 @@ fn poseidon_ex<F: SmallField>(
 fn main() {
     let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
     let n_inputs = 4;
-    let poseidon_ex_initial_state = circuit_builder.create_cell();
-    let poseidon_ex_inputs = circuit_builder.create_cells(n_inputs);
+    let (_, poseidon_ex_initial_state) = circuit_builder.create_wire_in(1);
+    let (_, poseidon_ex_inputs) = circuit_builder.create_wire_in(n_inputs);
     let poseidon_ex_out = poseidon_ex(
         &mut circuit_builder,
         1,
         &poseidon_ex_inputs,
-        poseidon_ex_initial_state,
+        poseidon_ex_initial_state[0],
     );
     println!("The output is located at cell {:?}", poseidon_ex_out[0]);
     circuit_builder.configure();
+    circuit_builder.print_info();
 }
 
 mod mock_constant {
