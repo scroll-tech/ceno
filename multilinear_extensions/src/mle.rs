@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use ark_std::{end_timer, rand::RngCore, start_timer};
 use ff::Field;
+use serde::{Serialize,Deserialize};
 
 /// Stores a multilinear polynomial in dense evaluation form.
-#[derive(Clone, PartialEq, Eq, Hash, Default, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
 pub struct DenseMultilinearExtension<F: Field> {
     /// The evaluation over {0,1}^`num_vars`
     pub evaluations: Vec<F>,

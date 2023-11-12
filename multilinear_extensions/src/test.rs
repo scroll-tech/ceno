@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
 use ark_std::test_rng;
-use ff::{PrimeField, Field};
+use ff::{Field, PrimeField};
 use goldilocks::Goldilocks as F;
 
-use crate::{virtual_poly::{VirtualPolynomial, build_eq_x_r}, mle::DenseMultilinearExtension, util::bit_decompose};
-
+use crate::{
+    mle::DenseMultilinearExtension,
+    util::bit_decompose,
+    virtual_poly::{build_eq_x_r, VirtualPolynomial},
+};
 
 #[test]
 fn test_virtual_polynomial_additions() {
@@ -24,18 +27,17 @@ fn test_virtual_polynomial_additions() {
             );
         }
     }
-
 }
 
 #[test]
-fn test_virtual_polynomial_mul_by_mle()  {
+fn test_virtual_polynomial_mul_by_mle() {
     let mut rng = test_rng();
     for nv in 2..5 {
         for num_products in 2..5 {
             let base: Vec<F> = (0..nv).map(|_| F::random(&mut rng)).collect();
 
             let (a, _a_sum) = VirtualPolynomial::<F>::random(nv, (2, 3), num_products, &mut rng);
-            let (b, _b_sum) = DenseMultilinearExtension::<F>:: random_mle_list(nv, 1, &mut rng);
+            let (b, _b_sum) = DenseMultilinearExtension::<F>::random_mle_list(nv, 1, &mut rng);
             let b_mle = b[0].clone();
             let coeff = F::random(&mut rng);
             let b_vp = VirtualPolynomial::new_from_mle(&b_mle, coeff);
@@ -50,7 +52,6 @@ fn test_virtual_polynomial_mul_by_mle()  {
             );
         }
     }
-
 }
 
 #[test]

@@ -1,14 +1,2 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// todo: implement poseidon hash with 12-to-4 parameters as in
+// https://github.com/0xPolygonZero/plonky2/blob/main/plonky2/src/hash/poseidon.rs#L24

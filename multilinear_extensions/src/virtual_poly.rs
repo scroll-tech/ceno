@@ -5,6 +5,7 @@ use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 use ark_std::rand::Rng;
 use ark_std::{end_timer, start_timer};
 use ff::PrimeField;
+use serde::{Serialize,Deserialize};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 use crate::mle::DenseMultilinearExtension;
@@ -50,7 +51,7 @@ pub struct VirtualPolynomial<F: PrimeField> {
     raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<F>, usize>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize,Deserialize)]
 /// Auxiliary information about the multilinear polynomial
 pub struct VPAuxInfo<F: PrimeField> {
     /// max number of multiplicands in each product
@@ -60,6 +61,10 @@ pub struct VPAuxInfo<F: PrimeField> {
     /// Associated field
     #[doc(hidden)]
     pub phantom: PhantomData<F>,
+}
+
+impl<F: PrimeField> AsRef<[u8]> for VPAuxInfo<F> {
+    fn as_ref(&self) -> &[u8] { todo!() }
 }
 
 impl<F: PrimeField> Add for &VirtualPolynomial<F> {
