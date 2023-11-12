@@ -4,6 +4,7 @@ use core::iter::{Product, Sum};
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use ff::{Field, PrimeField};
 use rand_core::RngCore;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
@@ -11,7 +12,7 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 /// A Goldilocks field may store a non-canonical form of the element
 /// where the value can be between 0 and 2^64.
 /// For unique representation of its form, use `to_canonical_u64`
-#[derive(Clone, Copy, Debug, Default, Eq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Serialize, Deserialize)]
 pub struct Goldilocks(pub(crate) u64);
 
 impl PartialEq for Goldilocks {
