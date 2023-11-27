@@ -5,7 +5,7 @@ use ff::PrimeField;
 use goldilocks::SmallField;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use transcript::{Transcript, Challenge};
+use transcript::{Challenge, Transcript};
 
 use crate::{
     structs::{IOPProof, IOPProverMessage, IOPProverState},
@@ -34,9 +34,13 @@ impl<F: SmallField> IOPProverState<F> {
         };
 
         end_timer!(start);
-       IOPProof {
-            // the point consists of the first elements in the challenge 
-            point: prover_state.challenges.iter().map(|challenge|challenge.elements[0]).collect(),
+        IOPProof {
+            // the point consists of the first elements in the challenge
+            point: prover_state
+                .challenges
+                .iter()
+                .map(|challenge| challenge.elements[0])
+                .collect(),
             proofs: prover_msgs,
         }
     }
@@ -69,7 +73,10 @@ impl<F: SmallField> IOPProverState<F> {
     /// next round.
     ///
     /// Main algorithm used is from section 3.2 of [XZZPS19](https://eprint.iacr.org/2019/317.pdf#subsection.3.2).
-    fn prove_round_and_update_state(&mut self, challenge: &Option<Challenge<F>>) -> IOPProverMessage<F> {
+    fn prove_round_and_update_state(
+        &mut self,
+        challenge: &Option<Challenge<F>>,
+    ) -> IOPProverMessage<F> {
         let start =
             start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
 

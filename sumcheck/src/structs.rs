@@ -1,8 +1,8 @@
 use ff::PrimeField;
 use goldilocks::SmallField;
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
+use serde::{Deserialize, Serialize};
 use transcript::Challenge;
-use serde::{Serialize, Deserialize};
 
 /// An IOP proof is a collections of
 /// - messages from prover to verifier at each round through the interactive
@@ -33,8 +33,6 @@ pub struct IOPProverState<F: SmallField> {
     /// degree uni-polys to `max_degree + 1` evaluations.
     pub(crate) extrapolation_aux: Vec<(Vec<F>, Vec<F>)>,
 }
-
-
 
 /// Prover State of a PolyIOP
 pub struct IOPVerifierState<F: SmallField> {

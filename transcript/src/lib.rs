@@ -50,11 +50,7 @@ impl<F: SmallField> Transcript<F> {
     }
 
     // Append the message to the transcript.
-    pub fn append_serializable_element<S: Serialize>(
-        &mut self,
-        label: &'static [u8],
-        element: &S,
-    ) {
+    pub fn append_serializable_element<S: Serialize>(&mut self, label: &'static [u8], element: &S) {
         // TODO!
         println!("mock function. remember to fix me");
     }

@@ -3,9 +3,12 @@
 
 pub use field::SmallField;
 pub use fp::Goldilocks;
+pub use fp3::GoldilocksExt3;
 
 mod field;
 mod fp;
+mod fp2;
+mod fp3;
 mod util;
 
 #[cfg(test)]
