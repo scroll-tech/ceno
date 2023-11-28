@@ -17,7 +17,7 @@ use super::random_prime_field_tests;
 #[test]
 fn test_field() {
     random_field_tests::<GoldilocksExt3>("GoldilocksExt3".to_string());
-    random_prime_field_tests::<Goldilocks>("Goldilocks".to_string());
+    random_prime_field_tests::<GoldilocksExt3>("GoldilocksExt3".to_string());
 }
 
 #[test]
@@ -34,8 +34,8 @@ fn known_answer_tests() {
     ]);
     let c = GoldilocksExt3([
         Goldilocks::from(31),
-        Goldilocks::from(31),
-        Goldilocks::from(28),
+        Goldilocks::from(58),
+        Goldilocks::from(46),
     ]);
     assert_eq!(a * b, c)
 }

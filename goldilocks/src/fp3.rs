@@ -1,4 +1,4 @@
-//! This module implements degree 3 Goldilocks extension field mod x^3-1
+//! This module implements degree 3 Goldilocks extension field mod x^3-x-1
 
 use crate::Goldilocks;
 use core::iter::{Product, Sum};
@@ -8,15 +8,15 @@ use rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
-/// Degree 3 Goldilocks extension field mod x^3-1
+/// Degree 3 Goldilocks extension field mod x^3-x-1
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoldilocksExt3(pub [Goldilocks; 3]);
 
 /// For a = (a1, a2, a3) and b = (b1, b2, b3)
 /// The multiplication is define as
-/// c := a * b = a(x) * b(x) % (x^3-1)
-///    = x^2*a3*b1 + x^2*a2*b2 + x^2*a1*b3 +
-///    + x*a2*b1 + x*a1*b2 + x*a3*b3 +
+/// c := a * b = a(x) * b(x) % (x^3-x-1)
+///    = x^2*a3*b1 + x^2*a2*b2 + x^2*a1*b3 + x^2*a3*b3
+///    + x*a2*b1 + x*a1*b2 + x*a3*b2 + x*a2*b3 + x*a3*b3
 ///    + a1*b1 + a3*b2 + a2*b3
 /// This requires 9 multiplications and 6 1 additions
 fn mul_internal(a: &GoldilocksExt3, b: &GoldilocksExt3) -> GoldilocksExt3 {
@@ -32,8 +32,8 @@ fn mul_internal(a: &GoldilocksExt3, b: &GoldilocksExt3) -> GoldilocksExt3 {
     let a3b3 = a.0[2] * b.0[2];
 
     let c1 = a1b1 + a3b2 + a2b3;
-    let c2 = a2b1 + a1b2 + a3b3;
-    let c3 = a3b1 + a2b2 + a1b3;
+    let c2 = a2b1 + a1b2 + a2b3 + a3b2 + a3b3;
+    let c3 = a3b1 + a2b2 + a1b3 + a3b3;
     GoldilocksExt3([c1, c2, c3])
 }
 
