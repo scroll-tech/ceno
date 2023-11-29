@@ -9,7 +9,6 @@ license.workspace = true
 [dependencies]
 ff.workspace = true
 ark-std.workspace = true
+goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
-
-goldilocks = { path = "../goldilocks" }

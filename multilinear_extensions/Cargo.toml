@@ -13,4 +13,4 @@ rayon.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
-goldilocks = { path = "../goldilocks" }
+goldilocks.workspace = true
