@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ark_std::{end_timer, start_timer};
-use ff::PrimeField;
+use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -12,11 +12,12 @@ use crate::{
     util::{barycentric_weights, extrapolate},
 };
 
-impl<F: SmallField> IOPProverState<F> {
-    fn prove(poly: &VirtualPolynomial<F>, transcript: &mut Transcript<F>) -> IOPProof<F> {
+impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
+    pub fn prove(poly: &VirtualPolynomial<F>, transcript: &mut Transcript<F>) -> IOPProof<F> {
         let start = start_timer!(|| "sum check prove");
 
-        transcript.append_serializable_element(b"aux info", &poly.aux_info);
+        transcript.append_message(&poly.aux_info.num_variables.to_le_bytes());
+        transcript.append_message(&poly.aux_info.max_degree.to_le_bytes());
 
         let mut prover_state = Self::prover_init(poly);
         let mut challenge = None;
@@ -24,7 +25,12 @@ impl<F: SmallField> IOPProverState<F> {
         for _ in 0..poly.aux_info.num_variables {
             let prover_msg =
                 IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
-            transcript.append_serializable_element(b"prover msg", &prover_msg);
+
+            prover_msg
+                .evaluations
+                .iter()
+                .for_each(|e| transcript.append_field_element(e));
+
             prover_msgs.push(prover_msg);
             challenge = Some(transcript.get_and_append_challenge(b"Internal round"));
         }
@@ -47,7 +53,7 @@ impl<F: SmallField> IOPProverState<F> {
 
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
-    pub fn prover_init(polynomial: &VirtualPolynomial<F>) -> Self {
+    pub(crate) fn prover_init(polynomial: &VirtualPolynomial<F>) -> Self {
         let start = start_timer!(|| "sum check prover init");
         assert_ne!(
             polynomial.aux_info.num_variables, 0,
@@ -73,7 +79,7 @@ impl<F: SmallField> IOPProverState<F> {
     /// next round.
     ///
     /// Main algorithm used is from section 3.2 of [XZZPS19](https://eprint.iacr.org/2019/317.pdf#subsection.3.2).
-    fn prove_round_and_update_state(
+    pub(crate) fn prove_round_and_update_state(
         &mut self,
         challenge: &Option<Challenge<F>>,
     ) -> IOPProverMessage<F> {
@@ -81,7 +87,7 @@ impl<F: SmallField> IOPProverState<F> {
             start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
 
         assert!(
-            self.round >= self.poly.aux_info.num_variables,
+            self.round < self.poly.aux_info.num_variables,
             "Prover is not active"
         );
 

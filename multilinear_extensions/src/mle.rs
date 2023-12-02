@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Stores a multilinear polynomial in dense evaluation form.
 #[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
-pub struct DenseMultilinearExtension<F: Field> {
+pub struct DenseMultilinearExtension<F> {
     /// The evaluation over {0,1}^`num_vars`
     pub evaluations: Vec<F>,
     /// Number of variables
@@ -86,6 +86,12 @@ impl<F: Field> DenseMultilinearExtension<F> {
         });
 
         res
+    }
+
+    /// Generate a random evaluation of a multilinear poly
+    pub fn random(nv: usize, mut rng: &mut impl RngCore) -> Self {
+        let eval = (0..1 << nv).map(|_| F::random(&mut rng)).collect();
+        DenseMultilinearExtension::from_evaluations_vec(nv, eval)
     }
 
     /// Sample a random list of multilinear polynomials.

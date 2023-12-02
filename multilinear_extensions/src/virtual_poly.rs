@@ -39,7 +39,7 @@ use crate::util::bit_decompose;
 /// - raw_pointers_lookup_table maps fi to i
 ///
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct VirtualPolynomial<F: PrimeField> {
+pub struct VirtualPolynomial<F> {
     /// Aux information about the multilinear polynomial
     pub aux_info: VPAuxInfo<F>,
     /// list of reference to products (as usize) of multilinear extension
@@ -53,7 +53,7 @@ pub struct VirtualPolynomial<F: PrimeField> {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 /// Auxiliary information about the multilinear polynomial
-pub struct VPAuxInfo<F: PrimeField> {
+pub struct VPAuxInfo<F> {
     /// max number of multiplicands in each product
     pub max_degree: usize,
     /// number of variables of the polynomial
