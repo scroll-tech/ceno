@@ -6,7 +6,6 @@ mod hasher;
 use ff::{FromUniformBytes, PrimeField};
 use goldilocks::SmallField;
 use poseidon::Poseidon;
-use serde::Serialize;
 
 // temporarily using 12-4 hashes
 pub const INPUT_WIDTH: usize = 12;
@@ -66,10 +65,14 @@ impl<F: SmallField + FromUniformBytes<64>> Transcript<F> {
     // as the field has a size less than 2^384.
     pub fn get_and_append_challenge(&mut self, label: &'static [u8]) -> Challenge<F> {
         self.append_message(label);
-        Challenge {
+
+        let challenge = Challenge {
             elements: self.sponge_hasher.squeeze_vec()[0..OUTPUT_WIDTH]
                 .try_into()
                 .unwrap(),
-        }
+        };
+        println!("challenge: {:?}", challenge);
+
+        challenge
     }
 }

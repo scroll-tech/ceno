@@ -139,18 +139,19 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         // insert the asserted_sum to the first position of the expected vector
         expected_vec.insert(0, *asserted_sum);
 
-        for (evaluations, &expected) in self
+        for (i, (evaluations, &expected)) in self
             .polynomials_received
             .iter()
             .zip(expected_vec.iter())
+            .enumerate()
             .take(self.num_vars)
         {
             // the deferred check during the interactive phase:
             // 1. check if the received 'P(0) + P(1) = expected`.
             if evaluations[0] + evaluations[1] != expected {
                 panic!(
-                    "Prover message is not consistent with the claim. {:?} {:?} {:?}",
-                    evaluations[0], evaluations[1], expected
+                    "{}th round's prover message is not consistent with the claim. {:?} {:?} {:?}",
+                    i, evaluations[0], evaluations[1], expected
                 );
             }
         }

@@ -175,7 +175,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
                     },
                 );
             sum.iter_mut().for_each(|sum| *sum *= coefficient);
-            let extraploation = (0..self.poly.aux_info.max_degree - products.len())
+            let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
                 .into_par_iter()
                 .map(|i| {
                     let (points, weights) = &self.extrapolation_aux[products.len() - 1];
@@ -185,7 +185,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
                 .collect::<Vec<_>>();
             products_sum
                 .iter_mut()
-                .zip(sum.iter().chain(extraploation.iter()))
+                .zip(sum.iter().chain(extrapolation.iter()))
                 .for_each(|(products_sum, sum)| *products_sum += sum);
         });
 
