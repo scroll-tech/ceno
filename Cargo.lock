@@ -228,6 +228,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "frontend"
+version = "0.1.0"
+dependencies = [
+ "ark-ff",
+ "ark-std",
+ "ff",
+ "goldilocks",
+ "rayon",
+ "serde",
+]
+
+[[package]]
 name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
