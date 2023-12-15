@@ -4,6 +4,9 @@ use ark_std::{end_timer, rand::RngCore, start_timer};
 use ff::Field;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "parallel")]
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+
 /// Stores a multilinear polynomial in dense evaluation form.
 #[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
 pub struct DenseMultilinearExtension<F> {
@@ -77,7 +80,7 @@ impl<F: Field> DenseMultilinearExtension<F> {
         // evaluate single variable of partial point from left to right
         #[cfg(not(feature = "parallel"))]
         for i in 0..(1 << (nv - 1)) {
-            res[i] = data[i] + (data[(i << 1) + 1] - data[i << 1]) * point;
+            res[i] = data[i << 1] + (data[(i << 1) + 1] - data[i << 1]) * point;
         }
 
         #[cfg(feature = "parallel")]
