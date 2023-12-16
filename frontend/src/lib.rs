@@ -1,3 +1,3 @@
-mod circuit;
 mod circuit_builder;
-mod circuit_witness;
+mod lookup_builder;
+pub mod structs;

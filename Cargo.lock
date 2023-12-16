@@ -231,7 +231,6 @@ dependencies = [
 name = "frontend"
 version = "0.1.0"
 dependencies = [
- "ark-ff",
  "ark-std",
  "ff",
  "goldilocks",
@@ -264,6 +263,16 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi",
+]
+
+[[package]]
+name = "gkr"
+version = "0.1.0"
+dependencies = [
+ "frontend",
+ "goldilocks",
+ "sumcheck",
+ "transcript",
 ]
 
 [[package]]
