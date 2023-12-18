@@ -1,13 +1,13 @@
-use crate::structs::IOPVerifierState;
-
-#[cfg(test)]
-use super::*;
-use ark_ff::UniformRand;
-use ark_std::test_rng;
+use ark_std::{rand::RngCore, test_rng};
+use ff::Field;
 use goldilocks::Goldilocks;
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
-use std::sync::Arc;
 use transcript::Transcript;
+
+use crate::{
+    structs::{IOPProverState, IOPVerifierState},
+    util::interpolate_uni_poly,
+};
 
 fn test_sumcheck(nv: usize, num_multiplicands_range: (usize, usize), num_products: usize) {
     let mut rng = test_rng();
@@ -117,37 +117,52 @@ fn test_extract_sum() {
     assert_eq!(proof.extract_sum(), asserted_sum);
 }
 
+struct DensePolynomial(Vec<Goldilocks>);
+
+impl DensePolynomial {
+    fn rand(degree: usize, mut rng: &mut impl RngCore) -> Self {
+        Self((0..degree).map(|_| Goldilocks::random(&mut rng)).collect())
+    }
+
+    fn evaluate(&self, p: &Goldilocks) -> Goldilocks {
+        let mut powers_of_p = *p;
+        let mut res = self.0[0];
+        for &c in self.0.iter().skip(1) {
+            res += powers_of_p * c;
+            powers_of_p *= *p;
+        }
+        res
+    }
+}
 
 #[test]
-fn test_interpolation()  {
+fn test_interpolation() {
     let mut prng = ark_std::test_rng();
 
     // test a polynomial with 20 known points, i.e., with degree 19
-    let poly = DensePolynomial::<Fr>::rand(20 - 1, &mut prng);
+    let poly = DensePolynomial::rand(20 - 1, &mut prng);
     let evals = (0..20)
-        .map(|i| poly.evaluate(&Fr::from(i)))
-        .collect::<Vec<Fr>>();
-    let query = Fr::rand(&mut prng);
+        .map(|i| poly.evaluate(&Goldilocks::from(i)))
+        .collect::<Vec<Goldilocks>>();
+    let query = Goldilocks::random(&mut prng);
 
-    assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query)?);
+    assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query));
 
     // test a polynomial with 33 known points, i.e., with degree 32
-    let poly = DensePolynomial::<Fr>::rand(33 - 1, &mut prng);
+    let poly = DensePolynomial::rand(33 - 1, &mut prng);
     let evals = (0..33)
-        .map(|i| poly.evaluate(&Fr::from(i)))
-        .collect::<Vec<Fr>>();
-    let query = Fr::rand(&mut prng);
+        .map(|i| poly.evaluate(&Goldilocks::from(i)))
+        .collect::<Vec<Goldilocks>>();
+    let query = Goldilocks::random(&mut prng);
 
-    assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query)?);
+    assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query));
 
     // test a polynomial with 64 known points, i.e., with degree 63
-    let poly = DensePolynomial::<Fr>::rand(64 - 1, &mut prng);
+    let poly = DensePolynomial::rand(64 - 1, &mut prng);
     let evals = (0..64)
-        .map(|i| poly.evaluate(&Fr::from(i)))
-        .collect::<Vec<Fr>>();
-    let query = Fr::rand(&mut prng);
+        .map(|i| poly.evaluate(&Goldilocks::from(i)))
+        .collect::<Vec<Goldilocks>>();
+    let query = Goldilocks::random(&mut prng);
 
-    assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query)?);
-
-    Ok(())
+    assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query));
 }

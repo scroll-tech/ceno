@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use ff::PrimeField;
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use serde::{Deserialize, Serialize};
@@ -15,6 +13,7 @@ pub struct IOPProof<F> {
     pub proofs: Vec<IOPProverMessage<F>>,
 }
 impl<F: PrimeField> IOPProof<F> {
+    #[allow(dead_code)]
     pub(crate) fn extract_sum(&self) -> F {
         let res = self.proofs[0].evaluations[0] + self.proofs[0].evaluations[1];
 

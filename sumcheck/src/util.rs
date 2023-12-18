@@ -52,7 +52,7 @@ fn serial_batch_inversion_and_mul<F: PrimeField>(v: &mut [F], coeff: &F) {
     // First pass: compute [a, ab, abc, ...]
     let mut prod = Vec::with_capacity(v.len());
     let mut tmp = F::ONE;
-    for f in v.iter().filter(|f| f.is_zero().unwrap_u8() == 1) {
+    for f in v.iter().filter(|f| !f.is_zero_vartime()) {
         tmp.mul_assign(f);
         prod.push(tmp);
     }
@@ -69,7 +69,7 @@ fn serial_batch_inversion_and_mul<F: PrimeField>(v: &mut [F], coeff: &F) {
         // Backwards
         .rev()
         // Ignore normalized elements
-        .filter(|f| f.is_zero().unwrap_u8() == 1)
+        .filter(|f| !f.is_zero_vartime())
         // Backwards, skip last element, fill in one for last term.
         .zip(prod.into_iter().rev().skip(1).chain(Some(F::ONE)))
     {

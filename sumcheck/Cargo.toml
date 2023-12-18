@@ -16,5 +16,5 @@ serde.workspace = true
 
 
 
-multilinear_extensions = { path = "../multilinear_extensions" }
+multilinear_extensions = { path = "../multilinear_extensions", features = [ "parallel"] }
 transcript = { path = "../transcript" }
