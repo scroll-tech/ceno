@@ -430,7 +430,7 @@ fn main() {
         poseidon_ex_initial_state,
     );
     println!("The output is located at cell {:?}", poseidon_ex_out[0]);
-    circuit_builder.synthesize();
+    circuit_builder.configure();
 }
 
 mod mock_constant {

@@ -23,14 +23,10 @@ impl<F: SmallField> TableData<F> {
 
 impl<F: SmallField> LookupBuilder<F> {
     pub fn new() -> Self {
-        Self {
-            tables: HashMap::new(),
-            cells: todo!(),
-            table_data: Vec::new(),
-        }
+        todo!()
     }
 
-    pub(crate) fn define_table_type(&mut self, table_name: &'static str) -> TableType {
+    pub(crate) fn define_table_type(&mut self, table_type: TableType) {
         todo!()
     }
 

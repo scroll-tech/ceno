@@ -30,6 +30,7 @@ pub struct CircuitBuilder<F: SmallField> {
     pub cells: SharedCells<F>,
     pub challenges: Vec<usize>,
 
+    pub marked_cells: Vec<Vec<usize>>,
     pub(crate) lookup_builder: LookupBuilder<F>,
 }
 
@@ -50,8 +51,6 @@ pub(crate) struct TableData<F: SmallField> {
 /// Store information to build lookup circuits.
 pub(crate) struct LookupBuilder<F: SmallField> {
     pub(crate) cells: SharedCells<F>,
-    /// Store all table types.
-    pub(crate) tables: HashMap<&'static str, usize>,
-    /// Store all table data.
-    pub(crate) table_data: Vec<TableData<F>>,
+    /// Store all tables.
+    pub(crate) tables: Vec<TableData<F>>,
 }

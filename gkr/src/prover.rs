@@ -10,7 +10,7 @@ impl<F: SmallField> IOPProverState<F> {
     pub fn prove(
         circuit: &Circuit<F>,
         circuit_witness: &CircuitWitness<F>,
-        output_points: &[Point<F>],
+        output_points: &[&Point<F>],
         output_evaluations: &[F],
         transcript: &mut Transcript<F>,
     ) -> IOPProof<F> {
@@ -19,7 +19,7 @@ impl<F: SmallField> IOPProverState<F> {
 
     fn prover_init(
         circuit_witness: &CircuitWitness<F>,
-        output_points: &[Point<F>],
+        output_points: &[&Point<F>],
         output_evaluations: &[F],
     ) -> Self {
         todo!()
@@ -29,7 +29,7 @@ impl<F: SmallField> IOPProverState<F> {
     /// sum_j( alpha_j * subset[i][j](rt || rw_j) ) = sum_w( sum_j( (alpha_j copied_to[j](rw_j, w)) * current_out(rt || w) ) )
     fn prove_and_update_state_phase1(
         &mut self,
-        deeper_points: &[Point<F>],
+        deeper_points: &[&Point<F>],
         deeper_evaluations: &[F],
         transcript: &mut Transcript<F>,
     ) -> (IOPProverPhase1Message<F>, Point<F>) {
@@ -91,7 +91,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///         ) )
     fn prove_round_and_update_state_phase3(
         &mut self,
-        layer_in_points: &[Point<F>],
+        layer_in_points: &[&Point<F>],
         layer_in_evaluations: &[F],
         transcript: &mut Transcript<F>,
     ) -> IOPProverPhase3Message<F> {

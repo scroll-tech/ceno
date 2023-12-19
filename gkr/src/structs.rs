@@ -81,7 +81,7 @@ pub struct Layer<F: SmallField> {
 }
 
 pub struct Circuit<F: SmallField> {
-    pub(crate) layers: Vec<Layer<F>>,
+    pub layers: Vec<Layer<F>>,
 }
 
 pub struct LayerWitness<F: SmallField>(Vec<F>);
