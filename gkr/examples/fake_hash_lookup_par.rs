@@ -68,7 +68,7 @@ fn main() {
 
         let output_eval = last_layer_witness.evaluate(&output_point);
         (
-            IOPProverState::prove(
+            IOPProverState::prove_parallel(
                 &circuit,
                 &circuit_witness,
                 &[&output_point],
@@ -85,7 +85,7 @@ fn main() {
         let output_point = (0..output_log_size)
             .map(|_| verifier_transcript.get_and_append_challenge(b"output point"))
             .collect::<Vec<_>>();
-        IOPVerifierState::verify(
+        IOPVerifierState::verify_parallel(
             &circuit,
             &[&output_point],
             &[output_eval],

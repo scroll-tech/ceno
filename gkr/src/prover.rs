@@ -7,7 +7,8 @@ use crate::structs::{
 };
 
 impl<F: SmallField> IOPProverState<F> {
-    pub fn prove(
+    /// Prove process for data parallel circuits.
+    pub fn prove_parallel(
         circuit: &Circuit<F>,
         circuit_witness: &CircuitWitness<F>,
         output_points: &[&Point<F>],
@@ -17,7 +18,8 @@ impl<F: SmallField> IOPProverState<F> {
         todo!()
     }
 
-    fn prover_init(
+    /// Initialize proving state for data parallel circuits.
+    fn prover_init_parallel(
         circuit_witness: &CircuitWitness<F>,
         output_points: &[&Point<F>],
         output_evaluations: &[F],
@@ -25,9 +27,9 @@ impl<F: SmallField> IOPProverState<F> {
         todo!()
     }
 
-    /// Prove the items in the i-th layer are copied to deeper layers.
+    /// Prove the items in the i-th layer are copied to deeper layers for data parallel circuits.
     /// sum_j( alpha_j * subset[i][j](rt || rw_j) ) = sum_w( sum_j( (alpha_j copied_to[j](rw_j, w)) * current_out(rt || w) ) )
-    fn prove_and_update_state_phase1(
+    fn prove_and_update_state_phase1_parallel(
         &mut self,
         deeper_points: &[&Point<F>],
         deeper_evaluations: &[F],
@@ -36,7 +38,8 @@ impl<F: SmallField> IOPProverState<F> {
         todo!()
     }
 
-    /// Prove the computation in the current layer. The number of terms depends on the gate.
+    /// Prove the computation in the current layer for data parallel circuits.
+    /// The number of terms depends on the gate.
     /// Here is an example of degree 3:
     /// current_out(rt || rw) = sum_s1( sum_s2( sum_s3( sum_x( sum_y( sum_z(
     ///     eq(rt, s1, s2, s3) * mul3(rw, x, y, z) * current_in(s1 || x) * current_in(s2 || y) * current_in(s3 || z)
@@ -70,7 +73,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///     sigma = g1'(rs1 || rx)
     ///     f1''(s3 || z) = current_in(s3 || z)
     ///     g1''(s3 || z) = eq(rt, s1, s2, s3) * mul3(rw, x, y, z)
-    fn prove_round_and_update_state_phase2(
+    fn prove_round_and_update_state_phase2_parallel(
         &mut self,
         layer_out_point: &Point<F>,
         layer_out_evaluation: F,
@@ -81,7 +84,8 @@ impl<F: SmallField> IOPProverState<F> {
 
     // TODO: Define special protocols of special layers for optimization.
 
-    /// Prove the items of the input of the i-th layer are copied from previous layers.
+    /// Prove the items of the input of the i-th layer are copied from previous
+    /// layers for data parallel circuits.
     ///     gamma_1 current_in(rs1 || rx) + gamma_2 current_in(rs2 || ry) + gamma_2 current_in(rs3 || rz)
     ///         = sum_t( sum_w(
     ///             (gamma_1 eq(rs1 || rx, t || w) + gamma_2 eq(rs2 || ry, t || w) + gamma_3 eq(rs3 || rz, t || w)) * subset[prev_i][i](t || w)
@@ -89,7 +93,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///                 (gamma_1 eq(rs1 || rx) paste_from(rx, w) + gamma_2 eq(rs2 || ry) paste_from(ry, w) + gamma_3 eq(rs3 || rz) paste_from(rz, w)) * subset[j][i](t || w)
     ///             )
     ///         ) )
-    fn prove_round_and_update_state_phase3(
+    fn prove_round_and_update_state_phase3_parallel(
         &mut self,
         layer_in_points: &[&Point<F>],
         layer_in_evaluations: &[F],

@@ -10,7 +10,8 @@ use crate::{
 };
 
 impl<F: SmallField> IOPVerifierState<F> {
-    pub fn verify(
+    /// Verify process for data parallel circuits.
+    pub fn verify_parallel(
         circuit: &Circuit<F>,
         output_points: &[&Point<F>],
         output_evaluations: &[F],
@@ -20,12 +21,14 @@ impl<F: SmallField> IOPVerifierState<F> {
         todo!()
     }
 
-    fn verifier_init(output_points: &[Point<F>], output_evaluations: &[F]) -> Self {
+    /// Initialize verifying state for data parallel circuits.
+    fn verifier_init_parallel(output_points: &[Point<F>], output_evaluations: &[F]) -> Self {
         todo!()
     }
 
-    /// Verify the items in the i-th layer are copied to deeper layers.
-    fn prove_and_update_state_phase1(
+    /// Verify the items in the i-th layer are copied to deeper layers for data
+    /// parallel circuits.
+    fn verify_and_update_state_phase1_parallel(
         &mut self,
         deeper_points: &[&Point<F>],
         deeper_evaluations: &[F],
@@ -35,8 +38,9 @@ impl<F: SmallField> IOPVerifierState<F> {
         todo!()
     }
 
-    /// Verify the computation in the current layer. The number of terms depends on the gate.
-    fn prove_round_and_update_state_phase2(
+    /// Verify the computation in the current layer for data parallel circuits.
+    /// The number of terms depends on the gate.
+    fn verify_round_and_update_state_phase2_parallel(
         &mut self,
         layer_out_point: &Point<F>,
         layer_out_evaluation: F,
@@ -46,8 +50,9 @@ impl<F: SmallField> IOPVerifierState<F> {
         todo!()
     }
 
-    /// Verify the items of the input of the i-th layer are copied from previous layers.
-    fn prove_round_and_update_state_phase3(
+    /// Verify the items of the input of the i-th layer are copied from previous
+    /// layers for data parallel circuits.
+    fn verify_round_and_update_state_phase3_parallel(
         &mut self,
         layer_in_points: &[&Point<F>],
         layer_in_evaluations: &[F],
