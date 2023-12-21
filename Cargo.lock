@@ -364,6 +364,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mpcs"
+version = "0.1.0"
+dependencies = [
+ "ff",
+ "goldilocks",
+ "multilinear_extensions",
+ "serde",
+ "transcript",
+]
+
+[[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
 dependencies = [
