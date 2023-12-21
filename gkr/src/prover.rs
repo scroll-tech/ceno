@@ -86,11 +86,11 @@ impl<F: SmallField> IOPProverState<F> {
 
     /// Prove the items of the input of the i-th layer are copied from previous
     /// layers for data parallel circuits.
-    ///     gamma_1 current_in(rs1 || rx) + gamma_2 current_in(rs2 || ry) + gamma_2 current_in(rs3 || rz)
+    ///     gamma_1 current_in(rs1 || rx) + gamma_2 current_in(rs2 || ry) + gamma_3 current_in(rs3 || rz)
     ///         = sum_t( sum_w(
     ///             (gamma_1 eq(rs1 || rx, t || w) + gamma_2 eq(rs2 || ry, t || w) + gamma_3 eq(rs3 || rz, t || w)) * subset[prev_i][i](t || w)
     ///             + sum_j(
-    ///                 (gamma_1 eq(rs1 || rx) paste_from(rx, w) + gamma_2 eq(rs2 || ry) paste_from(ry, w) + gamma_3 eq(rs3 || rz) paste_from(rz, w)) * subset[j][i](t || w)
+    ///                 (gamma_1 eq(rs1, t) paste_from(rx, w) + gamma_2 eq(rs2, t) paste_from(ry, w) + gamma_3 eq(rs3, t) paste_from(rz, w)) * subset[j][i](t || w)
     ///             )
     ///         ) )
     fn prove_round_and_update_state_phase3_parallel(

@@ -3,18 +3,18 @@ use std::{collections::HashMap, sync::Arc};
 use goldilocks::SmallField;
 use transcript::Challenge;
 
-pub(crate) type SumcheckProof<F: SmallField> = sumcheck::structs::IOPProof<F>;
-pub(crate) type Point<F: SmallField> = Vec<Challenge<F>>;
+pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
+pub(crate) type Point<F> = Vec<Challenge<F>>;
 
-/// Represent the prover state for each layer in the IOP protocol.
+/// Represent the prover state for each layer in the IOP protocol. To support
+/// gates between non-adjeacent layers, we leverage the techniques in
+/// [Virgo++](https://eprint.iacr.org/2020/1247).
 pub struct IOPProverState<F: SmallField> {
     pub(crate) layer_id: usize,
-    /// Evaluation point used in the proved layers for pasting values from
-    /// previous layers.
-    pub(crate) layer_eval_points: Vec<HashMap<usize, Point<F>>>,
-    /// Evaluations of the connection subset between the proved layers with
-    /// previous layers.
-    pub(crate) layer_eval_values: Vec<HashMap<usize, F>>,
+    /// Evaluations and points used in the proved layers for pasting values from
+    /// previous layers. Hashmap is used to map from the layer id to the point
+    /// and value.
+    pub(crate) layer_evals: HashMap<usize, (Point<F>, F)>,
     pub(crate) circuit_witness: CircuitWitness<F>,
 }
 
@@ -22,22 +22,37 @@ pub struct IOPProverState<F: SmallField> {
 pub struct IOPVerifierState<F: SmallField> {
     pub(crate) layer_id: usize,
     /// Evaluation point used in the proved layers for pasting values from
-    /// previous layers.
-    pub(crate) layer_eval_points: Vec<Point<F>>,
+    /// previous layers. Hashmap is used to map from the layer id to the point.
+    pub(crate) layer_eval_points: HashMap<usize, Point<F>>,
 }
 
+/// Phase 1 is a sumcheck protocol merging the subset evaluations from the
+/// layers closer to the circuit output to an evaluation to the output of the
+/// current layer.
 pub struct IOPProverPhase1Message<F: SmallField> {
-    pub sumcheck_messages: Vec<SumcheckProof<F>>,
+    pub sumcheck_messages: SumcheckProof<F>,
+    /// Evaluation of the output of the current layer.
     pub evaluation: F,
 }
 
+/// Phase 2 is several sumcheck protocols (depending on the degree of gates),
+/// reducing the correctness of the output of the current layer to the input of
+/// the current layer.
 pub struct IOPProverPhase2Message<F: SmallField> {
+    /// Sumcheck messages for each sumcheck protocol.
     pub sumcheck_messages: Vec<SumcheckProof<F>>,
-    pub evaluations: Vec<F>,
+    /// Evaluations sent by the prover at the end of each sumcheck protocol.
+    pub evaluations: Vec<Vec<F>>,
 }
 
+/// Phase 3 is a sumcheck protocol splitting the evaluation of the input of the
+/// current layer to the subset evaluations from the layers closer to the
+/// circuit input. We don't record the layer id for the subset evaluations
+/// because the verifier can figure it out through the circuit structure.
 pub struct IOPProverPhase3Message<F: SmallField> {
-    pub sumcheck_messages: Vec<SumcheckProof<F>>,
+    pub sumcheck_messages: SumcheckProof<F>,
+    /// The evaluations of all subsets connected to the layers closer to the
+    /// circuit input.
     pub evaluations: Vec<F>,
 }
 
@@ -49,8 +64,10 @@ pub struct IOPProof<F: SmallField> {
     )>,
 }
 
+/// Represent the point at the final step and the evaluations of the subsets of
+/// the input layer.
 pub struct GKRInputClaims<F: SmallField> {
-    pub points: Vec<Point<F>>,
+    pub point: Point<F>,
     pub evaluations: Vec<F>,
 }
 
