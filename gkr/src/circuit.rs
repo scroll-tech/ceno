@@ -54,7 +54,12 @@ impl<F: SmallField> CircuitWitness<F> {
 }
 
 impl<F: SmallField> LayerWitness<F> {
-    pub fn evaluate(&self, output_point: &Point<F>) -> F {
+    pub fn evaluate(&self, point: &Point<F>) -> F {
+        todo!()
+    }
+
+    /// This function is to compute evaluations of the layer with log_size least significant challenges in the output point.
+    pub fn truncate_point_and_evaluate(&self, point: &Point<F>) -> F {
         todo!()
     }
 

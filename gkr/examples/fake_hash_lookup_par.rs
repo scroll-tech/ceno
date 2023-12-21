@@ -97,14 +97,16 @@ fn main() {
 
     let mut expected_values = vec![circuit_witness
         .public_input_ref()
-        .evaluate(&gkr_input_claims.points[0])];
+        .truncate_point_and_evaluate(&gkr_input_claims.point)];
 
-    for i in 1..gkr_input_claims.points.len() {
-        expected_values
-            .push(circuit_witness.witness_ref()[i - 1].evaluate(&gkr_input_claims.points[i]));
+    for i in 1..gkr_input_claims.evaluations.len() {
+        expected_values.push(
+            circuit_witness.witness_ref()[i - 1]
+                .truncate_point_and_evaluate(&gkr_input_claims.point),
+        );
     }
 
-    for i in 0..gkr_input_claims.points.len() {
+    for i in 0..gkr_input_claims.evaluations.len() {
         assert_eq!(expected_values[i], gkr_input_claims.evaluations[i]);
     }
 }
