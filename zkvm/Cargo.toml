@@ -1,0 +1,18 @@
+[package]
+name = "zkvm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ark-std.workspace = true
+ff.workspace = true
+goldilocks.workspace = true
+rayon.workspace = true
+serde.workspace = true
+
+frontend = { path = "../frontend" }
+gkr = { path = "../gkr" }
+transcript = { path = "../transcript" }

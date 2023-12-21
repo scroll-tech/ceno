@@ -850,3 +850,17 @@ dependencies = [
  "quote",
  "syn 2.0.39",
 ]
+
+[[package]]
+name = "zkvm"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "ff",
+ "frontend",
+ "gkr",
+ "goldilocks",
+ "rayon",
+ "serde",
+ "transcript",
+]
