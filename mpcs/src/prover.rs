@@ -1,20 +1,22 @@
+use std::sync::Arc;
+
 use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 
-use crate::structs::{Commitment, IOPProof, IOPProverState};
+use crate::structs::{Commitment, PCSProof, PCSProverState};
 
 #[allow(unused)]
-impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
+impl<F: SmallField + FromUniformBytes<64>> PCSProverState<F> {
     pub fn prove(
-        polys: &Vec<(Commitment, DenseMultilinearExtension<F>)>,
+        polys: &Vec<(Commitment, Arc<DenseMultilinearExtension<F>>)>,
         eval_point: &Vec<F>,
-    ) -> IOPProof<F> {
+    ) -> PCSProof<F> {
         todo!()
     }
 
     pub(crate) fn prover_init(
-        polys: &Vec<(Commitment, DenseMultilinearExtension<F>)>,
+        polys: &Vec<(Commitment, Arc<DenseMultilinearExtension<F>>)>,
         eval_point: &Vec<F>,
     ) -> Self {
         todo!()

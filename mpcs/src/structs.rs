@@ -24,8 +24,8 @@ pub struct Commitment {
 /// - Prover messages during the interactive phase
 /// - The proofs for query phase
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IOPProof<F> {
-    pub prover_messages: Vec<IOPProverMessage<F>>,
+pub struct PCSProof<F> {
+    pub prover_messages: Vec<PCSProverMessage<F>>,
     pub query_proof: Vec<QueryProof<F>>,
 }
 
@@ -55,7 +55,7 @@ pub(crate) const MAX_DEGREE: usize = 2;
 /// 2. The polynomial h(X) in its evaluation form, and the commitment to the new polynomial
 /// 3. The last polynomial in clear
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum IOPProverMessage<F> {
+pub enum PCSProverMessage<F> {
     #[default]
     None,
     Initial {
@@ -67,7 +67,7 @@ pub enum IOPProverMessage<F> {
         h2: F,              // h(2)
         f_comm: Commitment, // Commitment to the current polynomial
     },
-    Last(DenseMultilinearExtension<F>),
+    Last(DenseMultilinearExtension<F>), // The polynomial sent in the last round in FRI. It won't be very large.
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +78,7 @@ pub struct QueryProof<F> {
 
 /// Prover State of the MPCS opening protocol.
 #[allow(unused)]
-pub struct IOPProverState<F> {
+pub struct PCSProverState<F> {
     /// sampled randomness given by the verifier
     pub(crate) challenges: Vec<Challenge<F>>,
     /// evaluation point
@@ -92,7 +92,7 @@ pub struct IOPProverState<F> {
 
 /// Verifier State of the MPCS opening protocol.
 #[allow(unused)]
-pub struct IOPVerifierState<F> {
+pub struct PCSVerifierState<F> {
     pub(crate) round: usize,
     pub(crate) num_vars: usize,
     pub(crate) finished: bool,
