@@ -1,4 +1,4 @@
-use frontend::structs::CircuitBuilder;
+use frontend::structs::{CellType, CircuitBuilder, TableChallenge};
 use goldilocks::Goldilocks;
 
 enum TableType {
@@ -9,6 +9,7 @@ fn main() {
     let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
 
     let inputs = circuit_builder.create_cells(5);
+    circuit_builder.mark_cells(CellType::PublicInput, &inputs);
 
     let table_type = TableType::Range8bit as usize;
     circuit_builder.define_table_type(table_type);
@@ -20,5 +21,9 @@ fn main() {
         circuit_builder.add_input_item(table_type, *input);
     });
 
+    let challenge = circuit_builder.create_challenge_cell();
+    circuit_builder.assign_table_challenge(table_type, TableChallenge { index: challenge });
+
     circuit_builder.configure();
+    circuit_builder.print_info();
 }

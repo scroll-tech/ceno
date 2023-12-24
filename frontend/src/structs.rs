@@ -1,45 +1,49 @@
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
-
 use goldilocks::SmallField;
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 
 /// Represent a gate in the circuit. The inner variables denote the input
 /// indices and scaler.
-enum GateType<F: SmallField> {
+#[derive(Clone, Debug)]
+pub enum GateType<F: SmallField> {
+    AddC(F),
     Add(usize, F),
     Mul2(usize, usize, F),
     Mul3(usize, usize, usize, F),
 }
 
 /// Store wire structure of the circuit.
+#[derive(Clone, Debug)]
 pub struct Cell<F: SmallField> {
+    /// The layer of the cell.
     pub layer: Option<usize>,
-    /// Indicate the value of the cell is the sum of all gates.
+    /// The value of the cell is the sum of all gates.
     pub gates: Vec<GateType<F>>,
-    /// Indicate the value of the cell should equal to a constant.
+    /// The value of the cell should equal to a constant.
     pub assert_const: Option<F>,
     /// How many challenges are needed to evaluate this cell. In the IOP
     /// protocol, this indicates in which round this cell can be computed.
     pub challenge_level: Option<usize>,
-    /// Whether it is a challenge cell and its index.
-    pub challenge: Option<usize>,
+    /// The type of the cell, e.g., public input, witness, challenge, etc.
+    pub cell_type: Option<CellType>,
 }
 
-pub(crate) type SharedCells<F: SmallField> = Arc<RefCell<Vec<Cell<F>>>>;
-
-pub struct CircuitBuilder<F: SmallField> {
-    pub cells: SharedCells<F>,
-    pub challenges: Vec<usize>,
-
-    pub marked_cells: Vec<Vec<usize>>,
-    pub(crate) lookup_builder: LookupBuilder<F>,
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
+pub enum CellType {
+    PublicInput,
+    Witness(usize),
+    Challenge,
+    Output,
 }
 
 /// Indicate the challenge used to construct the lookup circuit. In our case,
 /// only one challenge is needed.
-pub(crate) struct TableChallenge {
-    pub(crate) challenge: usize,
+#[derive(Clone)]
+pub struct TableChallenge {
+    pub index: usize,
 }
 
+#[derive(Clone)]
 pub(crate) struct TableData<F: SmallField> {
     pub(crate) table_items: Vec<usize>,
     pub(crate) table_items_const: Vec<F>,
@@ -48,9 +52,20 @@ pub(crate) struct TableData<F: SmallField> {
     pub(crate) challenge: Option<TableChallenge>,
 }
 
-/// Store information to build lookup circuits.
-pub(crate) struct LookupBuilder<F: SmallField> {
-    pub(crate) cells: SharedCells<F>,
+pub type TableType = usize;
+
+pub struct CircuitBuilder<F: SmallField> {
+    pub cells: Vec<Cell<F>>,
+
+    /// Number of layers in the circuit.
+    pub n_layers_of_gates: Option<usize>,
+    /// Number of challenges in the circuit.
+    pub n_challenges: usize,
+
+    /// Collect all cells that have the same functionally. For example,
+    /// public_input, witnesses, and challenge, etc.
+    pub marked_cells: HashMap<CellType, HashSet<usize>>,
+
     /// Store all tables.
-    pub(crate) tables: Vec<TableData<F>>,
+    pub(crate) tables: HashMap<TableType, TableData<F>>,
 }
