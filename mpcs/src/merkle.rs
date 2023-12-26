@@ -16,12 +16,19 @@ pub struct MerkleOpening<F> {
     pub leaf_index: usize,
 }
 
+/// The cap of a Merkle tree. Playing the role of a Merkle root.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MerkleCap<F> {
+    pub(crate) cap: Vec<F>,
+}
+
 /// A Merkle tree
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MerkleTree<F> {
-    pub(crate) root: Digest,
+    pub(crate) root: MerkleCap<F>,
     pub(crate) leaves: Vec<F>,
     pub(crate) height: usize,
+    pub(crate) cap_height: usize,
     pub(crate) intermediate_nodes: Vec<Digest>,
 }
 
@@ -30,9 +37,10 @@ impl<F: SmallField + FromUniformBytes<64>> MerkleTree<F> {
     pub fn new(leaves: Vec<F>) -> Self {
         let height = leaves.len().next_power_of_two().trailing_zeros() as usize;
         let mut tree = MerkleTree {
-            root: Digest::default(),
+            root: MerkleCap::default(),
             leaves,
             height,
+            cap_height: 0,
             intermediate_nodes: vec![],
         };
         tree.build();
