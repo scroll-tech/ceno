@@ -5,7 +5,7 @@ use crate::{
     error::GKRError,
     structs::{
         Circuit, GKRInputClaims, IOPProof, IOPProverPhase1Message, IOPProverPhase2Message,
-        IOPProverPhase3Message, IOPVerifierState, Point,
+        IOPVerifierState, Point,
     },
 };
 
@@ -47,18 +47,6 @@ impl<F: SmallField> IOPVerifierState<F> {
         prover_msg: &IOPProverPhase2Message<F>,
         transcript: &mut Transcript<F>,
     ) -> IOPProverPhase2Message<F> {
-        todo!()
-    }
-
-    /// Verify the items of the input of the i-th layer are copied from previous
-    /// layers for data parallel circuits.
-    fn verify_round_and_update_state_phase3_parallel(
-        &mut self,
-        layer_in_points: &[&Point<F>],
-        layer_in_evaluations: &[F],
-        prover_msg: &IOPProverPhase3Message<F>,
-        transcript: &mut Transcript<F>,
-    ) -> IOPProverPhase3Message<F> {
         todo!()
     }
 }
