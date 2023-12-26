@@ -2,17 +2,7 @@ use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::{Deserialize, Serialize};
 use transcript::Challenge;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Digest;
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MerklePath(Vec<Digest>);
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MerkleOpening<F> {
-    pub path: MerklePath,
-    pub leaf: F,
-}
+use crate::merkle::{Digest, MerkleOpening};
 
 #[allow(unused)]
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
