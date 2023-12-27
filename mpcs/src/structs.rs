@@ -2,12 +2,22 @@ use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::{Deserialize, Serialize};
 use transcript::Challenge;
 
-use crate::merkle::{Digest, MerkleOpening};
+use crate::{
+    fri::FriParams,
+    linear_code::ReedSolomonCode,
+    merkle::{MerkleCap, MerkleOpening},
+};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitmentKey<F> {
+    pub(crate) fri_params: FriParams,
+    pub(crate) linear_code: ReedSolomonCode<F>,
+}
 
 #[allow(unused)]
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Commitment {
-    pub(crate) digest: Digest,
+    pub(crate) merkle_cap: MerkleCap,
 }
 
 /// An IOP proof is a collections of

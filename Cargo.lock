@@ -370,6 +370,7 @@ dependencies = [
  "ff",
  "goldilocks",
  "multilinear_extensions",
+ "poseidon 0.2.0",
  "serde",
  "transcript",
 ]

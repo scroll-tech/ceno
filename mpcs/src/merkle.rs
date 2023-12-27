@@ -18,14 +18,14 @@ pub struct MerkleOpening<F> {
 
 /// The cap of a Merkle tree. Playing the role of a Merkle root.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MerkleCap<F> {
-    pub(crate) cap: Vec<F>,
+pub struct MerkleCap {
+    pub(crate) cap: Vec<Digest>,
 }
 
 /// A Merkle tree
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MerkleTree<F> {
-    pub(crate) root: MerkleCap<F>,
+    pub(crate) root: MerkleCap,
     pub(crate) leaves: Vec<F>,
     pub(crate) height: usize,
     pub(crate) cap_height: usize,
