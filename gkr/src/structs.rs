@@ -1,6 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
+use frontend::structs::ConstantType;
 use goldilocks::SmallField;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 use transcript::Challenge;
 
 pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
@@ -45,23 +47,8 @@ pub struct IOPProverPhase2Message<F: SmallField> {
     pub evaluations: Vec<Vec<F>>,
 }
 
-/// Phase 3 is a sumcheck protocol splitting the evaluation of the input of the
-/// current layer to the subset evaluations from the layers closer to the
-/// circuit input. We don't record the layer id for the subset evaluations
-/// because the verifier can figure it out through the circuit structure.
-pub struct IOPProverPhase3Message<F: SmallField> {
-    pub sumcheck_messages: SumcheckProof<F>,
-    /// The evaluations of all subsets connected to the layers closer to the
-    /// circuit input.
-    pub evaluations: Vec<F>,
-}
-
 pub struct IOPProof<F: SmallField> {
-    pub sumcheck_proofs: Vec<(
-        IOPProverPhase1Message<F>,
-        IOPProverPhase2Message<F>,
-        IOPProverPhase3Message<F>,
-    )>,
+    pub sumcheck_proofs: Vec<(IOPProverPhase1Message<F>, IOPProverPhase2Message<F>)>,
 }
 
 /// Represent the point at the final step and the evaluations of the subsets of
@@ -71,62 +58,85 @@ pub struct GKRInputClaims<F: SmallField> {
     pub evaluations: Vec<F>,
 }
 
-/// Represent a connection between the current layer with layer_id. When a
-/// subset of Layer i is copied to Layer j, subset_conn[k] denotes the original
-/// index that the k-th wire corresponding to the one in either Layer i or j.
-pub struct LayerConnection {
-    pub(crate) layer_id: usize,
-    pub(crate) subset_conn: Vec<usize>,
-}
-
+#[derive(Clone, Debug)]
 pub struct Layer<F: SmallField> {
-    pub(crate) log_size: usize,
-    pub(crate) size: usize,
+    pub(crate) num_vars: usize,
 
-    // Gates
-    pub(crate) adds: Option<Vec<Gate1In<F>>>,
-    pub(crate) mul2s: Option<Vec<Gate2In<F>>>,
-    pub(crate) mul3s: Option<Vec<Gate3In<F>>>,
-    pub(crate) assert_consts: Vec<Option<F>>,
+    // Gates. Should be all None if it's the input layer.
+    pub(crate) add_consts: Vec<GateCIn<F>>,
+    pub(crate) adds: Vec<Gate1In<F>>,
+    pub(crate) mul2s: Vec<Gate2In<F>>,
+    pub(crate) mul3s: Vec<Gate3In<F>>,
+    pub(crate) assert_consts: Vec<GateCIn<F>>,
 
-    /// The corresponding wires copied from the output of this layer to deeper
-    /// layers.
-    pub(crate) copy_to: Vec<LayerConnection>,
-    /// The corresponding wires copied from shallower layers to the input of
-    /// this layer.
-    pub(crate) paste_from: Vec<LayerConnection>,
+    /// The corresponding wires copied from this layer to later layers. It is
+    /// (later layer id -> current wire id to be copied). It stores the non-zero
+    /// entry of copy_from[layer_id] for each row.
+    pub(crate) copy_from: HashMap<usize, Vec<usize>>,
+    /// The corresponding wires from previous layers pasted to this layer. It is
+    /// (shallower layer id -> pasted to the current id). It stores the non-zero
+    /// entry of paste_to[layer_id] for each column.
+    pub(crate) paste_to: HashMap<usize, Vec<usize>>,
 }
 
+#[derive(Clone, Debug)]
 pub struct Circuit<F: SmallField> {
     pub layers: Vec<Layer<F>>,
+    pub output_copy_from: Vec<Vec<usize>>,
+    pub n_wires_in: usize,
+    pub n_other_witnesses: usize,
 }
 
-pub struct LayerWitness<F: SmallField>(Vec<F>);
+pub struct LayerWitness<F: SmallField> {
+    pub(crate) poly: Arc<DenseMultilinearExtension<F>>,
+}
 
 pub struct CircuitWitness<F: SmallField> {
     pub(crate) layers: Vec<LayerWitness<F>>,
-    pub(crate) public_input: LayerWitness<F>,
-    pub(crate) witnesses: Vec<LayerWitness<F>>,
-    pub(crate) challenges: Vec<F>,
+    pub(crate) wires_in: Vec<LayerWitness<F>>,
+    pub(crate) wires_out: Vec<LayerWitness<F>>,
+    pub(crate) other_witnesses: Vec<LayerWitness<F>>,
+    pub(crate) n_instances: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct GateCIn<F: SmallField> {
+    pub(crate) idx_out: usize,
+    pub(crate) constant: ConstantType<F>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Gate1In<F: SmallField> {
     pub(crate) idx_in: usize,
     pub(crate) idx_out: usize,
-    pub(crate) scaler: F,
+    pub(crate) scaler: ConstantType<F>,
 }
 
+#[derive(Clone, Debug)]
 pub struct Gate2In<F: SmallField> {
     pub(crate) idx_in1: usize,
     pub(crate) idx_in2: usize,
     pub(crate) idx_out: usize,
-    pub(crate) scaler: F,
+    pub(crate) scaler: ConstantType<F>,
 }
 
+#[derive(Clone, Debug)]
 pub struct Gate3In<F: SmallField> {
     pub(crate) idx_in1: usize,
     pub(crate) idx_in2: usize,
     pub(crate) idx_in3: usize,
     pub(crate) idx_out: usize,
-    pub(crate) scaler: F,
+    pub(crate) scaler: ConstantType<F>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CircuitWitnessGenerator<F: SmallField> {
+    pub(crate) layers: Vec<Vec<F>>,
+    pub(crate) wires_in: Vec<Vec<F>>,
+    pub(crate) wires_out: Vec<Vec<F>>,
+    pub(crate) other_witnesses: Vec<Vec<F>>,
+    /// Challenges
+    pub(crate) challenges: Vec<F>,
+    /// The number of instances for the same sub-circuit.
+    pub(crate) n_instances: usize,
 }

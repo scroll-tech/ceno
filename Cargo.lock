@@ -269,8 +269,12 @@ dependencies = [
 name = "gkr"
 version = "0.1.0"
 dependencies = [
+ "ark-std",
+ "ff",
  "frontend",
  "goldilocks",
+ "itertools 0.12.0",
+ "multilinear_extensions",
  "sumcheck",
  "transcript",
 ]
