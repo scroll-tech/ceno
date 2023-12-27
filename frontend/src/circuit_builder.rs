@@ -592,15 +592,21 @@ where
                 &counts,
             );
 
-            let diff_den = self.create_cell();
-            let diff_num = self.create_cell();
-            self.add(diff_den, input_inv_sum_den, ConstantType::Field(F::ONE));
-            self.add(diff_den, table_inv_count_den, ConstantType::Field(-F::ONE));
-            self.add(diff_num, input_inv_sum_num, ConstantType::Field(F::ONE));
-            self.add(diff_num, table_inv_count_num, ConstantType::Field(-F::ONE));
+            let result = self.create_cell();
+            self.mul2(
+                result,
+                input_inv_sum_den,
+                table_inv_count_num,
+                ConstantType::Field(F::ONE),
+            );
+            self.mul2(
+                result,
+                input_inv_sum_num,
+                table_inv_count_den,
+                ConstantType::Field(-F::ONE),
+            );
 
-            self.assert_const(diff_den, F::ZERO);
-            self.assert_const(diff_num, F::ZERO);
+            self.assert_const(result, F::ZERO);
         }
     }
 
