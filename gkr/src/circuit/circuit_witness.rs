@@ -18,7 +18,7 @@ impl<F: SmallField> CircuitWitnessGenerator<F> {
             wires_in: vec![vec![]; circuit.n_wires_in],
             wires_out: vec![vec![]; circuit.output_copy_from.len()],
             other_witnesses: vec![vec![]; circuit.n_other_witnesses],
-            challenges: challenges,
+            challenges,
             n_instances: 0,
         }
     }
