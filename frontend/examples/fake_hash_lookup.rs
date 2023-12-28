@@ -25,7 +25,7 @@ fn main() {
         let diff = circuit_builder.create_cell();
         circuit_builder.add(diff, pow_of_xs[i + 1], one);
         circuit_builder.add(diff, tmp, neg_one);
-        circuit_builder.assert_const(diff, Goldilocks::ZERO);
+        circuit_builder.assert_const(diff, &Goldilocks::ZERO);
     }
     circuit_builder.mark_cell(CellType::WireIn(0), pow_of_xs[0]);
     circuit_builder.mark_cells(CellType::OtherInWitness(0), &pow_of_xs[1..pow_of_xs.len()]);

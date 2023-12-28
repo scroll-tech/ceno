@@ -32,8 +32,8 @@ impl<F: SmallField> TableData<F> {
     pub fn add_input_item(&mut self, cell: usize) {
         self.input_items.push(cell);
     }
-    pub fn add_table_item_const(&mut self, constant: F) {
-        self.table_items_const.push(constant);
+    pub fn add_table_item_const(&mut self, constant: &F) {
+        self.table_items_const.push(*constant);
     }
     pub fn assign_challenge(&mut self, challenge: ConstantType<F>) {
         assert!(matches!(challenge, ConstantType::Challenge(_)));
@@ -106,9 +106,9 @@ where
             .push(GateType::Mul3(in_0, in_1, in_2, scaler));
     }
 
-    pub fn assert_const(&mut self, out: usize, constant: F) {
+    pub fn assert_const(&mut self, out: usize, constant: &F) {
         let out_cell = &mut self.cells[out];
-        out_cell.assert_const = Some(constant);
+        out_cell.assert_const = Some(*constant);
     }
 
     /// Compute \sum_{i = 0}^{in_0_array.len()} scalers[i] * in_0_array[i] * in_1_array[i].
@@ -417,7 +417,7 @@ where
             .add_table_item(cell);
     }
 
-    pub fn add_table_item_const(&mut self, table_type: TableType, constant: F) {
+    pub fn add_table_item_const(&mut self, table_type: TableType, constant: &F) {
         assert!(self.tables.contains_key(&table_type));
         self.tables
             .get_mut(&table_type)
@@ -606,10 +606,11 @@ where
                 ConstantType::Field(-F::ONE),
             );
 
-            self.assert_const(result, F::ZERO);
+            self.assert_const(result, &F::ZERO);
         }
     }
 
+    #[cfg(debug_assertions)]
     pub fn print_info(&self) {
         println!("The number of layers: {}", self.n_layers.as_ref().unwrap());
         println!("The number of cells: {}", self.cells.len());

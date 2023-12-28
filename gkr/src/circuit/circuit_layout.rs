@@ -1,3 +1,4 @@
+use core::fmt;
 use std::collections::HashMap;
 
 use frontend::structs::{CellType, CircuitBuilder, ConstantType, GateType};
@@ -6,7 +7,7 @@ use itertools::Itertools;
 
 use crate::{
     structs::{Circuit, Gate1In, Gate2In, Gate3In, GateCIn, Layer},
-    utils::ceil_log2,
+    utils::{ceil_log2, MatrixMLEColumnFirst, MatrixMLERowFirst},
 };
 
 impl<F: SmallField> Circuit<F> {
@@ -38,9 +39,10 @@ impl<F: SmallField> Circuit<F> {
                 mul2s: vec![],
                 mul3s: vec![],
                 assert_consts: vec![],
-                copy_from: HashMap::new(),
-                paste_to: HashMap::new(),
+                copy_to: HashMap::new(),
+                paste_from: HashMap::new(),
                 num_vars: 0,
+                max_previous_num_vars: 0,
             })
             .collect_vec();
 
@@ -50,9 +52,9 @@ impl<F: SmallField> Circuit<F> {
 
         // Input layer if pasted from wires_in || other_witnesses.
         let (wires_in_cell_ids, other_witnesses_cell_ids, wires_out_cell_ids) = {
-            let mut wires_in_cell_ids = vec![vec![]];
-            let mut other_witnesses_cell_ids = vec![vec![]];
-            let mut wires_out_cell_ids = vec![vec![]];
+            let mut wires_in_cell_ids = vec![];
+            let mut other_witnesses_cell_ids = vec![];
+            let mut wires_out_cell_ids = vec![];
             for marked_cell in circuit_builder.marked_cells.iter() {
                 match marked_cell.0 {
                     CellType::WireIn(id) => {
@@ -89,9 +91,9 @@ impl<F: SmallField> Circuit<F> {
             .iter()
             .chain(other_witnesses_cell_ids.iter())
             .collect_vec();
-        let input_paste_to = &mut layers[n_layers - 1].paste_to;
+        let input_paste_from = &mut layers[n_layers - 1].paste_from;
         for (i, input_segment) in all_inputs.iter().enumerate() {
-            input_paste_to.insert(
+            input_paste_from.insert(
                 i,
                 input_segment
                     .iter()
@@ -99,6 +101,8 @@ impl<F: SmallField> Circuit<F> {
                     .collect_vec(),
             );
         }
+        layers[n_layers - 1].max_previous_num_vars =
+            ceil_log2(all_inputs.iter().map(|x| x.len()).max().unwrap());
 
         for layer_id in (0..n_layers - 1).rev() {
             // current_subsets: old_layer_id -> (old_wire_id, new_wire_id)
@@ -149,17 +153,27 @@ impl<F: SmallField> Circuit<F> {
             for (old_layer_id, old_wire_ids) in subsets.iter() {
                 for (old_wire_id, new_wire_id) in old_wire_ids.iter() {
                     layers[new_layer_id]
-                        .paste_to
+                        .paste_from
                         .entry(*old_layer_id)
                         .or_insert(vec![])
                         .push(*new_wire_id);
                     layers[*old_layer_id]
-                        .copy_from
+                        .copy_to
                         .entry(new_layer_id)
                         .or_insert(vec![])
                         .push(*old_wire_id);
                 }
             }
+            layers[new_layer_id].max_previous_num_vars =
+                layers[new_layer_id].max_previous_num_vars.max(ceil_log2(
+                    layers[new_layer_id]
+                        .paste_from
+                        .iter()
+                        .map(|(_, old_wire_ids)| old_wire_ids.len())
+                        .max()
+                        .unwrap_or(1),
+                ));
+            layers[layer_id].max_previous_num_vars = layers[new_layer_id].num_vars;
 
             // Compute gates with new wire ids accordingly.
             let current_wire_id = |old_cell_id: usize| -> usize {
@@ -221,7 +235,7 @@ impl<F: SmallField> Circuit<F> {
 
         layers[0].num_vars = ceil_log2(layers_of_cell_id[0].len()) as usize;
 
-        let output_copy_from = wires_out_cell_ids
+        let output_copy_to = wires_out_cell_ids
             .iter()
             .map(|cell_ids| {
                 cell_ids
@@ -233,7 +247,7 @@ impl<F: SmallField> Circuit<F> {
 
         Self {
             layers,
-            output_copy_from,
+            output_copy_to,
             n_wires_in: wires_in_cell_ids.len(),
             n_other_witnesses: other_witnesses_cell_ids.len(),
         }
@@ -263,5 +277,102 @@ impl<F: SmallField> Layer<F> {
 
     pub fn num_vars(&self) -> usize {
         self.num_vars
+    }
+
+    pub fn max_previous_num_vars(&self) -> usize {
+        self.max_previous_num_vars
+    }
+
+    pub fn max_previous_size(&self) -> usize {
+        1 << self.max_previous_num_vars
+    }
+
+    pub fn paste_from_fix_variables_eq(
+        &self,
+        old_layer_id: usize,
+        current_point_eq: &[F],
+    ) -> Vec<F> {
+        assert_eq!(current_point_eq.len(), self.size());
+        self.paste_from
+            .get(&old_layer_id)
+            .unwrap()
+            .as_slice()
+            .fix_row_col_first(current_point_eq, self.max_previous_num_vars)
+    }
+
+    pub fn paste_from_eval_eq(
+        &self,
+        old_layer_id: usize,
+        current_point_eq: &[F],
+        subset_point_eq: &[F],
+    ) -> F {
+        assert_eq!(current_point_eq.len(), self.size());
+        assert_eq!(subset_point_eq.len(), self.max_previous_size());
+        self.paste_from
+            .get(&old_layer_id)
+            .unwrap()
+            .as_slice()
+            .eval_col_first(current_point_eq, subset_point_eq)
+    }
+
+    pub fn copy_to_fix_variables(&self, new_layer_id: usize, subset_point_eq: &[F]) -> Vec<F> {
+        let old_wire_ids = self.copy_to.get(&new_layer_id).unwrap();
+        old_wire_ids
+            .as_slice()
+            .fix_row_row_first(subset_point_eq, self.num_vars)
+    }
+
+    pub fn copy_to_eval_eq(
+        &self,
+        new_layer_id: usize,
+        subset_point_eq: &[F],
+        current_point_eq: &[F],
+    ) -> F {
+        self.copy_to
+            .get(&new_layer_id)
+            .unwrap()
+            .as_slice()
+            .eval_row_first(subset_point_eq, current_point_eq)
+    }
+}
+
+impl<F: SmallField> fmt::Debug for Layer<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Layer {{")?;
+        writeln!(f, "  num_vars: {}", self.num_vars)?;
+        writeln!(f, "  max_previous_num_vars: {}", self.max_previous_num_vars)?;
+        writeln!(f, "  adds: ")?;
+        for add in self.adds.iter() {
+            writeln!(f, "    {:?}", add)?;
+        }
+        writeln!(f, "  mul2s: ")?;
+        for mul2 in self.mul2s.iter() {
+            writeln!(f, "    {:?}", mul2)?;
+        }
+        writeln!(f, "  mul3s: ")?;
+        for mul3 in self.mul3s.iter() {
+            writeln!(f, "    {:?}", mul3)?;
+        }
+        writeln!(f, "  assert_consts: ")?;
+        for assert_const in self.assert_consts.iter() {
+            writeln!(f, "    {:?}", assert_const)?;
+        }
+        writeln!(f, "  copy_to: {:?}", self.copy_to)?;
+        writeln!(f, "  paste_from: {:?}", self.paste_from)?;
+        writeln!(f, "}}")
+    }
+}
+
+impl<F: SmallField> fmt::Debug for Circuit<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Circuit {{")?;
+        writeln!(f, "  n_wires_in: {}", self.n_wires_in)?;
+        writeln!(f, "  n_other_witnesses: {}", self.n_other_witnesses)?;
+        writeln!(f, "  layers: ")?;
+        for layer in self.layers.iter() {
+            writeln!(f, "    {:?}", layer)?;
+        }
+        writeln!(f, "  output_copy_to: {:?}", self.output_copy_to)?;
+        writeln!(f, "}}")
     }
 }

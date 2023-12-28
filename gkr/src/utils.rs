@@ -1,4 +1,9 @@
+use std::{iter, sync::Arc};
+
+use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
+use itertools::Itertools;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 
 pub(crate) fn ceil_log2(x: usize) -> usize {
     assert!(x > 0, "ceil_log2: x must be positive");
@@ -11,6 +16,7 @@ pub(crate) fn ceil_log2(x: usize) -> usize {
 /// [0, max_idx]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})
 ///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i + (1 - x_i)(1 - y_i))
+#[allow(dead_code)]
 pub(crate) fn evaluate_partial_eq<F: SmallField>(max_idx: usize, a: &[F], b: &[F]) -> F {
     assert!(a.len() == b.len());
 
@@ -55,6 +61,177 @@ pub(crate) fn evaluate_partial_eq<F: SmallField>(max_idx: usize, a: &[F], b: &[F
             );
     }
     ans
+}
+
+/// Reduce the number of variables of `self` by fixing the
+/// `partial_point.len()` variables at `partial_point`.
+pub fn fix_high_variables<F: SmallField>(
+    poly: &Arc<DenseMultilinearExtension<F>>,
+    partial_point: &[F],
+) -> DenseMultilinearExtension<F> {
+    // TODO: return error.
+    assert!(
+        partial_point.len() <= poly.num_vars,
+        "invalid size of partial point"
+    );
+    let nv = poly.num_vars;
+    let new_len = 1 << (nv - partial_point.len());
+    let mut poly = poly.evaluations.to_vec();
+
+    for i in 0..new_len {
+        let partial_poly = DenseMultilinearExtension::from_evaluations_vec(
+            partial_point.len(),
+            poly[i..].iter().step_by(new_len).map(|x| *x).collect_vec(),
+        );
+        poly[i] = partial_poly.evaluate(&partial_point);
+    }
+
+    poly.resize(new_len, F::ZERO);
+    DenseMultilinearExtension::from_evaluations_vec(nv - partial_point.len(), poly)
+}
+
+/// Evaluate eq polynomial for 3 random points.
+pub fn eq3_eval<F: SmallField>(x: &[F], y: &[F], z: &[F]) -> F {
+    assert_eq!(x.len(), y.len(), "x and y have different length");
+
+    let start = start_timer!(|| "eq3_eval");
+    let mut res = F::ONE;
+    for ((&xi, &yi), &zi) in x.iter().zip(y.iter()).zip(z.iter()) {
+        res *= xi * yi * zi + (F::ONE - xi) * (F::ONE - yi) * (F::ONE - zi);
+    }
+    end_timer!(start);
+    res
+}
+
+/// Evaluate eq polynomial for 4 random points
+pub fn eq4_eval<F: SmallField>(x: &[F], y: &[F], z: &[F], w: &[F]) -> F {
+    assert_eq!(x.len(), y.len(), "x and y have different length");
+
+    let start = start_timer!(|| "eq3_eval");
+    let mut res = F::ONE;
+    for (((&xi, &yi), &zi), &wi) in x.iter().zip(y.iter()).zip(z.iter()).zip(w.iter()) {
+        res *= xi * yi * zi * wi + (F::ONE - xi) * (F::ONE - yi) * (F::ONE - zi) * (F::ONE - wi);
+    }
+    end_timer!(start);
+    res
+}
+
+pub fn tensor_product<F: SmallField>(a: &[F], b: &[F]) -> Vec<F> {
+    let mut res = vec![F::ZERO; a.len() * b.len()];
+    for i in 0..a.len() {
+        for j in 0..b.len() {
+            res[i * b.len() + j] = a[i] * b[j];
+        }
+    }
+    res
+}
+
+pub trait MultilinearExtensionFromVectors<F: SmallField> {
+    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>>;
+}
+
+impl<F: SmallField> MultilinearExtensionFromVectors<F> for Vec<Vec<F>> {
+    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>> {
+        let n_zeros = (1 << lo_num_vars) - self[0].len();
+        let n_zero_vecs = (1 << hi_num_vars) - self.len();
+        let vecs = self.clone();
+
+        Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            lo_num_vars + hi_num_vars,
+            vecs.into_iter()
+                .flat_map(|instance| {
+                    instance
+                        .into_iter()
+                        .chain(iter::repeat(F::ZERO).take(n_zeros))
+                })
+                .chain(vec![F::ZERO; n_zero_vecs])
+                .collect_vec(),
+        ))
+    }
+}
+
+pub(crate) trait MatrixMLEColumnFirst<F: SmallField> {
+    fn fix_row_col_first(&self, row_point_eq: &[F], col_num_vars: usize) -> Vec<F>;
+    fn fix_row_col_first_with_scaler(
+        &self,
+        row_point_eq: &[F],
+        col_num_vars: usize,
+        scaler: &F,
+    ) -> Vec<F>;
+    fn eval_col_first(&self, row_point_eq: &[F], col_point_eq: &[F]) -> F;
+}
+
+impl<F: SmallField> MatrixMLEColumnFirst<F> for &[usize] {
+    fn fix_row_col_first(&self, row_point_eq: &[F], col_num_vars: usize) -> Vec<F> {
+        let mut ans = vec![F::ZERO; 1 << col_num_vars];
+        for (col, &non_zero_row) in self.iter().enumerate() {
+            ans[col] = row_point_eq[non_zero_row];
+        }
+        ans
+    }
+
+    fn fix_row_col_first_with_scaler(
+        &self,
+        row_point_eq: &[F],
+        col_num_vars: usize,
+        scaler: &F,
+    ) -> Vec<F> {
+        let mut ans = vec![F::ZERO; 1 << col_num_vars];
+        for (col, &non_zero_row) in self.iter().enumerate() {
+            ans[col] = row_point_eq[non_zero_row] * scaler;
+        }
+        ans
+    }
+
+    fn eval_col_first(&self, row_point_eq: &[F], col_point_eq: &[F]) -> F {
+        self.iter()
+            .enumerate()
+            .fold(F::ZERO, |acc, (col, &non_zero_row)| {
+                acc + row_point_eq[non_zero_row] * col_point_eq[col]
+            })
+    }
+}
+
+pub(crate) trait MatrixMLERowFirst<F: SmallField> {
+    fn fix_row_row_first(&self, row_point_eq: &[F], col_num_vars: usize) -> Vec<F>;
+    fn fix_row_row_first_with_scaler(
+        &self,
+        row_point_eq: &[F],
+        col_num_vars: usize,
+        scaler: &F,
+    ) -> Vec<F>;
+    fn eval_row_first(&self, row_point_eq: &[F], col_point_eq: &[F]) -> F;
+}
+
+impl<F: SmallField> MatrixMLERowFirst<F> for &[usize] {
+    fn fix_row_row_first(&self, row_point_eq: &[F], col_num_vars: usize) -> Vec<F> {
+        let mut ans = vec![F::ZERO; 1 << col_num_vars];
+        for (row, &non_zero_col) in self.iter().enumerate() {
+            ans[non_zero_col] = row_point_eq[row];
+        }
+        ans
+    }
+
+    fn fix_row_row_first_with_scaler(
+        &self,
+        row_point_eq: &[F],
+        col_num_vars: usize,
+        scaler: &F,
+    ) -> Vec<F> {
+        let mut ans = vec![F::ZERO; 1 << col_num_vars];
+        for (row, &non_zero_col) in self.iter().enumerate() {
+            ans[non_zero_col] = row_point_eq[row] * scaler;
+        }
+        ans
+    }
+
+    fn eval_row_first(&self, row_point_eq: &[F], col_point_eq: &[F]) -> F {
+        self.iter()
+            .enumerate()
+            .fold(F::ZERO, |acc, (row, &non_zero_col)| {
+                acc + row_point_eq[row] * col_point_eq[non_zero_col]
+            })
+    }
 }
 
 // test
@@ -133,5 +310,44 @@ mod test {
                 DenseMultilinearExtension::from_evaluations_vec(n, partial_eq_vec).evaluate(&b);
             assert_eq!(expected_ans, evaluate_partial_eq(max_idx, &a, &b));
         }
+    }
+
+    #[test]
+    fn test_fix_high_variables() {
+        let poly = DenseMultilinearExtension::from_evaluations_vec(
+            3,
+            vec![
+                Goldilocks::from(13),
+                Goldilocks::from(97),
+                Goldilocks::from(11),
+                Goldilocks::from(101),
+                Goldilocks::from(7),
+                Goldilocks::from(103),
+                Goldilocks::from(5),
+                Goldilocks::from(107),
+            ],
+        );
+        let poly = Arc::new(poly);
+
+        let partial_point = vec![Goldilocks::from(3), Goldilocks::from(5)];
+
+        let expected1 = DenseMultilinearExtension::from_evaluations_vec(
+            2,
+            vec![
+                -Goldilocks::from(17),
+                Goldilocks::from(127),
+                -Goldilocks::from(19),
+                Goldilocks::from(131),
+            ],
+        );
+        let got1 = fix_high_variables(&poly, &partial_point[1..]);
+        assert_eq!(got1, expected1);
+
+        let expected2 = DenseMultilinearExtension::from_evaluations_vec(
+            1,
+            vec![-Goldilocks::from(23), Goldilocks::from(139)],
+        );
+        let got2: DenseMultilinearExtension<Goldilocks> = fix_high_variables(&poly, &partial_point);
+        assert_eq!(got2, expected2);
     }
 }

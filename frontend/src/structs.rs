@@ -1,8 +1,9 @@
 use goldilocks::SmallField;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub enum ConstantType<F: SmallField> {
     Field(F),
     Challenge(usize),

@@ -1,7 +1,6 @@
 use frontend::structs::{CellType, CircuitBuilder, ConstantType};
-use gkr::structs::{
-    Circuit, CircuitWitness, CircuitWitnessGenerator, IOPProverState, IOPVerifierState,
-};
+use gkr::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState};
+use gkr::utils::MultilinearExtensionFromVectors;
 use goldilocks::{Goldilocks, SmallField};
 use itertools::Itertools;
 use transcript::Transcript;
@@ -29,7 +28,7 @@ fn construct_circuit<F: SmallField>() -> Circuit<F> {
         let diff = circuit_builder.create_cell();
         circuit_builder.add(diff, pow_of_xs[i + 1], one);
         circuit_builder.add(diff, tmp, neg_one);
-        circuit_builder.assert_const(diff, F::ZERO);
+        circuit_builder.assert_const(diff, &F::ZERO);
     }
     circuit_builder.mark_cell(CellType::WireIn(0), pow_of_xs[0]);
     circuit_builder.mark_cells(CellType::OtherInWitness(0), &pow_of_xs[1..pow_of_xs.len()]);
@@ -49,7 +48,6 @@ fn construct_circuit<F: SmallField>() -> Circuit<F> {
     circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));
 
     circuit_builder.configure();
-    circuit_builder.print_info();
     Circuit::<F>::new(&circuit_builder)
 }
 
@@ -79,64 +77,88 @@ fn main() {
         ],
     ];
 
-    let wires_in_slices = wires_in.iter().map(|x| x.as_slice()).collect_vec();
-    let other_witnesses_slices = other_witnesses.iter().map(|x| x.as_slice()).collect_vec();
-
     let circuit_witness = {
         let challenge = Goldilocks::from(9);
-        let mut circuit_witness_gen = CircuitWitnessGenerator::new(&circuit, vec![challenge]);
+        let mut circuit_witness = CircuitWitness::new(&circuit, vec![challenge]);
         for _ in 0..4 {
-            circuit_witness_gen.add_instance(&circuit, &wires_in_slices, &other_witnesses_slices);
+            circuit_witness.add_instance(&circuit, &wires_in, &other_witnesses);
         }
-        CircuitWitness::new(circuit_witness_gen)
+        circuit_witness
     };
 
-    let (proof, output_log_size, output_eval) = {
-        let mut prover_transcript = Transcript::new(b"example");
-        let last_layer_witness = circuit_witness.last_layer_witness_ref();
-        let output_log_size = last_layer_witness.log_size();
+    #[cfg(feature = "debug")]
+    circuit_witness.check_correctness(&circuit);
 
-        let output_point = (0..output_log_size)
-            .map(|_| prover_transcript.get_and_append_challenge(b"output point"))
+    let instance_num_vars = circuit_witness.instance_num_vars();
+
+    let (proof, output_num_vars, output_eval) = {
+        let mut prover_transcript = Transcript::new(b"example");
+        let output_num_vars = instance_num_vars + circuit.last_layer_ref().num_vars();
+
+        let output_point = (0..output_num_vars)
+            .map(|_| {
+                prover_transcript
+                    .get_and_append_challenge(b"output point")
+                    .elements[0]
+            })
             .collect_vec();
 
-        let output_eval = last_layer_witness.evaluate(&output_point);
+        let output_eval = circuit_witness
+            .layer_poly(0, circuit.last_layer_ref().num_vars())
+            .evaluate(&output_point);
         (
             IOPProverState::prove_parallel(
                 &circuit,
                 &circuit_witness,
-                &[&output_point],
-                &[output_eval],
+                &output_point,
+                &output_eval,
+                &[],
+                &[],
                 &mut prover_transcript,
             ),
-            output_log_size,
+            output_num_vars,
             output_eval,
         )
     };
 
     let gkr_input_claims = {
         let mut verifier_transcript = &mut Transcript::new(b"example");
-        let output_point = (0..output_log_size)
-            .map(|_| verifier_transcript.get_and_append_challenge(b"output point"))
+        let output_point = (0..output_num_vars)
+            .map(|_| {
+                verifier_transcript
+                    .get_and_append_challenge(b"output point")
+                    .elements[0]
+            })
             .collect_vec();
         IOPVerifierState::verify_parallel(
             &circuit,
-            &[&output_point],
-            &[output_eval],
+            circuit_witness.challenges(),
+            &output_point,
+            &output_eval,
+            &[],
+            &[],
             &proof,
+            instance_num_vars,
             &mut verifier_transcript,
         )
         .expect("verification failed")
     };
 
-    let all_inputs_witnesses = circuit_witness
-        .wires_in_ref()
+    let expected_values = circuit_witness
+        .all_inputs_ref()
         .iter()
-        .chain(circuit_witness.other_witnesses_ref().iter());
-    let expected_values = all_inputs_witnesses
-        .map(|witness| witness.truncate_point_and_evaluate(&gkr_input_claims.point))
+        .map(|witness| {
+            witness
+                .mle(
+                    circuit.first_layer_ref().max_previous_num_vars(),
+                    instance_num_vars,
+                )
+                .evaluate(&gkr_input_claims.point)
+        })
         .collect_vec();
-    for i in 0..gkr_input_claims.evaluations.len() {
-        assert_eq!(expected_values[i], gkr_input_claims.evaluations[i]);
+    for i in 0..gkr_input_claims.values.len() {
+        assert_eq!(expected_values[i], gkr_input_claims.values[i]);
     }
+
+    println!("verification succeeded");
 }

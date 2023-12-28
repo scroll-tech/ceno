@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use frontend::structs::ConstantType;
 use goldilocks::SmallField;
@@ -6,17 +6,17 @@ use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 
 use crate::{
-    structs::{Circuit, CircuitWitness, CircuitWitnessGenerator, LayerWitness, Point},
-    utils::ceil_log2,
+    structs::{Circuit, CircuitWitness},
+    utils::{ceil_log2, MultilinearExtensionFromVectors},
 };
 
-impl<F: SmallField> CircuitWitnessGenerator<F> {
+impl<F: SmallField> CircuitWitness<F> {
     /// Initialize the structure of the circuit witness.
     pub fn new(circuit: &Circuit<F>, challenges: Vec<F>) -> Self {
         Self {
             layers: vec![vec![]; circuit.layers.len()],
             wires_in: vec![vec![]; circuit.n_wires_in],
-            wires_out: vec![vec![]; circuit.output_copy_from.len()],
+            wires_out: vec![vec![]; circuit.output_copy_to.len()],
             other_witnesses: vec![vec![]; circuit.n_other_witnesses],
             challenges,
             n_instances: 0,
@@ -27,8 +27,8 @@ impl<F: SmallField> CircuitWitnessGenerator<F> {
     /// wire out witnesses.
     fn new_instance(
         circuit: &Circuit<F>,
-        wires_in: &[&[F]],
-        other_witnesses: &[&[F]],
+        wires_in: &[Vec<F>],
+        other_witnesses: &[Vec<F>],
         challenges: &[F],
     ) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
         let n_layers = circuit.layers.len();
@@ -39,7 +39,7 @@ impl<F: SmallField> CircuitWitnessGenerator<F> {
             let all_input_witnesses = wires_in.iter().chain(other_witnesses.iter()).collect_vec();
             let mut layer_witness = vec![F::ZERO; circuit.layers[n_layers - 1].size()];
             circuit.layers[n_layers - 1]
-                .paste_to
+                .paste_from
                 .iter()
                 .for_each(|(id, new_wire_ids)| {
                     new_wire_ids
@@ -62,7 +62,7 @@ impl<F: SmallField> CircuitWitnessGenerator<F> {
             let mut current_layer_witness = vec![F::ZERO; size];
 
             layer
-                .paste_to
+                .paste_from
                 .iter()
                 .for_each(|(old_layer_id, new_wire_ids)| {
                     new_wire_ids
@@ -70,7 +70,7 @@ impl<F: SmallField> CircuitWitnessGenerator<F> {
                         .enumerate()
                         .for_each(|(subset_wire_id, new_wire_id)| {
                             let old_wire_id = circuit.layers[*old_layer_id]
-                                .copy_from
+                                .copy_to
                                 .get(&layer_id)
                                 .unwrap()[subset_wire_id];
                             current_layer_witness[*new_wire_id] =
@@ -116,9 +116,9 @@ impl<F: SmallField> CircuitWitnessGenerator<F> {
             }
             layer_witnesses[layer_id] = current_layer_witness;
         }
-        let mut wires_out = vec![vec![]; circuit.output_copy_from.len()];
+        let mut wires_out = vec![vec![]; circuit.output_copy_to.len()];
         circuit.layers[0]
-            .copy_from
+            .copy_to
             .iter()
             .for_each(|(id, old_wire_ids)| {
                 wires_out[*id] = old_wire_ids
@@ -133,78 +133,161 @@ impl<F: SmallField> CircuitWitnessGenerator<F> {
     pub fn add_instance(
         &mut self,
         circuit: &Circuit<F>,
-        wires_in: &[&[F]],
-        other_witnesses: &[&[F]],
+        wires_in: &[Vec<F>],
+        other_witnesses: &[Vec<F>],
     ) {
         assert!(wires_in.len() == circuit.n_wires_in);
         assert!(other_witnesses.len() == circuit.n_other_witnesses);
-        let (new_layer_witnesses, new_wires_out) = CircuitWitnessGenerator::new_instance(
-            circuit,
-            wires_in,
-            other_witnesses,
-            &self.challenges,
-        );
+        let (new_layer_witnesses, new_wires_out) =
+            CircuitWitness::new_instance(circuit, wires_in, other_witnesses, &self.challenges);
 
         // Merge self and circuit_witness.
         for (layer_witness, new_layer_witness) in
             self.layers.iter_mut().zip(new_layer_witnesses.into_iter())
         {
-            layer_witness.extend(new_layer_witness);
+            layer_witness.push(new_layer_witness);
         }
 
         for (wire_out, new_wire_out) in self.wires_out.iter_mut().zip(new_wires_out.into_iter()) {
-            let new_len = new_wire_out.len().next_power_of_two();
-            let old_len = wire_out.len();
-            wire_out.extend(new_wire_out);
-            wire_out.extend(vec![F::ZERO; new_len - old_len]);
+            wire_out.push(new_wire_out);
         }
 
         for (wire_in, new_wire_in) in self.wires_in.iter_mut().zip(wires_in.iter()) {
-            let new_len = new_wire_in.len().next_power_of_two();
-            wire_in.extend(*new_wire_in);
-            wire_in.extend(vec![F::ZERO; new_len - new_wire_in.len()]);
+            wire_in.push(new_wire_in.clone());
         }
 
         for (other_witness, new_other_witness) in
             self.other_witnesses.iter_mut().zip(other_witnesses.iter())
         {
-            let new_len = new_other_witness.len().next_power_of_two();
-            other_witness.extend(*new_other_witness);
-            other_witness.extend(vec![F::ZERO; new_len - new_other_witness.len()]);
+            other_witness.push(new_other_witness.clone());
         }
 
         self.n_instances += 1;
     }
+
+    pub fn instance_num_vars(&self) -> usize {
+        ceil_log2(self.n_instances)
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn check_correctness(&self, circuit: &Circuit<F>) {
+        // Check input.
+        let input_layer_witness = self.layers.last().unwrap();
+        let input_layer = &circuit.layers.last().unwrap();
+        let all_inputs = self.all_inputs_ref();
+        for copy_id in 0..self.n_instances {
+            for (id, new_wire_ids) in input_layer.paste_from.iter() {
+                for (subset_wire_id, new_wire_id) in new_wire_ids.iter().enumerate() {
+                    assert_eq!(
+                        input_layer_witness[copy_id][*new_wire_id],
+                        all_inputs[*id][copy_id][subset_wire_id],
+                        "input layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
+                        circuit.layers.len() - 1,
+                        copy_id,
+                        new_wire_id,
+                        input_layer_witness[*new_wire_id],
+                        all_inputs[*id][subset_wire_id]
+                    );
+                }
+            }
+        }
+
+        for (layer_id, (layer_witnesses, layer)) in self
+            .layers
+            .iter()
+            .zip(circuit.layers.iter())
+            .enumerate()
+            .rev()
+            .skip(1)
+        {
+            let prev_layer_witnesses = &self.layers[layer_id + 1];
+            for (copy_id, (prev, curr)) in prev_layer_witnesses
+                .iter()
+                .zip(layer_witnesses.iter())
+                .enumerate()
+            {
+                let mut expected = vec![F::ZERO; curr.len()];
+                for add_const in layer.add_consts.iter() {
+                    expected[add_const.idx_out] =
+                        expected[add_const.idx_out] + self.constant(&add_const.constant);
+                }
+                for add in layer.adds.iter() {
+                    expected[add.idx_out] += prev[add.idx_in] * self.constant(&add.scaler);
+                }
+                for mul2 in layer.mul2s.iter() {
+                    expected[mul2.idx_out] = expected[mul2.idx_out]
+                        + prev[mul2.idx_in1] * prev[mul2.idx_in2] * self.constant(&mul2.scaler);
+                }
+                for mul3 in layer.mul3s.iter() {
+                    expected[mul3.idx_out] = expected[mul3.idx_out]
+                        + prev[mul3.idx_in1]
+                            * prev[mul3.idx_in2]
+                            * prev[mul3.idx_in3]
+                            * self.constant(&mul3.scaler);
+                }
+
+                let mut expected_max_previous_size = prev.len();
+                for (old_layer_id, new_wire_ids) in layer.paste_from.iter() {
+                    expected_max_previous_size = expected_max_previous_size.max(new_wire_ids.len());
+                    for (subset_wire_id, new_wire_id) in new_wire_ids.iter().enumerate() {
+                        let old_wire_id = circuit.layers[*old_layer_id]
+                            .copy_to
+                            .get(&layer_id)
+                            .unwrap()[subset_wire_id];
+                        expected[*new_wire_id] = self.layers[*old_layer_id][copy_id][old_wire_id];
+                    }
+                }
+                assert_eq!(
+                    ceil_log2(expected_max_previous_size),
+                    layer.max_previous_num_vars,
+                    "layer: {}, expected_max_previous_size: {}, got: {}",
+                    layer_id,
+                    expected_max_previous_size,
+                    layer.max_previous_num_vars
+                );
+                for (new_layer_id, old_wire_ids) in layer.copy_to.iter() {
+                    for (subset_wire_id, old_wire_id) in old_wire_ids.iter().enumerate() {
+                        let new_wire_id = circuit.layers[*new_layer_id]
+                            .paste_from
+                            .get(&layer_id)
+                            .unwrap()[subset_wire_id];
+                        assert_eq!(
+                            curr[*old_wire_id],
+                            self.layers[*new_layer_id][copy_id][new_wire_id],
+                            "copy_to check: layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
+                            layer_id,
+                            copy_id,
+                            old_wire_id,
+                            curr[*old_wire_id],
+                            self.layers[*new_layer_id][copy_id][new_wire_id]
+                        )
+                    }
+                }
+                for (wire_id, (got, expected)) in curr.iter().zip(expected.iter()).enumerate() {
+                    assert_eq!(
+                        *got, *expected,
+                        "layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
+                        layer_id, copy_id, wire_id, got, expected
+                    );
+                }
+                for assert_const in layer.assert_consts.iter() {
+                    assert_eq!(
+                        curr[assert_const.idx_out],
+                        self.constant(&assert_const.constant),
+                        "layer: {}, wire_id: {}, assert_const: {:?} != {:?}",
+                        layer_id,
+                        assert_const.idx_out,
+                        curr[assert_const.idx_out],
+                        self.constant(&assert_const.constant)
+                    );
+                }
+            }
+        }
+    }
 }
 
 impl<F: SmallField> CircuitWitness<F> {
-    pub fn new(gen: CircuitWitnessGenerator<F>) -> Self {
-        let n_instances = gen.n_instances;
-        let layers = gen.layers.into_iter().map(LayerWitness::new).collect_vec();
-        let wires_in = gen
-            .wires_in
-            .into_iter()
-            .map(LayerWitness::new)
-            .collect_vec();
-        let wires_out = gen
-            .wires_out
-            .into_iter()
-            .map(LayerWitness::new)
-            .collect_vec();
-        let other_witnesses = gen
-            .other_witnesses
-            .into_iter()
-            .map(LayerWitness::new)
-            .collect_vec();
-        Self {
-            layers,
-            wires_in,
-            wires_out,
-            other_witnesses,
-            n_instances,
-        }
-    }
-    pub fn last_layer_witness_ref(&self) -> &LayerWitness<F> {
+    pub fn last_layer_witness_ref(&self) -> &[Vec<F>] {
         self.layers.first().unwrap()
     }
 
@@ -212,52 +295,68 @@ impl<F: SmallField> CircuitWitness<F> {
         self.n_instances
     }
 
-    pub fn wires_in_ref(&self) -> &[LayerWitness<F>] {
+    pub fn wires_in_ref(&self) -> &[Vec<Vec<F>>] {
         &self.wires_in
     }
 
-    pub fn other_witnesses_ref(&self) -> &[LayerWitness<F>] {
+    pub fn other_witnesses_ref(&self) -> &[Vec<Vec<F>>] {
         &self.other_witnesses
     }
 
-    pub fn wires_out_ref(&self) -> &[LayerWitness<F>] {
+    pub fn wires_out_ref(&self) -> &[Vec<Vec<F>>] {
         &self.wires_out
+    }
+
+    pub fn challenges(&self) -> &[F] {
+        &self.challenges
+    }
+
+    pub fn constant(&self, c: &ConstantType<F>) -> F {
+        match *c {
+            ConstantType::Field(x) => x,
+            ConstantType::Challenge(i) => self.challenges[i],
+        }
+    }
+
+    pub fn all_inputs_ref(&self) -> Vec<&Vec<Vec<F>>> {
+        self.wires_in
+            .iter()
+            .chain(self.other_witnesses.iter())
+            .collect_vec()
     }
 }
 
-impl<F: SmallField> LayerWitness<F> {
-    pub fn new(values: Vec<F>) -> Self {
-        let num_vars = ceil_log2(values.len()) as usize;
-        // Expand the values to the size of a power of 2
-        let values = if values.len() < (1 << num_vars) {
-            let mut values = values;
-            values.resize(1 << num_vars, F::ZERO);
-            values
-        } else {
-            values
-        };
-        Self {
-            poly: Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                num_vars, values,
-            )),
+impl<F: SmallField> CircuitWitness<F> {
+    pub fn layer_poly(
+        &self,
+        layer_id: usize,
+        single_num_vars: usize,
+    ) -> Arc<DenseMultilinearExtension<F>> {
+        self.layers[layer_id].mle(single_num_vars, self.instance_num_vars())
+    }
+}
+
+impl<F: SmallField> Debug for CircuitWitness<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "CircuitWitness {{")?;
+        writeln!(f, "  n_instances: {}", self.n_instances)?;
+        writeln!(f, "  layers: ")?;
+        for (i, layer) in self.layers.iter().enumerate() {
+            writeln!(f, "    {}: {:?}", i, layer)?;
         }
-    }
-    pub fn evaluate(&self, point: &Point<F>) -> F {
-        let p = point.iter().map(|x| x.elements[0]).collect_vec();
-        self.poly.evaluate(&p)
-    }
-
-    /// This function is to compute evaluations of the layer with log_size least significant challenges in the output point.
-    pub fn truncate_point_and_evaluate(&self, point: &Point<F>) -> F {
-        let p = point.iter().map(|x| x.elements[0]).collect_vec();
-        self.poly.evaluate(&p[0..self.poly.num_vars])
-    }
-
-    pub fn size(&self) -> usize {
-        1 << self.poly.num_vars
-    }
-
-    pub fn log_size(&self) -> usize {
-        self.poly.num_vars
+        writeln!(f, "  wires_in: ")?;
+        for (i, wire) in self.wires_in.iter().enumerate() {
+            writeln!(f, "    {}: {:?}", i, wire)?;
+        }
+        writeln!(f, "  wires_out: ")?;
+        for (i, wire) in self.wires_out.iter().enumerate() {
+            writeln!(f, "    {}: {:?}", i, wire)?;
+        }
+        writeln!(f, "  other_witnesses: ")?;
+        for (i, wire) in self.other_witnesses.iter().enumerate() {
+            writeln!(f, "    {}: {:?}", i, wire)?;
+        }
+        writeln!(f, "  challenges: {:?}", self.challenges)?;
+        writeln!(f, "}}")
     }
 }

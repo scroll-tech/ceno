@@ -14,7 +14,7 @@ fn main() {
     let table_type = TableType::Range8bit as usize;
     circuit_builder.define_table_type(table_type, CellType::OtherInWitness(0));
     for i in 0..8 as u64 {
-        circuit_builder.add_table_item_const(table_type, Goldilocks::from(i))
+        circuit_builder.add_table_item_const(table_type, &Goldilocks::from(i))
     }
 
     inputs.iter().for_each(|input| {
