@@ -3,7 +3,8 @@ members = [
     "multilinear_extensions",
     "poseidon",
     "sumcheck",
-    "transcript"
+    "transcript",
+    "mpcs",
 ]
 
 [workspace.package]
