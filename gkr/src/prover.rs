@@ -144,11 +144,19 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             hi_num_vars,
         );
 
+        // =============================================================
+        // Step 1: First step of copy constraints copied to later layers
+        // =============================================================
+
         let (sumcheck_proof_1, eval_value_1) = prover_phase1_state
             .prove_and_update_state_step1_parallel(
                 |new_layer_id| &layer.copy_to[new_layer_id],
                 transcript,
             );
+
+        // ==============================================================
+        // Step 2: Second step of copy constraints copied to later layers
+        // ==============================================================
 
         let (sumcheck_proof_2, eval_value_2) =
             prover_phase1_state.prove_and_update_state_step2_parallel(transcript);
@@ -208,15 +216,21 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         let mut sumcheck_proofs = vec![];
         let mut sumcheck_eval_values = vec![];
 
-        // ===========
-        // Sumcheck 0
-        // ===========
-        if lo_out_num_vars != 0 && !layer.assert_consts.is_empty() {
+        // =============================
+        // Step 0: Assertion constraints
+        // =============================
+
+        if !layer.assert_consts.is_empty() {
             let (sumcheck_proof_0, eval_values_0) =
                 prover_phase2_state.prove_and_update_state_step0_parallel(transcript);
             sumcheck_proofs.push(sumcheck_proof_0);
             sumcheck_eval_values.push(eval_values_0);
         }
+
+        // ================================================
+        // Step 1: First step of arithmetic constraints and
+        // copy constraints pasted from previous layers
+        // ================================================
 
         let lo_in_num_vars = layer.max_previous_num_vars;
 
@@ -239,6 +253,12 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
                 },
                 transcript,
             );
+
+        // If it's the input layer, then eval_values_1 are evaluations of the wires_in and other_witnesses.
+        // Otherwise it includes:
+        //      - one evaluation of the next layer to be proved.
+        //      - evaluations of the pasted subsets.
+        //      - one evaluation of g0 to help with the sumcheck.
         let (next_f_values, subset_f_values) = if is_input_layer {
             eval_values_1.split_at(0)
         } else {
@@ -268,6 +288,10 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         sumcheck_proofs.push(sumcheck_proof_1);
         sumcheck_eval_values.push(eval_values_1.clone());
 
+        // =============================================
+        // Step 2: Second step of arithmetic constraints
+        // =============================================
+
         if layer.mul2s.is_empty() && layer.mul3s.is_empty() {
             return IOPProverPhase2Message {
                 sumcheck_proofs,
@@ -283,6 +307,10 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
 
         sumcheck_proofs.push(sumcheck_proof_2);
         sumcheck_eval_values.push(eval_values_2);
+
+        // ============================================
+        // Step 3: Third step of arithmetic constraints
+        // ============================================
 
         if layer.mul3s.is_empty() {
             return IOPProverPhase2Message {

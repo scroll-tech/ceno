@@ -116,11 +116,23 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         transcript: &mut Transcript<F>,
     ) -> (SumcheckProof<F>, Vec<F>) {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 0");
+
         let layer_out_poly = &self.layer_out_poly;
         let lo_out_num_vars = self.lo_out_num_vars;
         let hi_point = &self.layer_out_point[self.lo_out_num_vars..];
         let eq_y_ry = &self.eq_y_ry;
         let assert_consts = &self.assert_consts;
+
+        if lo_out_num_vars == 0 {
+            end_timer!(timer);
+            return (
+                SumcheckProof {
+                    point: vec![],
+                    proofs: vec![],
+                },
+                vec![],
+            );
+        }
 
         // f0(x1) = layers[i](rt || x1)
         let f0 = Arc::new(fix_high_variables(&layer_out_poly, &hi_point));

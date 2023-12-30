@@ -9,6 +9,7 @@ use itertools::Itertools;
 use transcript::Transcript;
 
 use crate::{
+    circuit::EvaluateGateCIn,
     error::GKRError,
     structs::{
         Circuit, GKRInputClaims, Gate1In, Gate2In, Gate3In, GateCIn, IOPProof,
@@ -156,11 +157,19 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
             hi_num_vars,
         );
 
+        // =============================================================
+        // Step 1: First step of copy constraints copied to later layers
+        // =============================================================
+
         verifier_phase1_state.verify_and_update_state_step1_parallel(
             (&prover_msg.sumcheck_proof_1, &prover_msg.eval_value_1),
             |new_layer_id| &layer.copy_to[new_layer_id],
             transcript,
         )?;
+
+        // ==============================================================
+        // Step 2: Second step of copy constraints copied to later layers
+        // ==============================================================
 
         verifier_phase1_state.verify_and_update_state_step2_parallel(
             (&prover_msg.sumcheck_proof_2, prover_msg.eval_value_2),
@@ -198,9 +207,13 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
             is_input_layer,
         );
 
+        // =============================
+        // Step 0: Assertion constraints
+        // =============================
+
         // sigma = layers[i](rt || ry) - assert_const(ry)
-        let (sumcheck_proofs, sumcheck_eval_values) =
-            if lo_out_num_vars != 0 && !layer.assert_consts.is_empty() {
+        let (sumcheck_proofs, sumcheck_eval_values) = {
+            if !layer.assert_consts.is_empty() {
                 verifier_phase2_state.verify_and_update_state_step0_parallel(
                     (
                         &prover_msg.sumcheck_proofs[0],
@@ -217,13 +230,24 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                     &prover_msg.sumcheck_proofs[..],
                     &prover_msg.sumcheck_eval_values[..],
                 )
-            };
+            }
+        };
+
+        // ================================================
+        // Step 1: First step of arithmetic constraints and
+        // copy constraints pasted from previous layers
+        // ================================================
 
         verifier_phase2_state.verify_and_update_state_step1_parallel(
             (&sumcheck_proofs[0], &sumcheck_eval_values[0]),
             transcript,
         )?;
 
+        // If it's the input layer, then eval_values_1 are evaluations of the wires_in and other_witnesses.
+        // Otherwise it includes:
+        //      - one evaluation of the next layer to be proved.
+        //      - evaluations of the pasted subsets.
+        //      - one evaluation of g0 to help with the sumcheck.
         let (next_f_values, subset_f_values) = if is_input_layer {
             sumcheck_eval_values[0].split_at(0)
         } else {
@@ -251,6 +275,10 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                     ));
             });
 
+        // =============================================
+        // Step 2: Second step of arithmetic constraints
+        // =============================================
+
         if layer.mul2s.is_empty() && layer.mul3s.is_empty() {
             return Ok(());
         }
@@ -264,6 +292,10 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
             verifier_phase2_state.sumcheck_point_2.clone(),
             sumcheck_eval_values[1][0],
         ));
+
+        // ============================================
+        // Step 3: Third step of arithmetic constraints
+        // ============================================
 
         if layer.mul3s.is_empty() {
             return Ok(());

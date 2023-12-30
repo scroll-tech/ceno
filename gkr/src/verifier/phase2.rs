@@ -110,13 +110,19 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
 
         let assert_consts = &self.assert_consts;
 
-        // sigma = layers[i](rt || ry) - assert_const(ry)
         let lo_point = &layer_out_point[..lo_out_num_vars];
         let hi_point = &layer_out_point[lo_out_num_vars..];
         let eq_y_ry = &self.eq_y_ry;
-        let eq_expected = build_eq_x_r_vec(&lo_point);
-        debug_assert_eq!(&eq_expected, eq_y_ry);
 
+        if lo_out_num_vars == 0 {
+            if layer_out_value != self.assert_consts.as_slice().eval(&self.eq_y_ry) {
+                return Err(GKRError::VerifyError);
+            }
+            end_timer!(timer);
+            return Ok(());
+        }
+
+        // sigma = layers[i](rt || ry) - assert_const(ry)
         let sigma_0 = layer_out_value - assert_consts.as_slice().eval(&eq_y_ry);
         // Sumcheck 0: sigma = \sum_{x1} f0(x1) * g0(x1)
         //     f0(x1) = layers[i](rt || x1)
