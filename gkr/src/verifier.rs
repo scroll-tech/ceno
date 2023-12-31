@@ -9,7 +9,6 @@ use itertools::Itertools;
 use transcript::Transcript;
 
 use crate::{
-    circuit::EvaluateGateCIn,
     error::GKRError,
     structs::{
         Circuit, GKRInputClaims, Gate1In, Gate2In, Gate3In, GateCIn, IOPProof,
