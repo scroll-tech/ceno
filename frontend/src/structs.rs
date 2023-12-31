@@ -35,7 +35,6 @@ pub struct Cell<F: SmallField> {
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
 pub enum CellType {
     WireIn(usize),
-    OtherInWitness(usize),
     WireOut(usize),
 }
 
@@ -67,5 +66,4 @@ pub struct CircuitBuilder<F: SmallField> {
 
     pub(crate) n_wires_in: usize,
     pub(crate) n_wires_out: usize,
-    pub(crate) n_other_in_witnesses: usize,
 }

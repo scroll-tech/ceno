@@ -51,9 +51,8 @@ impl<F: SmallField> Circuit<F> {
         // copy them to the last layer.
 
         // Input layer if pasted from wires_in || other_witnesses.
-        let (wires_in_cell_ids, other_witnesses_cell_ids, wires_out_cell_ids) = {
+        let (wires_in_cell_ids, wires_out_cell_ids) = {
             let mut wires_in_cell_ids = vec![vec![]; circuit_builder.n_wires_in()];
-            let mut other_witnesses_cell_ids = vec![vec![]; circuit_builder.n_other_in_witnesses()];
             let mut wires_out_cell_ids = vec![vec![]; circuit_builder.n_wires_out()];
             for marked_cell in circuit_builder.marked_cells.iter() {
                 match marked_cell.0 {
@@ -61,29 +60,17 @@ impl<F: SmallField> Circuit<F> {
                         wires_in_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
                         wires_in_cell_ids[*id].sort();
                     }
-                    CellType::OtherInWitness(id) => {
-                        other_witnesses_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
-                        other_witnesses_cell_ids[*id].sort();
-                    }
                     CellType::WireOut(id) => {
                         wires_out_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
                         wires_out_cell_ids[*id].sort();
                     }
                 }
             }
-            (
-                wires_in_cell_ids,
-                other_witnesses_cell_ids,
-                wires_out_cell_ids,
-            )
+            (wires_in_cell_ids, wires_out_cell_ids)
         };
 
-        let all_inputs = wires_in_cell_ids
-            .iter()
-            .chain(other_witnesses_cell_ids.iter())
-            .collect_vec();
         let input_paste_from = &mut layers[n_layers - 1].paste_from;
-        for (i, input_segment) in all_inputs.iter().enumerate() {
+        for (i, input_segment) in wires_in_cell_ids.iter().enumerate() {
             input_paste_from.insert(
                 i,
                 input_segment
@@ -93,7 +80,7 @@ impl<F: SmallField> Circuit<F> {
             );
         }
         layers[n_layers - 1].max_previous_num_vars =
-            ceil_log2(all_inputs.iter().map(|x| x.len()).max().unwrap());
+            ceil_log2(wires_in_cell_ids.iter().map(|x| x.len()).max().unwrap());
 
         for layer_id in (0..n_layers - 1).rev() {
             // current_subsets: old_layer_id -> (old_wire_id, new_wire_id)
@@ -240,7 +227,6 @@ impl<F: SmallField> Circuit<F> {
             layers,
             output_copy_to,
             n_wires_in: circuit_builder.n_wires_in(),
-            n_other_witnesses: circuit_builder.n_other_in_witnesses(),
         }
     }
 
@@ -358,7 +344,6 @@ impl<F: SmallField> fmt::Debug for Circuit<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Circuit {{")?;
         writeln!(f, "  n_wires_in: {}", self.n_wires_in)?;
-        writeln!(f, "  n_other_witnesses: {}", self.n_other_witnesses)?;
         writeln!(f, "  layers: ")?;
         for layer in self.layers.iter() {
             writeln!(f, "    {:?}", layer)?;

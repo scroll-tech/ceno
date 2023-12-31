@@ -26,8 +26,7 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
 
     let table_size = 4;
     let (x_idx, x) = circuit_builder.create_wire_in(1);
-    let (other_x_pows_idx, other_pows_of_x) =
-        circuit_builder.create_other_in_witness(table_size - 1);
+    let (other_x_pows_idx, other_pows_of_x) = circuit_builder.create_wire_in(table_size - 1);
     let pow_of_xs = [x, other_pows_of_x].concat();
     for i in 0..table_size - 1 {
         // circuit_builder.mul2(
@@ -72,7 +71,6 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
 fn main() {
     let (circuit, all_input_index) = construct_circuit::<Goldilocks>();
     let mut wires_in = vec![vec![]; circuit.n_wires_in];
-    let mut other_witnesses = vec![vec![]; circuit.n_other_witnesses];
     wires_in[all_input_index.x_idx] = vec![Goldilocks::from(2u64)];
     wires_in[all_input_index.inputs_idx] = vec![
         Goldilocks::from(2u64),
@@ -81,12 +79,12 @@ fn main() {
         Goldilocks::from(16u64),
         Goldilocks::from(2u64),
     ];
-    other_witnesses[all_input_index.other_x_pows_idx] = vec![
+    wires_in[all_input_index.other_x_pows_idx] = vec![
         Goldilocks::from(4u64),
         Goldilocks::from(16u64),
         Goldilocks::from(256u64),
     ];
-    other_witnesses[all_input_index.count_idx] = vec![
+    wires_in[all_input_index.count_idx] = vec![
         Goldilocks::from(3u64),
         Goldilocks::from(1u64),
         Goldilocks::from(1u64),
@@ -97,7 +95,7 @@ fn main() {
         let challenge = Goldilocks::from(9);
         let mut circuit_witness = CircuitWitness::new(&circuit, vec![challenge]);
         for _ in 0..4 {
-            circuit_witness.add_instance(&circuit, &wires_in, &other_witnesses);
+            circuit_witness.add_instance(&circuit, &wires_in);
         }
         circuit_witness
     };
@@ -161,7 +159,7 @@ fn main() {
     };
 
     let expected_values = circuit_witness
-        .all_inputs_ref()
+        .wires_in_ref()
         .iter()
         .map(|witness| {
             witness

@@ -25,7 +25,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
         layer_out_point: &Point<F>,
         layer_out_value: F,
-        paste_from_sources: &'a [&Vec<Vec<F>>],
+        paste_from_sources: &'a [Vec<Vec<F>>],
         constant: impl Fn(&ConstantType<F>) -> F,
         hi_num_vars: usize,
         is_input_layer: bool,

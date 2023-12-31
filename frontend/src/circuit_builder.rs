@@ -55,7 +55,6 @@ where
             n_layers: None,
             n_wires_in: 0,
             n_wires_out: 0,
-            n_other_in_witnesses: 0,
         }
     }
     pub fn create_cell(&mut self) -> usize {
@@ -89,16 +88,9 @@ where
         (self.n_wires_out - 1, cell)
     }
 
-    pub fn create_other_in_witness(&mut self, num: usize) -> (usize, Vec<usize>) {
-        let cell = self.create_cells(num);
-        self.mark_cells(CellType::OtherInWitness(self.n_other_in_witnesses), &cell);
-        self.n_other_in_witnesses += 1;
-        (self.n_other_in_witnesses - 1, cell)
-    }
-
-    fn create_other_in_witness_empty(&mut self) -> usize {
-        self.n_other_in_witnesses += 1;
-        self.n_other_in_witnesses - 1
+    fn create_wire_in_empty(&mut self) -> usize {
+        self.n_wires_in += 1;
+        self.n_wires_in - 1
     }
 
     pub fn add_const(&mut self, out: usize, constant: ConstantType<F>) {
@@ -420,13 +412,11 @@ where
     /// indicate the table and convert it to usize. This should throw an error
     /// if the type has been defined. Return the index of the witness.
     pub fn define_table_type(&mut self, table_type: TableType) -> usize {
-        let witness_cell_type = self.create_other_in_witness_empty();
+        let count_idx = self.create_wire_in_empty();
         assert!(!self.tables.contains_key(&table_type));
-        self.tables.insert(
-            table_type,
-            TableData::new(CellType::OtherInWitness(witness_cell_type)),
-        );
-        witness_cell_type
+        self.tables
+            .insert(table_type, TableData::new(CellType::WireIn(count_idx)));
+        count_idx
     }
 
     pub fn add_input_item(&mut self, table_type: TableType, cell: usize) {
@@ -646,10 +636,6 @@ where
         self.n_wires_out
     }
 
-    pub fn n_other_in_witnesses(&self) -> usize {
-        self.n_other_in_witnesses
-    }
-
     #[cfg(debug_assertions)]
     pub fn print_info(&self) {
         println!("The number of layers: {}", self.n_layers.as_ref().unwrap());
@@ -662,11 +648,6 @@ where
         self.marked_cells.iter().for_each(|(ty, set)| {
             if let CellType::WireOut(i) = ty {
                 println!("wire_out[{}] size: {}", i, set.len());
-            }
-        });
-        self.marked_cells.iter().for_each(|(ty, set)| {
-            if let CellType::OtherInWitness(i) = ty {
-                println!("other_in_witness[{}] size: {}", i, set.len());
             }
         });
 

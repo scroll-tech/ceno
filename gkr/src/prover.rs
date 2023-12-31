@@ -197,9 +197,9 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
 
         let is_input_layer = self.layer_id == circuit.layers.len() - 1;
         let paste_from_sources = if is_input_layer {
-            self.circuit_witness.all_inputs_ref()
+            self.circuit_witness.wires_in_ref()
         } else {
-            self.circuit_witness.layers.iter().collect_vec()
+            self.circuit_witness.layers_ref()
         };
 
         let mut prover_phase2_state = IOPProverPhase2State::prover_init_parallel(
@@ -360,7 +360,7 @@ struct IOPProverPhase2State<'a, F: SmallField> {
     adds: Vec<Gate1In<F>>,
     assert_consts: Vec<GateCIn<F>>,
     paste_from: &'a HashMap<usize, Vec<usize>>,
-    paste_from_sources: &'a [&'a Vec<Vec<F>>],
+    paste_from_sources: &'a [Vec<Vec<F>>],
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
     hi_num_vars: usize,

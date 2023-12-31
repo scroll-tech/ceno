@@ -14,7 +14,7 @@ fn main() {
     let table_size = 4;
     let pow_of_xs = {
         let (_, x): (usize, Vec<usize>) = circuit_builder.create_wire_in(1);
-        let (_, other_pows_of_x) = circuit_builder.create_other_in_witness(table_size - 1);
+        let (_, other_pows_of_x) = circuit_builder.create_wire_in(table_size - 1);
         [x, other_pows_of_x].concat()
     };
     for i in 0..table_size - 1 {

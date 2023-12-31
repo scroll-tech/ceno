@@ -93,7 +93,6 @@ pub struct Circuit<F: SmallField> {
     pub layers: Vec<Layer<F>>,
     pub output_copy_to: Vec<Vec<usize>>,
     pub n_wires_in: usize,
-    pub n_other_witnesses: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -131,7 +130,6 @@ pub struct CircuitWitness<F: SmallField> {
     pub(crate) layers: Vec<Vec<Vec<F>>>,
     pub(crate) wires_in: Vec<Vec<Vec<F>>>,
     pub(crate) wires_out: Vec<Vec<Vec<F>>>,
-    pub(crate) other_witnesses: Vec<Vec<Vec<F>>>,
     /// Challenges
     pub(crate) challenges: Vec<F>,
     /// The number of instances for the same sub-circuit.

@@ -17,7 +17,6 @@ impl<F: SmallField> CircuitWitness<F> {
             layers: vec![vec![]; circuit.layers.len()],
             wires_in: vec![vec![]; circuit.n_wires_in],
             wires_out: vec![vec![]; circuit.output_copy_to.len()],
-            other_witnesses: vec![vec![]; circuit.n_other_witnesses],
             challenges,
             n_instances: 0,
         }
@@ -28,7 +27,6 @@ impl<F: SmallField> CircuitWitness<F> {
     fn new_instance(
         circuit: &Circuit<F>,
         wires_in: &[Vec<F>],
-        other_witnesses: &[Vec<F>],
         challenges: &[F],
     ) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
         let n_layers = circuit.layers.len();
@@ -36,7 +34,6 @@ impl<F: SmallField> CircuitWitness<F> {
 
         // The first layer.
         layer_witnesses[n_layers - 1] = {
-            let all_input_witnesses = wires_in.iter().chain(other_witnesses.iter()).collect_vec();
             let mut layer_witness = vec![F::ZERO; circuit.layers[n_layers - 1].size()];
             circuit.layers[n_layers - 1]
                 .paste_from
@@ -46,7 +43,7 @@ impl<F: SmallField> CircuitWitness<F> {
                         .iter()
                         .enumerate()
                         .for_each(|(i, new_wire_id)| {
-                            layer_witness[*new_wire_id] = all_input_witnesses[*id][i];
+                            layer_witness[*new_wire_id] = wires_in[*id][i];
                         })
                 });
             layer_witness
@@ -130,16 +127,10 @@ impl<F: SmallField> CircuitWitness<F> {
     }
 
     /// Add another instance for the circuit.
-    pub fn add_instance(
-        &mut self,
-        circuit: &Circuit<F>,
-        wires_in: &[Vec<F>],
-        other_witnesses: &[Vec<F>],
-    ) {
+    pub fn add_instance(&mut self, circuit: &Circuit<F>, wires_in: &[Vec<F>]) {
         assert!(wires_in.len() == circuit.n_wires_in);
-        assert!(other_witnesses.len() == circuit.n_other_witnesses);
         let (new_layer_witnesses, new_wires_out) =
-            CircuitWitness::new_instance(circuit, wires_in, other_witnesses, &self.challenges);
+            CircuitWitness::new_instance(circuit, wires_in, &self.challenges);
 
         // Merge self and circuit_witness.
         for (layer_witness, new_layer_witness) in
@@ -156,12 +147,6 @@ impl<F: SmallField> CircuitWitness<F> {
             wire_in.push(new_wire_in.clone());
         }
 
-        for (other_witness, new_other_witness) in
-            self.other_witnesses.iter_mut().zip(other_witnesses.iter())
-        {
-            other_witness.push(new_other_witness.clone());
-        }
-
         self.n_instances += 1;
     }
 
@@ -174,19 +159,19 @@ impl<F: SmallField> CircuitWitness<F> {
         // Check input.
         let input_layer_witness = self.layers.last().unwrap();
         let input_layer = &circuit.layers.last().unwrap();
-        let all_inputs = self.all_inputs_ref();
+        let wires_in = self.wires_in_ref();
         for copy_id in 0..self.n_instances {
             for (id, new_wire_ids) in input_layer.paste_from.iter() {
                 for (subset_wire_id, new_wire_id) in new_wire_ids.iter().enumerate() {
                     assert_eq!(
                         input_layer_witness[copy_id][*new_wire_id],
-                        all_inputs[*id][copy_id][subset_wire_id],
+                        wires_in[*id][copy_id][subset_wire_id],
                         "input layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
                         circuit.layers.len() - 1,
                         copy_id,
                         new_wire_id,
                         input_layer_witness[*new_wire_id],
-                        all_inputs[*id][subset_wire_id]
+                        wires_in[*id][subset_wire_id]
                     );
                 }
             }
@@ -299,10 +284,6 @@ impl<F: SmallField> CircuitWitness<F> {
         &self.wires_in
     }
 
-    pub fn other_witnesses_ref(&self) -> &[Vec<Vec<F>>] {
-        &self.other_witnesses
-    }
-
     pub fn wires_out_ref(&self) -> &[Vec<Vec<F>>] {
         &self.wires_out
     }
@@ -311,18 +292,15 @@ impl<F: SmallField> CircuitWitness<F> {
         &self.challenges
     }
 
+    pub fn layers_ref(&self) -> &[Vec<Vec<F>>] {
+        &self.layers
+    }
+
     pub fn constant(&self, c: &ConstantType<F>) -> F {
         match *c {
             ConstantType::Field(x) => x,
             ConstantType::Challenge(i) => self.challenges[i],
         }
-    }
-
-    pub fn all_inputs_ref(&self) -> Vec<&Vec<Vec<F>>> {
-        self.wires_in
-            .iter()
-            .chain(self.other_witnesses.iter())
-            .collect_vec()
     }
 }
 
@@ -350,10 +328,6 @@ impl<F: SmallField> Debug for CircuitWitness<F> {
         }
         writeln!(f, "  wires_out: ")?;
         for (i, wire) in self.wires_out.iter().enumerate() {
-            writeln!(f, "    {}: {:?}", i, wire)?;
-        }
-        writeln!(f, "  other_witnesses: ")?;
-        for (i, wire) in self.other_witnesses.iter().enumerate() {
             writeln!(f, "    {}: {:?}", i, wire)?;
         }
         writeln!(f, "  challenges: {:?}", self.challenges)?;
