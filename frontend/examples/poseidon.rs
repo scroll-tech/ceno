@@ -1,6 +1,6 @@
 //! Poseidon hash function. This is modified from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom.
 
-use frontend::structs::{CellType, CircuitBuilder, ConstantType};
+use frontend::structs::{CircuitBuilder, ConstantType};
 use goldilocks::{Goldilocks, SmallField};
 use mock_constant::{poseidon_c, poseidon_m, poseidon_p, poseidon_s};
 
@@ -429,15 +429,13 @@ fn poseidon_ex<F: SmallField>(
 fn main() {
     let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
     let n_inputs = 4;
-    let poseidon_ex_initial_state = circuit_builder.create_cell();
-    let poseidon_ex_inputs = circuit_builder.create_cells(n_inputs);
-    circuit_builder.mark_cell(CellType::OtherInWitness(0), poseidon_ex_initial_state);
-    circuit_builder.mark_cells(CellType::WireIn(0), &poseidon_ex_inputs);
+    let (_, poseidon_ex_initial_state) = circuit_builder.create_other_in_witness(1);
+    let (_, poseidon_ex_inputs) = circuit_builder.create_wire_in(n_inputs);
     let poseidon_ex_out = poseidon_ex(
         &mut circuit_builder,
         1,
         &poseidon_ex_inputs,
-        poseidon_ex_initial_state,
+        poseidon_ex_initial_state[0],
     );
     println!("The output is located at cell {:?}", poseidon_ex_out[0]);
     circuit_builder.configure();

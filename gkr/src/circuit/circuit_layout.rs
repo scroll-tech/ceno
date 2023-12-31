@@ -52,29 +52,20 @@ impl<F: SmallField> Circuit<F> {
 
         // Input layer if pasted from wires_in || other_witnesses.
         let (wires_in_cell_ids, other_witnesses_cell_ids, wires_out_cell_ids) = {
-            let mut wires_in_cell_ids = vec![];
-            let mut other_witnesses_cell_ids = vec![];
-            let mut wires_out_cell_ids = vec![];
+            let mut wires_in_cell_ids = vec![vec![]; circuit_builder.n_wires_in()];
+            let mut other_witnesses_cell_ids = vec![vec![]; circuit_builder.n_other_in_witnesses()];
+            let mut wires_out_cell_ids = vec![vec![]; circuit_builder.n_wires_out()];
             for marked_cell in circuit_builder.marked_cells.iter() {
                 match marked_cell.0 {
                     CellType::WireIn(id) => {
-                        if wires_in_cell_ids.len() <= *id {
-                            wires_in_cell_ids.resize(id + 1, vec![]);
-                        }
                         wires_in_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
                         wires_in_cell_ids[*id].sort();
                     }
                     CellType::OtherInWitness(id) => {
-                        if other_witnesses_cell_ids.len() <= *id {
-                            other_witnesses_cell_ids.resize(id + 1, vec![]);
-                        }
                         other_witnesses_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
                         other_witnesses_cell_ids[*id].sort();
                     }
                     CellType::WireOut(id) => {
-                        if wires_out_cell_ids.len() <= *id {
-                            wires_out_cell_ids.resize(id + 1, vec![]);
-                        }
                         wires_out_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
                         wires_out_cell_ids[*id].sort();
                     }
@@ -248,8 +239,8 @@ impl<F: SmallField> Circuit<F> {
         Self {
             layers,
             output_copy_to,
-            n_wires_in: wires_in_cell_ids.len(),
-            n_other_witnesses: other_witnesses_cell_ids.len(),
+            n_wires_in: circuit_builder.n_wires_in(),
+            n_other_witnesses: circuit_builder.n_other_in_witnesses(),
         }
     }
 

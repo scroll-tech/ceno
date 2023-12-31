@@ -47,7 +47,7 @@ pub(crate) struct TableData<F: SmallField> {
     /// Indicate the challenge used to construct the lookup circuit.
     pub(crate) challenge: Option<ConstantType<F>>,
     /// Witness vector index.
-    pub(crate) witness_cell_type: CellType,
+    pub(crate) count_witness_cell_type: CellType,
 }
 
 pub type TableType = usize;
@@ -64,4 +64,8 @@ pub struct CircuitBuilder<F: SmallField> {
 
     /// Store all tables.
     pub(crate) tables: HashMap<TableType, TableData<F>>,
+
+    pub(crate) n_wires_in: usize,
+    pub(crate) n_wires_out: usize,
+    pub(crate) n_other_in_witnesses: usize,
 }

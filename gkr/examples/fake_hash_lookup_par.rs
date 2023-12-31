@@ -1,4 +1,4 @@
-use frontend::structs::{CellType, CircuitBuilder, ConstantType};
+use frontend::structs::{CircuitBuilder, ConstantType};
 use gkr::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState};
 use gkr::utils::MultilinearExtensionFromVectors;
 use goldilocks::{Goldilocks, SmallField};
@@ -9,13 +9,26 @@ enum TableType {
     FakeHashTable,
 }
 
-fn construct_circuit<F: SmallField>() -> Circuit<F> {
+struct AllInputIndex {
+    // public
+    x_idx: usize,
+    inputs_idx: usize,
+
+    // private
+    other_x_pows_idx: usize,
+    count_idx: usize,
+}
+
+fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let one = ConstantType::Field(F::ONE);
     let neg_one = ConstantType::Field(-F::ONE);
 
     let table_size = 4;
-    let pow_of_xs = circuit_builder.create_cells(table_size);
+    let (x_idx, x) = circuit_builder.create_wire_in(1);
+    let (other_x_pows_idx, other_pows_of_x) =
+        circuit_builder.create_other_in_witness(table_size - 1);
+    let pow_of_xs = [x, other_pows_of_x].concat();
     for i in 0..table_size - 1 {
         // circuit_builder.mul2(
         //     pow_of_xs[i + 1],
@@ -30,17 +43,14 @@ fn construct_circuit<F: SmallField>() -> Circuit<F> {
         circuit_builder.add(diff, tmp, neg_one);
         circuit_builder.assert_const(diff, &F::ZERO);
     }
-    circuit_builder.mark_cell(CellType::WireIn(0), pow_of_xs[0]);
-    circuit_builder.mark_cells(CellType::OtherInWitness(0), &pow_of_xs[1..pow_of_xs.len()]);
 
     let table_type = TableType::FakeHashTable as usize;
-    circuit_builder.define_table_type(table_type, CellType::OtherInWitness(1));
+    let count_idx = circuit_builder.define_table_type(table_type);
     for i in 0..table_size {
         circuit_builder.add_table_item(table_type, pow_of_xs[i]);
     }
 
-    let inputs = circuit_builder.create_cells(5);
-    circuit_builder.mark_cells(CellType::WireIn(1), &inputs);
+    let (inputs_idx, inputs) = circuit_builder.create_wire_in(5);
     inputs.iter().for_each(|input| {
         circuit_builder.add_input_item(table_type, *input);
     });
@@ -48,33 +58,39 @@ fn construct_circuit<F: SmallField>() -> Circuit<F> {
     circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));
 
     circuit_builder.configure();
-    Circuit::<F>::new(&circuit_builder)
+    (
+        Circuit::<F>::new(&circuit_builder),
+        AllInputIndex {
+            x_idx,
+            other_x_pows_idx,
+            inputs_idx,
+            count_idx,
+        },
+    )
 }
 
 fn main() {
-    let circuit = construct_circuit::<Goldilocks>();
-    let wires_in = vec![
-        vec![Goldilocks::from(2u64)],
-        vec![
-            Goldilocks::from(2u64),
-            Goldilocks::from(2u64),
-            Goldilocks::from(4u64),
-            Goldilocks::from(16u64),
-            Goldilocks::from(2u64),
-        ],
+    let (circuit, all_input_index) = construct_circuit::<Goldilocks>();
+    let mut wires_in = vec![vec![]; circuit.n_wires_in];
+    let mut other_witnesses = vec![vec![]; circuit.n_other_witnesses];
+    wires_in[all_input_index.x_idx] = vec![Goldilocks::from(2u64)];
+    wires_in[all_input_index.inputs_idx] = vec![
+        Goldilocks::from(2u64),
+        Goldilocks::from(2u64),
+        Goldilocks::from(4u64),
+        Goldilocks::from(16u64),
+        Goldilocks::from(2u64),
     ];
-    let other_witnesses = vec![
-        vec![
-            Goldilocks::from(4u64),
-            Goldilocks::from(16u64),
-            Goldilocks::from(256u64),
-        ],
-        vec![
-            Goldilocks::from(3u64),
-            Goldilocks::from(1u64),
-            Goldilocks::from(1u64),
-            Goldilocks::from(0u64),
-        ],
+    other_witnesses[all_input_index.other_x_pows_idx] = vec![
+        Goldilocks::from(4u64),
+        Goldilocks::from(16u64),
+        Goldilocks::from(256u64),
+    ];
+    other_witnesses[all_input_index.count_idx] = vec![
+        Goldilocks::from(3u64),
+        Goldilocks::from(1u64),
+        Goldilocks::from(1u64),
+        Goldilocks::from(0u64),
     ];
 
     let circuit_witness = {

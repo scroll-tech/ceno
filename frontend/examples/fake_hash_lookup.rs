@@ -1,5 +1,5 @@
 use ff::Field;
-use frontend::structs::{CellType, CircuitBuilder, ConstantType};
+use frontend::structs::{CircuitBuilder, ConstantType};
 use goldilocks::Goldilocks;
 
 enum TableType {
@@ -12,7 +12,11 @@ fn main() {
     let neg_one = ConstantType::Field(-Goldilocks::ONE);
 
     let table_size = 4;
-    let pow_of_xs = circuit_builder.create_cells(table_size);
+    let pow_of_xs = {
+        let (_, x): (usize, Vec<usize>) = circuit_builder.create_wire_in(1);
+        let (_, other_pows_of_x) = circuit_builder.create_other_in_witness(table_size - 1);
+        [x, other_pows_of_x].concat()
+    };
     for i in 0..table_size - 1 {
         // circuit_builder.mul2(
         //     pow_of_xs[i + 1],
@@ -27,17 +31,14 @@ fn main() {
         circuit_builder.add(diff, tmp, neg_one);
         circuit_builder.assert_const(diff, &Goldilocks::ZERO);
     }
-    circuit_builder.mark_cell(CellType::WireIn(0), pow_of_xs[0]);
-    circuit_builder.mark_cells(CellType::OtherInWitness(0), &pow_of_xs[1..pow_of_xs.len()]);
 
     let table_type = TableType::FakeHashTable as usize;
-    circuit_builder.define_table_type(table_type, CellType::OtherInWitness(1));
+    circuit_builder.define_table_type(table_type);
     for i in 0..table_size {
         circuit_builder.add_table_item(table_type, pow_of_xs[i]);
     }
 
-    let inputs = circuit_builder.create_cells(5);
-    circuit_builder.mark_cells(CellType::WireIn(1), &inputs);
+    let (_, inputs) = circuit_builder.create_wire_in(5);
     inputs.iter().for_each(|input| {
         circuit_builder.add_input_item(table_type, *input);
     });

@@ -23,7 +23,7 @@ impl<F: SmallField> TableData<F> {
             table_items_const: vec![],
             input_items: vec![],
             challenge: None,
-            witness_cell_type,
+            count_witness_cell_type: witness_cell_type,
         }
     }
     pub fn add_table_item(&mut self, cell: usize) {
@@ -53,6 +53,9 @@ where
             marked_cells,
             tables: HashMap::new(),
             n_layers: None,
+            n_wires_in: 0,
+            n_wires_out: 0,
+            n_other_in_witnesses: 0,
         }
     }
     pub fn create_cell(&mut self) -> usize {
@@ -65,16 +68,37 @@ where
         (self.cells.len() - num..self.cells.len()).collect()
     }
 
-    /// This is to mark the cell with special functionality.
-    pub fn mark_cell(&mut self, cell_type: CellType, cell: usize) {
-        self.cells[cell].cell_type = Some(cell_type);
-    }
-
     /// This is to mark the cells with special functionality.
-    pub fn mark_cells(&mut self, cell_type: CellType, cells: &[usize]) {
+    fn mark_cells(&mut self, cell_type: CellType, cells: &[usize]) {
         cells.iter().for_each(|cell| {
             self.cells[*cell].cell_type = Some(cell_type);
         });
+    }
+
+    pub fn create_wire_in(&mut self, num: usize) -> (usize, Vec<usize>) {
+        let cell = self.create_cells(num);
+        self.mark_cells(CellType::WireIn(self.n_wires_in), &cell);
+        self.n_wires_in += 1;
+        (self.n_wires_in - 1, cell)
+    }
+
+    pub fn create_wire_out(&mut self, num: usize) -> (usize, Vec<usize>) {
+        let cell = self.create_cells(num);
+        self.mark_cells(CellType::WireOut(self.n_wires_out), &cell);
+        self.n_wires_out += 1;
+        (self.n_wires_out - 1, cell)
+    }
+
+    pub fn create_other_in_witness(&mut self, num: usize) -> (usize, Vec<usize>) {
+        let cell = self.create_cells(num);
+        self.mark_cells(CellType::OtherInWitness(self.n_other_in_witnesses), &cell);
+        self.n_other_in_witnesses += 1;
+        (self.n_other_in_witnesses - 1, cell)
+    }
+
+    fn create_other_in_witness_empty(&mut self) -> usize {
+        self.n_other_in_witnesses += 1;
+        self.n_other_in_witnesses - 1
     }
 
     pub fn add_const(&mut self, out: usize, constant: ConstantType<F>) {
@@ -395,10 +419,14 @@ where
     /// Input a table type and initialize a table. We can define an enum type to
     /// indicate the table and convert it to usize. This should throw an error
     /// if the type has been defined. Return the index of the witness.
-    pub fn define_table_type(&mut self, table_type: TableType, witness_cell_type: CellType) {
+    pub fn define_table_type(&mut self, table_type: TableType) -> usize {
+        let witness_cell_type = self.create_other_in_witness_empty();
         assert!(!self.tables.contains_key(&table_type));
-        self.tables
-            .insert(table_type, TableData::new(witness_cell_type));
+        self.tables.insert(
+            table_type,
+            TableData::new(CellType::OtherInWitness(witness_cell_type)),
+        );
+        witness_cell_type
     }
 
     pub fn add_input_item(&mut self, table_type: TableType, cell: usize) {
@@ -537,7 +565,7 @@ where
             let challenge = table_data.challenge.unwrap();
             let counts = self
                 .create_cells(table_data.table_items.len() + table_data.table_items_const.len());
-            self.mark_cells(table_data.witness_cell_type, &counts);
+            self.mark_cells(table_data.count_witness_cell_type, &counts);
 
             // Compute (input_item + challenge)
             let input_items_with_challenge = self.create_cells(table_data.input_items.len());
@@ -608,6 +636,18 @@ where
 
             self.assert_const(result, &F::ZERO);
         }
+    }
+
+    pub fn n_wires_in(&self) -> usize {
+        self.n_wires_in
+    }
+
+    pub fn n_wires_out(&self) -> usize {
+        self.n_wires_out
+    }
+
+    pub fn n_other_in_witnesses(&self) -> usize {
+        self.n_other_in_witnesses
     }
 
     #[cfg(debug_assertions)]
