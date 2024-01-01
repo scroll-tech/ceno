@@ -196,6 +196,8 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         assert!(lo_out_num_vars + hi_num_vars == layer_out_point.len());
 
         let is_input_layer = self.layer_id == circuit.layers.len() - 1;
+        let is_empty_gates =
+            layer.mul3s.is_empty() && layer.mul2s.is_empty() && layer.adds.is_empty();
         let paste_from_sources = if is_input_layer {
             self.circuit_witness.wires_in_ref()
         } else {
@@ -211,6 +213,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             |c| self.circuit_witness.constant(c),
             hi_num_vars,
             is_input_layer,
+            is_empty_gates,
         );
 
         let mut sumcheck_proofs = vec![];
@@ -254,12 +257,13 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
                 transcript,
             );
 
-        // If it's the input layer, then eval_values_1 are evaluations of the wires_in and other_witnesses.
+        // If the current layers are only pasted from previous layers, then it
+        // constains the subset evaluations from previous layers.
         // Otherwise it includes:
         //      - one evaluation of the next layer to be proved.
         //      - evaluations of the pasted subsets.
         //      - one evaluation of g0 to help with the sumcheck.
-        let (next_f_values, subset_f_values) = if is_input_layer {
+        let (next_f_values, subset_f_values) = if is_empty_gates {
             eval_values_1.split_at(0)
         } else {
             eval_values_1
@@ -366,6 +370,7 @@ struct IOPProverPhase2State<'a, F: SmallField> {
     hi_num_vars: usize,
 
     is_input_layer: bool,
+    is_empty_gates: bool,
 
     // sumcheck_sigma: F,
     sumcheck_point_1: Point<F>,

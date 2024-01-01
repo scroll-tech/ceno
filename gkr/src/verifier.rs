@@ -192,7 +192,8 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         let layer = &circuit.layers[self.layer_id];
         let lo_out_num_vars = layer.num_vars;
         let hi_out_num_vars = layer_out_point.len() - lo_out_num_vars;
-        let is_input_layer = self.layer_id == circuit.layers.len() - 1;
+        let is_empty_gates =
+            layer.mul3s.is_empty() && layer.mul2s.is_empty() && layer.adds.is_empty();
 
         let mut verifier_phase2_state = IOPVerifierPhase2State::verifier_init_parallel(
             layer,
@@ -203,7 +204,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                 ConstantType::Challenge(i) => challenges[i],
             },
             hi_out_num_vars,
-            is_input_layer,
+            is_empty_gates,
         );
 
         // =============================
@@ -247,7 +248,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         //      - one evaluation of the next layer to be proved.
         //      - evaluations of the pasted subsets.
         //      - one evaluation of g0 to help with the sumcheck.
-        let (next_f_values, subset_f_values) = if is_input_layer {
+        let (next_f_values, subset_f_values) = if is_empty_gates {
             sumcheck_eval_values[0].split_at(0)
         } else {
             sumcheck_eval_values[0]
@@ -328,7 +329,7 @@ struct IOPVerifierPhase1State<'a, F: SmallField> {
 struct IOPVerifierPhase2State<'a, F: SmallField> {
     layer_out_point: Point<F>,
     layer_out_value: F,
-    is_input_layer: bool,
+    is_empty_gates: bool,
 
     mul3s: Vec<Gate3In<F>>,
     mul2s: Vec<Gate2In<F>>,

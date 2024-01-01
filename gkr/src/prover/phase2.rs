@@ -29,6 +29,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         constant: impl Fn(&ConstantType<F>) -> F,
         hi_num_vars: usize,
         is_input_layer: bool,
+        is_empty_gates: bool,
     ) -> Self {
         let timer = start_timer!(|| "Prover init phase 2");
         let mul3s = layer
@@ -90,6 +91,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
             lo_in_num_vars,
             hi_num_vars,
             is_input_layer,
+            is_empty_gates,
             layer_in_poly: Arc::default(),
             layer_in_vec: None,
             // sumcheck_sigma: F::ZERO,
@@ -187,7 +189,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         let lo_in_num_vars = self.lo_in_num_vars;
         let hi_num_vars = self.hi_num_vars;
         let in_num_vars = lo_in_num_vars + hi_num_vars;
-        let is_input_layer = self.is_input_layer;
+        let is_empty_gates = self.is_empty_gates;
 
         let mul3s = &self.mul3s;
         let mul2s = &self.mul2s;
@@ -196,7 +198,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         let tensor_eq_ty_rtry = &self.tensor_eq_ty_rtry;
         // sigma = layers[i](rt || ry) - add_const(ry),
         // let sigma_1 = self.layer_out_value - add_consts.as_slice().eval(eq_y_ry);
-        let (mut f1_vec, mut g1_vec) = if is_input_layer {
+        let (mut f1_vec, mut g1_vec) = if is_empty_gates {
             (vec![], vec![])
         } else {
             self.layer_in_poly = layer_in_poly();

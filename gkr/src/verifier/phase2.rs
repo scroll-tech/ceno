@@ -22,7 +22,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         layer_out_value: &F,
         constant: impl Fn(&ConstantType<F>) -> F,
         hi_num_vars: usize,
-        is_input_layer: bool,
+        is_empty_gates: bool,
     ) -> Self {
         let timer = start_timer!(|| "Verifier init phase 2");
         let mul3s = layer
@@ -78,7 +78,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         Self {
             layer_out_point: layer_out_point.clone(),
             layer_out_value: *layer_out_value,
-            is_input_layer,
+            is_empty_gates,
             mul3s,
             mul2s,
             adds,
@@ -197,7 +197,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         let lo_point_sc1 = &claim1_point[..lo_in_num_vars];
 
         self.eq_x1_rx1 = build_eq_x_r_vec(lo_point_sc1);
-        let (f1_values, received_g1_values) = if self.is_input_layer {
+        let (f1_values, received_g1_values) = if self.is_empty_gates {
             prover_msg.1.split_at(prover_msg.1.len())
         } else {
             prover_msg.1.split_at(prover_msg.1.len() - 1)
