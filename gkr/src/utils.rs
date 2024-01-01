@@ -13,18 +13,67 @@ pub(crate) fn ceil_log2(x: usize) -> usize {
 }
 
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
-/// [0, max_idx]. Specifically, it is an MLE of the following vector:
+/// (min_idx, 2^n]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})
-///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i + (1 - x_i)(1 - y_i))
-#[allow(dead_code)]
-pub(crate) fn evaluate_partial_eq<F: SmallField>(max_idx: usize, a: &[F], b: &[F]) -> F {
-    assert!(a.len() == b.len());
-
+///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i y_i + (1 - x_i)(1 - y_i))
+pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[F]) -> F {
+    assert!(a.len() >= b.len());
     // Compute running product of ( x_i y_i + (1 - x_i)(1 - y_i) )_{0 <= i <= n}
     let running_product = {
         let mut running_product = Vec::with_capacity(a.len() + 1);
         running_product.push(F::ONE);
-        for i in 0..a.len() {
+        for i in 0..b.len() {
+            let x = running_product[i] * (a[i] * b[i] + (F::ONE - a[i]) * (F::ONE - b[i]));
+            running_product.push(x);
+        }
+        running_product
+    };
+
+    // Compute eq(a, b, num) = \prod_{ i = 0 }^{ m - 1 } ( a_i b_i num_i + (1 - a_i)(1 - b_i)(1 - num_i) )
+    let compute_eq_ab_num = |a: &[F], b: &[F], num: usize, m: usize| -> F {
+        let mut ans = F::ONE;
+        for i in 0..m {
+            let bit = F::from(((num >> i) & 1) as u64);
+            ans = ans * (a[i] * b[i] * bit + (F::ONE - a[i]) * (F::ONE - b[i]) * (F::ONE - bit));
+        }
+        ans
+    };
+
+    // Here is an example of how this works:
+    // Suppose min_idx = (110101)_2
+    // Then ans = eq(11011, a[1..6], b[1..6])eq(a[0..1], b[0..1])
+    //          + eq(111, a[3..6], b[3..6])eq(a[0..3], b[0..3])
+    let mut ans = F::ZERO;
+    for i in 0..b.len() {
+        let bit = (min_idx >> i) & 1;
+        if bit == 1 {
+            continue;
+        }
+        ans += running_product[i]
+            * compute_eq_ab_num(
+                &a[i..b.len()],
+                &b[i..b.len()],
+                (min_idx >> i) ^ 1,
+                b.len() - i,
+            );
+    }
+    for i in b.len()..a.len() {
+        ans *= F::ONE - a[i];
+    }
+    ans
+}
+
+/// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
+/// [0, max_idx]. Specifically, it is an MLE of the following vector:
+///     partial_eq_{\mathbf{x}}(\mathbf{y})
+///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i + (1 - x_i)(1 - y_i))
+pub(crate) fn eq_eval_less_or_equal_than<F: SmallField>(max_idx: usize, a: &[F], b: &[F]) -> F {
+    assert!(a.len() >= b.len());
+    // Compute running product of ( x_i y_i + (1 - x_i)(1 - y_i) )_{0 <= i <= n}
+    let running_product = {
+        let mut running_product = Vec::with_capacity(a.len() + 1);
+        running_product.push(F::ONE);
+        for i in 0..b.len() {
             let x = running_product[i] * (a[i] * b[i] + (F::ONE - a[i]) * (F::ONE - b[i]));
             running_product.push(x);
         }
@@ -46,19 +95,22 @@ pub(crate) fn evaluate_partial_eq<F: SmallField>(max_idx: usize, a: &[F], b: &[F
     // Then ans = eq(a, b)
     //          - eq(11011, a[1..6], b[1..6])eq(a[0..1], b[0..1])
     //          - eq(111, a[3..6], b[3..6])eq(a[0..3], b[0..3])
-    let mut ans = running_product[a.len()];
-    for i in 0..a.len() {
+    let mut ans = running_product[b.len()];
+    for i in 0..b.len() {
         let bit = (max_idx >> i) & 1;
         if bit == 1 {
             continue;
         }
         ans -= running_product[i]
             * compute_eq_ab_num(
-                &a[i..a.len()],
+                &a[i..b.len()],
                 &b[i..b.len()],
                 (max_idx >> i) ^ 1,
-                a.len() - i,
+                b.len() - i,
             );
+    }
+    for i in b.len()..a.len() {
+        ans *= F::ONE - a[i];
     }
     ans
 }
@@ -257,7 +309,7 @@ mod test {
     }
 
     #[test]
-    fn test_evaluate_partial_eq() {
+    fn test_eq_eval_less_or_equal_than() {
         let mut rng = test_rng();
         let n = 5;
         let pow_n = 1 << n;
@@ -272,7 +324,7 @@ mod test {
             partial_eq_vec.extend(vec![Goldilocks::ZERO; pow_n - max_idx - 1]);
             let expected_ans =
                 DenseMultilinearExtension::from_evaluations_vec(n, partial_eq_vec).evaluate(&b);
-            assert_eq!(expected_ans, evaluate_partial_eq(max_idx, &a, &b));
+            assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
 
         {
@@ -281,7 +333,7 @@ mod test {
             partial_eq_vec.extend(vec![Goldilocks::ZERO; pow_n - max_idx - 1]);
             let expected_ans =
                 DenseMultilinearExtension::from_evaluations_vec(n, partial_eq_vec).evaluate(&b);
-            assert_eq!(expected_ans, evaluate_partial_eq(max_idx, &a, &b));
+            assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
 
         {
@@ -290,7 +342,7 @@ mod test {
             partial_eq_vec.extend(vec![Goldilocks::ZERO; pow_n - max_idx - 1]);
             let expected_ans =
                 DenseMultilinearExtension::from_evaluations_vec(n, partial_eq_vec).evaluate(&b);
-            assert_eq!(expected_ans, evaluate_partial_eq(max_idx, &a, &b));
+            assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
 
         {
@@ -299,7 +351,7 @@ mod test {
             partial_eq_vec.extend(vec![Goldilocks::ZERO; pow_n - max_idx - 1]);
             let expected_ans =
                 DenseMultilinearExtension::from_evaluations_vec(n, partial_eq_vec).evaluate(&b);
-            assert_eq!(expected_ans, evaluate_partial_eq(max_idx, &a, &b));
+            assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
 
         {
@@ -308,7 +360,7 @@ mod test {
             partial_eq_vec.extend(vec![Goldilocks::ZERO; pow_n - max_idx - 1]);
             let expected_ans =
                 DenseMultilinearExtension::from_evaluations_vec(n, partial_eq_vec).evaluate(&b);
-            assert_eq!(expected_ans, evaluate_partial_eq(max_idx, &a, &b));
+            assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
     }
 

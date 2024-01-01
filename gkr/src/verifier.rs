@@ -192,6 +192,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         let layer = &circuit.layers[self.layer_id];
         let lo_out_num_vars = layer.num_vars;
         let hi_out_num_vars = layer_out_point.len() - lo_out_num_vars;
+        let is_input_layer = self.layer_id == circuit.layers.len() - 1;
         let is_empty_gates =
             layer.mul3s.is_empty() && layer.mul2s.is_empty() && layer.adds.is_empty();
 
@@ -204,6 +205,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                 ConstantType::Challenge(i) => challenges[i],
             },
             hi_out_num_vars,
+            is_input_layer,
             is_empty_gates,
         );
 
@@ -329,6 +331,7 @@ struct IOPVerifierPhase1State<'a, F: SmallField> {
 struct IOPVerifierPhase2State<'a, F: SmallField> {
     layer_out_point: Point<F>,
     layer_out_value: F,
+    is_input_layer: bool,
     is_empty_gates: bool,
 
     mul3s: Vec<Gate3In<F>>,

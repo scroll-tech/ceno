@@ -70,12 +70,23 @@ impl<F: SmallField> Circuit<F> {
         };
 
         let input_paste_from = &mut layers[n_layers - 1].paste_from;
-        for (i, input_segment) in wires_in_cell_ids.iter().enumerate() {
+        for (i, wire_in) in wires_in_cell_ids.iter().enumerate() {
             input_paste_from.insert(
                 i,
-                input_segment
+                wire_in
                     .iter()
-                    .map(|cell_id| wire_ids_in_layer[*cell_id])
+                    .enumerate()
+                    .map(|(i, cell_id)| {
+                        // Each wire_in should be assigned with a consecutive
+                        // input layer segment. Then we can use a special
+                        // sumcheck protocol to prove it.
+                        assert!(
+                            i == 0
+                                || wire_ids_in_layer[*cell_id]
+                                    == wire_ids_in_layer[wire_in[i - 1]] + 1
+                        );
+                        wire_ids_in_layer[*cell_id]
+                    })
                     .collect_vec(),
             );
         }
