@@ -15,6 +15,7 @@ use crate::structs::{
 
 mod phase1;
 mod phase2;
+mod phase2_input;
 
 #[cfg(tests)]
 mod test;
@@ -34,7 +35,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     ) -> IOPProof<F> {
         let timer = start_timer!(|| "Proving");
         assert_eq!(wires_out_points.len(), wires_out_values.len());
-        assert_eq!(wires_out_points.len(), circuit.output_copy_to.len());
+        assert_eq!(wires_out_points.len(), circuit.copy_to_wires_out.len());
         // TODO: Currently haven't support non-power-of-two number of instances.
         assert!(circuit_witness.n_instances == 1 << circuit_witness.instance_num_vars());
 
@@ -67,12 +68,20 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
                     ),
                 };
 
-                let phase2_msg = prover_state.prove_and_update_state_phase2_parallel(
-                    &circuit,
-                    &layer_out_point,
-                    &layer_out_value,
-                    transcript,
-                );
+                let phase2_msg = if circuit.is_input_layer(layer_id) {
+                    prover_state.prove_and_update_state_phase2_input_parallel(
+                        &circuit,
+                        &layer_out_point,
+                        transcript,
+                    )
+                } else {
+                    prover_state.prove_and_update_state_phase2_parallel(
+                        &circuit,
+                        &layer_out_point,
+                        &layer_out_value,
+                        transcript,
+                    )
+                };
                 end_timer!(timer);
                 (phase1_msg, phase2_msg)
             })
@@ -193,27 +202,18 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         let layer = &circuit.layers[self.layer_id];
         let lo_out_num_vars = layer.num_vars;
         let hi_num_vars = self.circuit_witness.instance_num_vars();
-        assert!(lo_out_num_vars + hi_num_vars == layer_out_point.len());
 
-        let is_input_layer = self.layer_id == circuit.layers.len() - 1;
-        let is_empty_gates =
-            layer.mul3s.is_empty() && layer.mul2s.is_empty() && layer.adds.is_empty();
-        let paste_from_sources = if is_input_layer {
-            self.circuit_witness.wires_in_ref()
-        } else {
-            self.circuit_witness.layers_ref()
-        };
+        assert!(lo_out_num_vars + hi_num_vars == layer_out_point.len());
 
         let mut prover_phase2_state = IOPProverPhase2State::prover_init_parallel(
             &layer,
             &self.layer_out_poly,
             &layer_out_point,
             *layer_out_value,
-            &paste_from_sources,
+            &self.circuit_witness.layers[self.layer_id + 1],
+            self.circuit_witness.layers_ref(),
             |c| self.circuit_witness.constant(c),
             hi_num_vars,
-            is_input_layer,
-            is_empty_gates,
         );
 
         let mut sumcheck_proofs = vec![];
@@ -235,24 +235,13 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         // copy constraints pasted from previous layers
         // ================================================
 
-        let lo_in_num_vars = layer.max_previous_num_vars;
-
         let (sumcheck_proof_1, eval_values_1) = prover_phase2_state
             .prove_and_update_state_step1_parallel(
-                || {
-                    self.circuit_witness
-                        .layer_poly(self.layer_id + 1, lo_in_num_vars)
-                },
-                || &self.circuit_witness.layers[self.layer_id + 1],
                 |old_layer_id, subset_wire_id| {
-                    if is_input_layer {
-                        subset_wire_id
-                    } else {
-                        circuit.layers[old_layer_id]
-                            .copy_to
-                            .get(&self.layer_id)
-                            .unwrap()[subset_wire_id]
-                    }
+                    circuit.layers[old_layer_id]
+                        .copy_to
+                        .get(&self.layer_id)
+                        .unwrap()[subset_wire_id]
                 },
                 transcript,
             );
@@ -263,14 +252,10 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         //      - one evaluation of the next layer to be proved.
         //      - evaluations of the pasted subsets.
         //      - one evaluation of g0 to help with the sumcheck.
-        let (next_f_values, subset_f_values) = if is_empty_gates {
-            eval_values_1.split_at(0)
-        } else {
-            eval_values_1
-                .split_at(eval_values_1.len() - 1)
-                .0
-                .split_at(1)
-        };
+        let (next_f_values, subset_f_values) = eval_values_1
+            .split_at(eval_values_1.len() - 1)
+            .0
+            .split_at(1);
 
         for f_value in next_f_values {
             self.next_evals
@@ -338,6 +323,50 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         }
     }
 
+    /// Refer to [`IOPProverState::prove_and_update_state_phase2_parallel`].
+    fn prove_and_update_state_phase2_input_parallel(
+        &mut self,
+        circuit: &Circuit<F>,
+        layer_out_point: &Point<F>,
+        transcript: &mut Transcript<F>,
+    ) -> IOPProverPhase2Message<F> {
+        self.next_evals.clear();
+
+        let layer = &circuit.layers[self.layer_id];
+        let lo_out_num_vars = layer.num_vars;
+        let hi_num_vars = self.circuit_witness.instance_num_vars();
+        assert!(lo_out_num_vars + hi_num_vars == layer_out_point.len());
+
+        let prover_phase2_state = IOPProverPhase2InputState::prover_init_parallel(
+            &layer_out_point,
+            self.circuit_witness.wires_in_ref(),
+            &circuit.paste_from_wires_in,
+            layer.num_vars,
+            circuit.max_wires_in_num_vars,
+            hi_num_vars,
+        );
+
+        // We don't allow gates in the input layer.
+
+        assert!(layer.assert_consts.is_empty());
+        assert!(layer.add_consts.is_empty());
+        assert!(layer.adds.is_empty());
+        assert!(layer.mul2s.is_empty());
+        assert!(layer.mul3s.is_empty());
+
+        // ===========================================================
+        // Step 1: First step of copy constraints pasted from wires_in
+        // ===========================================================
+
+        let (sumcheck_proof_1, eval_values_1) =
+            prover_phase2_state.prove_and_update_state_input_step1_parallel(transcript);
+
+        IOPProverPhase2Message {
+            sumcheck_proofs: vec![sumcheck_proof_1],
+            sumcheck_eval_values: vec![eval_values_1],
+        }
+    }
+
     // TODO: Define special protocols of special layers for optimization.
 }
 
@@ -358,7 +387,7 @@ struct IOPProverPhase2State<'a, F: SmallField> {
     layer_out_point: Point<F>,
     layer_out_value: F,
     layer_in_poly: Arc<DenseMultilinearExtension<F>>,
-    layer_in_vec: Option<&'a [Vec<F>]>,
+    layer_in_vec: &'a [Vec<F>],
     mul3s: Vec<Gate3In<F>>,
     mul2s: Vec<Gate2In<F>>,
     adds: Vec<Gate1In<F>>,
@@ -368,9 +397,6 @@ struct IOPProverPhase2State<'a, F: SmallField> {
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
     hi_num_vars: usize,
-
-    is_input_layer: bool,
-    is_empty_gates: bool,
 
     // sumcheck_sigma: F,
     sumcheck_point_1: Point<F>,
@@ -387,4 +413,13 @@ struct IOPProverPhase2State<'a, F: SmallField> {
     eq_x2_rx2: Vec<F>,
     eq_s2_rs2: Vec<F>,
     tensor_eq_s2x2_rs2rx2: Vec<F>,
+}
+
+struct IOPProverPhase2InputState<'a, F: SmallField> {
+    layer_out_point: &'a Point<F>,
+    paste_from_wires_in: &'a [(usize, usize)],
+    wires_in: &'a [Vec<Vec<F>>],
+    lo_out_num_vars: usize,
+    lo_in_num_vars: usize,
+    hi_num_vars: usize,
 }

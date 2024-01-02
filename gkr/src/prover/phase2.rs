@@ -14,7 +14,7 @@ use transcript::Transcript;
 
 use crate::{
     structs::{Gate1In, Gate2In, Gate3In, GateCIn, Layer, Point, SumcheckProof},
-    utils::{fix_high_variables, tensor_product},
+    utils::{fix_high_variables, tensor_product, MultilinearExtensionFromVectors},
 };
 
 use super::{IOPProverPhase2State, SumcheckState};
@@ -25,11 +25,10 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
         layer_out_point: &Point<F>,
         layer_out_value: F,
+        layer_in_vec: &'a [Vec<F>],
         paste_from_sources: &'a [Vec<Vec<F>>],
         constant: impl Fn(&ConstantType<F>) -> F,
         hi_num_vars: usize,
-        is_input_layer: bool,
-        is_empty_gates: bool,
     ) -> Self {
         let timer = start_timer!(|| "Prover init phase 2");
         let mul3s = layer
@@ -75,6 +74,9 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         let eq_y_ry = build_eq_x_r_vec(&layer_out_point[..lo_out_num_vars]);
         let eq_t_rt = build_eq_x_r_vec(&layer_out_point[lo_out_num_vars..]);
         let tensor_eq_ty_rtry = tensor_product(&eq_t_rt, &eq_y_ry);
+
+        let layer_in_poly = layer_in_vec.mle(lo_in_num_vars, hi_num_vars);
+
         end_timer!(timer);
 
         Self {
@@ -90,10 +92,8 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
             lo_out_num_vars,
             lo_in_num_vars,
             hi_num_vars,
-            is_input_layer,
-            is_empty_gates,
-            layer_in_poly: Arc::default(),
-            layer_in_vec: None,
+            layer_in_poly,
+            layer_in_vec,
             // sumcheck_sigma: F::ZERO,
             sumcheck_point_1: vec![],
             sumcheck_point_2: vec![],
@@ -157,7 +157,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         let eval_value_0 = f0.evaluate(&sumcheck_proof_0.point);
 
         self.eq_y_ry = build_eq_x_r_vec(&sumcheck_proof_0.point);
-        self.eq_t_rt = build_eq_x_r_vec(&hi_point);
+        self.eq_t_rt = build_eq_x_r_vec(hi_point);
         self.tensor_eq_ty_rtry = tensor_product(&self.eq_t_rt, &self.eq_y_ry);
         self.layer_out_point = [sumcheck_proof_0.point.clone(), hi_point.to_vec()].concat();
         self.layer_out_value = eval_value_0;
@@ -179,8 +179,6 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
     ///     g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
     pub(super) fn prove_and_update_state_step1_parallel(
         &mut self,
-        layer_in_poly: impl Fn() -> Arc<DenseMultilinearExtension<F>>,
-        layer_in_vec: impl Fn() -> &'a [Vec<F>],
         old_wire_id: impl Fn(usize, usize) -> usize,
         transcript: &mut Transcript<F>,
     ) -> (SumcheckProof<F>, Vec<F>) {
@@ -189,23 +187,17 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         let lo_in_num_vars = self.lo_in_num_vars;
         let hi_num_vars = self.hi_num_vars;
         let in_num_vars = lo_in_num_vars + hi_num_vars;
-        let is_empty_gates = self.is_empty_gates;
 
         let mul3s = &self.mul3s;
         let mul2s = &self.mul2s;
         let adds = &self.adds;
 
         let tensor_eq_ty_rtry = &self.tensor_eq_ty_rtry;
+        let layer_in_poly = &self.layer_in_poly;
+        let layer_in_vec = self.layer_in_vec;
         // sigma = layers[i](rt || ry) - add_const(ry),
         // let sigma_1 = self.layer_out_value - add_consts.as_slice().eval(eq_y_ry);
-        let (mut f1_vec, mut g1_vec) = if is_empty_gates {
-            (vec![], vec![])
-        } else {
-            self.layer_in_poly = layer_in_poly();
-            self.layer_in_vec = Some(layer_in_vec());
-            let layer_in_vec = self.layer_in_vec.unwrap();
-            let layer_in_poly = &self.layer_in_poly;
-
+        let (mut f1_vec, mut g1_vec) = {
             // f1(s1 || x1) = layers[i + 1](s1 || x1)
             let f1 = layer_in_poly.clone();
 
@@ -291,9 +283,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
             .map(|f1_j| f1_j.evaluate(&eval_point_1))
             .collect_vec();
 
-        let eval_values_1 = if self.is_input_layer {
-            eval_values_f1
-        } else {
+        let eval_values_1 = {
             let eval_values_g1_0 = g1_vec[0].evaluate(&eval_point_1);
             self.eq_x1_rx1 = build_eq_x_r_vec(&eval_point_1[..lo_in_num_vars]);
             self.eq_s1_rs1 = build_eq_x_r_vec(&eval_point_1[lo_in_num_vars..]);
@@ -333,7 +323,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
         let hi_num_vars = self.hi_num_vars;
 
         let layer_in_poly = &self.layer_in_poly;
-        let layer_in_vec = self.layer_in_vec.unwrap();
+        let layer_in_vec = self.layer_in_vec;
 
         let mul3s = &self.mul3s;
         let mul2s = &self.mul2s;

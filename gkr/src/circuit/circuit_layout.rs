@@ -50,12 +50,26 @@ impl<F: SmallField> Circuit<F> {
         // gate has the input from multiple previous layers, then we need to
         // copy them to the last layer.
 
-        // Input layer if pasted from wires_in || other_witnesses.
-        let (wires_in_cell_ids, wires_out_cell_ids) = {
+        // Input layer if pasted from wires_in and constant.
+        let (wires_const_cell_ids, wires_in_cell_ids, wires_out_cell_ids) = {
+            let mut wires_const_cell_ids = vec![];
             let mut wires_in_cell_ids = vec![vec![]; circuit_builder.n_wires_in()];
             let mut wires_out_cell_ids = vec![vec![]; circuit_builder.n_wires_out()];
             for marked_cell in circuit_builder.marked_cells.iter() {
                 match marked_cell.0 {
+                    CellType::ConstantIn(constant) => {
+                        let field_element = if *constant >= 0 {
+                            F::from(*constant as u64)
+                        } else {
+                            -F::from((-constant) as u64)
+                        };
+
+                        wires_const_cell_ids.push((
+                            field_element,
+                            marked_cell.1.iter().map(|x| *x).collect_vec(),
+                        ));
+                        wires_const_cell_ids.last_mut().unwrap().1.sort();
+                    }
                     CellType::WireIn(id) => {
                         wires_in_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
                         wires_in_cell_ids[*id].sort();
@@ -66,33 +80,48 @@ impl<F: SmallField> Circuit<F> {
                     }
                 }
             }
-            (wires_in_cell_ids, wires_out_cell_ids)
+            (wires_const_cell_ids, wires_in_cell_ids, wires_out_cell_ids)
         };
 
-        let input_paste_from = &mut layers[n_layers - 1].paste_from;
-        for (i, wire_in) in wires_in_cell_ids.iter().enumerate() {
-            input_paste_from.insert(
-                i,
-                wire_in
-                    .iter()
-                    .enumerate()
-                    .map(|(i, cell_id)| {
-                        // Each wire_in should be assigned with a consecutive
-                        // input layer segment. Then we can use a special
-                        // sumcheck protocol to prove it.
-                        assert!(
-                            i == 0
-                                || wire_ids_in_layer[*cell_id]
-                                    == wire_ids_in_layer[wire_in[i - 1]] + 1
-                        );
-                        wire_ids_in_layer[*cell_id]
-                    })
-                    .collect_vec(),
-            );
+        let mut input_paste_from_wires_in = Vec::with_capacity(wires_in_cell_ids.len());
+        for wire_in in wires_in_cell_ids.iter() {
+            #[cfg(feature = "debug")]
+            wire_in.iter().enumerate().map(|(i, cell_id)| {
+                // Each wire_in should be assigned with a consecutive
+                // input layer segment. Then we can use a special
+                // sumcheck protocol to prove it.
+                assert!(
+                    i == 0 || wire_ids_in_layer[*cell_id] == wire_ids_in_layer[wire_in[i - 1]] + 1
+                );
+            });
+            input_paste_from_wires_in.push((
+                wire_ids_in_layer[wire_in[0]],
+                wire_ids_in_layer[wire_in[wire_in.len() - 1]] + 1,
+            ));
         }
-        layers[n_layers - 1].max_previous_num_vars =
+
+        let max_wires_in_num_vars =
             ceil_log2(wires_in_cell_ids.iter().map(|x| x.len()).max().unwrap());
 
+        let mut input_paste_from_constant = vec![];
+        for wire_const in wires_const_cell_ids.iter() {
+            #[cfg(feature = "debug")]
+            wire_const.1.iter().enumerate().map(|(i, cell_id)| {
+                assert_eq!(
+                    i == 0
+                        || wire_ids_in_layer[*cell_id]
+                            == wire_ids_in_layer[wire_const.1[i - 1]] + 1,
+                    true
+                );
+            });
+            input_paste_from_constant.push((
+                wire_const.0,
+                wire_ids_in_layer[wire_const.1[0]],
+                wire_ids_in_layer[wire_const.1[wire_const.1.len() - 1]] + 1,
+            ));
+        }
+
+        // Compute gates and copy constraints of the other layers.
         for layer_id in (0..n_layers - 1).rev() {
             // current_subsets: old_layer_id -> (old_wire_id, new_wire_id)
             // It only stores the wires not in the last layer.
@@ -222,6 +251,7 @@ impl<F: SmallField> Circuit<F> {
             }
         }
 
+        // Compute the copy_to from the output layer to the wires_out.
         layers[0].num_vars = ceil_log2(layers_of_cell_id[0].len()) as usize;
 
         let output_copy_to = wires_out_cell_ids
@@ -236,8 +266,11 @@ impl<F: SmallField> Circuit<F> {
 
         Self {
             layers,
-            output_copy_to,
+            copy_to_wires_out: output_copy_to,
+            paste_from_constant: input_paste_from_constant,
             n_wires_in: circuit_builder.n_wires_in(),
+            paste_from_wires_in: input_paste_from_wires_in,
+            max_wires_in_num_vars,
         }
     }
 
@@ -255,6 +288,10 @@ impl<F: SmallField> Circuit<F> {
 
     pub fn output_size(&self) -> usize {
         1 << self.last_layer_ref().num_vars
+    }
+
+    pub fn is_input_layer(&self, layer_id: usize) -> bool {
+        layer_id == self.layers.len() - 1
     }
 }
 
@@ -354,12 +391,15 @@ impl<F: SmallField> fmt::Debug for Layer<F> {
 impl<F: SmallField> fmt::Debug for Circuit<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Circuit {{")?;
-        writeln!(f, "  n_wires_in: {}", self.n_wires_in)?;
+        writeln!(f, "  output_copy_to: {:?}", self.copy_to_wires_out)?;
         writeln!(f, "  layers: ")?;
         for layer in self.layers.iter() {
             writeln!(f, "    {:?}", layer)?;
         }
-        writeln!(f, "  output_copy_to: {:?}", self.output_copy_to)?;
+        writeln!(f, "  n_wires_in: {}", self.n_wires_in)?;
+        writeln!(f, "  paste_from_wires_in: {:?}", self.paste_from_wires_in)?;
+        writeln!(f, "  max_wires_in_num_vars: {}", self.max_wires_in_num_vars)?;
+        writeln!(f, "  paste_from_constant: {:?}", self.paste_from_constant)?;
         writeln!(f, "}}")
     }
 }

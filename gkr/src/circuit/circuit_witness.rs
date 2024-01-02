@@ -16,7 +16,7 @@ impl<F: SmallField> CircuitWitness<F> {
         Self {
             layers: vec![vec![]; circuit.layers.len()],
             wires_in: vec![vec![]; circuit.n_wires_in],
-            wires_out: vec![vec![]; circuit.output_copy_to.len()],
+            wires_out: vec![vec![]; circuit.copy_to_wires_out.len()],
             challenges,
             n_instances: 0,
         }
@@ -35,17 +35,16 @@ impl<F: SmallField> CircuitWitness<F> {
         // The first layer.
         layer_witnesses[n_layers - 1] = {
             let mut layer_witness = vec![F::ZERO; circuit.layers[n_layers - 1].size()];
-            circuit.layers[n_layers - 1]
-                .paste_from
-                .iter()
-                .for_each(|(id, new_wire_ids)| {
-                    new_wire_ids
-                        .iter()
-                        .enumerate()
-                        .for_each(|(i, new_wire_id)| {
-                            layer_witness[*new_wire_id] = wires_in[*id][i];
-                        })
-                });
+            for (id, (l, r)) in circuit.paste_from_wires_in.iter().enumerate() {
+                for i in *l..*r {
+                    layer_witness[i] = wires_in[id][i - *l];
+                }
+            }
+            for (c, l, r) in circuit.paste_from_constant.iter() {
+                for i in *l..*r {
+                    layer_witness[i] = *c;
+                }
+            }
             layer_witness
         };
 
@@ -113,7 +112,7 @@ impl<F: SmallField> CircuitWitness<F> {
             }
             layer_witnesses[layer_id] = current_layer_witness;
         }
-        let mut wires_out = vec![vec![]; circuit.output_copy_to.len()];
+        let mut wires_out = vec![vec![]; circuit.copy_to_wires_out.len()];
         circuit.layers[0]
             .copy_to
             .iter()
@@ -310,7 +309,9 @@ impl<F: SmallField> CircuitWitness<F> {
         layer_id: usize,
         single_num_vars: usize,
     ) -> Arc<DenseMultilinearExtension<F>> {
-        self.layers[layer_id].mle(single_num_vars, self.instance_num_vars())
+        self.layers[layer_id]
+            .as_slice()
+            .mle(single_num_vars, self.instance_num_vars())
     }
 }
 

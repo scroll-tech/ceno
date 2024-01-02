@@ -12,10 +12,41 @@ pub(crate) fn ceil_log2(x: usize) -> usize {
     usize_bits - (x - 1).leading_zeros() as usize
 }
 
+/// This is to compute a segment indicator. Specifically, it is an MLE of the
+/// following vector:
+///     segment_{\mathbf{x}}
+///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i b_i + (1 - x_i)(1 - b_i))
+pub(crate) fn segment_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F]) -> F {
+    let running_product2 = {
+        let mut running_product = vec![F::ZERO; a.len() + 1];
+        running_product[a.len()] = F::ONE;
+        for i in (0..a.len()).rev() {
+            let bit = F::from(((min_idx >> i) & 1) as u64);
+            running_product[i] =
+                running_product[i + 1] * (a[i] * bit + (F::ONE - a[i]) * (F::ONE - bit));
+        }
+        running_product
+    };
+    // Here is an example of how this works:
+    // Suppose min_idx = (110101)_2
+    // Then ans = eq(11011, a[1..6])
+    //          + eq(111, a[3..6], b[3..6])
+    let mut ans = F::ZERO;
+    for i in 0..a.len() {
+        let bit = (min_idx >> i) & 1;
+        if bit == 1 {
+            continue;
+        }
+        ans += running_product2[i + 1] * a[i];
+    }
+    ans
+}
+
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
 /// (min_idx, 2^n]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})
-///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i y_i + (1 - x_i)(1 - y_i))
+///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
+#[allow(dead_code)]
 pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[F]) -> F {
     assert!(a.len() >= b.len());
     // Compute running product of ( x_i y_i + (1 - x_i)(1 - y_i) )_{0 <= i <= n}
@@ -29,14 +60,15 @@ pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[
         running_product
     };
 
-    // Compute eq(a, b, num) = \prod_{ i = 0 }^{ m - 1 } ( a_i b_i num_i + (1 - a_i)(1 - b_i)(1 - num_i) )
-    let compute_eq_ab_num = |a: &[F], b: &[F], num: usize, m: usize| -> F {
-        let mut ans = F::ONE;
-        for i in 0..m {
-            let bit = F::from(((num >> i) & 1) as u64);
-            ans = ans * (a[i] * b[i] * bit + (F::ONE - a[i]) * (F::ONE - b[i]) * (F::ONE - bit));
+    let running_product2 = {
+        let mut running_product = vec![F::ZERO; b.len() + 1];
+        running_product[b.len()] = F::ONE;
+        for i in (0..b.len()).rev() {
+            let bit = F::from(((min_idx >> i) & 1) as u64);
+            running_product[i] = running_product[i + 1]
+                * (a[i] * b[i] * bit + (F::ONE - a[i]) * (F::ONE - b[i]) * (F::ONE - bit));
         }
-        ans
+        running_product
     };
 
     // Here is an example of how this works:
@@ -49,13 +81,7 @@ pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[
         if bit == 1 {
             continue;
         }
-        ans += running_product[i]
-            * compute_eq_ab_num(
-                &a[i..b.len()],
-                &b[i..b.len()],
-                (min_idx >> i) ^ 1,
-                b.len() - i,
-            );
+        ans += running_product[i] * running_product2[i + 1] * a[i] * b[i];
     }
     for i in b.len()..a.len() {
         ans *= F::ONE - a[i];
@@ -66,12 +92,12 @@ pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
 /// [0, max_idx]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})
-///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i + (1 - x_i)(1 - y_i))
+///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
 pub(crate) fn eq_eval_less_or_equal_than<F: SmallField>(max_idx: usize, a: &[F], b: &[F]) -> F {
     assert!(a.len() >= b.len());
     // Compute running product of ( x_i y_i + (1 - x_i)(1 - y_i) )_{0 <= i <= n}
     let running_product = {
-        let mut running_product = Vec::with_capacity(a.len() + 1);
+        let mut running_product = Vec::with_capacity(b.len() + 1);
         running_product.push(F::ONE);
         for i in 0..b.len() {
             let x = running_product[i] * (a[i] * b[i] + (F::ONE - a[i]) * (F::ONE - b[i]));
@@ -80,14 +106,15 @@ pub(crate) fn eq_eval_less_or_equal_than<F: SmallField>(max_idx: usize, a: &[F],
         running_product
     };
 
-    // Compute eq(a, b, num) = \prod_{ i = 0 }^{ m - 1 } ( a_i b_i num_i + (1 - a_i)(1 - b_i)(1 - num_i) )
-    let compute_eq_ab_num = |a: &[F], b: &[F], num: usize, m: usize| -> F {
-        let mut ans = F::ONE;
-        for i in 0..m {
-            let bit = F::from(((num >> i) & 1) as u64);
-            ans = ans * (a[i] * b[i] * bit + (F::ONE - a[i]) * (F::ONE - b[i]) * (F::ONE - bit));
+    let running_product2 = {
+        let mut running_product = vec![F::ZERO; b.len() + 1];
+        running_product[b.len()] = F::ONE;
+        for i in (0..b.len()).rev() {
+            let bit = F::from(((max_idx >> i) & 1) as u64);
+            running_product[i] = running_product[i + 1]
+                * (a[i] * b[i] * bit + (F::ONE - a[i]) * (F::ONE - b[i]) * (F::ONE - bit));
         }
-        ans
+        running_product
     };
 
     // Here is an example of how this works:
@@ -101,13 +128,7 @@ pub(crate) fn eq_eval_less_or_equal_than<F: SmallField>(max_idx: usize, a: &[F],
         if bit == 1 {
             continue;
         }
-        ans -= running_product[i]
-            * compute_eq_ab_num(
-                &a[i..b.len()],
-                &b[i..b.len()],
-                (max_idx >> i) ^ 1,
-                b.len() - i,
-            );
+        ans -= running_product[i] * running_product2[i + 1] * a[i] * b[i];
     }
     for i in b.len()..a.len() {
         ans *= F::ONE - a[i];
@@ -182,11 +203,11 @@ pub trait MultilinearExtensionFromVectors<F: SmallField> {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>>;
 }
 
-impl<F: SmallField> MultilinearExtensionFromVectors<F> for Vec<Vec<F>> {
+impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F>] {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>> {
         let n_zeros = (1 << lo_num_vars) - self[0].len();
         let n_zero_vecs = (1 << hi_num_vars) - self.len();
-        let vecs = self.clone();
+        let vecs = self.to_vec();
 
         Arc::new(DenseMultilinearExtension::from_evaluations_vec(
             lo_num_vars + hi_num_vars,

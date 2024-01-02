@@ -10,9 +10,7 @@ use crate::{
     circuit::{EvaluateGate1In, EvaluateGate2In, EvaluateGate3In, EvaluateGateCIn},
     error::GKRError,
     structs::{Gate1In, Gate2In, Gate3In, GateCIn, Layer, Point, SumcheckProof},
-    utils::{
-        eq3_eval, eq4_eval, eq_eval_greater_than, eq_eval_less_or_equal_than, MatrixMLEColumnFirst,
-    },
+    utils::{eq3_eval, eq4_eval, MatrixMLEColumnFirst},
 };
 
 use super::{IOPVerifierPhase2State, SumcheckState};
@@ -24,8 +22,6 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         layer_out_value: &F,
         constant: impl Fn(&ConstantType<F>) -> F,
         hi_num_vars: usize,
-        is_input_layer: bool,
-        is_empty_gates: bool,
     ) -> Self {
         let timer = start_timer!(|| "Verifier init phase 2");
         let mul3s = layer
@@ -81,8 +77,6 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         Self {
             layer_out_point: layer_out_point.clone(),
             layer_out_value: *layer_out_value,
-            is_input_layer,
-            is_empty_gates,
             mul3s,
             mul2s,
             adds,
@@ -119,10 +113,10 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         let eq_y_ry = &self.eq_y_ry;
 
         if lo_out_num_vars == 0 {
+            end_timer!(timer);
             if layer_out_value != self.assert_consts.as_slice().eval(&self.eq_y_ry) {
                 return Err(GKRError::VerifyError);
             }
-            end_timer!(timer);
             return Ok(());
         }
 
@@ -147,6 +141,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         let g0_value = eq_eval(&lo_point, &claim0_point)
             - assert_consts.as_slice().eval_subset_eq(&eq_y_ry, &eq_x_rx);
 
+        end_timer!(timer);
         if claim_0.expected_evaluation != f0_value * g0_value {
             return Err(GKRError::VerifyError);
         }
@@ -155,7 +150,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         self.layer_out_point = [claim0_point, hi_point.to_vec()].concat();
         self.layer_out_value = f0_value;
         self.sumcheck_sigma = g0_value;
-        end_timer!(timer);
+
         Ok(())
     }
 
@@ -174,7 +169,6 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         let add_consts = &self.add_consts;
 
         let hi_point = &self.layer_out_point[lo_out_num_vars..];
-        let lo_point = &self.layer_out_point[..lo_out_num_vars];
         let eq_y_ry = &self.eq_y_ry;
 
         // sigma = layers[i](rt || ry) - add_const(ry),
@@ -203,52 +197,26 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         let lo_point_sc1 = &claim1_point[..lo_in_num_vars];
 
         self.eq_x1_rx1 = build_eq_x_r_vec(lo_point_sc1);
-        let (f1_values, received_g1_values) = if self.is_empty_gates {
-            prover_msg.1.split_at(prover_msg.1.len())
-        } else {
-            prover_msg.1.split_at(prover_msg.1.len() - 1)
-        };
+        let (f1_values, received_g1_values) = prover_msg.1.split_at(prover_msg.1.len() - 1);
         let g1_values = {
             let hi_eq_eval = eq_eval(&hi_point, hi_point_sc1);
-            // For the input layer, each segment is consecutive. In this case we
-            // can accelerate the computing the first paste_eval with special
-            // algorithm.
-            if self.is_input_layer {
-                self.paste_from
-                    .iter()
-                    .map(|(_, paste_from)| {
-                        let paste_eval = if *paste_from.first().unwrap() == 0 {
-                            eq_eval_less_or_equal_than(
-                                *paste_from.last().unwrap(),
-                                &lo_point,
-                                lo_point_sc1,
-                            )
-                        } else {
-                            paste_from
-                                .as_slice()
-                                .eval_col_first(&eq_y_ry, &self.eq_x1_rx1)
-                        };
-                        hi_eq_eval * paste_eval
-                    })
-                    .collect_vec()
-            } else {
-                received_g1_values
-                    .iter()
-                    .cloned()
-                    .chain(self.paste_from.iter().map(|(_, paste_from)| {
-                        hi_eq_eval
-                            * paste_from
-                                .as_slice()
-                                .eval_col_first(&eq_y_ry, &self.eq_x1_rx1)
-                    }))
-                    .collect_vec()
-            }
+            received_g1_values
+                .iter()
+                .cloned()
+                .chain(self.paste_from.iter().map(|(_, paste_from)| {
+                    hi_eq_eval
+                        * paste_from
+                            .as_slice()
+                            .eval_col_first(&eq_y_ry, &self.eq_x1_rx1)
+                }))
+                .collect_vec()
         };
         let got_value_1 = f1_values
             .iter()
             .zip(g1_values.iter())
             .fold(F::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
         if claim_1.expected_evaluation != got_value_1 {
+            end_timer!(timer);
             return Err(GKRError::VerifyError);
         }
 
@@ -301,6 +269,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
         let got_value_2 = f2_value * g2_value;
 
         if claim_2.expected_evaluation != got_value_2 {
+            end_timer!(timer);
             return Err(GKRError::VerifyError);
         }
 
@@ -359,11 +328,11 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             .as_slice()
             .eval(&eq_y_ry, &eq_x1_rx1, &eq_x2_rx2, &eq_x3_rx3);
         let got_value_3 = f3_value * g3_value;
+        end_timer!(timer);
         if claim_3.expected_evaluation != got_value_3 {
             return Err(GKRError::VerifyError);
         }
         self.sumcheck_point_3 = claim3_point.clone();
-        end_timer!(timer);
         Ok(())
     }
 }

@@ -34,6 +34,7 @@ pub struct Cell<F: SmallField> {
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
 pub enum CellType {
+    ConstantIn(i64), // just for implementation convenience.
     WireIn(usize),
     WireOut(usize),
 }

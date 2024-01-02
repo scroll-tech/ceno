@@ -81,6 +81,13 @@ where
         (self.n_wires_in - 1, cell)
     }
 
+    /// Create input cells and assign it to be constant.
+    pub fn create_constant_in(&mut self, num: usize, constant: i64) -> Vec<usize> {
+        let cell: Vec<usize> = self.create_cells(num);
+        self.mark_cells(CellType::ConstantIn(constant), &cell);
+        cell
+    }
+
     pub fn create_wire_out(&mut self, num: usize) -> (usize, Vec<usize>) {
         let cell = self.create_cells(num);
         self.mark_cells(CellType::WireOut(self.n_wires_out), &cell);
@@ -465,6 +472,11 @@ where
                         self.cells[*cell].layer = Some(0);
                     }
                 }
+                CellType::ConstantIn(_) => {
+                    for cell in cells.iter() {
+                        self.cells[*cell].layer = Some(0);
+                    }
+                }
                 _ => {}
             }
         }
@@ -474,7 +486,11 @@ where
                 let _ = self.assign_layer(i);
             }
             if *self.cells[i].layer.as_ref().unwrap() == 0 {
-                assert!(self.cells[i].cell_type.is_some());
+                assert!(
+                    self.cells[i].cell_type.is_some()
+                        && (matches!(self.cells[i].cell_type.unwrap(), CellType::WireIn(_))
+                            || matches!(self.cells[i].cell_type.unwrap(), CellType::ConstantIn(_)))
+                );
             }
         }
 
@@ -488,6 +504,7 @@ where
 
         self.n_layers = Some(max_layer_id + 1);
 
+        // Force wire_out to be at the last layer.
         for i in 0..self.cells.len() {
             if matches!(self.cells[i].cell_type, Some(CellType::WireOut(_))) {
                 self.cells[i].layer = Some(max_layer_id);

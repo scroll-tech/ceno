@@ -81,18 +81,26 @@ pub struct Layer<F: SmallField> {
     pub(crate) copy_to: HashMap<usize, Vec<usize>>,
     /// The corresponding wires from previous layers pasted to this layer. It is
     /// (shallower layer id -> pasted to the current id). It stores the non-zero
-    /// entry of paste_from[layer_id] for each column.
+    /// entry of paste_from[layer_id] for each column. Undefined for the input.
     pub(crate) paste_from: HashMap<usize, Vec<usize>>,
     /// Maximum size of the subsets pasted from the previous layers, rounded up
     /// to the next power of two. This is the logarithm of the rounded size.
+    /// Undefined for the input layer.
     pub(crate) max_previous_num_vars: usize,
 }
 
 #[derive(Clone, Serialize)]
 pub struct Circuit<F: SmallField> {
     pub layers: Vec<Layer<F>>,
-    pub output_copy_to: Vec<Vec<usize>>,
+    /// Copied from the circuit output to segments for convenience of later use.
+    pub copy_to_wires_out: Vec<Vec<usize>>,
+
+    /// The left and right endpoints in the input layer assigned as a constant.
+    pub paste_from_constant: Vec<(F, usize, usize)>,
     pub n_wires_in: usize,
+    /// The left endpoint in the input layer copied from each wire_in.
+    pub paste_from_wires_in: Vec<(usize, usize)>,
+    pub max_wires_in_num_vars: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]

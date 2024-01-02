@@ -11,7 +11,6 @@ enum TableType {
 
 struct AllInputIndex {
     // public
-    x_idx: usize,
     inputs_idx: usize,
 
     // private
@@ -25,7 +24,7 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
     let neg_one = ConstantType::Field(-F::ONE);
 
     let table_size = 4;
-    let (x_idx, x) = circuit_builder.create_wire_in(1);
+    let x = circuit_builder.create_constant_in(1, 2);
     let (other_x_pows_idx, other_pows_of_x) = circuit_builder.create_wire_in(table_size - 1);
     let pow_of_xs = [x, other_pows_of_x].concat();
     for i in 0..table_size - 1 {
@@ -57,10 +56,10 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
     circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));
 
     circuit_builder.configure();
+    // circuit_builder.print_info();
     (
         Circuit::<F>::new(&circuit_builder),
         AllInputIndex {
-            x_idx,
             other_x_pows_idx,
             inputs_idx,
             count_idx,
@@ -70,8 +69,8 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
 
 fn main() {
     let (circuit, all_input_index) = construct_circuit::<Goldilocks>();
+    // println!("circuit: {:?}", circuit);
     let mut wires_in = vec![vec![]; circuit.n_wires_in];
-    wires_in[all_input_index.x_idx] = vec![Goldilocks::from(2u64)];
     wires_in[all_input_index.inputs_idx] = vec![
         Goldilocks::from(2u64),
         Goldilocks::from(2u64),
@@ -79,6 +78,7 @@ fn main() {
         Goldilocks::from(16u64),
         Goldilocks::from(2u64),
     ];
+    // x = 2, 2^2 = 4, 2^2^2 = 16, 2^2^2^2 = 256
     wires_in[all_input_index.other_x_pows_idx] = vec![
         Goldilocks::from(4u64),
         Goldilocks::from(16u64),
@@ -163,10 +163,8 @@ fn main() {
         .iter()
         .map(|witness| {
             witness
-                .mle(
-                    circuit.first_layer_ref().max_previous_num_vars(),
-                    instance_num_vars,
-                )
+                .as_slice()
+                .mle(circuit.max_wires_in_num_vars, instance_num_vars)
                 .evaluate(&gkr_input_claims.point)
         })
         .collect_vec();

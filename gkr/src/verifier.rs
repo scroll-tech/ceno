@@ -18,6 +18,7 @@ use crate::{
 
 mod phase1;
 mod phase2;
+mod phase2_input;
 
 type SumcheckState<F> = sumcheck::structs::IOPVerifierState<F>;
 
@@ -36,7 +37,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
     ) -> Result<GKRInputClaims<F>, GKRError> {
         let timer = start_timer!(|| "Verification");
         assert_eq!(wires_out_points.len(), wires_out_values.len());
-        assert_eq!(wires_out_points.len(), circuit.output_copy_to.len());
+        assert_eq!(wires_out_points.len(), circuit.copy_to_wires_out.len());
 
         let mut verifier_state = Self::verifier_init_parallel(
             output_point,
@@ -73,36 +74,34 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                 ),
             };
 
-            verifier_state.verify_and_update_state_phase2_parallel(
-                &circuit,
-                &challenges,
-                &layer_out_point,
-                &layer_out_value,
-                &phase2_msg,
-                transcript,
-            )?;
+            if circuit.is_input_layer(layer_id) {
+                verifier_state.verify_and_update_state_phase2_input_parallel(
+                    circuit,
+                    &layer_out_point,
+                    &layer_out_value,
+                    &phase2_msg,
+                    transcript,
+                )?;
+            } else {
+                verifier_state.verify_and_update_state_phase2_parallel(
+                    &circuit,
+                    &challenges,
+                    &layer_out_point,
+                    &layer_out_value,
+                    &phase2_msg,
+                    transcript,
+                )?;
+            }
             end_timer!(timer);
         }
 
         let (_, input_phase2_msg) = proof.sumcheck_proofs.last().unwrap();
-        let point = input_phase2_msg
-            .sumcheck_proofs
-            .last()
-            .unwrap()
-            .point
-            .clone();
-        let mut values = vec![F::ZERO; verifier_state.subset_evals.len()];
-        verifier_state
-            .subset_evals
-            .iter()
-            .for_each(|(id, subset_evals)| {
-                assert_eq!(subset_evals.len(), 1);
-                assert_eq!(subset_evals[0].0, circuit.layers.len() - 1);
-                assert_eq!(subset_evals[0].1, point);
-                values[*id] = subset_evals[0].2;
-            });
+        let point = input_phase2_msg.sumcheck_proofs[0].point.clone();
         end_timer!(timer);
-        Ok(GKRInputClaims { point, values })
+        Ok(GKRInputClaims {
+            point,
+            values: input_phase2_msg.sumcheck_eval_values[0].clone(),
+        })
     }
 
     /// Initialize verifying state for data parallel circuits.
@@ -192,9 +191,6 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         let layer = &circuit.layers[self.layer_id];
         let lo_out_num_vars = layer.num_vars;
         let hi_out_num_vars = layer_out_point.len() - lo_out_num_vars;
-        let is_input_layer = self.layer_id == circuit.layers.len() - 1;
-        let is_empty_gates =
-            layer.mul3s.is_empty() && layer.mul2s.is_empty() && layer.adds.is_empty();
 
         let mut verifier_phase2_state = IOPVerifierPhase2State::verifier_init_parallel(
             layer,
@@ -205,8 +201,6 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                 ConstantType::Challenge(i) => challenges[i],
             },
             hi_out_num_vars,
-            is_input_layer,
-            is_empty_gates,
         );
 
         // =============================
@@ -250,14 +244,11 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         //      - one evaluation of the next layer to be proved.
         //      - evaluations of the pasted subsets.
         //      - one evaluation of g0 to help with the sumcheck.
-        let (next_f_values, subset_f_values) = if is_empty_gates {
-            sumcheck_eval_values[0].split_at(0)
-        } else {
-            sumcheck_eval_values[0]
-                .split_at(sumcheck_eval_values[0].len() - 1)
-                .0
-                .split_at(1)
-        };
+        let (next_f_values, subset_f_values) = sumcheck_eval_values[0]
+            .split_at(sumcheck_eval_values[0].len() - 1)
+            .0
+            .split_at(1);
+
         for f_value in next_f_values {
             self.next_evals
                 .push((verifier_phase2_state.sumcheck_point_1.clone(), *f_value));
@@ -314,6 +305,55 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
 
         Ok(())
     }
+
+    fn verify_and_update_state_phase2_input_parallel(
+        &mut self,
+        circuit: &Circuit<F>,
+        layer_out_point: &Point<F>,
+        layer_out_value: &F,
+        prover_msg: &IOPProverPhase2Message<F>,
+        transcript: &mut Transcript<F>,
+    ) -> Result<(), GKRError> {
+        self.next_evals.clear();
+
+        let layer = &circuit.layers[self.layer_id];
+        let lo_out_num_vars = layer.num_vars;
+        let lo_in_num_vars = circuit.max_wires_in_num_vars;
+        let hi_out_num_vars = layer_out_point.len() - lo_out_num_vars;
+
+        let verifier_phase2_state = IOPVerifierPhase2InputState::verifier_init_parallel(
+            layer_out_point,
+            *layer_out_value,
+            &circuit.paste_from_constant,
+            &circuit.paste_from_wires_in,
+            layer.num_vars,
+            lo_in_num_vars,
+            hi_out_num_vars,
+        );
+
+        if !layer.assert_consts.is_empty()
+            || !layer.add_consts.is_empty()
+            || !layer.adds.is_empty()
+            || !layer.mul2s.is_empty()
+            || !layer.mul3s.is_empty()
+        {
+            return Err(GKRError::InvalidCircuit);
+        }
+
+        // ===========================================================
+        // Step 1: First step of copy constraints pasted from wires_in
+        // ===========================================================
+
+        verifier_phase2_state.verify_and_update_state_input_step1_parallel(
+            (
+                &prover_msg.sumcheck_proofs[0],
+                &prover_msg.sumcheck_eval_values[0],
+            ),
+            transcript,
+        )?;
+
+        Ok(())
+    }
 }
 
 struct IOPVerifierPhase1State<'a, F: SmallField> {
@@ -331,8 +371,6 @@ struct IOPVerifierPhase1State<'a, F: SmallField> {
 struct IOPVerifierPhase2State<'a, F: SmallField> {
     layer_out_point: Point<F>,
     layer_out_value: F,
-    is_input_layer: bool,
-    is_empty_gates: bool,
 
     mul3s: Vec<Gate3In<F>>,
     mul2s: Vec<Gate2In<F>>,
@@ -352,4 +390,14 @@ struct IOPVerifierPhase2State<'a, F: SmallField> {
     eq_y_ry: Vec<F>,
     eq_x1_rx1: Vec<F>,
     eq_x2_rx2: Vec<F>,
+}
+
+struct IOPVerifierPhase2InputState<'a, F: SmallField> {
+    layer_out_point: &'a Point<F>,
+    layer_out_value: F,
+    paste_from_constant: &'a [(F, usize, usize)],
+    paste_from_wires_in: &'a [(usize, usize)],
+    lo_out_num_vars: usize,
+    lo_in_num_vars: usize,
+    hi_num_vars: usize,
 }

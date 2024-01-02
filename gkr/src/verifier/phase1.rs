@@ -111,12 +111,14 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
             .iter()
             .zip(self.g1_values.iter())
             .fold(F::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
+
+        end_timer!(timer);
+
         if claim_1.expected_evaluation != got_value_1 {
             return Err(GKRError::VerifyError);
         }
 
         self.sumcheck_sigma = got_value_1;
-        end_timer!(timer);
         Ok(())
     }
 
@@ -170,10 +172,11 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
             .collect_vec();
 
         let got_value_2 = g2_values.iter().fold(F::ZERO, |acc, value| acc + value) * prover_msg.1;
+        end_timer!(timer);
+
         if claim_2.expected_evaluation != got_value_2 {
             return Err(GKRError::VerifyError);
         }
-        end_timer!(timer);
         Ok(())
     }
 }
