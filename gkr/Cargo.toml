@@ -1,0 +1,14 @@
+[package]
+name = "gkr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+goldilocks.workspace = true
+
+frontend = { path = "../frontend" }
+transcript = { path = "../transcript" }
+sumcheck = { path = "../sumcheck" }
