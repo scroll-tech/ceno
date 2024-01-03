@@ -17,6 +17,12 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         aux_info: &VPAuxInfo<F>,
         transcript: &mut Transcript<F>,
     ) -> SumCheckSubClaim<F> {
+        if aux_info.num_variables == 0 {
+            return SumCheckSubClaim {
+                point: vec![],
+                expected_evaluation: claimed_sum,
+            };
+        }
         let start = start_timer!(|| "sum check verify");
 
         transcript.append_message(&aux_info.num_variables.to_le_bytes());
