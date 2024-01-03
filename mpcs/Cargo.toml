@@ -29,6 +29,7 @@ generic-array = { version = "0.14.7", features = ["serde"] }
 hex-literal = "0.3.3"
 
 [features]
-default = ["parallel"]
+default = ["parallel", "sanity-check"]
 parallel = ["dep:rayon"]
 benchmark = ["parallel"]
+sanity-check = []

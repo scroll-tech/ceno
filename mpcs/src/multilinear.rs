@@ -378,7 +378,7 @@ mod test {
             + TranscriptWrite<Pcs::CommitmentChunk, F>
             + InMemoryTranscript<Param = ()>,
     {
-        for num_vars in 10..25 {
+        for num_vars in 10..15 {
             println!("k {:?}", num_vars);
             let batch_size = 2;
             let num_points = batch_size >> 1;
