@@ -27,24 +27,16 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
     pub fn verify_parallel(
         circuit: &Circuit<F>,
         challenges: &[F],
-        output_point: &Point<F>,
-        output_value: &F,
-        wires_out_points: &[&Point<F>],
-        wires_out_values: &[F],
+        output_evals: &[(Point<F>, F)],
+        wires_out_evals: &[(Point<F>, F)],
         proof: &IOPProof<F>,
         instance_num_vars: usize,
         transcript: &mut Transcript<F>,
     ) -> Result<GKRInputClaims<F>, GKRError> {
         let timer = start_timer!(|| "Verification");
-        assert_eq!(wires_out_points.len(), wires_out_values.len());
-        assert_eq!(wires_out_points.len(), circuit.copy_to_wires_out.len());
+        assert_eq!(wires_out_evals.len(), circuit.copy_to_wires_out.len());
 
-        let mut verifier_state = Self::verifier_init_parallel(
-            output_point,
-            output_value,
-            wires_out_points,
-            wires_out_values,
-        );
+        let mut verifier_state = Self::verifier_init_parallel(output_evals, wires_out_evals);
         for layer_id in 0..circuit.layers.len() {
             let timer = start_timer!(|| format!("Verify layer {}", layer_id));
             verifier_state.layer_id = layer_id;
@@ -106,19 +98,17 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
 
     /// Initialize verifying state for data parallel circuits.
     fn verifier_init_parallel(
-        output_point: &Point<F>,
-        output_value: &F,
-        wires_out_points: &[&Point<F>],
-        wires_out_values: &[F],
+        output_evals: &[(Point<F>, F)],
+        wires_out_evals: &[(Point<F>, F)],
     ) -> Self {
-        let next_evals = vec![(output_point.clone(), *output_value)];
+        let next_evals = output_evals.to_vec();
         let mut subset_evals = HashMap::new();
         subset_evals.entry(0usize).or_insert(
-            wires_out_points
-                .iter()
-                .zip(wires_out_values.iter())
+            wires_out_evals
+                .to_vec()
+                .into_iter()
                 .enumerate()
-                .map(|(i, (&point, &value))| (i, point.clone(), value))
+                .map(|(i, (point, value))| (i, point.clone(), value))
                 .collect_vec(),
         );
         Self {
@@ -159,6 +149,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         // Step 1: First step of copy constraints copied to later layers
         // =============================================================
 
+        // TODO: Double check the correctness.
         verifier_phase1_state.verify_and_update_state_step1_parallel(
             (&prover_msg.sumcheck_proof_1, &prover_msg.eval_value_1),
             |new_layer_id| &layer.copy_to[new_layer_id],
@@ -199,6 +190,12 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
             |c| match *c {
                 ConstantType::Field(x) => x,
                 ConstantType::Challenge(i) => challenges[i],
+                ConstantType::Challenge2(i) => challenges[i] * challenges[i],
+                ConstantType::Challenge3(i) => challenges[i] * challenges[i] * challenges[i],
+                ConstantType::Challenge4(i) => {
+                    let tmp = challenges[i] * challenges[i];
+                    tmp * tmp
+                }
             },
             hi_out_num_vars,
         );
