@@ -48,9 +48,7 @@ fn main() {
     let proof = IOPProverState::prove_parallel(
         &circuit,
         &witness,
-        &point,
-        &value,
-        &[],
+        &[(point, value)],
         &[],
         &mut prover_transcript,
     );
@@ -66,9 +64,7 @@ fn main() {
     let gkr_final_claim = IOPVerifierState::verify_parallel(
         &circuit,
         &[],
-        &point,
-        &value,
-        &[],
+        &[(point, value)],
         &[],
         &proof,
         0,

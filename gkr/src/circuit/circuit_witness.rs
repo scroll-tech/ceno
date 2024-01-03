@@ -52,6 +52,12 @@ impl<F: SmallField> CircuitWitness<F> {
         let constant = |c: ConstantType<F>| match c {
             ConstantType::Field(x) => x,
             ConstantType::Challenge(i) => challenges[i],
+            ConstantType::Challenge2(i) => challenges[i] * challenges[i],
+            ConstantType::Challenge3(i) => challenges[i] * challenges[i] * challenges[i],
+            ConstantType::Challenge4(i) => {
+                let tmp = challenges[i] * challenges[i];
+                tmp * tmp
+            }
         };
         for (layer_id, layer) in circuit.layers.iter().enumerate().rev().skip(1) {
             let size = circuit.layers[layer_id].size();
@@ -113,11 +119,12 @@ impl<F: SmallField> CircuitWitness<F> {
             layer_witnesses[layer_id] = current_layer_witness;
         }
         let mut wires_out = vec![vec![]; circuit.copy_to_wires_out.len()];
-        circuit.layers[0]
-            .copy_to
+        circuit
+            .copy_to_wires_out
             .iter()
+            .enumerate()
             .for_each(|(id, old_wire_ids)| {
-                wires_out[*id] = old_wire_ids
+                wires_out[id] = old_wire_ids
                     .iter()
                     .map(|old_wire_id| layer_witnesses[0][*old_wire_id])
                     .collect_vec();
@@ -299,6 +306,14 @@ impl<F: SmallField> CircuitWitness<F> {
         match *c {
             ConstantType::Field(x) => x,
             ConstantType::Challenge(i) => self.challenges[i],
+            ConstantType::Challenge2(i) => self.challenges[i] * self.challenges[i],
+            ConstantType::Challenge3(i) => {
+                self.challenges[i] * self.challenges[i] * self.challenges[i]
+            }
+            ConstantType::Challenge4(i) => {
+                let tmp = self.challenges[i] * self.challenges[i];
+                tmp * tmp
+            }
         }
     }
 }

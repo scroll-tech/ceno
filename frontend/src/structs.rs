@@ -7,6 +7,9 @@ use std::hash::Hash;
 pub enum ConstantType<F: SmallField> {
     Field(F),
     Challenge(usize),
+    Challenge2(usize), // challenge^2
+    Challenge3(usize), // challenge^3
+    Challenge4(usize), // challenge^4
 }
 
 /// Represent a gate in the circuit. The inner variables denote the input

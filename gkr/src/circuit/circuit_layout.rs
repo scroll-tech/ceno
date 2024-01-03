@@ -100,6 +100,13 @@ impl<F: SmallField> Circuit<F> {
             ));
         }
 
+        // TODO: This is to avoid incorrect use of input paste_from. To be refined.
+        for (id, wire_in) in input_paste_from_wires_in.iter().enumerate() {
+            layers[n_layers - 1]
+                .paste_from
+                .insert(id, (wire_in.0..wire_in.1).collect_vec());
+        }
+
         let max_wires_in_num_vars =
             ceil_log2(wires_in_cell_ids.iter().map(|x| x.len()).max().unwrap());
 
@@ -264,6 +271,13 @@ impl<F: SmallField> Circuit<F> {
             })
             .collect_vec();
 
+        // TODO: This is to avoid incorrect use of output copy_to. To be refined.
+        for (id, wire_out) in output_copy_to.iter().enumerate() {
+            layers[0]
+                .copy_to
+                .insert(id, wire_out.iter().map(|x| *x).collect_vec());
+        }
+
         Self {
             layers,
             copy_to_wires_out: output_copy_to,
@@ -292,6 +306,10 @@ impl<F: SmallField> Circuit<F> {
 
     pub fn is_input_layer(&self, layer_id: usize) -> bool {
         layer_id == self.layers.len() - 1
+    }
+
+    pub fn is_output_layer(&self, layer_id: usize) -> bool {
+        layer_id == 0
     }
 }
 

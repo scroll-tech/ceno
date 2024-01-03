@@ -27,25 +27,17 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     pub fn prove_parallel(
         circuit: &Circuit<F>,
         circuit_witness: &CircuitWitness<F>,
-        output_point: &Point<F>,
-        output_value: &F,
-        wires_out_points: &[&Point<F>],
-        wires_out_values: &[F],
+        output_evals: &[(Point<F>, F)],
+        wires_out_evals: &[(Point<F>, F)],
         transcript: &mut Transcript<F>,
     ) -> IOPProof<F> {
         let timer = start_timer!(|| "Proving");
-        assert_eq!(wires_out_points.len(), wires_out_values.len());
-        assert_eq!(wires_out_points.len(), circuit.copy_to_wires_out.len());
+        assert_eq!(wires_out_evals.len(), circuit.copy_to_wires_out.len());
         // TODO: Currently haven't support non-power-of-two number of instances.
         assert!(circuit_witness.n_instances == 1 << circuit_witness.instance_num_vars());
 
-        let mut prover_state = Self::prover_init_parallel(
-            circuit_witness,
-            output_point,
-            output_value,
-            wires_out_points,
-            wires_out_values,
-        );
+        let mut prover_state =
+            Self::prover_init_parallel(circuit_witness, output_evals, wires_out_evals);
 
         let sumcheck_proofs = (0..circuit.layers.len())
             .map(|layer_id| {
@@ -93,19 +85,17 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     /// Initialize proving state for data parallel circuits.
     fn prover_init_parallel(
         circuit_witness: &CircuitWitness<F>,
-        output_point: &Point<F>,
-        output_value: &F,
-        wires_out_points: &[&Point<F>],
-        wires_out_values: &[F],
+        output_evals: &[(Point<F>, F)],
+        wires_out_evals: &[(Point<F>, F)],
     ) -> Self {
-        let next_evals = vec![(output_point.clone(), *output_value)];
+        let next_evals = output_evals.to_vec();
         let mut subset_evals = HashMap::new();
         subset_evals.entry(0usize).or_insert(
-            wires_out_points
-                .iter()
-                .zip(wires_out_values.iter())
+            wires_out_evals
+                .to_vec()
+                .into_iter()
                 .enumerate()
-                .map(|(i, (&point, &value))| (i, point.clone(), value))
+                .map(|(i, (point, value))| (i, point, value))
                 .collect_vec(),
         );
         Self {
@@ -157,6 +147,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         // Step 1: First step of copy constraints copied to later layers
         // =============================================================
 
+        // TODO: Need to distinguish the output copy_to and the other layers.
         let (sumcheck_proof_1, eval_value_1) = prover_phase1_state
             .prove_and_update_state_step1_parallel(
                 |new_layer_id| &layer.copy_to[new_layer_id],

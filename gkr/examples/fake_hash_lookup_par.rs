@@ -124,9 +124,7 @@ fn main() {
             IOPProverState::prove_parallel(
                 &circuit,
                 &circuit_witness,
-                &output_point,
-                &output_eval,
-                &[],
+                &[(output_point, output_eval)],
                 &[],
                 &mut prover_transcript,
             ),
@@ -147,9 +145,7 @@ fn main() {
         IOPVerifierState::verify_parallel(
             &circuit,
             circuit_witness.challenges(),
-            &output_point,
-            &output_eval,
-            &[],
+            &[(output_point, output_eval)],
             &[],
             &proof,
             instance_num_vars,
