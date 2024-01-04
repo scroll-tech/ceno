@@ -92,6 +92,18 @@ impl<F: PrimeField, H: Hash> BasefoldCommitment<F, H> {
             bh_evals: Vec::new(),
         }
     }
+
+    fn get_root(&self) -> Output<H> {
+        self.codeword_tree[self.codeword_tree.len() - 1][0].clone()
+    }
+
+    fn get_root_ref(&self) -> &Output<H> {
+        &self.codeword_tree[self.codeword_tree.len() - 1][0]
+    }
+
+    fn with_only_root(&self) -> Self {
+        Self::from_root(self.get_root())
+    }
 }
 impl<F: PrimeField, H: Hash> PartialEq for BasefoldCommitment<F, H> {
     fn eq(&self, other: &Self) -> bool {
@@ -231,7 +243,9 @@ where
     }
 
     fn commit(pp: &Self::ProverParam, poly: &Self::Polynomial) -> Result<Self::Commitment, Error> {
-        // bh_evals is just a copy of poly.evals()
+        // bh_evals is just a copy of poly.evals().
+        // Note that this function implicitly assumes that the size of poly.evals() is a
+        // power of two. Otherwise, the function crashes with index out of bound.
         let (coeffs, mut bh_evals) =
             interpolate_over_boolean_hypercube_with_copy(&poly.evals().to_vec());
 
@@ -277,14 +291,9 @@ where
         Self::Polynomial: 'a,
     {
         let comms = Self::batch_commit(pp, polys)?;
-        let mut roots = Vec::with_capacity(comms.len());
-
         comms.iter().for_each(|comm| {
-            let root = &comm.codeword_tree[comm.codeword_tree.len() - 1][0];
-            roots.push(root);
+            transcript.write_commitment(comm.get_root_ref());
         });
-
-        transcript.write_commitments(roots).unwrap();
         Ok(comms)
     }
 
@@ -1070,6 +1079,8 @@ fn interpolate_over_boolean_hypercube_with_copy<F: PrimeField>(evals: &Vec<F>) -
         j += 2
     }
 
+    // This code implicitly assumes that coeffs has size at least 1 << n,
+    // that means the size of evals should be a power of two
     for i in 2..n + 1 {
         let chunk_size = 1 << i;
         coeffs.par_chunks_mut(chunk_size).for_each(|chunk| {
