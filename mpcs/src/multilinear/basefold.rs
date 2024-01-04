@@ -235,7 +235,8 @@ where
                 log_rate: param.log_rate,
                 num_verifier_queries: param.num_verifier_queries,
                 num_rounds: rounds,
-                // Why not trim the weights using poly_size?
+                // Why not trim the weights using poly_size? And is the verifier really
+                // able to hold all these weights?
                 table_w_weights: param.table_w_weights.clone(),
                 basecode: param.basecode,
             },
@@ -330,6 +331,9 @@ where
         );
 
         let qp = Instant::now();
+
+        // Each entry in queried_els stores a list of triples (F, F, i) indicating the
+        // position opened at each round and the two values at that round
         let (queried_els, queries_usize_) =
             query_phase(transcript, &comm, &oracles, pp.num_verifier_queries);
 
@@ -342,7 +346,7 @@ where
 
         if pp.num_rounds < pp.num_vars {
             transcript.write_field_elements(&bh_evals); //write bh_evals
-            transcript.write_field_elements(&eq); //write eq
+            transcript.write_field_elements(&eq); //write eq (why? can't the verifier evaluate itself?)
         }
 
         //write final oracle
@@ -600,7 +604,7 @@ where
             fold_challenges.push(transcript.squeeze_challenge());
         }
         size = size + 256 * vp.num_rounds;
-        //read last commitment
+        //read last commitment (and abandoned), so why write it in the proving side?
         transcript.read_commitment().unwrap();
 
         let mut query_challenges = transcript.squeeze_challenges(vp.num_verifier_queries);
@@ -689,6 +693,7 @@ where
             &eval,
         );
 
+        // Why make this optional? It feels crucial for the security.
         if (!vp.basecode) {
             virtual_open(
                 vp.num_vars,
@@ -1956,12 +1961,17 @@ fn virtual_open<F: PrimeField>(
 
     let mut oracles = Vec::with_capacity(rounds);
     let mut new_oracle = last_oracle;
+    // Continue the folding, because sum-check needs a single value in the end
+    // not just a low-degree codeword
     for round in 0..rounds {
         let challenge: F = rand_chacha(&mut rng);
         challenges.push(challenge);
         let now = Instant::now();
         sum_check_oracles.push(sum_check_challenge_round(eq, bh_evals, challenge));
 
+        // The verifier only needs the last rows of the table, which are very small.
+        // Although in the current code the verification key still contains the complete
+        // table. Need to optimize.
         oracles.push(basefold_one_round_by_interpolation_weights::<F>(
             &table,
             round + num_rounds,
@@ -1973,6 +1983,10 @@ fn virtual_open<F: PrimeField>(
 
     let mut no = new_oracle.clone();
     no.dedup();
+    // If the prover is honest, the final oracle should consist of repetitions of
+    // the same value. Don't we need to check that? It doesn't hurt the verifier to
+    // add this additional check. Just for better chance of being secure.
+    assert_eq!(no.len(), 1);
 
     //verify it information-theoretically
     let mut eq_r_ = F::ONE;
@@ -2042,6 +2056,8 @@ fn commit_phase<F: PrimeField, H: Hash>(
         root = trees[i].last().unwrap()[0].clone();
     }
 
+    // This place sends the root of the last oracle, instead of the encoded message
+    // in clear.
     transcript.write_commitment(&root).unwrap();
     return (trees, sum_check_oracles, oracles, bh_evals, eq, eval);
 }
@@ -2054,12 +2070,13 @@ fn query_phase<F: PrimeField, H: Hash>(
 ) -> (Vec<(Vec<(F, F)>, Vec<usize>)>, Vec<usize>) {
     let mut queries = transcript.squeeze_challenges(num_verifier_queries);
 
+    // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
         .iter()
         .map(|x_index| {
             let x_rep = (*x_index).to_repr();
             let mut x: &[u8] = x_rep.as_ref();
-            let (int_bytes, rest) = x.split_at(std::mem::size_of::<u32>());
+            let (int_bytes, _) = x.split_at(std::mem::size_of::<u32>());
             let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
             ((x_int as usize) % comm.codeword.len()).into()
         })
@@ -2100,6 +2117,9 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
             ((x_int as usize) % n).into()
         })
         .collect();
+
+    // For computing the weights on the fly, because the verifier is incapable of storing
+    // the weights.
     let mut key: [u8; 16] = [0u8; 16];
     let mut iv: [u8; 16] = [0u8; 16];
     let mut rng = rng.clone();
@@ -2112,6 +2132,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
         GenericArray::from_slice(&key[..]),
         GenericArray::from_slice(&iv[..]),
     );
+
     queries_usize
         .par_iter_mut()
         .enumerate()
@@ -2163,6 +2184,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
 
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_oracles[0]));
 
+    // The sum-check part of the protocol
     for i in 0..fold_challenges.len() - 1 {
         assert_eq!(
             degree_2_eval(&sum_check_oracles[i], fold_challenges[i]),
