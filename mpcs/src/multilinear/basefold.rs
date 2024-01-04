@@ -231,16 +231,20 @@ where
     }
 
     fn commit(pp: &Self::ProverParam, poly: &Self::Polynomial) -> Result<Self::Commitment, Error> {
+        // bh_evals is just a copy of poly.evals()
         let (coeffs, mut bh_evals) =
             interpolate_over_boolean_hypercube_with_copy(&poly.evals().to_vec());
 
+        // Split the input into chunks of message size, encode each message, and return the codewords
         let mut basecode = encode_rs_basecode(
             &coeffs,
             1 << pp.log_rate,
             1 << (pp.num_vars - pp.num_rounds),
         );
 
-        let mut commitment = evaluate_over_foldable_domain_generic_basecode(
+        // Apply the recursive definition of the BaseFold code to the list of base codewords,
+        // and produce the final codeword
+        let mut codeword = evaluate_over_foldable_domain_generic_basecode(
             1 << (pp.num_vars - pp.num_rounds),
             coeffs.len(),
             pp.log_rate,
@@ -249,17 +253,18 @@ where
         );
 
         //If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
-        //        let mut commitment = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
+        //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
 
         reverse_index_bits_in_place(&mut bh_evals);
-        reverse_index_bits_in_place(&mut commitment);
+        reverse_index_bits_in_place(&mut codeword);
 
-        let tree = merkelize::<F, H>(&commitment);
+        // Compute and store all the layers of the Merkle tree
+        let codeword_tree = merkelize::<F, H>(&codeword);
 
         Ok(Self::Commitment {
-            codeword: commitment,
-            codeword_tree: tree,
-            bh_evals: bh_evals,
+            codeword,
+            codeword_tree,
+            bh_evals,
         })
     }
 
@@ -926,16 +931,20 @@ fn time_rs_code() {
     //    println!("rs time {:?}", now.elapsed().as_millis());
     //    println!("evals {:?}", evals.len());
 }
+
+// Split the input into chunks of message size, encode each message, and return the codewords
 fn encode_rs_basecode<F: PrimeField>(
     poly: &Vec<F>,
     rate: usize,
     message_size: usize,
 ) -> Vec<Vec<F>> {
+    // The domain is just counting 1, 2, 3, ... , domain_size
     let domain: Vec<F> = steps(F::ONE).take(message_size * rate).collect();
     let res = poly
         .par_chunks_exact(message_size)
         .map(|chunk| {
             let mut target = vec![F::ZERO; message_size * rate];
+            // Just Reed-Solomon code, but with the naive domain
             target
                 .iter_mut()
                 .enumerate()
@@ -977,7 +986,12 @@ pub fn evaluate_over_foldable_domain_generic_basecode<F: PrimeField>(
     //iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
     let mut chunk_size = base_codewords[0].len(); //block length of the base code
     for i in base_log_k..logk {
+        // In beginning of each iteration, the current codeword size is 1<<i, after this iteration,
+        // every two adjacent codewords are folded into one codeword of size 1<<(i+1).
+        // Fetch the table that has the same size of the *current* codeword size.
         let level = &table[i + log_rate];
+        // chunk_size is equal to 1 << (i+1), i.e., the codeword size after the current iteration
+        // half_chunk is equal to 1 << i, i.e. the current codeword size
         chunk_size = chunk_size << 1;
         assert_eq!(level.len(), chunk_size >> 1);
         <Vec<F> as AsMut<[F]>>::as_mut(&mut coeffs_with_bc)
@@ -985,6 +999,10 @@ pub fn evaluate_over_foldable_domain_generic_basecode<F: PrimeField>(
             .for_each(|chunk| {
                 let half_chunk = chunk_size >> 1;
                 for j in half_chunk..chunk_size {
+                    // Suppose the current codewords are (a, b)
+                    // The new codeword is computed by two halves:
+                    // left  = a + t * b
+                    // right = a - t * b
                     let rhs = chunk[j] * level[j - half_chunk];
                     chunk[j] = chunk[j - half_chunk] - rhs;
                     chunk[j - half_chunk] = chunk[j - half_chunk] + rhs;
@@ -1088,24 +1106,22 @@ pub fn log2_strict(n: usize) -> usize {
 fn merkelize<F: PrimeField, H: Hash>(values: &Vec<F>) -> Vec<Vec<Output<H>>> {
     let log_v = log2_strict(values.len());
     let mut tree = Vec::with_capacity(log_v);
+    // The first layer of hashes, half the number of leaves
     let mut hashes = vec![Output::<H>::default(); (values.len() >> 1)];
-    let method1 = Instant::now();
     hashes.par_iter_mut().enumerate().for_each(|(i, mut hash)| {
         let mut hasher = H::new();
-        hasher.update_field_element(&values[i + i]);
-        hasher.update_field_element(&values[i + i + 1]);
+        hasher.update_field_element(&values[i << 1]);
+        hasher.update_field_element(&values[(i << 1) + 1]);
         *hash = hasher.finalize_fixed();
     });
 
     tree.push(hashes);
 
-    let now = Instant::now();
     for i in 1..(log_v) {
         let oracle = tree[i - 1]
             .par_chunks_exact(2)
             .map(|ys| {
                 let mut hasher = H::new();
-                let mut hash = Output::<H>::default();
                 hasher.update(&ys[0]);
                 hasher.update(&ys[1]);
                 hasher.finalize_fixed()

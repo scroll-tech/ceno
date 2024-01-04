@@ -74,6 +74,7 @@ pub fn horner_new<F: Field>(coeffs: &[F], x: &F) -> F {
     //.fold(F::ZERO, |acc, coeff| acc * x + coeff)
 }
 
+/// Evaluate the given coeffs as a univariate polynomial at x
 pub fn horner<F: Field>(coeffs: &[F], x: &F) -> F {
     let coeff_vec: Vec<&F> = coeffs.iter().rev().collect();
     let mut acc = F::ZERO;
