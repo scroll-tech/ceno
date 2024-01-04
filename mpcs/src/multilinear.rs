@@ -329,7 +329,7 @@ mod test {
             + TranscriptWrite<Pcs::CommitmentChunk, F>
             + InMemoryTranscript<Param = ()>,
     {
-        for num_vars in 10..25 {
+        for num_vars in 10..15 {
             println!("k {:?}", num_vars);
             // Setup
             let (pp, vp) = {

@@ -269,6 +269,9 @@ where
         //If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
         //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
 
+        // The sum-check protocol starts from the first variable, but the FRI part
+        // will eventually produce the evaluation at (alpha_k, ..., alpha_1), so apply
+        // the bit-reversion to reverse the variable indices of the polynomial.
         reverse_index_bits_in_place(&mut bh_evals);
         reverse_index_bits_in_place(&mut codeword);
 
@@ -1189,19 +1192,19 @@ fn build_eq_x_r_helper<F: PrimeField>(r: &[F], buf: &mut Vec<F>) {
 
         let mut res = vec![F::ZERO; buf.len() << 1];
         res.par_iter_mut().enumerate().for_each(|(i, val)| {
-            let bi = buf[i >> 1];
-            let tmp = r[0] * bi;
-            if i & 1 == 0 {
-                *val = bi - tmp;
-            } else {
-                *val = tmp;
-            }
+            *val = buf[i >> 1] * if i & 1 == 0 { F::ONE - r[0] } else { r[0] }
         });
         *buf = res;
     }
 }
 
 fn sum_check_first_round<F: PrimeField>(mut eq: &mut Vec<F>, mut bh_values: &mut Vec<F>) -> Vec<F> {
+    // The input polynomials are in the form of evaluations. Instead of viewing
+    // every one element as the evaluation of the polynomial at a single point,
+    // we can view every two elements as partially evaluating the polynomial at
+    // a single point, leaving the first variable free, and obtaining a univariate
+    // polynomial. The one_level_interp_hc transforms the evaluation forms into
+    // the coefficient forms, for every of these partial polynomials.
     one_level_interp_hc(&mut eq);
     one_level_interp_hc(&mut bh_values);
     parallel_pi(&bh_values, &eq)
@@ -1221,8 +1224,9 @@ pub fn one_level_eval_hc<F: PrimeField>(mut evals: &mut Vec<F>, challenge: F) {
     evals.par_chunks_mut(2).for_each(|chunk| {
         chunk[1] = chunk[0] + challenge * chunk[1];
     });
-    let mut index = 0;
 
+    // Skip every one other element
+    let mut index = 0;
     evals.retain(|v| {
         index += 1;
         (index - 1) % 2 == 1
@@ -1252,6 +1256,7 @@ fn parallel_pi<F: PrimeField>(evals: &Vec<F>, eq: &Vec<F>) -> Vec<F> {
     }
     let mut coeffs = vec![F::ZERO, F::ZERO, F::ZERO];
 
+    // Manually write down the multiplication formular of two linear polynomials
     let mut firsts = vec![F::ZERO; evals.len()];
     firsts.par_iter_mut().enumerate().for_each(|(i, mut f)| {
         if (i % 2 == 0) {
@@ -1323,6 +1328,10 @@ fn sum_check_challenge_round<F: PrimeField>(
     mut bh_values: &mut Vec<F>,
     challenge: F,
 ) -> Vec<F> {
+    // Note that when the last round ends, every two elements are in
+    // the coefficient form. Use the challenge to reduce the two elements
+    // into a single value. This is equivalent to substituting the challenge
+    // to the first variable of the poly.
     one_level_eval_hc(&mut bh_values, challenge);
     one_level_eval_hc(&mut eq, challenge);
 
@@ -1525,6 +1534,7 @@ pub fn interpolate2_weights<F: PrimeField>(points: [(F, F); 2], weight: F, x: F)
     let (a0, a1) = points[0];
     let (b0, b1) = points[1];
     //    assert_ne!(a0, b0);
+    // Here weight = 1/(b0-a0). The reason for precomputing it is that inversion is expensive
     a1 + (x - a0) * (b1 - a1) * weight
 }
 
@@ -1992,25 +2002,26 @@ fn commit_phase<F: PrimeField, H: Hash>(
     F,
 ) {
     let mut oracles = Vec::with_capacity(num_vars);
-
     let mut trees = Vec::with_capacity(num_vars);
-
     let mut new_tree = &comm.codeword_tree;
-    let mut root = new_tree[new_tree.len() - 1][0].clone();
+    let mut root = comm.get_root();
     let mut new_oracle = &comm.codeword;
-
-    let num_rounds = num_rounds; //pp.table.len() - pp.log_rate;
+    // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let mut eq = build_eq_x_r_vec::<F>(&point).unwrap();
-
-    let mut eval = F::ZERO;
-    let mut bh_evals = Vec::with_capacity(1 << num_vars);
-    for i in 0..eq.len() {
-        eval = eval + comm.bh_evals[i] * eq[i];
-        bh_evals.push(comm.bh_evals[i]);
-    }
+    let mut bh_evals = comm.bh_evals.clone();
+    // eval is the evaluation of the committed polynomial at r
+    let eval = comm
+        .bh_evals
+        .par_iter()
+        .zip(&eq)
+        .map(|(a, b)| *a * *b)
+        .sum();
 
     let mut sum_check_oracles = Vec::with_capacity(num_rounds + 1);
     sum_check_oracles.push(sum_check_first_round::<F>(&mut eq, &mut bh_evals));
+    // Note that after the sum_check_first_round, every two elements in eq and bh_evals have
+    // been transformed into the coefficient forms. More precisely, position [2i] and [2i+1]
+    // are used to store the partially evaluated polynomial f(X,binary(i))
 
     for i in 0..(num_rounds) {
         transcript.write_commitment(&root).unwrap();
@@ -2018,7 +2029,6 @@ fn commit_phase<F: PrimeField, H: Hash>(
         let sumcheck = Instant::now();
         sum_check_oracles.push(sum_check_challenge_round(&mut eq, &mut bh_evals, challenge));
 
-        let now = Instant::now();
         oracles.push(basefold_one_round_by_interpolation_weights::<F>(
             &table_w_weights,
             i,
@@ -2027,10 +2037,9 @@ fn commit_phase<F: PrimeField, H: Hash>(
         ));
 
         new_oracle = &oracles[i];
-        let now = Instant::now();
         trees.push(merkelize::<F, H>(&new_oracle));
 
-        root = trees[i][trees[i].len() - 1][0].clone();
+        root = trees[i].last().unwrap()[0].clone();
     }
 
     transcript.write_commitment(&root).unwrap();
@@ -2282,6 +2291,8 @@ fn get_table_aes<F: PrimeField>(
     BatchInverter::invert_with_external_scratch(&mut weights, &mut scratch_space);
 
     // Zip x and -1/2x together. The result is the list { (x, -1/2x) }
+    // What is this -1/2x? It is used in linear interpolation over the domain (x, -x), which
+    // involves computing 1/(b-a) where b=-x and a=x, and 1/(b-a) here is exactly -1/2x
     let mut flat_table_w_weights = flat_table
         .iter()
         .zip(weights)
