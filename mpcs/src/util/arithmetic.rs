@@ -1,5 +1,8 @@
+use crate::util::{
+    new_fields::{Mersenne127, Mersenne61},
+    BigUint, Itertools,
+};
 use ctr;
-use crate::util::{BigUint, Itertools, new_fields::{Mersenne127,Mersenne61}};
 use halo2_curves::{
     bn256, grumpkin,
     pairing::{self, MillerLoopResult},
@@ -22,9 +25,6 @@ pub use halo2_curves::{
     Coordinates, CurveAffine, CurveExt,
 };
 pub use msm::{fixed_base_msm, variable_base_msm, window_size, window_table};
-
-
-
 
 pub trait MultiMillerLoop: pairing::MultiMillerLoop + Debug + Sync {
     fn pairings_product_is_identity(terms: &[(&Self::G1Affine, &Self::G2Prepared)]) -> bool {
@@ -64,13 +64,10 @@ pub fn field_size<F: PrimeField>() -> usize {
 }
 
 pub fn horner_new<F: Field>(coeffs: &[F], x: &F) -> F {
-    let coeff_vec:Vec<&F> = coeffs
-        .iter()
-        .rev()
-	.collect();
+    let coeff_vec: Vec<&F> = coeffs.iter().rev().collect();
     let mut acc = F::ZERO;
-    for c in coeff_vec{
-	acc = acc*x + c;
+    for c in coeff_vec {
+        acc = acc * x + c;
     }
     acc
     //2
@@ -78,13 +75,10 @@ pub fn horner_new<F: Field>(coeffs: &[F], x: &F) -> F {
 }
 
 pub fn horner<F: Field>(coeffs: &[F], x: &F) -> F {
-    let coeff_vec:Vec<&F> = coeffs
-        .iter()
-        .rev()
-	.collect();
+    let coeff_vec: Vec<&F> = coeffs.iter().rev().collect();
     let mut acc = F::ZERO;
-    for c in coeff_vec{
-	acc = acc*x + c;
+    for c in coeff_vec {
+        acc = acc * x + c;
     }
     acc
     //2
@@ -95,24 +89,21 @@ pub fn horner_orig<F: Field>(coeffs: &[F], x: &F) -> F {
     coeffs
         .iter()
         .rev()
-	.fold(F::ZERO, |acc, coeff| acc * x + coeff)
+        .fold(F::ZERO, |acc, coeff| acc * x + coeff)
 }
 #[test]
-fn bench_horner(){
+fn bench_horner() {
+    use crate::poly::{multilinear::MultilinearPolynomial, Polynomial};
     use rand::{rngs::OsRng, Rng};
     use std::time::Instant;
-    use crate::poly::{Polynomial,multilinear::MultilinearPolynomial};
     let poly = MultilinearPolynomial::rand(10, OsRng);
     let test1 = Instant::now();
-    horner_orig(&poly.evals()[..],&Mersenne61::ONE);
+    horner_orig(&poly.evals()[..], &Mersenne61::ONE);
     println!("orig {:?}", test1.elapsed());
 
     let test2 = Instant::now();
-    horner_new(&poly.evals()[..],&Mersenne61::ONE);
+    horner_new(&poly.evals()[..], &Mersenne61::ONE);
     println!("new {:?}", test2.elapsed());
-    
-
-    
 }
 pub fn steps<F: Field>(start: F) -> impl Iterator<Item = F> {
     steps_by(start, F::ONE)

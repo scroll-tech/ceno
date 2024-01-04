@@ -11,6 +11,7 @@ pub mod parallel;
 pub mod plonky2_util;
 mod timer;
 pub mod transcript;
+use ff::PrimeField;
 pub use itertools::{chain, izip, Itertools};
 pub use num_bigint::BigUint;
 pub use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
@@ -44,6 +45,11 @@ impl BitIndex for usize {
     fn nth_bit(&self, nth: usize) -> bool {
         (self >> nth) & 1 == 1
     }
+}
+
+/// How many bytes are required to store n field elements?
+pub fn num_of_bytes<F: PrimeField>(n: usize) -> usize {
+    (F::NUM_BITS as usize).next_power_of_two() * n / 8
 }
 
 macro_rules! impl_index {

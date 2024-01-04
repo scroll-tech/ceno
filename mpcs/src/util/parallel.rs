@@ -13,7 +13,6 @@ where
     T: Send,
     F: Fn(T) + Send + Sync + Clone,
 {
-
     #[cfg(feature = "parallel")]
     rayon::scope(|scope| {
         iter.for_each(|item| {
@@ -23,7 +22,6 @@ where
     });
 
     #[cfg(not(feature = "parallel"))]
-
     iter.for_each(f);
 }
 
@@ -32,7 +30,6 @@ where
     T: Send,
     F: Fn((&mut [T], usize)) + Send + Sync + Clone,
 {
-
     #[cfg(feature = "parallel")]
     {
         use crate::util::arithmetic::div_ceil;
@@ -46,7 +43,6 @@ where
     }
 
     #[cfg(not(feature = "parallel"))]
-
     f((v, 0));
 }
 

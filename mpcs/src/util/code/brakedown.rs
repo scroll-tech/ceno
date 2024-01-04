@@ -14,7 +14,7 @@ use std::{
     cmp::{max, min},
     collections::BTreeSet,
     fmt::Debug,
-    iter
+    iter,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,7 +54,7 @@ impl<F: PrimeField> Brakedown<F> {
                 }
             });
 
-//	let row_len = (((1 << num_vars) as f64).sqrt() as usize).next_power_of_two() as usize;
+        //	let row_len = (((1 << num_vars) as f64).sqrt() as usize).next_power_of_two() as usize;
         let codeword_len = S::codeword_len(log2_q, row_len, n_0);
         let num_column_opening = S::num_column_opening();
         let num_proximity_testing = S::num_proximity_testing(log2_q, row_len, n_0);
@@ -177,10 +177,10 @@ pub trait BrakedownSpec: Debug {
     }
 
     fn num_column_opening() -> usize {
-//	1
+        //	1
         let numc = ceil(-Self::LAMBDA / (1.0 - Self::delta() / 3.0).log2());
-//	println!("num c {:?}", numc);
-	numc
+        //	println!("num c {:?}", numc);
+        numc
     }
 
     fn num_proximity_testing(log2_q: usize, n: usize, n_0: usize) -> usize {
@@ -364,7 +364,6 @@ mod test {
         let n = 1 << 30;
         let n_0 = 30;
 
-	
         assert!(S::delta() - delta < 1e-3);
         assert_eq!(S::c_n(n), c_n);
         assert_eq!(S::d_n(log2_q, n), d_n);

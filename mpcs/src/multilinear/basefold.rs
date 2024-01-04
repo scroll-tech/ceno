@@ -1,7 +1,3 @@
-use crate::sum_check::{
-    classic::{ClassicSumCheck, CoefficientsProver},
-    eq_xy_eval, SumCheck as _, VirtualPolynomial,
-};
 use crate::Commitment;
 use crate::{
     multilinear::{additive, validate_input},
@@ -17,6 +13,13 @@ use crate::{
         BigUint, Deserialize, DeserializeOwned, Itertools, Serialize,
     },
     AdditiveCommitment, Error, Evaluation, Point, PolynomialCommitmentScheme,
+};
+use crate::{
+    sum_check::{
+        classic::{ClassicSumCheck, CoefficientsProver},
+        eq_xy_eval, SumCheck as _, VirtualPolynomial,
+    },
+    util::num_of_bytes,
 };
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use core::fmt::Debug;
@@ -163,6 +166,7 @@ impl<F: PrimeField, H: Hash> AdditiveCommitment<F> for BasefoldCommitment<F, H> 
         }
     }
 }
+
 impl<F, H, V> PolynomialCommitmentScheme<F> for Basefold<F, H, V>
 where
     F: PrimeField + Serialize + DeserializeOwned,
@@ -192,6 +196,7 @@ where
             basecode: true,
         })
     }
+
     fn trim(
         param: &Self::Param,
         poly_size: usize,
@@ -218,6 +223,7 @@ where
                 log_rate: param.log_rate,
                 num_verifier_queries: param.num_verifier_queries,
                 num_rounds: rounds,
+                // Why not trim the weights using poly_size?
                 table_w_weights: param.table_w_weights.clone(),
                 basecode: param.basecode,
             },
@@ -878,6 +884,7 @@ where
         Ok(())
     }
 }
+
 #[test]
 fn test_evaluate_generic_basecode() {
     use crate::multilinear::basefold::test::Five;
@@ -2204,6 +2211,7 @@ fn get_table_aes<F: PrimeField>(
     rate: usize,
     rng: &mut ChaCha8Rng,
 ) -> (Vec<Vec<(F, F)>>, Vec<Vec<F>>) {
+    // The size (logarithmic) of the codeword for the polynomial
     let lg_n: usize = rate + log2_strict(poly_size);
 
     let now = Instant::now();
@@ -2220,35 +2228,48 @@ fn get_table_aes<F: PrimeField>(
         GenericArray::from_slice(&iv[..]),
     );
 
-    let bytes = (F::NUM_BITS as usize).next_power_of_two() * (1 << lg_n) / 8;
+    // Allocate the buffer for storing n field elements (the entire codeword)
+    let bytes = num_of_bytes::<F>(1 << lg_n);
     let mut dest: Vec<u8> = vec![0u8; bytes];
     cipher.apply_keystream(&mut dest[..]);
 
+    // Now, dest is a vector filled with random data for a field vector of size n
+
+    // Collect the bytes into field elements
     let flat_table: Vec<F> = dest
-        .par_chunks_exact((F::NUM_BITS as usize).next_power_of_two() / 8)
+        .par_chunks_exact(num_of_bytes::<F>(1))
         .map(|chunk| from_raw_bytes::<F>(&chunk.to_vec()))
         .collect::<Vec<_>>();
 
+    // Now, flat_table is a field vector of size n, filled with random field elements
     assert_eq!(flat_table.len(), 1 << lg_n);
 
+    // Multiply -2 to every element to get the weights. Now weights = { -2x }
     let mut weights: Vec<F> = flat_table
         .par_iter()
         .map(|el| F::ZERO - *el - *el)
         .collect();
 
+    // Then invert all the elements. Now weights = { -1/2x }
     let mut scratch_space = vec![F::ZERO; weights.len()];
     BatchInverter::invert_with_external_scratch(&mut weights, &mut scratch_space);
 
+    // Zip x and -1/2x together. The result is the list { (x, -1/2x) }
     let mut flat_table_w_weights = flat_table
         .iter()
         .zip(weights)
         .map(|(el, w)| (*el, w))
         .collect_vec();
 
+    // Split the positions from 0 to n-1 into slices of sizes:
+    // 2, 2, 4, 8, ..., n/2, exactly lg_n number of them
+    // The weights are (x, -1/2x), the table elements are just x
+
     let mut unflattened_table_w_weights = vec![Vec::new(); lg_n];
     let mut unflattened_table = vec![Vec::new(); lg_n];
 
     let mut level_weights = flat_table_w_weights[0..2].to_vec();
+    // Apply the reverse-bits permutation to a vector of size 2, equivalent to just swapping
     reverse_index_bits_in_place(&mut level_weights);
     unflattened_table_w_weights[0] = level_weights;
 
