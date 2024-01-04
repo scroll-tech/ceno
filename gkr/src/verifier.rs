@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
-use frontend::structs::ConstantType;
+use frontend::structs::{CellId, ConstantType, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
 
@@ -37,12 +37,12 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         assert_eq!(wires_out_evals.len(), circuit.copy_to_wires_out.len());
 
         let mut verifier_state = Self::verifier_init_parallel(output_evals, wires_out_evals);
-        for layer_id in 0..circuit.layers.len() {
+        for layer_id in 0..circuit.layers.len() as LayerId {
             let timer = start_timer!(|| format!("Verify layer {}", layer_id));
             verifier_state.layer_id = layer_id;
 
-            let layer = &circuit.layers[layer_id];
-            let (phase1_msg, phase2_msg) = &proof.sumcheck_proofs[layer_id];
+            let layer = &circuit.layers[layer_id as usize];
+            let (phase1_msg, phase2_msg) = &proof.sumcheck_proofs[layer_id as usize];
             let (layer_out_point, layer_out_value) = match phase1_msg {
                 Some(phase1_msg) => {
                     verifier_state.verify_and_update_state_phase1_parallel(
@@ -103,12 +103,12 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
     ) -> Self {
         let next_evals = output_evals.to_vec();
         let mut subset_evals = HashMap::new();
-        subset_evals.entry(0usize).or_insert(
+        subset_evals.entry(0).or_insert(
             wires_out_evals
                 .to_vec()
                 .into_iter()
                 .enumerate()
-                .map(|(i, (point, value))| (i, point.clone(), value))
+                .map(|(i, (point, value))| (i as LayerId, point.clone(), value))
                 .collect_vec(),
         );
         Self {
@@ -179,7 +179,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
     ) -> Result<(), GKRError> {
         self.next_evals.clear();
 
-        let layer = &circuit.layers[self.layer_id];
+        let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let hi_out_num_vars = layer_out_point.len() - lo_out_num_vars;
 
@@ -313,7 +313,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
     ) -> Result<(), GKRError> {
         self.next_evals.clear();
 
-        let layer = &circuit.layers[self.layer_id];
+        let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let lo_in_num_vars = circuit.max_wires_in_num_vars;
         let hi_out_num_vars = layer_out_point.len() - lo_out_num_vars;
@@ -355,7 +355,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
 
 struct IOPVerifierPhase1State<'a, F: SmallField> {
     next_evals: &'a [(Point<F>, F)],
-    subset_evals: &'a [(usize, Point<F>, F)],
+    subset_evals: &'a [(LayerId, Point<F>, F)],
     alpha_pows: Vec<F>,
     lo_num_vars: usize,
     hi_num_vars: usize,
@@ -374,7 +374,7 @@ struct IOPVerifierPhase2State<'a, F: SmallField> {
     adds: Vec<Gate1In<F>>,
     add_consts: Vec<GateCIn<F>>,
     assert_consts: Vec<GateCIn<F>>,
-    paste_from: &'a HashMap<usize, Vec<usize>>,
+    paste_from: &'a HashMap<LayerId, Vec<CellId>>,
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
     hi_num_vars: usize,
@@ -392,8 +392,8 @@ struct IOPVerifierPhase2State<'a, F: SmallField> {
 struct IOPVerifierPhase2InputState<'a, F: SmallField> {
     layer_out_point: &'a Point<F>,
     layer_out_value: F,
-    paste_from_constant: &'a [(F, usize, usize)],
-    paste_from_wires_in: &'a [(usize, usize)],
+    paste_from_constant: &'a [(F, CellId, CellId)],
+    paste_from_wires_in: &'a [(CellId, CellId)],
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
     hi_num_vars: usize,

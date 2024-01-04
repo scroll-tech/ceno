@@ -2,7 +2,7 @@ use std::{iter, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
-use frontend::structs::ConstantType;
+use frontend::structs::{CellId, ConstantType};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -179,7 +179,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
     ///     g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
     pub(super) fn prove_and_update_state_step1_parallel(
         &mut self,
-        old_wire_id: impl Fn(usize, usize) -> usize,
+        old_wire_id: impl Fn(CellId, CellId) -> CellId,
         transcript: &mut Transcript<F>,
     ) -> (SumcheckProof<F>, Vec<F>) {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 1");
@@ -251,8 +251,8 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
                 .enumerate()
                 .for_each(|(subset_wire_id, &new_wire_id)| {
                     for s in 0..(1 << hi_num_vars) {
-                        f1_j[(s << lo_in_num_vars) ^ subset_wire_id] =
-                            paste_from_sources[j][s][old_wire_id(j, subset_wire_id)];
+                        f1_j[(s << lo_in_num_vars) ^ subset_wire_id] = paste_from_sources
+                            [j as usize][s][old_wire_id(j as usize, subset_wire_id)];
                         g1_j[(s << lo_in_num_vars) ^ subset_wire_id] +=
                             tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ new_wire_id];
                     }

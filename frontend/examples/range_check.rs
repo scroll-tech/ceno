@@ -10,7 +10,7 @@ fn main() {
 
     let (_, inputs) = circuit_builder.create_wire_in(5);
 
-    let table_type = TableType::Range8bit as usize;
+    let table_type = TableType::Range8bit as u16;
     circuit_builder.define_table_type(table_type);
     for i in 0..8 as u64 {
         circuit_builder.add_table_item_const(table_type, &Goldilocks::from(i))
@@ -23,5 +23,6 @@ fn main() {
     circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));
 
     circuit_builder.configure();
+    #[cfg(debug_assertions)]
     circuit_builder.print_info();
 }

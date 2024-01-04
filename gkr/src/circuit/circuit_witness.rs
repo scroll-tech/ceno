@@ -1,6 +1,6 @@
 use std::{fmt::Debug, sync::Arc};
 
-use frontend::structs::ConstantType;
+use frontend::structs::{ConstantType, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
@@ -71,12 +71,12 @@ impl<F: SmallField> CircuitWitness<F> {
                         .iter()
                         .enumerate()
                         .for_each(|(subset_wire_id, new_wire_id)| {
-                            let old_wire_id = circuit.layers[*old_layer_id]
+                            let old_wire_id = circuit.layers[*old_layer_id as usize]
                                 .copy_to
-                                .get(&layer_id)
+                                .get(&(layer_id as LayerId))
                                 .unwrap()[subset_wire_id];
                             current_layer_witness[*new_wire_id] =
-                                layer_witnesses[*old_layer_id][old_wire_id];
+                                layer_witnesses[*old_layer_id as usize][old_wire_id];
                         });
                 });
 
@@ -171,13 +171,13 @@ impl<F: SmallField> CircuitWitness<F> {
                 for (subset_wire_id, new_wire_id) in new_wire_ids.iter().enumerate() {
                     assert_eq!(
                         input_layer_witness[copy_id][*new_wire_id],
-                        wires_in[*id][copy_id][subset_wire_id],
+                        wires_in[*id as usize][copy_id][subset_wire_id],
                         "input layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
                         circuit.layers.len() - 1,
                         copy_id,
                         new_wire_id,
                         input_layer_witness[*new_wire_id],
-                        wires_in[*id][subset_wire_id]
+                        wires_in[*id as usize][subset_wire_id]
                     );
                 }
             }
@@ -221,11 +221,12 @@ impl<F: SmallField> CircuitWitness<F> {
                 for (old_layer_id, new_wire_ids) in layer.paste_from.iter() {
                     expected_max_previous_size = expected_max_previous_size.max(new_wire_ids.len());
                     for (subset_wire_id, new_wire_id) in new_wire_ids.iter().enumerate() {
-                        let old_wire_id = circuit.layers[*old_layer_id]
+                        let old_wire_id = circuit.layers[*old_layer_id as usize]
                             .copy_to
-                            .get(&layer_id)
+                            .get(&(layer_id as LayerId))
                             .unwrap()[subset_wire_id];
-                        expected[*new_wire_id] = self.layers[*old_layer_id][copy_id][old_wire_id];
+                        expected[*new_wire_id] =
+                            self.layers[*old_layer_id as usize][copy_id][old_wire_id];
                     }
                 }
                 assert_eq!(
@@ -238,19 +239,19 @@ impl<F: SmallField> CircuitWitness<F> {
                 );
                 for (new_layer_id, old_wire_ids) in layer.copy_to.iter() {
                     for (subset_wire_id, old_wire_id) in old_wire_ids.iter().enumerate() {
-                        let new_wire_id = circuit.layers[*new_layer_id]
+                        let new_wire_id = circuit.layers[*new_layer_id as usize]
                             .paste_from
-                            .get(&layer_id)
+                            .get(&(layer_id as LayerId))
                             .unwrap()[subset_wire_id];
                         assert_eq!(
                             curr[*old_wire_id],
-                            self.layers[*new_layer_id][copy_id][new_wire_id],
+                            self.layers[*new_layer_id as usize][copy_id][new_wire_id],
                             "copy_to check: layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
                             layer_id,
                             copy_id,
                             old_wire_id,
                             curr[*old_wire_id],
-                            self.layers[*new_layer_id][copy_id][new_wire_id]
+                            self.layers[*new_layer_id as usize][copy_id][new_wire_id]
                         )
                     }
                 }
@@ -321,10 +322,10 @@ impl<F: SmallField> CircuitWitness<F> {
 impl<F: SmallField> CircuitWitness<F> {
     pub fn layer_poly(
         &self,
-        layer_id: usize,
+        layer_id: LayerId,
         single_num_vars: usize,
     ) -> Arc<DenseMultilinearExtension<F>> {
-        self.layers[layer_id]
+        self.layers[layer_id as usize]
             .as_slice()
             .mle(single_num_vars, self.instance_num_vars())
     }
