@@ -2,6 +2,7 @@ use std::{ops::Add, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
+use frontend::structs::{CellId, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -22,7 +23,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase1State<'a, F> {
     pub(super) fn prover_init_parallel(
         layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
         next_evals: &'a [(Point<F>, F)],
-        subset_evals: &'a [(usize, Point<F>, F)],
+        subset_evals: &'a [(LayerId, Point<F>, F)],
         alpha: &F,
         lo_num_vars: usize,
         hi_num_vars: usize,
@@ -55,7 +56,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase1State<'a, F> {
     ///     g1^{(j)}(y) = \alpha^j copy_to[j](ry_j, y)
     pub(super) fn prove_and_update_state_step1_parallel(
         &mut self,
-        copy_to: impl Fn(&usize) -> &'a [usize],
+        copy_to: impl Fn(&LayerId) -> &'a [CellId],
         transcript: &mut Transcript<F>,
     ) -> (SumcheckProof<F>, Vec<F>) {
         let timer = start_timer!(|| "Prover sumcheck phase 1 step 1");
@@ -149,7 +150,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase1State<'a, F> {
         //     .fold(F::ZERO, |acc, (&f1_value_j, g1_value_j)| {
         //         acc + f1_value_j * g1_value_j
         //     });
-        
+
         // f2(t) = layers[i](t || ry)
         let f2 = Arc::new(self.layer_out_poly.fix_variables(&self.sumcheck_point_1));
         // g2^{(j)}(t) = \alpha^j copy_to[j](ry_j, ry) eq(rt_j, t)

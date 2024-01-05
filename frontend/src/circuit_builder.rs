@@ -2,7 +2,8 @@ use goldilocks::SmallField;
 use std::collections::{HashMap, HashSet};
 
 use crate::structs::{
-    Cell, CellType, CircuitBuilder, ConstantType, GateType, TableData, TableType,
+    Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId, TableData, TableType,
+    WireId,
 };
 
 impl<F: SmallField> Cell<F> {
@@ -26,10 +27,10 @@ impl<F: SmallField> TableData<F> {
             count_witness_cell_type: witness_cell_type,
         }
     }
-    pub fn add_table_item(&mut self, cell: usize) {
+    pub fn add_table_item(&mut self, cell: CellId) {
         self.table_items.push(cell);
     }
-    pub fn add_input_item(&mut self, cell: usize) {
+    pub fn add_input_item(&mut self, cell: CellId) {
         self.input_items.push(cell);
     }
     pub fn add_table_item_const(&mut self, constant: &F) {
@@ -57,70 +58,70 @@ where
             n_wires_out: 0,
         }
     }
-    pub fn create_cell(&mut self) -> usize {
+    pub fn create_cell(&mut self) -> CellId {
         self.cells.push(Cell::new());
         self.cells.len() - 1
     }
 
-    pub fn create_cells(&mut self, num: usize) -> Vec<usize> {
+    pub fn create_cells(&mut self, num: usize) -> Vec<CellId> {
         self.cells.extend((0..num).map(|_| Cell::new()));
         (self.cells.len() - num..self.cells.len()).collect()
     }
 
     /// This is to mark the cells with special functionality.
-    fn mark_cells(&mut self, cell_type: CellType, cells: &[usize]) {
+    fn mark_cells(&mut self, cell_type: CellType, cells: &[CellId]) {
         cells.iter().for_each(|cell| {
             self.cells[*cell].cell_type = Some(cell_type);
         });
     }
 
-    pub fn create_wire_in(&mut self, num: usize) -> (usize, Vec<usize>) {
+    pub fn create_wire_in(&mut self, num: usize) -> (usize, Vec<CellId>) {
         let cell = self.create_cells(num);
-        self.mark_cells(CellType::WireIn(self.n_wires_in), &cell);
+        self.mark_cells(CellType::WireIn(self.n_wires_in as WireId), &cell);
         self.n_wires_in += 1;
         (self.n_wires_in - 1, cell)
     }
 
     /// Create input cells and assign it to be constant.
-    pub fn create_constant_in(&mut self, num: usize, constant: i64) -> Vec<usize> {
-        let cell: Vec<usize> = self.create_cells(num);
+    pub fn create_constant_in(&mut self, num: usize, constant: i64) -> Vec<CellId> {
+        let cell = self.create_cells(num);
         self.mark_cells(CellType::ConstantIn(constant), &cell);
         cell
     }
 
-    pub fn create_wire_out(&mut self, num: usize) -> (usize, Vec<usize>) {
+    pub fn create_wire_out(&mut self, num: usize) -> (usize, Vec<CellId>) {
         let cell = self.create_cells(num);
-        self.mark_cells(CellType::WireOut(self.n_wires_out), &cell);
+        self.mark_cells(CellType::WireOut(self.n_wires_out as WireId), &cell);
         self.n_wires_out += 1;
         (self.n_wires_out - 1, cell)
     }
 
-    fn create_wire_in_empty(&mut self) -> usize {
+    fn create_wire_in_empty(&mut self) -> WireId {
         self.n_wires_in += 1;
-        self.n_wires_in - 1
+        self.n_wires_in as WireId - 1
     }
 
-    pub fn add_const(&mut self, out: usize, constant: ConstantType<F>) {
+    pub fn add_const(&mut self, out: CellId, constant: ConstantType<F>) {
         let out_cell = &mut self.cells[out];
         out_cell.gates.push(GateType::AddC(constant));
     }
 
-    pub fn add(&mut self, out: usize, in_0: usize, scaler: ConstantType<F>) {
+    pub fn add(&mut self, out: CellId, in_0: CellId, scaler: ConstantType<F>) {
         let out_cell = &mut self.cells[out];
         out_cell.gates.push(GateType::Add(in_0, scaler));
     }
 
-    pub fn mul2(&mut self, out: usize, in_0: usize, in_1: usize, scaler: ConstantType<F>) {
+    pub fn mul2(&mut self, out: CellId, in_0: CellId, in_1: CellId, scaler: ConstantType<F>) {
         let out_cell = &mut self.cells[out];
         out_cell.gates.push(GateType::Mul2(in_0, in_1, scaler));
     }
 
     pub fn mul3(
         &mut self,
-        out: usize,
-        in_0: usize,
-        in_1: usize,
-        in_2: usize,
+        out: CellId,
+        in_0: CellId,
+        in_1: CellId,
+        in_2: CellId,
         scaler: ConstantType<F>,
     ) {
         let out_cell = &mut self.cells[out];
@@ -129,7 +130,7 @@ where
             .push(GateType::Mul3(in_0, in_1, in_2, scaler));
     }
 
-    pub fn assert_const(&mut self, out: usize, constant: &F) {
+    pub fn assert_const(&mut self, out: CellId, constant: &F) {
         let out_cell = &mut self.cells[out];
         out_cell.assert_const = Some(*constant);
     }
@@ -137,9 +138,9 @@ where
     /// Compute \sum_{i = 0}^{in_0_array.len()} scalers[i] * in_0_array[i] * in_1_array[i].
     pub fn inner_product(
         &mut self,
-        out: usize,
-        in_0_array: &[usize],
-        in_1_array: &[usize],
+        out: CellId,
+        in_0_array: &[CellId],
+        in_1_array: &[CellId],
         scaler_array: &[ConstantType<F>],
     ) {
         assert_eq!(in_0_array.len(), in_1_array.len());
@@ -150,8 +151,8 @@ where
     }
     pub fn inner_product_const(
         &mut self,
-        out: usize,
-        in_0_array: &[usize],
+        out: CellId,
+        in_0_array: &[CellId],
         scaler_array: &[ConstantType<F>],
     ) {
         assert_eq!(in_0_array.len(), scaler_array.len());
@@ -159,7 +160,7 @@ where
             self.add(out, *in_0, *scaler);
         }
     }
-    pub fn product_of_array(&mut self, out: usize, in_array: &[usize]) {
+    pub fn product_of_array(&mut self, out: CellId, in_array: &[CellId]) {
         match in_array.len() {
             0 => {}
             1 => {
@@ -213,10 +214,10 @@ where
 
     pub fn frac_addition_of_array(
         &mut self,
-        out_den: usize,
-        out_num: usize,
-        den_array: &[usize],
-        num_array: &[usize],
+        out_den: CellId,
+        out_num: CellId,
+        den_array: &[CellId],
+        num_array: &[CellId],
     ) {
         assert!(den_array.len() == num_array.len());
         assert!(den_array.len() > 0);
@@ -351,7 +352,12 @@ where
         }
     }
 
-    pub fn inv_addition_of_array(&mut self, out_den: usize, out_num: usize, den_array: &[usize]) {
+    pub fn inv_addition_of_array(
+        &mut self,
+        out_den: CellId,
+        out_num: CellId,
+        den_array: &[CellId],
+    ) {
         assert!(den_array.len() > 0);
         match den_array.len() {
             1 => {
@@ -418,7 +424,7 @@ where
     /// Input a table type and initialize a table. We can define an enum type to
     /// indicate the table and convert it to usize. This should throw an error
     /// if the type has been defined. Return the index of the witness.
-    pub fn define_table_type(&mut self, table_type: TableType) -> usize {
+    pub fn define_table_type(&mut self, table_type: TableType) -> WireId {
         let count_idx = self.create_wire_in_empty();
         assert!(!self.tables.contains_key(&table_type));
         self.tables
@@ -426,7 +432,7 @@ where
         count_idx
     }
 
-    pub fn add_input_item(&mut self, table_type: TableType, cell: usize) {
+    pub fn add_input_item(&mut self, table_type: TableType, cell: CellId) {
         assert!(self.tables.contains_key(&table_type));
         self.tables
             .get_mut(&table_type)
@@ -434,7 +440,7 @@ where
             .add_input_item(cell);
     }
 
-    pub fn add_table_item(&mut self, table_type: TableType, cell: usize) {
+    pub fn add_table_item(&mut self, table_type: TableType, cell: CellId) {
         assert!(self.tables.contains_key(&table_type));
         self.tables
             .get_mut(&table_type)
@@ -524,13 +530,13 @@ where
     }
 
     /// Recursively assign layers to all cells.
-    fn assign_layer(&mut self, id: usize) -> usize {
+    fn assign_layer(&mut self, id: CellId) -> LayerId {
         if self.cells[id].gates.len() == 0 {
             self.cells[id].layer = Some(0);
             return 0;
         }
         if self.cells[id].layer.is_some() {
-            return *self.cells[id].layer.as_ref().unwrap();
+            return self.cells[id].layer.unwrap();
         }
         let mut prep_max_layer = 0;
 
@@ -673,7 +679,7 @@ where
         }
     }
 
-    pub fn is_wire_in(&self, cell: usize) -> bool {
+    pub fn is_wire_in(&self, cell: CellId) -> bool {
         self.cells[cell]
             .cell_type
             .map_or(false, |x| matches!(x, CellType::WireIn(_)))

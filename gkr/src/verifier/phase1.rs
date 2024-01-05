@@ -1,5 +1,6 @@
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
+use frontend::structs::{CellId, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
@@ -16,7 +17,7 @@ use super::{IOPVerifierPhase1State, SumcheckState};
 impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
     pub(super) fn verifier_init_parallel(
         next_evals: &'a [(Point<F>, F)],
-        subset_evals: &'a [(usize, Point<F>, F)],
+        subset_evals: &'a [(LayerId, Point<F>, F)],
         alpha: &F,
         lo_num_vars: usize,
         hi_num_vars: usize,
@@ -45,7 +46,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
     pub(super) fn verify_and_update_state_step1_parallel(
         &mut self,
         prover_msg: (&SumcheckProof<F>, &[F]),
-        copy_to: impl Fn(&usize) -> &'a [usize],
+        copy_to: impl Fn(&LayerId) -> &'a [CellId],
         transcript: &mut Transcript<F>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 1 step 1");

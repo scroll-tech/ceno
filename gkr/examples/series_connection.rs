@@ -1,6 +1,6 @@
 use frontend::structs::{CircuitBuilder, ConstantType};
 use gkr::{
-    structs::{Circuit, CircuitWitness, IOPProof, IOPProverState, IOPVerifierState},
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState},
     utils::MultilinearExtensionFromVectors,
 };
 use goldilocks::{Goldilocks, SmallField};

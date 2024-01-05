@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
+use frontend::structs::CellId;
 use goldilocks::SmallField;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
@@ -21,7 +22,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2InputState<'a, F> 
     pub(super) fn prover_init_parallel(
         layer_out_point: &'a Point<F>,
         wires_in: &'a [Vec<Vec<F>>],
-        paste_from_wires_in: &'a [(usize, usize)],
+        paste_from_wires_in: &'a [(CellId, CellId)],
         lo_out_num_vars: usize,
         lo_in_num_vars: usize,
         hi_num_vars: usize,

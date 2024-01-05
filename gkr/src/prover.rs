@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
 
+use frontend::structs::{CellId, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
@@ -39,7 +40,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         let mut prover_state =
             Self::prover_init_parallel(circuit_witness, output_evals, wires_out_evals);
 
-        let sumcheck_proofs = (0..circuit.layers.len())
+        let sumcheck_proofs = (0..circuit.layers.len() as LayerId)
             .map(|layer_id| {
                 let timer = start_timer!(|| format!("Prove layer {}", layer_id));
                 prover_state.layer_id = layer_id;
@@ -90,12 +91,12 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     ) -> Self {
         let next_evals = output_evals.to_vec();
         let mut subset_evals = HashMap::new();
-        subset_evals.entry(0usize).or_insert(
+        subset_evals.entry(0 as LayerId).or_insert(
             wires_out_evals
                 .to_vec()
                 .into_iter()
                 .enumerate()
-                .map(|(i, (point, value))| (i, point, value))
+                .map(|(i, (point, value))| (i as LayerId, point, value))
                 .collect_vec(),
         );
         Self {
@@ -116,7 +117,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         circuit: &Circuit<F>,
         transcript: &mut Transcript<F>,
     ) -> Option<IOPProverPhase1Message<F>> {
-        let layer = &circuit.layers[self.layer_id];
+        let layer = &circuit.layers[self.layer_id as usize];
         let lo_num_vars = layer.num_vars;
         let hi_num_vars = self.circuit_witness.instance_num_vars();
         self.layer_out_poly = self
@@ -190,7 +191,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     ) -> IOPProverPhase2Message<F> {
         self.next_evals.clear();
 
-        let layer = &circuit.layers[self.layer_id];
+        let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let hi_num_vars = self.circuit_witness.instance_num_vars();
 
@@ -201,7 +202,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             &self.layer_out_poly,
             &layer_out_point,
             *layer_out_value,
-            &self.circuit_witness.layers[self.layer_id + 1],
+            &self.circuit_witness.layers[self.layer_id as usize + 1],
             self.circuit_witness.layers_ref(),
             |c| self.circuit_witness.constant(c),
             hi_num_vars,
@@ -323,7 +324,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     ) -> IOPProverPhase2Message<F> {
         self.next_evals.clear();
 
-        let layer = &circuit.layers[self.layer_id];
+        let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let hi_num_vars = self.circuit_witness.instance_num_vars();
         assert!(lo_out_num_vars + hi_num_vars == layer_out_point.len());
@@ -364,7 +365,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
 struct IOPProverPhase1State<'a, F> {
     layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
     next_evals: &'a [(Point<F>, F)],
-    subset_evals: &'a [(usize, Point<F>, F)],
+    subset_evals: &'a [(LayerId, Point<F>, F)],
     alpha_pows: Vec<F>,
     lo_num_vars: usize,
     hi_num_vars: usize,
@@ -383,7 +384,7 @@ struct IOPProverPhase2State<'a, F: SmallField> {
     mul2s: Vec<Gate2In<F>>,
     adds: Vec<Gate1In<F>>,
     assert_consts: Vec<GateCIn<F>>,
-    paste_from: &'a HashMap<usize, Vec<usize>>,
+    paste_from: &'a HashMap<LayerId, Vec<CellId>>,
     paste_from_sources: &'a [Vec<Vec<F>>],
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
@@ -408,7 +409,7 @@ struct IOPProverPhase2State<'a, F: SmallField> {
 
 struct IOPProverPhase2InputState<'a, F: SmallField> {
     layer_out_point: &'a Point<F>,
-    paste_from_wires_in: &'a [(usize, usize)],
+    paste_from_wires_in: &'a [(CellId, CellId)],
     wires_in: &'a [Vec<Vec<F>>],
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,

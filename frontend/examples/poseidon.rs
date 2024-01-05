@@ -1,6 +1,6 @@
 //! Poseidon hash function. This is modified from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom.
 
-use frontend::structs::{CircuitBuilder, ConstantType};
+use frontend::structs::{CellId, CircuitBuilder, ConstantType};
 use goldilocks::{Goldilocks, SmallField};
 use mock_constant::{poseidon_c, poseidon_m, poseidon_p, poseidon_s};
 
@@ -22,7 +22,7 @@ const N_ROUNDS_P: [usize; 16] = [
 //     out <== in4*in;
 // }
 
-fn sigma<F: SmallField>(circuit_builder: &mut CircuitBuilder<F>, in_: usize) -> usize {
+fn sigma<F: SmallField>(circuit_builder: &mut CircuitBuilder<F>, in_: CellId) -> CellId {
     let in2 = circuit_builder.create_cell();
     let in4 = circuit_builder.create_cell();
 
@@ -47,10 +47,10 @@ fn sigma<F: SmallField>(circuit_builder: &mut CircuitBuilder<F>, in_: usize) -> 
 
 fn ark<F: SmallField>(
     circuit_builder: &mut CircuitBuilder<F>,
-    in_: &[usize],
+    in_: &[CellId],
     c: &[F],
     r: usize,
-) -> Vec<usize> {
+) -> Vec<CellId> {
     let out = circuit_builder.create_cells(in_.len());
 
     let one = ConstantType::Field(F::ONE);
@@ -79,9 +79,9 @@ fn ark<F: SmallField>(
 
 fn mix<F: SmallField>(
     circuit_builder: &mut CircuitBuilder<F>,
-    in_: &[usize],
+    in_: &[CellId],
     m: &[&[F]],
-) -> Vec<usize> {
+) -> Vec<CellId> {
     let out = circuit_builder.create_cells(in_.len());
 
     for i in 0..in_.len() {
@@ -106,10 +106,10 @@ fn mix<F: SmallField>(
 
 fn mix_last<F: SmallField>(
     circuit_builder: &mut CircuitBuilder<F>,
-    in_: &[usize],
+    in_: &[CellId],
     m: &[&[F]],
     s: usize,
-) -> usize {
+) -> CellId {
     let out = circuit_builder.create_cell();
 
     for j in 0..in_.len() {
@@ -135,10 +135,10 @@ fn mix_last<F: SmallField>(
 
 fn mix_s<F: SmallField>(
     circuit_builder: &mut CircuitBuilder<F>,
-    in_: &[usize],
+    in_: &[CellId],
     s: &[F],
     r: usize,
-) -> Vec<usize> {
+) -> Vec<CellId> {
     let t = in_.len();
     let out = circuit_builder.create_cells(t);
 
@@ -163,9 +163,9 @@ fn mix_s<F: SmallField>(
 fn poseidon_ex<F: SmallField>(
     circuit_builder: &mut CircuitBuilder<F>,
     n_outs: usize,
-    inputs: &[usize],
-    initial_state: usize,
-) -> Vec<usize> {
+    inputs: &[CellId],
+    initial_state: CellId,
+) -> Vec<CellId> {
     //     signal input inputs[nInputs];
     //     signal input initialState;
     //     signal output out[nOuts];
@@ -439,6 +439,7 @@ fn main() {
     );
     println!("The output is located at cell {:?}", poseidon_ex_out[0]);
     circuit_builder.configure();
+    #[cfg(debug_assertions)]
     circuit_builder.print_info();
 }
 

@@ -42,7 +42,7 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
         circuit_builder.assert_const(diff, &F::ZERO);
     }
 
-    let table_type = TableType::FakeHashTable as usize;
+    let table_type = TableType::FakeHashTable as u16;
     let count_idx = circuit_builder.define_table_type(table_type);
     for i in 0..table_size {
         circuit_builder.add_table_item(table_type, pow_of_xs[i]);
@@ -62,7 +62,7 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
         AllInputIndex {
             other_x_pows_idx,
             inputs_idx,
-            count_idx,
+            count_idx: count_idx as usize,
         },
     )
 }
