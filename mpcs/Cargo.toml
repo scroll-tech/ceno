@@ -27,6 +27,7 @@ poseidon = { git = "https://github.com/han0110/poseidon", branch = "feature/with
 rand_chacha={version ="0.3.1", features=["serde1"]}
 generic-array = { version = "0.14.7", features = ["serde"] }
 hex-literal = "0.3.3"
+multilinear_extensions = { path = "../multilinear_extensions" }
 
 [features]
 default = ["parallel", "sanity-check"]

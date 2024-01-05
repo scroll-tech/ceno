@@ -31,6 +31,8 @@ use halo2_curves::bn256::{Bn256, Fr};
 use rayon::iter::IntoParallelIterator;
 use std::{collections::HashMap, iter, ops::Deref, time::Instant};
 
+use multilinear_extensions::virtual_poly::build_eq_x_r_vec;
+
 use crate::util::plonky2_util::{reverse_bits, reverse_index_bits_in_place};
 use rand_chacha::{
     rand_core::{RngCore, SeedableRng},
@@ -1152,57 +1154,6 @@ fn merkelize<F: PrimeField, H: Hash>(values: &Vec<F>) -> Vec<Vec<Output<H>>> {
     tree
 }
 
-pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Option<Vec<F>> {
-    // we build eq(x,r) from its evaluations
-    // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
-    // for example, with num_vars = 4, x is a binary vector of 4, then
-    //  0 0 0 0 -> (1-r0)   * (1-r1)    * (1-r2)    * (1-r3)
-    //  1 0 0 0 -> r0       * (1-r1)    * (1-r2)    * (1-r3)
-    //  0 1 0 0 -> (1-r0)   * r1        * (1-r2)    * (1-r3)
-    //  1 1 0 0 -> r0       * r1        * (1-r2)    * (1-r3)
-    //  ....
-    //  1 1 1 1 -> r0       * r1        * r2        * r3
-    // we will need 2^num_var evaluations
-
-    let mut eval = Vec::new();
-    build_eq_x_r_helper(r, &mut eval);
-
-    Some(eval)
-}
-
-/// A helper function to build eq(x, r) recursively.
-/// This function takes `r.len()` steps, and for each step it requires a maximum
-/// `r.len()-1` multiplications.
-fn build_eq_x_r_helper<F: PrimeField>(r: &[F], buf: &mut Vec<F>) {
-    assert!(!r.is_empty(), "r length is 0");
-
-    if r.len() == 1 {
-        // initializing the buffer with [1-r_0, r_0]
-        buf.push(F::ONE - r[0]);
-        buf.push(r[0]);
-    } else {
-        build_eq_x_r_helper(&r[1..], buf);
-
-        // suppose at the previous step we received [b_1, ..., b_k]
-        // for the current step we will need
-        // if x_0 = 0:   (1-r0) * [b_1, ..., b_k]
-        // if x_0 = 1:   r0 * [b_1, ..., b_k]
-        // let mut res = vec![];
-        // for &b_i in buf.iter() {
-        //     let tmp = r[0] * b_i;
-        //     res.push(b_i - tmp);
-        //     res.push(tmp);
-        // }
-        // *buf = res;
-
-        let mut res = vec![F::ZERO; buf.len() << 1];
-        res.par_iter_mut().enumerate().for_each(|(i, val)| {
-            *val = buf[i >> 1] * if i & 1 == 0 { F::ONE - r[0] } else { r[0] }
-        });
-        *buf = res;
-    }
-}
-
 fn sum_check_first_round<F: PrimeField>(mut eq: &mut Vec<F>, mut bh_values: &mut Vec<F>) -> Vec<F> {
     // The input polynomials are in the form of evaluations. Instead of viewing
     // every one element as the evaluation of the polynomial at a single point,
@@ -2029,7 +1980,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
     let mut root = comm.get_root();
     let mut new_oracle = &comm.codeword;
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let mut eq = build_eq_x_r_vec::<F>(&point).unwrap();
+    let mut eq = build_eq_x_r_vec::<F>(&point);
     let mut bh_evals = comm.bh_evals.clone();
     // eval is the evaluation of the committed polynomial at r
     let eval = comm
