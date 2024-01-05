@@ -8,6 +8,7 @@ use std::hash::Hash;
 // We achieve this via setting them to different primitive types.
 // This works better/simpler than struct-wrapping
 pub type TableType = u16;
+pub type WireId = u16;
 pub type LayerId = u32;
 pub type CellId = usize;
 
@@ -46,8 +47,8 @@ pub struct Cell<F: SmallField> {
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
 pub enum CellType {
     ConstantIn(i64), // just for implementation convenience.
-    WireIn(CellId),
-    WireOut(CellId),
+    WireIn(WireId),
+    WireOut(WireId),
 }
 
 #[derive(Clone)]

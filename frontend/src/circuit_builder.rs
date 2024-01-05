@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::structs::{
     Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId, TableData, TableType,
+    WireId,
 };
 
 impl<F: SmallField> Cell<F> {
@@ -76,7 +77,7 @@ where
 
     pub fn create_wire_in(&mut self, num: usize) -> (usize, Vec<CellId>) {
         let cell = self.create_cells(num);
-        self.mark_cells(CellType::WireIn(self.n_wires_in), &cell);
+        self.mark_cells(CellType::WireIn(self.n_wires_in as WireId), &cell);
         self.n_wires_in += 1;
         (self.n_wires_in - 1, cell)
     }
@@ -90,14 +91,14 @@ where
 
     pub fn create_wire_out(&mut self, num: usize) -> (usize, Vec<CellId>) {
         let cell = self.create_cells(num);
-        self.mark_cells(CellType::WireOut(self.n_wires_out), &cell);
+        self.mark_cells(CellType::WireOut(self.n_wires_out as WireId), &cell);
         self.n_wires_out += 1;
         (self.n_wires_out - 1, cell)
     }
 
-    fn create_wire_in_empty(&mut self) -> CellId {
+    fn create_wire_in_empty(&mut self) -> WireId {
         self.n_wires_in += 1;
-        self.n_wires_in - 1
+        self.n_wires_in as WireId - 1
     }
 
     pub fn add_const(&mut self, out: CellId, constant: ConstantType<F>) {
@@ -423,7 +424,7 @@ where
     /// Input a table type and initialize a table. We can define an enum type to
     /// indicate the table and convert it to usize. This should throw an error
     /// if the type has been defined. Return the index of the witness.
-    pub fn define_table_type(&mut self, table_type: TableType) -> CellId {
+    pub fn define_table_type(&mut self, table_type: TableType) -> WireId {
         let count_idx = self.create_wire_in_empty();
         assert!(!self.tables.contains_key(&table_type));
         self.tables

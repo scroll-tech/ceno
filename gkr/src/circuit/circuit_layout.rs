@@ -70,13 +70,15 @@ impl<F: SmallField> Circuit<F> {
                         ));
                         wires_const_cell_ids.last_mut().unwrap().1.sort();
                     }
-                    CellType::WireIn(id) => {
-                        wires_in_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
-                        wires_in_cell_ids[*id].sort();
+                    CellType::WireIn(wire_id) => {
+                        wires_in_cell_ids[*wire_id as usize] =
+                            marked_cell.1.iter().map(|x| *x).collect();
+                        wires_in_cell_ids[*wire_id as usize].sort();
                     }
-                    CellType::WireOut(id) => {
-                        wires_out_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
-                        wires_out_cell_ids[*id].sort();
+                    CellType::WireOut(wire_id) => {
+                        wires_out_cell_ids[*wire_id as usize] =
+                            marked_cell.1.iter().map(|x| *x).collect();
+                        wires_out_cell_ids[*wire_id as usize].sort();
                     }
                 }
             }
