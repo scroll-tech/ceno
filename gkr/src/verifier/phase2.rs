@@ -135,7 +135,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             },
             transcript,
         );
-        let claim0_point = claim_0.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim0_point = claim_0.point.iter().map(|x| x.elements).collect_vec();
         let eq_x_rx = build_eq_x_r_vec(&claim0_point);
         let f0_value = prover_msg.1[0];
         let g0_value = eq_eval(&lo_point, &claim0_point)
@@ -192,7 +192,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             },
             transcript,
         );
-        let claim1_point = claim_1.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim1_point = claim_1.point.iter().map(|x| x.elements).collect_vec();
         let hi_point_sc1 = &claim1_point[lo_in_num_vars..];
         let lo_point_sc1 = &claim1_point[..lo_in_num_vars];
 
@@ -263,7 +263,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             },
             transcript,
         );
-        let claim2_point = claim_2.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim2_point = claim_2.point.iter().map(|x| x.elements).collect_vec();
         let f2_value = prover_msg.1[0];
         let g2_value = prover_msg.1[1];
         let got_value_2 = f2_value * g2_value;
@@ -315,7 +315,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             },
             transcript,
         );
-        let claim3_point = claim_3.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim3_point = claim_3.point.iter().map(|x| x.elements).collect_vec();
         let lo_point_sc3 = &claim3_point[..lo_in_num_vars];
         let eq_x3_rx3 = build_eq_x_r_vec(lo_point_sc3);
         let f3_value = prover_msg.1[0];

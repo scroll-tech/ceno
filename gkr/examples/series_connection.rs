@@ -160,10 +160,10 @@ fn main() {
     // Witness generation
     // ==================
 
-    let mut prover_transcript = Transcript::new(b"test");
+    let mut prover_transcript = Transcript::<Goldilocks>::new(b"test");
     let challenge = [prover_transcript
         .get_and_append_challenge(b"lookup challenge")
-        .elements[0]];
+        .elements];
 
     // Compute lookup input and output (lookup_input + beta)
     let mut input_circuit_witness = CircuitWitness::new(&input_circuit, challenge.to_vec());
@@ -230,7 +230,7 @@ fn main() {
     let mut output_point = vec![
         prover_transcript
             .get_and_append_challenge(b"output point")
-            .elements[0],
+            .elements,
     ];
     let output_witness = frac_sum_witnesses[frac_sum_witnesses.len() - 1].last_layer_witness_ref();
     let mut output_value = output_witness.mle(1, 0).evaluate(&output_point);
@@ -294,13 +294,13 @@ fn main() {
     let mut verifier_transcript = Transcript::<Goldilocks>::new(b"test");
     let challenge = [verifier_transcript
         .get_and_append_challenge(b"lookup challenge")
-        .elements[0]];
+        .elements];
 
     // prove frac sum
     let mut output_point = vec![
         verifier_transcript
             .get_and_append_challenge(b"output point")
-            .elements[0],
+            .elements,
     ];
     let output_witness = frac_sum_witnesses[frac_sum_witnesses.len() - 1].last_layer_witness_ref();
     let mut output_value = output_witness.mle(1, 0).evaluate(&output_point);

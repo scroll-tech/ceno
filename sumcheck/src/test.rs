@@ -1,6 +1,6 @@
 use ark_std::{rand::RngCore, test_rng};
-use ff::Field;
-use goldilocks::Goldilocks;
+use ff::{Field, FromUniformBytes};
+use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use transcript::Transcript;
 
@@ -13,24 +13,28 @@ fn test_sumcheck(nv: usize, num_multiplicands_range: (usize, usize), num_product
     let mut rng = test_rng();
     let mut transcript = Transcript::new(b"test");
 
-    let (poly, asserted_sum) = VirtualPolynomial::<Goldilocks>::random(
+    let (poly, asserted_sum) = VirtualPolynomial::<GoldilocksExt2>::random(
         nv,
         num_multiplicands_range,
         num_products,
         &mut rng,
     );
-    let proof = IOPProverState::<Goldilocks>::prove(&poly, &mut transcript);
+    let proof = IOPProverState::<GoldilocksExt2>::prove(&poly, &mut transcript);
     let poly_info = poly.aux_info.clone();
 
     let mut transcript = Transcript::new(b"test");
-    let subclaim =
-        IOPVerifierState::<Goldilocks>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
+    let subclaim = IOPVerifierState::<GoldilocksExt2>::verify(
+        asserted_sum,
+        &proof,
+        &poly_info,
+        &mut transcript,
+    );
     assert!(
         poly.evaluate(
             &subclaim
                 .point
                 .iter()
-                .map(|c| c.elements[0])
+                .map(|c| c.elements)
                 .collect::<Vec<_>>()
                 .as_ref()
         ) == subclaim.expected_evaluation,
@@ -40,7 +44,7 @@ fn test_sumcheck(nv: usize, num_multiplicands_range: (usize, usize), num_product
 
 fn test_sumcheck_internal(nv: usize, num_multiplicands_range: (usize, usize), num_products: usize) {
     let mut rng = test_rng();
-    let (poly, asserted_sum) = VirtualPolynomial::<Goldilocks>::random(
+    let (poly, asserted_sum) = VirtualPolynomial::<GoldilocksExt2>::random(
         nv,
         num_multiplicands_range,
         num_products,
@@ -71,7 +75,7 @@ fn test_sumcheck_internal(nv: usize, num_multiplicands_range: (usize, usize), nu
             &subclaim
                 .point
                 .iter()
-                .map(|c| c.elements[0])
+                .map(|c| c.elements)
                 .collect::<Vec<_>>()
                 .as_ref()
         ) == subclaim.expected_evaluation,
@@ -81,6 +85,11 @@ fn test_sumcheck_internal(nv: usize, num_multiplicands_range: (usize, usize), nu
 
 #[test]
 fn test_trivial_polynomial() {
+    test_trivial_polynomial_helper::<Goldilocks>();
+    test_trivial_polynomial_helper::<GoldilocksExt2>();
+}
+
+fn test_trivial_polynomial_helper<F: SmallField + FromUniformBytes<64>>() {
     let nv = 1;
     let num_multiplicands_range = (4, 13);
     let num_products = 5;
@@ -88,8 +97,14 @@ fn test_trivial_polynomial() {
     test_sumcheck(nv, num_multiplicands_range, num_products);
     test_sumcheck_internal(nv, num_multiplicands_range, num_products);
 }
+
 #[test]
 fn test_normal_polynomial() {
+    test_normal_polynomial_helper::<Goldilocks>();
+    test_normal_polynomial_helper::<GoldilocksExt2>();
+}
+
+fn test_normal_polynomial_helper<F: SmallField + FromUniformBytes<64>>() {
     let nv = 12;
     let num_multiplicands_range = (4, 9);
     let num_products = 5;
@@ -97,6 +112,7 @@ fn test_normal_polynomial() {
     test_sumcheck(nv, num_multiplicands_range, num_products);
     test_sumcheck_internal(nv, num_multiplicands_range, num_products);
 }
+
 // #[test]
 // fn zero_polynomial_should_error() {
 //     let nv = 0;
@@ -109,22 +125,31 @@ fn test_normal_polynomial() {
 
 #[test]
 fn test_extract_sum() {
+    test_extract_sum_helper::<Goldilocks>();
+    test_extract_sum_helper::<GoldilocksExt2>();
+}
+
+fn test_extract_sum_helper<F: SmallField + FromUniformBytes<64>>() {
     let mut rng = test_rng();
     let mut transcript = Transcript::new(b"test");
-    let (poly, asserted_sum) = VirtualPolynomial::<Goldilocks>::random(8, (3, 4), 3, &mut rng);
+    let (poly, asserted_sum) = VirtualPolynomial::<F>::random(8, (3, 4), 3, &mut rng);
 
     let proof = IOPProverState::prove(&poly, &mut transcript);
     assert_eq!(proof.extract_sum(), asserted_sum);
 }
 
-struct DensePolynomial(Vec<Goldilocks>);
+struct DensePolynomial(Vec<GoldilocksExt2>);
 
 impl DensePolynomial {
     fn rand(degree: usize, mut rng: &mut impl RngCore) -> Self {
-        Self((0..degree).map(|_| Goldilocks::random(&mut rng)).collect())
+        Self(
+            (0..degree)
+                .map(|_| GoldilocksExt2::random(&mut rng))
+                .collect(),
+        )
     }
 
-    fn evaluate(&self, p: &Goldilocks) -> Goldilocks {
+    fn evaluate(&self, p: &GoldilocksExt2) -> GoldilocksExt2 {
         let mut powers_of_p = *p;
         let mut res = self.0[0];
         for &c in self.0.iter().skip(1) {
@@ -142,27 +167,27 @@ fn test_interpolation() {
     // test a polynomial with 20 known points, i.e., with degree 19
     let poly = DensePolynomial::rand(20 - 1, &mut prng);
     let evals = (0..20)
-        .map(|i| poly.evaluate(&Goldilocks::from(i)))
-        .collect::<Vec<Goldilocks>>();
-    let query = Goldilocks::random(&mut prng);
+        .map(|i| poly.evaluate(&GoldilocksExt2::from(i)))
+        .collect::<Vec<GoldilocksExt2>>();
+    let query = GoldilocksExt2::random(&mut prng);
 
     assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query));
 
     // test a polynomial with 33 known points, i.e., with degree 32
     let poly = DensePolynomial::rand(33 - 1, &mut prng);
     let evals = (0..33)
-        .map(|i| poly.evaluate(&Goldilocks::from(i)))
-        .collect::<Vec<Goldilocks>>();
-    let query = Goldilocks::random(&mut prng);
+        .map(|i| poly.evaluate(&GoldilocksExt2::from(i)))
+        .collect::<Vec<GoldilocksExt2>>();
+    let query = GoldilocksExt2::random(&mut prng);
 
     assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query));
 
     // test a polynomial with 64 known points, i.e., with degree 63
     let poly = DensePolynomial::rand(64 - 1, &mut prng);
     let evals = (0..64)
-        .map(|i| poly.evaluate(&Goldilocks::from(i)))
-        .collect::<Vec<Goldilocks>>();
-    let query = Goldilocks::random(&mut prng);
+        .map(|i| poly.evaluate(&GoldilocksExt2::from(i)))
+        .collect::<Vec<GoldilocksExt2>>();
+    let query = GoldilocksExt2::random(&mut prng);
 
     assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query));
 }

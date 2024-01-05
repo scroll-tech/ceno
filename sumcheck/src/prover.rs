@@ -51,7 +51,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             point: prover_state
                 .challenges
                 .iter()
-                .map(|challenge| challenge.elements[0])
+                .map(|challenge| challenge.elements)
                 .collect(),
             proofs: prover_msgs,
         }
@@ -130,7 +130,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             #[cfg(not(feature = "parallel"))]
             flattened_ml_extensions
                 .iter_mut()
-                .for_each(|mle| *mle = mle.fix_variables(&[r.elements[0]]));
+                .for_each(|mle| *mle = mle.fix_variables(&[r.elements]));
         } else if self.round > 0 {
             panic!("verifier message is empty");
         }

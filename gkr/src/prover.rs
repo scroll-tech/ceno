@@ -133,7 +133,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         // TODO: Double check the correctness.
         let alpha = transcript
             .get_and_append_challenge(b"combine subset evals")
-            .elements[0];
+            .elements;
 
         let mut prover_phase1_state = IOPProverPhase1State::prover_init_parallel(
             &self.layer_out_poly,

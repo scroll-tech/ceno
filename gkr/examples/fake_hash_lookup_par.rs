@@ -106,14 +106,14 @@ fn main() {
     let instance_num_vars = circuit_witness.instance_num_vars();
 
     let (proof, output_num_vars, output_eval) = {
-        let mut prover_transcript = Transcript::new(b"example");
+        let mut prover_transcript = Transcript::<Goldilocks>::new(b"example");
         let output_num_vars = instance_num_vars + circuit.last_layer_ref().num_vars();
 
         let output_point = (0..output_num_vars)
             .map(|_| {
                 prover_transcript
                     .get_and_append_challenge(b"output point")
-                    .elements[0]
+                    .elements
             })
             .collect_vec();
 
@@ -134,12 +134,12 @@ fn main() {
     };
 
     let gkr_input_claims = {
-        let mut verifier_transcript = &mut Transcript::new(b"example");
+        let mut verifier_transcript = &mut Transcript::<Goldilocks>::new(b"example");
         let output_point = (0..output_num_vars)
             .map(|_| {
                 verifier_transcript
                     .get_and_append_challenge(b"output point")
-                    .elements[0]
+                    .elements
             })
             .collect_vec();
         IOPVerifierState::verify_parallel(

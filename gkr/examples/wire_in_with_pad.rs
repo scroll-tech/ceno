@@ -29,12 +29,12 @@ fn main() {
 
     // print!("witness: {:?}", witness);
 
-    let mut prover_transcript = Transcript::new(b"test");
+    let mut prover_transcript = Transcript::<Goldilocks>::new(b"test");
     let point: Vec<Goldilocks> = (0..3)
         .map(|_| {
             prover_transcript
                 .get_and_append_challenge(b"output point")
-                .elements[0]
+                .elements
         })
         .collect_vec();
     let eq_point = build_eq_x_r_vec(&point);
@@ -53,12 +53,12 @@ fn main() {
         &mut prover_transcript,
     );
 
-    let mut verifier_transcript = Transcript::new(b"test");
+    let mut verifier_transcript = Transcript::<Goldilocks>::new(b"test");
     let point: Vec<Goldilocks> = (0..3)
         .map(|_| {
             verifier_transcript
                 .get_and_append_challenge(b"output point")
-                .elements[0]
+                .elements
         })
         .collect_vec();
     let gkr_final_claim = IOPVerifierState::verify_parallel(

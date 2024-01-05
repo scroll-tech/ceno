@@ -140,7 +140,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         let mut verifier_phase1_state = IOPVerifierPhase1State::verifier_init_parallel(
             &next_evals,
             &subset_evals,
-            &alpha.elements[0],
+            &alpha.elements,
             lo_num_vars,
             hi_num_vars,
         );

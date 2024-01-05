@@ -74,7 +74,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2InputState<'a, F
             transcript,
         );
 
-        let claim_point = claim.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim_point = claim.point.iter().map(|x| x.elements).collect_vec();
         let hi_point_sc1 = &claim_point[lo_in_num_vars..];
         let lo_point_sc1 = &claim_point[..lo_in_num_vars];
 

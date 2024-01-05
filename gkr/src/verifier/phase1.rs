@@ -85,7 +85,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
             },
             transcript,
         );
-        let claim1_point = claim_1.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim1_point = claim_1.point.iter().map(|x| x.elements).collect_vec();
         let eq_y_ry = build_eq_x_r_vec(&claim1_point);
         self.g1_values = next_evals
             .iter()
@@ -151,7 +151,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
             },
             transcript,
         );
-        let claim2_point = claim_2.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim2_point = claim_2.point.iter().map(|x| x.elements).collect_vec();
         let g2_values = next_evals
             .iter()
             .zip(g1_values.iter())

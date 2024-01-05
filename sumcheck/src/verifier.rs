@@ -138,7 +138,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                     );
                 }
                 // fixme: move to extension field
-                interpolate_uni_poly::<F>(&evaluations, challenge.elements[0])
+                interpolate_uni_poly::<F>(&evaluations, challenge.elements)
             })
             .collect::<Vec<_>>();
 
