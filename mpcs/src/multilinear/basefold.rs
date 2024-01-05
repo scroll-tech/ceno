@@ -396,9 +396,11 @@ where
         let ell = evals.len().next_power_of_two().ilog2() as usize;
         let t = transcript.squeeze_challenges(ell);
 
-        let eq_xt = MultilinearPolynomial::eq_xy(&t);
+        // Use eq(X,t) where t is random to batch the different evaluation queries
+        let eq_xt = Self::Polynomial::eq_xy(&t);
+        // Merge the polynomials for every point. One merged polynomial for each point.
         let merged_polys = evals.iter().zip(eq_xt.evals().iter()).fold(
-            vec![(F::ONE, Cow::<MultilinearPolynomial<_>>::default()); points.len()],
+            vec![(F::ONE, Cow::<Self::Polynomial>::default()); points.len()],
             |mut merged_polys, (eval, eq_xt_i)| {
                 if merged_polys[eval.point()].1.is_zero() {
                     merged_polys[eval.point()] = (*eq_xt_i, Cow::Borrowed(polys[eval.poly()]));
@@ -441,7 +443,6 @@ where
         );
         let tilde_gs_sum =
             inner_product(evals.iter().map(Evaluation::value), &eq_xt[..evals.len()]);
-        let now = Instant::now();
         let (challenges, _) =
             SumCheck::prove(&(), pp.num_vars, virtual_poly, tilde_gs_sum, transcript)?;
 
@@ -453,7 +454,7 @@ where
             .into_iter()
             .zip(eq_xy_evals.iter())
             .map(|((scalar, poly), eq_xy_eval)| (scalar * eq_xy_eval, poly.into_owned()))
-            .sum::<MultilinearPolynomial<_>>();
+            .sum::<Self::Polynomial>();
 
         let (mut comm, eval) = if cfg!(feature = "sanity-check") {
             let scalars = evals
@@ -462,7 +463,6 @@ where
                 .map(|(eval, eq_xt_i)| eq_xy_evals[eval.point()] * eq_xt_i)
                 .collect_vec();
             let bases = evals.iter().map(|eval| comms[eval.poly()]);
-            let now = Instant::now();
             let comm = Self::Commitment::sum_with_scalar(&scalars, bases);
 
             (comm, g_prime.evaluate(&challenges))
@@ -1962,7 +1962,15 @@ fn virtual_open<F: PrimeField>(
     let mut oracles = Vec::with_capacity(rounds);
     let mut new_oracle = last_oracle;
     // Continue the folding, because sum-check needs a single value in the end
-    // not just a low-degree codeword
+    // not just a low-degree codeword.
+    // But there is definitely a better way to evaluate the polynomial at random
+    // challenges than locally simulating a sum-check.
+    // In fact, all we need to check is that:
+    // 1. the last_oracle is the correct encoding of the current bh_evals
+    // 2. the current bh_evals * eq produces the claimed target sum
+    // We can continue the folding, it's a good idea, but there is no need to compute
+    // the polynomial h(X) in every round.
+    // TODO: use an alternative protocol.
     for round in 0..rounds {
         let challenge: F = rand_chacha(&mut rng);
         challenges.push(challenge);
