@@ -422,10 +422,12 @@ where
                         merged_polys[eval.point()].0 = F::ONE;
                         *merged_polys[eval.point()].1.to_mut() *= &coeff;
                     }
-                    // Note that the add_assign operator is overloaded to allow a polynomial
-                    // to += a pair of (scalar, polynomial), which is equivalent to
-                    // += scalar * polynomial.
-                    *merged_polys[eval.point()].1.to_mut() += (eq_xt_i, polys[eval.poly()]);
+                    // Equivalent to merged_poly += poly * batch_coeff. Note that
+                    // add_assign_mixed_with_coeff allows adding two polynomials with
+                    // different variables, and the result has the same number of vars
+                    // with the larger one of the two added polynomials.
+                    (*merged_polys[eval.point()].1.to_mut())
+                        .add_assign_mixed_with_coeff(polys[eval.poly()], eq_xt_i);
 
                     // Note that once the scalar in the accumulator becomes ONE, it will remain
                     // to be ONE forever.
@@ -433,6 +435,14 @@ where
                 merged_polys
             },
         );
+
+        let mut points = points.to_vec();
+        // Note that merged_polys may contain polynomials of different number of variables.
+        // Resize the evaluation points so that the size match.
+        merged_polys.iter().enumerate().for_each(|(i, (_, poly))| {
+            assert!(points[i].len() >= poly.num_vars());
+            points[i].resize(poly.num_vars(), F::ZERO)
+        });
 
         let unique_merged_polys = merged_polys
             .iter()
@@ -457,12 +467,19 @@ where
             &expression,
             unique_merged_polys.iter().map(|(_, poly)| poly.deref()),
             &[],
-            points,
+            points.as_slice(),
         );
+        // virtual_poly is a polynomial expression that may also involve polynomials with different
+        // number of variables. Use the maximal number of variables in the sum-check.
+        let num_vars = unique_merged_polys
+            .iter()
+            .map(|(_, poly)| poly.num_vars())
+            .max()
+            .unwrap();
         let tilde_gs_sum =
             inner_product(evals.iter().map(Evaluation::value), &eq_xt[..evals.len()]);
         let (challenges, _) =
-            SumCheck::prove(&(), pp.num_vars, virtual_poly, tilde_gs_sum, transcript)?;
+            SumCheck::prove(&(), num_vars, virtual_poly, tilde_gs_sum, transcript)?;
 
         let eq_xy_evals = points
             .iter()

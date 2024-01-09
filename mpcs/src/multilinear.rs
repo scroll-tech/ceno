@@ -25,20 +25,21 @@ fn validate_input<'a, F: Field>(
             ));
         }
     }
-    let input_num_vars = polys
-        .iter()
-        .map(|poly| poly.num_vars())
-        .chain(points.iter().map(|point| point.len()))
-        .next()
-        .expect("To have at least 1 poly or point");
-    for point in points.into_iter() {
-        if point.len() != input_num_vars {
-            return Err(Error::InvalidPcsParam(format!(
-                "Invalid point (expect point to have {input_num_vars} variates but got {})",
-                point.len()
-            )));
-        }
-    }
+    // No need to check these as we are going to support batching different number of variables
+    // let input_num_vars = polys
+    //     .iter()
+    //     .map(|poly| poly.num_vars())
+    //     .chain(points.iter().map(|point| point.len()))
+    //     .next()
+    //     .expect("To have at least 1 poly or point");
+    // for point in points.into_iter() {
+    //     if point.len() != input_num_vars {
+    //         return Err(Error::InvalidPcsParam(format!(
+    //             "Invalid point (expect point to have {input_num_vars} variates but got {})",
+    //             point.len()
+    //         )));
+    //     }
+    // }
     Ok(())
 }
 

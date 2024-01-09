@@ -16,10 +16,8 @@ use num_integer::Integer;
 use std::{borrow::Cow, collections::HashMap, fmt::Debug, marker::PhantomData};
 
 mod coeff;
-mod eval;
 
 pub use coeff::CoefficientsProver;
-pub use eval::EvaluationsProver;
 
 #[derive(Debug)]
 pub struct ProverState<'a, F: Field> {
