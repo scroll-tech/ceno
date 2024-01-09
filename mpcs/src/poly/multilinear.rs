@@ -314,6 +314,15 @@ impl<'rhs, F: Field> MultilinearPolynomial<F> {
                 if self.num_vars < rhs.num_vars {
                     self.resize_num_vars(rhs.num_vars);
                 }
+                if rhs.num_vars < self.num_vars {
+                    parallelize(&mut self.evals, |(lhs, start)| {
+                        for (index, lhs) in lhs.iter_mut().enumerate() {
+                            *lhs += rhs[(start + index) & ((1 << rhs.num_vars) - 1)];
+                        }
+                    });
+                } else {
+                    *self += rhs;
+                }
             }
         }
     }
@@ -762,5 +771,17 @@ mod test {
                 Fr::from(4)
             ]
         );
+    }
+
+    #[test]
+    fn test_add_assign_mixed() {
+        let mut f =
+            MultilinearPolynomial::new(vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)]);
+        let g = MultilinearPolynomial::new(vec![Fr::from(5), Fr::from(6)]);
+        f.add_assign_mixed(&g);
+        assert_eq!(
+            f.evals,
+            vec![Fr::from(6), Fr::from(8), Fr::from(8), Fr::from(10)]
+        )
     }
 }
