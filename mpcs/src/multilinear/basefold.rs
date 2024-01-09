@@ -1,7 +1,8 @@
 use crate::util::code;
+use crate::util::merkle_tree::MerkleTree;
 use crate::Commitment;
 use crate::{
-    multilinear::{additive, validate_input},
+    multilinear::validate_input,
     poly::{multilinear::MultilinearPolynomial, Polynomial},
     util::{
         arithmetic::{horner, inner_product, steps, BatchInvert, Field, PrimeField},
@@ -72,36 +73,59 @@ pub struct BasefoldVerifierParams<F: PrimeField> {
     table_w_weights: Vec<Vec<(F, F)>>,
 }
 
+/// A polynomial commitment together with all the data (e.g., the codeword, and Merkle tree)
+/// used to generate this commitment and for assistant in opening
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize", deserialize = "F: DeserializeOwned"))]
-pub struct BasefoldCommitment<F, H: Hash> {
+pub struct BasefoldCommitmentWithData<F, H: Hash> {
     codeword: Vec<F>,
     codeword_tree: Vec<Vec<Output<H>>>,
     bh_evals: Vec<F>,
+    num_vars: usize,
 }
 
-impl<F: PrimeField, H: Hash> BasefoldCommitment<F, H> {
-    fn from_root(root: Output<H>) -> Self {
+impl<F: PrimeField, H: Hash> BasefoldCommitmentWithData<F, H> {
+    pub fn to_commitment(&self) -> BasefoldCommitment<H> {
+        BasefoldCommitment::new(self.codeword_tree.last().unwrap()[0].clone(), self.num_vars)
+    }
+
+    pub fn get_root_ref(&self) -> &Output<H> {
+        &self.codeword_tree.last().unwrap()[0]
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(bound(serialize = "", deserialize = ""))]
+pub struct BasefoldCommitment<H: Hash> {
+    root: Output<H>,
+    num_vars: Option<usize>,
+}
+
+impl<H: Hash> BasefoldCommitment<H> {
+    fn new(root: Output<H>, num_vars: usize) -> Self {
         Self {
-            codeword: Vec::new(),
-            codeword_tree: vec![vec![root]],
-            bh_evals: Vec::new(),
+            root,
+            num_vars: Some(num_vars),
         }
     }
 
-    fn get_root(&self) -> Output<H> {
-        self.codeword_tree[self.codeword_tree.len() - 1][0].clone()
+    fn from_root(root: Output<H>) -> Self {
+        Self {
+            root,
+            num_vars: None,
+        }
     }
 
-    fn get_root_ref(&self) -> &Output<H> {
-        &self.codeword_tree[self.codeword_tree.len() - 1][0]
+    fn root(&self) -> Output<H> {
+        self.root.clone()
     }
 
-    fn with_only_root(&self) -> Self {
-        Self::from_root(self.get_root())
+    fn num_vars(&self) -> Option<usize> {
+        self.num_vars
     }
 }
-impl<F: PrimeField, H: Hash> PartialEq for BasefoldCommitment<F, H> {
+
+impl<F: PrimeField, H: Hash> PartialEq for BasefoldCommitmentWithData<F, H> {
     fn eq(&self, other: &Self) -> bool {
         self.codeword.eq(&other.codeword)
             && self.codeword_tree.eq(&other.codeword_tree)
@@ -109,7 +133,7 @@ impl<F: PrimeField, H: Hash> PartialEq for BasefoldCommitment<F, H> {
     }
 }
 
-impl<F: PrimeField, H: Hash> Eq for BasefoldCommitment<F, H> {}
+impl<F: PrimeField, H: Hash> Eq for BasefoldCommitmentWithData<F, H> {}
 
 pub trait BasefoldExtParams: Debug {
     fn get_reps() -> usize;
@@ -128,13 +152,21 @@ impl<F: PrimeField, H: Hash, V: BasefoldExtParams> Clone for Basefold<F, H, V> {
     }
 }
 
-impl<F: PrimeField, H: Hash> AsRef<[Output<H>]> for BasefoldCommitment<F, H> {
+impl<H: Hash> AsRef<[Output<H>]> for BasefoldCommitment<H> {
+    fn as_ref(&self) -> &[Output<H>] {
+        let root = &self.root;
+        slice::from_ref(root)
+    }
+}
+
+impl<F: PrimeField, H: Hash> AsRef<[Output<H>]> for BasefoldCommitmentWithData<F, H> {
     fn as_ref(&self) -> &[Output<H>] {
         let root = &self.codeword_tree[self.codeword_tree.len() - 1][0];
         slice::from_ref(root)
     }
 }
-impl<F: PrimeField, H: Hash> AdditiveCommitment<F> for BasefoldCommitment<F, H> {
+
+impl<F: PrimeField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithData<F, H> {
     fn sum_with_scalar<'a>(
         scalars: impl IntoIterator<Item = &'a F> + 'a,
         bases: impl IntoIterator<Item = &'a Self> + 'a,
@@ -144,6 +176,7 @@ impl<F: PrimeField, H: Hash> AdditiveCommitment<F> for BasefoldCommitment<F, H> 
         let scalars = scalars.into_iter().collect_vec();
         let bases = bases.into_iter().collect_vec();
         let k = bases[0].bh_evals.len();
+        let num_vars = log2_strict(k);
 
         let mut new_codeword = vec![F::ZERO; bases[0].codeword.len()];
         new_codeword
@@ -171,6 +204,7 @@ impl<F: PrimeField, H: Hash> AdditiveCommitment<F> for BasefoldCommitment<F, H> 
             codeword: new_codeword,
             bh_evals: Vec::new(),
             codeword_tree: tree,
+            num_vars,
         }
     }
 }
@@ -185,7 +219,8 @@ where
     type ProverParam = BasefoldProverParams<F>;
     type VerifierParam = BasefoldVerifierParams<F>;
     type Polynomial = MultilinearPolynomial<F>;
-    type Commitment = BasefoldCommitment<F, H>;
+    type CommitmentWithData = BasefoldCommitmentWithData<F, H>;
+    type Commitment = BasefoldCommitment<H>;
     type CommitmentChunk = Output<H>;
 
     fn setup(poly_size: usize, _: usize, rng: impl RngCore) -> Result<Self::Param, Error> {
@@ -229,12 +264,17 @@ where
         ))
     }
 
-    fn commit(pp: &Self::ProverParam, poly: &Self::Polynomial) -> Result<Self::Commitment, Error> {
+    fn commit(
+        pp: &Self::ProverParam,
+        poly: &Self::Polynomial,
+    ) -> Result<Self::CommitmentWithData, Error> {
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
         let (coeffs, mut bh_evals) =
             interpolate_over_boolean_hypercube_with_copy(&poly.evals().to_vec());
+
+        let num_vars = log2_strict(bh_evals.len());
 
         // Split the input into chunks of message size, encode each message, and return the codewords
         let mut basecode = encode_rs_basecode(&coeffs, 1 << pp.log_rate, 1 << V::get_basecode());
@@ -261,10 +301,11 @@ where
         // Compute and store all the layers of the Merkle tree
         let codeword_tree = merkelize::<F, H>(&codeword);
 
-        Ok(Self::Commitment {
+        Ok(Self::CommitmentWithData {
             codeword,
             codeword_tree,
             bh_evals,
+            num_vars,
         })
     }
 
@@ -272,7 +313,7 @@ where
         pp: &Self::ProverParam,
         polys: impl IntoIterator<Item = &'a Self::Polynomial>,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
-    ) -> Result<Vec<Self::Commitment>, Error>
+    ) -> Result<Vec<Self::CommitmentWithData>, Error>
     where
         Self::Polynomial: 'a,
     {
@@ -286,7 +327,7 @@ where
     fn batch_commit<'a>(
         pp: &Self::ProverParam,
         polys: impl IntoIterator<Item = &'a Self::Polynomial>,
-    ) -> Result<Vec<Self::Commitment>, Error> {
+    ) -> Result<Vec<Self::CommitmentWithData>, Error> {
         let polys_vec: Vec<&Self::Polynomial> = polys.into_iter().map(|poly| poly).collect();
         polys_vec
             .par_iter()
@@ -297,7 +338,7 @@ where
     fn open(
         pp: &Self::ProverParam,
         poly: &Self::Polynomial,
-        comm: &Self::Commitment,
+        comm: &Self::CommitmentWithData,
         point: &Point<F, Self::Polynomial>,
         eval: &F,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
@@ -361,7 +402,7 @@ where
     fn batch_open<'a>(
         pp: &Self::ProverParam,
         polys: impl IntoIterator<Item = &'a Self::Polynomial>,
-        comms: impl IntoIterator<Item = &'a Self::Commitment>,
+        comms: impl IntoIterator<Item = &'a Self::CommitmentWithData>,
         points: &[Point<F, Self::Polynomial>],
         evals: &[Evaluation<F>],
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
@@ -818,10 +859,10 @@ where
 
             let comm_queries = &queries[vq * 2 + 1];
             for cq in 0..comm_queries.len() {
-                let tree = &comms[cq].codeword_tree;
+                let root = &comms[cq].root();
                 assert_eq!(
-                    tree[tree.len() - 1][0],
-                    batch_paths[vq * 2 + 1][cq].pop().unwrap().pop().unwrap()
+                    root,
+                    &batch_paths[vq * 2 + 1][cq].pop().unwrap().pop().unwrap()
                 );
 
                 authenticate_merkle_path::<H, F>(
@@ -1331,7 +1372,7 @@ fn basefold_get_query<F: PrimeField>(
 }
 
 fn batch_basefold_get_query<F: PrimeField, H: Hash>(
-    comms: &[&BasefoldCommitment<F, H>],
+    comms: &[&BasefoldCommitmentWithData<F, H>],
     oracles: &Vec<Vec<F>>,
     codeword_size: usize,
     mut x_index: usize,
@@ -1949,7 +1990,7 @@ fn virtual_open<F: PrimeField>(
 //outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 fn commit_phase<F: PrimeField, H: Hash>(
     point: &Point<F, MultilinearPolynomial<F>>,
-    comm: &BasefoldCommitment<F, H>,
+    comm: &BasefoldCommitmentWithData<F, H>,
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     num_vars: usize,
     num_rounds: usize,
@@ -1964,7 +2005,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
 ) {
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
-    let mut root = comm.get_root();
+    let mut root = comm.to_commitment().root();
     let mut new_oracle = &comm.codeword;
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let mut eq = build_eq_x_r_vec::<F>(&point);
@@ -2011,7 +2052,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
 //outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 fn batch_commit_phase<F: PrimeField, H: Hash>(
     point: &Point<F, MultilinearPolynomial<F>>,
-    comms: &[&BasefoldCommitment<F, H>],
+    comms: &[&BasefoldCommitmentWithData<F, H>],
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     num_vars: usize,
     num_rounds: usize,
@@ -2134,7 +2175,7 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
 
 fn query_phase<F: PrimeField, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
-    comm: &BasefoldCommitment<F, H>,
+    comm: &BasefoldCommitmentWithData<F, H>,
     oracles: &Vec<Vec<F>>,
     num_verifier_queries: usize,
 ) -> (Vec<(Vec<(F, F)>, Vec<usize>)>, Vec<usize>) {
@@ -2166,7 +2207,7 @@ fn query_phase<F: PrimeField, H: Hash>(
 fn batch_query_phase<F: PrimeField, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     codeword_size: usize,
-    comms: &[&BasefoldCommitment<F, H>],
+    comms: &[&BasefoldCommitmentWithData<F, H>],
     oracles: &Vec<Vec<F>>,
     num_verifier_queries: usize,
 ) -> (Vec<(Vec<(F, F, usize)>, Vec<(F, F, usize)>)>, Vec<usize>) {

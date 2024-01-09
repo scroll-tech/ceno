@@ -24,6 +24,12 @@ pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
     type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
     type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
     type Polynomial: Polynomial<F> + Serialize + DeserializeOwned;
+    type CommitmentWithData: Clone
+        + Debug
+        + Default
+        + AsRef<[Self::CommitmentChunk]>
+        + Serialize
+        + DeserializeOwned;
     type Commitment: Clone
         + Debug
         + Default
@@ -40,13 +46,16 @@ pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
         batch_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
-    fn commit(pp: &Self::ProverParam, poly: &Self::Polynomial) -> Result<Self::Commitment, Error>;
+    fn commit(
+        pp: &Self::ProverParam,
+        poly: &Self::Polynomial,
+    ) -> Result<Self::CommitmentWithData, Error>;
 
     fn commit_and_write(
         pp: &Self::ProverParam,
         poly: &Self::Polynomial,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
-    ) -> Result<Self::Commitment, Error> {
+    ) -> Result<Self::CommitmentWithData, Error> {
         let comm = Self::commit(pp, poly)?;
 
         transcript.write_commitments(comm.as_ref())?;
@@ -57,7 +66,7 @@ pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
     fn batch_commit<'a>(
         pp: &Self::ProverParam,
         polys: impl IntoIterator<Item = &'a Self::Polynomial>,
-    ) -> Result<Vec<Self::Commitment>, Error>
+    ) -> Result<Vec<Self::CommitmentWithData>, Error>
     where
         Self::Polynomial: 'a;
 
@@ -65,7 +74,7 @@ pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
         pp: &Self::ProverParam,
         polys: impl IntoIterator<Item = &'a Self::Polynomial>,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
-    ) -> Result<Vec<Self::Commitment>, Error>
+    ) -> Result<Vec<Self::CommitmentWithData>, Error>
     where
         Self::Polynomial: 'a,
     {
@@ -79,7 +88,7 @@ pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
     fn open(
         pp: &Self::ProverParam,
         poly: &Self::Polynomial,
-        comm: &Self::Commitment,
+        comm: &Self::CommitmentWithData,
         point: &Point<F, Self::Polynomial>,
         eval: &F,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
@@ -88,14 +97,14 @@ pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
     fn batch_open<'a>(
         pp: &Self::ProverParam,
         polys: impl IntoIterator<Item = &'a Self::Polynomial>,
-        comms: impl IntoIterator<Item = &'a Self::Commitment>,
+        comms: impl IntoIterator<Item = &'a Self::CommitmentWithData>,
         points: &[Point<F, Self::Polynomial>],
         evals: &[Evaluation<F>],
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error>
     where
         Self::Polynomial: 'a,
-        Self::Commitment: 'a;
+        Self::CommitmentWithData: 'a;
 
     fn read_commitment(
         vp: &Self::VerifierParam,

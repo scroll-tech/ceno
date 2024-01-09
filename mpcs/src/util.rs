@@ -16,6 +16,7 @@ pub use itertools::{chain, izip, Itertools};
 pub use num_bigint::BigUint;
 pub use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 pub use timer::{end_timer, start_timer, start_unit_timer};
+pub mod merkle_tree;
 
 macro_rules! izip_eq {
     (@closure $p:pat => $tup:expr) => {
