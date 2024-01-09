@@ -47,12 +47,10 @@ type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 pub struct BasefoldParams<F: PrimeField> {
     log_rate: usize,
     num_verifier_queries: usize,
-    num_vars: usize,
-    num_rounds: Option<usize>,
+    max_num_vars: usize,
     table_w_weights: Vec<Vec<(F, F)>>,
     table: Vec<Vec<F>>,
     rng: ChaCha8Rng,
-    basecode: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,20 +59,16 @@ pub struct BasefoldProverParams<F: PrimeField> {
     table_w_weights: Vec<Vec<(F, F)>>,
     table: Vec<Vec<F>>,
     num_verifier_queries: usize,
-    num_vars: usize,
-    num_rounds: usize,
-    basecode: bool,
+    max_num_vars: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BasefoldVerifierParams<F: PrimeField> {
     rng: ChaCha8Rng,
-    num_vars: usize,
+    max_num_vars: usize,
     log_rate: usize,
     num_verifier_queries: usize,
-    num_rounds: usize,
     table_w_weights: Vec<Vec<(F, F)>>,
-    basecode: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -199,14 +193,12 @@ where
         let (table_w_weights, table) = get_table_aes(poly_size, log_rate, &mut test_rng);
 
         Ok(BasefoldParams {
-            log_rate: log_rate,
+            log_rate,
             num_verifier_queries: V::get_reps(),
-            num_vars: log2_strict(poly_size),
-            num_rounds: Some(log2_strict(poly_size) - V::get_basecode()),
-            table_w_weights: table_w_weights,
-            table: table,
+            max_num_vars: log2_strict(poly_size),
+            table_w_weights,
+            table,
             rng: test_rng.clone(),
-            basecode: true,
         })
     }
 
@@ -215,31 +207,23 @@ where
         poly_size: usize,
         batch_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        let mut rounds = param.num_vars;
-        if param.num_rounds.is_some() {
-            rounds = param.num_rounds.unwrap();
-        }
-
+        let mut rounds = param.max_num_vars;
         Ok((
             BasefoldProverParams {
                 log_rate: param.log_rate,
                 table_w_weights: param.table_w_weights.clone(),
                 table: param.table.clone(),
                 num_verifier_queries: param.num_verifier_queries,
-                num_vars: param.num_vars,
-                num_rounds: rounds,
-                basecode: param.basecode,
+                max_num_vars: param.max_num_vars,
             },
             BasefoldVerifierParams {
                 rng: param.rng.clone(),
-                num_vars: param.num_vars,
+                max_num_vars: param.max_num_vars,
                 log_rate: param.log_rate,
                 num_verifier_queries: param.num_verifier_queries,
-                num_rounds: rounds,
                 // Why not trim the weights using poly_size? And is the verifier really
                 // able to hold all these weights?
                 table_w_weights: param.table_w_weights.clone(),
-                basecode: param.basecode,
             },
         ))
     }
@@ -252,16 +236,12 @@ where
             interpolate_over_boolean_hypercube_with_copy(&poly.evals().to_vec());
 
         // Split the input into chunks of message size, encode each message, and return the codewords
-        let mut basecode = encode_rs_basecode(
-            &coeffs,
-            1 << pp.log_rate,
-            1 << (pp.num_vars - pp.num_rounds),
-        );
+        let mut basecode = encode_rs_basecode(&coeffs, 1 << pp.log_rate, 1 << V::get_basecode());
 
         // Apply the recursive definition of the BaseFold code to the list of base codewords,
         // and produce the final codeword
         let mut codeword = evaluate_over_foldable_domain_generic_basecode(
-            1 << (pp.num_vars - pp.num_rounds),
+            1 << V::get_basecode(),
             coeffs.len(),
             pp.log_rate,
             basecode,
@@ -326,8 +306,8 @@ where
             &point,
             &comm,
             transcript,
-            pp.num_vars,
-            pp.num_rounds,
+            poly.num_vars(),
+            poly.num_vars() - V::get_basecode(),
             &pp.table_w_weights,
         );
 
@@ -345,10 +325,8 @@ where
             .write_field_elements(&sum_check_oracles.into_iter().flatten().collect::<Vec<F>>()); //write sumcheck
         transcript.write_field_element(&eval); //write eval
 
-        if pp.num_rounds < pp.num_vars {
-            transcript.write_field_elements(&bh_evals); //write bh_evals
-            transcript.write_field_elements(&eq); //write eq (why? can't the verifier evaluate itself?)
-        }
+        transcript.write_field_elements(&bh_evals); //write bh_evals
+        transcript.write_field_elements(&eq); //write eq (why? can't the verifier evaluate itself?)
 
         //write final oracle
         let mut final_oracle = oracles.pop().unwrap();
@@ -392,7 +370,7 @@ where
         let polys = polys.into_iter().collect_vec();
         let comms = comms.into_iter().collect_vec();
 
-        validate_input("batch open", pp.num_vars, polys.clone(), points)?;
+        validate_input("batch open", pp.max_num_vars, polys.clone(), points)?;
 
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
@@ -490,6 +468,9 @@ where
             .zip(eq_xy_evals.iter())
             .map(|((scalar, poly), eq_xy_eval)| (scalar * eq_xy_eval, poly.into_owned()))
             .sum::<Self::Polynomial>();
+        if cfg!(feature = "sanity-check") {
+            assert_eq!(g_prime.num_vars(), num_vars);
+        }
 
         let (mut comm, eval) = {
             let scalars = evals
@@ -520,15 +501,13 @@ where
             &point,
             &comm,
             transcript,
-            pp.num_vars,
-            pp.num_rounds,
+            num_vars,
+            num_vars - V::get_basecode(),
             &pp.table_w_weights,
         );
 
-        if pp.num_rounds < pp.num_vars {
-            transcript.write_field_elements(&bh_evals);
-            transcript.write_field_elements(&eq);
-        }
+        transcript.write_field_elements(&bh_evals);
+        transcript.write_field_elements(&eq);
 
         let (queried_els, queries_usize) =
             query_phase(transcript, &comm, &oracles, pp.num_verifier_queries);
@@ -635,31 +614,33 @@ where
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
         let field_size = 255;
-        let n = (1 << (vp.num_vars + vp.log_rate));
+        let num_vars = point.len();
+        let n = (1 << (num_vars + vp.log_rate));
+        let num_rounds = num_vars - V::get_basecode();
         //read first $(num_var - 1) commitments
 
-        let mut fold_challenges: Vec<F> = Vec::with_capacity(vp.num_vars);
+        let mut fold_challenges: Vec<F> = Vec::with_capacity(vp.max_num_vars);
         let mut size = 0;
         let mut roots = Vec::new();
-        for i in 0..vp.num_rounds {
+        for i in 0..num_rounds {
             roots.push(transcript.read_commitment().unwrap());
             fold_challenges.push(transcript.squeeze_challenge());
         }
-        size = size + 256 * vp.num_rounds;
+        size = size + 256 * num_rounds;
         //read last commitment (and abandoned), so why write it in the proving side?
         transcript.read_commitment().unwrap();
 
         let mut query_challenges = transcript.squeeze_challenges(vp.num_verifier_queries);
         //read sum check oracles
         let mut sum_check_oracles: Vec<Vec<F>> = transcript
-            .read_field_elements(3 * (vp.num_rounds + 1))
+            .read_field_elements(3 * (num_rounds + 1))
             .unwrap()
             .chunks(3)
             .map(|c| c.to_vec())
             .collect_vec();
 
-        size = size + field_size * (3 * (vp.num_rounds + 1)); // dont need last sumcheck oracle in proof
-                                                              //read eval
+        size = size + field_size * (3 * (num_rounds + 1)); // dont need last sumcheck oracle in proof
+                                                           //read eval
 
         // TODO: This eval shadows the eval passed in from the argument.
         // this should not be desired
@@ -667,31 +648,28 @@ where
 
         let mut bh_evals = Vec::new();
         let mut eq = Vec::new();
-        if vp.num_rounds < vp.num_vars {
-            bh_evals = transcript
-                .read_field_elements(1 << (vp.num_vars - vp.num_rounds))
-                .unwrap();
-            eq = transcript
-                .read_field_elements(1 << (vp.num_vars - vp.num_rounds))
-                .unwrap();
-            size = size + field_size * (bh_evals.len() + eq.len());
-        }
-
+        bh_evals = transcript
+            .read_field_elements(1 << V::get_basecode())
+            .unwrap();
+        eq = transcript
+            .read_field_elements(1 << V::get_basecode())
+            .unwrap();
+        size = size + field_size * (bh_evals.len() + eq.len());
         //read final oracle
         let mut final_oracle = transcript
-            .read_field_elements(1 << (vp.num_vars - vp.num_rounds + vp.log_rate))
+            .read_field_elements(1 << (vp.max_num_vars - num_rounds + vp.log_rate))
             .unwrap();
 
         size = size + field_size * final_oracle.len();
         //read query paths
-        let num_queries = vp.num_verifier_queries * 2 * (vp.num_rounds + 1);
+        let num_queries = vp.num_verifier_queries * 2 * (num_rounds + 1);
 
         let all_qs = transcript.read_field_elements(num_queries).unwrap();
 
         size = size + (num_queries - 2) * field_size;
         //        println!("size for all iop queries {:?}", size);
 
-        let i_qs = all_qs.chunks((vp.num_rounds + 1) * 2).collect_vec();
+        let i_qs = all_qs.chunks((num_rounds + 1) * 2).collect_vec();
 
         assert_eq!(i_qs.len(), vp.num_verifier_queries);
 
@@ -706,13 +684,12 @@ where
         let query_merkle_paths: Vec<Vec<Vec<Vec<Output<H>>>>> = (0..vp.num_verifier_queries)
             .into_iter()
             .map(|i| {
-                let mut merkle_paths: Vec<Vec<Vec<Output<H>>>> =
-                    Vec::with_capacity(vp.num_rounds + 1);
-                for round in 0..(vp.num_rounds + 1) {
+                let mut merkle_paths: Vec<Vec<Vec<Output<H>>>> = Vec::with_capacity(num_rounds + 1);
+                for round in 0..(num_rounds + 1) {
                     let mut merkle_path: Vec<Output<H>> = transcript
-                        .read_commitments(2 * (vp.num_vars - round + vp.log_rate - 1))
+                        .read_commitments(2 * (num_vars - round + vp.log_rate - 1))
                         .unwrap();
-                    size = size + 256 * (2 * (vp.num_vars - round + vp.log_rate - 1));
+                    size = size + 256 * (2 * (num_vars - round + vp.log_rate - 1));
 
                     let chunked_path: Vec<Vec<Output<H>>> =
                         merkle_path.chunks(2).map(|c| c.to_vec()).collect_vec();
@@ -729,28 +706,25 @@ where
             &sum_check_oracles,
             &fold_challenges,
             &queries,
-            vp.num_rounds,
-            vp.num_vars,
+            num_rounds,
+            num_vars,
             vp.log_rate,
             &roots,
             vp.rng.clone(),
             &eval,
         );
 
-        // Why make this optional? It feels crucial for the security.
-        if (!vp.basecode) {
-            virtual_open(
-                vp.num_vars,
-                vp.num_rounds,
-                &mut eq,
-                &mut bh_evals,
-                &mut final_oracle,
-                point,
-                &mut fold_challenges,
-                &vp.table_w_weights,
-                &mut sum_check_oracles,
-            );
-        }
+        virtual_open(
+            num_vars,
+            num_rounds,
+            &mut eq,
+            &mut bh_evals,
+            &mut final_oracle,
+            point,
+            &mut fold_challenges,
+            &vp.table_w_weights,
+            &mut sum_check_oracles,
+        );
         Ok(())
     }
 
@@ -765,7 +739,9 @@ where
         //	let key = "RAYON_NUM_THREADS";
         //	env::set_var(key, "32");
         let comms = comms.into_iter().collect_vec();
-        validate_input("batch verify", vp.num_vars, [], points)?;
+        let num_vars = points.iter().map(|point| point.len()).max().unwrap();
+        let num_rounds = num_vars - V::get_basecode();
+        validate_input("batch verify", num_vars, [], points)?;
 
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = transcript.squeeze_challenges(batch_size_log);
@@ -775,7 +751,7 @@ where
             inner_product(evals.iter().map(Evaluation::value), &eq_xt[..evals.len()]);
 
         let (g_prime_eval, verify_point) =
-            SumCheck::verify(&(), vp.num_vars, 2, tilde_gs_sum, transcript)?;
+            SumCheck::verify(&(), num_vars, 2, tilde_gs_sum, transcript)?;
 
         let eq_xy_evals = points
             .iter()
@@ -783,11 +759,11 @@ where
             .collect_vec();
 
         //start of verify
-        let n = (1 << (vp.num_vars + vp.log_rate));
+        let n = (1 << (num_vars + vp.log_rate));
         //read first $(num_var - 1) commitments
-        let mut roots: Vec<Output<H>> = Vec::with_capacity(vp.num_rounds + 1);
-        let mut fold_challenges: Vec<F> = Vec::with_capacity(vp.num_rounds);
-        for i in 0..vp.num_rounds {
+        let mut roots: Vec<Output<H>> = Vec::with_capacity(num_rounds + 1);
+        let mut fold_challenges: Vec<F> = Vec::with_capacity(num_rounds);
+        for i in 0..num_rounds {
             roots.push(transcript.read_commitment().unwrap());
             fold_challenges.push(transcript.squeeze_challenge());
         }
@@ -797,14 +773,12 @@ where
 
         let mut bh_evals = Vec::new();
         let mut eq = Vec::new();
-        if vp.num_rounds < vp.num_vars {
-            bh_evals = transcript
-                .read_field_elements(1 << (vp.num_vars - vp.num_rounds))
-                .unwrap();
-            eq = transcript
-                .read_field_elements(1 << (vp.num_vars - vp.num_rounds))
-                .unwrap();
-        }
+        bh_evals = transcript
+            .read_field_elements(1 << (num_vars - num_rounds))
+            .unwrap();
+        eq = transcript
+            .read_field_elements(1 << (num_vars - num_rounds))
+            .unwrap();
 
         let mut query_challenges = transcript.squeeze_challenges(vp.num_verifier_queries);
 
@@ -828,7 +802,7 @@ where
             let mut comms_merkle_paths = Vec::with_capacity(evals.len());
             for j in 0..evals.len() {
                 let merkle_path = transcript
-                    .read_commitments(2 * (vp.num_vars + vp.log_rate))
+                    .read_commitments(2 * (vp.max_num_vars + vp.log_rate))
                     .unwrap();
                 let chunked_path = merkle_path.chunks(2).map(|c| c.to_vec()).collect_vec();
 
@@ -841,7 +815,7 @@ where
         let mut count = 0;
 
         let mut sum_check_oracles: Vec<Vec<F>> = transcript
-            .read_field_elements(3 * (vp.num_rounds + 1))
+            .read_field_elements(3 * (num_rounds + 1))
             .unwrap()
             .chunks(3)
             .map(|c| c.to_vec())
@@ -852,15 +826,15 @@ where
 
         //read final oracle
         let mut final_oracle = transcript
-            .read_field_elements(1 << (vp.num_vars - vp.num_rounds + vp.log_rate))
+            .read_field_elements(1 << (num_vars - num_rounds + vp.log_rate))
             .unwrap();
 
         //read query paths
-        let num_queries = vp.num_verifier_queries * 2 * (vp.num_rounds + 1);
+        let num_queries = vp.num_verifier_queries * 2 * (num_rounds + 1);
 
         let all_qs = transcript.read_field_elements(num_queries).unwrap();
 
-        let i_qs = all_qs.chunks((vp.num_rounds + 1) * 2).collect_vec();
+        let i_qs = all_qs.chunks((num_rounds + 1) * 2).collect_vec();
 
         assert_eq!(i_qs.len(), vp.num_verifier_queries);
 
@@ -890,10 +864,10 @@ where
         let mut query_merkle_paths: Vec<Vec<Vec<Vec<Output<H>>>>> =
             Vec::with_capacity(vp.num_verifier_queries);
         for i in 0..vp.num_verifier_queries {
-            let mut merkle_paths: Vec<Vec<Vec<Output<H>>>> = Vec::with_capacity(vp.num_rounds + 1);
-            for round in 0..(vp.num_rounds + 1) {
+            let mut merkle_paths: Vec<Vec<Vec<Output<H>>>> = Vec::with_capacity(num_rounds + 1);
+            for round in 0..(num_rounds + 1) {
                 let merkle_path: Vec<Output<H>> = transcript
-                    .read_commitments(2 * (vp.num_vars - round + vp.log_rate - 1)) //-1 because we already read roots
+                    .read_commitments(2 * (num_vars - round + vp.log_rate - 1)) //-1 because we already read roots
                     .unwrap();
                 let chunked_path: Vec<Vec<Output<H>>> =
                     merkle_path.chunks(2).map(|c| c.to_vec()).collect_vec();
@@ -909,8 +883,8 @@ where
             &sum_check_oracles,
             &fold_challenges,
             &queries,
-            vp.num_rounds,
-            vp.num_vars,
+            num_rounds,
+            num_vars,
             vp.log_rate,
             &roots,
             vp.rng.clone(),
@@ -934,19 +908,17 @@ where
                 count += 1;
             }
         }
-        if (!vp.basecode) {
-            virtual_open(
-                vp.num_vars,
-                vp.num_rounds,
-                &mut eq,
-                &mut bh_evals,
-                &mut final_oracle,
-                &verify_point,
-                &mut fold_challenges,
-                &vp.table_w_weights,
-                &mut sum_check_oracles,
-            );
-        }
+        virtual_open(
+            num_vars,
+            num_rounds,
+            &mut eq,
+            &mut bh_evals,
+            &mut final_oracle,
+            &verify_point,
+            &mut fold_challenges,
+            &vp.table_w_weights,
+            &mut sum_check_oracles,
+        );
         Ok(())
     }
 }
