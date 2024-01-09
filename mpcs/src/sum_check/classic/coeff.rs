@@ -62,6 +62,8 @@ impl<'rhs, F: PrimeField> AddAssign<(&'rhs F, &'rhs Coefficients<F>)> for Coeffi
 
 impl_index!(Coefficients, 0);
 
+/// A CoefficientsProver is represented as a polynomial of the form c + sum_i c_i poly_i, where
+/// poly_i are represented as product of polynomial expressions.
 #[derive(Clone, Debug)]
 pub struct CoefficientsProver<F: PrimeField>(F, Vec<(F, Vec<Expression<F>>)>);
 
@@ -88,9 +90,9 @@ where
                 });
                 (-constant, products)
             },
-            &|(lhs_constnat, mut lhs_products), (rhs_constnat, rhs_products)| {
+            &|(lhs_constnat, mut lhs_products), (rhs_constant, rhs_products)| {
                 lhs_products.extend(rhs_products);
-                (lhs_constnat + rhs_constnat, lhs_products)
+                (lhs_constnat + rhs_constant, lhs_products)
             },
             &|(lhs_constant, lhs_products), (rhs_constant, rhs_products)| {
                 let mut outputs =
@@ -131,8 +133,12 @@ where
     }
 
     fn prove_round(&self, state: &ProverState<F>) -> Self::RoundMessage {
+        // Initialize h(X) to zero
         let mut coeffs = Coefficients(vec![F::ZERO; state.expression.degree() + 1]);
+        // First, sum the constant over the hypercube and add to h(X)
         coeffs += &(F::from(state.size() as u64) * &self.0);
+        // Next, for every product of polynomials, where each product is assumed to be exactly 2
+        // put this into h(X).
         if self.1.iter().all(|(_, products)| products.len() == 2) {
             for (scalar, products) in self.1.iter() {
                 let [lhs, rhs] = [0, 1].map(|idx| &products[idx]);
@@ -147,6 +153,9 @@ where
 }
 
 impl<F: PrimeField> CoefficientsProver<F> {
+    /// Given two polynomials, represented as polynomial expressions, compute the coefficients
+    /// of their product, with certain variables fixed and other variables summed according to
+    /// the state.
     fn karatsuba<const LAZY: bool>(
         &self,
         state: &ProverState<F>,
@@ -166,9 +175,19 @@ impl<F: PrimeField> CoefficientsProver<F> {
                 let lhs = &state.eq_xys[*idx];
                 let rhs = &state.polys[query.poly()][state.num_vars];
 
+                // lhs and rhs are guaranteed to have the same number of variables and are both
+                // multilinear. However, their number of variables may be smaller than the total
+                // number of variables of this sum-check protocol. In that case, simply pretend
+                // that the evaluation representations are of the full sizes, by repeating the
+                // existing evaluations.
+
                 let evaluate_serial = |coeffs: &mut [F; 3], start: usize, n: usize| {
-                    zip_self!(lhs.iter(), 2, start)
-                        .zip(zip_self!(rhs.iter(), 2, start))
+                    zip_self!(iter::repeat(lhs).flat_map(|x| x.iter()), 2, start)
+                        .zip(zip_self!(
+                            iter::repeat(rhs).flat_map(|x| x.iter()),
+                            2,
+                            start
+                        ))
                         .take(n)
                         .for_each(|((lhs_0, lhs_1), (rhs_0, rhs_1))| {
                             let coeff_0 = *lhs_0 * rhs_0;

@@ -125,6 +125,7 @@ fn identity_eval<F: PrimeField>(x: &[F]) -> F {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 pub(super) mod test {
     use crate::{
         poly::multilinear::{rotation_eval, MultilinearPolynomial},
