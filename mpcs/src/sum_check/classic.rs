@@ -96,9 +96,11 @@ impl<'a, F: PrimeField> ProverState<'a, F> {
             }
             *b >>= 1;
         });
-        self.eq_xys
-            .iter_mut()
-            .for_each(|eq_xy| eq_xy.fix_var_in_place(challenge, &mut self.buf));
+        self.eq_xys.iter_mut().for_each(|eq_xy| {
+            if !eq_xy.is_constant() {
+                eq_xy.fix_var_in_place(challenge, &mut self.buf)
+            }
+        });
         if self.round == 0 {
             let rotation_maps = self
                 .expression
@@ -259,5 +261,83 @@ where
             P::RoundMessage::verify_consistency(degree, sum, &msgs, &challenges)?,
             challenges,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use crate::{
+        poly::Polynomial,
+        util::{
+            arithmetic::inner_product,
+            expression::Query,
+            transcript::{InMemoryTranscript, Keccak256Transcript},
+        },
+    };
+
+    use super::*;
+    use halo2_curves::bn256::Fr;
+
+    #[test]
+    fn test_sum_check_protocol() {
+        let polys = vec![
+            MultilinearPolynomial::new(vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)]),
+            MultilinearPolynomial::new(vec![Fr::from(0), Fr::from(1), Fr::from(1), Fr::from(0)]),
+            MultilinearPolynomial::new(vec![Fr::from(0), Fr::from(1)]),
+        ];
+        let points = vec![vec![Fr::from(1), Fr::from(2)], vec![Fr::from(1)]];
+        let expression = Expression::<Fr>::eq_xy(0)
+            * Expression::Polynomial(Query::new(0, Rotation::cur()))
+            + Expression::<Fr>::eq_xy(0) * Expression::Polynomial(Query::new(1, Rotation::cur()))
+            + Expression::<Fr>::eq_xy(1) * Expression::Polynomial(Query::new(2, Rotation::cur()));
+        let virtual_poly = VirtualPolynomial::new(&expression, polys.iter(), &[], &points);
+        let sum = inner_product(
+            polys[0].evals(),
+            MultilinearPolynomial::eq_xy(&points[0]).evals(),
+        ) + inner_product(
+            polys[1].evals(),
+            MultilinearPolynomial::eq_xy(&points[0]).evals(),
+        ) + inner_product(
+            polys[2].evals(),
+            MultilinearPolynomial::eq_xy(&points[1]).evals(),
+        );
+        let mut transcript = Keccak256Transcript::<Cursor<Vec<u8>>>::new(());
+        let (challenges, evals) = <ClassicSumCheck<CoefficientsProver<Fr>> as SumCheck<Fr>>::prove(
+            &(),
+            2,
+            virtual_poly.clone(),
+            sum,
+            &mut transcript,
+        )
+        .unwrap();
+
+        assert_eq!(polys[0].evaluate(&challenges), evals[0]);
+        assert_eq!(polys[1].evaluate(&challenges), evals[1]);
+        assert_eq!(polys[2].evaluate(&challenges[..1]), evals[2]);
+
+        let proof = transcript.into_proof();
+        let mut transcript = Keccak256Transcript::<Cursor<Vec<u8>>>::from_proof((), &proof);
+
+        <ClassicSumCheck<CoefficientsProver<Fr>> as SumCheck<Fr>>::verify(
+            &(),
+            2,
+            2,
+            sum,
+            &mut transcript,
+        )
+        .unwrap();
+
+        let mut transcript = Keccak256Transcript::<Cursor<Vec<u8>>>::from_proof((), &proof);
+
+        <ClassicSumCheck<CoefficientsProver<Fr>> as SumCheck<Fr>>::verify(
+            &(),
+            2,
+            2,
+            sum + Fr::ONE,
+            &mut transcript,
+        )
+        .expect_err("Should panic");
     }
 }
