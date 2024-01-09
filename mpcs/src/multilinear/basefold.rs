@@ -1314,11 +1314,11 @@ fn sum_check_challenge_round<F: PrimeField>(
 
 fn basefold_one_round_by_interpolation_weights<F: PrimeField>(
     table: &Vec<Vec<(F, F)>>,
-    table_offset: usize,
+    level_index: usize,
     values: &Vec<F>,
     challenge: F,
 ) -> Vec<F> {
-    let level = &table[table.len() - 1 - table_offset];
+    let level = &table[level_index];
     values
         .par_chunks_exact(2)
         .enumerate()
@@ -1947,7 +1947,7 @@ fn virtual_open<F: PrimeField>(
         // table. Need to optimize.
         oracles.push(basefold_one_round_by_interpolation_weights::<F>(
             &table,
-            round + num_rounds,
+            log2_strict(new_oracle.len()) - 1,
             &new_oracle,
             challenge,
         ));
@@ -2018,7 +2018,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
 
         oracles.push(basefold_one_round_by_interpolation_weights::<F>(
             &table_w_weights,
-            i,
+            log2_strict(new_oracle.len()) - 1,
             new_oracle,
             challenge,
         ));
