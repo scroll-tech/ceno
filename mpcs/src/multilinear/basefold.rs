@@ -478,7 +478,7 @@ where
             .unwrap();
         let tilde_gs_sum =
             inner_product(evals.iter().map(Evaluation::value), &eq_xt[..evals.len()]);
-        let (challenges, _) =
+        let (challenges, poly_evals) =
             SumCheck::prove(&(), num_vars, virtual_poly, tilde_gs_sum, transcript)?;
 
         let eq_xy_evals = points
@@ -491,18 +491,25 @@ where
             .map(|((scalar, poly), eq_xy_eval)| (scalar * eq_xy_eval, poly.into_owned()))
             .sum::<Self::Polynomial>();
 
-        let (mut comm, eval) = if cfg!(feature = "sanity-check") {
+        let (mut comm, eval) = {
             let scalars = evals
                 .iter()
                 .zip(eq_xt.evals())
                 .map(|(eval, eq_xt_i)| eq_xy_evals[eval.point()] * eq_xt_i)
                 .collect_vec();
+            let poly_evals = evals
+                .iter()
+                .map(|eval| poly_evals[eval.point()])
+                .collect_vec();
             let bases = evals.iter().map(|eval| comms[eval.poly()]);
             let comm = Self::Commitment::sum_with_scalar(&scalars, bases);
+            let eval = g_prime.evaluate(&challenges);
 
-            (comm, g_prime.evaluate(&challenges))
-        } else {
-            (Self::Commitment::default(), F::ZERO)
+            if cfg!(feature = "sanity-check") {
+                assert_eq!(inner_product(&scalars, &poly_evals), eval);
+            }
+
+            (comm, eval)
         };
         let mut bh_evals = g_prime.evals().to_vec();
         reverse_index_bits_in_place(&mut bh_evals);
