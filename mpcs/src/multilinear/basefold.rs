@@ -1,5 +1,5 @@
 use crate::util::code;
-use crate::util::merkle_tree::MerkleTree;
+use crate::util::merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree};
 use crate::Commitment;
 use crate::{
     multilinear::validate_input,
@@ -306,12 +306,13 @@ where
             &pp.table,
         );
 
-        //If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
+        // If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
         //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
 
         // The sum-check protocol starts from the first variable, but the FRI part
         // will eventually produce the evaluation at (alpha_k, ..., alpha_1), so apply
         // the bit-reversion to reverse the variable indices of the polynomial.
+        // In short: store the poly and codeword in big endian
         reverse_index_bits_in_place(&mut bh_evals);
         reverse_index_bits_in_place(&mut codeword);
 
@@ -405,9 +406,17 @@ where
             let indices = &query.1;
             indices.into_iter().enumerate().for_each(|(i, q)| {
                 if (i == 0) {
-                    write_merkle_path::<H, F>(&comm.codeword_tree, *q, transcript);
+                    write_merkle_path::<H, F>(
+                        &comm
+                            .codeword_tree
+                            .merkle_path_without_leaf_sibling_or_root(*q),
+                        transcript,
+                    );
                 } else {
-                    write_merkle_path::<H, F>(&trees[i - 1], *q, transcript);
+                    write_merkle_path::<H, F>(
+                        &trees[i - 1].merkle_path_without_leaf_sibling_or_root(*q),
+                        transcript,
+                    );
                 }
             })
         });
@@ -557,7 +566,7 @@ where
             pp.num_verifier_queries,
         );
 
-        let merkle_paths: Vec<Vec<Vec<Output<H>>>> = queried_els
+        let merkle_paths: Vec<Vec<MerklePathWithoutLeafOrRoot<H>>> = queried_els
             .iter()
             .map(|query| {
                 let (oracle_queries, poly_queries) = query;
@@ -595,8 +604,8 @@ where
             });
 
         //write merkle paths
-        merkle_paths.iter().flatten().flatten().for_each(|h| {
-            transcript.write_commitment(h);
+        merkle_paths.iter().flatten().for_each(|path| {
+            write_merkle_path(path, transcript);
         });
 
         Ok(())
@@ -1377,15 +1386,12 @@ fn batch_basefold_get_query<F: PrimeField, H: Hash>(
 }
 
 fn write_merkle_path<H: Hash, F: PrimeField>(
-    tree: &MerkleTree<F, H>,
-    mut x_index: usize,
+    path: &MerklePathWithoutLeafOrRoot<H>,
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
 ) {
-    tree.merkle_path_without_leaf_sibling_or_root(x_index)
-        .iter()
-        .for_each(|comm| {
-            transcript.write_commitment(comm);
-        });
+    path.iter().for_each(|comm| {
+        transcript.write_commitment(comm);
+    });
 }
 
 fn authenticate_merkle_path<H: Hash, F: PrimeField>(
@@ -2372,7 +2378,7 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
 fn query_codeword<F: PrimeField, H: Hash>(
     query: &usize,
     codeword_tree: &MerkleTree<F, H>,
-) -> ((F, F), Vec<Output<H>>) {
+) -> ((F, F), MerklePathWithoutLeafOrRoot<H>) {
     let mut p0 = *query;
     let temp = p0;
     let mut p1 = p0 ^ 1;

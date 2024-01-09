@@ -47,13 +47,34 @@ impl<F: PrimeField, H: Hash> MerkleTree<F, H> {
         &self.leaves[index]
     }
 
-    pub fn merkle_path_without_leaf_sibling_or_root(&self, leaf_index: usize) -> Vec<Output<H>> {
+    pub fn merkle_path_without_leaf_sibling_or_root(
+        &self,
+        leaf_index: usize,
+    ) -> MerklePathWithoutLeafOrRoot<H> {
         assert!(leaf_index < self.size());
-        self.inner
-            .iter()
-            .take(self.height() - 1)
-            .map(|layer| layer[(leaf_index >> 1) ^ 1].clone())
-            .collect()
+        MerklePathWithoutLeafOrRoot::<H>::new(
+            self.inner
+                .iter()
+                .take(self.height() - 1)
+                .map(|layer| layer[(leaf_index >> 1) ^ 1].clone())
+                .collect(),
+        )
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(bound(serialize = "", deserialize = ""))]
+pub struct MerklePathWithoutLeafOrRoot<H: Hash> {
+    inner: Vec<Output<H>>,
+}
+
+impl<H: Hash> MerklePathWithoutLeafOrRoot<H> {
+    pub fn new(inner: Vec<Output<H>>) -> Self {
+        Self { inner }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Output<H>> {
+        self.inner.iter()
     }
 }
 
