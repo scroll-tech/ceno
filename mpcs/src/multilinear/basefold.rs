@@ -483,7 +483,7 @@ where
 
         let eq_xy_evals = points
             .iter()
-            .map(|point| eq_xy_eval(&challenges, point))
+            .map(|point| eq_xy_eval(&challenges[..point.len()], point))
             .collect_vec();
         let g_prime = merged_polys
             .into_iter()

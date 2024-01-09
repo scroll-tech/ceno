@@ -50,6 +50,10 @@ impl<F> MultilinearPolynomial<F> {
     }
 
     pub fn is_zero(&self) -> bool {
+        self.num_vars == 0 && self.evals.is_empty()
+    }
+
+    pub fn is_constant(&self) -> bool {
         self.num_vars == 0
     }
 
