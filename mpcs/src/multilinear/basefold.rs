@@ -573,12 +573,19 @@ where
                 oracle_queries
                     .into_iter()
                     .enumerate()
-                    .map(|(i, (_, _, j))| trees[i].merkle_path_without_leaf_sibling_or_root(*j))
-                    .chain(poly_queries.into_iter().enumerate().map(|(i, (_, _, j))| {
-                        comms[i]
-                            .codeword_tree
-                            .merkle_path_without_leaf_sibling_or_root(*j)
-                    }))
+                    .map(|(i, query_result)| {
+                        trees[i].merkle_path_without_leaf_sibling_or_root(query_result.index)
+                    })
+                    .chain(
+                        poly_queries
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, query_result)| {
+                                comms[i]
+                                    .codeword_tree
+                                    .merkle_path_without_leaf_sibling_or_root(query_result.index)
+                            }),
+                    )
                     .collect()
             })
             .collect();
@@ -589,8 +596,8 @@ where
             .map(|q| &q.0)
             .flatten()
             .for_each(|query| {
-                transcript.write_field_element(&query.0);
-                transcript.write_field_element(&query.1);
+                transcript.write_field_element(&query.left);
+                transcript.write_field_element(&query.right);
             });
 
         //write poly query results
@@ -599,8 +606,8 @@ where
             .map(|q| &q.1)
             .flatten()
             .for_each(|query| {
-                transcript.write_field_element(&query.0);
-                transcript.write_field_element(&query.1);
+                transcript.write_field_element(&query.left);
+                transcript.write_field_element(&query.right);
             });
 
         //write merkle paths
@@ -1357,14 +1364,19 @@ fn batch_basefold_get_query<F: PrimeField, H: Hash>(
     oracles: &Vec<Vec<F>>,
     codeword_size: usize,
     mut x_index: usize,
-) -> (Vec<(F, F, usize)>, Vec<(F, F, usize)>) {
+) -> (
+    Vec<CodewordSingleQueryResult<F>>,
+    Vec<CodewordSingleQueryResult<F>>,
+) {
     let mut queries = Vec::with_capacity(oracles.len());
 
     x_index >>= 1;
     for oracle in oracles {
         let mut p1 = x_index | 1;
         let mut p0 = p1 - 1;
-        queries.push((oracle[p0], oracle[p1], p0));
+        queries.push(CodewordSingleQueryResult::<F>::new(
+            oracle[p0], oracle[p1], p0,
+        ));
         x_index >>= 1;
     }
 
@@ -1374,7 +1386,7 @@ fn batch_basefold_get_query<F: PrimeField, H: Hash>(
             let x_index = x_index >> (log2_strict(codeword_size) - comm.codeword_size_log());
             let mut p1 = x_index | 1;
             let mut p0 = p1 - 1;
-            (
+            CodewordSingleQueryResult::<F>::new(
                 *comm.get_codeword_entry(p0),
                 *comm.get_codeword_entry(p1),
                 p0,
@@ -2147,13 +2159,31 @@ fn query_phase<F: PrimeField, H: Hash>(
     )
 }
 
+struct CodewordSingleQueryResult<F> {
+    left: F,
+    right: F,
+    index: usize,
+}
+
+impl<F> CodewordSingleQueryResult<F> {
+    fn new(left: F, right: F, index: usize) -> Self {
+        Self { left, right, index }
+    }
+}
+
 fn batch_query_phase<F: PrimeField, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     codeword_size: usize,
     comms: &[&BasefoldCommitmentWithData<F, H>],
     oracles: &Vec<Vec<F>>,
     num_verifier_queries: usize,
-) -> (Vec<(Vec<(F, F, usize)>, Vec<(F, F, usize)>)>, Vec<usize>) {
+) -> (
+    Vec<(
+        Vec<CodewordSingleQueryResult<F>>,
+        Vec<CodewordSingleQueryResult<F>>,
+    )>,
+    Vec<usize>,
+) {
     let mut queries = transcript.squeeze_challenges(num_verifier_queries);
 
     // Transform the challenge queries from field elements into integers
