@@ -9,6 +9,7 @@ use crate::{
         code::LinearCodes,
         expression::{Expression, Query, Rotation},
         hash::{Hash, Output},
+        log2_strict,
         new_fields::{Mersenne127, Mersenne61},
         transcript::{FieldTranscript, TranscriptRead, TranscriptWrite},
         Deserialize, DeserializeOwned, Itertools, Serialize,
@@ -78,19 +79,38 @@ pub struct BasefoldVerifierParams<F: PrimeField> {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize", deserialize = "F: DeserializeOwned"))]
 pub struct BasefoldCommitmentWithData<F, H: Hash> {
-    codeword: Vec<F>,
-    codeword_tree: Vec<Vec<Output<H>>>,
+    codeword_tree: MerkleTree<F, H>,
     bh_evals: Vec<F>,
     num_vars: usize,
 }
 
 impl<F: PrimeField, H: Hash> BasefoldCommitmentWithData<F, H> {
     pub fn to_commitment(&self) -> BasefoldCommitment<H> {
-        BasefoldCommitment::new(self.codeword_tree.last().unwrap()[0].clone(), self.num_vars)
+        BasefoldCommitment::new(self.codeword_tree.root(), self.num_vars)
     }
 
     pub fn get_root_ref(&self) -> &Output<H> {
-        &self.codeword_tree.last().unwrap()[0]
+        self.codeword_tree.root_ref()
+    }
+
+    pub fn get_codeword(&self) -> &Vec<F> {
+        self.codeword_tree.leaves()
+    }
+
+    pub fn codeword_size(&self) -> usize {
+        self.codeword_tree.size()
+    }
+
+    pub fn codeword_size_log(&self) -> usize {
+        self.codeword_tree.height()
+    }
+
+    pub fn poly_size(&self) -> usize {
+        self.bh_evals.len()
+    }
+
+    pub fn get_codeword_entry(&self, index: usize) -> &F {
+        self.codeword_tree.get_leaf(index)
     }
 }
 
@@ -127,9 +147,7 @@ impl<H: Hash> BasefoldCommitment<H> {
 
 impl<F: PrimeField, H: Hash> PartialEq for BasefoldCommitmentWithData<F, H> {
     fn eq(&self, other: &Self) -> bool {
-        self.codeword.eq(&other.codeword)
-            && self.codeword_tree.eq(&other.codeword_tree)
-            && self.bh_evals.eq(&other.bh_evals)
+        self.get_codeword().eq(other.get_codeword()) && self.bh_evals.eq(&other.bh_evals)
     }
 }
 
@@ -161,7 +179,7 @@ impl<H: Hash> AsRef<[Output<H>]> for BasefoldCommitment<H> {
 
 impl<F: PrimeField, H: Hash> AsRef<[Output<H>]> for BasefoldCommitmentWithData<F, H> {
     fn as_ref(&self) -> &[Output<H>] {
-        let root = &self.codeword_tree[self.codeword_tree.len() - 1][0];
+        let root = self.get_root_ref();
         slice::from_ref(root)
     }
 }
@@ -178,13 +196,13 @@ impl<F: PrimeField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithDat
         let k = bases[0].bh_evals.len();
         let num_vars = log2_strict(k);
 
-        let mut new_codeword = vec![F::ZERO; bases[0].codeword.len()];
+        let mut new_codeword = vec![F::ZERO; bases[0].codeword_size()];
         new_codeword
             .par_iter_mut()
             .enumerate()
             .for_each(|(i, mut c)| {
                 for j in 0..bases.len() {
-                    *c += *scalars[j] * bases[j].codeword[i];
+                    *c += *scalars[j] * bases[j].get_codeword_entry(i);
                 }
             });
 
@@ -198,10 +216,9 @@ impl<F: PrimeField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithDat
                 }
             });
 
-        let tree = merkelize::<F, H>(&new_codeword);
+        let tree = MerkleTree::<F, H>::from_leaves(new_codeword);
 
         Self {
-            codeword: new_codeword,
             bh_evals: Vec::new(),
             codeword_tree: tree,
             num_vars,
@@ -299,10 +316,9 @@ where
         reverse_index_bits_in_place(&mut codeword);
 
         // Compute and store all the layers of the Merkle tree
-        let codeword_tree = merkelize::<F, H>(&codeword);
+        let codeword_tree = MerkleTree::<F, H>::from_leaves(codeword);
 
         Ok(Self::CommitmentWithData {
-            codeword,
             codeword_tree,
             bh_evals,
             num_vars,
@@ -541,18 +557,18 @@ where
             pp.num_verifier_queries,
         );
 
-        let merkle_paths: Vec<Vec<Vec<(Output<H>, Output<H>)>>> = queried_els
+        let merkle_paths: Vec<Vec<Vec<Output<H>>>> = queried_els
             .iter()
             .map(|query| {
                 let (oracle_queries, poly_queries) = query;
                 oracle_queries
                     .into_iter()
                     .enumerate()
-                    .map(|(i, (_, _, j))| {
-                        return get_merkle_path::<H, F>(&trees[i], *j, false);
-                    })
+                    .map(|(i, (_, _, j))| trees[i].merkle_path_without_leaf_sibling_or_root(*j))
                     .chain(poly_queries.into_iter().enumerate().map(|(i, (_, _, j))| {
-                        return get_merkle_path::<H, F>(&comms[i].codeword_tree, *j, true);
+                        comms[i]
+                            .codeword_tree
+                            .merkle_path_without_leaf_sibling_or_root(*j)
                     }))
                     .collect()
             })
@@ -579,14 +595,9 @@ where
             });
 
         //write merkle paths
-        merkle_paths
-            .iter()
-            .flatten()
-            .flatten()
-            .for_each(|(h1, h2)| {
-                transcript.write_commitment(h1);
-                transcript.write_commitment(h2);
-            });
+        merkle_paths.iter().flatten().flatten().for_each(|h| {
+            transcript.write_commitment(h);
+        });
 
         Ok(())
     }
@@ -1104,45 +1115,6 @@ fn rand_chacha<F: PrimeField>(mut rng: &mut ChaCha8Rng) -> F {
     from_raw_bytes::<F>(&dest)
 }
 
-pub fn log2_strict(n: usize) -> usize {
-    let res = n.trailing_zeros();
-    assert!(n.wrapping_shr(res) == 1, "Not a power of two: {n}");
-    // Tell the optimizer about the semantics of `log2_strict`. i.e. it can replace `n` with
-    // `1 << res` and vice versa.
-
-    res as usize
-}
-
-fn merkelize<F: PrimeField, H: Hash>(values: &Vec<F>) -> Vec<Vec<Output<H>>> {
-    let log_v = log2_strict(values.len());
-    let mut tree = Vec::with_capacity(log_v);
-    // The first layer of hashes, half the number of leaves
-    let mut hashes = vec![Output::<H>::default(); (values.len() >> 1)];
-    hashes.par_iter_mut().enumerate().for_each(|(i, mut hash)| {
-        let mut hasher = H::new();
-        hasher.update_field_element(&values[i << 1]);
-        hasher.update_field_element(&values[(i << 1) + 1]);
-        *hash = hasher.finalize_fixed();
-    });
-
-    tree.push(hashes);
-
-    for i in 1..(log_v) {
-        let oracle = tree[i - 1]
-            .par_chunks_exact(2)
-            .map(|ys| {
-                let mut hasher = H::new();
-                hasher.update(&ys[0]);
-                hasher.update(&ys[1]);
-                hasher.finalize_fixed()
-            })
-            .collect::<Vec<_>>();
-
-        tree.push(oracle);
-    }
-    tree
-}
-
 fn sum_check_first_round<F: PrimeField>(mut eq: &mut Vec<F>, mut bh_values: &mut Vec<F>) -> Vec<F> {
     // The input polynomials are in the form of evaluations. Instead of viewing
     // every one element as the evaluation of the polynomial at a single point,
@@ -1390,65 +1362,30 @@ fn batch_basefold_get_query<F: PrimeField, H: Hash>(
     let comm_queries = comms
         .iter()
         .map(|comm| {
-            let x_index =
-                x_index >> (log2_strict(codeword_size) - log2_strict(comm.codeword.len()));
+            let x_index = x_index >> (log2_strict(codeword_size) - comm.codeword_size_log());
             let mut p1 = x_index | 1;
             let mut p0 = p1 - 1;
-            (comm.codeword[p0], comm.codeword[p1], p0)
+            (
+                *comm.get_codeword_entry(p0),
+                *comm.get_codeword_entry(p1),
+                p0,
+            )
         })
         .collect_vec();
 
     return (queries, comm_queries);
 }
 
-fn get_merkle_path<H: Hash, F: PrimeField>(
-    tree: &Vec<Vec<Output<H>>>,
-    mut x_index: usize,
-    root: bool,
-) -> Vec<(Output<H>, Output<H>)> {
-    let mut queries = Vec::with_capacity(tree.len());
-    x_index >>= 1;
-    for oracle in tree {
-        let mut p0 = x_index;
-        let mut p1 = x_index ^ 1;
-        if (p1 < p0) {
-            p0 = x_index ^ 1;
-            p1 = x_index;
-        }
-        if (oracle.len() == 1) {
-            if (root) {
-                queries.push((oracle[0].clone(), oracle[0].clone()));
-            }
-            break;
-        }
-        queries.push((oracle[p0].clone(), oracle[p1].clone()));
-        x_index >>= 1;
-    }
-
-    return queries;
-}
-
 fn write_merkle_path<H: Hash, F: PrimeField>(
-    tree: &Vec<Vec<Output<H>>>,
+    tree: &MerkleTree<F, H>,
     mut x_index: usize,
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
 ) {
-    x_index >>= 1;
-    for oracle in tree {
-        let mut p0 = x_index;
-        let mut p1 = x_index ^ 1;
-        if (p1 < p0) {
-            p0 = x_index ^ 1;
-            p1 = x_index;
-        }
-        if (oracle.len() == 1) {
-            //	    transcript.write_commitment(&oracle[0]);
-            break;
-        }
-        transcript.write_commitment(&oracle[p0]);
-        transcript.write_commitment(&oracle[p1]);
-        x_index >>= 1;
-    }
+    tree.merkle_path_without_leaf_sibling_or_root(x_index)
+        .iter()
+        .for_each(|comm| {
+            transcript.write_commitment(comm);
+        });
 }
 
 fn authenticate_merkle_path<H: Hash, F: PrimeField>(
@@ -1996,7 +1933,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
     num_rounds: usize,
     table_w_weights: &Vec<Vec<(F, F)>>,
 ) -> (
-    Vec<Vec<Vec<Output<H>>>>,
+    Vec<MerkleTree<F, H>>,
     Vec<Vec<F>>,
     Vec<Vec<F>>,
     Vec<F>,
@@ -2006,7 +1943,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let mut root = comm.to_commitment().root();
-    let mut new_oracle = &comm.codeword;
+    let mut new_oracle = comm.get_codeword();
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let mut eq = build_eq_x_r_vec::<F>(&point);
     let mut bh_evals = comm.bh_evals.clone();
@@ -2038,9 +1975,9 @@ fn commit_phase<F: PrimeField, H: Hash>(
         ));
 
         new_oracle = &oracles[i];
-        trees.push(merkelize::<F, H>(&new_oracle));
+        trees.push(MerkleTree::<F, H>::from_leaves(new_oracle.clone()));
 
-        root = trees[i].last().unwrap()[0].clone();
+        root = trees[i].root();
     }
 
     // This place sends the root of the last oracle, instead of the encoded message
@@ -2059,7 +1996,7 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
     table_w_weights: &Vec<Vec<(F, F)>>,
     log_rate: usize,
     coeffs: &[F],
-) -> (Vec<Vec<Vec<Output<H>>>>, Vec<Vec<F>>, Vec<Vec<F>>) {
+) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>, Vec<Vec<F>>) {
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
@@ -2071,15 +2008,15 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
     comms
         .iter()
         .enumerate()
-        .filter(|(_, comm)| comm.codeword.len() == running_oracle_len)
+        .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
         .for_each(|(index, comm)| {
             running_oracle
                 .par_iter_mut()
-                .zip_eq(comm.codeword.par_iter())
+                .zip_eq(comm.get_codeword().par_iter())
                 .for_each(|(mut r, &a)| *r += a * coeffs[index]);
         });
-    let mut running_tree = merkelize::<F, H>(&running_oracle);
-    let mut running_root = running_tree.last().unwrap()[0].clone();
+    let mut running_tree = MerkleTree::<F, H>::from_leaves(running_oracle.clone());
+    let mut running_root = running_tree.root();
 
     // Unlike the FRI part, the sum-check part still follows the original procedure,
     // and linearly combine all the polynomials once for all
@@ -2128,11 +2065,11 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
         comms
             .iter()
             .enumerate()
-            .filter(|(_, comm)| comm.codeword.len() == running_oracle_len)
+            .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
             .for_each(|(index, comm)| {
                 running_oracle
                     .par_iter_mut()
-                    .zip_eq(comm.codeword.par_iter())
+                    .zip_eq(comm.get_codeword().par_iter())
                     .for_each(|(mut r, &a)| *r += a * coeffs[index]);
             });
 
@@ -2140,8 +2077,8 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
             sumcheck_messages.push(last_sumcheck_message.clone());
-            running_tree = merkelize::<F, H>(&running_oracle);
-            running_root = running_tree.last().unwrap()[0].clone();
+            running_tree = MerkleTree::<F, H>::from_leaves(running_oracle.clone());
+            running_root = running_tree.root();
             transcript.write_commitment(&running_root).unwrap();
 
             oracles.push(running_oracle);
@@ -2189,7 +2126,7 @@ fn query_phase<F: PrimeField, H: Hash>(
             let mut x: &[u8] = x_rep.as_ref();
             let (int_bytes, _) = x.split_at(std::mem::size_of::<u32>());
             let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
-            ((x_int as usize) % comm.codeword.len()).into()
+            ((x_int as usize) % comm.codeword_size()).into()
         })
         .collect_vec();
 
@@ -2197,7 +2134,7 @@ fn query_phase<F: PrimeField, H: Hash>(
         queries_usize
             .par_iter()
             .map(|x_index| {
-                return basefold_get_query::<F>(&comm.codeword, &oracles, *x_index);
+                return basefold_get_query::<F>(comm.get_codeword(), &oracles, *x_index);
             })
             .collect(),
         queries_usize,
@@ -2434,9 +2371,8 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
 //return ((leaf1,leaf2),path), where leaves are queries from codewords
 fn query_codeword<F: PrimeField, H: Hash>(
     query: &usize,
-    codeword: &Vec<F>,
-    codeword_tree: &Vec<Vec<Output<H>>>,
-) -> ((F, F), Vec<(Output<H>, Output<H>)>) {
+    codeword_tree: &MerkleTree<F, H>,
+) -> ((F, F), Vec<Output<H>>) {
     let mut p0 = *query;
     let temp = p0;
     let mut p1 = p0 ^ 1;
@@ -2445,8 +2381,8 @@ fn query_codeword<F: PrimeField, H: Hash>(
         p1 = temp;
     }
     return (
-        (codeword[p0], codeword[p1]),
-        get_merkle_path::<H, F>(&codeword_tree, *query, true),
+        (*codeword_tree.get_leaf(p0), *codeword_tree.get_leaf(p1)),
+        codeword_tree.merkle_path_without_leaf_sibling_or_root(*query),
     );
 }
 

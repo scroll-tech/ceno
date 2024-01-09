@@ -18,6 +18,15 @@ pub use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Seri
 pub use timer::{end_timer, start_timer, start_unit_timer};
 pub mod merkle_tree;
 
+pub fn log2_strict(n: usize) -> usize {
+    let res = n.trailing_zeros();
+    assert!(n.wrapping_shr(res) == 1, "Not a power of two: {n}");
+    // Tell the optimizer about the semantics of `log2_strict`. i.e. it can replace `n` with
+    // `1 << res` and vice versa.
+
+    res as usize
+}
+
 macro_rules! izip_eq {
     (@closure $p:pat => $tup:expr) => {
         |$p| $tup
