@@ -326,6 +326,31 @@ impl<'rhs, F: Field> MultilinearPolynomial<F> {
             }
         }
     }
+
+    pub fn add_assign_mixed_with_coeff(
+        &mut self,
+        rhs: &'rhs MultilinearPolynomial<F>,
+        coeff: &'rhs F,
+    ) {
+        match (self.is_zero(), rhs.is_zero()) {
+            (_, true) => {}
+            (true, false) => *self = rhs.clone(),
+            (false, false) => {
+                if self.num_vars < rhs.num_vars {
+                    self.resize_num_vars(rhs.num_vars);
+                }
+                if rhs.num_vars < self.num_vars {
+                    parallelize(&mut self.evals, |(lhs, start)| {
+                        for (index, lhs) in lhs.iter_mut().enumerate() {
+                            *lhs += *coeff * rhs[(start + index) & ((1 << rhs.num_vars) - 1)];
+                        }
+                    });
+                } else {
+                    *self += (coeff, rhs);
+                }
+            }
+        }
+    }
 }
 
 impl<'rhs, F: Field> AddAssign<(&'rhs F, &'rhs MultilinearPolynomial<F>)>
@@ -777,11 +802,16 @@ mod test {
     fn test_add_assign_mixed() {
         let mut f =
             MultilinearPolynomial::new(vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)]);
-        let g = MultilinearPolynomial::new(vec![Fr::from(5), Fr::from(6)]);
+        let mut g = MultilinearPolynomial::new(vec![Fr::from(5), Fr::from(6)]);
         f.add_assign_mixed(&g);
         assert_eq!(
             f.evals,
             vec![Fr::from(6), Fr::from(8), Fr::from(8), Fr::from(10)]
+        );
+        g.add_assign_mixed_with_coeff(&f, &Fr::from(2));
+        assert_eq!(
+            g.evals,
+            vec![Fr::from(17), Fr::from(22), Fr::from(21), Fr::from(26)]
         )
     }
 }
