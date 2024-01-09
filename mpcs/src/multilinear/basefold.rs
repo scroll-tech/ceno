@@ -1,3 +1,4 @@
+use crate::util::code;
 use crate::Commitment;
 use crate::{
     multilinear::{additive, validate_input},
@@ -459,119 +460,64 @@ where
         let (challenges, poly_evals) =
             SumCheck::prove(&(), num_vars, virtual_poly, tilde_gs_sum, transcript)?;
 
+        // Now the verifier has obtained the new target sum, and is able to compute the random
+        // linear coefficients, and is able to evaluate eq_xy(point) for each poly to open.
+        // The remaining tasks for the prover is to prove that
+        // poly_evals[i] = poly[i](challenges[..poly[i].num_vars]) for every i.
+
+        // More precisely, prove sum_i coeffs[i] poly_evals[i] is equal to
+        // the new target sum, where coeffs is computed as follows
         let eq_xy_evals = points
             .iter()
-            .map(|point| eq_xy_eval(&challenges[..point.len()], point))
+            .map(|point| eq_xy_eval(&challenges, point))
             .collect_vec();
-        let g_prime = merged_polys
-            .into_iter()
-            .zip(eq_xy_evals.iter())
-            .map(|((scalar, poly), eq_xy_eval)| (scalar * eq_xy_eval, poly.into_owned()))
-            .sum::<Self::Polynomial>();
-        if cfg!(feature = "sanity-check") {
-            assert_eq!(g_prime.num_vars(), num_vars);
-        }
+        let mut coeffs = vec![F::ZERO; comms.len()];
+        evals
+            .iter()
+            .enumerate()
+            .for_each(|(i, eval)| coeffs[eval.poly()] += eq_xy_evals[eval.point()] * eq_xt[i]);
+        // Note that the verifier can also compute these coeffs locally, so no need to pass
+        // them to the transcript.
 
-        let (mut comm, eval) = {
-            let scalars = evals
-                .iter()
-                .zip(eq_xt.evals())
-                .map(|(eval, eq_xt_i)| eq_xy_evals[eval.point()] * eq_xt_i)
-                .collect_vec();
-            let poly_evals = evals
-                .iter()
-                .map(|eval| poly_evals[eval.point()])
-                .collect_vec();
-            let bases = evals.iter().map(|eval| comms[eval.poly()]);
-            let comm = Self::Commitment::sum_with_scalar(&scalars, bases);
-            let eval = g_prime.evaluate(&challenges);
-
-            if cfg!(feature = "sanity-check") {
-                assert_eq!(inner_product(&scalars, &poly_evals), eval);
-            }
-
-            (comm, eval)
-        };
-        let mut bh_evals = g_prime.evals().to_vec();
-        reverse_index_bits_in_place(&mut bh_evals);
-        comm.bh_evals = bh_evals;
         let point = challenges;
 
-        let (trees, sum_check_oracles, mut oracles, bh_evals, eq, eval) = commit_phase(
+        let (trees, sum_check_oracles, mut oracles) = batch_commit_phase(
             &point,
-            &comm,
+            comms.as_slice(),
             transcript,
             num_vars,
             num_vars - V::get_basecode(),
             &pp.table_w_weights,
+            pp.log_rate,
+            coeffs.as_slice(),
         );
 
-        transcript.write_field_elements(&bh_evals);
-        transcript.write_field_elements(&eq);
-
-        let (queried_els, queries_usize) =
-            query_phase(transcript, &comm, &oracles, pp.num_verifier_queries);
-
-        let mut individual_queries: Vec<Vec<(F, F)>> = Vec::with_capacity(queries_usize.len());
-
-        let mut individual_paths: Vec<Vec<Vec<(Output<H>, Output<H>)>>> =
-            Vec::with_capacity(queries_usize.len());
-        for query in &queries_usize {
-            let mut comm_queries = Vec::with_capacity(evals.len());
-            let mut comm_paths = Vec::with_capacity(evals.len());
-            for eval in evals {
-                let c = comms[eval.poly()];
-                let res = query_codeword::<F, H>(query, &c.codeword, &c.codeword_tree);
-                comm_queries.push(res.0);
-                comm_paths.push(res.1);
-            }
-
-            individual_queries.push(comm_queries);
-            individual_paths.push(comm_paths);
-        }
+        let (queried_els, queries_usize) = batch_query_phase(
+            transcript,
+            1 << (num_vars + pp.log_rate),
+            comms.as_slice(),
+            &oracles,
+            pp.num_verifier_queries,
+        );
 
         let merkle_paths: Vec<Vec<Vec<(Output<H>, Output<H>)>>> = queried_els
             .iter()
             .map(|query| {
-                let indices = &query.1;
-                indices
+                let (oracle_queries, poly_queries) = query;
+                oracle_queries
                     .into_iter()
                     .enumerate()
-                    .map(|(i, q)| {
-                        if (i == 0) {
-                            return get_merkle_path::<H, F>(&comm.codeword_tree, *q, false);
-                        } else {
-                            return get_merkle_path::<H, F>(&trees[i - 1], *q, false);
-                        }
+                    .map(|(i, (_, _, j))| {
+                        return get_merkle_path::<H, F>(&trees[i], *j, false);
                     })
+                    .chain(poly_queries.into_iter().enumerate().map(|(i, (_, _, j))| {
+                        return get_merkle_path::<H, F>(&comms[i].codeword_tree, *j, true);
+                    }))
                     .collect()
             })
             .collect();
 
-        // a proof consists of roots, merkle paths, query paths, sum check oracles, eval, and final oracle
-        //write individual commitment queries for batching
-        //queries for batch
-        individual_queries.iter().flatten().for_each(|(f1, f2)| {
-            transcript.write_field_element(f1).unwrap();
-            transcript.write_field_element(f2).unwrap();
-        });
-        //paths for batch
-        individual_paths
-            .iter()
-            .flatten()
-            .flatten()
-            .for_each(|(h1, h2)| {
-                transcript.write_commitment(h1);
-                transcript.write_commitment(h2);
-            });
-
-        //write sum check oracles
-        transcript.write_field_elements(sum_check_oracles.iter().flatten());
-        //write eval
-        transcript.write_field_element(&eval);
-        //write final oracle
-        transcript.write_field_elements(oracles.pop().unwrap().iter().collect_vec());
-        //write query paths
+        //write oracle query results
         queried_els
             .iter()
             .map(|q| &q.0)
@@ -580,6 +526,17 @@ where
                 transcript.write_field_element(&query.0);
                 transcript.write_field_element(&query.1);
             });
+
+        //write poly query results
+        queried_els
+            .iter()
+            .map(|q| &q.1)
+            .flatten()
+            .for_each(|query| {
+                transcript.write_field_element(&query.0);
+                transcript.write_field_element(&query.1);
+            });
+
         //write merkle paths
         merkle_paths
             .iter()
@@ -742,6 +699,11 @@ where
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
         let num_rounds = num_vars - V::get_basecode();
         validate_input("batch verify", vp.max_num_vars, [], points)?;
+        let mut poly_num_vars = vec![0usize; comms.len()];
+        evals
+            .iter()
+            .for_each(|eval| poly_num_vars[eval.poly()] = points[eval.point()].len());
+        assert!(poly_num_vars.iter().min().unwrap() >= &V::get_basecode());
 
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = transcript.squeeze_challenges(batch_size_log);
@@ -750,59 +712,76 @@ where
         let tilde_gs_sum =
             inner_product(evals.iter().map(Evaluation::value), &eq_xt[..evals.len()]);
 
-        let (g_prime_eval, verify_point) =
+        let (new_target_sum, verify_point) =
             SumCheck::verify(&(), num_vars, 2, tilde_gs_sum, transcript)?;
 
+        // Now the goal is to use the BaseFold to check the new target sum. Note that this time
+        // we only have one eq polynomial in the sum-check.
         let eq_xy_evals = points
             .iter()
             .map(|point| eq_xy_eval(&verify_point, point))
             .collect_vec();
+        let mut coeffs = vec![F::ZERO; comms.len()];
+        evals
+            .iter()
+            .enumerate()
+            .for_each(|(i, eval)| coeffs[eval.poly()] += eq_xy_evals[eval.point()] * eq_xt[i]);
 
         //start of verify
         let n = (1 << (num_vars + vp.log_rate));
         //read first $(num_var - 1) commitments
-        let mut roots: Vec<Output<H>> = Vec::with_capacity(num_rounds + 1);
+        let mut sumcheck_messages = Vec::with_capacity(num_rounds);
+        let mut roots: Vec<Output<H>> = Vec::with_capacity(num_rounds - 1);
         let mut fold_challenges: Vec<F> = Vec::with_capacity(num_rounds);
         for i in 0..num_rounds {
-            roots.push(transcript.read_commitment().unwrap());
+            sumcheck_messages.push(transcript.read_field_elements(3).unwrap());
             fold_challenges.push(transcript.squeeze_challenge());
+            if i < num_rounds - 1 {
+                roots.push(transcript.read_commitment().unwrap());
+            }
         }
-
-        //read last commitment
-        transcript.read_commitment().unwrap();
-
-        let mut bh_evals = Vec::new();
-        let mut eq = Vec::new();
-        bh_evals = transcript
-            .read_field_elements(1 << (num_vars - num_rounds))
-            .unwrap();
-        eq = transcript
-            .read_field_elements(1 << (num_vars - num_rounds))
+        let final_message = transcript
+            .read_field_elements(1 << V::get_basecode())
             .unwrap();
 
         let mut query_challenges = transcript.squeeze_challenges(vp.num_verifier_queries);
 
-        let mut ind_queries = Vec::with_capacity(vp.num_verifier_queries);
+        let mut queries = Vec::with_capacity(vp.num_verifier_queries);
         let mut count = 0;
         for i in 0..vp.num_verifier_queries {
-            let mut comms_queries = Vec::with_capacity(evals.len());
-            for j in 0..evals.len() {
+            let mut oracle_queries = Vec::with_capacity(num_rounds - 1);
+            for j in 0..num_rounds - 1 {
                 let queries = transcript.read_field_elements(2).unwrap();
+                oracle_queries.push(queries);
+            }
+            queries.push(oracle_queries);
 
+            let mut comms_queries = Vec::with_capacity(comms.len());
+            for j in 0..comms.len() {
+                let queries = transcript.read_field_elements(2).unwrap();
                 comms_queries.push(queries);
             }
 
-            ind_queries.push(comms_queries);
+            queries.push(comms_queries);
         }
 
         //read merkle paths
         let mut batch_paths = Vec::with_capacity(vp.num_verifier_queries);
         let mut count = 0;
         for i in 0..vp.num_verifier_queries {
-            let mut comms_merkle_paths = Vec::with_capacity(evals.len());
-            for j in 0..evals.len() {
+            let mut oracle_merkle_paths = Vec::with_capacity(num_rounds - 1);
+            for j in 0..num_rounds - 1 {
                 let merkle_path = transcript
-                    .read_commitments(2 * (vp.max_num_vars + vp.log_rate))
+                    .read_commitments(2 * (num_vars + vp.log_rate - j - 1))
+                    .unwrap();
+                let chunked_path = merkle_path.chunks(2).map(|c| c.to_vec()).collect_vec();
+                oracle_merkle_paths.push(chunked_path);
+            }
+            batch_paths.push(oracle_merkle_paths);
+            let mut comms_merkle_paths = Vec::with_capacity(comms.len());
+            for j in 0..comms.len() {
+                let merkle_path = transcript
+                    .read_commitments(2 * (poly_num_vars[j] + vp.log_rate))
                     .unwrap();
                 let chunked_path = merkle_path.chunks(2).map(|c| c.to_vec()).collect_vec();
 
@@ -812,75 +791,9 @@ where
             batch_paths.push(comms_merkle_paths);
         }
 
-        let mut count = 0;
-
-        let mut sum_check_oracles: Vec<Vec<F>> = transcript
-            .read_field_elements(3 * (num_rounds + 1))
-            .unwrap()
-            .chunks(3)
-            .map(|c| c.to_vec())
-            .collect_vec();
-
-        //read eval
-        let eval = transcript.read_field_element().unwrap();
-
-        //read final oracle
-        let mut final_oracle = transcript
-            .read_field_elements(1 << (num_vars - num_rounds + vp.log_rate))
-            .unwrap();
-
-        //read query paths
-        let num_queries = vp.num_verifier_queries * 2 * (num_rounds + 1);
-
-        let all_qs = transcript.read_field_elements(num_queries).unwrap();
-
-        let i_qs = all_qs.chunks((num_rounds + 1) * 2).collect_vec();
-
-        assert_eq!(i_qs.len(), vp.num_verifier_queries);
-
-        let mut queries = i_qs.iter().map(|q| q.chunks(2).collect_vec()).collect_vec();
-
-        assert_eq!(queries[0][0].len(), 2);
-
-        let scalars = evals
-            .iter()
-            .zip(eq_xt.evals())
-            .map(|(eval, eq_xt_i)| eq_xy_evals[eval.point()] * eq_xt_i)
-            .collect_vec();
-
-        for (i, query) in queries.iter().enumerate() {
-            let mut lc0 = F::ZERO;
-            let mut lc1 = F::ZERO;
-            for j in 0..scalars.len() {
-                lc0 += scalars[j] * ind_queries[i][j][0];
-                lc1 += scalars[j] * ind_queries[i][j][1];
-            }
-            assert_eq!(query[0][0], lc0);
-            assert_eq!(query[0][1], lc1);
-        }
-
-        //start regular verify on the proof in transcript
-
-        let mut query_merkle_paths: Vec<Vec<Vec<Vec<Output<H>>>>> =
-            Vec::with_capacity(vp.num_verifier_queries);
-        for i in 0..vp.num_verifier_queries {
-            let mut merkle_paths: Vec<Vec<Vec<Output<H>>>> = Vec::with_capacity(num_rounds + 1);
-            for round in 0..(num_rounds + 1) {
-                let merkle_path: Vec<Output<H>> = transcript
-                    .read_commitments(2 * (num_vars - round + vp.log_rate - 1)) //-1 because we already read roots
-                    .unwrap();
-                let chunked_path: Vec<Vec<Output<H>>> =
-                    merkle_path.chunks(2).map(|c| c.to_vec()).collect_vec();
-
-                merkle_paths.push(chunked_path);
-            }
-            query_merkle_paths.push(merkle_paths);
-        }
-
-        let queries_usize = verifier_query_phase::<F, H>(
+        let queries_usize = batch_verifier_query_phase::<F, H>(
             &query_challenges,
-            &query_merkle_paths,
-            &sum_check_oracles,
+            &sumcheck_messages,
             &fold_challenges,
             &queries,
             num_rounds,
@@ -888,37 +801,58 @@ where
             vp.log_rate,
             &roots,
             vp.rng.clone(),
-            &eval,
+            &new_target_sum,
         );
-
         for vq in 0..vp.num_verifier_queries {
-            for cq in 0..ind_queries[vq].len() {
-                let tree = &comms[evals[cq].poly].codeword_tree;
+            let oracle_queries = &queries[vq * 2];
+            for cq in 0..oracle_queries.len() {
+                let root = &roots[cq];
+                assert_eq!(root, &batch_paths[vq * 2][cq].pop().unwrap().pop().unwrap());
+
+                authenticate_merkle_path::<H, F>(
+                    &batch_paths[vq * 2][cq],
+                    (oracle_queries[cq][0], oracle_queries[cq][1]),
+                    queries_usize[vq * 2],
+                );
+            }
+
+            let comm_queries = &queries[vq * 2 + 1];
+            for cq in 0..comm_queries.len() {
+                let tree = &comms[cq].codeword_tree;
                 assert_eq!(
                     tree[tree.len() - 1][0],
-                    batch_paths[vq][cq].pop().unwrap().pop().unwrap()
+                    batch_paths[vq * 2 + 1][cq].pop().unwrap().pop().unwrap()
                 );
 
                 authenticate_merkle_path::<H, F>(
-                    &batch_paths[vq][cq],
-                    (ind_queries[vq][cq][0], ind_queries[vq][cq][1]),
-                    queries_usize[vq],
+                    &batch_paths[vq * 2 + 1][cq],
+                    (comm_queries[cq][0], comm_queries[cq][1]),
+                    queries_usize[vq * 2 + 1],
                 );
-
-                count += 1;
             }
         }
-        virtual_open(
-            num_vars,
-            num_rounds,
-            &mut eq,
-            &mut bh_evals,
-            &mut final_oracle,
-            &verify_point,
-            &mut fold_challenges,
-            &vp.table_w_weights,
-            &mut sum_check_oracles,
-        );
+
+        for (i, query) in queries.iter().enumerate() {
+            let mut lc0 = F::ZERO;
+            let mut lc1 = F::ZERO;
+            for j in 0..coeffs.len() {
+                lc0 += coeffs[j] * queries[i][j][0];
+                lc1 += coeffs[j] * queries[i][j][1];
+            }
+            assert_eq!(query[0][0], lc0);
+            assert_eq!(query[0][1], lc1);
+        }
+        // virtual_open(
+        //     num_vars,
+        //     num_rounds,
+        //     &mut eq,
+        //     &mut bh_evals,
+        //     &mut final_oracle,
+        //     &verify_point,
+        //     &mut fold_challenges,
+        //     &vp.table_w_weights,
+        //     &mut sum_check_oracles,
+        // );
         Ok(())
     }
 }
@@ -1312,6 +1246,15 @@ fn sum_check_challenge_round<F: PrimeField>(
     // p_i(&bh_values,&eq)
 }
 
+fn sum_check_last_round<F: PrimeField>(
+    mut eq: &mut Vec<F>,
+    mut bh_values: &mut Vec<F>,
+    challenge: F,
+) {
+    one_level_eval_hc(&mut bh_values, challenge);
+    one_level_eval_hc(&mut eq, challenge);
+}
+
 fn basefold_one_round_by_interpolation_weights<F: PrimeField>(
     table: &Vec<Vec<(F, F)>>,
     level_index: usize,
@@ -1385,6 +1328,36 @@ fn basefold_get_query<F: PrimeField>(
     }
 
     return (queries, indices);
+}
+
+fn batch_basefold_get_query<F: PrimeField, H: Hash>(
+    comms: &[&BasefoldCommitment<F, H>],
+    oracles: &Vec<Vec<F>>,
+    codeword_size: usize,
+    mut x_index: usize,
+) -> (Vec<(F, F, usize)>, Vec<(F, F, usize)>) {
+    let mut queries = Vec::with_capacity(oracles.len());
+
+    x_index >>= 1;
+    for oracle in oracles {
+        let mut p1 = x_index | 1;
+        let mut p0 = p1 - 1;
+        queries.push((oracle[p0], oracle[p1], p0));
+        x_index >>= 1;
+    }
+
+    let comm_queries = comms
+        .iter()
+        .map(|comm| {
+            let x_index =
+                x_index >> (log2_strict(codeword_size) - log2_strict(comm.codeword.len()));
+            let mut p1 = x_index | 1;
+            let mut p0 = p1 - 1;
+            (comm.codeword[p0], comm.codeword[p1], p0)
+        })
+        .collect_vec();
+
+    return (queries, comm_queries);
 }
 
 fn get_merkle_path<H: Hash, F: PrimeField>(
@@ -1972,6 +1945,7 @@ fn virtual_open<F: PrimeField>(
         eq_r_ * no[0]
     );
 }
+
 //outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 fn commit_phase<F: PrimeField, H: Hash>(
     point: &Point<F, MultilinearPolynomial<F>>,
@@ -1990,7 +1964,6 @@ fn commit_phase<F: PrimeField, H: Hash>(
 ) {
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
-    let mut new_tree = &comm.codeword_tree;
     let mut root = comm.get_root();
     let mut new_oracle = &comm.codeword;
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
@@ -2035,6 +2008,130 @@ fn commit_phase<F: PrimeField, H: Hash>(
     return (trees, sum_check_oracles, oracles, bh_evals, eq, eval);
 }
 
+//outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
+fn batch_commit_phase<F: PrimeField, H: Hash>(
+    point: &Point<F, MultilinearPolynomial<F>>,
+    comms: &[&BasefoldCommitment<F, H>],
+    transcript: &mut impl TranscriptWrite<Output<H>, F>,
+    num_vars: usize,
+    num_rounds: usize,
+    table_w_weights: &Vec<Vec<(F, F)>>,
+    log_rate: usize,
+    coeffs: &[F],
+) -> (Vec<Vec<Vec<Output<H>>>>, Vec<Vec<F>>, Vec<Vec<F>>) {
+    assert_eq!(point.len(), num_vars);
+    let mut oracles = Vec::with_capacity(num_vars);
+    let mut trees = Vec::with_capacity(num_vars);
+    let mut running_oracle = vec![F::ZERO; 1 << (num_vars + log_rate)];
+
+    // Before the interaction, collect all the polynomials whose num variables match the
+    // max num variables
+    let running_oracle_len = running_oracle.len();
+    comms
+        .iter()
+        .enumerate()
+        .filter(|(_, comm)| comm.codeword.len() == running_oracle_len)
+        .for_each(|(index, comm)| {
+            running_oracle
+                .par_iter_mut()
+                .zip_eq(comm.codeword.par_iter())
+                .for_each(|(mut r, &a)| *r += a * coeffs[index]);
+        });
+    let mut running_tree = merkelize::<F, H>(&running_oracle);
+    let mut running_root = running_tree.last().unwrap()[0].clone();
+
+    // Unlike the FRI part, the sum-check part still follows the original procedure,
+    // and linearly combine all the polynomials once for all
+    let mut sum_of_all_evals_for_sumcheck = vec![F::ZERO; 1 << num_vars];
+    comms.iter().enumerate().for_each(|(index, comm)| {
+        sum_of_all_evals_for_sumcheck
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(pos, mut r)| {
+                // Evaluating the multilinear polynomial outside of its interpolation hypercube
+                // is equivalent to repeating each element in place.
+                // Here is the tricky part: the bh_evals are stored in big endian, but we want
+                // to align the polynomials to the variable with index 0 before adding them
+                // together. So each element is repeated by
+                // sum_of_all_evals_for_sumcheck.len() / bh_evals.len() times
+                *r += comm.bh_evals[pos >> (num_vars - log2_strict(comm.bh_evals.len()))]
+                    * coeffs[index]
+            });
+    });
+
+    // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
+    let mut eq = build_eq_x_r_vec::<F>(&point);
+
+    let mut sumcheck_messages = Vec::with_capacity(num_rounds + 1);
+    let mut last_sumcheck_message =
+        sum_check_first_round::<F>(&mut eq, &mut sum_of_all_evals_for_sumcheck);
+    sumcheck_messages.push(last_sumcheck_message.clone());
+
+    for i in 0..num_rounds {
+        // For the first round, no need to send the running root, because this root is
+        // committing to a vector that can be recovered from linearly combining other
+        // already-committed vectors.
+        transcript.write_field_elements(&last_sumcheck_message);
+
+        let challenge: F = transcript.squeeze_challenge();
+
+        // Fold the current oracle for FRI
+        let mut running_oracle = basefold_one_round_by_interpolation_weights::<F>(
+            &table_w_weights,
+            log2_strict(running_oracle.len()) - 1,
+            &running_oracle,
+            challenge,
+        );
+        // Then merge the rest polynomials whose sizes match the current running oracle
+        let running_oracle_len = running_oracle.len();
+        comms
+            .iter()
+            .enumerate()
+            .filter(|(_, comm)| comm.codeword.len() == running_oracle_len)
+            .for_each(|(index, comm)| {
+                running_oracle
+                    .par_iter_mut()
+                    .zip_eq(comm.codeword.par_iter())
+                    .for_each(|(mut r, &a)| *r += a * coeffs[index]);
+            });
+
+        if i < num_rounds - 1 {
+            last_sumcheck_message =
+                sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
+            sumcheck_messages.push(last_sumcheck_message.clone());
+            running_tree = merkelize::<F, H>(&running_oracle);
+            running_root = running_tree.last().unwrap()[0].clone();
+            transcript.write_commitment(&running_root).unwrap();
+
+            oracles.push(running_oracle);
+            trees.push(running_tree);
+        } else {
+            // The difference of the last round is that we don't need to compute the message,
+            // and we don't interpolate the small polynomials. So after the last round,
+            // sum_of_all_evals_for_sumcheck is exactly the evaluation representation of the
+            // folded polynomial so far.
+            sum_check_last_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
+            // For the FRI part, we send the current polynomial as the message
+            transcript.write_field_elements(&sum_of_all_evals_for_sumcheck);
+
+            if cfg!(feature = "sanity-check") {
+                // If the prover is honest, in the last round, the running oracle
+                // on the prover side should be exactly the encoding of the folded polynomial.
+                reverse_index_bits_in_place(&mut sum_of_all_evals_for_sumcheck);
+                reverse_index_bits_in_place(&mut running_oracle);
+
+                let (coeffs, mut bh_evals) =
+                    interpolate_over_boolean_hypercube_with_copy(&sum_of_all_evals_for_sumcheck);
+                let basecode = encode_rs_basecode(&coeffs, log_rate, coeffs.len());
+                assert_eq!(basecode.len(), 1);
+                let basecode = basecode[0].clone();
+                assert_eq!(basecode, running_oracle);
+            }
+        }
+    }
+    return (trees, sumcheck_messages, oracles);
+}
+
 fn query_phase<F: PrimeField, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     comm: &BasefoldCommitment<F, H>,
@@ -2060,6 +2157,38 @@ fn query_phase<F: PrimeField, H: Hash>(
             .par_iter()
             .map(|x_index| {
                 return basefold_get_query::<F>(&comm.codeword, &oracles, *x_index);
+            })
+            .collect(),
+        queries_usize,
+    )
+}
+
+fn batch_query_phase<F: PrimeField, H: Hash>(
+    transcript: &mut impl TranscriptWrite<Output<H>, F>,
+    codeword_size: usize,
+    comms: &[&BasefoldCommitment<F, H>],
+    oracles: &Vec<Vec<F>>,
+    num_verifier_queries: usize,
+) -> (Vec<(Vec<(F, F, usize)>, Vec<(F, F, usize)>)>, Vec<usize>) {
+    let mut queries = transcript.squeeze_challenges(num_verifier_queries);
+
+    // Transform the challenge queries from field elements into integers
+    let queries_usize: Vec<usize> = queries
+        .iter()
+        .map(|x_index| {
+            let x_rep = (*x_index).to_repr();
+            let mut x: &[u8] = x_rep.as_ref();
+            let (int_bytes, _) = x.split_at(std::mem::size_of::<u32>());
+            let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
+            ((x_int as usize) % codeword_size).into()
+        })
+        .collect_vec();
+
+    (
+        queries_usize
+            .par_iter()
+            .map(|x_index| {
+                return batch_basefold_get_query::<F, H>(comms, &oracles, codeword_size, *x_index);
             })
             .collect(),
         queries_usize,
@@ -2166,6 +2295,101 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
     }
     return queries_usize;
 }
+
+fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
+    query_challenges: &Vec<F>,
+    sum_check_oracles: &Vec<Vec<F>>,
+    fold_challenges: &Vec<F>,
+    queries: &Vec<Vec<Vec<F>>>,
+    num_rounds: usize,
+    num_vars: usize,
+    log_rate: usize,
+    roots: &Vec<Output<H>>,
+    rng: ChaCha8Rng,
+    eval: &F,
+) -> Vec<usize> {
+    let n = (1 << (num_vars + log_rate));
+    let mut queries_usize: Vec<usize> = query_challenges
+        .par_iter()
+        .map(|x_index| {
+            let x_repr = (*x_index).to_repr();
+            let mut x: &[u8] = x_repr.as_ref();
+            let (int_bytes, rest) = x.split_at(std::mem::size_of::<u32>());
+            let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
+            ((x_int as usize) % n).into()
+        })
+        .collect();
+
+    // For computing the weights on the fly, because the verifier is incapable of storing
+    // the weights.
+    let mut key: [u8; 16] = [0u8; 16];
+    let mut iv: [u8; 16] = [0u8; 16];
+    let mut rng = rng.clone();
+    rng.set_word_pos(0);
+    rng.fill_bytes(&mut key);
+    rng.fill_bytes(&mut iv);
+
+    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
+    let mut cipher = Aes128Ctr64LE::new(
+        GenericArray::from_slice(&key[..]),
+        GenericArray::from_slice(&iv[..]),
+    );
+
+    queries_usize
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(qi, query_index)| {
+            let mut cipher = cipher.clone();
+            let mut rng = rng.clone();
+            let mut cur_index = *query_index;
+            let mut oracle_queries = &queries[qi * 2];
+            let mut comm_queries = &queries[qi * 2 + 1];
+
+            for i in 0..num_rounds {
+                let temp = cur_index;
+                let mut other_index = cur_index ^ 1;
+                if (other_index < cur_index) {
+                    cur_index = other_index;
+                    other_index = temp;
+                }
+
+                assert_eq!(cur_index % 2, 0);
+
+                let ri0 = reverse_bits(cur_index, num_vars + log_rate - i);
+                let ri1 = reverse_bits(other_index, num_vars + log_rate - i);
+                let now = Instant::now();
+                let x0: F = query_point(
+                    1 << (num_vars + log_rate - i),
+                    ri0,
+                    &mut rng,
+                    num_vars + log_rate - i - 1,
+                    &mut cipher,
+                );
+                let x1 = -x0;
+
+                let res = interpolate2(
+                    [(x0, oracle_queries[i][0]), (x1, oracle_queries[i][1])],
+                    fold_challenges[i],
+                );
+
+                assert_eq!(res, oracle_queries[i + 1][(cur_index >> 1) % 2]);
+
+                cur_index >>= 1;
+            }
+        });
+
+    assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_oracles[0]));
+
+    // The sum-check part of the protocol
+    for i in 0..fold_challenges.len() - 1 {
+        assert_eq!(
+            degree_2_eval(&sum_check_oracles[i], fold_challenges[i]),
+            degree_2_zero_plus_one(&sum_check_oracles[i + 1])
+        );
+    }
+    return queries_usize;
+}
+
 //return ((leaf1,leaf2),path), where leaves are queries from codewords
 fn query_codeword<F: PrimeField, H: Hash>(
     query: &usize,
