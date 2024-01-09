@@ -394,24 +394,41 @@ where
 
         validate_input("batch open", pp.num_vars, polys.clone(), points)?;
 
-        let ell = evals.len().next_power_of_two().ilog2() as usize;
-        let t = transcript.squeeze_challenges(ell);
+        // evals.len() is the batch size, i.e., how many polynomials are being opened together
+        let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
+        let t = transcript.squeeze_challenges(batch_size_log);
 
-        // Use eq(X,t) where t is random to batch the different evaluation queries
+        // Use eq(X,t) where t is random to batch the different evaluation queries.
+        // Note that this is a small polynomial (only batch_size) compared to the polynomials
+        // to open.
         let eq_xt = Self::Polynomial::eq_xy(&t);
         // Merge the polynomials for every point. One merged polynomial for each point.
         let merged_polys = evals.iter().zip(eq_xt.evals().iter()).fold(
+            // This folding will generate a vector of |points| pairs of (scalar, polynomial)
+            // The polynomials are initialized to zero, and the scalars are initialized to one
             vec![(F::ONE, Cow::<Self::Polynomial>::default()); points.len()],
             |mut merged_polys, (eval, eq_xt_i)| {
+                // For each polynomial to open, eval.point() specifies which point it is to be opened at.
                 if merged_polys[eval.point()].1.is_zero() {
+                    // If the accumulator for this point is still the zero polynomial,
+                    // directly assign the random coefficient and the polynomial to open to
+                    // this accumulator
                     merged_polys[eval.point()] = (*eq_xt_i, Cow::Borrowed(polys[eval.poly()]));
                 } else {
+                    // If the accumulator is unempty now, first force its scalar to 1, i.e.,
+                    // make (scalar, polynomial) to (1, scalar * polynomial)
                     let coeff = merged_polys[eval.point()].0;
                     if coeff != F::ONE {
                         merged_polys[eval.point()].0 = F::ONE;
                         *merged_polys[eval.point()].1.to_mut() *= &coeff;
                     }
+                    // Note that the add_assign operator is overloaded to allow a polynomial
+                    // to += a pair of (scalar, polynomial), which is equivalent to
+                    // += scalar * polynomial.
                     *merged_polys[eval.point()].1.to_mut() += (eq_xt_i, polys[eval.poly()]);
+
+                    // Note that once the scalar in the accumulator becomes ONE, it will remain
+                    // to be ONE forever.
                 }
                 merged_polys
             },
@@ -620,6 +637,8 @@ where
         size = size + field_size * (3 * (vp.num_rounds + 1)); // dont need last sumcheck oracle in proof
                                                               //read eval
 
+        // TODO: This eval shadows the eval passed in from the argument.
+        // this should not be desired
         let eval = &transcript.read_field_element().unwrap(); //do not need eval in proof
 
         let mut bh_evals = Vec::new();
@@ -724,8 +743,8 @@ where
         let comms = comms.into_iter().collect_vec();
         validate_input("batch verify", vp.num_vars, [], points)?;
 
-        let ell = evals.len().next_power_of_two().ilog2() as usize;
-        let t = transcript.squeeze_challenges(ell);
+        let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
+        let t = transcript.squeeze_challenges(batch_size_log);
 
         let eq_xt = MultilinearPolynomial::eq_xy(&t);
         let tilde_gs_sum =

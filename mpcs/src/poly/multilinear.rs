@@ -274,6 +274,8 @@ impl<'rhs, F: Field> AddAssign<&'rhs MultilinearPolynomial<F>> for MultilinearPo
             (_, true) => {}
             (true, false) => *self = rhs.clone(),
             (false, false) => {
+                // This is only correct if the two polynomials have the same number of
+                // variables. The same for the implementations in ark-poly.
                 assert_eq!(self.num_vars, rhs.num_vars);
 
                 parallelize(&mut self.evals, |(lhs, start)| {
@@ -281,6 +283,37 @@ impl<'rhs, F: Field> AddAssign<&'rhs MultilinearPolynomial<F>> for MultilinearPo
                         *lhs += rhs;
                     }
                 });
+            }
+        }
+    }
+}
+
+impl<'rhs, F: Field> MultilinearPolynomial<F> {
+    /// Resize to the new number of variables, which must be greater than or equal to
+    /// the current number of variables.
+    pub fn resize_num_vars(&mut self, num_vars: usize) {
+        assert!(num_vars >= self.num_vars);
+        if num_vars == self.num_vars {
+            return;
+        }
+        self.evals.resize(1 << num_vars, F::ZERO);
+        // When evaluate a multilinear polynomial outside of its original interpolated hypercube,
+        // the evaluations are just repetitions of the original evaluations
+        (1 << self.num_vars..1 << num_vars)
+            .for_each(|i| self.evals[i] = self.evals[i & ((1 << self.num_vars) - 1)]);
+        self.num_vars = num_vars;
+    }
+
+    /// Add assign a polynomial of different number of variables. If the rhs has more
+    /// variables, this polynomial should increase its number of variables to match.
+    pub fn add_assign_mixed(&mut self, rhs: &'rhs MultilinearPolynomial<F>) {
+        match (self.is_zero(), rhs.is_zero()) {
+            (_, true) => {}
+            (true, false) => *self = rhs.clone(),
+            (false, false) => {
+                if self.num_vars < rhs.num_vars {
+                    self.resize_num_vars(rhs.num_vars);
+                }
             }
         }
     }
@@ -704,5 +737,30 @@ mod test {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_resize_num_vars() {
+        let mut f =
+            MultilinearPolynomial::new(vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)]);
+        f.resize_num_vars(2);
+        assert_eq!(
+            f.evals,
+            vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)]
+        );
+        f.resize_num_vars(3);
+        assert_eq!(
+            f.evals,
+            vec![
+                Fr::from(1),
+                Fr::from(2),
+                Fr::from(3),
+                Fr::from(4),
+                Fr::from(1),
+                Fr::from(2),
+                Fr::from(3),
+                Fr::from(4)
+            ]
+        );
     }
 }
