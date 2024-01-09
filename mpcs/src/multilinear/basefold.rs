@@ -3,14 +3,13 @@ use crate::{
     multilinear::{additive, validate_input},
     poly::{multilinear::MultilinearPolynomial, Polynomial},
     util::{
-        arithmetic::{div_ceil, horner, inner_product, steps, BatchInvert, Field, PrimeField},
+        arithmetic::{horner, inner_product, steps, BatchInvert, Field, PrimeField},
         code::LinearCodes,
         expression::{Expression, Query, Rotation},
         hash::{Hash, Output},
         new_fields::{Mersenne127, Mersenne61},
-        parallel::{num_threads, parallelize, parallelize_iter},
         transcript::{FieldTranscript, TranscriptRead, TranscriptWrite},
-        BigUint, Deserialize, DeserializeOwned, Itertools, Serialize,
+        Deserialize, DeserializeOwned, Itertools, Serialize,
     },
     AdditiveCommitment, Error, Evaluation, Point, PolynomialCommitmentScheme,
 };

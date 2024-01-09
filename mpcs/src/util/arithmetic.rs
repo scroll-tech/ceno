@@ -12,8 +12,6 @@ use num_integer::Integer;
 use std::{borrow::Borrow, fmt::Debug, iter};
 
 mod bh;
-mod msm;
-
 pub use bh::BooleanHypercube;
 pub use bitvec::field::BitField;
 pub use halo2_curves::{
@@ -24,7 +22,6 @@ pub use halo2_curves::{
     },
     Coordinates, CurveAffine, CurveExt,
 };
-pub use msm::{fixed_base_msm, variable_base_msm, window_size, window_table};
 
 pub trait MultiMillerLoop: pairing::MultiMillerLoop + Debug + Sync {
     fn pairings_product_is_identity(terms: &[(&Self::G1Affine, &Self::G2Prepared)]) -> bool {
