@@ -741,7 +741,7 @@ where
         let comms = comms.into_iter().collect_vec();
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
         let num_rounds = num_vars - V::get_basecode();
-        validate_input("batch verify", num_vars, [], points)?;
+        validate_input("batch verify", vp.max_num_vars, [], points)?;
 
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = transcript.squeeze_challenges(batch_size_log);
