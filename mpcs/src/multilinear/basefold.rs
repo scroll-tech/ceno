@@ -1293,7 +1293,7 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
                 let coeffs = interpolate_over_boolean_hypercube(&sum_of_all_evals_for_sumcheck);
-                let basecode = encode_rs_basecode(&coeffs, log_rate, coeffs.len());
+                let basecode = encode_rs_basecode(&coeffs, 1 << log_rate, coeffs.len());
                 assert_eq!(basecode.len(), 1);
                 let basecode = basecode[0].clone();
 
@@ -2058,7 +2058,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
     eval: &F,
 ) {
     let message = interpolate_over_boolean_hypercube(&final_message);
-    let mut final_codeword = encode_rs_basecode(&message, log_rate, message.len());
+    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
     assert_eq!(final_codeword.len(), 1);
     let mut final_codeword = final_codeword.remove(0);
     reverse_index_bits_in_place(&mut final_codeword);
@@ -2125,7 +2125,7 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
     eval: &F,
 ) {
     let message = interpolate_over_boolean_hypercube(&final_message);
-    let mut final_codeword = encode_rs_basecode(&message, log_rate, message.len());
+    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
     assert_eq!(final_codeword.len(), 1);
     let mut final_codeword = final_codeword.remove(0);
     reverse_index_bits_in_place(&mut final_codeword);

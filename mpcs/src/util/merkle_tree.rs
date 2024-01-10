@@ -76,6 +76,10 @@ impl<H: Hash> MerklePathWithoutLeafOrRoot<H> {
         Self { inner }
     }
 
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Output<H>> {
         self.inner.iter()
     }
@@ -173,4 +177,64 @@ fn authenticate_merkle_path_root<H: Hash, F: PrimeField>(
         x_index >>= 1;
     }
     assert_eq!(&hash, root);
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::util::transcript::{Blake2sTranscript, FieldTranscript, InMemoryTranscript};
+
+    use super::*;
+    type F = halo2_curves::bn256::Fr;
+    type H = crate::util::hash::Blake2s;
+
+    #[test]
+    fn test_merkle_tree() {
+        let leaves = vec![F::from(1), F::from(2), F::from(3), F::from(4)];
+        test_leaves(&leaves);
+
+        let leaves = vec![
+            F::from(1),
+            F::from(2),
+            F::from(3),
+            F::from(4),
+            F::from(1),
+            F::from(2),
+            F::from(3),
+            F::from(4),
+        ];
+        test_leaves(&leaves);
+
+        let leaves = vec![
+            F::from(1),
+            F::from(2),
+            F::from(3),
+            F::from(4),
+            F::from(1),
+            F::from(2),
+            F::from(3),
+            F::from(4),
+        ];
+        test_leaves(&leaves);
+    }
+
+    fn test_leaves(leaves: &Vec<F>) {
+        let tree = MerkleTree::<F, H>::from_leaves(leaves.clone());
+        let root = tree.root();
+        for (i, _) in leaves.iter().enumerate() {
+            let path = tree.merkle_path_without_leaf_sibling_or_root(i);
+            let left_leaf = leaves[(i | 1) - 1];
+            let right_leaf = leaves[i | 1];
+            path.authenticate_leaves_root(left_leaf, right_leaf, i, &root);
+
+            let mut transcript = Blake2sTranscript::new(());
+            path.write_transcript::<F>(&mut transcript);
+            let proof = transcript.into_proof();
+            let mut transcript = Blake2sTranscript::from_proof((), &proof);
+            let path = MerklePathWithoutLeafOrRoot::<H>::read_transcript::<F>(
+                &mut transcript,
+                tree.height(),
+            );
+            path.authenticate_leaves_root(left_leaf, right_leaf, i, &root);
+        }
+    }
 }
