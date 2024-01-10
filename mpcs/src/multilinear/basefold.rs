@@ -124,13 +124,6 @@ impl<H: Hash> BasefoldCommitment<H> {
         }
     }
 
-    fn from_root(root: Output<H>) -> Self {
-        Self {
-            root,
-            num_vars: None,
-        }
-    }
-
     fn root(&self) -> Output<H> {
         self.root.clone()
     }
@@ -321,6 +314,9 @@ where
         let comms = Self::batch_commit(pp, polys)?;
         comms.iter().for_each(|comm| {
             transcript.write_commitment(comm.get_root_ref()).unwrap();
+            transcript
+                .write_field_element(&F::from(comm.num_vars as u64))
+                .unwrap();
         });
         Ok(comms)
     }
@@ -344,6 +340,7 @@ where
         _eval: &F, // Opening does not need eval, except for sanity check
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
+        assert!(comm.num_vars >= V::get_basecode());
         let (trees, oracles) = commit_phase(
             &point,
             &comm,
@@ -375,6 +372,8 @@ where
     ) -> Result<(), Error> {
         let polys = polys.into_iter().collect_vec();
         let comms = comms.into_iter().collect_vec();
+        let min_num_vars = polys.iter().map(|p| p.num_vars()).min().unwrap();
+        assert!(min_num_vars >= V::get_basecode());
 
         validate_input("batch open", pp.max_num_vars, polys.clone(), points)?;
 
@@ -522,12 +521,31 @@ where
         num_polys: usize,
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, F>,
     ) -> Result<Vec<Self::Commitment>, Error> {
-        let roots = transcript.read_commitments(num_polys).unwrap();
+        let roots = (0..num_polys)
+            .map(|_| {
+                let commitment = transcript.read_commitment().unwrap();
+                let num_vars = field_to_usize(&transcript.read_field_element().unwrap(), None);
+                (num_vars, commitment)
+            })
+            .collect_vec();
 
         Ok(roots
             .iter()
-            .map(|r| BasefoldCommitment::from_root(r.clone()))
+            .map(|(num_vars, commitment)| BasefoldCommitment::new(commitment.clone(), *num_vars))
             .collect_vec())
+    }
+
+    fn commit_and_write(
+        pp: &Self::ProverParam,
+        poly: &Self::Polynomial,
+        transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
+    ) -> Result<Self::CommitmentWithData, Error> {
+        let comm = Self::commit(pp, poly)?;
+
+        transcript.write_commitments(comm.as_ref())?;
+        transcript.write_field_element(&F::from(comm.num_vars as u64))?;
+
+        Ok(comm)
     }
 
     fn verify(
@@ -537,6 +555,8 @@ where
         eval: &F,
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
+        assert!(comm.num_vars().unwrap() >= V::get_basecode());
+
         let _field_size = 255;
         let num_vars = point.len();
         let num_rounds = num_vars - V::get_basecode();
@@ -558,7 +578,7 @@ where
         let query_challenges = transcript
             .squeeze_challenges(vp.num_verifier_queries)
             .iter()
-            .map(|index| field_to_usize(index, 1 << (num_vars + vp.log_rate)))
+            .map(|index| field_to_usize(index, Some(1 << (num_vars + vp.log_rate))))
             .collect_vec();
         let query_result_with_merkle_path = QueriesResultWithMerklePath::read_transcript(
             transcript,
@@ -568,7 +588,15 @@ where
             query_challenges.as_slice(),
         );
 
-        let coeff = eq_xy_eval(point.as_slice(), fold_challenges.as_slice());
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(
+            &point.as_slice()[..fold_challenges.len()],
+            fold_challenges.as_slice(),
+        );
+        let mut eq = build_eq_x_r_vec(&point.as_slice()[fold_challenges.len()..]);
+        eq.par_iter_mut().for_each(|e| *e *= coeff);
+        // Now eq is the partially evaluated eq polynomial
+
         verifier_query_phase::<F, H>(
             &query_result_with_merkle_path,
             &sumcheck_messages,
@@ -579,7 +607,7 @@ where
             &final_message,
             &roots,
             comm,
-            coeff,
+            eq.as_slice(),
             vp.rng.clone(),
             &eval,
         );
@@ -647,7 +675,7 @@ where
         let query_challenges = transcript
             .squeeze_challenges(vp.num_verifier_queries)
             .iter()
-            .map(|index| field_to_usize(index, 1 << (num_vars + vp.log_rate)))
+            .map(|index| field_to_usize(index, Some(1 << (num_vars + vp.log_rate))))
             .collect_vec();
         let query_result_with_merkle_path = BatchedQueriesResultWithMerklePath::read_transcript(
             transcript,
@@ -1999,7 +2027,7 @@ fn batch_query_phase<F: PrimeField, H: Hash>(
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
         .iter()
-        .map(|x_index| field_to_usize(x_index, codeword_size))
+        .map(|x_index| field_to_usize(x_index, Some(codeword_size)))
         .collect_vec();
 
     BatchedQueriesResult {
@@ -2025,7 +2053,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
     final_message: &Vec<F>,
     roots: &Vec<Output<H>>,
     comms: &BasefoldCommitment<H>,
-    coeff: F,
+    partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
 ) {
@@ -2078,7 +2106,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
             &sum_check_messages[fold_challenges.len() - 1],
             fold_challenges[fold_challenges.len() - 1]
         ),
-        final_message.iter().sum::<F>() * coeff
+        inner_product(final_message, partial_eq)
     );
 }
 
@@ -2353,7 +2381,7 @@ mod test {
         }
 
         fn get_basecode() -> usize {
-            return 0;
+            return 3;
         }
     }
 

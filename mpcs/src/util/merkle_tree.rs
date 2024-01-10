@@ -58,7 +58,8 @@ impl<F: PrimeField, H: Hash> MerkleTree<F, H> {
             self.inner
                 .iter()
                 .take(self.height() - 1)
-                .map(|layer| layer[(leaf_index >> 1) ^ 1].clone())
+                .enumerate()
+                .map(|(index, layer)| layer[(leaf_index >> (index + 1)) ^ 1].clone())
                 .collect(),
         )
     }

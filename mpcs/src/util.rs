@@ -26,12 +26,16 @@ pub fn log2_strict(n: usize) -> usize {
     res as usize
 }
 
-pub fn field_to_usize<F: PrimeField>(x: &F, n: usize) -> usize {
+pub fn field_to_usize<F: PrimeField>(x: &F, n: Option<usize>) -> usize {
     let x_rep = (*x).to_repr();
     let x: &[u8] = x_rep.as_ref();
     let (int_bytes, _) = x.split_at(std::mem::size_of::<u32>());
     let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
-    ((x_int as usize) % n).into()
+    if let Some(n) = n {
+        ((x_int as usize) % n).into()
+    } else {
+        x_int as usize
+    }
 }
 
 pub trait BitIndex {
