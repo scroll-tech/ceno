@@ -165,7 +165,7 @@ impl<H: Hash, F: PrimeField, W: io::Write> FieldTranscriptWrite<F> for FiatShami
         self.common_field_element(fe)?;
         let mut repr = fe.to_repr();
         repr.as_mut().reverse();
-        let el = repr.as_ref();
+        let _el = repr.as_ref();
         //	println!("field el length {:?}", el.len());
         self.stream
             .write_all(repr.as_ref())

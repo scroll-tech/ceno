@@ -344,7 +344,7 @@ where
         _eval: &F, // Opening does not need eval, except for sanity check
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        let (trees, mut oracles) = commit_phase(
+        let (trees, oracles) = commit_phase(
             &point,
             &comm,
             transcript,
@@ -537,12 +537,12 @@ where
         eval: &F,
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        let field_size = 255;
+        let _field_size = 255;
         let num_vars = point.len();
         let num_rounds = num_vars - V::get_basecode();
 
         let mut fold_challenges: Vec<F> = Vec::with_capacity(vp.max_num_vars);
-        let mut size = 0;
+        let _size = 0;
         let mut roots = Vec::new();
         let mut sumcheck_messages = Vec::with_capacity(num_rounds);
         for i in 0..num_rounds {

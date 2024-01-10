@@ -1,8 +1,7 @@
 use crate::util::{
-    new_fields::{Mersenne127, Mersenne61},
     BigUint, Itertools,
 };
-use ctr;
+
 use halo2_curves::{
     bn256, grumpkin,
     pairing::{self, MillerLoopResult},

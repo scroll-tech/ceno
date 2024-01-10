@@ -32,9 +32,9 @@ pub trait Hash:
     }
 
     fn update_consec_field_pairs(values: &Vec<impl PrimeField>) -> Vec<Output<Self>> {
-        let log_v = log2_strict(values.len());
-        let mut hashes = vec![Output::<Self>::default(); (values.len() >> 1)];
-        hashes.par_iter_mut().enumerate().for_each(|(i, mut hash)| {
+        let _log_v = log2_strict(values.len());
+        let mut hashes = vec![Output::<Self>::default(); values.len() >> 1];
+        hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
             let mut hasher = Self::new();
             hasher.update_field_element(&values[i + i]);
             hasher.update_field_element(&values[i + i + 1]);
@@ -44,12 +44,12 @@ pub trait Hash:
     }
 
     fn update_consec_hash_pairs(values: &Vec<Output<Self>>) -> Vec<Output<Self>> {
-        let log_v = log2_strict(values.len());
+        let _log_v = log2_strict(values.len());
         let oracle = values
             .par_chunks_exact(2)
             .map(|ys| {
                 let mut hasher = Self::new();
-                let mut hash = Output::<Self>::default();
+                let _hash = Output::<Self>::default();
                 hasher.update(&ys[0]);
                 hasher.update(&ys[1]);
                 hasher.finalize_fixed()
@@ -105,7 +105,7 @@ impl Hash for Blake2s {
 
         let mut params = Params::new();
         params.hash_length(Self::OUTPUTLEN);
-        let now = Instant::now();
+        let _now = Instant::now();
         let mut jobs = v
             .iter()
             .map(|v| HashManyJob::new(&params, v))

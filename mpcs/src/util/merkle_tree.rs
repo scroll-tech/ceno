@@ -115,8 +115,8 @@ fn merkelize<F: PrimeField, H: Hash>(values: &Vec<F>) -> Vec<Vec<Output<H>>> {
     let log_v = log2_strict(values.len());
     let mut tree = Vec::with_capacity(log_v);
     // The first layer of hashes, half the number of leaves
-    let mut hashes = vec![Output::<H>::default(); (values.len() >> 1)];
-    hashes.par_iter_mut().enumerate().for_each(|(i, mut hash)| {
+    let mut hashes = vec![Output::<H>::default(); values.len() >> 1];
+    hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
         let mut hasher = H::new();
         hasher.update_field_element(&values[i << 1]);
         hasher.update_field_element(&values[(i << 1) + 1]);

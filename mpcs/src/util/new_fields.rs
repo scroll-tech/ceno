@@ -1,20 +1,19 @@
 use crate::util::{
-    arithmetic::{modulus, Field},
-    BigUint,
+    arithmetic::{Field},
 };
 use core::fmt;
 use core::{
     iter::{Product, Sum},
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
-use ff::{BatchInvert, PrimeFieldBits};
+
 use halo2_curves::ff::PrimeField;
 use rand::RngCore;
-use rand::SeedableRng;
+
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Display, Formatter};
-use std::ops::{BitAnd, Shr};
-use std::time::Instant;
+use std::fmt::{Display, Formatter};
+
+
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 #[derive(PrimeField, Serialize, Deserialize, Hash)]
 #[PrimeFieldModulus = "170141183460469231731687303715884105727"]
@@ -60,7 +59,7 @@ impl PrimeField for Mersenne61 {
     }
 
     fn is_odd(&self) -> Choice {
-        if (self.value % 2 == 0) {
+        if self.value % 2 == 0 {
             return Choice::from(0u8);
         } else {
             return Choice::from(1u8);
@@ -77,8 +76,8 @@ impl Mersenne61 {
         if value == Self::ORDER {
             return Self::ZERO;
         }
-        let hi = (value >> 61);
-        if (hi == 0) {
+        let hi = value >> 61;
+        if hi == 0 {
             return Self { value };
         }
 
@@ -194,7 +193,7 @@ impl<'r> AddAssign<&'r Mersenne61> for Mersenne61 {
 }
 
 impl<'r> Product<&'r Mersenne61> for Mersenne61 {
-    fn product<I: Iterator<Item = &'r Self>>(iter: I) -> Self {
+    fn product<I: Iterator<Item = &'r Self>>(_iter: I) -> Self {
         assert!(1 == 0, "do not use this function");
         Self::ZERO
     }
@@ -207,7 +206,7 @@ impl Product for Mersenne61 {
 }
 
 impl<'r> Sum<&'r Mersenne61> for Mersenne61 {
-    fn sum<I: Iterator<Item = &'r Self>>(iter: I) -> Self {
+    fn sum<I: Iterator<Item = &'r Self>>(_iter: I) -> Self {
         assert!(1 == 0, "do not use this function");
         Self::ZERO
         //        *iter.reduce(|x, y| &(*x + *y)).unwrap_or(&Self::ZERO)
@@ -255,7 +254,7 @@ impl Neg for Mersenne61 {
 
     fn neg(self) -> Self::Output {
         let hi = self.value >> 61;
-        if (hi == 0) {
+        if hi == 0 {
             let res = unsafe { Self::ORDER.unchecked_sub(self.value) };
             return Self { value: res };
         }
@@ -353,7 +352,7 @@ impl Field for Mersenne61 {
     fn invert(&self) -> CtOption<Self> {
         let res = extended_euclidean_algorithm(self.value as i64, Self::ORDER as i64);
 
-        if (res.1 < 0) {
+        if res.1 < 0 {
             return CtOption::new(
                 -Self {
                     value: res.1.abs() as u64,
@@ -376,7 +375,7 @@ impl Field for Mersenne61 {
         CtOption::new(Self::ZERO, Choice::from(0u8))
     }
 
-    fn sqrt_ratio(num: &Self, div: &Self) -> (Choice, Self) {
+    fn sqrt_ratio(_num: &Self, _div: &Self) -> (Choice, Self) {
         assert!(1 == 0, "do not use this function");
         /// `(t - 1) // 2` where t * 2^s + 1 = p with t odd.
         (Choice::from(0u8), Self::ZERO)
@@ -405,7 +404,7 @@ pub fn extended_euclidean_algorithm(a: i64, b: i64) -> (i64, i64, i64) {
     (old_r, old_s, old_t)
 }
 
-use rand_chacha::ChaCha12Rng;
+
 
 #[test]
 fn add() {
