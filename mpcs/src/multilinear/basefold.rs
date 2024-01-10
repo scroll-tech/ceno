@@ -348,6 +348,7 @@ where
             poly.num_vars(),
             poly.num_vars() - V::get_basecode(),
             &pp.table_w_weights,
+            pp.log_rate,
         );
 
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
@@ -1139,42 +1140,70 @@ fn commit_phase<F: PrimeField, H: Hash>(
     num_vars: usize,
     num_rounds: usize,
     table_w_weights: &Vec<Vec<(F, F)>>,
+    log_rate: usize,
 ) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>) {
+    assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
-    let mut root = comm.to_commitment().root();
-    let mut new_oracle = comm.get_codeword();
+    let mut running_oracle = comm.get_codeword().clone();
+    let mut running_evals = comm.bh_evals.clone();
+
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let mut eq = build_eq_x_r_vec::<F>(&point);
-    let mut bh_evals = comm.bh_evals.clone();
+    let mut last_sumcheck_message = sum_check_first_round::<F>(&mut eq, &mut running_evals);
 
-    let mut sum_check_oracles = Vec::with_capacity(num_rounds + 1);
-    sum_check_oracles.push(sum_check_first_round::<F>(&mut eq, &mut bh_evals));
-    // Note that after the sum_check_first_round, every two elements in eq and bh_evals have
-    // been transformed into the coefficient forms. More precisely, position [2i] and [2i+1]
-    // are used to store the partially evaluated polynomial f(X,binary(i))
+    for i in 0..num_rounds {
+        // For the first round, no need to send the running root, because this root is
+        // committing to a vector that can be recovered from linearly combining other
+        // already-committed vectors.
+        transcript
+            .write_field_elements(&last_sumcheck_message)
+            .unwrap();
 
-    for i in 0..(num_rounds) {
-        transcript.write_commitment(&root).unwrap();
         let challenge: F = transcript.squeeze_challenge();
-        sum_check_oracles.push(sum_check_challenge_round(&mut eq, &mut bh_evals, challenge));
 
-        oracles.push(basefold_one_round_by_interpolation_weights::<F>(
+        // Fold the current oracle for FRI
+        let mut running_oracle = basefold_one_round_by_interpolation_weights::<F>(
             &table_w_weights,
-            log2_strict(new_oracle.len()) - 1,
-            new_oracle,
+            log2_strict(running_oracle.len()) - 1,
+            &running_oracle,
             challenge,
-        ));
+        );
 
-        new_oracle = &oracles[i];
-        trees.push(MerkleTree::<F, H>::from_leaves(new_oracle.clone()));
+        if i < num_rounds - 1 {
+            last_sumcheck_message =
+                sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
+            let running_tree = MerkleTree::<F, H>::from_leaves(running_oracle.clone());
+            let running_root = running_tree.root();
+            transcript.write_commitment(&running_root).unwrap();
 
-        root = trees[i].root();
+            oracles.push(running_oracle);
+            trees.push(running_tree);
+        } else {
+            // The difference of the last round is that we don't need to compute the message,
+            // and we don't interpolate the small polynomials. So after the last round,
+            // running_evals is exactly the evaluation representation of the
+            // folded polynomial so far.
+            sum_check_last_round(&mut eq, &mut running_evals, challenge);
+            // For the FRI part, we send the current polynomial as the message.
+            // Transform it back into little endiean before sending it
+            reverse_index_bits_in_place(&mut running_evals);
+            transcript.write_field_elements(&running_evals).unwrap();
+
+            if cfg!(feature = "sanity-check") {
+                // If the prover is honest, in the last round, the running oracle
+                // on the prover side should be exactly the encoding of the folded polynomial.
+
+                let coeffs = interpolate_over_boolean_hypercube(&running_evals);
+                let basecode = encode_rs_basecode(&coeffs, 1 << log_rate, coeffs.len());
+                assert_eq!(basecode.len(), 1);
+                let basecode = basecode[0].clone();
+
+                reverse_index_bits_in_place(&mut running_oracle);
+                assert_eq!(basecode, running_oracle);
+            }
+        }
     }
-
-    // This place sends the root of the last oracle, instead of the encoded message
-    // in clear.
-    transcript.write_commitment(&root).unwrap();
     return (trees, oracles);
 }
 
