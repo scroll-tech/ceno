@@ -34,26 +34,6 @@ pub fn field_to_usize<F: PrimeField>(x: &F, n: usize) -> usize {
     ((x_int as usize) % n).into()
 }
 
-macro_rules! izip_eq {
-    (@closure $p:pat => $tup:expr) => {
-        |$p| $tup
-    };
-    (@closure $p:pat => ($($tup:tt)*) , $_iter:expr $(, $tail:expr)*) => {
-        $crate::util::izip_eq!(@closure ($p, b) => ($($tup)*, b) $(, $tail)*)
-    };
-    ($first:expr $(,)*) => {
-        itertools::__std_iter::IntoIterator::into_iter($first)
-    };
-    ($first:expr, $second:expr $(,)*) => {
-        $crate::util::izip_eq!($first).zip_eq($second)
-    };
-    ($first:expr $(, $rest:expr)* $(,)*) => {
-        $crate::util::izip_eq!($first)
-            $(.zip_eq($rest))*
-            .map($crate::util::izip_eq!(@closure a => (a) $(, $rest)*))
-    };
-}
-
 pub trait BitIndex {
     fn nth_bit(&self, nth: usize) -> bool;
 }

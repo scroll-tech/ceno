@@ -826,13 +826,6 @@ fn interpolate_over_boolean_hypercube<F: PrimeField>(evals: &Vec<F>) -> Vec<F> {
     coeffs
 }
 
-fn rand_chacha<F: PrimeField>(rng: &mut ChaCha8Rng) -> F {
-    let bytes = (F::NUM_BITS as usize).next_power_of_two() / 8;
-    let mut dest: Vec<u8> = vec![0u8; bytes];
-    rng.fill_bytes(&mut dest);
-    from_raw_bytes::<F>(&dest)
-}
-
 fn sum_check_first_round<F: PrimeField>(mut eq: &mut Vec<F>, mut bh_values: &mut Vec<F>) -> Vec<F> {
     // The input polynomials are in the form of evaluations. Instead of viewing
     // every one element as the evaluation of the polynomial at a single point,

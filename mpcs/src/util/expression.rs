@@ -7,9 +7,6 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
-pub(crate) mod evaluator;
-pub mod relaxed;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Rotation(pub i32);
 
