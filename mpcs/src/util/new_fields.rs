@@ -70,12 +70,12 @@ impl PrimeField for Mersenne61 {
     }
 }
 impl Mersenne61 {
-    const ORDER: u64 = (1 << 61) - 1;
-    const TWO: Self = Self { value: 2 };
-    const NEG_ONE: Self = Self {
+    pub const ORDER: u64 = (1 << 61) - 1;
+    pub const TWO: Self = Self { value: 2 };
+    pub const NEG_ONE: Self = Self {
         value: Self::ORDER - 1,
     };
-    fn new(value: u64) -> Self {
+    pub fn new(value: u64) -> Self {
         if value == Self::ORDER {
             return Self::ZERO;
         }
@@ -96,7 +96,7 @@ fn bench_new() {
     type F = Mersenne61;
 
     let now = Instant::now();
-    let _el = Mersenne61::new(4345233423);
+    let _el = F::new(4345233423);
     println!("now elapsed {:?}", now.elapsed());
 }
 impl PartialEq for Mersenne61 {
@@ -125,13 +125,11 @@ impl ConstantTimeEq for Mersenne61 {
 
 impl ConditionallySelectable for Mersenne61 {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        let mut res = Self::ZERO;
         if choice.unwrap_u8() == 0 {
-            res = *a;
+            *a
         } else {
-            res = *b;
+            *b
         }
-        res
     }
 }
 
@@ -374,13 +372,13 @@ impl Field for Mersenne61 {
 
     fn sqrt(&self) -> CtOption<Self> {
         assert!(1 == 0, "do not use this function");
-        /// `(t - 1) // 2` where t * 2^s + 1 = p with t odd.
+        // `(t - 1) // 2` where t * 2^s + 1 = p with t odd.
         CtOption::new(Self::ZERO, Choice::from(0u8))
     }
 
     fn sqrt_ratio(_num: &Self, _div: &Self) -> (Choice, Self) {
         assert!(1 == 0, "do not use this function");
-        /// `(t - 1) // 2` where t * 2^s + 1 = p with t odd.
+        // `(t - 1) // 2` where t * 2^s + 1 = p with t odd.
         (Choice::from(0u8), Self::ZERO)
     }
 }
@@ -539,10 +537,10 @@ fn compare_mult() {
     type F1 = Mersenne127;
     type F2 = Mersenne61;
     let m127 = Instant::now();
-    F1::random(&mut rng) * F1::random(&mut rng);
+    let _ = F1::random(&mut rng) * F1::random(&mut rng);
     println!("m127 time {:?}", m127.elapsed());
 
     let m61 = Instant::now();
-    F2::random(&mut rng) * F2::random(&mut rng);
+    let _ = F2::random(&mut rng) * F2::random(&mut rng);
     println!("m61 time {:?}", m61.elapsed());
 }
