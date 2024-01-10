@@ -96,7 +96,7 @@ fn bench_new() {
     type F = Mersenne61;
 
     let now = Instant::now();
-    let el = Mersenne61::new(4345233423);
+    let _el = Mersenne61::new(4345233423);
     println!("now elapsed {:?}", now.elapsed());
 }
 impl PartialEq for Mersenne61 {
@@ -442,7 +442,7 @@ fn mul() {
 fn inverse() {
     type F = Mersenne61;
     let mut rng = ChaCha12Rng::from_entropy();
-    for i in 0..1000 {
+    for _i in 0..1000 {
         let el = F::random(&mut rng);
         let inverse = el.invert().unwrap();
         assert_eq!(el * inverse, F::ONE);
@@ -521,7 +521,7 @@ fn batch_inversion() {
 #[test]
 fn test_basic_arith() {
     use ff::Field;
-    use rand::{rngs::OsRng, Rng};
+    use rand::rngs::OsRng;
 
     let mut rng = OsRng;
     type F = Mersenne61;

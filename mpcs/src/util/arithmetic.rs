@@ -1,5 +1,6 @@
-use crate::util::{new_fields::Mersenne61, BigUint, Itertools};
-
+#[cfg(test)]
+use crate::util::new_fields::Mersenne61;
+use crate::util::{BigUint, Itertools};
 use halo2_curves::{
     bn256, grumpkin,
     pairing::{self, MillerLoopResult},
@@ -89,7 +90,7 @@ pub fn horner_orig<F: Field>(coeffs: &[F], x: &F) -> F {
 #[test]
 fn bench_horner() {
     use crate::poly::{multilinear::MultilinearPolynomial, Polynomial};
-    use rand::{rngs::OsRng, Rng};
+    use rand::rngs::OsRng;
     use std::time::Instant;
     let poly = MultilinearPolynomial::rand(10, OsRng);
     let test1 = Instant::now();
