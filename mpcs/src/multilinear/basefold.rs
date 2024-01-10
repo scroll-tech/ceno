@@ -2820,24 +2820,6 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
     );
 }
 
-//return ((leaf1,leaf2),path), where leaves are queries from codewords
-fn query_codeword<F: PrimeField, H: Hash>(
-    query: &usize,
-    codeword_tree: &MerkleTree<F, H>,
-) -> ((F, F), MerklePathWithoutLeafOrRoot<H>) {
-    let mut p0 = *query;
-    let temp = p0;
-    let mut p1 = p0 ^ 1;
-    if (p1 < p0) {
-        p0 = p1;
-        p1 = temp;
-    }
-    return (
-        (*codeword_tree.get_leaf(p0), *codeword_tree.get_leaf(p1)),
-        codeword_tree.merkle_path_without_leaf_sibling_or_root(*query),
-    );
-}
-
 fn get_table<F: PrimeField>(
     poly_size: usize,
     rate: usize,
