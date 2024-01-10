@@ -1,18 +1,21 @@
-use crate::util::{
-    arithmetic::{Field},
-};
+use crate::util::arithmetic::Field;
 use core::fmt;
 use core::{
     iter::{Product, Sum},
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
-
+#[cfg(test)]
+use ff::BatchInvert;
 use halo2_curves::ff::PrimeField;
 use rand::RngCore;
-
+#[cfg(test)]
+use rand::SeedableRng;
+#[cfg(test)]
+use rand_chacha::ChaCha12Rng;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
-
+#[cfg(test)]
+use std::time::Instant;
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 #[derive(PrimeField, Serialize, Deserialize, Hash)]
@@ -403,8 +406,6 @@ pub fn extended_euclidean_algorithm(a: i64, b: i64) -> (i64, i64, i64) {
 
     (old_r, old_s, old_t)
 }
-
-
 
 #[test]
 fn add() {

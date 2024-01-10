@@ -106,7 +106,7 @@ macro_rules! impl_index {
     };
 }
 
-pub(crate) use {impl_index};
+pub(crate) use impl_index;
 
 #[cfg(any(test, feature = "benchmark"))]
 pub mod test {

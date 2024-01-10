@@ -1,6 +1,4 @@
-use crate::util::{
-    BigUint, Itertools,
-};
+use crate::util::{new_fields::Mersenne61, BigUint, Itertools};
 
 use halo2_curves::{
     bn256, grumpkin,
