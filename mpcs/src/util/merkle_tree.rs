@@ -181,7 +181,7 @@ fn authenticate_merkle_path_root<H: Hash, F: PrimeField>(
 
 #[cfg(test)]
 mod tests {
-    use crate::util::transcript::{Blake2sTranscript, FieldTranscript, InMemoryTranscript};
+    use crate::util::transcript::{Blake2sTranscript, InMemoryTranscript};
 
     use super::*;
     type F = halo2_curves::bn256::Fr;

@@ -1150,6 +1150,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let mut eq = build_eq_x_r_vec::<F>(&point);
+    reverse_index_bits_in_place(&mut eq);
     let mut last_sumcheck_message = sum_check_first_round::<F>(&mut eq, &mut running_evals);
 
     for i in 0..num_rounds {
