@@ -785,12 +785,6 @@ where
             query_challenges.as_slice(),
         );
 
-        let (message, _) = interpolate_over_boolean_hypercube_with_copy(&final_message);
-        let mut final_codeword = encode_rs_basecode(&message, vp.log_rate, message.len());
-        assert_eq!(final_codeword.len(), 1);
-        let mut final_codeword = final_codeword.remove(0);
-        reverse_index_bits_in_place(&mut final_codeword);
-
         batch_verifier_query_phase::<F, H>(
             &query_result_with_merkle_path,
             &sumcheck_messages,
@@ -798,7 +792,7 @@ where
             num_rounds,
             num_vars,
             vp.log_rate,
-            &final_codeword,
+            &final_message,
             &roots,
             &comms,
             &coeffs,
@@ -2757,18 +2751,24 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
 
 fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
     queries: &BatchedQueriesResultWithMerklePath<F, H>,
-    sum_check_oracles: &Vec<Vec<F>>,
+    sum_check_messages: &Vec<Vec<F>>,
     fold_challenges: &Vec<F>,
     num_rounds: usize,
     num_vars: usize,
     log_rate: usize,
-    final_codeword: &Vec<F>,
+    final_message: &Vec<F>,
     roots: &Vec<Output<H>>,
     comms: &Vec<&BasefoldCommitment<H>>,
     coeffs: &[F],
     rng: ChaCha8Rng,
     eval: &F,
 ) {
+    let (message, _) = interpolate_over_boolean_hypercube_with_copy(&final_message);
+    let mut final_codeword = encode_rs_basecode(&message, log_rate, message.len());
+    assert_eq!(final_codeword.len(), 1);
+    let mut final_codeword = final_codeword.remove(0);
+    reverse_index_bits_in_place(&mut final_codeword);
+
     let n = (1 << (num_vars + log_rate));
 
     // For computing the weights on the fly, because the verifier is incapable of storing
@@ -2791,7 +2791,7 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
         num_rounds,
         num_vars,
         log_rate,
-        final_codeword,
+        &final_codeword,
         roots,
         comms,
         coeffs,
@@ -2799,15 +2799,25 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
         cipher,
     );
 
-    assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_oracles[0]));
+    assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
 
     // The sum-check part of the protocol
     for i in 0..fold_challenges.len() - 1 {
         assert_eq!(
-            degree_2_eval(&sum_check_oracles[i], fold_challenges[i]),
-            degree_2_zero_plus_one(&sum_check_oracles[i + 1])
+            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
+            degree_2_zero_plus_one(&sum_check_messages[i + 1])
         );
     }
+
+    // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
+    // sent from the prover
+    assert_eq!(
+        degree_2_eval(
+            &sum_check_messages[fold_challenges.len() - 1],
+            fold_challenges[fold_challenges.len() - 1]
+        ),
+        final_message.iter().sum()
+    );
 }
 
 //return ((leaf1,leaf2),path), where leaves are queries from codewords
