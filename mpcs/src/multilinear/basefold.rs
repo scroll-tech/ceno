@@ -772,104 +772,40 @@ where
             .read_field_elements(1 << V::get_basecode())
             .unwrap();
 
-        let mut query_challenges = transcript.squeeze_challenges(vp.num_verifier_queries);
+        let query_challenges = transcript
+            .squeeze_challenges(vp.num_verifier_queries)
+            .iter()
+            .map(|index| field_to_usize(index, 1 << (num_vars + vp.log_rate)))
+            .collect_vec();
+        let query_result_with_merkle_path = BatchedQueriesResultWithMerklePath::read_transcript(
+            transcript,
+            num_rounds,
+            vp.log_rate,
+            poly_num_vars.as_slice(),
+            query_challenges.as_slice(),
+        );
 
-        let mut queries = Vec::with_capacity(vp.num_verifier_queries);
-        let mut count = 0;
-        for i in 0..vp.num_verifier_queries {
-            let mut oracle_queries = Vec::with_capacity(num_rounds - 1);
-            for j in 0..num_rounds - 1 {
-                let queries = transcript.read_field_elements(2).unwrap();
-                oracle_queries.push(queries);
-            }
-            queries.push(oracle_queries);
+        let (message, _) = interpolate_over_boolean_hypercube_with_copy(&final_message);
+        let mut final_codeword = encode_rs_basecode(&message, vp.log_rate, message.len());
+        assert_eq!(final_codeword.len(), 1);
+        let mut final_codeword = final_codeword.remove(0);
+        reverse_index_bits_in_place(&mut final_codeword);
 
-            let mut comms_queries = Vec::with_capacity(comms.len());
-            for j in 0..comms.len() {
-                let queries = transcript.read_field_elements(2).unwrap();
-                comms_queries.push(queries);
-            }
-
-            queries.push(comms_queries);
-        }
-
-        //read merkle paths
-        let mut batch_paths = Vec::with_capacity(vp.num_verifier_queries);
-        let mut count = 0;
-        for i in 0..vp.num_verifier_queries {
-            let mut oracle_merkle_paths = Vec::with_capacity(num_rounds - 1);
-            for j in 0..num_rounds - 1 {
-                let merkle_path = transcript
-                    .read_commitments(2 * (num_vars + vp.log_rate - j - 1))
-                    .unwrap();
-                let chunked_path = merkle_path.chunks(2).map(|c| c.to_vec()).collect_vec();
-                oracle_merkle_paths.push(chunked_path);
-            }
-            batch_paths.push(oracle_merkle_paths);
-            let mut comms_merkle_paths = Vec::with_capacity(comms.len());
-            for j in 0..comms.len() {
-                let merkle_path = transcript
-                    .read_commitments(2 * (poly_num_vars[j] + vp.log_rate))
-                    .unwrap();
-                let chunked_path = merkle_path.chunks(2).map(|c| c.to_vec()).collect_vec();
-
-                comms_merkle_paths.push(chunked_path);
-            }
-
-            batch_paths.push(comms_merkle_paths);
-        }
-
-        let queries_usize = batch_verifier_query_phase::<F, H>(
-            &query_challenges,
+        batch_verifier_query_phase::<F, H>(
+            &query_result_with_merkle_path,
             &sumcheck_messages,
             &fold_challenges,
-            &queries,
             num_rounds,
             num_vars,
             vp.log_rate,
+            &final_codeword,
             &roots,
+            &comms,
+            &coeffs,
             vp.rng.clone(),
             &new_target_sum,
         );
-        for vq in 0..vp.num_verifier_queries {
-            let oracle_queries = &queries[vq * 2];
-            for cq in 0..oracle_queries.len() {
-                let root = &roots[cq];
-                assert_eq!(root, &batch_paths[vq * 2][cq].pop().unwrap().pop().unwrap());
 
-                authenticate_merkle_path::<H, F>(
-                    &batch_paths[vq * 2][cq],
-                    (oracle_queries[cq][0], oracle_queries[cq][1]),
-                    queries_usize[vq * 2],
-                );
-            }
-
-            let comm_queries = &queries[vq * 2 + 1];
-            for cq in 0..comm_queries.len() {
-                let root = &comms[cq].root();
-                assert_eq!(
-                    root,
-                    &batch_paths[vq * 2 + 1][cq].pop().unwrap().pop().unwrap()
-                );
-
-                authenticate_merkle_path::<H, F>(
-                    &batch_paths[vq * 2 + 1][cq],
-                    (comm_queries[cq][0], comm_queries[cq][1]),
-                    queries_usize[vq * 2 + 1],
-                );
-            }
-        }
-
-        for (i, query) in queries.iter().enumerate() {
-            let mut lc0 = F::ZERO;
-            let mut lc1 = F::ZERO;
-            for j in 0..coeffs.len() {
-                lc0 += coeffs[j] * queries[i][j][0];
-                lc1 += coeffs[j] * queries[i][j][1];
-            }
-            assert_eq!(query[0][0], lc0);
-            assert_eq!(query[0][1], lc1);
-        }
         // virtual_open(
         //     num_vars,
         //     num_rounds,
@@ -1399,38 +1335,6 @@ fn authenticate_merkle_path<H: Hash, F: PrimeField>(
         assert_eq!(hash, path[i + 1][(x_index >> 1) % 2]);
         x_index >>= 1;
     }
-}
-
-fn authenticate_merkle_path_root<H: Hash, F: PrimeField>(
-    path: &Vec<Vec<Output<H>>>,
-    leaves: (F, F),
-    mut x_index: usize,
-    root: &Output<H>,
-) {
-    let mut hasher = H::new();
-    let mut hash = Output::<H>::default();
-    hasher.update_field_element(&leaves.0);
-    hasher.update_field_element(&leaves.1);
-    hasher.finalize_into_reset(&mut hash);
-
-    assert_eq!(hash, path[0][(x_index >> 1) % 2]);
-    x_index >>= 1;
-    for i in 0..path.len() - 1 {
-        let mut hasher = H::new();
-        let mut hash = Output::<H>::default();
-        hasher.update(&path[i][0]);
-        hasher.update(&path[i][1]);
-        hasher.finalize_into_reset(&mut hash);
-
-        assert_eq!(hash, path[i + 1][(x_index >> 1) % 2]);
-        x_index >>= 1;
-    }
-    let mut hasher = H::new();
-    let mut hash = Output::<H>::default();
-    hasher.update(&path[path.len() - 1][0]);
-    hasher.update(&path[path.len() - 1][1]);
-    hasher.finalize_into_reset(&mut hash);
-    assert_eq!(&hash, root);
 }
 
 pub fn interpolate2_weights<F: PrimeField>(points: [(F, F); 2], weight: F, x: F) -> F {
@@ -2074,20 +1978,22 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
             // sum_of_all_evals_for_sumcheck is exactly the evaluation representation of the
             // folded polynomial so far.
             sum_check_last_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
-            // For the FRI part, we send the current polynomial as the message
+            // For the FRI part, we send the current polynomial as the message.
+            // Transform it back into little endiean before sending it
+            reverse_index_bits_in_place(&mut sum_of_all_evals_for_sumcheck);
             transcript.write_field_elements(&sum_of_all_evals_for_sumcheck);
 
             if cfg!(feature = "sanity-check") {
                 // If the prover is honest, in the last round, the running oracle
                 // on the prover side should be exactly the encoding of the folded polynomial.
-                reverse_index_bits_in_place(&mut sum_of_all_evals_for_sumcheck);
-                reverse_index_bits_in_place(&mut running_oracle);
 
                 let (coeffs, mut bh_evals) =
                     interpolate_over_boolean_hypercube_with_copy(&sum_of_all_evals_for_sumcheck);
                 let basecode = encode_rs_basecode(&coeffs, log_rate, coeffs.len());
                 assert_eq!(basecode.len(), 1);
                 let basecode = basecode[0].clone();
+
+                reverse_index_bits_in_place(&mut running_oracle);
                 assert_eq!(basecode, running_oracle);
             }
         }
@@ -2126,6 +2032,7 @@ fn query_phase<F: PrimeField, H: Hash>(
     )
 }
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 struct CodewordSingleQueryResult<F> {
     left: F,
     right: F,
@@ -2141,8 +2048,22 @@ impl<F> CodewordSingleQueryResult<F> {
         transcript.write_field_element(&self.left);
         transcript.write_field_element(&self.right);
     }
+
+    pub fn read_transcript<H: Hash>(
+        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        full_codeword_size_log: usize,
+        codeword_size_log: usize,
+        index: usize,
+    ) -> Self {
+        Self {
+            left: transcript.read_field_element().unwrap(),
+            right: transcript.read_field_element().unwrap(),
+            index: index >> (full_codeword_size_log - codeword_size_log),
+        }
+    }
 }
 
+#[derive(Debug, Clone)]
 struct CodewordSingleQueryResultWithMerklePath<F, H: Hash> {
     query: CodewordSingleQueryResult<F>,
     merkle_path: MerklePathWithoutLeafOrRoot<H>,
@@ -2153,22 +2074,104 @@ impl<F: PrimeField, H: Hash> CodewordSingleQueryResultWithMerklePath<F, H> {
         self.query.write_transcript::<H>(transcript);
         self.merkle_path.write_transcript::<F>(transcript);
     }
+
+    pub fn read_transcript(
+        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        full_codeword_size_log: usize,
+        codeword_size_log: usize,
+        index: usize,
+    ) -> Self {
+        Self {
+            query: CodewordSingleQueryResult::read_transcript::<H>(
+                transcript,
+                full_codeword_size_log,
+                codeword_size_log,
+                index,
+            ),
+            merkle_path: MerklePathWithoutLeafOrRoot::read_transcript::<F>(
+                transcript,
+                codeword_size_log,
+            ),
+        }
+    }
+
+    pub fn check_merkle_path(&self, root: &Output<H>) {
+        self.merkle_path.authenticate_leaves_root(
+            self.query.left,
+            self.query.right,
+            self.query.index,
+            root,
+        );
+    }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OracleListQueryResult<F> {
     inner: Vec<CodewordSingleQueryResult<F>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CommitmentsQueryResult<F> {
     inner: Vec<CodewordSingleQueryResult<F>>,
 }
 
+#[derive(Debug, Clone)]
 struct OracleListQueryResultWithMerklePath<F, H: Hash> {
     inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>,
 }
 
+impl<F: PrimeField, H: Hash> OracleListQueryResultWithMerklePath<F, H> {
+    pub fn read_transcript(
+        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        num_rounds: usize,
+        codeword_size_log: usize,
+        index: usize,
+    ) -> Self {
+        // Remember that the prover doesn't send the commitment in the last round.
+        // In the first round, the oracle is sent after folding, so the first oracle
+        // has half the size of the full codeword size.
+        Self {
+            inner: (0..num_rounds - 1)
+                .map(|round| {
+                    CodewordSingleQueryResultWithMerklePath::read_transcript(
+                        transcript,
+                        codeword_size_log,
+                        codeword_size_log - round - 1,
+                        index,
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct CommitmentsQueryResultWithMerklePath<F, H: Hash> {
     inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>,
+}
+
+impl<F: PrimeField, H: Hash> CommitmentsQueryResultWithMerklePath<F, H> {
+    pub fn read_transcript(
+        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        max_num_vars: usize,
+        poly_num_vars: &[usize],
+        log_rate: usize,
+        index: usize,
+    ) -> Self {
+        Self {
+            inner: poly_num_vars
+                .iter()
+                .map(|num_vars| {
+                    CodewordSingleQueryResultWithMerklePath::read_transcript(
+                        transcript,
+                        max_num_vars + log_rate,
+                        num_vars + log_rate,
+                        index,
+                    )
+                })
+                .collect(),
+        }
+    }
 }
 
 impl<F: PrimeField> ListQueryResult<F> for OracleListQueryResult<F> {
@@ -2263,13 +2266,146 @@ trait ListQueryResultWithMerklePath<F: PrimeField, H: Hash>: Sized {
             .iter()
             .for_each(|q| q.write_transcript(transcript));
     }
+
+    fn check_merkle_paths(&self, roots: &Vec<Output<H>>) {
+        self.get_inner()
+            .iter()
+            .zip(roots.iter())
+            .for_each(|(q, root)| {
+                q.check_merkle_path(root);
+            });
+    }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SingleQueryResult<F> {
+    oracle_query: OracleListQueryResult<F>,
+    commitment_query: CodewordSingleQueryResult<F>,
+}
+
+#[derive(Debug, Clone)]
+struct SingleQueryResultWithMerklePath<F, H: Hash> {
+    oracle_query: OracleListQueryResultWithMerklePath<F, H>,
+    commitment_query: CodewordSingleQueryResultWithMerklePath<F, H>,
+}
+
+impl<F: PrimeField, H: Hash> SingleQueryResultWithMerklePath<F, H> {
+    pub fn from_single_query_result(
+        single_query_result: SingleQueryResult<F>,
+        oracle_trees: &Vec<MerkleTree<F, H>>,
+        commitment: &BasefoldCommitmentWithData<F, H>,
+    ) -> Self {
+        Self {
+            oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
+                single_query_result.oracle_query,
+                |i| &oracle_trees[i],
+            ),
+            commitment_query: CodewordSingleQueryResultWithMerklePath {
+                query: single_query_result.commitment_query,
+                merkle_path: commitment
+                    .codeword_tree
+                    .merkle_path_without_leaf_sibling_or_root(
+                        single_query_result.commitment_query.index,
+                    ),
+            },
+        }
+    }
+
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+        self.oracle_query.write_transcript(transcript);
+        self.commitment_query.write_transcript(transcript);
+    }
+
+    pub fn read_transcript(
+        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        num_rounds: usize,
+        log_rate: usize,
+        num_vars: usize,
+        index: usize,
+    ) -> Self {
+        Self {
+            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
+                transcript,
+                num_rounds,
+                num_vars + log_rate,
+                index,
+            ),
+            commitment_query: CodewordSingleQueryResultWithMerklePath::read_transcript(
+                transcript,
+                num_vars + log_rate,
+                num_vars + log_rate,
+                index,
+            ),
+        }
+    }
+
+    pub fn check(
+        &self,
+        fold_challenges: &Vec<F>,
+        num_rounds: usize,
+        num_vars: usize,
+        log_rate: usize,
+        final_codeword: &Vec<F>,
+        roots: &Vec<Output<H>>,
+        comm: &BasefoldCommitment<H>,
+        coeff: F,
+        mut rng: ChaCha8Rng,
+        mut cipher: ctr::Ctr32LE<aes::Aes128>,
+        index: usize,
+    ) {
+        self.oracle_query.check_merkle_paths(roots);
+        self.commitment_query.check_merkle_path(&comm.root());
+
+        let mut curr_left = self.commitment_query.query.left;
+        let mut curr_right = self.commitment_query.query.right;
+
+        let mut right_index = index | 1;
+        let mut left_index = right_index - 1;
+
+        for i in 0..num_rounds {
+            let ri0 = reverse_bits(left_index, num_vars + log_rate - i);
+            let ri1 = reverse_bits(right_index, num_vars + log_rate - i);
+
+            let x0: F = query_point(
+                1 << (num_vars + log_rate - i),
+                ri0,
+                &mut rng,
+                num_vars + log_rate - i - 1,
+                &mut cipher,
+            );
+            let x1 = -x0;
+
+            let res = interpolate2([(x0, curr_left), (x1, curr_right)], fold_challenges[i]);
+
+            let next_index = right_index >> 1;
+            let next_oracle_value = if i < num_rounds - 1 {
+                right_index = next_index | 1;
+                left_index = right_index - 1;
+                let next_oracle_query = self.oracle_query.get_inner()[i].clone();
+                curr_left = next_oracle_query.query.left;
+                curr_right = next_oracle_query.query.right;
+                if next_index & 1 == 0 {
+                    curr_left
+                } else {
+                    curr_right
+                }
+            } else {
+                // Note that final_codeword has been bit-reversed, so no need to bit-reverse
+                // next_index here.
+                final_codeword[next_index]
+            };
+            assert_eq!(res, next_oracle_value);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BatchedSingleQueryResult<F> {
     oracle_query: OracleListQueryResult<F>,
     commitments_query: CommitmentsQueryResult<F>,
 }
 
+#[derive(Debug, Clone)]
 struct BatchedSingleQueryResultWithMerklePath<F, H: Hash> {
     oracle_query: OracleListQueryResultWithMerklePath<F, H>,
     commitments_query: CommitmentsQueryResultWithMerklePath<F, H>,
@@ -2296,6 +2432,103 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
     pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
         self.oracle_query.write_transcript(transcript);
         self.commitments_query.write_transcript(transcript);
+    }
+
+    pub fn read_transcript(
+        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        num_rounds: usize,
+        log_rate: usize,
+        poly_num_vars: &[usize],
+        index: usize,
+    ) -> Self {
+        let num_vars = poly_num_vars.iter().max().unwrap();
+        Self {
+            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
+                transcript,
+                num_rounds,
+                *num_vars + log_rate,
+                index,
+            ),
+            commitments_query: CommitmentsQueryResultWithMerklePath::read_transcript(
+                transcript,
+                *num_vars,
+                poly_num_vars,
+                log_rate,
+                index,
+            ),
+        }
+    }
+
+    pub fn check(
+        &self,
+        fold_challenges: &Vec<F>,
+        num_rounds: usize,
+        num_vars: usize,
+        log_rate: usize,
+        final_codeword: &Vec<F>,
+        roots: &Vec<Output<H>>,
+        comms: &Vec<&BasefoldCommitment<H>>,
+        coeffs: &[F],
+        mut rng: ChaCha8Rng,
+        mut cipher: ctr::Ctr32LE<aes::Aes128>,
+        index: usize,
+    ) {
+        self.oracle_query.check_merkle_paths(roots);
+        self.commitments_query
+            .check_merkle_paths(&comms.iter().map(|comm| comm.root()).collect());
+
+        let mut curr_left = F::ZERO;
+        let mut curr_right = F::ZERO;
+
+        let mut right_index = index | 1;
+        let mut left_index = right_index - 1;
+
+        for i in 0..num_rounds {
+            let ri0 = reverse_bits(left_index, num_vars + log_rate - i);
+            let ri1 = reverse_bits(right_index, num_vars + log_rate - i);
+            let matching_comms = comms
+                .iter()
+                .enumerate()
+                .filter(|(index, comm)| comm.num_vars().unwrap() == num_vars - i)
+                .map(|(index, _)| index)
+                .collect_vec();
+
+            matching_comms.iter().for_each(|index| {
+                let query = self.commitments_query.get_inner()[*index].query;
+                curr_left += query.left * coeffs[*index];
+                curr_right += query.right * coeffs[*index];
+            });
+
+            let x0: F = query_point(
+                1 << (num_vars + log_rate - i),
+                ri0,
+                &mut rng,
+                num_vars + log_rate - i - 1,
+                &mut cipher,
+            );
+            let x1 = -x0;
+
+            let res = interpolate2([(x0, curr_left), (x1, curr_right)], fold_challenges[i]);
+
+            let next_index = right_index >> 1;
+            let next_oracle_value = if i < num_rounds - 1 {
+                right_index = next_index | 1;
+                left_index = right_index - 1;
+                let next_oracle_query = &self.oracle_query.get_inner()[i];
+                curr_left = next_oracle_query.query.left;
+                curr_right = next_oracle_query.query.right;
+                if next_index & 1 == 0 {
+                    curr_left
+                } else {
+                    curr_right
+                }
+            } else {
+                // Note that final_codeword has been bit-reversed, so no need to bit-reverse
+                // next_index here.
+                final_codeword[next_index]
+            };
+            assert_eq!(res, next_oracle_value);
+        }
     }
 }
 
@@ -2335,6 +2568,62 @@ impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
         self.inner
             .iter()
             .for_each(|(_, q)| q.write_transcript(transcript));
+    }
+
+    pub fn read_transcript(
+        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        num_rounds: usize,
+        log_rate: usize,
+        poly_num_vars: &[usize],
+        indices: &[usize],
+    ) -> Self {
+        Self {
+            inner: indices
+                .iter()
+                .map(|index| {
+                    (
+                        *index,
+                        BatchedSingleQueryResultWithMerklePath::read_transcript(
+                            transcript,
+                            num_rounds,
+                            log_rate,
+                            poly_num_vars,
+                            *index,
+                        ),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn check(
+        &self,
+        fold_challenges: &Vec<F>,
+        num_rounds: usize,
+        num_vars: usize,
+        log_rate: usize,
+        final_codeword: &Vec<F>,
+        roots: &Vec<Output<H>>,
+        comms: &Vec<&BasefoldCommitment<H>>,
+        coeffs: &[F],
+        rng: ChaCha8Rng,
+        cipher: ctr::Ctr32LE<aes::Aes128>,
+    ) {
+        self.inner.par_iter().for_each(|(index, query)| {
+            query.check(
+                fold_challenges,
+                num_rounds,
+                num_vars,
+                log_rate,
+                final_codeword,
+                roots,
+                comms,
+                coeffs,
+                rng.clone(),
+                cipher.clone(),
+                *index,
+            );
+        });
     }
 }
 
@@ -2378,7 +2667,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
     roots: &Vec<Output<H>>,
     rng: ChaCha8Rng,
     eval: &F,
-) -> Vec<usize> {
+) {
     let n = (1 << (num_vars + log_rate));
     let mut queries_usize: Vec<usize> = query_challenges
         .par_iter()
@@ -2444,12 +2733,12 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
 
                 assert_eq!(res, cur_queries[i + 1][(cur_index >> 1) % 2]);
 
-                authenticate_merkle_path_root::<H, F>(
-                    &query_merkle_paths[qi][i],
-                    (cur_queries[i][0], cur_queries[i][1]),
-                    cur_index,
-                    &roots[i],
-                );
+                // authenticate_merkle_path_root::<H, F>(
+                //     &query_merkle_paths[qi][i],
+                //     (cur_queries[i][0], cur_queries[i][1]),
+                //     cur_index,
+                //     &roots[i],
+                // );
 
                 cur_index >>= 1;
             }
@@ -2464,32 +2753,23 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
             degree_2_zero_plus_one(&sum_check_oracles[i + 1])
         );
     }
-    return queries_usize;
 }
 
 fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
-    query_challenges: &Vec<F>,
+    queries: &BatchedQueriesResultWithMerklePath<F, H>,
     sum_check_oracles: &Vec<Vec<F>>,
     fold_challenges: &Vec<F>,
-    queries: &Vec<Vec<Vec<F>>>,
     num_rounds: usize,
     num_vars: usize,
     log_rate: usize,
+    final_codeword: &Vec<F>,
     roots: &Vec<Output<H>>,
+    comms: &Vec<&BasefoldCommitment<H>>,
+    coeffs: &[F],
     rng: ChaCha8Rng,
     eval: &F,
-) -> Vec<usize> {
+) {
     let n = (1 << (num_vars + log_rate));
-    let mut queries_usize: Vec<usize> = query_challenges
-        .par_iter()
-        .map(|x_index| {
-            let x_repr = (*x_index).to_repr();
-            let mut x: &[u8] = x_repr.as_ref();
-            let (int_bytes, rest) = x.split_at(std::mem::size_of::<u32>());
-            let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
-            ((x_int as usize) % n).into()
-        })
-        .collect();
 
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
@@ -2501,53 +2781,23 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
     rng.fill_bytes(&mut iv);
 
     type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
-    let mut cipher = Aes128Ctr64LE::new(
+    let cipher = Aes128Ctr64LE::new(
         GenericArray::from_slice(&key[..]),
         GenericArray::from_slice(&iv[..]),
     );
 
-    queries_usize
-        .par_iter_mut()
-        .enumerate()
-        .for_each(|(qi, query_index)| {
-            let mut cipher = cipher.clone();
-            let mut rng = rng.clone();
-            let mut cur_index = *query_index;
-            let mut oracle_queries = &queries[qi * 2];
-            let mut comm_queries = &queries[qi * 2 + 1];
-
-            for i in 0..num_rounds {
-                let temp = cur_index;
-                let mut other_index = cur_index ^ 1;
-                if (other_index < cur_index) {
-                    cur_index = other_index;
-                    other_index = temp;
-                }
-
-                assert_eq!(cur_index % 2, 0);
-
-                let ri0 = reverse_bits(cur_index, num_vars + log_rate - i);
-                let ri1 = reverse_bits(other_index, num_vars + log_rate - i);
-                let now = Instant::now();
-                let x0: F = query_point(
-                    1 << (num_vars + log_rate - i),
-                    ri0,
-                    &mut rng,
-                    num_vars + log_rate - i - 1,
-                    &mut cipher,
-                );
-                let x1 = -x0;
-
-                let res = interpolate2(
-                    [(x0, oracle_queries[i][0]), (x1, oracle_queries[i][1])],
-                    fold_challenges[i],
-                );
-
-                assert_eq!(res, oracle_queries[i + 1][(cur_index >> 1) % 2]);
-
-                cur_index >>= 1;
-            }
-        });
+    queries.check(
+        fold_challenges,
+        num_rounds,
+        num_vars,
+        log_rate,
+        final_codeword,
+        roots,
+        comms,
+        coeffs,
+        rng.clone(),
+        cipher,
+    );
 
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_oracles[0]));
 
@@ -2558,7 +2808,6 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
             degree_2_zero_plus_one(&sum_check_oracles[i + 1])
         );
     }
-    return queries_usize;
 }
 
 //return ((leaf1,leaf2),path), where leaves are queries from codewords
