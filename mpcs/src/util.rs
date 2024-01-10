@@ -1,9 +1,8 @@
-#![allow(warnings, unused)]
 pub mod arithmetic;
 pub mod code;
 pub mod expression;
 pub mod ff_255;
-pub mod goldilocksMont;
+pub mod goldilocks_mont;
 pub mod hash;
 pub mod mersenne_61_mont;
 pub mod new_fields;

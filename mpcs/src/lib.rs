@@ -40,11 +40,7 @@ pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
 
     fn setup(poly_size: usize, batch_size: usize, rng: impl RngCore) -> Result<Self::Param, Error>;
 
-    fn trim(
-        param: &Self::Param,
-        poly_size: usize,
-        batch_size: usize,
-    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
+    fn trim(param: &Self::Param) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
     fn commit(
         pp: &Self::ProverParam,

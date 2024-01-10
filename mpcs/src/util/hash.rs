@@ -2,12 +2,11 @@ use super::plonky2_util::log2_strict;
 use crate::util::arithmetic::PrimeField;
 use blake2b_simd::{
     many::{hash_many, HashManyJob},
-    Hash as BHash, Params, State, OUTBYTES,
+    Params, State,
 };
 use generic_array::GenericArray;
 use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
-    ParallelSlice, ParallelSliceMut,
+    IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator, ParallelSlice,
 };
 use sha3::digest::{Digest, FixedOutput, HashMarker, OutputSizeUser, Reset};
 pub use sha3::{
@@ -18,10 +17,7 @@ use std::fmt::Debug;
 use std::time::Instant;
 
 pub use blake2::Blake2s256;
-use generic_array::{
-    typenum::{U128, U16, U32, U64},
-    ArrayLength,
-};
+use generic_array::typenum::U32;
 pub use poseidon::{self, Poseidon};
 
 pub trait Hash:

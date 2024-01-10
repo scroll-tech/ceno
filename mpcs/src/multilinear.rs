@@ -1,7 +1,6 @@
-#![allow(warnings, unused)]
 use crate::{
-    poly::{multilinear::MultilinearPolynomial, Polynomial},
-    util::{arithmetic::Field, end_timer, izip, parallel::parallelize, start_timer, Itertools},
+    poly::multilinear::MultilinearPolynomial,
+    util::{arithmetic::Field, Itertools},
     Error,
 };
 
@@ -45,43 +44,6 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
     })
 }
 
-fn quotients<F: Field, T>(
-    poly: &MultilinearPolynomial<F>,
-    point: &[F],
-    f: impl Fn(usize, Vec<F>) -> T,
-) -> (Vec<T>, F) {
-    assert_eq!(poly.num_vars(), point.len());
-
-    let mut remainder = poly.evals().to_vec();
-    let mut quotients = point
-        .iter()
-        .zip(0..poly.num_vars())
-        .rev()
-        .map(|(x_i, num_vars)| {
-            let timer = start_timer(|| "quotients");
-            let (remaimder_lo, remainder_hi) = remainder.split_at_mut(1 << num_vars);
-            let mut quotient = vec![F::ZERO; remaimder_lo.len()];
-
-            parallelize(&mut quotient, |(quotient, start)| {
-                izip!(quotient, &remaimder_lo[start..], &remainder_hi[start..])
-                    .for_each(|(q, r_lo, r_hi)| *q = *r_hi - r_lo);
-            });
-            parallelize(remaimder_lo, |(remaimder_lo, start)| {
-                izip!(remaimder_lo, &remainder_hi[start..])
-                    .for_each(|(r_lo, r_hi)| *r_lo += (*r_hi - r_lo as &_) * x_i);
-            });
-
-            remainder.truncate(1 << num_vars);
-            end_timer(timer);
-
-            f(num_vars, quotient)
-        })
-        .collect_vec();
-    quotients.reverse();
-
-    (quotients, remainder[0])
-}
-
 #[cfg(test)]
 mod test {
     use crate::{
@@ -101,18 +63,8 @@ mod test {
         use crate::multilinear::basefold::BasefoldExtParams;
         use crate::util::transcript::Blake2sTranscript;
         use crate::util::transcript::FieldTranscript;
-        use crate::util::transcript::FieldTranscriptWrite;
-        use crate::{
-            multilinear::{
-                basefold::Basefold,
-                test::{run_batch_commit_open_verify, run_commit_open_verify},
-            },
-            util::{
-                hash::{Blake2s, Hash, Keccak256, Output},
-                new_fields::{Mersenne127, Mersenne61},
-            },
-        };
-        use halo2_curves::bn256::{Bn256, Fr};
+        use crate::{multilinear::basefold::Basefold, util::hash::Blake2s};
+        use halo2_curves::bn256::Fr;
         #[derive(Debug)]
         pub struct Five {}
 
@@ -136,7 +88,7 @@ mod test {
         let poly = MultilinearPolynomial::rand(num_vars, OsRng);
         let param = Pcs::setup(poly_size, 1, &mut rng).unwrap();
 
-        let (pp, vp) = Pcs::trim(&param, poly_size, 1).unwrap();
+        let (pp, _) = Pcs::trim(&param).unwrap();
         println!("before commit");
         let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
         let point = transcript.squeeze_challenges(num_vars);
@@ -162,7 +114,7 @@ mod test {
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, 1, &mut rng).unwrap();
                 println!("before trim");
-                Pcs::trim(&param, poly_size, 1).unwrap()
+                Pcs::trim(&param).unwrap()
             };
             println!("after trim");
             // Commit and open
@@ -212,7 +164,7 @@ mod test {
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, batch_size, &mut rng).unwrap();
-                Pcs::trim(&param, poly_size, batch_size).unwrap()
+                Pcs::trim(&param).unwrap()
             };
             // Batch commit and open
             let evals = chain![
