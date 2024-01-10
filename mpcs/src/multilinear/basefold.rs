@@ -1,5 +1,5 @@
-use crate::util::code;
 use crate::util::merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree};
+use crate::util::{code, field_to_usize};
 use crate::Commitment;
 use crate::{
     multilinear::validate_input,
@@ -558,7 +558,7 @@ where
             coeffs.as_slice(),
         );
 
-        let (queried_els, queries_usize) = batch_query_phase(
+        let query_result = batch_query_phase(
             transcript,
             1 << (num_vars + pp.log_rate),
             comms.as_slice(),
@@ -566,54 +566,14 @@ where
             pp.num_verifier_queries,
         );
 
-        let merkle_paths: Vec<Vec<MerklePathWithoutLeafOrRoot<H>>> = queried_els
-            .iter()
-            .map(|query| {
-                let (oracle_queries, poly_queries) = query;
-                oracle_queries
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, query_result)| {
-                        trees[i].merkle_path_without_leaf_sibling_or_root(query_result.index)
-                    })
-                    .chain(
-                        poly_queries
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, query_result)| {
-                                comms[i]
-                                    .codeword_tree
-                                    .merkle_path_without_leaf_sibling_or_root(query_result.index)
-                            }),
-                    )
-                    .collect()
-            })
-            .collect();
+        let query_result_with_merkle_path =
+            BatchedQueriesResultWithMerklePath::from_batched_query_result(
+                query_result,
+                &trees,
+                &comms,
+            );
 
-        //write oracle query results
-        queried_els
-            .iter()
-            .map(|q| &q.0)
-            .flatten()
-            .for_each(|query| {
-                transcript.write_field_element(&query.left);
-                transcript.write_field_element(&query.right);
-            });
-
-        //write poly query results
-        queried_els
-            .iter()
-            .map(|q| &q.1)
-            .flatten()
-            .for_each(|query| {
-                transcript.write_field_element(&query.left);
-                transcript.write_field_element(&query.right);
-            });
-
-        //write merkle paths
-        merkle_paths.iter().flatten().for_each(|path| {
-            write_merkle_path(path, transcript);
-        });
+        query_result_with_merkle_path.write_transcript(transcript);
 
         Ok(())
     }
@@ -1364,21 +1324,21 @@ fn batch_basefold_get_query<F: PrimeField, H: Hash>(
     oracles: &Vec<Vec<F>>,
     codeword_size: usize,
     mut x_index: usize,
-) -> (
-    Vec<CodewordSingleQueryResult<F>>,
-    Vec<CodewordSingleQueryResult<F>>,
-) {
-    let mut queries = Vec::with_capacity(oracles.len());
+) -> BatchedSingleQueryResult<F> {
+    let mut oracle_list_queries = Vec::with_capacity(oracles.len());
 
     x_index >>= 1;
     for oracle in oracles {
         let mut p1 = x_index | 1;
         let mut p0 = p1 - 1;
-        queries.push(CodewordSingleQueryResult::<F>::new(
+        oracle_list_queries.push(CodewordSingleQueryResult::<F>::new(
             oracle[p0], oracle[p1], p0,
         ));
         x_index >>= 1;
     }
+    let oracle_query = OracleListQueryResult {
+        inner: oracle_list_queries,
+    };
 
     let comm_queries = comms
         .iter()
@@ -1394,7 +1354,14 @@ fn batch_basefold_get_query<F: PrimeField, H: Hash>(
         })
         .collect_vec();
 
-    return (queries, comm_queries);
+    let commitments_query = CommitmentsQueryResult {
+        inner: comm_queries,
+    };
+
+    BatchedSingleQueryResult {
+        oracle_query,
+        commitments_query,
+    }
 }
 
 fn write_merkle_path<H: Hash, F: PrimeField>(
@@ -2169,6 +2136,206 @@ impl<F> CodewordSingleQueryResult<F> {
     fn new(left: F, right: F, index: usize) -> Self {
         Self { left, right, index }
     }
+
+    pub fn write_transcript<H: Hash>(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+        transcript.write_field_element(&self.left);
+        transcript.write_field_element(&self.right);
+    }
+}
+
+struct CodewordSingleQueryResultWithMerklePath<F, H: Hash> {
+    query: CodewordSingleQueryResult<F>,
+    merkle_path: MerklePathWithoutLeafOrRoot<H>,
+}
+
+impl<F: PrimeField, H: Hash> CodewordSingleQueryResultWithMerklePath<F, H> {
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+        self.query.write_transcript::<H>(transcript);
+        self.merkle_path.write_transcript::<F>(transcript);
+    }
+}
+
+struct OracleListQueryResult<F> {
+    inner: Vec<CodewordSingleQueryResult<F>>,
+}
+
+struct CommitmentsQueryResult<F> {
+    inner: Vec<CodewordSingleQueryResult<F>>,
+}
+
+struct OracleListQueryResultWithMerklePath<F, H: Hash> {
+    inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>,
+}
+
+struct CommitmentsQueryResultWithMerklePath<F, H: Hash> {
+    inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>,
+}
+
+impl<F: PrimeField> ListQueryResult<F> for OracleListQueryResult<F> {
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<F>> {
+        &self.inner
+    }
+
+    fn get_inner_into(self) -> Vec<CodewordSingleQueryResult<F>> {
+        self.inner
+    }
+}
+
+impl<F: PrimeField> ListQueryResult<F> for CommitmentsQueryResult<F> {
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<F>> {
+        &self.inner
+    }
+
+    fn get_inner_into(self) -> Vec<CodewordSingleQueryResult<F>> {
+        self.inner
+    }
+}
+
+impl<F: PrimeField, H: Hash> ListQueryResultWithMerklePath<F, H>
+    for OracleListQueryResultWithMerklePath<F, H>
+{
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>> {
+        &self.inner
+    }
+
+    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<F: PrimeField, H: Hash> ListQueryResultWithMerklePath<F, H>
+    for CommitmentsQueryResultWithMerklePath<F, H>
+{
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>> {
+        &self.inner
+    }
+
+    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>) -> Self {
+        Self { inner }
+    }
+}
+
+trait ListQueryResult<F: PrimeField> {
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<F>>;
+
+    fn get_inner_into(self) -> Vec<CodewordSingleQueryResult<F>>;
+
+    fn merkle_path<'a, H: Hash>(
+        &self,
+        trees: impl Fn(usize) -> &'a MerkleTree<F, H>,
+    ) -> Vec<MerklePathWithoutLeafOrRoot<H>> {
+        self.get_inner()
+            .into_iter()
+            .enumerate()
+            .map(|(i, query_result)| {
+                trees(i).merkle_path_without_leaf_sibling_or_root(query_result.index)
+            })
+            .collect_vec()
+    }
+}
+
+trait ListQueryResultWithMerklePath<F: PrimeField, H: Hash>: Sized {
+    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>) -> Self;
+
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>>;
+
+    fn from_query_and_trees<'a, LQR: ListQueryResult<F>>(
+        query_result: LQR,
+        trees: impl Fn(usize) -> &'a MerkleTree<F, H>,
+    ) -> Self {
+        Self::new(
+            query_result
+                .merkle_path(trees)
+                .into_iter()
+                .zip(query_result.get_inner_into().into_iter())
+                .map(
+                    |(path, codeword_result)| CodewordSingleQueryResultWithMerklePath {
+                        query: codeword_result,
+                        merkle_path: path,
+                    },
+                )
+                .collect_vec(),
+        )
+    }
+
+    fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+        self.get_inner()
+            .iter()
+            .for_each(|q| q.write_transcript(transcript));
+    }
+}
+
+struct BatchedSingleQueryResult<F> {
+    oracle_query: OracleListQueryResult<F>,
+    commitments_query: CommitmentsQueryResult<F>,
+}
+
+struct BatchedSingleQueryResultWithMerklePath<F, H: Hash> {
+    oracle_query: OracleListQueryResultWithMerklePath<F, H>,
+    commitments_query: CommitmentsQueryResultWithMerklePath<F, H>,
+}
+
+impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
+    pub fn from_batched_single_query_result(
+        batched_single_query_result: BatchedSingleQueryResult<F>,
+        oracle_trees: &Vec<MerkleTree<F, H>>,
+        commitments: &Vec<&BasefoldCommitmentWithData<F, H>>,
+    ) -> Self {
+        Self {
+            oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
+                batched_single_query_result.oracle_query,
+                |i| &oracle_trees[i],
+            ),
+            commitments_query: CommitmentsQueryResultWithMerklePath::from_query_and_trees(
+                batched_single_query_result.commitments_query,
+                |i| &commitments[i].codeword_tree,
+            ),
+        }
+    }
+
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+        self.oracle_query.write_transcript(transcript);
+        self.commitments_query.write_transcript(transcript);
+    }
+}
+
+struct BatchedQueriesResult<F> {
+    inner: Vec<(usize, BatchedSingleQueryResult<F>)>,
+}
+
+struct BatchedQueriesResultWithMerklePath<F, H: Hash> {
+    inner: Vec<(usize, BatchedSingleQueryResultWithMerklePath<F, H>)>,
+}
+
+impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
+    pub fn from_batched_query_result(
+        batched_query_result: BatchedQueriesResult<F>,
+        oracle_trees: &Vec<MerkleTree<F, H>>,
+        commitments: &Vec<&BasefoldCommitmentWithData<F, H>>,
+    ) -> Self {
+        Self {
+            inner: batched_query_result
+                .inner
+                .into_iter()
+                .map(|(i, q)| {
+                    (
+                        i,
+                        BatchedSingleQueryResultWithMerklePath::from_batched_single_query_result(
+                            q,
+                            oracle_trees,
+                            commitments,
+                        ),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+        self.inner
+            .iter()
+            .for_each(|(_, q)| q.write_transcript(transcript));
+    }
 }
 
 fn batch_query_phase<F: PrimeField, H: Hash>(
@@ -2177,36 +2344,26 @@ fn batch_query_phase<F: PrimeField, H: Hash>(
     comms: &[&BasefoldCommitmentWithData<F, H>],
     oracles: &Vec<Vec<F>>,
     num_verifier_queries: usize,
-) -> (
-    Vec<(
-        Vec<CodewordSingleQueryResult<F>>,
-        Vec<CodewordSingleQueryResult<F>>,
-    )>,
-    Vec<usize>,
-) {
+) -> BatchedQueriesResult<F> {
     let mut queries = transcript.squeeze_challenges(num_verifier_queries);
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
         .iter()
-        .map(|x_index| {
-            let x_rep = (*x_index).to_repr();
-            let mut x: &[u8] = x_rep.as_ref();
-            let (int_bytes, _) = x.split_at(std::mem::size_of::<u32>());
-            let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
-            ((x_int as usize) % codeword_size).into()
-        })
+        .map(|x_index| field_to_usize(x_index, codeword_size))
         .collect_vec();
 
-    (
-        queries_usize
+    BatchedQueriesResult {
+        inner: queries_usize
             .par_iter()
             .map(|x_index| {
-                return batch_basefold_get_query::<F, H>(comms, &oracles, codeword_size, *x_index);
+                (
+                    *x_index,
+                    batch_basefold_get_query::<F, H>(comms, &oracles, codeword_size, *x_index),
+                )
             })
             .collect(),
-        queries_usize,
-    )
+    }
 }
 
 fn verifier_query_phase<F: PrimeField, H: Hash>(

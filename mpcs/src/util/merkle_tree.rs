@@ -5,7 +5,9 @@ use rayon::{
 
 use crate::util::{
     hash::{Hash, Output},
-    log2_strict, Deserialize, DeserializeOwned, PrimeField, Serialize,
+    log2_strict,
+    transcript::TranscriptWrite,
+    Deserialize, DeserializeOwned, PrimeField, Serialize,
 };
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -75,6 +77,15 @@ impl<H: Hash> MerklePathWithoutLeafOrRoot<H> {
 
     pub fn iter(&self) -> impl Iterator<Item = &Output<H>> {
         self.inner.iter()
+    }
+
+    pub fn write_transcript<F: PrimeField>(
+        &self,
+        transcript: &mut impl TranscriptWrite<Output<H>, F>,
+    ) {
+        self.inner
+            .iter()
+            .for_each(|hash| transcript.write_commitment(hash).unwrap());
     }
 }
 
