@@ -1163,7 +1163,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
         let challenge: F = transcript.squeeze_challenge();
 
         // Fold the current oracle for FRI
-        let mut running_oracle = basefold_one_round_by_interpolation_weights::<F>(
+        running_oracle = basefold_one_round_by_interpolation_weights::<F>(
             &table_w_weights,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
@@ -1177,7 +1177,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
             let running_root = running_tree.root();
             transcript.write_commitment(&running_root).unwrap();
 
-            oracles.push(running_oracle);
+            oracles.push(running_oracle.clone());
             trees.push(running_tree);
         } else {
             // The difference of the last round is that we don't need to compute the message,
@@ -1275,7 +1275,7 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
         let challenge: F = transcript.squeeze_challenge();
 
         // Fold the current oracle for FRI
-        let mut running_oracle = basefold_one_round_by_interpolation_weights::<F>(
+        running_oracle = basefold_one_round_by_interpolation_weights::<F>(
             &table_w_weights,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
@@ -1302,7 +1302,7 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
             let running_root = running_tree.root();
             transcript.write_commitment(&running_root).unwrap();
 
-            oracles.push(running_oracle);
+            oracles.push(running_oracle.clone());
             trees.push(running_tree);
         } else {
             // The difference of the last round is that we don't need to compute the message,
