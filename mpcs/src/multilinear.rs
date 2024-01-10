@@ -56,7 +56,9 @@ mod test {
         },
         Evaluation, PolynomialCommitmentScheme,
     };
+    use rand::prelude::*;
     use rand::{rngs::OsRng, Rng};
+    use rand_chacha::ChaCha8Rng;
     use std::{iter, time::Instant};
     #[test]
     fn test_transcript() {
@@ -82,7 +84,7 @@ mod test {
 
         type Pcs = Basefold<Fr, Blake2s, Five>;
         let num_vars = 10;
-        let mut rng = OsRng;
+        let mut rng = ChaCha8Rng::from_seed([0u8; 32]);
         let poly_size = 1 << num_vars;
         let mut transcript = Blake2sTranscript::new(());
         let poly = MultilinearPolynomial::rand(num_vars, OsRng);
@@ -110,7 +112,7 @@ mod test {
             println!("k {:?}", num_vars);
             // Setup
             let (pp, vp) = {
-                let mut rng = OsRng;
+                let mut rng = ChaCha8Rng::from_seed([0u8; 32]);
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, 1, &mut rng).unwrap();
                 println!("before trim");
@@ -159,7 +161,7 @@ mod test {
             println!("k {:?}", num_vars);
             let batch_size = 2;
             let num_points = batch_size >> 1;
-            let mut rng = OsRng;
+            let mut rng = ChaCha8Rng::from_seed([0u8; 32]);
             // Setup
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;

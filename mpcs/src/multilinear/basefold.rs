@@ -1,5 +1,5 @@
-use crate::util::field_to_usize;
 use crate::util::merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree};
+use crate::util::{field_to_usize, u32_to_field};
 use crate::{
     multilinear::validate_input,
     poly::{multilinear::MultilinearPolynomial, Polynomial},
@@ -315,7 +315,7 @@ where
         comms.iter().for_each(|comm| {
             transcript.write_commitment(comm.get_root_ref()).unwrap();
             transcript
-                .write_field_element(&F::from(comm.num_vars as u64))
+                .write_field_element(&u32_to_field(comm.num_vars as u32))
                 .unwrap();
         });
         Ok(comms)
@@ -544,7 +544,7 @@ where
         let comm = Self::commit(pp, poly)?;
 
         transcript.write_commitments(comm.as_ref())?;
-        transcript.write_field_element(&F::from(comm.num_vars as u64))?;
+        transcript.write_field_element(&u32_to_field::<F>(comm.num_vars as u32))?;
 
         Ok(comm)
     }
@@ -629,10 +629,15 @@ where
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
         let num_rounds = num_vars - V::get_basecode();
         validate_input("batch verify", vp.max_num_vars, [], points)?;
-        let mut poly_num_vars = vec![0usize; comms.len()];
-        evals
-            .iter()
-            .for_each(|eval| poly_num_vars[eval.poly()] = points[eval.point()].len());
+        let poly_num_vars = comms.iter().map(|c| c.num_vars().unwrap()).collect_vec();
+        if cfg!(feature = "sanity-check") {
+            evals.iter().for_each(|eval| {
+                assert_eq!(
+                    points[eval.point()].len(),
+                    comms[eval.poly()].num_vars().unwrap()
+                );
+            });
+        }
         assert!(poly_num_vars.iter().min().unwrap() >= &V::get_basecode());
 
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
@@ -678,6 +683,7 @@ where
             .iter()
             .map(|index| field_to_usize(index, Some(1 << (num_vars + vp.log_rate))))
             .collect_vec();
+
         let query_result_with_merkle_path = BatchedQueriesResultWithMerklePath::read_transcript(
             transcript,
             num_rounds,
@@ -976,21 +982,22 @@ fn basefold_one_round_by_interpolation_weights<F: PrimeField>(
 fn basefold_get_query<F: PrimeField>(
     poly_codeword: &Vec<F>,
     oracles: &Vec<Vec<F>>,
-    mut x_index: usize,
+    x_index: usize,
 ) -> SingleQueryResult<F> {
-    let p1 = x_index | 1;
+    let mut index = x_index;
+    let p1 = index | 1;
     let p0 = p1 - 1;
 
     let commitment_query = CodewordSingleQueryResult::new(poly_codeword[p0], poly_codeword[p1], p0);
-    x_index >>= 1;
+    index >>= 1;
 
     let mut oracle_queries = Vec::with_capacity(oracles.len() + 1);
     for oracle in oracles {
-        let p1 = x_index | 1;
+        let p1 = index | 1;
         let p0 = p1 - 1;
 
         oracle_queries.push(CodewordSingleQueryResult::new(oracle[p0], oracle[p1], p0));
-        x_index >>= 1;
+        index >>= 1;
     }
 
     let oracle_query = OracleListQueryResult {
@@ -1007,18 +1014,19 @@ fn batch_basefold_get_query<F: PrimeField, H: Hash>(
     comms: &[&BasefoldCommitmentWithData<F, H>],
     oracles: &Vec<Vec<F>>,
     codeword_size: usize,
-    mut x_index: usize,
+    x_index: usize,
 ) -> BatchedSingleQueryResult<F> {
     let mut oracle_list_queries = Vec::with_capacity(oracles.len());
 
-    x_index >>= 1;
+    let mut index = x_index;
+    index >>= 1;
     for oracle in oracles {
-        let p1 = x_index | 1;
+        let p1 = index | 1;
         let p0 = p1 - 1;
         oracle_list_queries.push(CodewordSingleQueryResult::<F>::new(
             oracle[p0], oracle[p1], p0,
         ));
-        x_index >>= 1;
+        index >>= 1;
     }
     let oracle_query = OracleListQueryResult {
         inner: oracle_list_queries,
@@ -1567,7 +1575,16 @@ trait ListQueryResult<F: PrimeField> {
             .into_iter()
             .enumerate()
             .map(|(i, query_result)| {
-                trees(i).merkle_path_without_leaf_sibling_or_root(query_result.index)
+                let path = trees(i).merkle_path_without_leaf_sibling_or_root(query_result.index);
+                if cfg!(feature = "sanity-check") {
+                    path.authenticate_leaves_root(
+                        query_result.left,
+                        query_result.right,
+                        query_result.index,
+                        &trees(i).root(),
+                    );
+                }
+                path
             })
             .collect_vec()
     }
@@ -2026,7 +2043,7 @@ impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
         log_rate: usize,
         final_codeword: &Vec<F>,
         roots: &Vec<Output<H>>,
-        comms: &BasefoldCommitment<H>,
+        comm: &BasefoldCommitment<H>,
         cipher: ctr::Ctr32LE<aes::Aes128>,
     ) {
         self.inner.par_iter().for_each(|(index, query)| {
@@ -2037,7 +2054,7 @@ impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
                 log_rate,
                 final_codeword,
                 roots,
-                comms,
+                comm,
                 cipher.clone(),
                 *index,
             );
@@ -2082,7 +2099,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
     log_rate: usize,
     final_message: &Vec<F>,
     roots: &Vec<Output<H>>,
-    comms: &BasefoldCommitment<H>,
+    comm: &BasefoldCommitment<H>,
     partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
@@ -2115,7 +2132,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
         log_rate,
         &final_codeword,
         roots,
-        comms,
+        comm,
         cipher,
     );
 

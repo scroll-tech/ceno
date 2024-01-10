@@ -38,6 +38,21 @@ pub fn field_to_usize<F: PrimeField>(x: &F, n: Option<usize>) -> usize {
     }
 }
 
+/// PrimeField does not have a to_u32 method, so field_to_usize(F::from(k))
+/// does not necessarily return k. So let u32_to_field be the reverse of
+/// field_to_usize.
+pub fn u32_to_field<F: PrimeField>(x: u32) -> F {
+    let mut repr = F::Repr::default();
+    let bytes = x.to_be_bytes();
+    let desired_length = repr.as_mut().len();
+    if desired_length > bytes.len() {
+        repr.as_mut()[..bytes.len()].copy_from_slice(&bytes);
+    } else {
+        repr.as_mut().copy_from_slice(&bytes[..desired_length]);
+    }
+    F::from_repr(repr).unwrap()
+}
+
 pub trait BitIndex {
     fn nth_bit(&self, nth: usize) -> bool;
 }
@@ -94,7 +109,8 @@ pub(crate) use impl_index;
 
 #[cfg(any(test, feature = "benchmark"))]
 pub mod test {
-    use crate::util::arithmetic::Field;
+    use crate::util::{arithmetic::Field, field_to_usize, u32_to_field};
+    type F = halo2_curves::bn256::Fr;
     use rand::{
         rngs::{OsRng, StdRng},
         CryptoRng, RngCore, SeedableRng,
@@ -119,5 +135,11 @@ pub mod test {
 
     pub fn rand_vec<F: Field>(n: usize, mut rng: impl RngCore) -> Vec<F> {
         iter::repeat_with(|| F::random(&mut rng)).take(n).collect()
+    }
+
+    #[test]
+    pub fn test_field_transform() {
+        assert_eq!(field_to_usize(&u32_to_field::<F>(1u32), None), 1);
+        assert_eq!(field_to_usize(&u32_to_field::<F>(10u32), None), 10);
     }
 }
