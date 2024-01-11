@@ -30,10 +30,7 @@ use std::{ops::Deref, time::Instant};
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec;
 
 use crate::util::plonky2_util::{reverse_bits, reverse_index_bits_in_place};
-use rand_chacha::{
-    rand_core::{RngCore, SeedableRng},
-    ChaCha8Rng,
-};
+use rand_chacha::{rand_core::RngCore, ChaCha8Rng};
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
     ParallelSlice, ParallelSliceMut,
@@ -41,13 +38,13 @@ use rayon::prelude::{
 use std::{borrow::Cow, marker::PhantomData, slice};
 type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BasefoldParams<F: PrimeField> {
+pub struct BasefoldParams<F: PrimeField, Rng: RngCore> {
     log_rate: usize,
     num_verifier_queries: usize,
     max_num_vars: usize,
     table_w_weights: Vec<Vec<(F, F)>>,
     table: Vec<Vec<F>>,
-    rng: ChaCha8Rng,
+    rng: Rng,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -60,8 +57,8 @@ pub struct BasefoldProverParams<F: PrimeField> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BasefoldVerifierParams<F: PrimeField> {
-    rng: ChaCha8Rng,
+pub struct BasefoldVerifierParams<F: PrimeField, Rng: RngCore> {
+    rng: Rng,
     max_num_vars: usize,
     log_rate: usize,
     num_verifier_queries: usize,
@@ -213,18 +210,18 @@ where
     H: Hash,
     V: BasefoldExtParams,
 {
-    type Param = BasefoldParams<F>;
+    type Param = BasefoldParams<F, ChaCha8Rng>;
     type ProverParam = BasefoldProverParams<F>;
-    type VerifierParam = BasefoldVerifierParams<F>;
+    type VerifierParam = BasefoldVerifierParams<F, ChaCha8Rng>;
     type Polynomial = MultilinearPolynomial<F>;
     type CommitmentWithData = BasefoldCommitmentWithData<F, H>;
     type Commitment = BasefoldCommitment<H>;
     type CommitmentChunk = Output<H>;
+    type Rng = ChaCha8Rng;
 
-    fn setup(poly_size: usize, _: usize, _: impl RngCore) -> Result<Self::Param, Error> {
+    fn setup(poly_size: usize, rng: &Self::Rng) -> Result<Self::Param, Error> {
         let log_rate = V::get_rate();
-        let mut test_rng = ChaCha8Rng::from_entropy();
-        let (table_w_weights, table) = get_table_aes(poly_size, log_rate, &mut test_rng);
+        let (table_w_weights, table) = get_table_aes(poly_size, log_rate, &mut rng.clone());
 
         Ok(BasefoldParams {
             log_rate,
@@ -232,7 +229,7 @@ where
             max_num_vars: log2_strict(poly_size),
             table_w_weights,
             table,
-            rng: test_rng.clone(),
+            rng: rng.clone(),
         })
     }
 
@@ -2272,10 +2269,10 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
     );
 }
 
-fn get_table_aes<F: PrimeField>(
+fn get_table_aes<F: PrimeField, Rng: RngCore + Clone>(
     poly_size: usize,
     rate: usize,
-    rng: &mut ChaCha8Rng,
+    rng: &mut Rng,
 ) -> (Vec<Vec<(F, F)>>, Vec<Vec<F>>) {
     // The size (logarithmic) of the codeword for the polynomial
     let lg_n: usize = rate + log2_strict(poly_size);

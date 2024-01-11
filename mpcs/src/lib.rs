@@ -37,8 +37,9 @@ pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
         + Serialize
         + DeserializeOwned;
     type CommitmentChunk: Clone + Debug + Default;
+    type Rng: RngCore + Clone;
 
-    fn setup(poly_size: usize, batch_size: usize, rng: impl RngCore) -> Result<Self::Param, Error>;
+    fn setup(poly_size: usize, rng: &Self::Rng) -> Result<Self::Param, Error>;
 
     fn trim(param: &Self::Param) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 

@@ -84,11 +84,11 @@ mod test {
 
         type Pcs = Basefold<Fr, Blake2s, Five>;
         let num_vars = 10;
-        let mut rng = ChaCha8Rng::from_seed([0u8; 32]);
+        let rng = ChaCha8Rng::from_seed([0u8; 32]);
         let poly_size = 1 << num_vars;
         let mut transcript = Blake2sTranscript::new(());
         let poly = MultilinearPolynomial::rand(num_vars, OsRng);
-        let param = Pcs::setup(poly_size, 1, &mut rng).unwrap();
+        let param = Pcs::setup(poly_size, &rng).unwrap();
 
         let (pp, _) = Pcs::trim(&param).unwrap();
         println!("before commit");
@@ -103,7 +103,7 @@ mod test {
     pub(super) fn run_commit_open_verify<F, Pcs, T>()
     where
         F: PrimeField,
-        Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>>,
+        Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
             + TranscriptWrite<Pcs::CommitmentChunk, F>
             + InMemoryTranscript<Param = ()>,
@@ -112,9 +112,9 @@ mod test {
             println!("k {:?}", num_vars);
             // Setup
             let (pp, vp) = {
-                let mut rng = ChaCha8Rng::from_seed([0u8; 32]);
+                let rng = ChaCha8Rng::from_seed([0u8; 32]);
                 let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, 1, &mut rng).unwrap();
+                let param = Pcs::setup(poly_size, &rng).unwrap();
                 println!("before trim");
                 Pcs::trim(&param).unwrap()
             };
@@ -152,20 +152,20 @@ mod test {
     pub(super) fn run_batch_commit_open_verify<F, Pcs, T>()
     where
         F: PrimeField,
-        Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>>,
+        Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
             + TranscriptWrite<Pcs::CommitmentChunk, F>
             + InMemoryTranscript<Param = ()>,
     {
         for num_vars in 10..15 {
             println!("k {:?}", num_vars);
-            let batch_size = 2;
+            let batch_size = 4;
             let num_points = batch_size >> 1;
             let mut rng = ChaCha8Rng::from_seed([0u8; 32]);
             // Setup
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, batch_size, &mut rng).unwrap();
+                let param = Pcs::setup(poly_size, &rng).unwrap();
                 Pcs::trim(&param).unwrap()
             };
             // Batch commit and open
