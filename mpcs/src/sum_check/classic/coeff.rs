@@ -1,5 +1,5 @@
 use crate::{
-    poly::multilinear::zip_self,
+    poly::{multilinear::zip_self, Polynomial},
     sum_check::classic::{ClassicSumCheckProver, ClassicSumCheckRoundMessage, ProverState},
     util::{
         arithmetic::{div_ceil, horner, PrimeField},
@@ -66,6 +66,45 @@ impl_index!(Coefficients, 0);
 /// poly_i are represented as product of polynomial expressions.
 #[derive(Clone, Debug)]
 pub struct CoefficientsProver<F: PrimeField>(F, Vec<(F, Vec<Expression<F>>)>);
+
+impl<F> CoefficientsProver<F>
+where
+    F: PrimeField,
+{
+    fn evals(&self, state: &ProverState<F>) -> Vec<F> {
+        let mut result = vec![self.0; 1 << state.num_vars];
+        // Next, for every product of polynomials, where each product is assumed to be exactly 2
+        // put this into h(X).
+        if self.1.iter().all(|(_, products)| products.len() == 2) {
+            for (scalar, products) in self.1.iter() {
+                let [lhs, rhs] = [0, 1].map(|idx| &products[idx]);
+                match (lhs, rhs) {
+                    (
+                        Expression::CommonPolynomial(CommonPolynomial::EqXY(idx)),
+                        Expression::Polynomial(query),
+                    )
+                    | (
+                        Expression::Polynomial(query),
+                        Expression::CommonPolynomial(CommonPolynomial::EqXY(idx)),
+                    ) if query.rotation() == Rotation::cur() => {
+                        let lhs = &state.eq_xys[*idx];
+                        let rhs = &state.polys[query.poly()][state.num_vars];
+                        assert_eq!(lhs.num_vars(), rhs.num_vars());
+                        result.iter_mut().enumerate().for_each(|(i, v)| {
+                            *v += lhs.evals()[i % lhs.evals().len()]
+                                * rhs.evals()[i % rhs.evals().len()]
+                                * scalar;
+                        })
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+        } else {
+            unimplemented!()
+        }
+        result
+    }
+}
 
 impl<F> ClassicSumCheckProver<F> for CoefficientsProver<F>
 where
@@ -142,13 +181,26 @@ where
         if self.1.iter().all(|(_, products)| products.len() == 2) {
             for (scalar, products) in self.1.iter() {
                 let [lhs, rhs] = [0, 1].map(|idx| &products[idx]);
-                coeffs += (scalar, &self.karatsuba::<true>(state, lhs, rhs));
+                if cfg!(feature = "sanity-check") {
+                    // When LAZY = false, coeffs[1] will also be computed during the process
+                    coeffs += (scalar, &self.karatsuba::<false>(state, lhs, rhs));
+                } else {
+                    coeffs += (scalar, &self.karatsuba::<true>(state, lhs, rhs));
+                }
             }
-            coeffs[1] = state.sum - coeffs[0].double() - coeffs[2];
+            if cfg!(feature = "sanity-check") {
+                assert_eq!(coeffs[0].double() + coeffs[1] + coeffs[2], state.sum);
+            } else {
+                coeffs[1] = state.sum - coeffs[0].double() - coeffs[2];
+            }
         } else {
             unimplemented!()
         }
         coeffs
+    }
+
+    fn sum(&self, state: &ProverState<F>) -> F {
+        self.evals(state).iter().sum()
     }
 }
 
@@ -182,11 +234,11 @@ impl<F: PrimeField> CoefficientsProver<F> {
                 // existing evaluations.
 
                 let evaluate_serial = |coeffs: &mut [F; 3], start: usize, n: usize| {
-                    zip_self!(iter::repeat(lhs).flat_map(|x| x.iter()), 2, start)
+                    zip_self!(iter::repeat(lhs).flat_map(|x| x.iter()), 2, start * 2)
                         .zip(zip_self!(
                             iter::repeat(rhs).flat_map(|x| x.iter()),
                             2,
-                            start
+                            start * 2
                         ))
                         .take(n)
                         .for_each(|((lhs_0, lhs_1), (rhs_0, rhs_1))| {
@@ -207,9 +259,14 @@ impl<F: PrimeField> CoefficientsProver<F> {
                     let chunk_size = div_ceil(state.size(), num_threads);
                     let mut partials = vec![[F::ZERO; 3]; num_threads];
                     parallelize_iter(
-                        partials.iter_mut().zip((0..).step_by(chunk_size << 1)),
+                        partials.iter_mut().zip((0..).step_by(chunk_size)),
                         |(partial, start)| {
-                            evaluate_serial(partial, start, chunk_size);
+                            // It is possible that the previous chunks already covers all
+                            // the positions
+                            if state.size() > start {
+                                let chunk_size = chunk_size.min(state.size() - start);
+                                evaluate_serial(partial, start, chunk_size);
+                            }
                         },
                     );
                     partials.iter().for_each(|partial| {

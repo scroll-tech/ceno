@@ -139,6 +139,7 @@ pub mod test {
 
     #[test]
     pub fn test_field_transform() {
+        assert_eq!(F::from(2) * F::from(3), F::from(6));
         assert_eq!(field_to_usize(&u32_to_field::<F>(1u32), None), 1);
         assert_eq!(field_to_usize(&u32_to_field::<F>(10u32), None), 10);
     }

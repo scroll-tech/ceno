@@ -22,11 +22,10 @@ use crate::{
 };
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use core::fmt::Debug;
-use core::ptr::addr_of;
 use ctr;
 use ff::BatchInverter;
 use generic_array::GenericArray;
-use std::{collections::HashMap, ops::Deref, time::Instant};
+use std::{ops::Deref, time::Instant};
 
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec;
 
@@ -376,6 +375,15 @@ where
         let min_num_vars = polys.iter().map(|p| p.num_vars()).min().unwrap();
         assert!(min_num_vars >= V::get_basecode());
 
+        if cfg!(feature = "sanity-check") {
+            evals.iter().for_each(|eval| {
+                assert_eq!(
+                    &polys[eval.poly()].evaluate(&points[eval.point()]),
+                    eval.value(),
+                )
+            })
+        }
+
         validate_input("batch open", pp.max_num_vars, polys.clone(), points)?;
 
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
@@ -428,59 +436,80 @@ where
             points[i].resize(poly.num_vars(), F::ZERO)
         });
 
-        let unique_merged_polys = merged_polys
-            .iter()
-            .unique_by(|(_, poly)| addr_of!(*poly.deref()))
-            .collect_vec();
-        let unique_merged_poly_indices = unique_merged_polys
-            .iter()
-            .enumerate()
-            .map(|(idx, (_, poly))| (addr_of!(*poly.deref()), idx))
-            .collect::<HashMap<_, _>>();
         let expression = merged_polys
             .iter()
             .enumerate()
-            .map(|(idx, (scalar, poly))| {
-                let poly = unique_merged_poly_indices[&addr_of!(*poly.deref())];
+            .map(|(idx, (scalar, _))| {
                 Expression::<F>::eq_xy(idx)
-                    * Expression::Polynomial(Query::new(poly, Rotation::cur()))
+                    * Expression::Polynomial(Query::new(idx, Rotation::cur()))
                     * scalar
             })
             .sum();
-        let virtual_poly = VirtualPolynomial::new(
-            &expression,
-            unique_merged_polys.iter().map(|(_, poly)| poly.deref()),
-            &[],
-            points.as_slice(),
-        );
+        let sumcheck_polys: Vec<&MultilinearPolynomial<F>> = merged_polys
+            .iter()
+            .map(|(_, poly)| poly.deref())
+            .collect_vec();
+        let virtual_poly =
+            VirtualPolynomial::new(&expression, sumcheck_polys, &[], points.as_slice());
         // virtual_poly is a polynomial expression that may also involve polynomials with different
         // number of variables. Use the maximal number of variables in the sum-check.
-        let num_vars = unique_merged_polys
+        let num_vars = merged_polys
             .iter()
             .map(|(_, poly)| poly.num_vars())
             .max()
             .unwrap();
-        let tilde_gs_sum =
-            inner_product(evals.iter().map(Evaluation::value), &eq_xt[..evals.len()]);
-        let (challenges, _) =
-            SumCheck::prove(&(), num_vars, virtual_poly, tilde_gs_sum, transcript)?;
+        let target_sum = inner_product(evals.iter().map(Evaluation::value), &eq_xt[..evals.len()]);
+
+        if cfg!(feature = "sanity-check") {
+            let expected_sum = merged_polys
+                .iter()
+                .zip(&points)
+                .map(|((scalar, poly), point)| {
+                    inner_product(poly.evals(), MultilinearPolynomial::eq_xy(&point).evals())
+                        * scalar
+                        * F::from(1 << (num_vars - poly.num_vars()))
+                    // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
+                })
+                .sum::<F>();
+            assert_eq!(expected_sum, target_sum);
+        }
+
+        let (challenges, merged_poly_evals) =
+            SumCheck::prove(&(), num_vars, virtual_poly, target_sum, transcript)?;
 
         // Now the verifier has obtained the new target sum, and is able to compute the random
         // linear coefficients, and is able to evaluate eq_xy(point) for each poly to open.
         // The remaining tasks for the prover is to prove that
-        // poly_evals[i] = poly[i](challenges[..poly[i].num_vars]) for every i.
-
-        // More precisely, prove sum_i coeffs[i] poly_evals[i] is equal to
+        // sum_i coeffs[i] poly_evals[i] is equal to
         // the new target sum, where coeffs is computed as follows
         let eq_xy_evals = points
             .iter()
             .map(|point| eq_xy_eval(&challenges, point))
             .collect_vec();
         let mut coeffs = vec![F::ZERO; comms.len()];
-        evals
-            .iter()
-            .enumerate()
-            .for_each(|(i, eval)| coeffs[eval.poly()] += eq_xy_evals[eval.point()] * eq_xt[i]);
+        evals.iter().enumerate().for_each(|(i, eval)| {
+            coeffs[eval.poly()] += eq_xy_evals[eval.point()] * eq_xt[i];
+        });
+
+        if cfg!(feature = "sanity-check") {
+            let poly_evals = polys
+                .iter()
+                .map(|poly| poly.evaluate(&challenges))
+                .collect_vec();
+            let new_target_sum = inner_product(&poly_evals, &coeffs);
+            let desired_sum = merged_polys
+                .iter()
+                .zip(points)
+                .zip(merged_poly_evals)
+                .map(|(((scalar, poly), point), evals_from_sum_check)| {
+                    assert_eq!(evals_from_sum_check, poly.evaluate(&challenges));
+                    *scalar
+                        * evals_from_sum_check
+                        * &eq_xy_eval(point.as_slice(), &challenges[0..point.len()])
+                })
+                .sum::<F>();
+            assert_eq!(new_target_sum, desired_sum);
+        }
         // Note that the verifier can also compute these coeffs locally, so no need to pass
         // them to the transcript.
 
@@ -1267,6 +1296,7 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let mut eq = build_eq_x_r_vec::<F>(&point);
+    reverse_index_bits_in_place(&mut eq);
 
     let mut sumcheck_messages = Vec::with_capacity(num_rounds + 1);
     let mut last_sumcheck_message =

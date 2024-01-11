@@ -156,6 +156,8 @@ pub trait ClassicSumCheckProver<F: Field>: Clone + Debug {
     fn new(state: &ProverState<F>) -> Self;
 
     fn prove_round(&self, state: &ProverState<F>) -> Self::RoundMessage;
+
+    fn sum(&self, state: &ProverState<F>) -> F;
 }
 
 pub trait ClassicSumCheckRoundMessage<F: Field>: Sized + Debug {
@@ -221,6 +223,11 @@ where
         let mut state = ProverState::new(num_vars, sum, virtual_poly);
         let mut challenges = Vec::with_capacity(num_vars);
         let prover = P::new(&state);
+
+        if cfg!(feature = "sanity-check") {
+            assert_eq!(prover.sum(&state), state.sum);
+        }
+
         let aux = P::RoundMessage::auxiliary(state.degree);
 
         for round in 0..num_vars {
@@ -228,6 +235,13 @@ where
             let msg = prover.prove_round(&state);
             end_timer(timer);
             msg.write(transcript)?;
+
+            if cfg!(feature = "sanity-check") {
+                assert_eq!(
+                    msg.evaluate(&aux, &F::ZERO) + msg.evaluate(&aux, &F::ONE),
+                    state.sum
+                );
+            }
 
             let challenge = transcript.squeeze_challenge();
             challenges.push(challenge);
@@ -270,6 +284,7 @@ mod tests {
 
     use crate::{
         poly::Polynomial,
+        sum_check::eq_xy_eval,
         util::{
             arithmetic::inner_product,
             expression::Query,
@@ -290,19 +305,27 @@ mod tests {
         let points = vec![vec![Fr::from(1), Fr::from(2)], vec![Fr::from(1)]];
         let expression = Expression::<Fr>::eq_xy(0)
             * Expression::Polynomial(Query::new(0, Rotation::cur()))
-            + Expression::<Fr>::eq_xy(0) * Expression::Polynomial(Query::new(1, Rotation::cur()))
-            + Expression::<Fr>::eq_xy(1) * Expression::Polynomial(Query::new(2, Rotation::cur()));
+            * Fr::from(2)
+            + Expression::<Fr>::eq_xy(0)
+                * Expression::Polynomial(Query::new(1, Rotation::cur()))
+                * Fr::from(3)
+            + Expression::<Fr>::eq_xy(1)
+                * Expression::Polynomial(Query::new(2, Rotation::cur()))
+                * Fr::from(4);
         let virtual_poly = VirtualPolynomial::new(&expression, polys.iter(), &[], &points);
         let sum = inner_product(
             polys[0].evals(),
             MultilinearPolynomial::eq_xy(&points[0]).evals(),
-        ) + inner_product(
-            polys[1].evals(),
-            MultilinearPolynomial::eq_xy(&points[0]).evals(),
-        ) + inner_product(
-            polys[2].evals(),
-            MultilinearPolynomial::eq_xy(&points[1]).evals(),
-        );
+        ) * Fr::from(2)
+            + inner_product(
+                polys[1].evals(),
+                MultilinearPolynomial::eq_xy(&points[0]).evals(),
+            ) * Fr::from(3)
+            + inner_product(
+                polys[2].evals(),
+                MultilinearPolynomial::eq_xy(&points[1]).evals(),
+            ) * Fr::from(4)
+                * Fr::from(2); // The third polynomial is summed twice because the hypercube is larger
         let mut transcript = Keccak256Transcript::<Cursor<Vec<u8>>>::new(());
         let (challenges, evals) = <ClassicSumCheck<CoefficientsProver<Fr>> as SumCheck<Fr>>::prove(
             &(),
@@ -320,14 +343,23 @@ mod tests {
         let proof = transcript.into_proof();
         let mut transcript = Keccak256Transcript::<Cursor<Vec<u8>>>::from_proof((), &proof);
 
-        <ClassicSumCheck<CoefficientsProver<Fr>> as SumCheck<Fr>>::verify(
-            &(),
-            2,
-            2,
-            sum,
-            &mut transcript,
-        )
-        .unwrap();
+        let (new_sum, verifier_challenges) =
+            <ClassicSumCheck<CoefficientsProver<Fr>> as SumCheck<Fr>>::verify(
+                &(),
+                2,
+                2,
+                sum,
+                &mut transcript,
+            )
+            .unwrap();
+
+        assert_eq!(verifier_challenges, challenges);
+        assert_eq!(
+            new_sum,
+            evals[0] * eq_xy_eval(&points[0], &challenges[..2]) * Fr::from(2)
+                + evals[1] * eq_xy_eval(&points[0], &challenges[..2]) * Fr::from(3)
+                + evals[2] * eq_xy_eval(&points[1], &challenges[..1]) * Fr::from(4)
+        );
 
         let mut transcript = Keccak256Transcript::<Cursor<Vec<u8>>>::from_proof((), &proof);
 
