@@ -2399,7 +2399,7 @@ mod test {
             transcript::Blake2sTranscript,
         },
     };
-    use goldilocks::Goldilocks;
+    use goldilocks::{Goldilocks, GoldilocksExt2, GoldilocksExt3};
     use halo2_curves::{ff::Field, secp256k1::Fp};
     use rand_chacha::{
         rand_core::{RngCore, SeedableRng},
@@ -2413,6 +2413,8 @@ mod test {
 
     type Pcs = Basefold<Fp, Blake2s256, Five>;
     type PcsGoldilocks = Basefold<Goldilocks, Blake2s256, Five>;
+    type PcsGoldilocks2 = Basefold<GoldilocksExt2, Blake2s256, Five>;
+    type PcsGoldilocks3 = Basefold<GoldilocksExt3, Blake2s256, Five>;
 
     #[derive(Debug)]
     pub struct Five {}
@@ -2547,6 +2549,16 @@ mod test {
     }
 
     #[test]
+    fn commit_open_verify_goldilocks_2() {
+        run_commit_open_verify::<_, PcsGoldilocks2, Blake2sTranscript<_>>();
+    }
+
+    #[test]
+    fn commit_open_verify_goldilocks_3() {
+        run_commit_open_verify::<_, PcsGoldilocks3, Blake2sTranscript<_>>();
+    }
+
+    #[test]
     fn batch_commit_open_verify() {
         run_batch_commit_open_verify::<_, Pcs, Blake2sTranscript<_>>();
     }
@@ -2554,6 +2566,16 @@ mod test {
     #[test]
     fn batch_commit_open_verify_goldilocks() {
         run_batch_commit_open_verify::<_, PcsGoldilocks, Blake2sTranscript<_>>();
+    }
+
+    #[test]
+    fn batch_commit_open_verify_goldilocks_2() {
+        run_batch_commit_open_verify::<_, PcsGoldilocks2, Blake2sTranscript<_>>();
+    }
+
+    #[test]
+    fn batch_commit_open_verify_goldilocks_3() {
+        run_batch_commit_open_verify::<_, PcsGoldilocks3, Blake2sTranscript<_>>();
     }
 
     #[test]
