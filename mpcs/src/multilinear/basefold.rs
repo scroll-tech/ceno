@@ -723,6 +723,19 @@ where
             query_challenges.as_slice(),
         );
 
+        // coeff is the eq polynomial evaluated at the last challenge.len() variables
+        // in reverse order.
+        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
+        let coeff = eq_xy_eval(
+            &verify_point.as_slice()[verify_point.len() - fold_challenges.len()..],
+            &rev_challenges,
+        );
+        // Compute eq as the partially evaluated eq polynomial
+        let mut eq = build_eq_x_r_vec(
+            &verify_point.as_slice()[..verify_point.len() - fold_challenges.len()],
+        );
+        eq.par_iter_mut().for_each(|e| *e *= coeff);
+
         batch_verifier_query_phase::<F, H>(
             &query_result_with_merkle_path,
             &sumcheck_messages,
@@ -734,6 +747,7 @@ where
             &roots,
             &comms,
             &coeffs,
+            eq.as_slice(),
             vp.rng.clone(),
             &new_target_sum,
         );
@@ -2200,6 +2214,7 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
     roots: &Vec<Output<H>>,
     comms: &Vec<&BasefoldCommitment<H>>,
     coeffs: &[F],
+    partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
 ) {
@@ -2253,7 +2268,7 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
             &sum_check_messages[fold_challenges.len() - 1],
             fold_challenges[fold_challenges.len() - 1]
         ),
-        final_message.iter().sum()
+        inner_product(final_message, partial_eq)
     );
 }
 
