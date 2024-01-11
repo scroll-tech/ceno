@@ -1,4 +1,5 @@
 #![feature(unchecked_math)]
+use goldilocks::SmallField;
 use poly::Polynomial;
 use rand::RngCore;
 use std::fmt::Debug;
@@ -18,7 +19,7 @@ pub type Commitment<F, Pcs> = <Pcs as PolynomialCommitmentScheme<F>>::Commitment
 
 pub type CommitmentChunk<F, Pcs> = <Pcs as PolynomialCommitmentScheme<F>>::CommitmentChunk;
 
-pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
+pub trait PolynomialCommitmentScheme<F: SmallField>: Clone + Debug {
     type Param: Clone + Debug + Serialize + DeserializeOwned;
     type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
     type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
@@ -235,6 +236,7 @@ mod test {
         },
         Evaluation, PolynomialCommitmentScheme,
     };
+    use goldilocks::SmallField;
     use rand::prelude::*;
     use rand::rngs::OsRng;
     use rand_chacha::ChaCha8Rng;
@@ -281,7 +283,7 @@ mod test {
 
     pub(super) fn run_commit_open_verify<F, Pcs, T>()
     where
-        F: PrimeField,
+        F: SmallField,
         Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
             + TranscriptWrite<Pcs::CommitmentChunk, F>
@@ -330,7 +332,7 @@ mod test {
 
     pub(super) fn run_batch_commit_open_verify<F, Pcs, T>()
     where
-        F: PrimeField,
+        F: SmallField,
         Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
             + TranscriptWrite<Pcs::CommitmentChunk, F>
