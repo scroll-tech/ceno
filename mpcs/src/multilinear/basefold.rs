@@ -2399,6 +2399,7 @@ mod test {
             transcript::Blake2sTranscript,
         },
     };
+    use goldilocks::Goldilocks;
     use halo2_curves::{ff::Field, secp256k1::Fp};
     use rand_chacha::{
         rand_core::{RngCore, SeedableRng},
@@ -2411,9 +2412,24 @@ mod test {
     use blake2::Blake2s256;
 
     type Pcs = Basefold<Fp, Blake2s256, Five>;
+    type PcsGoldilocks = Basefold<Goldilocks, Blake2s256, Five>;
 
     #[derive(Debug)]
     pub struct Five {}
+
+    impl BasefoldExtParams for Five {
+        fn get_reps() -> usize {
+            return 260;
+        }
+
+        fn get_rate() -> usize {
+            return 3;
+        }
+
+        fn get_basecode() -> usize {
+            return 7;
+        }
+    }
 
     pub fn p_i<F: PrimeField>(evals: &Vec<F>, eq: &Vec<F>) -> Vec<F> {
         if evals.len() == 1 {
@@ -2499,20 +2515,6 @@ mod test {
         (0..size).map(|_| F::random(&mut rng)).collect()
     }
 
-    impl BasefoldExtParams for Five {
-        fn get_reps() -> usize {
-            return 260;
-        }
-
-        fn get_rate() -> usize {
-            return 3;
-        }
-
-        fn get_basecode() -> usize {
-            return 7;
-        }
-    }
-
     #[test]
     fn time_rs_code() {
         use rand::rngs::OsRng;
@@ -2540,8 +2542,18 @@ mod test {
     }
 
     #[test]
+    fn commit_open_verify_goldilocks() {
+        run_commit_open_verify::<_, PcsGoldilocks, Blake2sTranscript<_>>();
+    }
+
+    #[test]
     fn batch_commit_open_verify() {
         run_batch_commit_open_verify::<_, Pcs, Blake2sTranscript<_>>();
+    }
+
+    #[test]
+    fn batch_commit_open_verify_goldilocks() {
+        run_batch_commit_open_verify::<_, PcsGoldilocks, Blake2sTranscript<_>>();
     }
 
     #[test]
