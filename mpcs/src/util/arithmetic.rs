@@ -140,6 +140,19 @@ pub fn inner_product<'a, 'b, F: Field>(
         .unwrap_or_default()
 }
 
+pub fn inner_product_three<'a, 'b, 'c, F: Field>(
+    a: impl IntoIterator<Item = &'a F>,
+    b: impl IntoIterator<Item = &'b F>,
+    c: impl IntoIterator<Item = &'c F>,
+) -> F {
+    a.into_iter()
+        .zip_eq(b.into_iter())
+        .zip_eq(c.into_iter())
+        .map(|((a, b), c)| *a * b * c)
+        .reduce(|acc, product| acc + product)
+        .unwrap_or_default()
+}
+
 pub fn barycentric_weights<F: Field>(points: &[F]) -> Vec<F> {
     let mut weights = points
         .iter()

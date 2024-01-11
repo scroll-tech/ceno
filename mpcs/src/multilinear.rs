@@ -57,9 +57,9 @@ mod test {
         Evaluation, PolynomialCommitmentScheme,
     };
     use rand::prelude::*;
-    use rand::{rngs::OsRng, Rng};
+    use rand::rngs::OsRng;
     use rand_chacha::ChaCha8Rng;
-    use std::{iter, time::Instant};
+    use std::time::Instant;
     #[test]
     fn test_transcript() {
         use crate::multilinear::basefold::BasefoldExtParams;
@@ -159,9 +159,9 @@ mod test {
     {
         for num_vars in 10..15 {
             println!("k {:?}", num_vars);
-            let batch_size = 4;
+            let batch_size = 8;
             let num_points = batch_size >> 1;
-            let mut rng = ChaCha8Rng::from_seed([0u8; 32]);
+            let rng = ChaCha8Rng::from_seed([0u8; 32]);
             // Setup
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
@@ -170,24 +170,23 @@ mod test {
             };
             // Batch commit and open
             let evals = chain![
-                (0..num_points).map(|point| (0, point)),
-                (0..batch_size).map(|poly| (poly, 0)),
-                iter::repeat_with(|| (rng.gen_range(0..batch_size), rng.gen_range(0..num_points)))
-                    .take(batch_size)
+                (0..num_points).map(|point| (point * 2, point)), // Every point matches two polys
+                (0..num_points).map(|point| (point * 2 + 1, point)),
             ]
             .unique()
             .collect_vec();
 
             let proof = {
                 let mut transcript = T::new(());
-                let polys = iter::repeat_with(|| MultilinearPolynomial::rand(num_vars, OsRng))
-                    .take(batch_size)
+                let polys = (0..batch_size)
+                    .map(|i| MultilinearPolynomial::rand(num_vars - (i >> 1), rng.clone()))
                     .collect_vec();
                 let now = Instant::now();
                 let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
                 println!("commit {:?}", now.elapsed());
 
-                let points = iter::repeat_with(|| transcript.squeeze_challenges(num_vars))
+                let points = (0..num_points)
+                    .map(|i| transcript.squeeze_challenges(num_vars - i))
                     .take(num_points)
                     .collect_vec();
 
@@ -213,7 +212,8 @@ mod test {
                 let mut transcript = T::from_proof((), proof.as_slice());
                 let comms = &Pcs::read_commitments(&vp, batch_size, &mut transcript).unwrap();
 
-                let challenges = &iter::repeat_with(|| transcript.squeeze_challenges(num_vars))
+                let points = (0..num_points)
+                    .map(|i| transcript.squeeze_challenges(num_vars - i))
                     .take(num_points)
                     .collect_vec();
 
@@ -222,7 +222,7 @@ mod test {
                 Pcs::batch_verify(
                     &vp,
                     comms,
-                    challenges,
+                    &points,
                     &evals
                         .iter()
                         .copied()

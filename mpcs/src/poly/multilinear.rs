@@ -181,12 +181,6 @@ impl<F: Field> MultilinearPolynomial<F> {
         Self::new(output)
     }
 
-    pub fn fix_var_in_place(&mut self, x_i: &F, buf: &mut Self) {
-        merge_into(&mut buf.evals, self.evals(), x_i, 1, 0);
-        buf.num_vars = self.num_vars - 1;
-        mem::swap(self, buf);
-    }
-
     pub fn evaluate_for_rotation(&self, x: &[F], rotation: Rotation) -> Vec<F> {
         assert_eq!(x.len(), self.num_vars);
         if rotation == Rotation::cur() {
@@ -669,7 +663,12 @@ pub(crate) fn merge_into<F: Field>(
     distance: usize,
     skip: usize,
 ) {
-    assert!(target.capacity() >= evals.len() >> distance);
+    assert!(
+        target.capacity() >= evals.len() >> distance,
+        "Capacity: {}, evals.len(): {}",
+        target.capacity(),
+        evals.len()
+    );
     target.resize(evals.len() >> distance, F::ZERO);
 
     let step = 1 << distance;

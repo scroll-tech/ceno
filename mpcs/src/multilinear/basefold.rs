@@ -4,7 +4,7 @@ use crate::{
     multilinear::validate_input,
     poly::{multilinear::MultilinearPolynomial, Polynomial},
     util::{
-        arithmetic::{horner, inner_product, steps, PrimeField},
+        arithmetic::{horner, inner_product, inner_product_three, steps, PrimeField},
         expression::{Expression, Query, Rotation},
         hash::{Hash, Output},
         log2_strict,
@@ -368,6 +368,7 @@ where
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
         let polys = polys.into_iter().collect_vec();
+        let num_vars = polys.iter().map(|poly| poly.num_vars()).max().unwrap();
         let comms = comms.into_iter().collect_vec();
         let min_num_vars = polys.iter().map(|p| p.num_vars()).min().unwrap();
         assert!(min_num_vars >= V::get_basecode());
@@ -391,6 +392,16 @@ where
         // Note that this is a small polynomial (only batch_size) compared to the polynomials
         // to open.
         let eq_xt = Self::Polynomial::eq_xy(&t);
+        // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
+        let target_sum = inner_product_three(
+            evals.iter().map(Evaluation::value),
+            &evals
+                .iter()
+                .map(|eval| F::from(1 << (num_vars - points[eval.point()].len())))
+                .collect_vec(),
+            &eq_xt[..evals.len()],
+        );
+
         // Merge the polynomials for every point. One merged polynomial for each point.
         let merged_polys = evals.iter().zip(eq_xt.evals().iter()).fold(
             // This folding will generate a vector of |points| pairs of (scalar, polynomial)
@@ -425,13 +436,24 @@ where
             },
         );
 
-        let mut points = points.to_vec();
-        // Note that merged_polys may contain polynomials of different number of variables.
-        // Resize the evaluation points so that the size match.
-        merged_polys.iter().enumerate().for_each(|(i, (_, poly))| {
-            assert!(points[i].len() >= poly.num_vars());
-            points[i].resize(poly.num_vars(), F::ZERO)
-        });
+        let points = points.to_vec();
+        if cfg!(feature = "sanity-check") {
+            let expected_sum = merged_polys
+                .iter()
+                .zip(&points)
+                .map(|((scalar, poly), point)| {
+                    inner_product(poly.evals(), MultilinearPolynomial::eq_xy(&point).evals())
+                        * scalar
+                        * F::from(1 << (num_vars - poly.num_vars()))
+                    // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
+                })
+                .sum::<F>();
+            assert_eq!(expected_sum, target_sum);
+
+            merged_polys.iter().enumerate().for_each(|(i, (_, poly))| {
+                assert_eq!(points[i].len(), poly.num_vars());
+            });
+        }
 
         let expression = merged_polys
             .iter()
@@ -448,28 +470,6 @@ where
             .collect_vec();
         let virtual_poly =
             VirtualPolynomial::new(&expression, sumcheck_polys, &[], points.as_slice());
-        // virtual_poly is a polynomial expression that may also involve polynomials with different
-        // number of variables. Use the maximal number of variables in the sum-check.
-        let num_vars = merged_polys
-            .iter()
-            .map(|(_, poly)| poly.num_vars())
-            .max()
-            .unwrap();
-        let target_sum = inner_product(evals.iter().map(Evaluation::value), &eq_xt[..evals.len()]);
-
-        if cfg!(feature = "sanity-check") {
-            let expected_sum = merged_polys
-                .iter()
-                .zip(&points)
-                .map(|((scalar, poly), point)| {
-                    inner_product(poly.evals(), MultilinearPolynomial::eq_xy(&point).evals())
-                        * scalar
-                        * F::from(1 << (num_vars - poly.num_vars()))
-                    // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
-                })
-                .sum::<F>();
-            assert_eq!(expected_sum, target_sum);
-        }
 
         let (challenges, merged_poly_evals) =
             SumCheck::prove(&(), num_vars, virtual_poly, target_sum, transcript)?;
@@ -481,7 +481,7 @@ where
         // the new target sum, where coeffs is computed as follows
         let eq_xy_evals = points
             .iter()
-            .map(|point| eq_xy_eval(&challenges, point))
+            .map(|point| eq_xy_eval(&challenges[..point.len()], point))
             .collect_vec();
         let mut coeffs = vec![F::ZERO; comms.len()];
         evals.iter().enumerate().for_each(|(i, eval)| {
@@ -491,7 +491,7 @@ where
         if cfg!(feature = "sanity-check") {
             let poly_evals = polys
                 .iter()
-                .map(|poly| poly.evaluate(&challenges))
+                .map(|poly| poly.evaluate(&challenges[..poly.num_vars()]))
                 .collect_vec();
             let new_target_sum = inner_product(&poly_evals, &coeffs);
             let desired_sum = merged_polys
@@ -499,7 +499,10 @@ where
                 .zip(points)
                 .zip(merged_poly_evals)
                 .map(|(((scalar, poly), point), evals_from_sum_check)| {
-                    assert_eq!(evals_from_sum_check, poly.evaluate(&challenges));
+                    assert_eq!(
+                        evals_from_sum_check,
+                        poly.evaluate(&challenges[..poly.num_vars()])
+                    );
                     *scalar
                         * evals_from_sum_check
                         * &eq_xy_eval(point.as_slice(), &challenges[0..point.len()])
@@ -672,17 +675,23 @@ where
         let t = transcript.squeeze_challenges(batch_size_log);
 
         let eq_xt = MultilinearPolynomial::eq_xy(&t);
-        let tilde_gs_sum =
-            inner_product(evals.iter().map(Evaluation::value), &eq_xt[..evals.len()]);
+        let target_sum = inner_product_three(
+            evals.iter().map(Evaluation::value),
+            &evals
+                .iter()
+                .map(|eval| F::from(1 << (num_vars - points[eval.point()].len())))
+                .collect_vec(),
+            &eq_xt[..evals.len()],
+        );
 
         let (new_target_sum, verify_point) =
-            SumCheck::verify(&(), num_vars, 2, tilde_gs_sum, transcript)?;
+            SumCheck::verify(&(), num_vars, 2, target_sum, transcript)?;
 
         // Now the goal is to use the BaseFold to check the new target sum. Note that this time
         // we only have one eq polynomial in the sum-check.
         let eq_xy_evals = points
             .iter()
-            .map(|point| eq_xy_eval(&verify_point, point))
+            .map(|point| eq_xy_eval(&verify_point[..point.len()], point))
             .collect_vec();
         let mut coeffs = vec![F::ZERO; comms.len()];
         evals

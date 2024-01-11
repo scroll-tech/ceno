@@ -30,7 +30,6 @@ pub struct ProverState<'a, F: Field> {
     eq_xys: Vec<MultilinearPolynomial<F>>,
     polys: Vec<Vec<Cow<'a, MultilinearPolynomial<F>>>>,
     challenges: &'a [F],
-    buf: MultilinearPolynomial<F>,
     round: usize,
     bh: BooleanHypercube,
 }
@@ -75,7 +74,6 @@ impl<'a, F: PrimeField> ProverState<'a, F> {
             eq_xys,
             polys,
             challenges: virtual_poly.challenges,
-            buf: MultilinearPolynomial::new(vec![F::ZERO; 1 << (num_vars - 1)]),
             round: 0,
             bh,
         }
@@ -98,7 +96,7 @@ impl<'a, F: PrimeField> ProverState<'a, F> {
         });
         self.eq_xys.iter_mut().for_each(|eq_xy| {
             if !eq_xy.is_constant() {
-                eq_xy.fix_var_in_place(challenge, &mut self.buf)
+                *eq_xy = eq_xy.fix_var(challenge)
             }
         });
         if self.round == 0 {
@@ -114,11 +112,11 @@ impl<'a, F: PrimeField> ProverState<'a, F> {
             for query in self.expression.used_query() {
                 if query.rotation() != Rotation::cur() {
                     let poly = &self.polys[query.poly()][self.num_vars];
-                    let mut rotated = MultilinearPolynomial::new(par_map_collect(
+                    let rotated = MultilinearPolynomial::new(par_map_collect(
                         &rotation_maps[&query.rotation()],
                         |b| poly[*b],
-                    ));
-                    rotated.fix_var_in_place(challenge, &mut self.buf);
+                    ))
+                    .fix_var(challenge);
                     self.polys[query.poly()]
                         [(query.rotation().0 + self.num_vars as i32) as usize] =
                         Cow::Owned(rotated);
@@ -132,7 +130,7 @@ impl<'a, F: PrimeField> ProverState<'a, F> {
                 polys.iter_mut().for_each(|poly| {
                     // If it's constant, then fixing a variable is a no-op
                     if !poly.is_constant() {
-                        poly.to_mut().fix_var_in_place(challenge, &mut self.buf);
+                        *poly.to_mut() = poly.fix_var(challenge);
                     }
                 });
             });
