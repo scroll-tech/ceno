@@ -1895,6 +1895,7 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
 
             matching_comms.iter().for_each(|index| {
                 let query = self.commitments_query.get_inner()[*index].query;
+                assert_eq!(query.index >> 1, left_index >> 1);
                 curr_left += query.left * coeffs[*index];
                 curr_right += query.right * coeffs[*index];
             });
@@ -1907,7 +1908,7 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
             );
             let x1 = -x0;
 
-            let res = interpolate2([(x0, curr_left), (x1, curr_right)], fold_challenges[i]);
+            let mut res = interpolate2([(x0, curr_left), (x1, curr_right)], fold_challenges[i]);
 
             let next_index = right_index >> 1;
 
@@ -1923,6 +1924,31 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
                     curr_right
                 }
             } else {
+                // Note that in the last round, res is folded to an element in the final
+                // codeword, but has not yet added the committed polynomial evaluations
+                // at this position.
+                // So we need to repeat the finding and adding procedure here.
+                // The reason for the existence of one extra find-and-add is that the number
+                // of different polynomial number of variables is one more than the number of
+                // rounds.
+
+                let matching_comms = comms
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, comm)| comm.num_vars().unwrap() == num_vars - i - 1)
+                    .map(|(index, _)| index)
+                    .collect_vec();
+
+                matching_comms.iter().for_each(|index| {
+                    let query = self.commitments_query.get_inner()[*index].query;
+                    assert_eq!(query.index >> 1, next_index >> 1);
+                    if next_index & 1 == 0 {
+                        res += query.left * coeffs[*index];
+                    } else {
+                        res += query.right * coeffs[*index];
+                    }
+                });
+
                 // Note that final_codeword has been bit-reversed, so no need to bit-reverse
                 // next_index here.
                 final_codeword[next_index]
@@ -2008,8 +2034,7 @@ impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
         coeffs: &[F],
         cipher: ctr::Ctr32LE<aes::Aes128>,
     ) {
-        // TODO: replace with par_iter
-        self.inner.iter().for_each(|(index, query)| {
+        self.inner.par_iter().for_each(|(index, query)| {
             query.check(
                 fold_challenges,
                 num_rounds,
@@ -2484,7 +2509,7 @@ mod test {
         }
 
         fn get_basecode() -> usize {
-            return 3;
+            return 7;
         }
     }
 
