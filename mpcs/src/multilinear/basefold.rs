@@ -618,14 +618,16 @@ where
             query_challenges.as_slice(),
         );
 
-        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        // coeff is the eq polynomial evaluated at the last challenge.len() variables
+        // in reverse order.
+        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
         let coeff = eq_xy_eval(
-            &point.as_slice()[..fold_challenges.len()],
-            fold_challenges.as_slice(),
+            &point.as_slice()[point.len() - fold_challenges.len()..],
+            &rev_challenges,
         );
-        let mut eq = build_eq_x_r_vec(&point.as_slice()[fold_challenges.len()..]);
+        // Compute eq as the partially evaluated eq polynomial
+        let mut eq = build_eq_x_r_vec(&point.as_slice()[..point.len() - fold_challenges.len()]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
-        // Now eq is the partially evaluated eq polynomial
 
         verifier_query_phase::<F, H>(
             &query_result_with_merkle_path,
