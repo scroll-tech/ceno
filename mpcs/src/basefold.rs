@@ -1,7 +1,6 @@
 use crate::util::merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree};
 use crate::util::{field_to_usize, u32_to_field};
 use crate::{
-    multilinear::validate_input,
     poly::{multilinear::MultilinearPolynomial, Polynomial},
     util::{
         arithmetic::{horner, inner_product, inner_product_three, steps, PrimeField},
@@ -11,7 +10,7 @@ use crate::{
         transcript::{TranscriptRead, TranscriptWrite},
         Deserialize, DeserializeOwned, Itertools, Serialize,
     },
-    AdditiveCommitment, Error, Evaluation, Point, PolynomialCommitmentScheme,
+    validate_input, AdditiveCommitment, Error, Evaluation, Point, PolynomialCommitmentScheme,
 };
 use crate::{
     sum_check::{
@@ -2390,10 +2389,8 @@ mod test {
     use super::*;
 
     use crate::{
-        multilinear::{
-            basefold::Basefold,
-            test::{run_batch_commit_open_verify, run_commit_open_verify},
-        },
+        basefold::Basefold,
+        test::{run_batch_commit_open_verify, run_commit_open_verify},
         util::{
             hash::{Hash, Keccak256, Output},
             new_fields::{Mersenne127, Mersenne61},
@@ -2407,9 +2404,9 @@ mod test {
         ChaCha12Rng, ChaCha8Rng,
     };
 
-    use crate::multilinear::basefold::Instant;
-    use crate::multilinear::BasefoldExtParams;
+    use crate::basefold::Instant;
     use crate::util::arithmetic::PrimeField;
+    use crate::BasefoldExtParams;
     use blake2::Blake2s256;
 
     // type Pcs = Basefold<Fp, Blake2s256, Five>;
