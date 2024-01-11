@@ -206,12 +206,13 @@ impl<F: SmallField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithDat
 impl<F, PF, H, V> PolynomialCommitmentScheme<F, PF> for Basefold<F, H, V>
 where
     F: SmallField + Serialize + DeserializeOwned,
-    PF: SmallField + Serialize + DeserializeOwned + Into<F>,
+    F::BaseField: Serialize + DeserializeOwned + Into<F> + Into<PF>,
+    PF: SmallField<BaseField = F::BaseField> + Serialize + DeserializeOwned + Into<F>,
     H: Hash,
     V: BasefoldExtParams,
 {
-    type Param = BasefoldParams<PF, ChaCha8Rng>;
-    type ProverParam = BasefoldProverParams<PF>;
+    type Param = BasefoldParams<F::BaseField, ChaCha8Rng>;
+    type ProverParam = BasefoldProverParams<F::BaseField>;
     type VerifierParam = BasefoldVerifierParams<ChaCha8Rng>;
     type Polynomial = MultilinearPolynomial<PF>;
     type CommitmentWithData = BasefoldCommitmentWithData<PF, H>;
@@ -268,7 +269,7 @@ where
 
         // Apply the recursive definition of the BaseFold code to the list of base codewords,
         // and produce the final codeword
-        let mut codeword = evaluate_over_foldable_domain_generic_basecode(
+        let mut codeword = evaluate_over_foldable_domain_generic_basecode::<PF, F::BaseField>(
             1 << V::get_basecode(),
             coeffs.len(),
             pp.log_rate,
@@ -1202,9 +1203,12 @@ fn commit_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     num_vars: usize,
     num_rounds: usize,
-    table_w_weights: &Vec<Vec<(PF, PF)>>,
+    table_w_weights: &Vec<Vec<(F::BaseField, F::BaseField)>>,
     log_rate: usize,
-) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>) {
+) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>)
+where
+    F::BaseField: Into<F>,
+{
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
@@ -1235,7 +1239,7 @@ fn commit_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
         let challenge: F = transcript.squeeze_challenge();
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<F, PF>(
+        running_oracle = basefold_one_round_by_interpolation_weights::<F, F::BaseField>(
             &table_w_weights,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
@@ -1286,10 +1290,13 @@ fn batch_commit_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     num_vars: usize,
     num_rounds: usize,
-    table_w_weights: &Vec<Vec<(PF, PF)>>,
+    table_w_weights: &Vec<Vec<(F::BaseField, F::BaseField)>>,
     log_rate: usize,
     coeffs: &[F],
-) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>) {
+) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>)
+where
+    F::BaseField: Into<F>,
+{
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
@@ -1349,7 +1356,7 @@ fn batch_commit_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
         let challenge: F = transcript.squeeze_challenge();
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<F, PF>(
+        running_oracle = basefold_one_round_by_interpolation_weights::<F, F::BaseField>(
             &table_w_weights,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
