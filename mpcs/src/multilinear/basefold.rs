@@ -25,6 +25,7 @@ use core::fmt::Debug;
 use ctr;
 use ff::BatchInverter;
 use generic_array::GenericArray;
+use goldilocks::SmallField;
 use std::{ops::Deref, time::Instant};
 
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec;
@@ -38,7 +39,7 @@ use rayon::prelude::{
 use std::{borrow::Cow, marker::PhantomData, slice};
 type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BasefoldParams<F: PrimeField, Rng: RngCore> {
+pub struct BasefoldParams<F: SmallField, Rng: RngCore> {
     log_rate: usize,
     num_verifier_queries: usize,
     max_num_vars: usize,
@@ -48,7 +49,7 @@ pub struct BasefoldParams<F: PrimeField, Rng: RngCore> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BasefoldProverParams<F: PrimeField> {
+pub struct BasefoldProverParams<F: SmallField> {
     log_rate: usize,
     table_w_weights: Vec<Vec<(F, F)>>,
     table: Vec<Vec<F>>,
@@ -57,7 +58,7 @@ pub struct BasefoldProverParams<F: PrimeField> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BasefoldVerifierParams<F: PrimeField, Rng: RngCore> {
+pub struct BasefoldVerifierParams<F: SmallField, Rng: RngCore> {
     rng: Rng,
     max_num_vars: usize,
     log_rate: usize,
@@ -75,7 +76,7 @@ pub struct BasefoldCommitmentWithData<F, H: Hash> {
     num_vars: usize,
 }
 
-impl<F: PrimeField, H: Hash> BasefoldCommitmentWithData<F, H> {
+impl<F: SmallField, H: Hash> BasefoldCommitmentWithData<F, H> {
     pub fn to_commitment(&self) -> BasefoldCommitment<H> {
         BasefoldCommitment::new(self.codeword_tree.root(), self.num_vars)
     }
@@ -129,13 +130,13 @@ impl<H: Hash> BasefoldCommitment<H> {
     }
 }
 
-impl<F: PrimeField, H: Hash> PartialEq for BasefoldCommitmentWithData<F, H> {
+impl<F: SmallField, H: Hash> PartialEq for BasefoldCommitmentWithData<F, H> {
     fn eq(&self, other: &Self) -> bool {
         self.get_codeword().eq(other.get_codeword()) && self.bh_evals.eq(&other.bh_evals)
     }
 }
 
-impl<F: PrimeField, H: Hash> Eq for BasefoldCommitmentWithData<F, H> {}
+impl<F: SmallField, H: Hash> Eq for BasefoldCommitmentWithData<F, H> {}
 
 pub trait BasefoldExtParams: Debug {
     fn get_reps() -> usize;
@@ -146,9 +147,9 @@ pub trait BasefoldExtParams: Debug {
 }
 
 #[derive(Debug)]
-pub struct Basefold<F: PrimeField, H: Hash, V: BasefoldExtParams>(PhantomData<(F, H, V)>);
+pub struct Basefold<F: SmallField, H: Hash, V: BasefoldExtParams>(PhantomData<(F, H, V)>);
 
-impl<F: PrimeField, H: Hash, V: BasefoldExtParams> Clone for Basefold<F, H, V> {
+impl<F: SmallField, H: Hash, V: BasefoldExtParams> Clone for Basefold<F, H, V> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
@@ -161,14 +162,14 @@ impl<H: Hash> AsRef<[Output<H>]> for BasefoldCommitment<H> {
     }
 }
 
-impl<F: PrimeField, H: Hash> AsRef<[Output<H>]> for BasefoldCommitmentWithData<F, H> {
+impl<F: SmallField, H: Hash> AsRef<[Output<H>]> for BasefoldCommitmentWithData<F, H> {
     fn as_ref(&self) -> &[Output<H>] {
         let root = self.get_root_ref();
         slice::from_ref(root)
     }
 }
 
-impl<F: PrimeField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithData<F, H> {
+impl<F: SmallField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithData<F, H> {
     fn sum_with_scalar<'a>(
         scalars: impl IntoIterator<Item = &'a F> + 'a,
         bases: impl IntoIterator<Item = &'a Self> + 'a,
@@ -206,7 +207,7 @@ impl<F: PrimeField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithDat
 
 impl<F, H, V> PolynomialCommitmentScheme<F> for Basefold<F, H, V>
 where
-    F: PrimeField + Serialize + DeserializeOwned,
+    F: SmallField + Serialize + DeserializeOwned,
     H: Hash,
     V: BasefoldExtParams,
 {
@@ -1030,7 +1031,7 @@ fn basefold_one_round_by_interpolation_weights<F: PrimeField>(
         .collect::<Vec<_>>()
 }
 
-fn basefold_get_query<F: PrimeField>(
+fn basefold_get_query<F: SmallField>(
     poly_codeword: &Vec<F>,
     oracles: &Vec<Vec<F>>,
     x_index: usize,
@@ -1061,7 +1062,7 @@ fn basefold_get_query<F: PrimeField>(
     };
 }
 
-fn batch_basefold_get_query<F: PrimeField, H: Hash>(
+fn batch_basefold_get_query<F: SmallField, H: Hash>(
     comms: &[&BasefoldCommitmentWithData<F, H>],
     oracles: &Vec<Vec<F>>,
     codeword_size: usize,
@@ -1192,7 +1193,7 @@ fn from_raw_bytes<F: PrimeField>(bytes: &Vec<u8>) -> F {
 }
 
 //outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-fn commit_phase<F: PrimeField, H: Hash>(
+fn commit_phase<F: SmallField, H: Hash>(
     point: &Point<F, MultilinearPolynomial<F>>,
     comm: &BasefoldCommitmentWithData<F, H>,
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
@@ -1268,7 +1269,7 @@ fn commit_phase<F: PrimeField, H: Hash>(
 }
 
 //outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-fn batch_commit_phase<F: PrimeField, H: Hash>(
+fn batch_commit_phase<F: SmallField, H: Hash>(
     point: &Point<F, MultilinearPolynomial<F>>,
     comms: &[&BasefoldCommitmentWithData<F, H>],
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
@@ -1396,7 +1397,7 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
     return (trees, oracles);
 }
 
-fn query_phase<F: PrimeField, H: Hash>(
+fn query_phase<F: SmallField, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     comm: &BasefoldCommitmentWithData<F, H>,
     oracles: &Vec<Vec<F>>,
@@ -2142,7 +2143,7 @@ impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
     }
 }
 
-fn batch_query_phase<F: PrimeField, H: Hash>(
+fn batch_query_phase<F: SmallField, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     codeword_size: usize,
     comms: &[&BasefoldCommitmentWithData<F, H>],
@@ -2400,7 +2401,7 @@ mod test {
         },
     };
     use goldilocks::{Goldilocks, GoldilocksExt2, GoldilocksExt3};
-    use halo2_curves::{ff::Field, secp256k1::Fp};
+    use halo2_curves::ff::Field;
     use rand_chacha::{
         rand_core::{RngCore, SeedableRng},
         ChaCha12Rng, ChaCha8Rng,
@@ -2411,7 +2412,7 @@ mod test {
     use crate::util::arithmetic::PrimeField;
     use blake2::Blake2s256;
 
-    type Pcs = Basefold<Fp, Blake2s256, Five>;
+    // type Pcs = Basefold<Fp, Blake2s256, Five>;
     type PcsGoldilocks = Basefold<Goldilocks, Blake2s256, Five>;
     type PcsGoldilocks2 = Basefold<GoldilocksExt2, Blake2s256, Five>;
     type PcsGoldilocks3 = Basefold<GoldilocksExt3, Blake2s256, Five>;
@@ -2538,10 +2539,10 @@ mod test {
         assert_eq!(coeffs1, coeffs2);
     }
 
-    #[test]
-    fn commit_open_verify() {
-        run_commit_open_verify::<_, Pcs, Blake2sTranscript<_>>();
-    }
+    // #[test]
+    // fn commit_open_verify() {
+    //     run_commit_open_verify::<_, Pcs, Blake2sTranscript<_>>();
+    // }
 
     #[test]
     fn commit_open_verify_goldilocks() {
@@ -2558,10 +2559,10 @@ mod test {
         run_commit_open_verify::<_, PcsGoldilocks3, Blake2sTranscript<_>>();
     }
 
-    #[test]
-    fn batch_commit_open_verify() {
-        run_batch_commit_open_verify::<_, Pcs, Blake2sTranscript<_>>();
-    }
+    // #[test]
+    // fn batch_commit_open_verify() {
+    //     run_batch_commit_open_verify::<_, Pcs, Blake2sTranscript<_>>();
+    // }
 
     #[test]
     fn batch_commit_open_verify_goldilocks() {

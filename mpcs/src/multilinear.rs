@@ -66,7 +66,7 @@ mod test {
         use crate::util::transcript::Blake2sTranscript;
         use crate::util::transcript::FieldTranscript;
         use crate::{multilinear::basefold::Basefold, util::hash::Blake2s};
-        use halo2_curves::bn256::Fr;
+        use goldilocks::Goldilocks as Fr;
         #[derive(Debug)]
         pub struct Five {}
 
