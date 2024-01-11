@@ -1342,18 +1342,6 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
             &running_oracle,
             challenge,
         );
-        // Then merge the rest polynomials whose sizes match the current running oracle
-        let running_oracle_len = running_oracle.len();
-        comms
-            .iter()
-            .enumerate()
-            .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
-            .for_each(|(index, comm)| {
-                running_oracle
-                    .par_iter_mut()
-                    .zip_eq(comm.get_codeword().par_iter())
-                    .for_each(|(r, &a)| *r += a * coeffs[index]);
-            });
 
         if i < num_rounds - 1 {
             last_sumcheck_message =
@@ -1365,6 +1353,19 @@ fn batch_commit_phase<F: PrimeField, H: Hash>(
 
             oracles.push(running_oracle.clone());
             trees.push(running_tree);
+
+            // Then merge the rest polynomials whose sizes match the current running oracle
+            let running_oracle_len = running_oracle.len();
+            comms
+                .iter()
+                .enumerate()
+                .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
+                .for_each(|(index, comm)| {
+                    running_oracle
+                        .par_iter_mut()
+                        .zip_eq(comm.get_codeword().par_iter())
+                        .for_each(|(r, &a)| *r += a * coeffs[index]);
+                });
         } else {
             // The difference of the last round is that we don't need to compute the message,
             // and we don't interpolate the small polynomials. So after the last round,
@@ -1909,6 +1910,7 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
             let res = interpolate2([(x0, curr_left), (x1, curr_right)], fold_challenges[i]);
 
             let next_index = right_index >> 1;
+
             let next_oracle_value = if i < num_rounds - 1 {
                 right_index = next_index | 1;
                 left_index = right_index - 1;
@@ -1925,7 +1927,7 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
                 // next_index here.
                 final_codeword[next_index]
             };
-            assert_eq!(res, next_oracle_value);
+            assert_eq!(res, next_oracle_value, "Failed at round {}", i);
         }
     }
 }
@@ -2006,7 +2008,8 @@ impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
         coeffs: &[F],
         cipher: ctr::Ctr32LE<aes::Aes128>,
     ) {
-        self.inner.par_iter().for_each(|(index, query)| {
+        // TODO: replace with par_iter
+        self.inner.iter().for_each(|(index, query)| {
             query.check(
                 fold_challenges,
                 num_rounds,
