@@ -57,12 +57,11 @@ pub struct BasefoldProverParams<F: SmallField> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BasefoldVerifierParams<F: SmallField, Rng: RngCore> {
+pub struct BasefoldVerifierParams<Rng: RngCore> {
     rng: Rng,
     max_num_vars: usize,
     log_rate: usize,
     num_verifier_queries: usize,
-    table_w_weights: Vec<Vec<(F, F)>>,
 }
 
 /// A polynomial commitment together with all the data (e.g., the codeword, and Merkle tree)
@@ -204,17 +203,18 @@ impl<F: SmallField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithDat
     }
 }
 
-impl<F, H, V> PolynomialCommitmentScheme<F> for Basefold<F, H, V>
+impl<F, PF, H, V> PolynomialCommitmentScheme<F, PF> for Basefold<F, H, V>
 where
     F: SmallField + Serialize + DeserializeOwned,
+    PF: SmallField + Serialize + DeserializeOwned + Into<F>,
     H: Hash,
     V: BasefoldExtParams,
 {
-    type Param = BasefoldParams<F, ChaCha8Rng>;
-    type ProverParam = BasefoldProverParams<F>;
-    type VerifierParam = BasefoldVerifierParams<F, ChaCha8Rng>;
-    type Polynomial = MultilinearPolynomial<F>;
-    type CommitmentWithData = BasefoldCommitmentWithData<F, H>;
+    type Param = BasefoldParams<PF, ChaCha8Rng>;
+    type ProverParam = BasefoldProverParams<PF>;
+    type VerifierParam = BasefoldVerifierParams<ChaCha8Rng>;
+    type Polynomial = MultilinearPolynomial<PF>;
+    type CommitmentWithData = BasefoldCommitmentWithData<PF, H>;
     type Commitment = BasefoldCommitment<H>;
     type CommitmentChunk = Output<H>;
     type Rng = ChaCha8Rng;
@@ -247,9 +247,6 @@ where
                 max_num_vars: param.max_num_vars,
                 log_rate: param.log_rate,
                 num_verifier_queries: param.num_verifier_queries,
-                // Why not trim the weights using poly_size? And is the verifier really
-                // able to hold all these weights?
-                table_w_weights: param.table_w_weights.clone(),
             },
         ))
     }
@@ -290,7 +287,7 @@ where
         reverse_index_bits_in_place(&mut codeword);
 
         // Compute and store all the layers of the Merkle tree
-        let codeword_tree = MerkleTree::<F, H>::from_leaves(codeword);
+        let codeword_tree = MerkleTree::<PF, H>::from_leaves(codeword);
 
         Ok(Self::CommitmentWithData {
             codeword_tree,
@@ -367,7 +364,10 @@ where
         evals: &[Evaluation<F>],
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        let polys = polys.into_iter().collect_vec();
+        let polys = polys
+            .into_iter()
+            .map(|poly| poly.extend::<F>())
+            .collect_vec();
         let num_vars = polys.iter().map(|poly| poly.num_vars()).max().unwrap();
         let comms = comms.into_iter().collect_vec();
         let min_num_vars = polys.iter().map(|p| p.num_vars()).min().unwrap();
@@ -382,7 +382,7 @@ where
             })
         }
 
-        validate_input("batch open", pp.max_num_vars, polys.clone(), points)?;
+        validate_input("batch open", pp.max_num_vars, &polys.clone(), points)?;
 
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
@@ -391,7 +391,7 @@ where
         // Use eq(X,t) where t is random to batch the different evaluation queries.
         // Note that this is a small polynomial (only batch_size) compared to the polynomials
         // to open.
-        let eq_xt = Self::Polynomial::eq_xy(&t);
+        let eq_xt = MultilinearPolynomial::<F>::eq_xy(&t);
         // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
         let target_sum = inner_product_three(
             evals.iter().map(Evaluation::value),
@@ -406,14 +406,14 @@ where
         let merged_polys = evals.iter().zip(eq_xt.evals().iter()).fold(
             // This folding will generate a vector of |points| pairs of (scalar, polynomial)
             // The polynomials are initialized to zero, and the scalars are initialized to one
-            vec![(F::ONE, Cow::<Self::Polynomial>::default()); points.len()],
+            vec![(F::ONE, Cow::<MultilinearPolynomial<F>>::default()); points.len()],
             |mut merged_polys, (eval, eq_xt_i)| {
                 // For each polynomial to open, eval.point() specifies which point it is to be opened at.
                 if merged_polys[eval.point()].1.is_zero() {
                     // If the accumulator for this point is still the zero polynomial,
                     // directly assign the random coefficient and the polynomial to open to
                     // this accumulator
-                    merged_polys[eval.point()] = (*eq_xt_i, Cow::Borrowed(polys[eval.poly()]));
+                    merged_polys[eval.point()] = (*eq_xt_i, Cow::Borrowed(&polys[eval.poly()]));
                 } else {
                     // If the accumulator is unempty now, first force its scalar to 1, i.e.,
                     // make (scalar, polynomial) to (1, scalar * polynomial)
@@ -427,7 +427,7 @@ where
                     // different variables, and the result has the same number of vars
                     // with the larger one of the two added polynomials.
                     (*merged_polys[eval.point()].1.to_mut())
-                        .add_assign_mixed_with_coeff(polys[eval.poly()], eq_xt_i);
+                        .add_assign_mixed_with_coeff(&polys[eval.poly()], eq_xt_i);
 
                     // Note that once the scalar in the accumulator becomes ONE, it will remain
                     // to be ONE forever.
@@ -799,12 +799,12 @@ fn encode_repetition_basecode<F: PrimeField>(poly: &Vec<F>, rate: usize) -> Vec<
 }
 
 //this function assumes all codewords in base_codeword has equivalent length
-pub fn evaluate_over_foldable_domain_generic_basecode<F: PrimeField>(
+pub fn evaluate_over_foldable_domain_generic_basecode<F: PrimeField, PF: PrimeField + Into<F>>(
     base_message_length: usize,
     num_coeffs: usize,
     log_rate: usize,
     base_codewords: Vec<Vec<F>>,
-    table: &Vec<Vec<F>>,
+    table: &Vec<Vec<PF>>,
 ) -> Vec<F> {
     let k = num_coeffs;
     let logk = log2_strict(k);
@@ -833,7 +833,7 @@ pub fn evaluate_over_foldable_domain_generic_basecode<F: PrimeField>(
                     // The new codeword is computed by two halves:
                     // left  = a + t * b
                     // right = a - t * b
-                    let rhs = chunk[j] * level[j - half_chunk];
+                    let rhs = chunk[j] * Into::<F>::into(level[j - half_chunk]);
                     chunk[j] = chunk[j - half_chunk] - rhs;
                     chunk[j - half_chunk] = chunk[j - half_chunk] + rhs;
                 }
@@ -1010,8 +1010,8 @@ fn sum_check_last_round<F: PrimeField>(
     one_level_eval_hc(&mut eq, challenge);
 }
 
-fn basefold_one_round_by_interpolation_weights<F: PrimeField>(
-    table: &Vec<Vec<(F, F)>>,
+fn basefold_one_round_by_interpolation_weights<F: PrimeField, PF: PrimeField + Into<F>>(
+    table: &Vec<Vec<(PF, PF)>>,
     level_index: usize,
     values: &Vec<F>,
     challenge: F,
@@ -1022,16 +1022,19 @@ fn basefold_one_round_by_interpolation_weights<F: PrimeField>(
         .enumerate()
         .map(|(i, ys)| {
             interpolate2_weights::<F>(
-                [(level[i].0, ys[0]), (-(level[i].0), ys[1])],
-                level[i].1,
+                [
+                    (Into::<F>::into(level[i].0), ys[0]),
+                    (Into::<F>::into(-(level[i].0)), ys[1]),
+                ],
+                Into::<F>::into(level[i].1),
                 challenge,
             )
         })
         .collect::<Vec<_>>()
 }
 
-fn basefold_get_query<F: SmallField>(
-    poly_codeword: &Vec<F>,
+fn basefold_get_query<F: SmallField, PF: SmallField + Into<F>>(
+    poly_codeword: &Vec<PF>,
     oracles: &Vec<Vec<F>>,
     x_index: usize,
 ) -> SingleQueryResult<F> {
@@ -1039,7 +1042,8 @@ fn basefold_get_query<F: SmallField>(
     let p1 = index | 1;
     let p0 = p1 - 1;
 
-    let commitment_query = CodewordSingleQueryResult::new(poly_codeword[p0], poly_codeword[p1], p0);
+    let commitment_query =
+        CodewordSingleQueryResult::new(poly_codeword[p0].into(), poly_codeword[p1].into(), p0);
     index >>= 1;
 
     let mut oracle_queries = Vec::with_capacity(oracles.len() + 1);
@@ -1061,8 +1065,8 @@ fn basefold_get_query<F: SmallField>(
     };
 }
 
-fn batch_basefold_get_query<F: SmallField, H: Hash>(
-    comms: &[&BasefoldCommitmentWithData<F, H>],
+fn batch_basefold_get_query<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
+    comms: &[&BasefoldCommitmentWithData<PF, H>],
     oracles: &Vec<Vec<F>>,
     codeword_size: usize,
     x_index: usize,
@@ -1090,8 +1094,8 @@ fn batch_basefold_get_query<F: SmallField, H: Hash>(
             let p1 = x_index | 1;
             let p0 = p1 - 1;
             CodewordSingleQueryResult::<F>::new(
-                *comm.get_codeword_entry(p0),
-                *comm.get_codeword_entry(p1),
+                (*comm.get_codeword_entry(p0)).into(),
+                (*comm.get_codeword_entry(p1)).into(),
                 p0,
             )
         })
@@ -1192,20 +1196,28 @@ fn from_raw_bytes<F: PrimeField>(bytes: &Vec<u8>) -> F {
 }
 
 //outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-fn commit_phase<F: SmallField, H: Hash>(
-    point: &Point<F, MultilinearPolynomial<F>>,
-    comm: &BasefoldCommitmentWithData<F, H>,
+fn commit_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
+    point: &Point<F, MultilinearPolynomial<PF>>,
+    comm: &BasefoldCommitmentWithData<PF, H>,
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     num_vars: usize,
     num_rounds: usize,
-    table_w_weights: &Vec<Vec<(F, F)>>,
+    table_w_weights: &Vec<Vec<(PF, PF)>>,
     log_rate: usize,
 ) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>) {
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
-    let mut running_oracle = comm.get_codeword().clone();
-    let mut running_evals = comm.bh_evals.clone();
+    let mut running_oracle = comm
+        .get_codeword()
+        .iter()
+        .map(|x| Into::<F>::into(*x))
+        .collect_vec();
+    let mut running_evals = comm
+        .bh_evals
+        .iter()
+        .map(|x| Into::<F>::into(*x))
+        .collect_vec();
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let mut eq = build_eq_x_r_vec::<F>(&point);
@@ -1223,7 +1235,7 @@ fn commit_phase<F: SmallField, H: Hash>(
         let challenge: F = transcript.squeeze_challenge();
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<F>(
+        running_oracle = basefold_one_round_by_interpolation_weights::<F, PF>(
             &table_w_weights,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
@@ -1268,13 +1280,13 @@ fn commit_phase<F: SmallField, H: Hash>(
 }
 
 //outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-fn batch_commit_phase<F: SmallField, H: Hash>(
-    point: &Point<F, MultilinearPolynomial<F>>,
-    comms: &[&BasefoldCommitmentWithData<F, H>],
+fn batch_commit_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
+    point: &Point<F, MultilinearPolynomial<PF>>,
+    comms: &[&BasefoldCommitmentWithData<PF, H>],
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     num_vars: usize,
     num_rounds: usize,
-    table_w_weights: &Vec<Vec<(F, F)>>,
+    table_w_weights: &Vec<Vec<(PF, PF)>>,
     log_rate: usize,
     coeffs: &[F],
 ) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>) {
@@ -1294,7 +1306,7 @@ fn batch_commit_phase<F: SmallField, H: Hash>(
             running_oracle
                 .par_iter_mut()
                 .zip_eq(comm.get_codeword().par_iter())
-                .for_each(|(r, &a)| *r += a * coeffs[index]);
+                .for_each(|(r, &a)| *r += Into::<F>::into(a) * coeffs[index]);
         });
 
     // Unlike the FRI part, the sum-check part still follows the original procedure,
@@ -1311,8 +1323,9 @@ fn batch_commit_phase<F: SmallField, H: Hash>(
                 // to align the polynomials to the variable with index 0 before adding them
                 // together. So each element is repeated by
                 // sum_of_all_evals_for_sumcheck.len() / bh_evals.len() times
-                *r += comm.bh_evals[pos >> (num_vars - log2_strict(comm.bh_evals.len()))]
-                    * coeffs[index]
+                *r += Into::<F>::into(
+                    comm.bh_evals[pos >> (num_vars - log2_strict(comm.bh_evals.len()))],
+                ) * coeffs[index]
             });
     });
 
@@ -1336,7 +1349,7 @@ fn batch_commit_phase<F: SmallField, H: Hash>(
         let challenge: F = transcript.squeeze_challenge();
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<F>(
+        running_oracle = basefold_one_round_by_interpolation_weights::<F, PF>(
             &table_w_weights,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
@@ -1364,7 +1377,7 @@ fn batch_commit_phase<F: SmallField, H: Hash>(
                     running_oracle
                         .par_iter_mut()
                         .zip_eq(comm.get_codeword().par_iter())
-                        .for_each(|(r, &a)| *r += a * coeffs[index]);
+                        .for_each(|(r, &a)| *r += Into::<F>::into(a) * coeffs[index]);
                 });
         } else {
             // The difference of the last round is that we don't need to compute the message,
@@ -1396,9 +1409,9 @@ fn batch_commit_phase<F: SmallField, H: Hash>(
     return (trees, oracles);
 }
 
-fn query_phase<F: SmallField, H: Hash>(
+fn query_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
-    comm: &BasefoldCommitmentWithData<F, H>,
+    comm: &BasefoldCommitmentWithData<PF, H>,
     oracles: &Vec<Vec<F>>,
     num_verifier_queries: usize,
 ) -> QueriesResult<F> {
@@ -1422,7 +1435,7 @@ fn query_phase<F: SmallField, H: Hash>(
             .map(|x_index| {
                 (
                     *x_index,
-                    basefold_get_query::<F>(comm.get_codeword(), &oracles, *x_index),
+                    basefold_get_query::<F, PF>(comm.get_codeword(), &oracles, *x_index),
                 )
             })
             .collect(),
@@ -1620,9 +1633,9 @@ trait ListQueryResult<F: PrimeField> {
 
     fn get_inner_into(self) -> Vec<CodewordSingleQueryResult<F>>;
 
-    fn merkle_path<'a, H: Hash>(
+    fn merkle_path<'a, H: Hash, PF: PrimeField + Into<F>>(
         &self,
-        trees: impl Fn(usize) -> &'a MerkleTree<F, H>,
+        trees: impl Fn(usize) -> &'a MerkleTree<PF, H>,
     ) -> Vec<MerklePathWithoutLeafOrRoot<H>> {
         self.get_inner()
             .into_iter()
@@ -1648,9 +1661,9 @@ trait ListQueryResultWithMerklePath<F: PrimeField, H: Hash>: Sized {
 
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>>;
 
-    fn from_query_and_trees<'a, LQR: ListQueryResult<F>>(
+    fn from_query_and_trees<'a, LQR: ListQueryResult<F>, PF: PrimeField + Into<F>>(
         query_result: LQR,
-        trees: impl Fn(usize) -> &'a MerkleTree<F, H>,
+        trees: impl Fn(usize) -> &'a MerkleTree<PF, H>,
     ) -> Self {
         Self::new(
             query_result
@@ -1696,10 +1709,10 @@ struct SingleQueryResultWithMerklePath<F, H: Hash> {
 }
 
 impl<F: PrimeField, H: Hash> SingleQueryResultWithMerklePath<F, H> {
-    pub fn from_single_query_result(
+    pub fn from_single_query_result<PF: PrimeField>(
         single_query_result: SingleQueryResult<F>,
         oracle_trees: &Vec<MerkleTree<F, H>>,
-        commitment: &BasefoldCommitmentWithData<F, H>,
+        commitment: &BasefoldCommitmentWithData<PF, H>,
     ) -> Self {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
@@ -1814,10 +1827,10 @@ struct BatchedSingleQueryResultWithMerklePath<F, H: Hash> {
 }
 
 impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
-    pub fn from_batched_single_query_result(
+    pub fn from_batched_single_query_result<PF: PrimeField + Into<F>>(
         batched_single_query_result: BatchedSingleQueryResult<F>,
         oracle_trees: &Vec<MerkleTree<F, H>>,
-        commitments: &Vec<&BasefoldCommitmentWithData<F, H>>,
+        commitments: &Vec<&BasefoldCommitmentWithData<PF, H>>,
     ) -> Self {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
@@ -1967,10 +1980,10 @@ struct BatchedQueriesResultWithMerklePath<F, H: Hash> {
 }
 
 impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
-    pub fn from_batched_query_result(
+    pub fn from_batched_query_result<PF: PrimeField + Into<F>>(
         batched_query_result: BatchedQueriesResult<F>,
         oracle_trees: &Vec<MerkleTree<F, H>>,
-        commitments: &Vec<&BasefoldCommitmentWithData<F, H>>,
+        commitments: &Vec<&BasefoldCommitmentWithData<PF, H>>,
     ) -> Self {
         Self {
             inner: batched_query_result
@@ -2060,10 +2073,10 @@ struct QueriesResultWithMerklePath<F, H: Hash> {
 }
 
 impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
-    pub fn from_query_result(
+    pub fn from_query_result<PF: PrimeField>(
         query_result: QueriesResult<F>,
         oracle_trees: &Vec<MerkleTree<F, H>>,
-        commitment: &BasefoldCommitmentWithData<F, H>,
+        commitment: &BasefoldCommitmentWithData<PF, H>,
     ) -> Self {
         Self {
             inner: query_result
@@ -2142,10 +2155,10 @@ impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
     }
 }
 
-fn batch_query_phase<F: SmallField, H: Hash>(
+fn batch_query_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
     transcript: &mut impl TranscriptWrite<Output<H>, F>,
     codeword_size: usize,
-    comms: &[&BasefoldCommitmentWithData<F, H>],
+    comms: &[&BasefoldCommitmentWithData<PF, H>],
     oracles: &Vec<Vec<F>>,
     num_verifier_queries: usize,
 ) -> BatchedQueriesResult<F> {
@@ -2163,7 +2176,7 @@ fn batch_query_phase<F: SmallField, H: Hash>(
             .map(|x_index| {
                 (
                     *x_index,
-                    batch_basefold_get_query::<F, H>(comms, &oracles, codeword_size, *x_index),
+                    batch_basefold_get_query::<F, PF, H>(comms, &oracles, codeword_size, *x_index),
                 )
             })
             .collect(),
@@ -2777,7 +2790,6 @@ mod test {
 
     #[test]
     fn test_evaluate_generic_basecode() {
-        use crate::util::new_fields::Mersenne61;
         use rand::rngs::OsRng;
 
         let poly = MultilinearPolynomial::rand(10, OsRng);
@@ -2787,14 +2799,14 @@ mod test {
         let rate = 8;
         let base_codewords = encode_repetition_basecode(&poly.evals().to_vec(), rate);
 
-        let evals1 = evaluate_over_foldable_domain_generic_basecode::<Mersenne61>(
+        let evals1 = evaluate_over_foldable_domain_generic_basecode::<Goldilocks, Goldilocks>(
             1,
             poly.evals().len(),
             3,
             base_codewords,
             &table,
         );
-        let evals2 = evaluate_over_foldable_domain::<Mersenne61>(3, poly.evals().to_vec(), &table);
+        let evals2 = evaluate_over_foldable_domain::<Goldilocks>(3, poly.evals().to_vec(), &table);
         assert_eq!(evals1, evals2);
     }
 }

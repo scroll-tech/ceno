@@ -1,6 +1,6 @@
 #![feature(unchecked_math)]
 use goldilocks::SmallField;
-use poly::Polynomial;
+use poly::{Polynomial, PolynomialEvalExt};
 use rand::RngCore;
 use std::fmt::Debug;
 use util::{
@@ -13,17 +13,17 @@ pub mod poly;
 pub mod sum_check;
 pub mod util;
 
-pub type Point<F, P> = <P as Polynomial<F>>::Point;
+pub type Point<F, P> = <P as PolynomialEvalExt<F>>::Point;
 
-pub type Commitment<F, Pcs> = <Pcs as PolynomialCommitmentScheme<F>>::Commitment;
+pub type Commitment<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::Commitment;
 
-pub type CommitmentChunk<F, Pcs> = <Pcs as PolynomialCommitmentScheme<F>>::CommitmentChunk;
+pub type CommitmentChunk<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::CommitmentChunk;
 
-pub trait PolynomialCommitmentScheme<F: SmallField>: Clone + Debug {
+pub trait PolynomialCommitmentScheme<F: SmallField, PF: SmallField>: Clone + Debug {
     type Param: Clone + Debug + Serialize + DeserializeOwned;
     type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
     type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
-    type Polynomial: Polynomial<F> + Serialize + DeserializeOwned;
+    type Polynomial: Polynomial<PF> + PolynomialEvalExt<F> + Serialize + DeserializeOwned;
     type CommitmentWithData: Clone
         + Debug
         + Default
@@ -229,7 +229,6 @@ mod test {
     use crate::{
         poly::multilinear::MultilinearPolynomial,
         util::{
-            arithmetic::PrimeField,
             chain,
             transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},
             Itertools,
@@ -269,14 +268,27 @@ mod test {
         let poly_size = 1 << num_vars;
         let mut transcript = Blake2sTranscript::new(());
         let poly = MultilinearPolynomial::rand(num_vars, OsRng);
-        let param = Pcs::setup(poly_size, &rng).unwrap();
+        let param = <Pcs as PolynomialCommitmentScheme<Fr, Fr>>::setup(poly_size, &rng).unwrap();
 
-        let (pp, _) = Pcs::trim(&param).unwrap();
+        let (pp, _) = <Pcs as PolynomialCommitmentScheme<Fr, Fr>>::trim(&param).unwrap();
         println!("before commit");
-        let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
+        let comm = <Pcs as PolynomialCommitmentScheme<Fr, Fr>>::commit_and_write(
+            &pp,
+            &poly,
+            &mut transcript,
+        )
+        .unwrap();
         let point = transcript.squeeze_challenges(num_vars);
         let eval = poly.evaluate(point.as_slice());
-        Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
+        <Pcs as PolynomialCommitmentScheme<Fr, Fr>>::open(
+            &pp,
+            &poly,
+            &comm,
+            &point,
+            &eval,
+            &mut transcript,
+        )
+        .unwrap();
         let proof = transcript.into_proof();
         println!("transcript commit len {:?}", proof.len() * 8);
     }
@@ -284,7 +296,13 @@ mod test {
     pub(super) fn run_commit_open_verify<F, Pcs, T>()
     where
         F: SmallField,
-        Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
+        F::BaseField: Into<F>,
+        Pcs: PolynomialCommitmentScheme<
+            F,
+            F::BaseField,
+            Polynomial = MultilinearPolynomial<F::BaseField>,
+            Rng = ChaCha8Rng,
+        >,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
             + TranscriptWrite<Pcs::CommitmentChunk, F>
             + InMemoryTranscript<Param = ()>,
@@ -333,7 +351,13 @@ mod test {
     pub(super) fn run_batch_commit_open_verify<F, Pcs, T>()
     where
         F: SmallField,
-        Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
+        F::BaseField: Into<F>,
+        Pcs: PolynomialCommitmentScheme<
+            F,
+            F::BaseField,
+            Polynomial = MultilinearPolynomial<F::BaseField>,
+            Rng = ChaCha8Rng,
+        >,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
             + TranscriptWrite<Pcs::CommitmentChunk, F>
             + InMemoryTranscript<Param = ()>,

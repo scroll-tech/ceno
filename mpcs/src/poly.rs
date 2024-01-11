@@ -14,3 +14,9 @@ pub trait Polynomial<F: Field>: Clone + Debug + for<'a> AddAssign<(&'a F, &'a Se
 
     fn evaluate(&self, point: &Self::Point) -> F;
 }
+
+pub trait PolynomialEvalExt<EF: Field>: Clone + Debug {
+    type Point: Clone + Debug;
+
+    fn evaluate(&self, point: &Self::Point) -> EF;
+}

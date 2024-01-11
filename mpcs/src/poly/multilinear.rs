@@ -42,6 +42,18 @@ impl<F> MultilinearPolynomial<F> {
         Self { evals, num_vars }
     }
 
+    pub fn extend<EF: Field>(&self) -> MultilinearPolynomial<EF>
+    where
+        F: Into<EF> + Copy,
+    {
+        let evals = self
+            .evals
+            .iter()
+            .map(|eval| Into::<EF>::into(*eval))
+            .collect::<Vec<_>>();
+        MultilinearPolynomial::new(evals)
+    }
+
     pub const fn zero() -> Self {
         Self {
             evals: Vec::new(),
@@ -83,6 +95,14 @@ impl<F: Field> Polynomial<F> for MultilinearPolynomial<F> {
 
     fn evaluate(&self, point: &Self::Point) -> F {
         MultilinearPolynomial::evaluate(self, point.as_slice())
+    }
+}
+
+impl<F: Field + Into<EF>, EF: Field> PolynomialEvalExt<EF> for MultilinearPolynomial<F> {
+    type Point = Vec<EF>;
+
+    fn evaluate(&self, point: &Self::Point) -> EF {
+        self.extend::<EF>().evaluate(point)
     }
 }
 
@@ -133,15 +153,23 @@ impl<F: Field> MultilinearPolynomial<F> {
         )
     }
 
-    pub fn evaluate(&self, x: &[F]) -> F {
+    pub fn evaluate<EF: Field>(&self, x: &[EF]) -> EF
+    where
+        F: Into<EF>,
+    {
         assert_eq!(x.len(), self.num_vars);
 
-        let mut evals = Cow::Borrowed(self.evals());
+        let evals = self
+            .evals()
+            .iter()
+            .map(|x| Into::<EF>::into(*x))
+            .collect_vec();
+        let mut evals = Cow::Borrowed(evals.as_slice());
         let mut bits = Vec::new();
         let mut buf = Vec::with_capacity(self.evals.len() >> 1);
         for x_i in x.iter() {
-            if x_i == &F::ZERO || x_i == &F::ONE {
-                bits.push(x_i == &F::ONE);
+            if x_i == &EF::ZERO || x_i == &EF::ONE {
+                bits.push(x_i == &EF::ONE);
                 continue;
             }
 
@@ -698,6 +726,8 @@ macro_rules! zip_self {
 }
 
 pub(crate) use zip_self;
+
+use super::PolynomialEvalExt;
 
 #[cfg(test)]
 mod test {
