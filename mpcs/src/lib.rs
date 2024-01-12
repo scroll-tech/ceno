@@ -299,8 +299,8 @@ mod test {
         F::BaseField: Into<F>,
         Pcs: PolynomialCommitmentScheme<
             F,
-            F::BaseField,
-            Polynomial = MultilinearPolynomial<F::BaseField>,
+            F,
+            Polynomial = MultilinearPolynomial<F>,
             Rng = ChaCha8Rng,
         >,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
@@ -354,8 +354,8 @@ mod test {
         F::BaseField: Into<F>,
         Pcs: PolynomialCommitmentScheme<
             F,
-            F::BaseField,
-            Polynomial = MultilinearPolynomial<F::BaseField>,
+            F,
+            Polynomial = MultilinearPolynomial<F>,
             Rng = ChaCha8Rng,
         >,
         T: TranscriptRead<Pcs::CommitmentChunk, F>

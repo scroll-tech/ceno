@@ -205,7 +205,7 @@ impl<F: SmallField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithDat
 
 impl<F, PF, H, V> PolynomialCommitmentScheme<F, PF> for Basefold<F, H, V>
 where
-    F: SmallField<BaseField = PF> + Serialize + DeserializeOwned,
+    F: SmallField + Serialize + DeserializeOwned,
     F::BaseField: Serialize + DeserializeOwned + Into<F> + Into<PF>,
     PF: SmallField<BaseField = F::BaseField> + Serialize + DeserializeOwned + Into<F>,
     H: Hash,
@@ -1520,21 +1520,6 @@ impl<F: PrimeField, H: Hash> CodewordSingleQueryResultWithMerklePath<F, H> {
             root,
         );
     }
-
-    /// This method is needed when the Merkle path has been created for the base field
-    /// but the query result has been embedded into the extended field.
-    pub fn check_merkle_path_for_base<PF: PrimeField + Into<F>>(&self, root: &Output<H>)
-    where
-        F: SmallField<BaseField = PF>,
-    {
-        let left = self.query.left.to_limbs()[0];
-        let right = self.query.right.to_limbs()[0];
-        // Make sure that they are indeed base field elements
-        assert_eq!(self.query.left, left.into());
-        assert_eq!(self.query.right, right.into());
-        self.merkle_path
-            .authenticate_leaves_root(left, right, self.query.index, root);
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1626,7 +1611,7 @@ impl<F: PrimeField> ListQueryResult<F> for CommitmentsQueryResult<F> {
     }
 }
 
-impl<F: SmallField, H: Hash> ListQueryResultWithMerklePath<F, H>
+impl<F: PrimeField, H: Hash> ListQueryResultWithMerklePath<F, H>
     for OracleListQueryResultWithMerklePath<F, H>
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>> {
@@ -1638,7 +1623,7 @@ impl<F: SmallField, H: Hash> ListQueryResultWithMerklePath<F, H>
     }
 }
 
-impl<F: SmallField, H: Hash> ListQueryResultWithMerklePath<F, H>
+impl<F: PrimeField, H: Hash> ListQueryResultWithMerklePath<F, H>
     for CommitmentsQueryResultWithMerklePath<F, H>
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>> {
@@ -1655,7 +1640,7 @@ trait ListQueryResult<F: PrimeField> {
 
     fn get_inner_into(self) -> Vec<CodewordSingleQueryResult<F>>;
 
-    fn merkle_path<'a, H: Hash, PF: PrimeField>(
+    fn merkle_path<'a, H: Hash, PF: PrimeField + Into<F>>(
         &self,
         trees: impl Fn(usize) -> &'a MerkleTree<PF, H>,
     ) -> Vec<MerklePathWithoutLeafOrRoot<H>> {
@@ -1676,39 +1661,9 @@ trait ListQueryResult<F: PrimeField> {
             })
             .collect_vec()
     }
-
-    fn merkle_path_base<'a, H: Hash>(
-        &self,
-        trees: impl Fn(usize) -> &'a MerkleTree<F::BaseField, H>,
-    ) -> Vec<MerklePathWithoutLeafOrRoot<H>>
-    where
-        F: SmallField,
-        F::BaseField: Into<F>,
-    {
-        self.get_inner()
-            .into_iter()
-            .enumerate()
-            .map(|(i, query_result)| {
-                let path = trees(i).merkle_path_without_leaf_sibling_or_root(query_result.index);
-                if cfg!(feature = "sanity-check") {
-                    let left = query_result.left.to_limbs()[0];
-                    let right = query_result.right.to_limbs()[0];
-                    assert_eq!(query_result.left, left.into());
-                    assert_eq!(query_result.right, right.into());
-                    path.authenticate_leaves_root(
-                        left,
-                        right,
-                        query_result.index,
-                        &trees(i).root(),
-                    );
-                }
-                path
-            })
-            .collect_vec()
-    }
 }
 
-trait ListQueryResultWithMerklePath<F: SmallField, H: Hash>: Sized {
+trait ListQueryResultWithMerklePath<F: PrimeField, H: Hash>: Sized {
     fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>) -> Self;
 
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>>;
@@ -1746,18 +1701,6 @@ trait ListQueryResultWithMerklePath<F: SmallField, H: Hash>: Sized {
                 q.check_merkle_path(root);
             });
     }
-
-    fn check_merkle_paths_for_base<PF: PrimeField + Into<F>>(&self, roots: &Vec<Output<H>>)
-    where
-        F: SmallField<BaseField = PF>,
-    {
-        self.get_inner()
-            .iter()
-            .zip(roots.iter())
-            .for_each(|(q, root)| {
-                q.check_merkle_path_for_base::<PF>(root);
-            });
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1772,10 +1715,7 @@ struct SingleQueryResultWithMerklePath<F, H: Hash> {
     commitment_query: CodewordSingleQueryResultWithMerklePath<F, H>,
 }
 
-impl<F: SmallField, H: Hash> SingleQueryResultWithMerklePath<F, H>
-where
-    F::BaseField: Into<F>,
-{
+impl<F: PrimeField, H: Hash> SingleQueryResultWithMerklePath<F, H> {
     pub fn from_single_query_result<PF: PrimeField>(
         single_query_result: SingleQueryResult<F>,
         oracle_trees: &Vec<MerkleTree<F, H>>,
@@ -1838,8 +1778,7 @@ where
         index: usize,
     ) {
         self.oracle_query.check_merkle_paths(roots);
-        self.commitment_query
-            .check_merkle_path_for_base(&comm.root());
+        self.commitment_query.check_merkle_path(&comm.root());
 
         let mut curr_left = self.commitment_query.query.left;
         let mut curr_right = self.commitment_query.query.right;
@@ -1894,7 +1833,7 @@ struct BatchedSingleQueryResultWithMerklePath<F, H: Hash> {
     commitments_query: CommitmentsQueryResultWithMerklePath<F, H>,
 }
 
-impl<F: SmallField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
+impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
     pub fn from_batched_single_query_result<PF: PrimeField + Into<F>>(
         batched_single_query_result: BatchedSingleQueryResult<F>,
         oracle_trees: &Vec<MerkleTree<F, H>>,
@@ -1942,7 +1881,7 @@ impl<F: SmallField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check<PF: PrimeField + Into<F>>(
+    pub fn check(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
@@ -1954,12 +1893,10 @@ impl<F: SmallField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
         coeffs: &[F],
         mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
-    ) where
-        F: SmallField<BaseField = PF>,
-    {
+    ) {
         self.oracle_query.check_merkle_paths(roots);
         self.commitments_query
-            .check_merkle_paths_for_base::<PF>(&comms.iter().map(|comm| comm.root()).collect());
+            .check_merkle_paths(&comms.iter().map(|comm| comm.root()).collect());
 
         let mut curr_left = F::ZERO;
         let mut curr_right = F::ZERO;
@@ -2049,7 +1986,7 @@ struct BatchedQueriesResultWithMerklePath<F, H: Hash> {
     inner: Vec<(usize, BatchedSingleQueryResultWithMerklePath<F, H>)>,
 }
 
-impl<F: SmallField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
+impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
     pub fn from_batched_query_result<PF: PrimeField + Into<F>>(
         batched_query_result: BatchedQueriesResult<F>,
         oracle_trees: &Vec<MerkleTree<F, H>>,
@@ -2105,7 +2042,7 @@ impl<F: SmallField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check<PF: PrimeField + Into<F>>(
+    pub fn check(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
@@ -2116,11 +2053,9 @@ impl<F: SmallField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
         comms: &Vec<&BasefoldCommitment<H>>,
         coeffs: &[F],
         cipher: ctr::Ctr32LE<aes::Aes128>,
-    ) where
-        F: SmallField<BaseField = PF>,
-    {
+    ) {
         self.inner.par_iter().for_each(|(index, query)| {
-            query.check::<PF>(
+            query.check(
                 fold_challenges,
                 num_rounds,
                 num_vars,
@@ -2144,11 +2079,8 @@ struct QueriesResultWithMerklePath<F, H: Hash> {
     inner: Vec<(usize, SingleQueryResultWithMerklePath<F, H>)>,
 }
 
-impl<F: SmallField, H: Hash> QueriesResultWithMerklePath<F, H>
-where
-    F::BaseField: Into<F>,
-{
-    pub fn from_query_result<PF: PrimeField + Into<F>>(
+impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
+    pub fn from_query_result<PF: PrimeField>(
         query_result: QueriesResult<F>,
         oracle_trees: &Vec<MerkleTree<F, H>>,
         commitment: &BasefoldCommitmentWithData<PF, H>,
@@ -2258,7 +2190,7 @@ fn batch_query_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
     }
 }
 
-fn verifier_query_phase<F: SmallField, H: Hash>(
+fn verifier_query_phase<F: PrimeField, H: Hash>(
     queries: &QueriesResultWithMerklePath<F, H>,
     sum_check_messages: &Vec<Vec<F>>,
     fold_challenges: &Vec<F>,
@@ -2271,9 +2203,7 @@ fn verifier_query_phase<F: SmallField, H: Hash>(
     partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
-) where
-    F::BaseField: Into<F>,
-{
+) {
     let message = interpolate_over_boolean_hypercube(&final_message);
     let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
     assert_eq!(final_codeword.len(), 1);
@@ -2327,7 +2257,7 @@ fn verifier_query_phase<F: SmallField, H: Hash>(
     );
 }
 
-fn batch_verifier_query_phase<F: SmallField, H: Hash>(
+fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
     queries: &BatchedQueriesResultWithMerklePath<F, H>,
     sum_check_messages: &Vec<Vec<F>>,
     fold_challenges: &Vec<F>,
@@ -2341,9 +2271,7 @@ fn batch_verifier_query_phase<F: SmallField, H: Hash>(
     partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
-) where
-    F::BaseField: Into<F>,
-{
+) {
     let message = interpolate_over_boolean_hypercube(&final_message);
     let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
     assert_eq!(final_codeword.len(), 1);
