@@ -20,6 +20,11 @@ pub fn log2_strict(n: usize) -> usize {
     res as usize
 }
 
+/// The two functions field_to_usize and u32_to_field here are not meant
+/// to get the exact integer of the prime field element (it may not have one).
+/// And we don't know anything about the internal representation of F.
+/// So the two functions are only meant to read and write u32 integers to
+/// transcript, which does not directly support reading or writing u32.
 pub fn field_to_usize<F: PrimeField>(x: &F, n: Option<usize>) -> usize {
     let x_rep = (*x).to_repr();
     let x: &[u8] = x_rep.as_ref();
@@ -32,9 +37,6 @@ pub fn field_to_usize<F: PrimeField>(x: &F, n: Option<usize>) -> usize {
     }
 }
 
-/// PrimeField does not have a to_u32 method, so field_to_usize(F::from(k))
-/// does not necessarily return k. So let u32_to_field be the reverse of
-/// field_to_usize.
 pub fn u32_to_field<F: PrimeField>(x: u32) -> F {
     let mut repr = F::Repr::default();
     let bytes = x.to_be_bytes();
