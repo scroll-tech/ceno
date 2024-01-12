@@ -1,19 +1,15 @@
 pub mod arithmetic;
-pub mod code;
 pub mod expression;
-pub mod ff_255;
 pub mod goldilocks_mont;
 pub mod hash;
 pub mod mersenne_61_mont;
-pub mod new_fields;
 pub mod parallel;
 pub mod plonky2_util;
 mod timer;
 pub mod transcript;
 use ff::PrimeField;
-pub use itertools::{chain, izip, Itertools};
-pub use num_bigint::BigUint;
-pub use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
+use itertools::{chain, izip, Itertools};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 pub use timer::{end_timer, start_timer, start_unit_timer};
 pub mod merkle_tree;
 
@@ -109,7 +105,8 @@ pub(crate) use impl_index;
 
 #[cfg(any(test, feature = "benchmark"))]
 pub mod test {
-    use crate::util::{arithmetic::Field, field_to_usize, u32_to_field};
+    use crate::util::{field_to_usize, u32_to_field};
+    use ff::Field;
     type F = halo2_curves::bn256::Fr;
     use rand::{
         rngs::{OsRng, StdRng},

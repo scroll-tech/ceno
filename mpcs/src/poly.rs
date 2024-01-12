@@ -1,4 +1,4 @@
-use crate::util::arithmetic::Field;
+use ff::Field;
 use std::{fmt::Debug, ops::AddAssign};
 
 pub mod multilinear;

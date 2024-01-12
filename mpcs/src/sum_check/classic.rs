@@ -2,19 +2,20 @@ use crate::{
     poly::multilinear::MultilinearPolynomial,
     sum_check::{SumCheck, VirtualPolynomial},
     util::{
-        arithmetic::{BooleanHypercube, Field, PrimeField},
+        arithmetic::BooleanHypercube,
         end_timer,
         expression::{Expression, Rotation},
         parallel::par_map_collect,
         start_timer,
         transcript::{FieldTranscriptRead, FieldTranscriptWrite},
-        Itertools,
     },
     Error,
 };
+use ff::{Field, PrimeField};
 use num_integer::Integer;
 use std::{borrow::Cow, collections::HashMap, fmt::Debug, marker::PhantomData};
 
+use itertools::{chain, izip, Itertools};
 mod coeff;
 
 pub use coeff::CoefficientsProver;

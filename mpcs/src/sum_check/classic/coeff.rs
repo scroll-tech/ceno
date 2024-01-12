@@ -2,15 +2,16 @@ use crate::{
     poly::{multilinear::zip_self, Polynomial},
     sum_check::classic::{ClassicSumCheckProver, ClassicSumCheckRoundMessage, ProverState},
     util::{
-        arithmetic::{div_ceil, horner, PrimeField},
+        arithmetic::{div_ceil, horner},
         expression::{CommonPolynomial, Expression, Rotation},
         impl_index,
         parallel::{num_threads, parallelize_iter},
         transcript::{FieldTranscriptRead, FieldTranscriptWrite},
-        Itertools,
     },
     Error,
 };
+use ff::PrimeField;
+use itertools::Itertools;
 use std::{fmt::Debug, iter, ops::AddAssign};
 
 #[derive(Debug)]

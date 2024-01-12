@@ -1,14 +1,17 @@
 use crate::{
     poly::multilinear::MultilinearPolynomial,
     util::{
-        arithmetic::{inner_product, powers, product, BooleanHypercube, Field, PrimeField},
+        arithmetic::{inner_product, powers, product, BooleanHypercube},
         expression::{CommonPolynomial, Expression, Query},
         transcript::{FieldTranscriptRead, FieldTranscriptWrite},
-        BitIndex, Itertools,
+        BitIndex,
     },
     Error,
 };
 use std::{collections::HashMap, fmt::Debug};
+
+use ff::{Field, PrimeField};
+use itertools::Itertools;
 
 pub mod classic;
 

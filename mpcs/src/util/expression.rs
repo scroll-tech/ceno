@@ -1,4 +1,5 @@
-use crate::util::{arithmetic::Field, izip, Deserialize, Itertools, Serialize};
+use crate::util::{izip, Deserialize, Itertools, Serialize};
+use ff::Field;
 use std::{
     collections::BTreeSet,
     fmt::Debug,

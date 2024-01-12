@@ -1,13 +1,12 @@
 #![feature(unchecked_math)]
+use ff::Field;
 use goldilocks::SmallField;
+use itertools::{chain, izip, Itertools};
 use poly::{Polynomial, PolynomialEvalExt};
 use rand::RngCore;
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Debug;
-use util::{
-    arithmetic::Field,
-    transcript::{TranscriptRead, TranscriptWrite},
-    DeserializeOwned, Serialize,
-};
+use util::transcript::{TranscriptRead, TranscriptWrite};
 
 pub mod poly;
 pub mod sum_check;
@@ -182,7 +181,6 @@ pub enum Error {
 }
 
 use poly::multilinear::MultilinearPolynomial;
-use util::Itertools;
 
 mod basefold;
 pub use basefold::{Basefold, BasefoldCommitmentWithData, BasefoldExtParams, BasefoldParams};
@@ -228,14 +226,11 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
 mod test {
     use crate::{
         poly::multilinear::MultilinearPolynomial,
-        util::{
-            chain,
-            transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},
-            Itertools,
-        },
+        util::transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},
         Evaluation, PolynomialCommitmentScheme,
     };
     use goldilocks::SmallField;
+    use itertools::{chain, izip, Itertools};
     use rand::prelude::*;
     use rand::rngs::OsRng;
     use rand_chacha::ChaCha8Rng;

@@ -1,11 +1,12 @@
 use crate::{
     util::{
-        arithmetic::{fe_mod_from_le_bytes, Coordinates, CurveAffine, PrimeField},
+        arithmetic::fe_mod_from_le_bytes,
         hash::{Blake2s, Blake2s256, Hash, Keccak256, Output, Update},
         Itertools,
     },
     Error,
 };
+use ff::PrimeField;
 
 use halo2_curves::{bn256, grumpkin, pasta};
 use std::{
@@ -172,78 +173,6 @@ impl<H: Hash, F: PrimeField, W: io::Write> FieldTranscriptWrite<F> for FiatShami
             .map_err(|err| Error::Transcript(err.kind(), err.to_string()))
     }
 }
-
-macro_rules! impl_fs_transcript_curve_commitment {
-    ($($curve:ty),*$(,)?) => {
-        $(
-            impl<H: Hash, S> Transcript<$curve, <$curve as CurveAffine>::ScalarExt> for FiatShamirTranscript<H, S> {
-                fn common_commitment(&mut self, comm: &$curve) -> Result<(), Error> {
-                    let coordinates =
-                        Option::<Coordinates<_>>::from(comm.coordinates()).ok_or_else(|| {
-                            Error::Transcript(
-                                io::ErrorKind::Other,
-                                "Invalid elliptic curve point encoding".to_string(),
-                            )
-                        })?;
-                    self.state.update_field_element(coordinates.x());
-                    self.state.update_field_element(coordinates.y());
-                    Ok(())
-                }
-            }
-
-            impl<H: Hash, R: io::Read> TranscriptRead<$curve, <$curve as CurveAffine>::ScalarExt>
-                for FiatShamirTranscript<H, R>
-            {
-                fn read_commitment(&mut self) -> Result<$curve, Error> {
-                    let mut reprs = [<<$curve as CurveAffine>::Base as PrimeField>::Repr::default(); 2];
-                    for repr in &mut reprs {
-                        self.stream
-                            .read_exact(repr.as_mut())
-                            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
-                        repr.as_mut().reverse();
-                    }
-                    let [x, y] =
-                        reprs.map(<<$curve as CurveAffine>::Base as PrimeField>::from_repr_vartime);
-                    let ec_point = x
-                        .zip(y)
-                        .and_then(|(x, y)| CurveAffine::from_xy(x, y).into())
-                        .ok_or_else(|| {
-                            Error::Transcript(
-                                io::ErrorKind::Other,
-                                "Invalid elliptic curve point encoding in proof".to_string(),
-                            )
-                        })?;
-                    self.common_commitment(&ec_point)?;
-                    Ok(ec_point)
-                }
-            }
-
-            impl<H: Hash, W: io::Write> TranscriptWrite<$curve, <$curve as CurveAffine>::ScalarExt>
-                for FiatShamirTranscript<H, W>
-            {
-                fn write_commitment(&mut self, ec_point: &$curve) -> Result<(), Error> {
-                    self.common_commitment(ec_point)?;
-                    let coordinates = ec_point.coordinates().unwrap();
-                    for coordinate in [coordinates.x(), coordinates.y()] {
-                        let mut repr = coordinate.to_repr();
-                        repr.as_mut().reverse();
-                        self.stream
-                            .write_all(repr.as_ref())
-                            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
-                    }
-                    Ok(())
-                }
-            }
-        )*
-    };
-}
-
-impl_fs_transcript_curve_commitment!(
-    bn256::G1Affine,
-    grumpkin::G1Affine,
-    pasta::EpAffine,
-    pasta::EqAffine,
-);
 
 impl<F: PrimeField, S> Transcript<Output<Keccak256>, F> for Keccak256Transcript<S> {
     fn common_commitment(&mut self, comm: &Output<Keccak256>) -> Result<(), Error> {

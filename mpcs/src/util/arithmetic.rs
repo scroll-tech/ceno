@@ -1,6 +1,4 @@
-#[cfg(test)]
-use crate::util::new_fields::Mersenne61;
-use crate::util::{BigUint, Itertools};
+use ff::{BatchInvert, Field, PrimeField};
 use halo2_curves::{
     bn256, grumpkin,
     pairing::{self, MillerLoopResult},
@@ -12,62 +10,10 @@ use std::{borrow::Borrow, fmt::Debug, iter};
 mod bh;
 pub use bh::BooleanHypercube;
 pub use bitvec::field::BitField;
-pub use halo2_curves::{
-    group::{
-        ff::{BatchInvert, Field, FromUniformBytes, PrimeField},
-        prime::PrimeCurveAffine,
-        Curve, Group,
-    },
-    Coordinates, CurveAffine, CurveExt,
-};
+use num_bigint::BigUint;
 
-pub trait MultiMillerLoop: pairing::MultiMillerLoop + Debug + Sync {
-    fn pairings_product_is_identity(terms: &[(&Self::G1Affine, &Self::G2Prepared)]) -> bool {
-        Self::multi_miller_loop(terms)
-            .final_exponentiation()
-            .is_identity()
-            .into()
-    }
-}
-
-impl<M> MultiMillerLoop for M where M: pairing::MultiMillerLoop + Debug + Sync {}
-
-pub trait TwoChainCurve: CurveAffine {
-    type Secondary: TwoChainCurve<ScalarExt = Self::Base, Base = Self::ScalarExt, Secondary = Self>;
-}
-
-impl TwoChainCurve for bn256::G1Affine {
-    type Secondary = grumpkin::G1Affine;
-}
-
-impl TwoChainCurve for grumpkin::G1Affine {
-    type Secondary = bn256::G1Affine;
-}
-
-impl TwoChainCurve for pallas::Affine {
-    type Secondary = vesta::Affine;
-}
-
-impl TwoChainCurve for vesta::Affine {
-    type Secondary = pallas::Affine;
-}
-
-pub fn field_size<F: PrimeField>() -> usize {
-    let neg_one = (-F::ONE).to_repr();
-    let bytes = neg_one.as_ref();
-    8 * bytes.len() - bytes.last().unwrap().leading_zeros() as usize
-}
-
-pub fn horner_new<F: Field>(coeffs: &[F], x: &F) -> F {
-    let coeff_vec: Vec<&F> = coeffs.iter().rev().collect();
-    let mut acc = F::ZERO;
-    for c in coeff_vec {
-        acc = acc * x + c;
-    }
-    acc
-    //2
-    //.fold(F::ZERO, |acc, coeff| acc * x + coeff)
-}
+use itertools::{chain, izip, Itertools};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Evaluate the given coeffs as a univariate polynomial at x
 pub fn horner<F: Field>(coeffs: &[F], x: &F) -> F {
@@ -81,26 +27,6 @@ pub fn horner<F: Field>(coeffs: &[F], x: &F) -> F {
     //.fold(F::ZERO, |acc, coeff| acc * x + coeff)
 }
 
-pub fn horner_orig<F: Field>(coeffs: &[F], x: &F) -> F {
-    coeffs
-        .iter()
-        .rev()
-        .fold(F::ZERO, |acc, coeff| acc * x + coeff)
-}
-#[test]
-fn bench_horner() {
-    use crate::poly::{multilinear::MultilinearPolynomial, Polynomial};
-    use rand::rngs::OsRng;
-    use std::time::Instant;
-    let poly = MultilinearPolynomial::rand(10, OsRng);
-    let test1 = Instant::now();
-    horner_orig(&poly.evals()[..], &Mersenne61::ONE);
-    println!("orig {:?}", test1.elapsed());
-
-    let test2 = Instant::now();
-    horner_new(&poly.evals()[..], &Mersenne61::ONE);
-    println!("new {:?}", test2.elapsed());
-}
 pub fn steps<F: Field>(start: F) -> impl Iterator<Item = F> {
     steps_by(start, F::ONE)
 }
@@ -240,15 +166,4 @@ pub fn div_rem(dividend: usize, divisor: usize) -> (usize, usize) {
 
 pub fn div_ceil(dividend: usize, divisor: usize) -> usize {
     Integer::div_ceil(&dividend, &divisor)
-}
-
-#[cfg(test)]
-mod test {
-    use crate::util::arithmetic;
-    use halo2_curves::bn256;
-
-    #[test]
-    fn field_size() {
-        assert_eq!(arithmetic::field_size::<bn256::Fr>(), 254);
-    }
 }

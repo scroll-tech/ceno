@@ -1,9 +1,9 @@
 use super::plonky2_util::log2_strict;
-use crate::util::arithmetic::PrimeField;
 use blake2b_simd::{
     many::{hash_many, HashManyJob},
     Params, State,
 };
+use ff::PrimeField;
 use generic_array::GenericArray;
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator, ParallelSlice,

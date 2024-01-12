@@ -1,13 +1,14 @@
 use crate::{
     poly::Polynomial,
     util::{
-        arithmetic::{div_ceil, usize_from_bits_le, BooleanHypercube, Field},
+        arithmetic::{div_ceil, usize_from_bits_le, BooleanHypercube},
         expression::Rotation,
         impl_index,
         parallel::{num_threads, parallelize, parallelize_iter},
-        BitIndex, Deserialize, Itertools, Serialize,
+        BitIndex,
     },
 };
+use ff::Field;
 use num_integer::Integer;
 use rand::RngCore;
 use std::{
@@ -16,6 +17,9 @@ use std::{
     mem,
     ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
 };
+
+use itertools::{chain, izip, Itertools};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MultilinearPolynomial<F> {
@@ -736,14 +740,11 @@ mod test {
             multilinear::{rotation_eval, zip_self, MultilinearPolynomial},
             Polynomial,
         },
-        util::{
-            arithmetic::{BooleanHypercube, Field},
-            expression::Rotation,
-            test::rand_vec,
-            Itertools,
-        },
+        util::{arithmetic::BooleanHypercube, expression::Rotation, test::rand_vec},
     };
+    use ff::Field;
     use halo2_curves::bn256::Fr;
+    use itertools::Itertools;
     use rand::{rngs::OsRng, RngCore};
     use std::iter;
 

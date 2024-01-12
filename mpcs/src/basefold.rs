@@ -3,12 +3,11 @@ use crate::util::{field_to_usize, u32_to_field};
 use crate::{
     poly::{multilinear::MultilinearPolynomial, Polynomial},
     util::{
-        arithmetic::{horner, inner_product, inner_product_three, steps, PrimeField},
+        arithmetic::{horner, inner_product, inner_product_three, steps},
         expression::{Expression, Query, Rotation},
         hash::{Hash, Output},
         log2_strict,
         transcript::{TranscriptRead, TranscriptWrite},
-        Deserialize, DeserializeOwned, Itertools, Serialize,
     },
     validate_input, AdditiveCommitment, Error, Evaluation, Point, PolynomialCommitmentScheme,
 };
@@ -22,10 +21,13 @@ use crate::{
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use core::fmt::Debug;
 use ctr;
-use ff::BatchInverter;
+use ff::{BatchInverter, PrimeField};
 use generic_array::GenericArray;
 use goldilocks::SmallField;
 use std::{ops::Deref, time::Instant};
+
+use itertools::{chain, izip, Itertools};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec;
 
@@ -2440,7 +2442,6 @@ mod test {
         test::{run_batch_commit_open_verify, run_commit_open_verify},
         util::{
             hash::{Hash, Keccak256, Output},
-            new_fields::{Mersenne127, Mersenne61},
             transcript::Blake2sTranscript,
         },
     };
@@ -2452,9 +2453,9 @@ mod test {
     };
 
     use crate::basefold::Instant;
-    use crate::util::arithmetic::PrimeField;
     use crate::BasefoldExtParams;
     use blake2::Blake2s256;
+    use ff::PrimeField;
 
     // type Pcs = Basefold<Fp, Blake2s256, Five>;
     type PcsGoldilocks = Basefold<Goldilocks, Blake2s256, Five>;
@@ -2545,18 +2546,6 @@ mod test {
         return (unflattened_table_w_weights, unflattened_table);
     }
 
-    pub fn multilinear_evaluation_ztoa<F: PrimeField>(poly: &mut Vec<F>, point: &Vec<F>) {
-        let n = log2_strict(poly.len());
-        assert_eq!(point.len(), n);
-        for p in point {
-            poly.par_chunks_mut(2).for_each(|chunk| {
-                chunk[0] = chunk[0] + *p * chunk[1];
-                chunk[1] = chunk[0];
-            });
-            poly.dedup();
-        }
-    }
-
     //helper function
     fn rand_vec<F: PrimeField>(size: usize, mut rng: &mut ChaCha8Rng) -> Vec<F> {
         (0..size).map(|_| F::random(&mut rng)).collect()
@@ -2568,16 +2557,15 @@ mod test {
 
         let poly = MultilinearPolynomial::rand(20, OsRng);
 
-        encode_rs_basecode::<Mersenne61>(&poly.evals().to_vec(), 2, 64);
+        encode_rs_basecode::<Goldilocks>(&poly.evals().to_vec(), 2, 64);
     }
 
     #[test]
     fn test_sumcheck() {
-        use crate::util::ff_255::ff255::Ft255;
         let i = 25;
         let mut rng = ChaCha8Rng::from_entropy();
-        let evals = rand_vec::<Ft255>(1 << i, &mut rng);
-        let eq = rand_vec::<Ft255>(1 << i, &mut rng);
+        let evals = rand_vec::<Goldilocks>(1 << i, &mut rng);
+        let eq = rand_vec::<Goldilocks>(1 << i, &mut rng);
         let coeffs1 = p_i(&evals, &eq);
         let coeffs2 = parallel_pi(&evals, &eq);
         assert_eq!(coeffs1, coeffs2);
@@ -2640,29 +2628,12 @@ mod test {
     }
 
     #[test]
-    fn bench_multilinear_eval() {
-        use crate::util::ff_255::ff255::Ft255;
-        for i in 10..27 {
-            let mut rng = ChaCha8Rng::from_entropy();
-            let mut poly = rand_vec::<Ft255>(1 << i, &mut rng);
-            let point = rand_vec::<Ft255>(i, &mut rng);
-            let now = Instant::now();
-            multilinear_evaluation_ztoa(&mut poly, &point);
-            println!(
-                "time for multilinear eval degree i {:?} : {:?}",
-                i,
-                now.elapsed().as_millis()
-            );
-        }
-    }
-
-    #[test]
     fn test_sha3_hashes() {
         use blake2::digest::FixedOutputReset;
 
         type H = Keccak256;
         let lots_of_hashes = Instant::now();
-        let values = vec![Mersenne127::ONE; 2000];
+        let values = vec![Goldilocks::ONE; 2000];
         let mut hashes = vec![Output::<H>::default(); values.len() >> 1];
         for (i, mut hash) in hashes.iter_mut().enumerate() {
             let mut hasher = H::new();
@@ -2688,7 +2659,7 @@ mod test {
 
         type H = Blake2s256;
         let lots_of_hashes = Instant::now();
-        let values = vec![Mersenne127::ONE; 2000];
+        let values = vec![Goldilocks::ONE; 2000];
         let mut hashes = vec![Output::<H>::default(); values.len() >> 1];
         for (i, mut hash) in hashes.iter_mut().enumerate() {
             let mut hasher = H::new();
@@ -2714,12 +2685,16 @@ mod test {
 
         type H = Blake2s256;
         let lots_of_hashes = Instant::now();
-        let values = vec![Mersenne127::ONE; 2000];
+        let values = vec![Goldilocks::ONE; 2000];
         let mut hashes = vec![Output::<H>::default(); values.len() >> 1];
         for (i, hash) in hashes.iter_mut().enumerate() {
             let f1 = values[i + 1].to_repr();
             let f2 = values[i + i + 1].to_repr();
-            let data = [f1.as_ref(), f2.as_ref()].concat();
+            let data = [
+                <Goldilocks as AsRef<[u8]>>::as_ref(&f1),
+                <Goldilocks as AsRef<[u8]>>::as_ref(&f2),
+            ]
+            .concat();
             //	    hasher.update_field_element(&values[i + i]);
             //	    hasher.update_field_element(&values[i+ i + 1]);
             *hash = H::digest(&data);
@@ -2816,7 +2791,7 @@ mod test {
         use blake2b_simd::State;
         use ff::PrimeField;
         let lots_of_hashes = Instant::now();
-        let values = vec![Mersenne127::ONE; 2000];
+        let values = vec![Goldilocks::ONE; 2000];
         let mut states = vec![State::new(); 1000];
 
         for (i, hash) in states.iter_mut().enumerate() {
