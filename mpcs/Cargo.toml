@@ -18,7 +18,6 @@ rand = "0.8"
 bitvec = "1.0.1"
 halo2_curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", tag = "0.3.3", package = "halo2curves", features = ["derive_serde"] }
 ctr = {git = "https://github.com/RustCrypto/block-modes"}
-subtle = "2.5.0"
 blake2b_simd = "1.0.2"
 sha3 = "0.10.6"
 rayon = { version = "1.5.3", optional = true }
@@ -26,7 +25,6 @@ blake2 = {version = "0.10.6"}
 poseidon = { git = "https://github.com/han0110/poseidon", branch = "feature/with-spec" }
 rand_chacha={version ="0.3.1", features=["serde1"]}
 generic-array = { version = "0.14.7", features = ["serde"] }
-hex-literal = "0.3.3"
 multilinear_extensions = { path = "../multilinear_extensions" }
 
 [features]
