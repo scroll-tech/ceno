@@ -205,9 +205,10 @@ impl<F: SmallField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithDat
 
 impl<F, PF, H, V> PolynomialCommitmentScheme<F, PF> for Basefold<F, H, V>
 where
-    F: SmallField + Serialize + DeserializeOwned,
+    F: SmallField + Serialize + DeserializeOwned + TryInto<PF>,
+    <F as TryInto<PF>>::Error: Debug,
     F::BaseField: Serialize + DeserializeOwned + Into<F> + Into<PF>,
-    PF: SmallField<BaseField = F::BaseField> + Serialize + DeserializeOwned + Into<F>,
+    PF: SmallField + Serialize + DeserializeOwned + Into<F>,
     H: Hash,
     V: BasefoldExtParams,
 {
@@ -630,7 +631,7 @@ where
         let mut eq = build_eq_x_r_vec(&point.as_slice()[..point.len() - fold_challenges.len()]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
-        verifier_query_phase::<F, H>(
+        verifier_query_phase::<F, PF, H>(
             &query_result_with_merkle_path,
             &sumcheck_messages,
             &fold_challenges,
@@ -743,7 +744,7 @@ where
         );
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
-        batch_verifier_query_phase::<F, H>(
+        batch_verifier_query_phase::<F, PF, H>(
             &query_result_with_merkle_path,
             &sumcheck_messages,
             &fold_challenges,
@@ -1512,10 +1513,16 @@ impl<F: PrimeField, H: Hash> CodewordSingleQueryResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check_merkle_path(&self, root: &Output<H>) {
-        self.merkle_path.authenticate_leaves_root(
-            self.query.left,
-            self.query.right,
+    /// Check this query against a Merkle root. The Merkle path and root are possibly
+    /// created when the leaves are in a different field
+    pub fn check_merkle_path<PF: PrimeField>(&self, root: &Output<H>)
+    where
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
+    {
+        self.merkle_path.authenticate_leaves_root::<PF>(
+            self.query.left.try_into().unwrap(),
+            self.query.right.try_into().unwrap(),
             self.query.index,
             root,
         );
@@ -1693,12 +1700,16 @@ trait ListQueryResultWithMerklePath<F: PrimeField, H: Hash>: Sized {
             .for_each(|q| q.write_transcript(transcript));
     }
 
-    fn check_merkle_paths(&self, roots: &Vec<Output<H>>) {
+    fn check_merkle_paths<PF: PrimeField>(&self, roots: &Vec<Output<H>>)
+    where
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
+    {
         self.get_inner()
             .iter()
             .zip(roots.iter())
             .for_each(|(q, root)| {
-                q.check_merkle_path(root);
+                q.check_merkle_path::<PF>(root);
             });
     }
 }
@@ -1765,7 +1776,7 @@ impl<F: PrimeField, H: Hash> SingleQueryResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check(
+    pub fn check<PF: PrimeField>(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
@@ -1776,9 +1787,12 @@ impl<F: PrimeField, H: Hash> SingleQueryResultWithMerklePath<F, H> {
         comm: &BasefoldCommitment<H>,
         mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
-    ) {
-        self.oracle_query.check_merkle_paths(roots);
-        self.commitment_query.check_merkle_path(&comm.root());
+    ) where
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
+    {
+        self.oracle_query.check_merkle_paths::<F>(roots);
+        self.commitment_query.check_merkle_path::<PF>(&comm.root());
 
         let mut curr_left = self.commitment_query.query.left;
         let mut curr_right = self.commitment_query.query.right;
@@ -1881,7 +1895,7 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check(
+    pub fn check<PF: PrimeField>(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
@@ -1893,10 +1907,13 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
         coeffs: &[F],
         mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
-    ) {
-        self.oracle_query.check_merkle_paths(roots);
+    ) where
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
+    {
+        self.oracle_query.check_merkle_paths::<F>(roots);
         self.commitments_query
-            .check_merkle_paths(&comms.iter().map(|comm| comm.root()).collect());
+            .check_merkle_paths::<PF>(&comms.iter().map(|comm| comm.root()).collect());
 
         let mut curr_left = F::ZERO;
         let mut curr_right = F::ZERO;
@@ -2042,7 +2059,7 @@ impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check(
+    pub fn check<PF: PrimeField>(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
@@ -2053,9 +2070,12 @@ impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
         comms: &Vec<&BasefoldCommitment<H>>,
         coeffs: &[F],
         cipher: ctr::Ctr32LE<aes::Aes128>,
-    ) {
+    ) where
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
+    {
         self.inner.par_iter().for_each(|(index, query)| {
-            query.check(
+            query.check::<PF>(
                 fold_challenges,
                 num_rounds,
                 num_vars,
@@ -2135,7 +2155,7 @@ impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check(
+    pub fn check<PF: PrimeField>(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
@@ -2145,9 +2165,12 @@ impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
         roots: &Vec<Output<H>>,
         comm: &BasefoldCommitment<H>,
         cipher: ctr::Ctr32LE<aes::Aes128>,
-    ) {
+    ) where
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
+    {
         self.inner.par_iter().for_each(|(index, query)| {
-            query.check(
+            query.check::<PF>(
                 fold_challenges,
                 num_rounds,
                 num_vars,
@@ -2190,7 +2213,7 @@ fn batch_query_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
     }
 }
 
-fn verifier_query_phase<F: PrimeField, H: Hash>(
+fn verifier_query_phase<F: PrimeField + TryInto<PF>, PF: PrimeField, H: Hash>(
     queries: &QueriesResultWithMerklePath<F, H>,
     sum_check_messages: &Vec<Vec<F>>,
     fold_challenges: &Vec<F>,
@@ -2203,7 +2226,9 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
     partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
-) {
+) where
+    <F as TryInto<PF>>::Error: Debug,
+{
     let message = interpolate_over_boolean_hypercube(&final_message);
     let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
     assert_eq!(final_codeword.len(), 1);
@@ -2225,7 +2250,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
         GenericArray::from_slice(&iv[..]),
     );
 
-    queries.check(
+    queries.check::<PF>(
         fold_challenges,
         num_rounds,
         num_vars,
@@ -2257,7 +2282,7 @@ fn verifier_query_phase<F: PrimeField, H: Hash>(
     );
 }
 
-fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
+fn batch_verifier_query_phase<F: PrimeField + TryInto<PF>, PF: PrimeField, H: Hash>(
     queries: &BatchedQueriesResultWithMerklePath<F, H>,
     sum_check_messages: &Vec<Vec<F>>,
     fold_challenges: &Vec<F>,
@@ -2271,7 +2296,9 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
     partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
-) {
+) where
+    <F as TryInto<PF>>::Error: Debug,
+{
     let message = interpolate_over_boolean_hypercube(&final_message);
     let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
     assert_eq!(final_codeword.len(), 1);
@@ -2293,7 +2320,7 @@ fn batch_verifier_query_phase<F: PrimeField, H: Hash>(
         GenericArray::from_slice(&iv[..]),
     );
 
-    queries.check(
+    queries.check::<PF>(
         fold_challenges,
         num_rounds,
         num_vars,
@@ -2563,17 +2590,25 @@ mod test {
 
     #[test]
     fn commit_open_verify_goldilocks() {
-        run_commit_open_verify::<_, PcsGoldilocks, Blake2sTranscript<_>>();
+        // Both challenge and poly are over base field
+        run_commit_open_verify::<Goldilocks, Goldilocks, PcsGoldilocks, Blake2sTranscript<_>>();
     }
 
     #[test]
     fn commit_open_verify_goldilocks_2() {
-        run_commit_open_verify::<_, PcsGoldilocks2, Blake2sTranscript<_>>();
+        // Challenge is over extension field, poly over the base field
+        run_commit_open_verify::<_, Goldilocks, PcsGoldilocks2, Blake2sTranscript<_>>();
+        // Both challenge and poly are over extension field
+        run_commit_open_verify::<_, GoldilocksExt2, PcsGoldilocks2, Blake2sTranscript<_>>();
     }
 
     #[test]
     fn commit_open_verify_goldilocks_3() {
-        run_commit_open_verify::<_, PcsGoldilocks3, Blake2sTranscript<_>>();
+        // Can't pass yet because GoldilocksExt3 does not implement invert
+        // Challenge is over extension field, poly over the base field
+        run_commit_open_verify::<_, Goldilocks, PcsGoldilocks3, Blake2sTranscript<_>>();
+        // Both challenge and poly are over extension field
+        run_commit_open_verify::<_, GoldilocksExt3, PcsGoldilocks3, Blake2sTranscript<_>>();
     }
 
     // #[test]
@@ -2583,17 +2618,25 @@ mod test {
 
     #[test]
     fn batch_commit_open_verify_goldilocks() {
-        run_batch_commit_open_verify::<_, PcsGoldilocks, Blake2sTranscript<_>>();
+        // Both challenge and poly are over base field
+        run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks, Blake2sTranscript<_>>();
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_2() {
-        run_batch_commit_open_verify::<_, PcsGoldilocks2, Blake2sTranscript<_>>();
+        // Challenge is over extension field, poly over the base field
+        run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks2, Blake2sTranscript<_>>();
+        // Both challenge and poly are over extension field
+        run_batch_commit_open_verify::<_, GoldilocksExt2, PcsGoldilocks2, Blake2sTranscript<_>>();
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_3() {
-        run_batch_commit_open_verify::<_, PcsGoldilocks3, Blake2sTranscript<_>>();
+        // Can't pass yet because GoldilocksExt3 does not implement invert
+        // Challenge is over extension field, poly over the base field
+        run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks3, Blake2sTranscript<_>>();
+        // Both challenge and poly are over extension field
+        run_batch_commit_open_verify::<_, GoldilocksExt3, PcsGoldilocks3, Blake2sTranscript<_>>();
     }
 
     #[test]

@@ -293,14 +293,16 @@ mod test {
         println!("transcript commit len {:?}", proof.len() * 8);
     }
 
-    pub(super) fn run_commit_open_verify<F, Pcs, T>()
+    pub(super) fn run_commit_open_verify<F, PF, Pcs, T>()
     where
-        F: SmallField,
-        F::BaseField: Into<F>,
+        F: SmallField + TryInto<PF>,
+        <F as TryInto<PF>>::Error: core::fmt::Debug,
+        F::BaseField: Into<F> + Into<PF>,
+        PF: SmallField + Into<F>,
         Pcs: PolynomialCommitmentScheme<
             F,
-            F,
-            Polynomial = MultilinearPolynomial<F>,
+            PF,
+            Polynomial = MultilinearPolynomial<PF>,
             Rng = ChaCha8Rng,
         >,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
@@ -348,14 +350,16 @@ mod test {
         }
     }
 
-    pub(super) fn run_batch_commit_open_verify<F, Pcs, T>()
+    pub(super) fn run_batch_commit_open_verify<F, PF, Pcs, T>()
     where
-        F: SmallField,
-        F::BaseField: Into<F>,
+        F: SmallField + TryInto<PF>,
+        <F as TryInto<PF>>::Error: core::fmt::Debug,
+        F::BaseField: Into<F> + Into<PF>,
+        PF: SmallField + Into<F>,
         Pcs: PolynomialCommitmentScheme<
             F,
-            F,
-            Polynomial = MultilinearPolynomial<F>,
+            PF,
+            Polynomial = MultilinearPolynomial<PF>,
             Rng = ChaCha8Rng,
         >,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
