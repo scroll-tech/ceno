@@ -15,7 +15,7 @@ use ff::{Field, PrimeField};
 use num_integer::Integer;
 use std::{borrow::Cow, collections::HashMap, fmt::Debug, marker::PhantomData};
 
-use itertools::{chain, izip, Itertools};
+use itertools::{Itertools};
 mod coeff;
 
 pub use coeff::CoefficientsProver;

@@ -8,7 +8,7 @@ use crate::{
 };
 use ff::PrimeField;
 
-use halo2_curves::{bn256, grumpkin, pasta};
+
 use std::{
     fmt::Debug,
     io::{self, Cursor},

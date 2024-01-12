@@ -26,8 +26,8 @@ use generic_array::GenericArray;
 use goldilocks::SmallField;
 use std::{ops::Deref, time::Instant};
 
-use itertools::{chain, izip, Itertools};
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
+use itertools::Itertools;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec;
 

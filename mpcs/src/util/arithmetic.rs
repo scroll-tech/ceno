@@ -1,19 +1,14 @@
 use ff::{BatchInvert, Field, PrimeField};
-use halo2_curves::{
-    bn256, grumpkin,
-    pairing::{self, MillerLoopResult},
-    pasta::{pallas, vesta},
-};
+
 use num_integer::Integer;
-use std::{borrow::Borrow, fmt::Debug, iter};
+use std::{borrow::Borrow, iter};
 
 mod bh;
 pub use bh::BooleanHypercube;
 pub use bitvec::field::BitField;
 use num_bigint::BigUint;
 
-use itertools::{chain, izip, Itertools};
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
+use itertools::Itertools;
 
 /// Evaluate the given coeffs as a univariate polynomial at x
 pub fn horner<F: Field>(coeffs: &[F], x: &F) -> F {

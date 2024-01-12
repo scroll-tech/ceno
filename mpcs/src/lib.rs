@@ -1,10 +1,10 @@
 #![feature(unchecked_math)]
 use ff::Field;
 use goldilocks::SmallField;
-use itertools::{chain, izip, Itertools};
+use itertools::Itertools;
 use poly::{Polynomial, PolynomialEvalExt};
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use util::transcript::{TranscriptRead, TranscriptWrite};
 
@@ -230,7 +230,7 @@ mod test {
         Evaluation, PolynomialCommitmentScheme,
     };
     use goldilocks::SmallField;
-    use itertools::{chain, izip, Itertools};
+    use itertools::{chain, Itertools};
     use rand::prelude::*;
     use rand::rngs::OsRng;
     use rand_chacha::ChaCha8Rng;

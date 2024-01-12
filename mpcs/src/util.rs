@@ -8,8 +8,8 @@ pub mod plonky2_util;
 mod timer;
 pub mod transcript;
 use ff::PrimeField;
-use itertools::{chain, izip, Itertools};
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
+use itertools::{izip, Itertools};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub use timer::{end_timer, start_timer, start_unit_timer};
 pub mod merkle_tree;
 
