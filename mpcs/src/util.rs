@@ -1,8 +1,6 @@
 pub mod arithmetic;
 pub mod expression;
-pub mod goldilocks_mont;
 pub mod hash;
-pub mod mersenne_61_mont;
 pub mod parallel;
 pub mod plonky2_util;
 mod timer;
