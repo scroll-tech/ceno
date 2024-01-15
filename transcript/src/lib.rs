@@ -4,7 +4,6 @@
 
 mod hasher;
 
-use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use poseidon::Poseidon;
 
@@ -22,7 +21,7 @@ pub struct Challenge<F> {
     pub elements: F,
 }
 
-impl<F: SmallField + FromUniformBytes<64>> Transcript<F> {
+impl<F: SmallField> Transcript<F> {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
         // FIXME: change me the the right parameter

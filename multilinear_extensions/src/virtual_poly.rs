@@ -72,7 +72,7 @@ impl<F: PrimeField> AsRef<[u8]> for VPAuxInfo<F> {
 }
 
 impl<F> VPAuxInfo<F> {
-    pub fn to_ext_field<Ext: SmallField<BaseField = F>>(&self)-> VPAuxInfo<Ext>{
+    pub fn to_ext_field<Ext: SmallField<BaseField = F>>(&self) -> VPAuxInfo<Ext> {
         VPAuxInfo::<Ext> {
             max_degree: self.max_degree,
             num_variables: self.num_variables,

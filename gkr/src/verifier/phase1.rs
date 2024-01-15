@@ -1,5 +1,4 @@
 use ark_std::{end_timer, start_timer};
-use ff::FromUniformBytes;
 use frontend::structs::{CellId, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -14,7 +13,7 @@ use crate::{
 
 use super::{IOPVerifierPhase1State, SumcheckState};
 
-impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
+impl<'a, F: SmallField> IOPVerifierPhase1State<'a, F> {
     pub(super) fn verifier_init_parallel(
         next_evals: &'a [(Point<F>, F)],
         subset_evals: &'a [(LayerId, Point<F>, F)],

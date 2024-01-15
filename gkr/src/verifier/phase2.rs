@@ -1,5 +1,4 @@
 use ark_std::{end_timer, start_timer};
-use ff::FromUniformBytes;
 use frontend::structs::ConstantType;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -15,7 +14,7 @@ use crate::{
 
 use super::{IOPVerifierPhase2State, SumcheckState};
 
-impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
+impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
     pub(super) fn verifier_init_parallel(
         layer: &'a Layer<F>,
         layer_out_point: &Point<F>,

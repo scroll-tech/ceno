@@ -1,7 +1,6 @@
-use std::{hash::Hash, sync::Arc};
+use std::sync::Arc;
 
 use ark_std::{end_timer, start_timer};
-use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -12,7 +11,7 @@ use crate::{
     util::{barycentric_weights, extrapolate},
 };
 
-impl<F: SmallField + FromUniformBytes<64> + Hash> IOPProverState<F> {
+impl<F: SmallField> IOPProverState<F> {
     pub fn prove(
         poly: &VirtualPolynomial<F::BaseField>,
         transcript: &mut Transcript<F>,

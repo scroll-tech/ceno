@@ -248,7 +248,7 @@ dependencies = [
 [[package]]
 name = "goldilocks"
 version = "0.1.0"
-source = "git+https://github.com/zhenfeizhang/Goldilocks#bfc97cbd12d53a110aeecbb365954f160daeb46e"
+source = "git+https://github.com/zhenfeizhang/Goldilocks#dac2627b7b50745f1af63bea57545c91faf044bf"
 dependencies = [
  "ff",
  "halo2curves",

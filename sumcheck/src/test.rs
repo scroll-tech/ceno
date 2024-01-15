@@ -1,7 +1,7 @@
 use std::hash::Hash;
 
 use ark_std::{rand::RngCore, test_rng};
-use ff::{Field, FromUniformBytes};
+use ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use transcript::Transcript;
@@ -92,7 +92,7 @@ fn test_trivial_polynomial() {
     test_trivial_polynomial_helper::<GoldilocksExt2>();
 }
 
-fn test_trivial_polynomial_helper<F: SmallField + FromUniformBytes<64>>() {
+fn test_trivial_polynomial_helper<F: SmallField>() {
     let nv = 1;
     let num_multiplicands_range = (4, 13);
     let num_products = 5;
@@ -107,7 +107,7 @@ fn test_normal_polynomial() {
     test_normal_polynomial_helper::<GoldilocksExt2>();
 }
 
-fn test_normal_polynomial_helper<F: SmallField + FromUniformBytes<64>>() {
+fn test_normal_polynomial_helper<F: SmallField>() {
     let nv = 12;
     let num_multiplicands_range = (4, 9);
     let num_products = 5;
@@ -132,7 +132,7 @@ fn test_extract_sum() {
     test_extract_sum_helper::<GoldilocksExt2>();
 }
 
-fn test_extract_sum_helper<F: SmallField + FromUniformBytes<64>+Hash>() {
+fn test_extract_sum_helper<F: SmallField + Hash>() {
     let mut rng = test_rng();
     let mut transcript = Transcript::<F>::new(b"test");
     let (poly, asserted_sum) = VirtualPolynomial::<F::BaseField>::random(8, (3, 4), 3, &mut rng);

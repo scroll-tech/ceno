@@ -1,7 +1,6 @@
 use std::{ops::Add, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
-use ff::FromUniformBytes;
 use frontend::structs::{CellId, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -19,7 +18,7 @@ use crate::{
 
 use super::IOPProverPhase1State;
 
-impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase1State<'a, F> {
+impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
     pub(super) fn prover_init_parallel(
         layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
         next_evals: &'a [(Point<F>, F)],
