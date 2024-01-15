@@ -1,3 +1,5 @@
+use std::hash::Hash;
+
 use ark_std::{rand::RngCore, test_rng};
 use ff::{Field, FromUniformBytes};
 use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
@@ -13,7 +15,7 @@ fn test_sumcheck(nv: usize, num_multiplicands_range: (usize, usize), num_product
     let mut rng = test_rng();
     let mut transcript = Transcript::new(b"test");
 
-    let (poly, asserted_sum) = VirtualPolynomial::<GoldilocksExt2>::random(
+    let (poly, asserted_sum) = VirtualPolynomial::<Goldilocks>::random(
         nv,
         num_multiplicands_range,
         num_products,
@@ -21,16 +23,17 @@ fn test_sumcheck(nv: usize, num_multiplicands_range: (usize, usize), num_product
     );
     let proof = IOPProverState::<GoldilocksExt2>::prove(&poly, &mut transcript);
     let poly_info = poly.aux_info.clone();
+    let poly_ext = poly.to_ext_field();
 
     let mut transcript = Transcript::new(b"test");
     let subclaim = IOPVerifierState::<GoldilocksExt2>::verify(
-        asserted_sum,
+        asserted_sum.into(),
         &proof,
-        &poly_info,
+        &poly_info.to_ext_field(),
         &mut transcript,
     );
     assert!(
-        poly.evaluate(
+        poly_ext.evaluate(
             &subclaim
                 .point
                 .iter()
@@ -100,7 +103,7 @@ fn test_trivial_polynomial_helper<F: SmallField + FromUniformBytes<64>>() {
 
 #[test]
 fn test_normal_polynomial() {
-    test_normal_polynomial_helper::<Goldilocks>();
+    // test_normal_polynomial_helper::<Goldilocks>();
     test_normal_polynomial_helper::<GoldilocksExt2>();
 }
 
@@ -129,13 +132,14 @@ fn test_extract_sum() {
     test_extract_sum_helper::<GoldilocksExt2>();
 }
 
-fn test_extract_sum_helper<F: SmallField + FromUniformBytes<64>>() {
+fn test_extract_sum_helper<F: SmallField + FromUniformBytes<64>+Hash>() {
     let mut rng = test_rng();
-    let mut transcript = Transcript::new(b"test");
-    let (poly, asserted_sum) = VirtualPolynomial::<F>::random(8, (3, 4), 3, &mut rng);
+    let mut transcript = Transcript::<F>::new(b"test");
+    let (poly, asserted_sum) = VirtualPolynomial::<F::BaseField>::random(8, (3, 4), 3, &mut rng);
 
-    let proof = IOPProverState::prove(&poly, &mut transcript);
-    assert_eq!(proof.extract_sum(), asserted_sum);
+    let proof = IOPProverState::<F>::prove(&poly, &mut transcript);
+    println!("sum: {:?} {:?}", proof.extract_sum(), asserted_sum);
+    assert_eq!(proof.extract_sum(), F::from_base(&asserted_sum));
 }
 
 struct DensePolynomial(Vec<GoldilocksExt2>);

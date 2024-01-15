@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{hash::Hash, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
@@ -12,8 +12,11 @@ use crate::{
     util::{barycentric_weights, extrapolate},
 };
 
-impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
-    pub fn prove(poly: &VirtualPolynomial<F>, transcript: &mut Transcript<F>) -> IOPProof<F> {
+impl<F: SmallField + FromUniformBytes<64> + Hash> IOPProverState<F> {
+    pub fn prove(
+        poly: &VirtualPolynomial<F::BaseField>,
+        transcript: &mut Transcript<F>,
+    ) -> IOPProof<F> {
         if poly.aux_info.num_variables == 0 {
             return IOPProof {
                 point: vec![],
@@ -22,10 +25,12 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         }
         let start = start_timer!(|| "sum check prove");
 
+        let ploy_ext = poly.to_ext_field::<F>();
+
         transcript.append_message(&poly.aux_info.num_variables.to_le_bytes());
         transcript.append_message(&poly.aux_info.max_degree.to_le_bytes());
 
-        let mut prover_state = Self::prover_init(poly);
+        let mut prover_state = Self::prover_init(&ploy_ext);
         let mut challenge = None;
         let mut prover_msgs = Vec::with_capacity(poly.aux_info.num_variables);
         for _ in 0..poly.aux_info.num_variables {

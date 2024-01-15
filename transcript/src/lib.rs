@@ -71,7 +71,7 @@ impl<F: SmallField + FromUniformBytes<64>> Transcript<F> {
         let challenge = Challenge {
             elements: F::from_limbs(self.sponge_hasher.squeeze_vec().as_ref()),
         };
-        println!("challenge: {:?}", challenge);
+        // println!("challenge: {:?}", challenge);
 
         challenge
     }

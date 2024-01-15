@@ -71,6 +71,16 @@ impl<F: PrimeField> AsRef<[u8]> for VPAuxInfo<F> {
     }
 }
 
+impl<F> VPAuxInfo<F> {
+    pub fn to_ext_field<Ext: SmallField<BaseField = F>>(&self)-> VPAuxInfo<Ext>{
+        VPAuxInfo::<Ext> {
+            max_degree: self.max_degree,
+            num_variables: self.num_variables,
+            phantom: PhantomData::default(),
+        }
+    }
+}
+
 impl<F: SmallField> Add for &VirtualPolynomial<F> {
     type Output = VirtualPolynomial<F>;
     fn add(self, other: &VirtualPolynomial<F>) -> Self::Output {
@@ -315,13 +325,9 @@ impl<F: SmallField> VirtualPolynomial<F> {
         println!()
     }
 
+    // TODO: This seems expensive. Is there a better way to covert poly into its ext fields?
     pub fn to_ext_field<Ext: SmallField<BaseField = F> + Hash>(&self) -> VirtualPolynomial<Ext> {
-        let aux_info = VPAuxInfo::<Ext> {
-            max_degree: self.aux_info.max_degree,
-            num_variables: self.aux_info.num_variables,
-            phantom: PhantomData::default(),
-        };
-
+        let aux_info = self.aux_info.to_ext_field();
         let products = self
             .products
             .iter()
