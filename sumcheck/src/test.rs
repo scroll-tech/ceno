@@ -25,7 +25,7 @@ fn test_sumcheck<F: SmallField>(
         num_products,
         &mut rng,
     );
-    let proof = IOPProverState::<F>::prove(&poly, &mut transcript);
+    let proof = IOPProverState::<F>::prove_base_poly(&poly, &mut transcript);
     let poly_info = poly.aux_info.clone();
     let poly_ext = poly.to_ext_field();
 
@@ -49,7 +49,11 @@ fn test_sumcheck<F: SmallField>(
     );
 }
 
-fn test_sumcheck_internal<F: SmallField>(nv: usize, num_multiplicands_range: (usize, usize), num_products: usize) {
+fn test_sumcheck_internal<F: SmallField>(
+    nv: usize,
+    num_multiplicands_range: (usize, usize),
+    num_products: usize,
+) {
     let mut rng = test_rng();
     let (poly, asserted_sum) = VirtualPolynomial::<F::BaseField>::random(
         nv,
@@ -141,8 +145,7 @@ fn test_extract_sum_helper<F: SmallField + Hash>() {
     let mut transcript = Transcript::<F>::new(b"test");
     let (poly, asserted_sum) = VirtualPolynomial::<F::BaseField>::random(8, (3, 4), 3, &mut rng);
 
-    let proof = IOPProverState::<F>::prove(&poly, &mut transcript);
-    println!("sum: {:?} {:?}", proof.extract_sum(), asserted_sum);
+    let proof = IOPProverState::<F>::prove_base_poly(&poly, &mut transcript);
     assert_eq!(proof.extract_sum(), F::from_base(&asserted_sum));
 }
 

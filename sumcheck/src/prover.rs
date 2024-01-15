@@ -12,10 +12,18 @@ use crate::{
 };
 
 impl<F: SmallField> IOPProverState<F> {
-    pub fn prove(
+    /// Identical to `prove` function. With the exception that the input poly is
+    /// over the base field rather than the extension field
+    pub fn prove_base_poly(
         poly: &VirtualPolynomial<F::BaseField>,
         transcript: &mut Transcript<F>,
     ) -> IOPProof<F> {
+        let ploy_ext = poly.to_ext_field::<F>();
+        Self::prove(&ploy_ext, transcript)
+    }
+
+    /// Given a virtual polynomial, generate an IOP proof.
+    pub fn prove(poly: &VirtualPolynomial<F>, transcript: &mut Transcript<F>) -> IOPProof<F> {
         if poly.aux_info.num_variables == 0 {
             return IOPProof {
                 point: vec![],
@@ -24,12 +32,10 @@ impl<F: SmallField> IOPProverState<F> {
         }
         let start = start_timer!(|| "sum check prove");
 
-        let ploy_ext = poly.to_ext_field::<F>();
-
         transcript.append_message(&poly.aux_info.num_variables.to_le_bytes());
         transcript.append_message(&poly.aux_info.max_degree.to_le_bytes());
 
-        let mut prover_state = Self::prover_init(&ploy_ext);
+        let mut prover_state = Self::prover_init(&poly);
         let mut challenge = None;
         let mut prover_msgs = Vec::with_capacity(poly.aux_info.num_variables);
         for _ in 0..poly.aux_info.num_variables {
