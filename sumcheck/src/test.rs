@@ -11,23 +11,27 @@ use crate::{
     util::interpolate_uni_poly,
 };
 
-fn test_sumcheck(nv: usize, num_multiplicands_range: (usize, usize), num_products: usize) {
+fn test_sumcheck<F: SmallField>(
+    nv: usize,
+    num_multiplicands_range: (usize, usize),
+    num_products: usize,
+) {
     let mut rng = test_rng();
     let mut transcript = Transcript::new(b"test");
 
-    let (poly, asserted_sum) = VirtualPolynomial::<Goldilocks>::random(
+    let (poly, asserted_sum) = VirtualPolynomial::<F::BaseField>::random(
         nv,
         num_multiplicands_range,
         num_products,
         &mut rng,
     );
-    let proof = IOPProverState::<GoldilocksExt2>::prove(&poly, &mut transcript);
+    let proof = IOPProverState::<F>::prove(&poly, &mut transcript);
     let poly_info = poly.aux_info.clone();
     let poly_ext = poly.to_ext_field();
 
     let mut transcript = Transcript::new(b"test");
-    let subclaim = IOPVerifierState::<GoldilocksExt2>::verify(
-        asserted_sum.into(),
+    let subclaim = IOPVerifierState::<F>::verify(
+        F::from_base(&asserted_sum),
         &proof,
         &poly_info.to_ext_field(),
         &mut transcript,
@@ -45,9 +49,9 @@ fn test_sumcheck(nv: usize, num_multiplicands_range: (usize, usize), num_product
     );
 }
 
-fn test_sumcheck_internal(nv: usize, num_multiplicands_range: (usize, usize), num_products: usize) {
+fn test_sumcheck_internal<F: SmallField>(nv: usize, num_multiplicands_range: (usize, usize), num_products: usize) {
     let mut rng = test_rng();
-    let (poly, asserted_sum) = VirtualPolynomial::<GoldilocksExt2>::random(
+    let (poly, asserted_sum) = VirtualPolynomial::<F::BaseField>::random(
         nv,
         num_multiplicands_range,
         num_products,
@@ -97,13 +101,13 @@ fn test_trivial_polynomial_helper<F: SmallField>() {
     let num_multiplicands_range = (4, 13);
     let num_products = 5;
 
-    test_sumcheck(nv, num_multiplicands_range, num_products);
-    test_sumcheck_internal(nv, num_multiplicands_range, num_products);
+    test_sumcheck::<F>(nv, num_multiplicands_range, num_products);
+    test_sumcheck_internal::<F>(nv, num_multiplicands_range, num_products);
 }
 
 #[test]
 fn test_normal_polynomial() {
-    // test_normal_polynomial_helper::<Goldilocks>();
+    test_normal_polynomial_helper::<Goldilocks>();
     test_normal_polynomial_helper::<GoldilocksExt2>();
 }
 
@@ -112,8 +116,8 @@ fn test_normal_polynomial_helper<F: SmallField>() {
     let num_multiplicands_range = (4, 9);
     let num_products = 5;
 
-    test_sumcheck(nv, num_multiplicands_range, num_products);
-    test_sumcheck_internal(nv, num_multiplicands_range, num_products);
+    test_sumcheck::<F>(nv, num_multiplicands_range, num_products);
+    test_sumcheck_internal::<F>(nv, num_multiplicands_range, num_products);
 }
 
 // #[test]
