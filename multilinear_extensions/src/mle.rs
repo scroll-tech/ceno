@@ -160,4 +160,11 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
         end_timer!(start);
         list
     }
+
+    pub fn to_ext_field<Ext: SmallField<BaseField = F>>(&self) -> DenseMultilinearExtension<Ext> {
+        DenseMultilinearExtension {
+            evaluations: self.evaluations.iter().map(|f| Ext::from_base(f)).collect(),
+            num_vars: self.num_vars,
+        }
+    }
 }
