@@ -3,7 +3,7 @@ use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use multilinear_extensions::virtual_poly::VPAuxInfo;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use transcript::{Challenge, Transcript};
+use transcript::{FieldTranscript, PoseidonRead};
 
 use crate::{
     structs::{IOPProof, IOPProverMessage, IOPVerifierState, SumCheckSubClaim},
@@ -15,20 +15,19 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         claimed_sum: F,
         proof: &IOPProof<F>,
         aux_info: &VPAuxInfo<F>,
-        transcript: &mut Transcript<F>,
+        transcript: &mut PoseidonRead<F>,
     ) -> SumCheckSubClaim<F> {
         let start = start_timer!(|| "sum check verify");
 
-        transcript.append_message(&aux_info.num_variables.to_le_bytes());
-        transcript.append_message(&aux_info.max_degree.to_le_bytes());
+        // transcript.append_message(&aux_info.num_variables.to_le_bytes());
+        // transcript.append_message(&aux_info.max_degree.to_le_bytes());
 
         let mut verifier_state = IOPVerifierState::verifier_init(aux_info);
         for i in 0..aux_info.num_variables {
             let prover_msg = proof.proofs.get(i).expect("proof is incomplete");
-            prover_msg
-                .evaluations
-                .iter()
-                .for_each(|e| transcript.append_field_element(e));
+            transcript
+                .common_field_elements(&prover_msg.evaluations)
+                .unwrap();
             Self::verify_round_and_update_state(&mut verifier_state, prover_msg, transcript);
         }
 
@@ -62,8 +61,8 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
     pub(crate) fn verify_round_and_update_state(
         &mut self,
         prover_msg: &IOPProverMessage<F>,
-        transcript: &mut Transcript<F>,
-    ) -> Challenge<F> {
+        transcript: &mut PoseidonRead<F>,
+    ) -> F {
         let start =
             start_timer!(|| format!("sum check verify {}-th round and update state", self.round));
 
@@ -80,7 +79,8 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
         // When we turn the protocol to a non-interactive one, it is sufficient to defer
         // such checks to `check_and_generate_subclaim` after the last round.
 
-        let challenge = transcript.get_and_append_challenge(b"Internal round");
+        let challenge = transcript.squeeze_challenge();
+
         self.challenges.push(challenge);
         self.polynomials_received
             .push(prover_msg.evaluations.to_vec());
@@ -132,7 +132,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                     );
                 }
                 // fixme: move to extension field
-                interpolate_uni_poly::<F>(&evaluations, challenge.elements[0])
+                interpolate_uni_poly::<F>(&evaluations, challenge)
             })
             .collect::<Vec<_>>();
 

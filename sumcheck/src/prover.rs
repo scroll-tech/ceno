@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use std::{io::Write, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use transcript::{Challenge, Transcript};
+use transcript::{FieldTranscript, PoseidonWrite};
 
 use crate::{
     structs::{IOPProof, IOPProverMessage, IOPProverState},
@@ -13,11 +13,17 @@ use crate::{
 };
 
 impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
-    pub fn prove(poly: &VirtualPolynomial<F>, transcript: &mut Transcript<F>) -> IOPProof<F> {
+    pub fn prove<W>(
+        poly: &VirtualPolynomial<F>,
+        transcript: &mut PoseidonWrite<F, W>,
+    ) -> IOPProof<F>
+    where
+        W: Write,
+    {
         let start = start_timer!(|| "sum check prove");
 
-        transcript.append_message(&poly.aux_info.num_variables.to_le_bytes());
-        transcript.append_message(&poly.aux_info.max_degree.to_le_bytes());
+        // transcript.append_message(&poly.aux_info.num_variables.to_le_bytes());
+        // transcript.append_message(&poly.aux_info.max_degree.to_le_bytes());
 
         let mut prover_state = Self::prover_init(poly);
         let mut challenge = None;
@@ -26,13 +32,19 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             let prover_msg =
                 IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
 
-            prover_msg
-                .evaluations
-                .iter()
-                .for_each(|e| transcript.append_field_element(e));
+            transcript
+                .common_field_elements(&prover_msg.evaluations)
+                .unwrap();
+
+            // prover_msg
+            //     .evaluations
+            //     .iter()
+            //     .for_each(|e| transcript.append_field_element(e));
 
             prover_msgs.push(prover_msg);
-            challenge = Some(transcript.get_and_append_challenge(b"Internal round"));
+            // challenge = Some(transcript.get_and_append_challenge(b"Internal round"));
+            challenge = Some(transcript.squeeze_challenge());
+            println!("challenge in prove: {:?}", challenge);
         }
         // pushing the last challenge point to the state
         if let Some(p) = challenge {
@@ -42,11 +54,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         end_timer!(start);
         IOPProof {
             // the point consists of the first elements in the challenge
-            point: prover_state
-                .challenges
-                .iter()
-                .map(|challenge| challenge.elements[0])
-                .collect(),
+            point: prover_state.challenges,
             proofs: prover_msgs,
         }
     }
@@ -81,7 +89,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     /// Main algorithm used is from section 3.2 of [XZZPS19](https://eprint.iacr.org/2019/317.pdf#subsection.3.2).
     pub(crate) fn prove_round_and_update_state(
         &mut self,
-        challenge: &Option<Challenge<F>>,
+        challenge: &Option<F>,
     ) -> IOPProverMessage<F> {
         let start =
             start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
@@ -124,7 +132,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             #[cfg(not(feature = "parallel"))]
             flattened_ml_extensions
                 .iter_mut()
-                .for_each(|mle| *mle = mle.fix_variables(&[r.elements[0]]));
+                .for_each(|mle| *mle = mle.fix_variables(&[r]));
         } else if self.round > 0 {
             panic!("verifier message is empty");
         }
