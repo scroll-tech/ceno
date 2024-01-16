@@ -282,6 +282,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gkr-graph"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "ff",
+ "frontend",
+ "gkr",
+ "goldilocks",
+ "itertools 0.12.0",
+ "multilinear_extensions",
+ "sumcheck",
+ "transcript",
+]
+
+[[package]]
 name = "goldilocks"
 version = "0.1.0"
 source = "git+https://github.com/zhenfeizhang/Goldilocks#7fb587f72605fea2b232b7165d365160a82dcb7e"
