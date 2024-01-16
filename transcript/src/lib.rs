@@ -1,78 +1,77 @@
-//! This repo is not properly implemented
-//! Transcript APIs are placeholders; the actual logic is to be implemented later.
+#![feature(iterator_try_collect)]
+mod poseidon_read;
+mod poseidon_write;
 
-mod hasher;
+pub use poseidon_read::PoseidonRead;
+pub use poseidon_read::{INPUT_WIDTH, OUTPUT_WIDTH, RATE, STATE};
+pub use poseidon_write::PoseidonWrite;
 
-use ff::{FromUniformBytes, PrimeField};
-use goldilocks::SmallField;
-use poseidon::Poseidon;
+use util::Error;
 
-// temporarily using 12-4 hashes
-pub const INPUT_WIDTH: usize = 12;
-pub const OUTPUT_WIDTH: usize = 4;
+pub trait FieldTranscript<F> {
+    fn squeeze_challenge(&mut self) -> F;
 
-#[derive(Clone)]
-pub struct Transcript<F: PrimeField> {
-    sponge_hasher: Poseidon<F, 12, 11>,
+    fn squeeze_challenges(&mut self, n: usize) -> Vec<F> {
+        (0..n).map(|_| self.squeeze_challenge()).collect()
+    }
+
+    fn common_field_element(&mut self, fe: &F) -> Result<(), Error>;
+
+    fn common_field_elements(&mut self, fes: &[F]) -> Result<(), Error> {
+        fes.iter()
+            .map(|fe| self.common_field_element(fe))
+            .try_collect()
+    }
 }
 
-#[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
-pub struct Challenge<F> {
-    pub elements: [F; OUTPUT_WIDTH],
+pub trait FieldTranscriptRead<F>: FieldTranscript<F> {
+    fn read_field_element(&mut self) -> Result<F, Error>;
+
+    fn read_field_elements(&mut self, n: usize) -> Result<Vec<F>, Error> {
+        (0..n).map(|_| self.read_field_element()).collect()
+    }
 }
 
-impl<F: SmallField + FromUniformBytes<64>> Transcript<F> {
-    /// Create a new IOP transcript.
-    pub fn new(label: &'static [u8]) -> Self {
-        // FIXME: change me the the right parameter
-        let mut hasher = Poseidon::new(8, 22);
-        let label_f = F::bytes_to_field_elements(label);
-        hasher.update(label_f.as_slice());
-        Self {
-            sponge_hasher: hasher,
+pub trait FieldTranscriptWrite<F>: FieldTranscript<F> {
+    fn write_field_element(&mut self, fe: &F) -> Result<(), Error>;
+
+    fn write_field_elements(&mut self, fes: &[F]) -> Result<(), Error> {
+        for fe in fes.into_iter() {
+            self.write_field_element(fe)?;
         }
+        Ok(())
     }
+}
 
-    // Append the message to the transcript.
-    pub fn append_message(&mut self, msg: &[u8]) {
-        let msg_f = F::bytes_to_field_elements(msg);
-        self.sponge_hasher.update(&msg_f);
+pub trait Transcript<C, F>: FieldTranscript<F> {
+    fn common_commitment(&mut self, comm: &C) -> Result<(), Error>;
+
+    fn common_commitments(&mut self, comms: &[C]) -> Result<(), Error> {
+        comms
+            .iter()
+            .map(|comm| self.common_commitment(comm))
+            .try_collect()
     }
+}
 
-    // Append the field elemetn to the transcript.
-    pub fn append_field_element(&mut self, element: &F) {
-        self.sponge_hasher.update(&[*element]);
+pub trait TranscriptRead<C, F>: Transcript<C, F> + FieldTranscriptRead<F> {
+    fn read_commitment(&mut self) -> Result<C, Error>;
+
+    fn read_commitments(&mut self, n: usize) -> Result<Vec<C>, Error> {
+        (0..n).map(|_| self.read_commitment()).collect()
     }
+}
 
-    // Append the challenge to the transcript.
-    pub fn append_challenge(&mut self, challenge: Challenge<F>) {
-        self.sponge_hasher.update(challenge.elements.as_slice())
-    }
+pub trait TranscriptWrite<C, F>: Transcript<C, F> + FieldTranscriptWrite<F> {
+    fn write_commitment(&mut self, comm: &C) -> Result<(), Error>;
 
-    // // Append the message to the transcript.
-    // pub fn append_serializable_element<S: Serialize>(
-    //     &mut self,
-    //     _label: &'static [u8],
-    //     _element: &S,
-    // ) {
-    //     unimplemented!()
-    // }
-
-    // Generate the challenge from the current transcript
-    // and append it to the transcript.
-    //
-    // The output field element is statistical uniform as long
-    // as the field has a size less than 2^384.
-    pub fn get_and_append_challenge(&mut self, label: &'static [u8]) -> Challenge<F> {
-        self.append_message(label);
-
-        let challenge = Challenge {
-            elements: self.sponge_hasher.squeeze_vec()[0..OUTPUT_WIDTH]
-                .try_into()
-                .unwrap(),
-        };
-        println!("challenge: {:?}", challenge);
-
-        challenge
+    fn write_commitments<'a>(&mut self, comms: impl IntoIterator<Item = &'a C>) -> Result<(), Error>
+    where
+        C: 'a,
+    {
+        for comm in comms.into_iter() {
+            self.write_commitment(comm)?;
+        }
+        Ok(())
     }
 }

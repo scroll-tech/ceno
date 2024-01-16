@@ -8,7 +8,6 @@ use crate::{
 };
 use ff::PrimeField;
 
-
 use std::{
     fmt::Debug,
     io::{self, Cursor},
