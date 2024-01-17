@@ -5,7 +5,7 @@ use crate::{
     util::{
         arithmetic::{horner, inner_product, inner_product_three, steps},
         expression::{Expression, Query, Rotation},
-        hash::{Hash, Output},
+        hash::Digest,
         log2_strict,
         transcript::{TranscriptRead, TranscriptWrite},
     },
@@ -21,7 +21,7 @@ use crate::{
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use core::fmt::Debug;
 use ctr;
-use ff::{BatchInverter, PrimeField};
+use ff::BatchInverter;
 use generic_array::GenericArray;
 use goldilocks::SmallField;
 use std::{ops::Deref, time::Instant};
@@ -70,19 +70,29 @@ pub struct BasefoldVerifierParams<Rng: RngCore> {
 /// used to generate this commitment and for assistant in opening
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize", deserialize = "F: DeserializeOwned"))]
-pub struct BasefoldCommitmentWithData<F, H: Hash> {
-    codeword_tree: MerkleTree<F, H>,
+pub struct BasefoldCommitmentWithData<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    codeword_tree: MerkleTree<F>,
     bh_evals: Vec<F>,
     num_vars: usize,
 }
 
-impl<F: SmallField, H: Hash> BasefoldCommitmentWithData<F, H> {
-    pub fn to_commitment(&self) -> BasefoldCommitment<H> {
+impl<F: SmallField> BasefoldCommitmentWithData<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn to_commitment(&self) -> BasefoldCommitment<F> {
         BasefoldCommitment::new(self.codeword_tree.root(), self.num_vars)
     }
 
-    pub fn get_root_ref(&self) -> &Output<H> {
+    pub fn get_root_ref(&self) -> &Digest<F> {
         self.codeword_tree.root_ref()
+    }
+
+    pub fn get_root_as<EF: SmallField<BaseField = F::BaseField>>(&self) -> Digest<EF> {
+        Digest::<EF>(self.get_root_ref().0)
     }
 
     pub fn get_codeword(&self) -> &Vec<F> {
@@ -106,37 +116,67 @@ impl<F: SmallField, H: Hash> BasefoldCommitmentWithData<F, H> {
     }
 }
 
+impl<F: SmallField, EF: SmallField<BaseField = F::BaseField>> Into<Digest<EF>>
+    for BasefoldCommitmentWithData<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+    EF::BaseField: Serialize + DeserializeOwned,
+{
+    fn into(self) -> Digest<EF> {
+        self.get_root_as()
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "", deserialize = ""))]
-pub struct BasefoldCommitment<H: Hash> {
-    root: Output<H>,
+pub struct BasefoldCommitment<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    root: Digest<F>,
     num_vars: Option<usize>,
 }
 
-impl<H: Hash> BasefoldCommitment<H> {
-    fn new(root: Output<H>, num_vars: usize) -> Self {
+impl<F: SmallField> BasefoldCommitment<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn new(root: Digest<F>, num_vars: usize) -> Self {
         Self {
             root,
             num_vars: Some(num_vars),
         }
     }
 
-    fn root(&self) -> Output<H> {
+    fn root(&self) -> Digest<F> {
         self.root.clone()
     }
 
     fn num_vars(&self) -> Option<usize> {
         self.num_vars
     }
+
+    pub fn as_field<EF: SmallField<BaseField = F::BaseField>>(&self) -> BasefoldCommitment<EF> {
+        BasefoldCommitment::<EF> {
+            root: Digest::<EF>(self.root().0),
+            num_vars: self.num_vars,
+        }
+    }
 }
 
-impl<F: SmallField, H: Hash> PartialEq for BasefoldCommitmentWithData<F, H> {
+impl<F: SmallField> PartialEq for BasefoldCommitmentWithData<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     fn eq(&self, other: &Self) -> bool {
         self.get_codeword().eq(other.get_codeword()) && self.bh_evals.eq(&other.bh_evals)
     }
 }
 
-impl<F: SmallField, H: Hash> Eq for BasefoldCommitmentWithData<F, H> {}
+impl<F: SmallField> Eq for BasefoldCommitmentWithData<F> where
+    F::BaseField: Serialize + DeserializeOwned
+{
+}
 
 pub trait BasefoldExtParams: Debug {
     fn get_reps() -> usize;
@@ -147,29 +187,38 @@ pub trait BasefoldExtParams: Debug {
 }
 
 #[derive(Debug)]
-pub struct Basefold<F: SmallField, H: Hash, V: BasefoldExtParams>(PhantomData<(F, H, V)>);
+pub struct Basefold<F: SmallField, V: BasefoldExtParams>(PhantomData<(F, V)>);
 
-impl<F: SmallField, H: Hash, V: BasefoldExtParams> Clone for Basefold<F, H, V> {
+impl<F: SmallField, V: BasefoldExtParams> Clone for Basefold<F, V> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
 }
 
-impl<H: Hash> AsRef<[Output<H>]> for BasefoldCommitment<H> {
-    fn as_ref(&self) -> &[Output<H>] {
+impl<F: SmallField> AsRef<[Digest<F>]> for BasefoldCommitment<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn as_ref(&self) -> &[Digest<F>] {
         let root = &self.root;
         slice::from_ref(root)
     }
 }
 
-impl<F: SmallField, H: Hash> AsRef<[Output<H>]> for BasefoldCommitmentWithData<F, H> {
-    fn as_ref(&self) -> &[Output<H>] {
+impl<F: SmallField> AsRef<[Digest<F>]> for BasefoldCommitmentWithData<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn as_ref(&self) -> &[Digest<F>] {
         let root = self.get_root_ref();
         slice::from_ref(root)
     }
 }
 
-impl<F: SmallField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithData<F, H> {
+impl<F: SmallField> AdditiveCommitment<F> for BasefoldCommitmentWithData<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     fn sum_with_scalar<'a>(
         scalars: impl IntoIterator<Item = &'a F> + 'a,
         bases: impl IntoIterator<Item = &'a Self> + 'a,
@@ -195,7 +244,7 @@ impl<F: SmallField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithDat
             }
         });
 
-        let tree = MerkleTree::<F, H>::from_leaves(new_codeword);
+        let tree = MerkleTree::<F>::from_leaves(new_codeword);
 
         Self {
             bh_evals: Vec::new(),
@@ -205,22 +254,24 @@ impl<F: SmallField, H: Hash> AdditiveCommitment<F> for BasefoldCommitmentWithDat
     }
 }
 
-impl<F, PF, H, V> PolynomialCommitmentScheme<F, PF> for Basefold<F, H, V>
+impl<F, PF, V> PolynomialCommitmentScheme<F, PF> for Basefold<F, V>
 where
-    F: SmallField + Serialize + DeserializeOwned + TryInto<PF>,
+    F: SmallField<BaseField = PF::BaseField> + Serialize + DeserializeOwned + TryInto<PF>,
     <F as TryInto<PF>>::Error: Debug,
     F::BaseField: Serialize + DeserializeOwned + Into<F> + Into<PF>,
     PF: SmallField + Serialize + DeserializeOwned + Into<F>,
-    H: Hash,
+    PF::BaseField: Into<PF> + Into<F>,
     V: BasefoldExtParams,
+    F::BaseField: Serialize + DeserializeOwned,
+    PF::BaseField: Serialize + DeserializeOwned,
 {
     type Param = BasefoldParams<F::BaseField, ChaCha8Rng>;
     type ProverParam = BasefoldProverParams<F::BaseField>;
     type VerifierParam = BasefoldVerifierParams<ChaCha8Rng>;
     type Polynomial = MultilinearPolynomial<PF>;
-    type CommitmentWithData = BasefoldCommitmentWithData<PF, H>;
-    type Commitment = BasefoldCommitment<H>;
-    type CommitmentChunk = Output<H>;
+    type CommitmentWithData = BasefoldCommitmentWithData<PF>;
+    type Commitment = BasefoldCommitment<PF>;
+    type CommitmentChunk = Digest<F>;
     type Rng = ChaCha8Rng;
 
     fn setup(poly_size: usize, rng: &Self::Rng) -> Result<Self::Param, Error> {
@@ -291,7 +342,7 @@ where
         reverse_index_bits_in_place(&mut codeword);
 
         // Compute and store all the layers of the Merkle tree
-        let codeword_tree = MerkleTree::<PF, H>::from_leaves(codeword);
+        let codeword_tree = MerkleTree::<PF>::from_leaves(codeword);
 
         Ok(Self::CommitmentWithData {
             codeword_tree,
@@ -310,7 +361,9 @@ where
     {
         let comms = Self::batch_commit(pp, polys)?;
         comms.iter().for_each(|comm| {
-            transcript.write_commitment(comm.get_root_ref()).unwrap();
+            transcript
+                .write_commitment(&comm.get_root_as::<F>())
+                .unwrap();
             transcript
                 .write_field_element(&u32_to_field(comm.num_vars as u32))
                 .unwrap();
@@ -558,14 +611,16 @@ where
         let roots = (0..num_polys)
             .map(|_| {
                 let commitment = transcript.read_commitment().unwrap();
-                let num_vars = field_to_usize(&transcript.read_field_element().unwrap(), None);
+                let num_vars = field_to_usize(&transcript.read_field_element().unwrap());
                 (num_vars, commitment)
             })
             .collect_vec();
 
         Ok(roots
             .iter()
-            .map(|(num_vars, commitment)| BasefoldCommitment::new(commitment.clone(), *num_vars))
+            .map(|(num_vars, commitment)| {
+                BasefoldCommitment::new(commitment.clone(), *num_vars).as_field::<PF>()
+            })
             .collect_vec())
     }
 
@@ -576,7 +631,7 @@ where
     ) -> Result<Self::CommitmentWithData, Error> {
         let comm = Self::commit(pp, poly)?;
 
-        transcript.write_commitments(comm.as_ref())?;
+        transcript.write_commitment(&comm.get_root_as())?;
         transcript.write_field_element(&u32_to_field::<F>(comm.num_vars as u32))?;
 
         Ok(comm)
@@ -612,7 +667,7 @@ where
         let query_challenges = transcript
             .squeeze_challenges(vp.num_verifier_queries)
             .iter()
-            .map(|index| field_to_usize(index, Some(1 << (num_vars + vp.log_rate))))
+            .map(|index| field_to_usize(index) % (1 << (num_vars + vp.log_rate)))
             .collect_vec();
         let query_result_with_merkle_path = QueriesResultWithMerklePath::read_transcript(
             transcript,
@@ -633,7 +688,7 @@ where
         let mut eq = build_eq_x_r_vec(&point.as_slice()[..point.len() - fold_challenges.len()]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
-        verifier_query_phase::<F, PF, H>(
+        verifier_query_phase::<F, PF>(
             &query_result_with_merkle_path,
             &sumcheck_messages,
             &fold_challenges,
@@ -706,7 +761,7 @@ where
         //start of verify
         //read first $(num_var - 1) commitments
         let mut sumcheck_messages = Vec::with_capacity(num_rounds);
-        let mut roots: Vec<Output<H>> = Vec::with_capacity(num_rounds - 1);
+        let mut roots: Vec<Digest<F>> = Vec::with_capacity(num_rounds - 1);
         let mut fold_challenges: Vec<F> = Vec::with_capacity(num_rounds);
         for i in 0..num_rounds {
             sumcheck_messages.push(transcript.read_field_elements(3).unwrap());
@@ -722,7 +777,7 @@ where
         let query_challenges = transcript
             .squeeze_challenges(vp.num_verifier_queries)
             .iter()
-            .map(|index| field_to_usize(index, Some(1 << (num_vars + vp.log_rate))))
+            .map(|index| field_to_usize(index) % (1 << (num_vars + vp.log_rate)))
             .collect_vec();
 
         let query_result_with_merkle_path = BatchedQueriesResultWithMerklePath::read_transcript(
@@ -746,7 +801,7 @@ where
         );
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
-        batch_verifier_query_phase::<F, PF, H>(
+        batch_verifier_query_phase::<F, PF>(
             &query_result_with_merkle_path,
             &sumcheck_messages,
             &fold_challenges,
@@ -766,7 +821,7 @@ where
 }
 
 // Split the input into chunks of message size, encode each message, and return the codewords
-fn encode_rs_basecode<F: PrimeField>(
+fn encode_rs_basecode<F: SmallField>(
     poly: &Vec<F>,
     rate: usize,
     message_size: usize,
@@ -790,7 +845,7 @@ fn encode_rs_basecode<F: PrimeField>(
 }
 
 #[allow(unused)]
-fn encode_repetition_basecode<F: PrimeField>(poly: &Vec<F>, rate: usize) -> Vec<Vec<F>> {
+fn encode_repetition_basecode<F: SmallField>(poly: &Vec<F>, rate: usize) -> Vec<Vec<F>> {
     let mut base_codewords = Vec::new();
     for c in poly {
         let mut rep_code = Vec::new();
@@ -803,7 +858,7 @@ fn encode_repetition_basecode<F: PrimeField>(poly: &Vec<F>, rate: usize) -> Vec<
 }
 
 //this function assumes all codewords in base_codeword has equivalent length
-pub fn evaluate_over_foldable_domain_generic_basecode<F: PrimeField, PF: PrimeField + Into<F>>(
+pub fn evaluate_over_foldable_domain_generic_basecode<F: SmallField, PF: SmallField + Into<F>>(
     base_message_length: usize,
     num_coeffs: usize,
     log_rate: usize,
@@ -847,7 +902,7 @@ pub fn evaluate_over_foldable_domain_generic_basecode<F: PrimeField, PF: PrimeFi
 }
 
 #[allow(unused)]
-pub fn evaluate_over_foldable_domain<F: PrimeField>(
+pub fn evaluate_over_foldable_domain<F: SmallField>(
     log_rate: usize,
     mut coeffs: Vec<F>,
     table: &Vec<Vec<F>>,
@@ -889,7 +944,7 @@ pub fn evaluate_over_foldable_domain<F: PrimeField>(
     coeffs_with_rep
 }
 
-fn interpolate_over_boolean_hypercube<F: PrimeField>(evals: &Vec<F>) -> Vec<F> {
+fn interpolate_over_boolean_hypercube<F: SmallField>(evals: &Vec<F>) -> Vec<F> {
     //iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
     let n = log2_strict(evals.len());
     let mut coeffs = vec![F::ZERO; evals.len()];
@@ -916,7 +971,7 @@ fn interpolate_over_boolean_hypercube<F: PrimeField>(evals: &Vec<F>) -> Vec<F> {
     coeffs
 }
 
-fn sum_check_first_round<F: PrimeField>(mut eq: &mut Vec<F>, mut bh_values: &mut Vec<F>) -> Vec<F> {
+fn sum_check_first_round<F: SmallField>(mut eq: &mut Vec<F>, mut bh_values: &mut Vec<F>) -> Vec<F> {
     // The input polynomials are in the form of evaluations. Instead of viewing
     // every one element as the evaluation of the polynomial at a single point,
     // we can view every two elements as partially evaluating the polynomial at
@@ -929,7 +984,7 @@ fn sum_check_first_round<F: PrimeField>(mut eq: &mut Vec<F>, mut bh_values: &mut
     //    p_i(&bh_values, &eq)
 }
 
-pub fn one_level_interp_hc<F: PrimeField>(evals: &mut Vec<F>) {
+pub fn one_level_interp_hc<F: SmallField>(evals: &mut Vec<F>) {
     if evals.len() == 1 {
         return;
     }
@@ -938,7 +993,7 @@ pub fn one_level_interp_hc<F: PrimeField>(evals: &mut Vec<F>) {
     });
 }
 
-pub fn one_level_eval_hc<F: PrimeField>(evals: &mut Vec<F>, challenge: F) {
+pub fn one_level_eval_hc<F: SmallField>(evals: &mut Vec<F>, challenge: F) {
     evals.par_chunks_mut(2).for_each(|chunk| {
         chunk[1] = chunk[0] + challenge * chunk[1];
     });
@@ -951,7 +1006,7 @@ pub fn one_level_eval_hc<F: PrimeField>(evals: &mut Vec<F>, challenge: F) {
     });
 }
 
-fn parallel_pi<F: PrimeField>(evals: &Vec<F>, eq: &Vec<F>) -> Vec<F> {
+fn parallel_pi<F: SmallField>(evals: &Vec<F>, eq: &Vec<F>) -> Vec<F> {
     if evals.len() == 1 {
         return vec![evals[0], evals[0], evals[0]];
     }
@@ -986,7 +1041,7 @@ fn parallel_pi<F: PrimeField>(evals: &Vec<F>, eq: &Vec<F>) -> Vec<F> {
     coeffs
 }
 
-fn sum_check_challenge_round<F: PrimeField>(
+fn sum_check_challenge_round<F: SmallField>(
     mut eq: &mut Vec<F>,
     mut bh_values: &mut Vec<F>,
     challenge: F,
@@ -1005,7 +1060,7 @@ fn sum_check_challenge_round<F: PrimeField>(
     // p_i(&bh_values,&eq)
 }
 
-fn sum_check_last_round<F: PrimeField>(
+fn sum_check_last_round<F: SmallField>(
     mut eq: &mut Vec<F>,
     mut bh_values: &mut Vec<F>,
     challenge: F,
@@ -1014,7 +1069,7 @@ fn sum_check_last_round<F: PrimeField>(
     one_level_eval_hc(&mut eq, challenge);
 }
 
-fn basefold_one_round_by_interpolation_weights<F: PrimeField, PF: PrimeField + Into<F>>(
+fn basefold_one_round_by_interpolation_weights<F: SmallField, PF: SmallField + Into<F>>(
     table: &Vec<Vec<(PF, PF)>>,
     level_index: usize,
     values: &Vec<F>,
@@ -1041,7 +1096,10 @@ fn basefold_get_query<F: SmallField, PF: SmallField + Into<F>>(
     poly_codeword: &Vec<PF>,
     oracles: &Vec<Vec<F>>,
     x_index: usize,
-) -> SingleQueryResult<F> {
+) -> SingleQueryResult<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     let mut index = x_index;
     let p1 = index | 1;
     let p0 = p1 - 1;
@@ -1069,12 +1127,16 @@ fn basefold_get_query<F: SmallField, PF: SmallField + Into<F>>(
     };
 }
 
-fn batch_basefold_get_query<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
-    comms: &[&BasefoldCommitmentWithData<PF, H>],
+fn batch_basefold_get_query<F: SmallField, PF: SmallField + Into<F>>(
+    comms: &[&BasefoldCommitmentWithData<PF>],
     oracles: &Vec<Vec<F>>,
     codeword_size: usize,
     x_index: usize,
-) -> BatchedSingleQueryResult<F> {
+) -> BatchedSingleQueryResult<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+    PF::BaseField: Serialize + DeserializeOwned,
+{
     let mut oracle_list_queries = Vec::with_capacity(oracles.len());
 
     let mut index = x_index;
@@ -1115,7 +1177,7 @@ fn batch_basefold_get_query<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
     }
 }
 
-pub fn interpolate2_weights<F: PrimeField>(points: [(F, F); 2], weight: F, x: F) -> F {
+pub fn interpolate2_weights<F: SmallField>(points: [(F, F); 2], weight: F, x: F) -> F {
     // a0 -> a1
     // b0 -> b1
     // x  -> a1 + (x-a0)*(b1-a1)/(b0-a0)
@@ -1129,7 +1191,7 @@ pub fn interpolate2_weights<F: PrimeField>(points: [(F, F); 2], weight: F, x: F)
     a1 + (x - a0) * (b1 - a1) * weight
 }
 
-pub fn query_point<F: PrimeField>(
+pub fn query_point<F: SmallField>(
     block_length: usize,
     eval_index: usize,
     level: usize,
@@ -1146,7 +1208,7 @@ pub fn query_point<F: PrimeField>(
     return el;
 }
 
-pub fn query_root_table_from_rng_aes<F: PrimeField>(
+pub fn query_root_table_from_rng_aes<F: SmallField>(
     level: usize,
     index: usize,
     cipher: &mut ctr::Ctr32LE<aes::Aes128>,
@@ -1173,7 +1235,7 @@ pub fn query_root_table_from_rng_aes<F: PrimeField>(
     res
 }
 
-pub fn interpolate2<F: PrimeField>(points: [(F, F); 2], x: F) -> F {
+pub fn interpolate2<F: SmallField>(points: [(F, F); 2], x: F) -> F {
     // a0 -> a1
     // b0 -> b1
     // x  -> a1 + (x-a0)*(b1-a1)/(b0-a0)
@@ -1183,15 +1245,15 @@ pub fn interpolate2<F: PrimeField>(points: [(F, F); 2], x: F) -> F {
     a1 + (x - a0) * (b1 - a1) * (b0 - a0).invert().unwrap()
 }
 
-fn degree_2_zero_plus_one<F: PrimeField>(poly: &Vec<F>) -> F {
+fn degree_2_zero_plus_one<F: SmallField>(poly: &Vec<F>) -> F {
     poly[0] + poly[0] + poly[1] + poly[2]
 }
 
-fn degree_2_eval<F: PrimeField>(poly: &Vec<F>, point: F) -> F {
+fn degree_2_eval<F: SmallField>(poly: &Vec<F>, point: F) -> F {
     poly[0] + point * poly[1] + point * point * poly[2]
 }
 
-fn from_raw_bytes<F: PrimeField>(bytes: &Vec<u8>) -> F {
+fn from_raw_bytes<F: SmallField>(bytes: &Vec<u8>) -> F {
     let mut res = F::ZERO;
     bytes.into_iter().for_each(|b| {
         res += F::from(u64::from(*b));
@@ -1200,17 +1262,19 @@ fn from_raw_bytes<F: PrimeField>(bytes: &Vec<u8>) -> F {
 }
 
 //outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-fn commit_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
+fn commit_phase<F: SmallField, PF: SmallField + Into<F>>(
     point: &Point<F, MultilinearPolynomial<PF>>,
-    comm: &BasefoldCommitmentWithData<PF, H>,
-    transcript: &mut impl TranscriptWrite<Output<H>, F>,
+    comm: &BasefoldCommitmentWithData<PF>,
+    transcript: &mut impl TranscriptWrite<Digest<F>, F>,
     num_vars: usize,
     num_rounds: usize,
     table_w_weights: &Vec<Vec<(F::BaseField, F::BaseField)>>,
     log_rate: usize,
-) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>)
+) -> (Vec<MerkleTree<F>>, Vec<Vec<F>>)
 where
     F::BaseField: Into<F>,
+    PF::BaseField: Serialize + DeserializeOwned,
+    F::BaseField: Serialize + DeserializeOwned,
 {
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
@@ -1252,7 +1316,7 @@ where
         if i < num_rounds - 1 {
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
-            let running_tree = MerkleTree::<F, H>::from_leaves(running_oracle.clone());
+            let running_tree = MerkleTree::<F>::from_leaves(running_oracle.clone());
             let running_root = running_tree.root();
             transcript.write_commitment(&running_root).unwrap();
 
@@ -1287,18 +1351,20 @@ where
 }
 
 //outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-fn batch_commit_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
+fn batch_commit_phase<F: SmallField, PF: SmallField + Into<F>>(
     point: &Point<F, MultilinearPolynomial<PF>>,
-    comms: &[&BasefoldCommitmentWithData<PF, H>],
-    transcript: &mut impl TranscriptWrite<Output<H>, F>,
+    comms: &[&BasefoldCommitmentWithData<PF>],
+    transcript: &mut impl TranscriptWrite<Digest<F>, F>,
     num_vars: usize,
     num_rounds: usize,
     table_w_weights: &Vec<Vec<(F::BaseField, F::BaseField)>>,
     log_rate: usize,
     coeffs: &[F],
-) -> (Vec<MerkleTree<F, H>>, Vec<Vec<F>>)
+) -> (Vec<MerkleTree<F>>, Vec<Vec<F>>)
 where
     F::BaseField: Into<F>,
+    PF::BaseField: Serialize + DeserializeOwned,
+    F::BaseField: Serialize + DeserializeOwned,
 {
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
@@ -1370,7 +1436,7 @@ where
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
             sumcheck_messages.push(last_sumcheck_message.clone());
-            let running_tree = MerkleTree::<F, H>::from_leaves(running_oracle.clone());
+            let running_tree = MerkleTree::<F>::from_leaves(running_oracle.clone());
             let running_root = running_tree.root();
             transcript.write_commitment(&running_root).unwrap();
 
@@ -1419,12 +1485,16 @@ where
     return (trees, oracles);
 }
 
-fn query_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
-    transcript: &mut impl TranscriptWrite<Output<H>, F>,
-    comm: &BasefoldCommitmentWithData<PF, H>,
+fn query_phase<F: SmallField, PF: SmallField + Into<F>>(
+    transcript: &mut impl TranscriptWrite<Digest<F>, F>,
+    comm: &BasefoldCommitmentWithData<PF>,
     oracles: &Vec<Vec<F>>,
     num_verifier_queries: usize,
-) -> QueriesResult<F> {
+) -> QueriesResult<F>
+where
+    PF::BaseField: Serialize + DeserializeOwned,
+    F::BaseField: Serialize + DeserializeOwned,
+{
     let queries = transcript.squeeze_challenges(num_verifier_queries);
 
     // Transform the challenge queries from field elements into integers
@@ -1459,18 +1529,21 @@ struct CodewordSingleQueryResult<F> {
     index: usize,
 }
 
-impl<F> CodewordSingleQueryResult<F> {
+impl<F: SmallField> CodewordSingleQueryResult<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     fn new(left: F, right: F, index: usize) -> Self {
         Self { left, right, index }
     }
 
-    pub fn write_transcript<H: Hash>(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<F>, F>) {
         transcript.write_field_element(&self.left).unwrap();
         transcript.write_field_element(&self.right).unwrap();
     }
 
-    pub fn read_transcript<H: Hash>(
-        transcript: &mut impl TranscriptRead<Output<H>, F>,
+    pub fn read_transcript(
+        transcript: &mut impl TranscriptRead<Digest<F>, F>,
         full_codeword_size_log: usize,
         codeword_size_log: usize,
         index: usize,
@@ -1484,31 +1557,37 @@ impl<F> CodewordSingleQueryResult<F> {
 }
 
 #[derive(Debug, Clone)]
-struct CodewordSingleQueryResultWithMerklePath<F, H: Hash> {
+struct CodewordSingleQueryResultWithMerklePath<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     query: CodewordSingleQueryResult<F>,
-    merkle_path: MerklePathWithoutLeafOrRoot<H>,
+    merkle_path: MerklePathWithoutLeafOrRoot<F>,
 }
 
-impl<F: PrimeField, H: Hash> CodewordSingleQueryResultWithMerklePath<F, H> {
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
-        self.query.write_transcript::<H>(transcript);
-        self.merkle_path.write_transcript::<F>(transcript);
+impl<F: SmallField> CodewordSingleQueryResultWithMerklePath<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<F>, F>) {
+        self.query.write_transcript(transcript);
+        self.merkle_path.write_transcript(transcript);
     }
 
     pub fn read_transcript(
-        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        transcript: &mut impl TranscriptRead<Digest<F>, F>,
         full_codeword_size_log: usize,
         codeword_size_log: usize,
         index: usize,
     ) -> Self {
         Self {
-            query: CodewordSingleQueryResult::read_transcript::<H>(
+            query: CodewordSingleQueryResult::read_transcript(
                 transcript,
                 full_codeword_size_log,
                 codeword_size_log,
                 index,
             ),
-            merkle_path: MerklePathWithoutLeafOrRoot::read_transcript::<F>(
+            merkle_path: MerklePathWithoutLeafOrRoot::read_transcript(
                 transcript,
                 codeword_size_log,
             ),
@@ -1517,7 +1596,7 @@ impl<F: PrimeField, H: Hash> CodewordSingleQueryResultWithMerklePath<F, H> {
 
     /// Check this query against a Merkle root. The Merkle path and root are possibly
     /// created when the leaves are in a different field
-    pub fn check_merkle_path<PF: PrimeField>(&self, root: &Output<H>)
+    pub fn check_merkle_path<PF: SmallField<BaseField = F::BaseField>>(&self, root: &Digest<F>)
     where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
@@ -1542,13 +1621,19 @@ struct CommitmentsQueryResult<F> {
 }
 
 #[derive(Debug, Clone)]
-struct OracleListQueryResultWithMerklePath<F, H: Hash> {
-    inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>,
+struct OracleListQueryResultWithMerklePath<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<CodewordSingleQueryResultWithMerklePath<F>>,
 }
 
-impl<F: PrimeField, H: Hash> OracleListQueryResultWithMerklePath<F, H> {
+impl<F: SmallField> OracleListQueryResultWithMerklePath<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     pub fn read_transcript(
-        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        transcript: &mut impl TranscriptRead<Digest<F>, F>,
         num_rounds: usize,
         codeword_size_log: usize,
         index: usize,
@@ -1572,13 +1657,19 @@ impl<F: PrimeField, H: Hash> OracleListQueryResultWithMerklePath<F, H> {
 }
 
 #[derive(Debug, Clone)]
-struct CommitmentsQueryResultWithMerklePath<F, H: Hash> {
-    inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>,
+struct CommitmentsQueryResultWithMerklePath<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<CodewordSingleQueryResultWithMerklePath<F>>,
 }
 
-impl<F: PrimeField, H: Hash> CommitmentsQueryResultWithMerklePath<F, H> {
+impl<F: SmallField> CommitmentsQueryResultWithMerklePath<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     pub fn read_transcript(
-        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        transcript: &mut impl TranscriptRead<Digest<F>, F>,
         max_num_vars: usize,
         poly_num_vars: &[usize],
         log_rate: usize,
@@ -1600,7 +1691,7 @@ impl<F: PrimeField, H: Hash> CommitmentsQueryResultWithMerklePath<F, H> {
     }
 }
 
-impl<F: PrimeField> ListQueryResult<F> for OracleListQueryResult<F> {
+impl<F: SmallField> ListQueryResult<F> for OracleListQueryResult<F> {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<F>> {
         &self.inner
     }
@@ -1610,7 +1701,7 @@ impl<F: PrimeField> ListQueryResult<F> for OracleListQueryResult<F> {
     }
 }
 
-impl<F: PrimeField> ListQueryResult<F> for CommitmentsQueryResult<F> {
+impl<F: SmallField> ListQueryResult<F> for CommitmentsQueryResult<F> {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<F>> {
         &self.inner
     }
@@ -1620,50 +1711,56 @@ impl<F: PrimeField> ListQueryResult<F> for CommitmentsQueryResult<F> {
     }
 }
 
-impl<F: PrimeField, H: Hash> ListQueryResultWithMerklePath<F, H>
-    for OracleListQueryResultWithMerklePath<F, H>
+impl<F: SmallField> ListQueryResultWithMerklePath<F> for OracleListQueryResultWithMerklePath<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
 {
-    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>> {
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F>> {
         &self.inner
     }
 
-    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>) -> Self {
+    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F>>) -> Self {
         Self { inner }
     }
 }
 
-impl<F: PrimeField, H: Hash> ListQueryResultWithMerklePath<F, H>
-    for CommitmentsQueryResultWithMerklePath<F, H>
+impl<F: SmallField> ListQueryResultWithMerklePath<F> for CommitmentsQueryResultWithMerklePath<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
 {
-    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>> {
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F>> {
         &self.inner
     }
 
-    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>) -> Self {
+    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F>>) -> Self {
         Self { inner }
     }
 }
 
-trait ListQueryResult<F: PrimeField> {
+trait ListQueryResult<F: SmallField> {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<F>>;
 
     fn get_inner_into(self) -> Vec<CodewordSingleQueryResult<F>>;
 
-    fn merkle_path<'a, H: Hash, PF: PrimeField + Into<F>>(
+    fn merkle_path<'a, PF: SmallField<BaseField = F::BaseField> + Into<F>>(
         &self,
-        trees: impl Fn(usize) -> &'a MerkleTree<PF, H>,
-    ) -> Vec<MerklePathWithoutLeafOrRoot<H>> {
+        trees: impl Fn(usize) -> &'a MerkleTree<PF>,
+    ) -> Vec<MerklePathWithoutLeafOrRoot<F>>
+    where
+        PF::BaseField: Serialize + DeserializeOwned,
+    {
         self.get_inner()
             .into_iter()
             .enumerate()
             .map(|(i, query_result)| {
-                let path = trees(i).merkle_path_without_leaf_sibling_or_root(query_result.index);
+                let path =
+                    trees(i).merkle_path_without_leaf_sibling_or_root::<F>(query_result.index);
                 if cfg!(feature = "sanity-check") {
                     path.authenticate_leaves_root(
                         query_result.left,
                         query_result.right,
                         query_result.index,
-                        &trees(i).root(),
+                        &Digest::<F>(trees(i).root().0.try_into().unwrap()),
                     );
                 }
                 path
@@ -1672,15 +1769,25 @@ trait ListQueryResult<F: PrimeField> {
     }
 }
 
-trait ListQueryResultWithMerklePath<F: PrimeField, H: Hash>: Sized {
-    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F, H>>) -> Self;
+trait ListQueryResultWithMerklePath<F: SmallField>: Sized
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<F>>) -> Self;
 
-    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F, H>>;
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<F>>;
 
-    fn from_query_and_trees<'a, LQR: ListQueryResult<F>, PF: PrimeField + Into<F>>(
+    fn from_query_and_trees<
+        'a,
+        LQR: ListQueryResult<F>,
+        PF: SmallField<BaseField = F::BaseField> + Into<F>,
+    >(
         query_result: LQR,
-        trees: impl Fn(usize) -> &'a MerkleTree<PF, H>,
-    ) -> Self {
+        trees: impl Fn(usize) -> &'a MerkleTree<PF>,
+    ) -> Self
+    where
+        PF::BaseField: Serialize + DeserializeOwned,
+    {
         Self::new(
             query_result
                 .merkle_path(trees)
@@ -1696,13 +1803,13 @@ trait ListQueryResultWithMerklePath<F: PrimeField, H: Hash>: Sized {
         )
     }
 
-    fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+    fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<F>, F>) {
         self.get_inner()
             .iter()
             .for_each(|q| q.write_transcript(transcript));
     }
 
-    fn check_merkle_paths<PF: PrimeField>(&self, roots: &Vec<Output<H>>)
+    fn check_merkle_paths<PF: SmallField<BaseField = F::BaseField>>(&self, roots: &Vec<Digest<F>>)
     where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
@@ -1723,17 +1830,26 @@ struct SingleQueryResult<F> {
 }
 
 #[derive(Debug, Clone)]
-struct SingleQueryResultWithMerklePath<F, H: Hash> {
-    oracle_query: OracleListQueryResultWithMerklePath<F, H>,
-    commitment_query: CodewordSingleQueryResultWithMerklePath<F, H>,
+struct SingleQueryResultWithMerklePath<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    oracle_query: OracleListQueryResultWithMerklePath<F>,
+    commitment_query: CodewordSingleQueryResultWithMerklePath<F>,
 }
 
-impl<F: PrimeField, H: Hash> SingleQueryResultWithMerklePath<F, H> {
-    pub fn from_single_query_result<PF: PrimeField>(
+impl<F: SmallField> SingleQueryResultWithMerklePath<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn from_single_query_result<PF: SmallField<BaseField = F::BaseField>>(
         single_query_result: SingleQueryResult<F>,
-        oracle_trees: &Vec<MerkleTree<F, H>>,
-        commitment: &BasefoldCommitmentWithData<PF, H>,
-    ) -> Self {
+        oracle_trees: &Vec<MerkleTree<F>>,
+        commitment: &BasefoldCommitmentWithData<PF>,
+    ) -> Self
+    where
+        PF::BaseField: Serialize + DeserializeOwned,
+    {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
                 single_query_result.oracle_query,
@@ -1750,13 +1866,13 @@ impl<F: PrimeField, H: Hash> SingleQueryResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<F>, F>) {
         self.oracle_query.write_transcript(transcript);
         self.commitment_query.write_transcript(transcript);
     }
 
     pub fn read_transcript(
-        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        transcript: &mut impl TranscriptRead<Digest<F>, F>,
         num_rounds: usize,
         log_rate: usize,
         num_vars: usize,
@@ -1778,23 +1894,25 @@ impl<F: PrimeField, H: Hash> SingleQueryResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check<PF: PrimeField>(
+    pub fn check<PF: SmallField<BaseField = F::BaseField>>(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
         num_vars: usize,
         log_rate: usize,
         final_codeword: &Vec<F>,
-        roots: &Vec<Output<H>>,
-        comm: &BasefoldCommitment<H>,
+        roots: &Vec<Digest<F>>,
+        comm: &BasefoldCommitment<PF>,
         mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
     ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
+        PF::BaseField: Serialize + DeserializeOwned,
     {
         self.oracle_query.check_merkle_paths::<F>(roots);
-        self.commitment_query.check_merkle_path::<PF>(&comm.root());
+        self.commitment_query
+            .check_merkle_path::<PF>(&Digest(comm.root().0.try_into().unwrap()));
 
         let mut curr_left = self.commitment_query.query.left;
         let mut curr_right = self.commitment_query.query.right;
@@ -1844,17 +1962,26 @@ struct BatchedSingleQueryResult<F> {
 }
 
 #[derive(Debug, Clone)]
-struct BatchedSingleQueryResultWithMerklePath<F, H: Hash> {
-    oracle_query: OracleListQueryResultWithMerklePath<F, H>,
-    commitments_query: CommitmentsQueryResultWithMerklePath<F, H>,
+struct BatchedSingleQueryResultWithMerklePath<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    oracle_query: OracleListQueryResultWithMerklePath<F>,
+    commitments_query: CommitmentsQueryResultWithMerklePath<F>,
 }
 
-impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
-    pub fn from_batched_single_query_result<PF: PrimeField + Into<F>>(
+impl<F: SmallField> BatchedSingleQueryResultWithMerklePath<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn from_batched_single_query_result<PF: SmallField<BaseField = F::BaseField> + Into<F>>(
         batched_single_query_result: BatchedSingleQueryResult<F>,
-        oracle_trees: &Vec<MerkleTree<F, H>>,
-        commitments: &Vec<&BasefoldCommitmentWithData<PF, H>>,
-    ) -> Self {
+        oracle_trees: &Vec<MerkleTree<F>>,
+        commitments: &Vec<&BasefoldCommitmentWithData<PF>>,
+    ) -> Self
+    where
+        PF::BaseField: Serialize + DeserializeOwned,
+    {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
                 batched_single_query_result.oracle_query,
@@ -1867,13 +1994,13 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<F>, F>) {
         self.oracle_query.write_transcript(transcript);
         self.commitments_query.write_transcript(transcript);
     }
 
     pub fn read_transcript(
-        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        transcript: &mut impl TranscriptRead<Digest<F>, F>,
         num_rounds: usize,
         log_rate: usize,
         poly_num_vars: &[usize],
@@ -1897,25 +2024,30 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check<PF: PrimeField>(
+    pub fn check<PF: SmallField<BaseField = F::BaseField>>(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
         num_vars: usize,
         log_rate: usize,
         final_codeword: &Vec<F>,
-        roots: &Vec<Output<H>>,
-        comms: &Vec<&BasefoldCommitment<H>>,
+        roots: &Vec<Digest<F>>,
+        comms: &Vec<&BasefoldCommitment<PF>>,
         coeffs: &[F],
         mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
     ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
+        PF::BaseField: Serialize + DeserializeOwned,
     {
         self.oracle_query.check_merkle_paths::<F>(roots);
-        self.commitments_query
-            .check_merkle_paths::<PF>(&comms.iter().map(|comm| comm.root()).collect());
+        self.commitments_query.check_merkle_paths::<PF>(
+            &comms
+                .iter()
+                .map(|comm| comm.as_field::<F>().root())
+                .collect(),
+        );
 
         let mut curr_left = F::ZERO;
         let mut curr_right = F::ZERO;
@@ -1997,20 +2129,29 @@ impl<F: PrimeField, H: Hash> BatchedSingleQueryResultWithMerklePath<F, H> {
     }
 }
 
-struct BatchedQueriesResult<F> {
+struct BatchedQueriesResult<F: SmallField> {
     inner: Vec<(usize, BatchedSingleQueryResult<F>)>,
 }
 
-struct BatchedQueriesResultWithMerklePath<F, H: Hash> {
-    inner: Vec<(usize, BatchedSingleQueryResultWithMerklePath<F, H>)>,
+struct BatchedQueriesResultWithMerklePath<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<(usize, BatchedSingleQueryResultWithMerklePath<F>)>,
 }
 
-impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
-    pub fn from_batched_query_result<PF: PrimeField + Into<F>>(
+impl<F: SmallField> BatchedQueriesResultWithMerklePath<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn from_batched_query_result<PF: SmallField<BaseField = F::BaseField> + Into<F>>(
         batched_query_result: BatchedQueriesResult<F>,
-        oracle_trees: &Vec<MerkleTree<F, H>>,
-        commitments: &Vec<&BasefoldCommitmentWithData<PF, H>>,
-    ) -> Self {
+        oracle_trees: &Vec<MerkleTree<F>>,
+        commitments: &Vec<&BasefoldCommitmentWithData<PF>>,
+    ) -> Self
+    where
+        PF::BaseField: Serialize + DeserializeOwned,
+    {
         Self {
             inner: batched_query_result
                 .inner
@@ -2029,14 +2170,14 @@ impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<F>, F>) {
         self.inner
             .iter()
             .for_each(|(_, q)| q.write_transcript(transcript));
     }
 
     pub fn read_transcript(
-        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        transcript: &mut impl TranscriptRead<Digest<F>, F>,
         num_rounds: usize,
         log_rate: usize,
         poly_num_vars: &[usize],
@@ -2061,20 +2202,21 @@ impl<F: PrimeField, H: Hash> BatchedQueriesResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check<PF: PrimeField>(
+    pub fn check<PF: SmallField<BaseField = F::BaseField>>(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
         num_vars: usize,
         log_rate: usize,
         final_codeword: &Vec<F>,
-        roots: &Vec<Output<H>>,
-        comms: &Vec<&BasefoldCommitment<H>>,
+        roots: &Vec<Digest<F>>,
+        comms: &Vec<&BasefoldCommitment<PF>>,
         coeffs: &[F],
         cipher: ctr::Ctr32LE<aes::Aes128>,
     ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
+        PF::BaseField: Serialize + DeserializeOwned,
     {
         self.inner.par_iter().for_each(|(index, query)| {
             query.check::<PF>(
@@ -2097,16 +2239,25 @@ struct QueriesResult<F> {
     inner: Vec<(usize, SingleQueryResult<F>)>,
 }
 
-struct QueriesResultWithMerklePath<F, H: Hash> {
-    inner: Vec<(usize, SingleQueryResultWithMerklePath<F, H>)>,
+struct QueriesResultWithMerklePath<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<(usize, SingleQueryResultWithMerklePath<F>)>,
 }
 
-impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
-    pub fn from_query_result<PF: PrimeField>(
+impl<F: SmallField> QueriesResultWithMerklePath<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn from_query_result<PF: SmallField<BaseField = F::BaseField>>(
         query_result: QueriesResult<F>,
-        oracle_trees: &Vec<MerkleTree<F, H>>,
-        commitment: &BasefoldCommitmentWithData<PF, H>,
-    ) -> Self {
+        oracle_trees: &Vec<MerkleTree<F>>,
+        commitment: &BasefoldCommitmentWithData<PF>,
+    ) -> Self
+    where
+        PF::BaseField: Serialize + DeserializeOwned,
+    {
         Self {
             inner: query_result
                 .inner
@@ -2125,14 +2276,14 @@ impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Output<H>, F>) {
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<F>, F>) {
         self.inner
             .iter()
             .for_each(|(_, q)| q.write_transcript(transcript));
     }
 
     pub fn read_transcript(
-        transcript: &mut impl TranscriptRead<Output<H>, F>,
+        transcript: &mut impl TranscriptRead<Digest<F>, F>,
         num_rounds: usize,
         log_rate: usize,
         poly_num_vars: usize,
@@ -2157,19 +2308,20 @@ impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
         }
     }
 
-    pub fn check<PF: PrimeField>(
+    pub fn check<PF: SmallField<BaseField = F::BaseField>>(
         &self,
         fold_challenges: &Vec<F>,
         num_rounds: usize,
         num_vars: usize,
         log_rate: usize,
         final_codeword: &Vec<F>,
-        roots: &Vec<Output<H>>,
-        comm: &BasefoldCommitment<H>,
+        roots: &Vec<Digest<F>>,
+        comm: &BasefoldCommitment<PF>,
         cipher: ctr::Ctr32LE<aes::Aes128>,
     ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
+        PF::BaseField: Serialize + DeserializeOwned,
     {
         self.inner.par_iter().for_each(|(index, query)| {
             query.check::<PF>(
@@ -2187,19 +2339,23 @@ impl<F: PrimeField, H: Hash> QueriesResultWithMerklePath<F, H> {
     }
 }
 
-fn batch_query_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
-    transcript: &mut impl TranscriptWrite<Output<H>, F>,
+fn batch_query_phase<F: SmallField, PF: SmallField<BaseField = F::BaseField> + Into<F>>(
+    transcript: &mut impl TranscriptWrite<Digest<F>, F>,
     codeword_size: usize,
-    comms: &[&BasefoldCommitmentWithData<PF, H>],
+    comms: &[&BasefoldCommitmentWithData<PF>],
     oracles: &Vec<Vec<F>>,
     num_verifier_queries: usize,
-) -> BatchedQueriesResult<F> {
+) -> BatchedQueriesResult<F>
+where
+    PF::BaseField: Serialize + DeserializeOwned,
+    F::BaseField: Serialize + DeserializeOwned,
+{
     let queries = transcript.squeeze_challenges(num_verifier_queries);
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
         .iter()
-        .map(|x_index| field_to_usize(x_index, Some(codeword_size)))
+        .map(|x_index| field_to_usize(x_index) % codeword_size)
         .collect_vec();
 
     BatchedQueriesResult {
@@ -2208,28 +2364,29 @@ fn batch_query_phase<F: SmallField, PF: SmallField + Into<F>, H: Hash>(
             .map(|x_index| {
                 (
                     *x_index,
-                    batch_basefold_get_query::<F, PF, H>(comms, &oracles, codeword_size, *x_index),
+                    batch_basefold_get_query::<F, PF>(comms, &oracles, codeword_size, *x_index),
                 )
             })
             .collect(),
     }
 }
 
-fn verifier_query_phase<F: PrimeField + TryInto<PF>, PF: PrimeField, H: Hash>(
-    queries: &QueriesResultWithMerklePath<F, H>,
+fn verifier_query_phase<F: SmallField + TryInto<PF>, PF: SmallField<BaseField = F::BaseField>>(
+    queries: &QueriesResultWithMerklePath<F>,
     sum_check_messages: &Vec<Vec<F>>,
     fold_challenges: &Vec<F>,
     num_rounds: usize,
     num_vars: usize,
     log_rate: usize,
     final_message: &Vec<F>,
-    roots: &Vec<Output<H>>,
-    comm: &BasefoldCommitment<H>,
+    roots: &Vec<Digest<F>>,
+    comm: &BasefoldCommitment<PF>,
     partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
 ) where
     <F as TryInto<PF>>::Error: Debug,
+    F::BaseField: Serialize + DeserializeOwned,
 {
     let message = interpolate_over_boolean_hypercube(&final_message);
     let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
@@ -2284,22 +2441,26 @@ fn verifier_query_phase<F: PrimeField + TryInto<PF>, PF: PrimeField, H: Hash>(
     );
 }
 
-fn batch_verifier_query_phase<F: PrimeField + TryInto<PF>, PF: PrimeField, H: Hash>(
-    queries: &BatchedQueriesResultWithMerklePath<F, H>,
+fn batch_verifier_query_phase<
+    F: SmallField + TryInto<PF>,
+    PF: SmallField<BaseField = F::BaseField>,
+>(
+    queries: &BatchedQueriesResultWithMerklePath<F>,
     sum_check_messages: &Vec<Vec<F>>,
     fold_challenges: &Vec<F>,
     num_rounds: usize,
     num_vars: usize,
     log_rate: usize,
     final_message: &Vec<F>,
-    roots: &Vec<Output<H>>,
-    comms: &Vec<&BasefoldCommitment<H>>,
+    roots: &Vec<Digest<F>>,
+    comms: &Vec<&BasefoldCommitment<PF>>,
     coeffs: &[F],
     partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
 ) where
     <F as TryInto<PF>>::Error: Debug,
+    F::BaseField: Serialize + DeserializeOwned,
 {
     let message = interpolate_over_boolean_hypercube(&final_message);
     let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
@@ -2355,7 +2516,7 @@ fn batch_verifier_query_phase<F: PrimeField + TryInto<PF>, PF: PrimeField, H: Ha
     );
 }
 
-fn get_table_aes<F: PrimeField, Rng: RngCore + Clone>(
+fn get_table_aes<F: SmallField, Rng: RngCore + Clone>(
     poly_size: usize,
     rate: usize,
     rng: &mut Rng,
@@ -2440,27 +2601,20 @@ mod test {
     use crate::{
         basefold::Basefold,
         test::{run_batch_commit_open_verify, run_commit_open_verify},
-        util::{
-            hash::{Hash, Keccak256, Output},
-            transcript::Blake2sTranscript,
-        },
+        util::transcript::PoseidonTranscript,
     };
     use goldilocks::{Goldilocks, GoldilocksExt2, GoldilocksExt3};
-    use halo2_curves::ff::Field;
     use rand_chacha::{
         rand_core::{RngCore, SeedableRng},
-        ChaCha12Rng, ChaCha8Rng,
+        ChaCha8Rng,
     };
 
-    use crate::basefold::Instant;
     use crate::BasefoldExtParams;
-    use blake2::Blake2s256;
-    use ff::PrimeField;
 
     // type Pcs = Basefold<Fp, Blake2s256, Five>;
-    type PcsGoldilocks = Basefold<Goldilocks, Blake2s256, Five>;
-    type PcsGoldilocks2 = Basefold<GoldilocksExt2, Blake2s256, Five>;
-    type PcsGoldilocks3 = Basefold<GoldilocksExt3, Blake2s256, Five>;
+    type PcsGoldilocks = Basefold<Goldilocks, Five>;
+    type PcsGoldilocks2 = Basefold<GoldilocksExt2, Five>;
+    type PcsGoldilocks3 = Basefold<GoldilocksExt3, Five>;
 
     #[derive(Debug)]
     pub struct Five {}
@@ -2479,7 +2633,7 @@ mod test {
         }
     }
 
-    pub fn p_i<F: PrimeField>(evals: &Vec<F>, eq: &Vec<F>) -> Vec<F> {
+    pub fn p_i<F: SmallField>(evals: &Vec<F>, eq: &Vec<F>) -> Vec<F> {
         if evals.len() == 1 {
             return vec![evals[0], evals[0], evals[0]];
         }
@@ -2496,7 +2650,7 @@ mod test {
         coeffs
     }
 
-    fn get_table<F: PrimeField>(
+    fn get_table<F: SmallField>(
         poly_size: usize,
         rate: usize,
         rng: &mut ChaCha8Rng,
@@ -2547,7 +2701,7 @@ mod test {
     }
 
     //helper function
-    fn rand_vec<F: PrimeField>(size: usize, mut rng: &mut ChaCha8Rng) -> Vec<F> {
+    fn rand_vec<F: SmallField>(size: usize, mut rng: &mut ChaCha8Rng) -> Vec<F> {
         (0..size).map(|_| F::random(&mut rng)).collect()
     }
 
@@ -2579,24 +2733,24 @@ mod test {
     #[test]
     fn commit_open_verify_goldilocks() {
         // Both challenge and poly are over base field
-        run_commit_open_verify::<Goldilocks, Goldilocks, PcsGoldilocks, Blake2sTranscript<_>>();
+        run_commit_open_verify::<Goldilocks, Goldilocks, PcsGoldilocks, PoseidonTranscript<_>>();
     }
 
     #[test]
     fn commit_open_verify_goldilocks_2() {
         // Challenge is over extension field, poly over the base field
-        run_commit_open_verify::<_, Goldilocks, PcsGoldilocks2, Blake2sTranscript<_>>();
+        run_commit_open_verify::<_, Goldilocks, PcsGoldilocks2, PoseidonTranscript<_>>();
         // Both challenge and poly are over extension field
-        run_commit_open_verify::<_, GoldilocksExt2, PcsGoldilocks2, Blake2sTranscript<_>>();
+        run_commit_open_verify::<_, GoldilocksExt2, PcsGoldilocks2, PoseidonTranscript<_>>();
     }
 
     #[test]
     fn commit_open_verify_goldilocks_3() {
         // Can't pass yet because GoldilocksExt3 does not implement invert
         // Challenge is over extension field, poly over the base field
-        run_commit_open_verify::<_, Goldilocks, PcsGoldilocks3, Blake2sTranscript<_>>();
+        run_commit_open_verify::<_, Goldilocks, PcsGoldilocks3, PoseidonTranscript<_>>();
         // Both challenge and poly are over extension field
-        run_commit_open_verify::<_, GoldilocksExt3, PcsGoldilocks3, Blake2sTranscript<_>>();
+        run_commit_open_verify::<_, GoldilocksExt3, PcsGoldilocks3, PoseidonTranscript<_>>();
     }
 
     // #[test]
@@ -2607,210 +2761,24 @@ mod test {
     #[test]
     fn batch_commit_open_verify_goldilocks() {
         // Both challenge and poly are over base field
-        run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks, Blake2sTranscript<_>>();
+        run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks, PoseidonTranscript<_>>();
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_2() {
         // Challenge is over extension field, poly over the base field
-        run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks2, Blake2sTranscript<_>>();
+        run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks2, PoseidonTranscript<_>>();
         // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<_, GoldilocksExt2, PcsGoldilocks2, Blake2sTranscript<_>>();
+        run_batch_commit_open_verify::<_, GoldilocksExt2, PcsGoldilocks2, PoseidonTranscript<_>>();
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_3() {
         // Can't pass yet because GoldilocksExt3 does not implement invert
         // Challenge is over extension field, poly over the base field
-        run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks3, Blake2sTranscript<_>>();
+        run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks3, PoseidonTranscript<_>>();
         // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<_, GoldilocksExt3, PcsGoldilocks3, Blake2sTranscript<_>>();
-    }
-
-    #[test]
-    fn test_sha3_hashes() {
-        use blake2::digest::FixedOutputReset;
-
-        type H = Keccak256;
-        let lots_of_hashes = Instant::now();
-        let values = vec![Goldilocks::ONE; 2000];
-        let mut hashes = vec![Output::<H>::default(); values.len() >> 1];
-        for (i, mut hash) in hashes.iter_mut().enumerate() {
-            let mut hasher = H::new();
-            hasher.update_field_element(&values[i + i]);
-            hasher.update_field_element(&values[i + i + 1]);
-            hasher.finalize_into_reset(&mut hash);
-        }
-        println!("lots of hashes sha3 time {:?}", lots_of_hashes.elapsed());
-
-        let hash_alot = Instant::now();
-        let mut hasher = H::new();
-        for i in 0..2000 {
-            hasher.update_field_element(&values[i]);
-        }
-        let mut hash = Output::<H>::default();
-        hasher.finalize_into_reset(&mut hash);
-        println!("hash a lot sha3 time {:?}", hash_alot.elapsed());
-    }
-
-    #[test]
-    fn test_blake2b_hashes() {
-        use blake2::{digest::FixedOutputReset, Blake2s256};
-
-        type H = Blake2s256;
-        let lots_of_hashes = Instant::now();
-        let values = vec![Goldilocks::ONE; 2000];
-        let mut hashes = vec![Output::<H>::default(); values.len() >> 1];
-        for (i, mut hash) in hashes.iter_mut().enumerate() {
-            let mut hasher = H::new();
-            hasher.update_field_element(&values[i + i]);
-            hasher.update_field_element(&values[i + i + 1]);
-            hasher.finalize_into_reset(&mut hash);
-        }
-        println!("lots of hashes blake2 time {:?}", lots_of_hashes.elapsed());
-
-        let hash_alot = Instant::now();
-        let mut hasher = H::new();
-        for i in 0..2000 {
-            hasher.update_field_element(&values[i]);
-        }
-        let mut hash = Output::<H>::default();
-        hasher.finalize_into_reset(&mut hash);
-        println!("hash alot blake2 time {:?}", hash_alot.elapsed());
-    }
-
-    #[test]
-    fn test_blake2b_no_finalize() {
-        use blake2::{digest::FixedOutputReset, Blake2s256};
-
-        type H = Blake2s256;
-        let lots_of_hashes = Instant::now();
-        let values = vec![Goldilocks::ONE; 2000];
-        let mut hashes = vec![Output::<H>::default(); values.len() >> 1];
-        for (i, hash) in hashes.iter_mut().enumerate() {
-            let f1 = values[i + 1].to_repr();
-            let f2 = values[i + i + 1].to_repr();
-            let data = [
-                <Goldilocks as AsRef<[u8]>>::as_ref(&f1),
-                <Goldilocks as AsRef<[u8]>>::as_ref(&f2),
-            ]
-            .concat();
-            //	    hasher.update_field_element(&values[i + i]);
-            //	    hasher.update_field_element(&values[i+ i + 1]);
-            *hash = H::digest(&data);
-        }
-        println!(
-            "lots of hashes blake2 time no finalize{:?}",
-            lots_of_hashes.elapsed()
-        );
-
-        let hash_alot = Instant::now();
-        let mut hasher = H::new();
-        for i in 0..2000 {
-            hasher.update_field_element(&values[i]);
-        }
-        let mut hash = Output::<H>::default();
-        hasher.finalize_into_reset(&mut hash);
-        println!("hash alot blake2 time no finalize{:?}", hash_alot.elapsed());
-    }
-
-    #[test]
-    fn test_cipher() {
-        use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
-        use generic_array::GenericArray;
-        type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
-        let mut rng = ChaCha12Rng::from_entropy();
-
-        let mut key: [u8; 16] = [042; 16];
-        let mut iv: [u8; 16] = [024; 16];
-        rng.fill_bytes(&mut key);
-        rng.fill_bytes(&mut iv);
-        //	rng.set_word_pos(0);
-
-        let mut key2: [u8; 16] = [042; 16];
-        let mut iv2: [u8; 16] = [024; 16];
-        rng.fill_bytes(&mut key2);
-        rng.fill_bytes(&mut iv2);
-
-        let mut buf1 = [0u8; 100];
-
-        let mut cipher = Aes128Ctr64LE::new(
-            GenericArray::from_slice(&key[..]),
-            GenericArray::from_slice(&iv[..]),
-        );
-        let hash_time = Instant::now();
-        cipher.apply_keystream(&mut buf1[..]);
-        println!("aes hash 34 bytes {:?}", hash_time.elapsed());
-        println!("buf1 {:?}", buf1);
-        for i in 0..40 {
-            let now = Instant::now();
-            cipher.seek((1 << i) as u64);
-            println!("aes seek {:?} : {:?}", (1 << i), now.elapsed());
-        }
-        let mut bufnew = [0u8; 1];
-        cipher.apply_keystream(&mut bufnew);
-
-        println!("byte1 {:?}", bufnew);
-
-        /*
-            let mut cipher2 = Aes128Ctr64LE::new(&key.into(),&iv.into());
-            let mut buf2 = [0u8; 34];
-            for chunk in buf2.chunks_mut(3){
-                cipher2.apply_keystream(chunk);
-            }
-
-            assert_eq!(buf1,buf2);
-        */
-        let mut dest: Vec<u8> = vec![0u8; 34];
-        let mut rng = ChaCha8Rng::from_entropy();
-        let now = Instant::now();
-        rng.fill_bytes(&mut dest);
-        println!("chacha20 hash 34 bytes {:?}", now.elapsed());
-        println!("des {:?}", dest);
-        let now = Instant::now();
-        rng.set_word_pos(1);
-
-        println!("chacha8 seek {:?}", now.elapsed());
-
-        let mut cipher = Aes128Ctr64LE::new(
-            GenericArray::from_slice(&key[..]),
-            GenericArray::from_slice(&iv[..]),
-        );
-
-        let now = Instant::now();
-        cipher.seek(33u64);
-        println!("aes seek {:?}", now.elapsed());
-        let mut bufnew = [0u8; 1];
-        cipher.apply_keystream(&mut bufnew);
-
-        println!("byte1 {:?}", bufnew);
-    }
-
-    #[test]
-    fn test_blake2b_simd_hashes() {
-        use blake2b_simd::State;
-        use ff::PrimeField;
-        let lots_of_hashes = Instant::now();
-        let values = vec![Goldilocks::ONE; 2000];
-        let mut states = vec![State::new(); 1000];
-
-        for (i, hash) in states.iter_mut().enumerate() {
-            hash.update(&values[i + i].to_repr().as_ref());
-            hash.update(&values[i + i + 1].to_repr().as_ref());
-            hash.finalize();
-        }
-        println!(
-            "lots of hashes blake2simd time {:?}",
-            lots_of_hashes.elapsed()
-        );
-
-        let hash_alot = Instant::now();
-        let mut state = State::new();
-        for i in 0..2000 {
-            state.update(values[i].to_repr().as_ref());
-        }
-        state.finalize();
-        println!("hash alot blake2simd time {:?}", hash_alot.elapsed());
+        run_batch_commit_open_verify::<_, GoldilocksExt3, PcsGoldilocks3, PoseidonTranscript<_>>();
     }
 
     #[test]

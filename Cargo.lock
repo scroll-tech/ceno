@@ -390,24 +390,6 @@ dependencies = [
 
 [[package]]
 name = "halo2curves"
-version = "0.3.2"
-source = "git+https://github.com/privacy-scaling-explorations/halo2curves.git?tag=0.3.2#9f5c50810bbefe779ee5cf1d852b2fe85dc35d5e"
-dependencies = [
- "ff",
- "group",
- "lazy_static",
- "num-bigint 0.4.4",
- "num-traits",
- "pasta_curves",
- "paste",
- "rand",
- "rand_core",
- "static_assertions",
- "subtle",
-]
-
-[[package]]
-name = "halo2curves"
 version = "0.3.3"
 source = "git+https://github.com/privacy-scaling-explorations/halo2curves?tag=0.3.3#8e4cb9f0c66c864e8ca25da07f50ae95f664a5b7"
 dependencies = [
@@ -493,12 +475,13 @@ dependencies = [
  "multilinear_extensions",
  "num-bigint 0.4.4",
  "num-integer",
- "poseidon 0.2.0 (git+https://github.com/han0110/poseidon?branch=feature/with-spec)",
+ "poseidon 0.2.0",
  "rand",
  "rand_chacha",
  "rayon",
  "serde",
  "sha3",
+ "transcript",
 ]
 
 [[package]]
@@ -577,15 +560,6 @@ checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-
-[[package]]
-name = "poseidon"
-version = "0.2.0"
-source = "git+https://github.com/han0110/poseidon?branch=feature/with-spec#fa4c2544ed38666f1f72d1c4fd0956756a7112b3"
-dependencies = [
- "halo2curves 0.3.2",
- "subtle",
-]
 
 [[package]]
 name = "poseidon"
@@ -790,7 +764,7 @@ dependencies = [
  "ff",
  "goldilocks",
  "halo2curves 0.1.0",
- "poseidon 0.2.0 (git+https://github.com/zhenfeizhang/poseidon)",
+ "poseidon 0.2.0",
  "rayon",
  "serde",
 ]

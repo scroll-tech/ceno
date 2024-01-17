@@ -1,35 +1,43 @@
+use goldilocks::SmallField;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
     slice::ParallelSlice,
 };
 
 use crate::util::{
-    hash::{Hash, Output},
     log2_strict,
     transcript::{TranscriptRead, TranscriptWrite},
-    Deserialize, DeserializeOwned, PrimeField, Serialize,
+    Deserialize, DeserializeOwned, Serialize,
 };
+
+use super::hash::{hash_two_digests, hash_two_leaves, Digest};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize", deserialize = "F: DeserializeOwned"))]
-pub struct MerkleTree<F, H: Hash> {
-    inner: Vec<Vec<Output<H>>>,
+pub struct MerkleTree<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<Vec<Digest<F>>>,
     leaves: Vec<F>,
 }
 
-impl<F: PrimeField, H: Hash> MerkleTree<F, H> {
+impl<F: SmallField> MerkleTree<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     pub fn from_leaves(leaves: Vec<F>) -> Self {
         Self {
-            inner: merkelize::<F, H>(&leaves),
+            inner: merkelize::<F>(&leaves),
             leaves,
         }
     }
 
-    pub fn root(&self) -> Output<H> {
+    pub fn root(&self) -> Digest<F> {
         self.inner.last().unwrap()[0].clone()
     }
 
-    pub fn root_ref(&self) -> &Output<H> {
+    pub fn root_ref(&self) -> &Digest<F> {
         &self.inner.last().unwrap()[0]
     }
 
@@ -49,17 +57,19 @@ impl<F: PrimeField, H: Hash> MerkleTree<F, H> {
         &self.leaves[index]
     }
 
-    pub fn merkle_path_without_leaf_sibling_or_root(
+    pub fn merkle_path_without_leaf_sibling_or_root<EF: SmallField<BaseField = F::BaseField>>(
         &self,
         leaf_index: usize,
-    ) -> MerklePathWithoutLeafOrRoot<H> {
+    ) -> MerklePathWithoutLeafOrRoot<EF> {
         assert!(leaf_index < self.size());
-        MerklePathWithoutLeafOrRoot::<H>::new(
+        MerklePathWithoutLeafOrRoot::<EF>::new(
             self.inner
                 .iter()
                 .take(self.height() - 1)
                 .enumerate()
-                .map(|(index, layer)| layer[(leaf_index >> (index + 1)) ^ 1].clone())
+                .map(|(index, layer)| {
+                    Digest::<EF>(layer[(leaf_index >> (index + 1)) ^ 1].clone().0)
+                })
                 .collect(),
         )
     }
@@ -67,12 +77,18 @@ impl<F: PrimeField, H: Hash> MerkleTree<F, H> {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "", deserialize = ""))]
-pub struct MerklePathWithoutLeafOrRoot<H: Hash> {
-    inner: Vec<Output<H>>,
+pub struct MerklePathWithoutLeafOrRoot<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<Digest<F>>,
 }
 
-impl<H: Hash> MerklePathWithoutLeafOrRoot<H> {
-    pub fn new(inner: Vec<Output<H>>) -> Self {
+impl<F: SmallField> MerklePathWithoutLeafOrRoot<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn new(inner: Vec<Digest<F>>) -> Self {
         Self { inner }
     }
 
@@ -80,21 +96,18 @@ impl<H: Hash> MerklePathWithoutLeafOrRoot<H> {
         self.inner.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Output<H>> {
+    pub fn iter(&self) -> impl Iterator<Item = &Digest<F>> {
         self.inner.iter()
     }
 
-    pub fn write_transcript<F: PrimeField>(
-        &self,
-        transcript: &mut impl TranscriptWrite<Output<H>, F>,
-    ) {
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<F>, F>) {
         self.inner
             .iter()
             .for_each(|hash| transcript.write_commitment(hash).unwrap());
     }
 
-    pub fn read_transcript<F: PrimeField>(
-        transcript: &mut impl TranscriptRead<Output<H>, F>,
+    pub fn read_transcript(
+        transcript: &mut impl TranscriptRead<Digest<F>, F>,
         height: usize,
     ) -> Self {
         // Since no root, the number of digests is height - 1
@@ -105,27 +118,27 @@ impl<H: Hash> MerklePathWithoutLeafOrRoot<H> {
         Self { inner }
     }
 
-    pub fn authenticate_leaves_root<F: PrimeField>(
+    pub fn authenticate_leaves_root<EF: SmallField<BaseField = F::BaseField>>(
         &self,
-        left: F,
-        right: F,
+        left: EF,
+        right: EF,
         index: usize,
-        root: &Output<H>,
+        root: &Digest<F>,
     ) {
-        authenticate_merkle_path_root::<H, F>(&self.inner, (left, right), index, root)
+        authenticate_merkle_path_root::<F, EF>(&self.inner, (left, right), index, root)
     }
 }
 
-fn merkelize<F: PrimeField, H: Hash>(values: &Vec<F>) -> Vec<Vec<Output<H>>> {
+fn merkelize<F: SmallField>(values: &Vec<F>) -> Vec<Vec<Digest<F>>>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     let log_v = log2_strict(values.len());
     let mut tree = Vec::with_capacity(log_v);
     // The first layer of hashes, half the number of leaves
-    let mut hashes = vec![Output::<H>::default(); values.len() >> 1];
+    let mut hashes = vec![Digest::default(); values.len() >> 1];
     hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
-        let mut hasher = H::new();
-        hasher.update_field_element(&values[i << 1]);
-        hasher.update_field_element(&values[(i << 1) + 1]);
-        *hash = hasher.finalize_fixed();
+        *hash = hash_two_leaves(&values[i << 1], &values[(i << 1) + 1]);
     });
 
     tree.push(hashes);
@@ -133,12 +146,7 @@ fn merkelize<F: PrimeField, H: Hash>(values: &Vec<F>) -> Vec<Vec<Output<H>>> {
     for i in 1..(log_v) {
         let oracle = tree[i - 1]
             .par_chunks_exact(2)
-            .map(|ys| {
-                let mut hasher = H::new();
-                hasher.update(&ys[0]);
-                hasher.update(&ys[1]);
-                hasher.finalize_fixed()
-            })
+            .map(|ys| hash_two_digests(&ys[0], &ys[1]))
             .collect::<Vec<_>>();
 
         tree.push(oracle);
@@ -146,34 +154,25 @@ fn merkelize<F: PrimeField, H: Hash>(values: &Vec<F>) -> Vec<Vec<Output<H>>> {
     tree
 }
 
-fn authenticate_merkle_path_root<H: Hash, F: PrimeField>(
-    path: &Vec<Output<H>>,
-    leaves: (F, F),
+fn authenticate_merkle_path_root<F: SmallField, EF: SmallField<BaseField = F::BaseField>>(
+    path: &Vec<Digest<F>>,
+    leaves: (EF, EF),
     x_index: usize,
-    root: &Output<H>,
-) {
-    let mut hasher = H::new();
-    let mut hash = Output::<H>::default();
+    root: &Digest<F>,
+) where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     let mut x_index = x_index;
-    hasher.update_field_element(&leaves.0);
-    hasher.update_field_element(&leaves.1);
-    hasher.finalize_into_reset(&mut hash);
+    let mut hash = Digest::<F>(hash_two_leaves(&leaves.0, &leaves.0).0);
 
     // The lowest bit in the index is ignored. It can point to either leaves
     x_index >>= 1;
     for i in 0..path.len() {
-        let mut hasher = H::new();
-        let mut new_hash = Output::<H>::default();
-        if x_index & 1 == 0 {
-            hasher.update(&hash);
-            hasher.update(&path[i]);
+        hash = if x_index & 1 == 0 {
+            hash_two_digests(&hash, &path[i])
         } else {
-            hasher.update(&path[i]);
-            hasher.update(&hash);
-        }
-        hasher.finalize_into_reset(&mut new_hash);
-        hash = new_hash;
-
+            hash_two_digests(&path[i], &hash)
+        };
         x_index >>= 1;
     }
     assert_eq!(&hash, root);
@@ -181,11 +180,10 @@ fn authenticate_merkle_path_root<H: Hash, F: PrimeField>(
 
 #[cfg(test)]
 mod tests {
-    use crate::util::transcript::{Blake2sTranscript, InMemoryTranscript};
+    use crate::util::transcript::{InMemoryTranscript, PoseidonTranscript};
 
     use super::*;
-    type F = halo2_curves::bn256::Fr;
-    type H = crate::util::hash::Blake2s;
+    type F = goldilocks::Goldilocks;
 
     #[test]
     fn test_merkle_tree() {
@@ -218,7 +216,7 @@ mod tests {
     }
 
     fn test_leaves(leaves: &Vec<F>) {
-        let tree = MerkleTree::<F, H>::from_leaves(leaves.clone());
+        let tree = MerkleTree::<F>::from_leaves(leaves.clone());
         let root = tree.root();
         for (i, _) in leaves.iter().enumerate() {
             let path = tree.merkle_path_without_leaf_sibling_or_root(i);
@@ -226,14 +224,12 @@ mod tests {
             let right_leaf = leaves[i | 1];
             path.authenticate_leaves_root(left_leaf, right_leaf, i, &root);
 
-            let mut transcript = Blake2sTranscript::new(());
-            path.write_transcript::<F>(&mut transcript);
+            let mut transcript = PoseidonTranscript::new();
+            path.write_transcript(&mut transcript);
             let proof = transcript.into_proof();
-            let mut transcript = Blake2sTranscript::from_proof((), &proof);
-            let path = MerklePathWithoutLeafOrRoot::<H>::read_transcript::<F>(
-                &mut transcript,
-                tree.height(),
-            );
+            let mut transcript = PoseidonTranscript::from_proof(&proof);
+            let path =
+                MerklePathWithoutLeafOrRoot::<F>::read_transcript(&mut transcript, tree.height());
             path.authenticate_leaves_root(left_leaf, right_leaf, i, &root);
         }
     }

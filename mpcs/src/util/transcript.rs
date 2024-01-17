@@ -1,18 +1,13 @@
-use crate::{
-    util::{
-        arithmetic::fe_mod_from_le_bytes,
-        hash::{Blake2s, Blake2s256, Hash, Keccak256, Output, Update},
-        Itertools,
-    },
-    Error,
-};
-use ff::PrimeField;
+use crate::{util::Itertools, Error};
+use ff::Field;
+use goldilocks::SmallField;
+use serde::{de::DeserializeOwned, Serialize};
 
+use std::fmt::Debug;
 
-use std::{
-    fmt::Debug,
-    io::{self, Cursor},
-};
+use super::hash::{new_hasher, Digest, Hasher, DIGEST_WIDTH};
+
+pub const OUTPUT_WIDTH: usize = 4; // Must be at least the degree of F
 
 pub trait FieldTranscript<F> {
     fn squeeze_challenge(&mut self) -> F;
@@ -88,168 +83,173 @@ pub trait TranscriptWrite<C, F>: Transcript<C, F> + FieldTranscriptWrite<F> {
     }
 }
 
-pub trait InMemoryTranscript {
-    type Param: Clone + Debug;
+pub trait InMemoryTranscript<F: SmallField> {
+    fn new() -> Self;
 
-    fn new(param: Self::Param) -> Self;
+    fn into_proof(self) -> Vec<F::BaseField>;
 
-    fn into_proof(self) -> Vec<u8>;
-
-    fn from_proof(param: Self::Param, proof: &[u8]) -> Self;
+    fn from_proof(proof: &[F::BaseField]) -> Self;
 }
 
-pub type Keccak256Transcript<S> = FiatShamirTranscript<Keccak256, S>;
-
-pub type Blake2sTranscript<S> = FiatShamirTranscript<Blake2s, S>;
-
-pub type Blake2s256Transcript<S> = FiatShamirTranscript<Blake2s256, S>;
-
-#[derive(Debug, Default)]
-pub struct FiatShamirTranscript<H, S> {
-    state: H,
-    stream: S,
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct Stream<T> {
+    inner: Vec<T>,
+    pointer: usize,
 }
 
-impl<H: Hash> InMemoryTranscript for FiatShamirTranscript<H, Cursor<Vec<u8>>> {
-    type Param = ();
-
-    fn new(_: Self::Param) -> Self {
-        Self::default()
-    }
-
-    fn into_proof(self) -> Vec<u8> {
-        self.stream.into_inner()
-    }
-
-    fn from_proof(_: Self::Param, proof: &[u8]) -> Self {
+impl<T: Copy> Stream<T> {
+    pub fn new(content: Vec<T>) -> Self {
         Self {
-            state: H::default(),
-            stream: Cursor::new(proof.to_vec()),
+            inner: content,
+            pointer: 0,
         }
     }
-}
 
-impl<H: Hash, F: PrimeField, S> FieldTranscript<F> for FiatShamirTranscript<H, S> {
-    fn squeeze_challenge(&mut self) -> F {
-        let hash = self.state.finalize_fixed_reset();
-        self.state.update(&hash);
-        fe_mod_from_le_bytes(hash)
+    pub fn into_inner(self) -> Vec<T> {
+        self.inner
     }
 
-    fn common_field_element(&mut self, fe: &F) -> Result<(), Error> {
-        self.state.update_field_element(fe);
+    fn left(&self) -> usize {
+        self.inner.len() - self.pointer
+    }
+
+    pub fn read_exact(&mut self, output: &mut Vec<T>) -> Result<(), Error> {
+        let left = self.left();
+        if left < output.len() {
+            return Err(Error::Transcript(
+                "Insufficient data in transcript".to_string(),
+            ));
+        }
+        let len = output.len();
+        output.copy_from_slice(&self.inner[self.pointer..(self.pointer + len)]);
+        self.pointer += output.len();
+        Ok(())
+    }
+
+    pub fn write_all(&mut self, input: &[T]) -> Result<(), Error> {
+        self.inner.extend_from_slice(input);
         Ok(())
     }
 }
 
-impl<H: Hash, F: PrimeField, R: io::Read> FieldTranscriptRead<F> for FiatShamirTranscript<H, R> {
-    fn read_field_element(&mut self) -> Result<F, Error> {
-        let mut repr = <F as PrimeField>::Repr::default();
+#[derive(Debug)]
+pub struct PoseidonTranscript<F: SmallField> {
+    state: Hasher<F>,
+    stream: Stream<F::BaseField>,
+}
 
-        self.stream
-            .read_exact(repr.as_mut())
-            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
-        repr.as_mut().reverse();
-        let fe = F::from_repr_vartime(repr).ok_or_else(|| {
-            Error::Transcript(
-                io::ErrorKind::Other,
-                "Invalid field element encoding in proof".to_string(),
-            )
-        })?;
+impl<F: SmallField> Default for PoseidonTranscript<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn default() -> Self {
+        Self {
+            state: new_hasher::<F>(),
+            stream: Stream::default(),
+        }
+    }
+}
+
+impl<F: SmallField> InMemoryTranscript<F> for PoseidonTranscript<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn into_proof(self) -> Vec<F::BaseField> {
+        self.stream.into_inner()
+    }
+
+    fn from_proof(proof: &[F::BaseField]) -> Self {
+        Self {
+            state: new_hasher::<F>(),
+            stream: Stream::new(proof.to_vec()),
+        }
+    }
+}
+
+impl<F: SmallField> FieldTranscript<F> for PoseidonTranscript<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn squeeze_challenge(&mut self) -> F {
+        let hash: [F::BaseField; OUTPUT_WIDTH] = self.state.squeeze_vec()[0..OUTPUT_WIDTH]
+            .try_into()
+            .unwrap();
+        self.state = new_hasher::<F>();
+        self.state.update(&hash);
+        F::from_limbs(&hash[..F::DEGREE])
+    }
+
+    fn common_field_element(&mut self, fe: &F) -> Result<(), Error> {
+        self.state.update(fe.to_limbs().as_slice());
+        Ok(())
+    }
+}
+
+impl<F: SmallField> FieldTranscriptRead<F> for PoseidonTranscript<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn read_field_element(&mut self) -> Result<F, Error> {
+        let mut repr = vec![F::BaseField::ZERO; F::DEGREE];
+
+        self.stream.read_exact(&mut repr)?;
+
+        let fe = F::from_limbs(&repr);
         self.common_field_element(&fe)?;
         Ok(fe)
     }
 }
 
-impl<H: Hash, F: PrimeField, W: io::Write> FieldTranscriptWrite<F> for FiatShamirTranscript<H, W> {
+impl<F: SmallField> FieldTranscriptWrite<F> for PoseidonTranscript<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     fn write_field_element(&mut self, fe: &F) -> Result<(), Error> {
         self.common_field_element(fe)?;
-        let mut repr = fe.to_repr();
-        repr.as_mut().reverse();
-        let _el = repr.as_ref();
-        //	println!("field el length {:?}", el.len());
-        self.stream
-            .write_all(repr.as_ref())
-            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))
+        self.stream.write_all(fe.to_limbs().as_slice())
     }
 }
 
-impl<F: PrimeField, S> Transcript<Output<Keccak256>, F> for Keccak256Transcript<S> {
-    fn common_commitment(&mut self, comm: &Output<Keccak256>) -> Result<(), Error> {
-        self.state.update(comm);
-        Ok(())
-    }
-}
-
-impl<F: PrimeField, R: io::Read> TranscriptRead<Output<Keccak256>, F> for Keccak256Transcript<R> {
-    fn read_commitment(&mut self) -> Result<Output<Keccak256>, Error> {
-        let mut hash = Output::<Keccak256>::default();
-        self.stream
-            .read_exact(hash.as_mut())
-            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
-        Ok(hash)
-    }
-}
-
-impl<F: PrimeField, W: io::Write> TranscriptWrite<Output<Keccak256>, F> for Keccak256Transcript<W> {
-    fn write_commitment(&mut self, hash: &Output<Keccak256>) -> Result<(), Error> {
-        self.stream
-            .write_all(hash)
-            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
-        Ok(())
-    }
-}
-
-impl<F: PrimeField, S> Transcript<Output<Blake2s>, F> for Blake2sTranscript<S> {
-    fn common_commitment(&mut self, comm: &Output<Blake2s>) -> Result<(), Error> {
-        self.state.update(comm);
-        Ok(())
-    }
-}
-
-impl<F: PrimeField, R: io::Read> TranscriptRead<Output<Blake2s>, F> for Blake2sTranscript<R> {
-    fn read_commitment(&mut self) -> Result<Output<Blake2s>, Error> {
-        let mut hash = Output::<Blake2s>::default();
-        self.stream
-            .read_exact(hash.as_mut())
-            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
-        Ok(hash)
-    }
-}
-
-impl<F: PrimeField, W: io::Write> TranscriptWrite<Output<Blake2s>, F> for Blake2sTranscript<W> {
-    fn write_commitment(&mut self, hash: &Output<Blake2s>) -> Result<(), Error> {
-        self.stream
-            .write_all(hash)
-            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
-        Ok(())
-    }
-}
-
-impl<F: PrimeField, S> Transcript<Output<Blake2s256>, F> for Blake2s256Transcript<S> {
-    fn common_commitment(&mut self, comm: &Output<Blake2s256>) -> Result<(), Error> {
-        self.state.update(comm);
-        Ok(())
-    }
-}
-
-impl<F: PrimeField, R: io::Read> TranscriptRead<Output<Blake2s256>, F> for Blake2s256Transcript<R> {
-    fn read_commitment(&mut self) -> Result<Output<Blake2s256>, Error> {
-        let mut hash = Output::<Blake2s256>::default();
-        self.stream
-            .read_exact(hash.as_mut())
-            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
-        Ok(hash)
-    }
-}
-
-impl<F: PrimeField, W: io::Write> TranscriptWrite<Output<Blake2s256>, F>
-    for Blake2s256Transcript<W>
+impl<F: SmallField> Transcript<Digest<F>, F> for PoseidonTranscript<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
 {
-    fn write_commitment(&mut self, hash: &Output<Blake2s256>) -> Result<(), Error> {
-        self.stream
-            .write_all(hash)
-            .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
+    fn common_commitment(&mut self, comm: &Digest<F>) -> Result<(), Error> {
+        self.state.update(&comm.0);
         Ok(())
+    }
+
+    fn common_commitments(&mut self, comms: &[Digest<F>]) -> Result<(), Error> {
+        comms
+            .iter()
+            .map(|comm| self.common_commitment(comm))
+            .try_collect()
+    }
+}
+
+impl<F: SmallField> TranscriptRead<Digest<F>, F> for PoseidonTranscript<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn read_commitment(&mut self) -> Result<Digest<F>, Error> {
+        let mut repr = vec![F::BaseField::ZERO; DIGEST_WIDTH];
+        self.stream.read_exact(&mut repr)?;
+        let comm = Digest(repr.as_slice().try_into().unwrap());
+        self.common_commitment(&comm)?;
+        Ok(comm)
+    }
+}
+
+impl<F: SmallField> TranscriptWrite<Digest<F>, F> for PoseidonTranscript<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn write_commitment(&mut self, comm: &Digest<F>) -> Result<(), Error> {
+        self.common_commitment(comm)?;
+        self.stream.write_all(&comm.0)
     }
 }

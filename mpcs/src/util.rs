@@ -6,6 +6,7 @@ pub mod plonky2_util;
 mod timer;
 pub mod transcript;
 use ff::PrimeField;
+use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub use timer::{end_timer, start_timer, start_unit_timer};
@@ -20,33 +21,12 @@ pub fn log2_strict(n: usize) -> usize {
     res as usize
 }
 
-/// The two functions field_to_usize and u32_to_field here are not meant
-/// to get the exact integer of the prime field element (it may not have one).
-/// And we don't know anything about the internal representation of F.
-/// So the two functions are only meant to read and write u32 integers to
-/// transcript, which does not directly support reading or writing u32.
-pub fn field_to_usize<F: PrimeField>(x: &F, n: Option<usize>) -> usize {
-    let x_rep = (*x).to_repr();
-    let x: &[u8] = x_rep.as_ref();
-    let (int_bytes, _) = x.split_at(std::mem::size_of::<u32>());
-    let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
-    if let Some(n) = n {
-        ((x_int as usize) % n).into()
-    } else {
-        x_int as usize
-    }
+pub fn field_to_usize<F: SmallField>(x: &F) -> usize {
+    x.to_canonical_u64_vec()[0] as usize
 }
 
-pub fn u32_to_field<F: PrimeField>(x: u32) -> F {
-    let mut repr = F::Repr::default();
-    let bytes = x.to_be_bytes();
-    let desired_length = repr.as_mut().len();
-    if desired_length > bytes.len() {
-        repr.as_mut()[..bytes.len()].copy_from_slice(&bytes);
-    } else {
-        repr.as_mut().copy_from_slice(&bytes[..desired_length]);
-    }
-    F::from_repr(repr).unwrap()
+pub fn u32_to_field<F: SmallField>(x: u32) -> F {
+    F::from(x as u64)
 }
 
 pub trait BitIndex {
@@ -107,7 +87,7 @@ pub(crate) use impl_index;
 pub mod test {
     use crate::util::{field_to_usize, u32_to_field};
     use ff::Field;
-    type F = halo2_curves::bn256::Fr;
+    type F = goldilocks::Goldilocks;
     use rand::{
         rngs::{OsRng, StdRng},
         CryptoRng, RngCore, SeedableRng,
@@ -137,7 +117,7 @@ pub mod test {
     #[test]
     pub fn test_field_transform() {
         assert_eq!(F::from(2) * F::from(3), F::from(6));
-        assert_eq!(field_to_usize(&u32_to_field::<F>(1u32), None), 1);
-        assert_eq!(field_to_usize(&u32_to_field::<F>(10u32), None), 10);
+        assert_eq!(field_to_usize(&u32_to_field::<F>(1u32)), 1);
+        assert_eq!(field_to_usize(&u32_to_field::<F>(10u32)), 10);
     }
 }

@@ -26,15 +26,10 @@ pub trait PolynomialCommitmentScheme<F: SmallField, PF: SmallField>: Clone + Deb
     type CommitmentWithData: Clone
         + Debug
         + Default
-        + AsRef<[Self::CommitmentChunk]>
         + Serialize
-        + DeserializeOwned;
-    type Commitment: Clone
-        + Debug
-        + Default
-        + AsRef<[Self::CommitmentChunk]>
-        + Serialize
-        + DeserializeOwned;
+        + DeserializeOwned
+        + Into<Self::CommitmentChunk>;
+    type Commitment: Clone + Debug + Default + Serialize + DeserializeOwned;
     type CommitmentChunk: Clone + Debug + Default;
     type Rng: RngCore + Clone;
 
@@ -51,13 +46,7 @@ pub trait PolynomialCommitmentScheme<F: SmallField, PF: SmallField>: Clone + Deb
         pp: &Self::ProverParam,
         poly: &Self::Polynomial,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
-    ) -> Result<Self::CommitmentWithData, Error> {
-        let comm = Self::commit(pp, poly)?;
-
-        transcript.write_commitments(comm.as_ref())?;
-
-        Ok(comm)
-    }
+    ) -> Result<Self::CommitmentWithData, Error>;
 
     fn batch_commit<'a>(
         pp: &Self::ProverParam,
@@ -72,14 +61,7 @@ pub trait PolynomialCommitmentScheme<F: SmallField, PF: SmallField>: Clone + Deb
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<Vec<Self::CommitmentWithData>, Error>
     where
-        Self::Polynomial: 'a,
-    {
-        let comms = Self::batch_commit(pp, polys)?;
-        for comm in comms.iter() {
-            transcript.write_commitments(comm.as_ref())?;
-        }
-        Ok(comms)
-    }
+        Self::Polynomial: 'a;
 
     fn open(
         pp: &Self::ProverParam,
@@ -177,7 +159,7 @@ pub enum Error {
     InvalidPcsOpen(String),
     InvalidSnark(String),
     Serialization(String),
-    Transcript(std::io::ErrorKind, String),
+    Transcript(String),
 }
 
 use poly::multilinear::MultilinearPolynomial;
@@ -237,10 +219,10 @@ mod test {
     use std::time::Instant;
     #[test]
     fn test_transcript() {
+        use crate::basefold::Basefold;
         use crate::basefold::BasefoldExtParams;
-        use crate::util::transcript::Blake2sTranscript;
         use crate::util::transcript::FieldTranscript;
-        use crate::{basefold::Basefold, util::hash::Blake2s};
+        use crate::util::transcript::PoseidonTranscript;
         use goldilocks::Goldilocks as Fr;
         #[derive(Debug)]
         pub struct Five {}
@@ -257,11 +239,11 @@ mod test {
             }
         }
 
-        type Pcs = Basefold<Fr, Blake2s, Five>;
+        type Pcs = Basefold<Fr, Five>;
         let num_vars = 10;
         let rng = ChaCha8Rng::from_seed([0u8; 32]);
         let poly_size = 1 << num_vars;
-        let mut transcript = Blake2sTranscript::new(());
+        let mut transcript = PoseidonTranscript::new();
         let poly = MultilinearPolynomial::rand(num_vars, OsRng);
         let param = <Pcs as PolynomialCommitmentScheme<Fr, Fr>>::setup(poly_size, &rng).unwrap();
 
@@ -302,7 +284,7 @@ mod test {
         >,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
             + TranscriptWrite<Pcs::CommitmentChunk, F>
-            + InMemoryTranscript<Param = ()>,
+            + InMemoryTranscript<F>,
     {
         for num_vars in 10..15 {
             println!("k {:?}", num_vars);
@@ -317,7 +299,7 @@ mod test {
             println!("after trim");
             // Commit and open
             let proof = {
-                let mut transcript = T::new(());
+                let mut transcript = T::new();
                 let poly = MultilinearPolynomial::rand(num_vars, OsRng);
                 let now = Instant::now();
 
@@ -332,7 +314,7 @@ mod test {
             };
             // Verify
             let result = {
-                let mut transcript = T::from_proof((), proof.as_slice());
+                let mut transcript = T::from_proof(proof.as_slice());
                 Pcs::verify(
                     &vp,
                     &Pcs::read_commitment(&vp, &mut transcript).unwrap(),
@@ -359,7 +341,7 @@ mod test {
         >,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
             + TranscriptWrite<Pcs::CommitmentChunk, F>
-            + InMemoryTranscript<Param = ()>,
+            + InMemoryTranscript<F>,
     {
         for num_vars in 10..15 {
             println!("k {:?}", num_vars);
@@ -381,7 +363,7 @@ mod test {
             .collect_vec();
 
             let proof = {
-                let mut transcript = T::new(());
+                let mut transcript = T::new();
                 let polys = (0..batch_size)
                     .map(|i| MultilinearPolynomial::rand(num_vars - (i >> 1), rng.clone()))
                     .collect_vec();
@@ -413,7 +395,7 @@ mod test {
             };
             // Batch verify
             let result = {
-                let mut transcript = T::from_proof((), proof.as_slice());
+                let mut transcript = T::from_proof(proof.as_slice());
                 let comms = &Pcs::read_commitments(&vp, batch_size, &mut transcript).unwrap();
 
                 let points = (0..num_points)

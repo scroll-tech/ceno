@@ -15,7 +15,7 @@ use ff::{Field, PrimeField};
 use num_integer::Integer;
 use std::{borrow::Cow, collections::HashMap, fmt::Debug, marker::PhantomData};
 
-use itertools::{Itertools};
+use itertools::Itertools;
 mod coeff;
 
 pub use coeff::CoefficientsProver;
@@ -279,7 +279,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
 
     use crate::{
         poly::Polynomial,
@@ -287,12 +286,12 @@ mod tests {
         util::{
             arithmetic::inner_product,
             expression::Query,
-            transcript::{InMemoryTranscript, Keccak256Transcript},
+            transcript::{InMemoryTranscript, PoseidonTranscript},
         },
     };
 
     use super::*;
-    use halo2_curves::bn256::Fr;
+    use goldilocks::Goldilocks as Fr;
 
     #[test]
     fn test_sum_check_protocol() {
@@ -325,7 +324,7 @@ mod tests {
                 MultilinearPolynomial::eq_xy(&points[1]).evals(),
             ) * Fr::from(4)
                 * Fr::from(2); // The third polynomial is summed twice because the hypercube is larger
-        let mut transcript = Keccak256Transcript::<Cursor<Vec<u8>>>::new(());
+        let mut transcript = PoseidonTranscript::<Fr>::new();
         let (challenges, evals) = <ClassicSumCheck<CoefficientsProver<Fr>> as SumCheck<Fr>>::prove(
             &(),
             2,
@@ -340,7 +339,7 @@ mod tests {
         assert_eq!(polys[2].evaluate(&challenges[..1]), evals[2]);
 
         let proof = transcript.into_proof();
-        let mut transcript = Keccak256Transcript::<Cursor<Vec<u8>>>::from_proof((), &proof);
+        let mut transcript = PoseidonTranscript::<Fr>::from_proof(&proof);
 
         let (new_sum, verifier_challenges) =
             <ClassicSumCheck<CoefficientsProver<Fr>> as SumCheck<Fr>>::verify(
@@ -360,7 +359,7 @@ mod tests {
                 + evals[2] * eq_xy_eval(&points[1], &challenges[..1]) * Fr::from(4)
         );
 
-        let mut transcript = Keccak256Transcript::<Cursor<Vec<u8>>>::from_proof((), &proof);
+        let mut transcript = PoseidonTranscript::<Fr>::from_proof(&proof);
 
         <ClassicSumCheck<CoefficientsProver<Fr>> as SumCheck<Fr>>::verify(
             &(),
