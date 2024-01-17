@@ -1,5 +1,5 @@
 [package]
-name = "zkvm"
+name = "singer_basic"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,3 +18,4 @@ gkr = { path = "../gkr" }
 transcript = { path = "../transcript" }
 mpcs = { path = "../mpcs" }
 gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
+itertools = "0.12.0"

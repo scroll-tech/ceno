@@ -8,7 +8,7 @@ members = [
     "transcript",
     "mpcs",
     "gkr-graph",
-    "zkvm",
+    "singer_basic",
 ]
 
 [workspace.package]
