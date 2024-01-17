@@ -1,4 +1,4 @@
-use frontend::structs::{CircuitBuilder, ConstantType};
+use frontend::structs::{CircuitBuilder, ConstantType, WireId};
 use gkr::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState};
 use gkr::utils::MultilinearExtensionFromVectors;
 use goldilocks::{Goldilocks, SmallField};
@@ -11,11 +11,11 @@ enum TableType {
 
 struct AllInputIndex {
     // public
-    inputs_idx: usize,
+    inputs_idx: WireId,
 
     // private
-    other_x_pows_idx: usize,
-    count_idx: usize,
+    other_x_pows_idx: WireId,
+    count_idx: WireId,
 }
 
 fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
@@ -42,7 +42,7 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
         circuit_builder.assert_const(diff, &F::ZERO);
     }
 
-    let table_type = TableType::FakeHashTable as usize;
+    let table_type = TableType::FakeHashTable as u16;
     let count_idx = circuit_builder.define_table_type(table_type);
     for i in 0..table_size {
         circuit_builder.add_table_item(table_type, pow_of_xs[i]);
@@ -71,7 +71,7 @@ fn main() {
     let (circuit, all_input_index) = construct_circuit::<Goldilocks>();
     // println!("circuit: {:?}", circuit);
     let mut wires_in = vec![vec![]; circuit.n_wires_in];
-    wires_in[all_input_index.inputs_idx] = vec![
+    wires_in[all_input_index.inputs_idx as usize] = vec![
         Goldilocks::from(2u64),
         Goldilocks::from(2u64),
         Goldilocks::from(4u64),
@@ -79,12 +79,12 @@ fn main() {
         Goldilocks::from(2u64),
     ];
     // x = 2, 2^2 = 4, 2^2^2 = 16, 2^2^2^2 = 256
-    wires_in[all_input_index.other_x_pows_idx] = vec![
+    wires_in[all_input_index.other_x_pows_idx as usize] = vec![
         Goldilocks::from(4u64),
         Goldilocks::from(16u64),
         Goldilocks::from(256u64),
     ];
-    wires_in[all_input_index.count_idx] = vec![
+    wires_in[all_input_index.count_idx as usize] = vec![
         Goldilocks::from(3u64),
         Goldilocks::from(1u64),
         Goldilocks::from(1u64),

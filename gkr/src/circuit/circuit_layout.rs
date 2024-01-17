@@ -1,7 +1,7 @@
 use core::fmt;
 use std::collections::HashMap;
 
-use frontend::structs::{CellType, CircuitBuilder, ConstantType, GateType};
+use frontend::structs::{CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
 
@@ -19,12 +19,12 @@ impl<F: SmallField> Circuit<F> {
         // stores all cell ids in each layer; `wire_ids_in_layer` stores the
         // wire id of each cell in its layer.
         let n_layers = circuit_builder.n_layers.unwrap();
-        let mut layers_of_cell_id = vec![vec![]; n_layers];
+        let mut layers_of_cell_id = vec![vec![]; n_layers as usize];
         let mut wire_ids_in_layer = vec![0; circuit_builder.cells.len()];
         for i in 0..circuit_builder.cells.len() {
             if let Some(layer) = circuit_builder.cells[i].layer {
-                wire_ids_in_layer[i] = layers_of_cell_id[layer].len();
-                layers_of_cell_id[layer].push(i);
+                wire_ids_in_layer[i] = layers_of_cell_id[layer as usize].len();
+                layers_of_cell_id[layer as usize].push(i);
             } else {
                 panic!("The layer of the cell is not specified.");
             }
@@ -70,13 +70,15 @@ impl<F: SmallField> Circuit<F> {
                         ));
                         wires_const_cell_ids.last_mut().unwrap().1.sort();
                     }
-                    CellType::WireIn(id) => {
-                        wires_in_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
-                        wires_in_cell_ids[*id].sort();
+                    CellType::WireIn(wire_id) => {
+                        wires_in_cell_ids[*wire_id as usize] =
+                            marked_cell.1.iter().map(|x| *x).collect();
+                        wires_in_cell_ids[*wire_id as usize].sort();
                     }
-                    CellType::WireOut(id) => {
-                        wires_out_cell_ids[*id] = marked_cell.1.iter().map(|x| *x).collect();
-                        wires_out_cell_ids[*id].sort();
+                    CellType::WireOut(wire_id) => {
+                        wires_out_cell_ids[*wire_id as usize] =
+                            marked_cell.1.iter().map(|x| *x).collect();
+                        wires_out_cell_ids[*wire_id as usize].sort();
                     }
                 }
             }
@@ -102,9 +104,9 @@ impl<F: SmallField> Circuit<F> {
 
         // TODO: This is to avoid incorrect use of input paste_from. To be refined.
         for (id, wire_in) in input_paste_from_wires_in.iter().enumerate() {
-            layers[n_layers - 1]
+            layers[n_layers as usize - 1]
                 .paste_from
-                .insert(id, (wire_in.0..wire_in.1).collect_vec());
+                .insert(id as LayerId, (wire_in.0..wire_in.1).collect_vec());
         }
 
         let max_wires_in_num_vars =
@@ -135,9 +137,10 @@ impl<F: SmallField> Circuit<F> {
             let new_layer_id = layer_id + 1;
             let subsets = {
                 let mut subsets = HashMap::new();
-                let mut wire_id_assigner =
-                    layers_of_cell_id[new_layer_id].len().next_power_of_two();
-                let mut update_subset = |old_cell_id: usize| {
+                let mut wire_id_assigner = layers_of_cell_id[new_layer_id as usize]
+                    .len()
+                    .next_power_of_two();
+                let mut update_subset = |old_cell_id: CellId| {
                     let old_layer_id =
                         n_layers - 1 - circuit_builder.cells[old_cell_id].layer.unwrap();
                     if old_layer_id == new_layer_id {
@@ -149,7 +152,7 @@ impl<F: SmallField> Circuit<F> {
                         .insert(wire_ids_in_layer[old_cell_id], wire_id_assigner);
                     wire_id_assigner += 1;
                 };
-                for cell_id in layers_of_cell_id[layer_id].iter() {
+                for cell_id in layers_of_cell_id[layer_id as usize].iter() {
                     let cell = &circuit_builder.cells[*cell_id];
                     for gate in cell.gates.iter() {
                         match gate {
@@ -169,7 +172,7 @@ impl<F: SmallField> Circuit<F> {
                         }
                     }
                 }
-                layers[new_layer_id].num_vars = ceil_log2(wire_id_assigner) as usize;
+                layers[new_layer_id as usize].num_vars = ceil_log2(wire_id_assigner) as usize;
                 subsets
             };
 
@@ -177,31 +180,33 @@ impl<F: SmallField> Circuit<F> {
             // layer.
             for (old_layer_id, old_wire_ids) in subsets.iter() {
                 for (old_wire_id, new_wire_id) in old_wire_ids.iter() {
-                    layers[new_layer_id]
+                    layers[new_layer_id as usize]
                         .paste_from
                         .entry(*old_layer_id)
                         .or_insert(vec![])
                         .push(*new_wire_id);
-                    layers[*old_layer_id]
+                    layers[*old_layer_id as usize]
                         .copy_to
                         .entry(new_layer_id)
                         .or_insert(vec![])
                         .push(*old_wire_id);
                 }
             }
-            layers[new_layer_id].max_previous_num_vars =
-                layers[new_layer_id].max_previous_num_vars.max(ceil_log2(
-                    layers[new_layer_id]
+            layers[new_layer_id as usize].max_previous_num_vars = layers[new_layer_id as usize]
+                .max_previous_num_vars
+                .max(ceil_log2(
+                    layers[new_layer_id as usize]
                         .paste_from
                         .iter()
                         .map(|(_, old_wire_ids)| old_wire_ids.len())
                         .max()
                         .unwrap_or(1),
                 ));
-            layers[layer_id].max_previous_num_vars = layers[new_layer_id].num_vars;
+            layers[layer_id as usize].max_previous_num_vars =
+                layers[new_layer_id as usize].num_vars;
 
             // Compute gates with new wire ids accordingly.
-            let current_wire_id = |old_cell_id: usize| -> usize {
+            let current_wire_id = |old_cell_id: CellId| -> CellId {
                 let old_layer_id = n_layers - 1 - circuit_builder.cells[old_cell_id].layer.unwrap();
                 let old_wire_id = wire_ids_in_layer[old_cell_id];
                 if old_layer_id == new_layer_id {
@@ -213,10 +218,10 @@ impl<F: SmallField> Circuit<F> {
                     .get(&old_wire_id)
                     .unwrap()
             };
-            for (i, cell_id) in layers_of_cell_id[layer_id].iter().enumerate() {
+            for (i, cell_id) in layers_of_cell_id[layer_id as usize].iter().enumerate() {
                 let cell = &circuit_builder.cells[*cell_id];
                 if let Some(assert_const) = cell.assert_const {
-                    layers[layer_id].assert_consts.push(GateCIn {
+                    layers[layer_id as usize].assert_consts.push(GateCIn {
                         idx_out: i,
                         constant: ConstantType::Field(assert_const),
                     });
@@ -224,20 +229,20 @@ impl<F: SmallField> Circuit<F> {
                 for gate in cell.gates.iter() {
                     match gate {
                         GateType::AddC(c) => {
-                            layers[layer_id].add_consts.push(GateCIn {
+                            layers[layer_id as usize].add_consts.push(GateCIn {
                                 idx_out: i,
                                 constant: *c,
                             });
                         }
                         GateType::Add(in_0, scaler) => {
-                            layers[layer_id].adds.push(Gate1In {
+                            layers[layer_id as usize].adds.push(Gate1In {
                                 idx_in: current_wire_id(*in_0),
                                 idx_out: i,
                                 scaler: *scaler,
                             });
                         }
                         GateType::Mul2(in_0, in_1, scaler) => {
-                            layers[layer_id].mul2s.push(Gate2In {
+                            layers[layer_id as usize].mul2s.push(Gate2In {
                                 idx_in1: current_wire_id(*in_0),
                                 idx_in2: current_wire_id(*in_1),
                                 idx_out: i,
@@ -245,7 +250,7 @@ impl<F: SmallField> Circuit<F> {
                             });
                         }
                         GateType::Mul3(in_0, in_1, in_2, scaler) => {
-                            layers[layer_id].mul3s.push(Gate3In {
+                            layers[layer_id as usize].mul3s.push(Gate3In {
                                 idx_in1: current_wire_id(*in_0),
                                 idx_in2: current_wire_id(*in_1),
                                 idx_in3: current_wire_id(*in_2),
@@ -275,7 +280,7 @@ impl<F: SmallField> Circuit<F> {
         for (id, wire_out) in output_copy_to.iter().enumerate() {
             layers[0]
                 .copy_to
-                .insert(id, wire_out.iter().map(|x| *x).collect_vec());
+                .insert(id as LayerId, wire_out.iter().map(|x| *x).collect_vec());
         }
 
         Self {
@@ -304,11 +309,11 @@ impl<F: SmallField> Circuit<F> {
         1 << self.last_layer_ref().num_vars
     }
 
-    pub fn is_input_layer(&self, layer_id: usize) -> bool {
-        layer_id == self.layers.len() - 1
+    pub fn is_input_layer(&self, layer_id: LayerId) -> bool {
+        layer_id as usize == self.layers.len() - 1
     }
 
-    pub fn is_output_layer(&self, layer_id: usize) -> bool {
+    pub fn is_output_layer(&self, layer_id: LayerId) -> bool {
         layer_id == 0
     }
 }
@@ -332,7 +337,7 @@ impl<F: SmallField> Layer<F> {
 
     pub fn paste_from_fix_variables_eq(
         &self,
-        old_layer_id: usize,
+        old_layer_id: LayerId,
         current_point_eq: &[F],
     ) -> Vec<F> {
         assert_eq!(current_point_eq.len(), self.size());
@@ -345,7 +350,7 @@ impl<F: SmallField> Layer<F> {
 
     pub fn paste_from_eval_eq(
         &self,
-        old_layer_id: usize,
+        old_layer_id: LayerId,
         current_point_eq: &[F],
         subset_point_eq: &[F],
     ) -> F {
@@ -358,7 +363,7 @@ impl<F: SmallField> Layer<F> {
             .eval_col_first(current_point_eq, subset_point_eq)
     }
 
-    pub fn copy_to_fix_variables(&self, new_layer_id: usize, subset_point_eq: &[F]) -> Vec<F> {
+    pub fn copy_to_fix_variables(&self, new_layer_id: LayerId, subset_point_eq: &[F]) -> Vec<F> {
         let old_wire_ids = self.copy_to.get(&new_layer_id).unwrap();
         old_wire_ids
             .as_slice()
@@ -367,7 +372,7 @@ impl<F: SmallField> Layer<F> {
 
     pub fn copy_to_eval_eq(
         &self,
-        new_layer_id: usize,
+        new_layer_id: LayerId,
         subset_point_eq: &[F],
         current_point_eq: &[F],
     ) -> F {

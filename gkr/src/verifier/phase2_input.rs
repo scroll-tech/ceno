@@ -1,5 +1,6 @@
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
+use frontend::structs::CellId;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
@@ -17,8 +18,8 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2InputState<'a, F
     pub(super) fn verifier_init_parallel(
         layer_out_point: &'a Point<F>,
         layer_out_value: F,
-        paste_from_constant: &'a [(F, usize, usize)],
-        paste_from_wires_in: &'a [(usize, usize)],
+        paste_from_constant: &'a [(F, CellId, CellId)],
+        paste_from_wires_in: &'a [(CellId, CellId)],
         lo_out_num_vars: usize,
         lo_in_num_vars: usize,
         hi_num_vars: usize,
