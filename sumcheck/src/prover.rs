@@ -14,6 +14,12 @@ use crate::{
 
 impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     pub fn prove(poly: &VirtualPolynomial<F>, transcript: &mut Transcript<F>) -> IOPProof<F> {
+        if poly.aux_info.num_variables == 0 {
+            return IOPProof {
+                point: vec![],
+                proofs: vec![],
+            };
+        }
         let start = start_timer!(|| "sum check prove");
 
         transcript.append_message(&poly.aux_info.num_variables.to_le_bytes());

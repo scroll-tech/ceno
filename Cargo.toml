@@ -6,7 +6,7 @@ members = [
     "poseidon",
     "sumcheck",
     "transcript",
-    "mpcs",
+    "mpcs", "gkr-graph",
 ]
 
 [workspace.package]

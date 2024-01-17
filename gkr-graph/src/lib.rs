@@ -1,6 +1,5 @@
-mod circuit;
+mod circuit_graph;
 mod error;
 mod prover;
 pub mod structs;
-pub mod utils;
 mod verifier;

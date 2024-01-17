@@ -1,115 +1,146 @@
 use std::{collections::HashMap, sync::Arc};
 
+use frontend::structs::ConstantType;
 use goldilocks::SmallField;
-use transcript::Challenge;
+use multilinear_extensions::mle::DenseMultilinearExtension;
+use serde::Serialize;
 
-pub(crate) type SumcheckProof<F: SmallField> = sumcheck::structs::IOPProof<F>;
-pub(crate) type Point<F: SmallField> = Vec<Challenge<F>>;
+pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
+pub(crate) type Point<F> = Vec<F>;
 
-/// Represent the prover state for each layer in the IOP protocol.
+/// Represent the prover state for each layer in the IOP protocol. To support
+/// gates between non-adjeacent layers, we leverage the techniques in
+/// [Virgo++](https://eprint.iacr.org/2020/1247).
 pub struct IOPProverState<F: SmallField> {
     pub(crate) layer_id: usize,
-    /// Evaluation point used in the proved layers for pasting values from
-    /// previous layers.
-    pub(crate) layer_eval_points: Vec<HashMap<usize, Point<F>>>,
-    /// Evaluations of the connection subset between the proved layers with
-    /// previous layers.
-    pub(crate) layer_eval_values: Vec<HashMap<usize, F>>,
+    /// Evaluations from the next layer.
+    pub(crate) next_evals: Vec<(Point<F>, F)>,
+    /// Evaluations of subsets from layers closer to the output. Hashmap is used
+    /// to map from the current layer id to the later layer id, point and value.
+    pub(crate) subset_evals: HashMap<usize, Vec<(usize, Point<F>, F)>>,
     pub(crate) circuit_witness: CircuitWitness<F>,
+    pub(crate) layer_out_poly: Arc<DenseMultilinearExtension<F>>,
 }
 
 /// Represent the verifier state for each layer in the IOP protocol.
 pub struct IOPVerifierState<F: SmallField> {
     pub(crate) layer_id: usize,
-    /// Evaluation point used in the proved layers for pasting values from
-    /// previous layers.
-    pub(crate) layer_eval_points: Vec<Point<F>>,
+    /// Evaluations from the next layer.
+    pub(crate) next_evals: Vec<(Point<F>, F)>,
+    /// Evaluations of subsets from layers closer to the output. Hashmap is used
+    /// to map from the current layer id to the deeper layer id, point and
+    /// value.
+    pub(crate) subset_evals: HashMap<usize, Vec<(usize, Point<F>, F)>>,
 }
 
+/// Phase 1 is a sumcheck protocol merging the subset evaluations from the
+/// layers closer to the circuit output to an evaluation to the output of the
+/// current layer.
 pub struct IOPProverPhase1Message<F: SmallField> {
-    pub sumcheck_messages: Vec<SumcheckProof<F>>,
-    pub evaluation: F,
+    pub sumcheck_proof_1: SumcheckProof<F>,
+    pub eval_value_1: Vec<F>,
+    pub sumcheck_proof_2: SumcheckProof<F>,
+    /// Evaluation of the output of the current layer.
+    pub eval_value_2: F,
 }
 
+/// Phase 2 is several sumcheck protocols (depending on the degree of gates),
+/// reducing the correctness of the output of the current layer to the input of
+/// the current layer.
 pub struct IOPProverPhase2Message<F: SmallField> {
-    pub sumcheck_messages: Vec<SumcheckProof<F>>,
-    pub evaluations: Vec<F>,
-}
-
-pub struct IOPProverPhase3Message<F: SmallField> {
-    pub sumcheck_messages: Vec<SumcheckProof<F>>,
-    pub evaluations: Vec<F>,
+    /// Sumcheck proofs for each sumcheck protocol.
+    pub sumcheck_proofs: Vec<SumcheckProof<F>>,
+    pub sumcheck_eval_values: Vec<Vec<F>>,
 }
 
 pub struct IOPProof<F: SmallField> {
-    pub sumcheck_proofs: Vec<(
-        IOPProverPhase1Message<F>,
-        IOPProverPhase2Message<F>,
-        IOPProverPhase3Message<F>,
-    )>,
+    pub sumcheck_proofs: Vec<(Option<IOPProverPhase1Message<F>>, IOPProverPhase2Message<F>)>,
 }
 
+/// Represent the point at the final step and the evaluations of the subsets of
+/// the input layer.
 pub struct GKRInputClaims<F: SmallField> {
-    pub points: Vec<Point<F>>,
-    pub evaluations: Vec<F>,
+    pub point: Point<F>,
+    pub values: Vec<F>,
 }
 
-/// Represent a connection between the current layer with layer_id. When a
-/// subset of Layer i is copied to Layer j, subset_conn[k] denotes the original
-/// index that the k-th wire corresponding to the one in either Layer i or j.
-pub struct LayerConnection {
-    pub(crate) layer_id: usize,
-    pub(crate) subset_conn: Vec<usize>,
-}
-
+#[derive(Clone, Serialize)]
 pub struct Layer<F: SmallField> {
-    pub(crate) log_size: usize,
-    pub(crate) size: usize,
+    pub(crate) num_vars: usize,
 
-    // Gates
-    pub(crate) adds: Option<Vec<Gate1In<F>>>,
-    pub(crate) mul2s: Option<Vec<Gate2In<F>>>,
-    pub(crate) mul3s: Option<Vec<Gate3In<F>>>,
-    pub(crate) assert_consts: Vec<Option<F>>,
+    // Gates. Should be all None if it's the input layer.
+    pub(crate) add_consts: Vec<GateCIn<ConstantType<F>>>,
+    pub(crate) adds: Vec<Gate1In<ConstantType<F>>>,
+    pub(crate) mul2s: Vec<Gate2In<ConstantType<F>>>,
+    pub(crate) mul3s: Vec<Gate3In<ConstantType<F>>>,
+    pub(crate) assert_consts: Vec<GateCIn<ConstantType<F>>>,
 
-    /// The corresponding wires copied from the output of this layer to deeper
-    /// layers.
-    pub(crate) copy_to: Vec<LayerConnection>,
-    /// The corresponding wires copied from shallower layers to the input of
-    /// this layer.
-    pub(crate) paste_from: Vec<LayerConnection>,
+    /// The corresponding wires copied from this layer to later layers. It is
+    /// (later layer id -> current wire id to be copied). It stores the non-zero
+    /// entry of copy_to[layer_id] for each row.
+    pub(crate) copy_to: HashMap<usize, Vec<usize>>,
+    /// The corresponding wires from previous layers pasted to this layer. It is
+    /// (shallower layer id -> pasted to the current id). It stores the non-zero
+    /// entry of paste_from[layer_id] for each column. Undefined for the input.
+    pub(crate) paste_from: HashMap<usize, Vec<usize>>,
+    /// Maximum size of the subsets pasted from the previous layers, rounded up
+    /// to the next power of two. This is the logarithm of the rounded size.
+    /// Undefined for the input layer.
+    pub(crate) max_previous_num_vars: usize,
 }
 
+#[derive(Clone, Serialize)]
 pub struct Circuit<F: SmallField> {
     pub layers: Vec<Layer<F>>,
+    /// Copied from the circuit output to segments for convenience of later use.
+    pub copy_to_wires_out: Vec<Vec<usize>>,
+
+    /// The left and right endpoints in the input layer assigned as a constant.
+    pub paste_from_constant: Vec<(F, usize, usize)>,
+    pub n_wires_in: usize,
+    /// The left endpoint in the input layer copied from each wire_in.
+    pub paste_from_wires_in: Vec<(usize, usize)>,
+    pub max_wires_in_num_vars: usize,
 }
 
-pub struct LayerWitness<F: SmallField>(Vec<F>);
-
-pub struct CircuitWitness<F: SmallField> {
-    pub(crate) layers: Vec<LayerWitness<F>>,
-    pub(crate) public_input: LayerWitness<F>,
-    pub(crate) witnesses: Vec<LayerWitness<F>>,
-    pub(crate) challenges: Vec<F>,
+#[derive(Clone, Debug, Serialize)]
+pub struct GateCIn<C> {
+    pub(crate) idx_out: usize,
+    pub(crate) constant: C,
 }
 
-pub struct Gate1In<F: SmallField> {
+#[derive(Clone, Debug, Serialize)]
+pub struct Gate1In<C> {
     pub(crate) idx_in: usize,
     pub(crate) idx_out: usize,
-    pub(crate) scaler: F,
+    pub(crate) scaler: C,
 }
 
-pub struct Gate2In<F: SmallField> {
+#[derive(Clone, Debug, Serialize)]
+pub struct Gate2In<C> {
     pub(crate) idx_in1: usize,
     pub(crate) idx_in2: usize,
     pub(crate) idx_out: usize,
-    pub(crate) scaler: F,
+    pub(crate) scaler: C,
 }
 
-pub struct Gate3In<F: SmallField> {
+#[derive(Clone, Debug, Serialize)]
+pub struct Gate3In<C> {
     pub(crate) idx_in1: usize,
     pub(crate) idx_in2: usize,
     pub(crate) idx_in3: usize,
     pub(crate) idx_out: usize,
-    pub(crate) scaler: F,
+    pub(crate) scaler: C,
+}
+
+#[derive(Clone, Serialize)]
+pub struct CircuitWitness<F: SmallField> {
+    /// Three vectors denote 1. layer_id, 2. instance_id, 3. wire_id.
+    pub(crate) layers: Vec<Vec<Vec<F>>>,
+    pub(crate) wires_in: Vec<Vec<Vec<F>>>,
+    pub(crate) wires_out: Vec<Vec<Vec<F>>>,
+    /// Challenges
+    pub(crate) challenges: Vec<F>,
+    /// The number of instances for the same sub-circuit.
+    pub(crate) n_instances: usize,
 }

@@ -1,68 +1,99 @@
-use frontend::structs::CircuitBuilder;
 use goldilocks::SmallField;
 
-use crate::structs::{Circuit, CircuitWitness, Layer, LayerWitness, Point};
+use crate::structs::{Gate1In, Gate2In, Gate3In, GateCIn};
 
-impl<F: SmallField> Circuit<F> {
-    /// Generate the circuit from circuit builder.
-    pub fn new(circuit_builder: &CircuitBuilder<F>) -> Self {
-        todo!()
+mod circuit_layout;
+mod circuit_witness;
+
+pub trait EvaluateGateCIn<F>
+where
+    F: SmallField,
+{
+    fn eval(&self, out: &[F]) -> F;
+    fn eval_subset_eq(&self, out_eq_vec: &[F], in_eq_vec: &[F]) -> F;
+}
+
+impl<F> EvaluateGateCIn<F> for &[GateCIn<F>]
+where
+    F: SmallField,
+{
+    fn eval(&self, out_eq_vec: &[F]) -> F {
+        self.iter().fold(F::ZERO, |acc, gate| {
+            acc + out_eq_vec[gate.idx_out] * gate.constant
+        })
     }
-
-    pub fn last_layer_ref(&self) -> &Layer<F> {
-        todo!()
+    fn eval_subset_eq(&self, out_eq_vec: &[F], in_eq_vec: &[F]) -> F {
+        self.iter().fold(F::ZERO, |acc, gate| {
+            acc + out_eq_vec[gate.idx_out] * in_eq_vec[gate.idx_out]
+        })
     }
 }
 
-impl<F: SmallField> Layer<F> {
-    pub fn size(&self) -> usize {
-        todo!()
-    }
+pub trait EvaluateGate1In<F>
+where
+    F: SmallField,
+{
+    fn eval(&self, out_eq_vec: &[F], in_eq_vec: &[F]) -> F;
+    fn fix_out_variables(&self, in_size: usize, out_eq_vec: &[F]) -> Vec<F>;
+}
 
-    pub fn log_size(&self) -> usize {
-        todo!()
+impl<F> EvaluateGate1In<F> for &[Gate1In<F>]
+where
+    F: SmallField,
+{
+    fn eval(&self, out_eq_vec: &[F], in_eq_vec: &[F]) -> F {
+        self.iter().fold(F::ZERO, |acc, gate| {
+            acc + out_eq_vec[gate.idx_out] * in_eq_vec[gate.idx_in] * gate.scaler
+        })
+    }
+    fn fix_out_variables(&self, in_size: usize, out_eq_vec: &[F]) -> Vec<F> {
+        let mut ans = vec![F::ZERO; in_size];
+        for gate in self.iter() {
+            ans[gate.idx_in] += out_eq_vec[gate.idx_out] * gate.scaler;
+        }
+        ans
     }
 }
 
-impl<F: SmallField> CircuitWitness<F> {
-    /// Initialize the structure of the circuit witness.
-    pub fn new(circuit: &Circuit<F>) -> Self {
-        todo!()
-    }
+pub trait EvaluateGate2In<F>
+where
+    F: SmallField,
+{
+    fn eval(&self, out_eq_vec: &[F], in1_eq_vec: &[F], in2_eq_vec: &[F]) -> F;
+}
 
-    /// Generate a fresh instance for the circuit.
-    pub fn new_instance(circuit: &Circuit<F>, public_input: &[F], witnesses: &[&[F]]) -> Self {
-        todo!()
-    }
-
-    /// Add another instance for the circuit.
-    pub fn add_instance(&mut self, circuit: &Circuit<F>, public_input: &[F], witnesses: &[&[F]]) {
-        todo!()
-    }
-
-    pub fn last_layer_witness_ref(&self) -> &LayerWitness<F> {
-        todo!()
-    }
-
-    pub fn public_input_ref(&self) -> &LayerWitness<F> {
-        todo!()
-    }
-
-    pub fn witness_ref(&self) -> Vec<&LayerWitness<F>> {
-        todo!()
+impl<F> EvaluateGate2In<F> for &[Gate2In<F>]
+where
+    F: SmallField,
+{
+    fn eval(&self, out_eq_vec: &[F], in1_eq_vec: &[F], in2_eq_vec: &[F]) -> F {
+        self.iter().fold(F::ZERO, |acc, gate| {
+            acc + out_eq_vec[gate.idx_out]
+                * in1_eq_vec[gate.idx_in1]
+                * in2_eq_vec[gate.idx_in2]
+                * gate.scaler
+        })
     }
 }
 
-impl<F: SmallField> LayerWitness<F> {
-    pub fn evaluate(&self, output_point: &Point<F>) -> F {
-        todo!()
-    }
+pub trait EvaluateGate3In<F>
+where
+    F: SmallField,
+{
+    fn eval(&self, out_eq_vec: &[F], in1_eq_vec: &[F], in2_eq_vec: &[F], in3_eq_vec: &[F]) -> F;
+}
 
-    pub fn size(&self) -> usize {
-        todo!()
-    }
-
-    pub fn log_size(&self) -> usize {
-        todo!()
+impl<F> EvaluateGate3In<F> for &[Gate3In<F>]
+where
+    F: SmallField,
+{
+    fn eval(&self, out_eq_vec: &[F], in1_eq_vec: &[F], in2_eq_vec: &[F], in3_eq_vec: &[F]) -> F {
+        self.iter().fold(F::ZERO, |acc, gate| {
+            acc + out_eq_vec[gate.idx_out]
+                * in1_eq_vec[gate.idx_in1]
+                * in2_eq_vec[gate.idx_in2]
+                * in3_eq_vec[gate.idx_in3]
+                * gate.scaler
+        })
     }
 }
