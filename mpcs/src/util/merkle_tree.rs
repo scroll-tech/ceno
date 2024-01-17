@@ -163,7 +163,7 @@ fn authenticate_merkle_path_root<F: SmallField, EF: SmallField<BaseField = F::Ba
     F::BaseField: Serialize + DeserializeOwned,
 {
     let mut x_index = x_index;
-    let mut hash = Digest::<F>(hash_two_leaves(&leaves.0, &leaves.0).0);
+    let mut hash = Digest::<F>(hash_two_leaves(&leaves.0, &leaves.1).0);
 
     // The lowest bit in the index is ignored. It can point to either leaves
     x_index >>= 1;
@@ -180,6 +180,8 @@ fn authenticate_merkle_path_root<F: SmallField, EF: SmallField<BaseField = F::Ba
 
 #[cfg(test)]
 mod tests {
+    use goldilocks::GoldilocksExt2;
+
     use crate::util::transcript::{InMemoryTranscript, PoseidonTranscript};
 
     use super::*;
@@ -211,6 +213,14 @@ mod tests {
             F::from(2),
             F::from(3),
             F::from(4),
+            F::from(1),
+            F::from(2),
+            F::from(3),
+            F::from(4),
+            F::from(1),
+            F::from(2),
+            F::from(3),
+            F::from(4),
         ];
         test_leaves(&leaves);
     }
@@ -231,6 +241,18 @@ mod tests {
             let path =
                 MerklePathWithoutLeafOrRoot::<F>::read_transcript(&mut transcript, tree.height());
             path.authenticate_leaves_root(left_leaf, right_leaf, i, &root);
+
+            let mut transcript = PoseidonTranscript::<GoldilocksExt2>::new();
+            let path = tree.merkle_path_without_leaf_sibling_or_root::<GoldilocksExt2>(i);
+            path.write_transcript(&mut transcript);
+            let proof = transcript.into_proof();
+            let mut transcript = PoseidonTranscript::<GoldilocksExt2>::from_proof(&proof);
+            let path: MerklePathWithoutLeafOrRoot<GoldilocksExt2> =
+                MerklePathWithoutLeafOrRoot::<GoldilocksExt2>::read_transcript(
+                    &mut transcript,
+                    tree.height(),
+                );
+            path.authenticate_leaves_root(left_leaf, right_leaf, i, &Digest(root.0));
         }
     }
 }

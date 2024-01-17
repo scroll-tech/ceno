@@ -26,7 +26,8 @@ where
     let mut hasher = new_hasher::<F>();
     hasher.update(a.to_limbs().as_slice());
     hasher.update(b.to_limbs().as_slice());
-    Digest(hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap())
+    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
+    Digest(result)
 }
 
 pub fn hash_two_digests<F: SmallField>(a: &Digest<F>, b: &Digest<F>) -> Digest<F>
@@ -36,5 +37,6 @@ where
     let mut hasher = new_hasher::<F>();
     hasher.update(a.0.as_slice());
     hasher.update(b.0.as_slice());
-    Digest(hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap())
+    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
+    Digest(result)
 }

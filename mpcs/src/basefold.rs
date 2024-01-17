@@ -1859,7 +1859,7 @@ where
                 query: single_query_result.commitment_query,
                 merkle_path: commitment
                     .codeword_tree
-                    .merkle_path_without_leaf_sibling_or_root(
+                    .merkle_path_without_leaf_sibling_or_root::<F>(
                         single_query_result.commitment_query.index,
                     ),
             },

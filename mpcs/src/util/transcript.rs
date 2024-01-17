@@ -253,3 +253,29 @@ where
         self.stream.write_all(&comm.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use goldilocks::Goldilocks as F;
+
+    #[test]
+    fn test_transcript() {
+        let mut transcript = PoseidonTranscript::<F>::new();
+        transcript.write_field_element(&F::from(1)).unwrap();
+        transcript.write_field_element(&F::from(2)).unwrap();
+        transcript
+            .write_commitment(&Digest([F::from(3); DIGEST_WIDTH]))
+            .unwrap();
+        let a = transcript.squeeze_challenge();
+        let proof = transcript.into_proof();
+        let mut transcript = PoseidonTranscript::<F>::from_proof(&proof);
+        assert_eq!(transcript.read_field_element().unwrap(), F::from(1));
+        assert_eq!(transcript.read_field_element().unwrap(), F::from(2));
+        assert_eq!(
+            transcript.read_commitment().unwrap(),
+            Digest([F::from(3); DIGEST_WIDTH])
+        );
+        assert_eq!(transcript.squeeze_challenge(), a);
+    }
+}
