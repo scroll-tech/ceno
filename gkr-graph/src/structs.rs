@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use frontend::structs::WireId;
 use gkr::structs::{Circuit, CircuitWitness};
 use goldilocks::SmallField;
 
@@ -7,11 +8,19 @@ type GKRProverState<F: SmallField> = gkr::structs::IOPProverState<F>;
 type GKRVerifierState<F: SmallField> = gkr::structs::IOPVerifierState<F>;
 type GKRProof<F: SmallField> = gkr::structs::IOPProof<F>;
 
-pub type NodeIndex = usize;
-pub type WireInIndex = usize;
-pub type WireOutIndex = usize;
-pub type NodeWireIn = (NodeIndex, WireInIndex);
-pub type NodeWireOut = (NodeIndex, Option<WireOutIndex>);
+pub struct NodeWireIn {
+    node_id: usize,
+    prep_wire_id: WireId,
+    /// The number of variables of the preceding nodes.
+    num_vars: usize,
+}
+
+pub struct NodeWireOut {
+    node_id: usize,
+    succ_wire_id: WireId,
+    /// The number of variables of the succeeding nodes.
+    num_vars: usize,
+}
 
 pub struct IOPProverState<F: SmallField> {
     marker: std::marker::PhantomData<F>,
@@ -26,7 +35,7 @@ pub struct IOPVerifierState<F: SmallField> {
 }
 
 pub struct CircuitNode<F: SmallField> {
-    id: NodeIndex,
+    id: usize,
     circuit: Arc<Circuit<F>>,
     // Each wire_in comes from a wire_out of a node
     predecessors: Vec<NodeWireOut>,
