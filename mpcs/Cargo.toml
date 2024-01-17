@@ -27,6 +27,7 @@ rand_chacha={version ="0.3.1", features=["serde1"]}
 generic-array = { version = "0.14.7", features = ["serde"] }
 multilinear_extensions = { path = "../multilinear_extensions" }
 transcript = { path = "../transcript" }
+plonky2 = "0.1.4"
 
 [features]
 default = ["parallel"] # Add "sanity-check" to debug
