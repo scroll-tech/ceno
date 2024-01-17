@@ -127,6 +127,15 @@ where
     }
 }
 
+impl<F: SmallField> Into<BasefoldCommitment<F>> for &BasefoldCommitmentWithData<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn into(self) -> BasefoldCommitment<F> {
+        self.to_commitment()
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "", deserialize = ""))]
 pub struct BasefoldCommitment<F: SmallField>
@@ -317,6 +326,7 @@ where
         let coeffs = interpolate_over_boolean_hypercube(&poly.evals().to_vec());
 
         let num_vars = log2_strict(bh_evals.len());
+        assert!(num_vars <= pp.max_num_vars && num_vars >= V::get_basecode());
 
         // Split the input into chunks of message size, encode each message, and return the codewords
         let basecode = encode_rs_basecode(&coeffs, 1 << pp.log_rate, 1 << V::get_basecode());
@@ -2604,7 +2614,7 @@ mod test {
 
     use crate::{
         basefold::Basefold,
-        test::{run_batch_commit_open_verify, run_commit_open_verify},
+        test::{run_batch_commit_open_verify, run_commit_open_verify, test_with_gkr},
         util::transcript::PoseidonTranscript,
     };
     use goldilocks::{Goldilocks, GoldilocksExt2, GoldilocksExt3};
@@ -2783,6 +2793,29 @@ mod test {
         run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks3, PoseidonTranscript<_>>();
         // Both challenge and poly are over extension field
         run_batch_commit_open_verify::<_, GoldilocksExt3, PcsGoldilocks3, PoseidonTranscript<_>>();
+    }
+
+    #[derive(Debug)]
+    pub struct BasefoldExtParamsForGKRTest {}
+
+    impl BasefoldExtParams for BasefoldExtParamsForGKRTest {
+        fn get_reps() -> usize {
+            return 260;
+        }
+
+        fn get_rate() -> usize {
+            return 3;
+        }
+
+        fn get_basecode() -> usize {
+            return 3;
+        }
+    }
+    type PcsGoldilocksForGKRTest = Basefold<Goldilocks, BasefoldExtParamsForGKRTest>;
+
+    #[test]
+    fn test_with_gkr_for_goldilocks() {
+        test_with_gkr::<Goldilocks, PcsGoldilocksForGKRTest, PoseidonTranscript<_>>();
     }
 
     #[test]

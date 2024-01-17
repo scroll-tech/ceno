@@ -23,12 +23,7 @@ pub trait PolynomialCommitmentScheme<F: SmallField, PF: SmallField>: Clone + Deb
     type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
     type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
     type Polynomial: Polynomial<PF> + PolynomialEvalExt<F> + Serialize + DeserializeOwned;
-    type CommitmentWithData: Clone
-        + Debug
-        + Default
-        + Serialize
-        + DeserializeOwned
-        + Into<Self::CommitmentChunk>;
+    type CommitmentWithData: Clone + Debug + Default + Serialize + DeserializeOwned;
     type Commitment: Clone + Debug + Default + Serialize + DeserializeOwned;
     type CommitmentChunk: Clone + Debug + Default;
     type Rng: RngCore + Clone;
@@ -426,7 +421,6 @@ mod test {
     use frontend::structs::{CircuitBuilder, ConstantType};
     use gkr::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState};
     use gkr::utils::MultilinearExtensionFromVectors;
-    use goldilocks::Goldilocks;
     use transcript::Transcript;
 
     enum TableType {
@@ -491,37 +485,51 @@ mod test {
         )
     }
 
-    #[test]
-    fn test_with_gkr() {
+    pub(super) fn test_with_gkr<F, Pcs, T>()
+    where
+        F: SmallField,
+        F::BaseField: Into<F>,
+        Pcs: PolynomialCommitmentScheme<
+            F,
+            F,
+            Polynomial = MultilinearPolynomial<F>,
+            Rng = ChaCha8Rng,
+        >,
+        for<'a> &'a Pcs::CommitmentWithData: Into<Pcs::Commitment>,
+        T: TranscriptRead<Pcs::CommitmentChunk, F>
+            + TranscriptWrite<Pcs::CommitmentChunk, F>
+            + InMemoryTranscript<F>,
+    {
         // This test is copied from examples/fake_hash_lookup_par, which is currently
         // not using PCS for the check. The verifier outputs a GKRInputClaims that the
         // verifier is unable to check without the PCS.
 
-        let (circuit, all_input_index) = construct_circuit::<Goldilocks>();
+        let rng = ChaCha8Rng::from_seed([0u8; 32]);
+        // Setup
+        let (pp, vp) = {
+            let poly_size = 1 << 10;
+            let param = Pcs::setup(poly_size, &rng).unwrap();
+            Pcs::trim(&param).unwrap()
+        };
+
+        let (circuit, all_input_index) = construct_circuit::<F>();
         // println!("circuit: {:?}", circuit);
         let mut wires_in = vec![vec![]; circuit.n_wires_in];
         wires_in[all_input_index.inputs_idx] = vec![
-            Goldilocks::from(2u64),
-            Goldilocks::from(2u64),
-            Goldilocks::from(4u64),
-            Goldilocks::from(16u64),
-            Goldilocks::from(2u64),
+            F::from(2u64),
+            F::from(2u64),
+            F::from(4u64),
+            F::from(16u64),
+            F::from(2u64),
         ];
         // x = 2, 2^2 = 4, 2^2^2 = 16, 2^2^2^2 = 256
-        wires_in[all_input_index.other_x_pows_idx] = vec![
-            Goldilocks::from(4u64),
-            Goldilocks::from(16u64),
-            Goldilocks::from(256u64),
-        ];
-        wires_in[all_input_index.count_idx] = vec![
-            Goldilocks::from(3u64),
-            Goldilocks::from(1u64),
-            Goldilocks::from(1u64),
-            Goldilocks::from(0u64),
-        ];
+        wires_in[all_input_index.other_x_pows_idx] =
+            vec![F::from(4u64), F::from(16u64), F::from(256u64)];
+        wires_in[all_input_index.count_idx] =
+            vec![F::from(3u64), F::from(1u64), F::from(1u64), F::from(0u64)];
 
         let circuit_witness = {
-            let challenge = Goldilocks::from(9);
+            let challenge = F::from(9);
             let mut circuit_witness = CircuitWitness::new(&circuit, vec![challenge]);
             for _ in 0..4 {
                 circuit_witness.add_instance(&circuit, &wires_in);
@@ -529,10 +537,34 @@ mod test {
             circuit_witness
         };
 
-        #[cfg(feature = "debug")]
+        #[cfg(feature = "sanity-check")]
         circuit_witness.check_correctness(&circuit);
 
         let instance_num_vars = circuit_witness.instance_num_vars();
+
+        // Commit to the input wires
+
+        let polys = circuit_witness
+            .wires_in_ref()
+            .iter()
+            .map(|values| {
+                MultilinearPolynomial::new(
+                    values
+                        .as_slice()
+                        .mle(circuit.max_wires_in_num_vars, instance_num_vars)
+                        .evaluations
+                        .clone(),
+                )
+            })
+            .collect_vec();
+        println!(
+            "Polynomial num vars: {:?}",
+            polys.iter().map(|p| p.num_vars()).collect_vec()
+        );
+        let comms_with_data = Pcs::batch_commit(&pp, &polys).unwrap();
+        let comms: Vec<Pcs::Commitment> = comms_with_data.iter().map(|cm| cm.into()).collect_vec();
+
+        // Commitments should be part of the proof, which is not yet
 
         let (proof, output_num_vars, output_eval) = {
             let mut prover_transcript = Transcript::new(b"example");
@@ -583,6 +615,8 @@ mod test {
             .expect("verification failed")
         };
 
+        // Generate pcs proof
+        let mut transcript = T::new();
         let expected_values = circuit_witness
             .wires_in_ref()
             .iter()
@@ -593,9 +627,46 @@ mod test {
                     .evaluate(&gkr_input_claims.point)
             })
             .collect_vec();
+        let points = vec![gkr_input_claims.point];
+        let evals = expected_values
+            .iter()
+            .enumerate()
+            .map(|(i, e)| Evaluation {
+                poly: i,
+                point: 0,
+                value: *e,
+            })
+            .collect_vec();
+        Pcs::batch_open(
+            &pp,
+            &polys,
+            &comms_with_data,
+            &points,
+            &evals,
+            &mut transcript,
+        )
+        .unwrap();
+        // This should be part of the GKR proof
+        let proof = transcript.into_proof();
+
+        // Check outside of the GKR verifier
         for i in 0..gkr_input_claims.values.len() {
             assert_eq!(expected_values[i], gkr_input_claims.values[i]);
         }
+
+        // This should be part of the GKR verifier
+        let mut transcript = T::from_proof(&proof);
+        let evals = gkr_input_claims
+            .values
+            .iter()
+            .enumerate()
+            .map(|(i, e)| Evaluation {
+                poly: i,
+                point: 0,
+                value: *e,
+            })
+            .collect_vec();
+        Pcs::batch_verify(&vp, &comms, &points, &evals, &mut transcript).unwrap();
 
         println!("verification succeeded");
     }
