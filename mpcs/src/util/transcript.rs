@@ -258,24 +258,46 @@ where
 mod tests {
     use super::*;
     use goldilocks::Goldilocks as F;
+    use goldilocks::GoldilocksExt2 as EF;
 
     #[test]
     fn test_transcript() {
         let mut transcript = PoseidonTranscript::<F>::new();
         transcript.write_field_element(&F::from(1)).unwrap();
+        let a = transcript.squeeze_challenge();
         transcript.write_field_element(&F::from(2)).unwrap();
         transcript
             .write_commitment(&Digest([F::from(3); DIGEST_WIDTH]))
             .unwrap();
-        let a = transcript.squeeze_challenge();
+        let b = transcript.squeeze_challenge();
         let proof = transcript.into_proof();
         let mut transcript = PoseidonTranscript::<F>::from_proof(&proof);
         assert_eq!(transcript.read_field_element().unwrap(), F::from(1));
+        assert_eq!(transcript.squeeze_challenge(), a);
         assert_eq!(transcript.read_field_element().unwrap(), F::from(2));
         assert_eq!(
             transcript.read_commitment().unwrap(),
             Digest([F::from(3); DIGEST_WIDTH])
         );
+        assert_eq!(transcript.squeeze_challenge(), b);
+
+        let mut transcript = PoseidonTranscript::<EF>::new();
+        transcript.write_field_element(&EF::from(1)).unwrap();
+        let a = transcript.squeeze_challenge();
+        transcript.write_field_element(&EF::from(2)).unwrap();
+        transcript
+            .write_commitment(&Digest([F::from(3); DIGEST_WIDTH]))
+            .unwrap();
+        let b = transcript.squeeze_challenge();
+        let proof = transcript.into_proof();
+        let mut transcript = PoseidonTranscript::<EF>::from_proof(&proof);
+        assert_eq!(transcript.read_field_element().unwrap(), EF::from(1));
         assert_eq!(transcript.squeeze_challenge(), a);
+        assert_eq!(transcript.read_field_element().unwrap(), EF::from(2));
+        assert_eq!(
+            transcript.read_commitment().unwrap(),
+            Digest([F::from(3); DIGEST_WIDTH])
+        );
+        assert_eq!(transcript.squeeze_challenge(), b);
     }
 }

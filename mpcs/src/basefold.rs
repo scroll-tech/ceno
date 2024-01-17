@@ -1500,13 +1500,7 @@ where
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
         .iter()
-        .map(|x_index| {
-            let x_rep = (*x_index).to_repr();
-            let x: &[u8] = x_rep.as_ref();
-            let (int_bytes, _) = x.split_at(std::mem::size_of::<u32>());
-            let x_int: u32 = u32::from_be_bytes(int_bytes.try_into().unwrap());
-            ((x_int as usize) % comm.codeword_size()).into()
-        })
+        .map(|x_index| field_to_usize(x_index) % comm.codeword_size())
         .collect_vec();
 
     QueriesResult {
@@ -1748,24 +1742,28 @@ trait ListQueryResult<F: SmallField> {
     ) -> Vec<MerklePathWithoutLeafOrRoot<F>>
     where
         PF::BaseField: Serialize + DeserializeOwned,
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
     {
-        self.get_inner()
+        let ret = self
+            .get_inner()
             .into_iter()
             .enumerate()
             .map(|(i, query_result)| {
                 let path =
                     trees(i).merkle_path_without_leaf_sibling_or_root::<F>(query_result.index);
                 if cfg!(feature = "sanity-check") {
-                    path.authenticate_leaves_root(
-                        query_result.left,
-                        query_result.right,
+                    path.authenticate_leaves_root::<PF>(
+                        query_result.left.try_into().unwrap(),
+                        query_result.right.try_into().unwrap(),
                         query_result.index,
                         &Digest::<F>(trees(i).root().0.try_into().unwrap()),
                     );
                 }
                 path
             })
-            .collect_vec()
+            .collect_vec();
+        ret
     }
 }
 
@@ -1787,6 +1785,8 @@ where
     ) -> Self
     where
         PF::BaseField: Serialize + DeserializeOwned,
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
     {
         Self::new(
             query_result
@@ -1981,9 +1981,11 @@ where
     ) -> Self
     where
         PF::BaseField: Serialize + DeserializeOwned,
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
     {
         Self {
-            oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
+            oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees::<'_, _, F>(
                 batched_single_query_result.oracle_query,
                 |i| &oracle_trees[i],
             ),
@@ -2151,6 +2153,8 @@ where
     ) -> Self
     where
         PF::BaseField: Serialize + DeserializeOwned,
+        F: TryInto<PF>,
+        <F as TryInto<PF>>::Error: Debug,
     {
         Self {
             inner: batched_query_result
@@ -2731,7 +2735,7 @@ mod test {
     // }
 
     #[test]
-    fn commit_open_verify_goldilocks() {
+    fn commit_open_verify_goldilocks_base() {
         // Both challenge and poly are over base field
         run_commit_open_verify::<Goldilocks, Goldilocks, PcsGoldilocks, PoseidonTranscript<_>>();
     }
@@ -2759,7 +2763,7 @@ mod test {
     // }
 
     #[test]
-    fn batch_commit_open_verify_goldilocks() {
+    fn batch_commit_open_verify_goldilocks_base() {
         // Both challenge and poly are over base field
         run_batch_commit_open_verify::<_, Goldilocks, PcsGoldilocks, PoseidonTranscript<_>>();
     }

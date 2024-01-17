@@ -180,7 +180,7 @@ fn authenticate_merkle_path_root<F: SmallField, EF: SmallField<BaseField = F::Ba
 
 #[cfg(test)]
 mod tests {
-    use goldilocks::GoldilocksExt2;
+    use goldilocks::{Goldilocks, GoldilocksExt2};
 
     use crate::util::transcript::{InMemoryTranscript, PoseidonTranscript};
 
@@ -252,7 +252,14 @@ mod tests {
                     &mut transcript,
                     tree.height(),
                 );
-            path.authenticate_leaves_root(left_leaf, right_leaf, i, &Digest(root.0));
+            let left_leaf_ext = GoldilocksExt2::from(left_leaf);
+            let right_leaf_ext = GoldilocksExt2::from(right_leaf);
+            path.authenticate_leaves_root::<Goldilocks>(
+                left_leaf_ext.try_into().unwrap(),
+                right_leaf_ext.try_into().unwrap(),
+                i,
+                &Digest(root.0),
+            );
         }
     }
 }
