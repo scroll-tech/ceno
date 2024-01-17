@@ -29,6 +29,10 @@ multilinear_extensions = { path = "../multilinear_extensions" }
 transcript = { path = "../transcript" }
 plonky2 = "0.1.4"
 
+[dev-dependencies]
+frontend = { path = "../frontend" }
+gkr = { path = "../gkr" }
+
 [features]
 default = ["parallel"] # Add "sanity-check" to debug
 parallel = ["dep:rayon"]
