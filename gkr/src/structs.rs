@@ -6,7 +6,7 @@ use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::Serialize;
 
 pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
-pub(crate) type Point<F> = Vec<F>;
+pub type Point<F> = Vec<F>;
 
 /// Represent the prover state for each layer in the IOP protocol. To support
 /// gates between non-adjeacent layers, we leverage the techniques in
