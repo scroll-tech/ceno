@@ -29,6 +29,7 @@ pub mod error;
 pub mod instructions;
 pub mod scheme;
 
+#[derive(Clone, Debug)]
 pub struct SingerBasic<F: SmallField> {
     /// Opcode circuits
     opcode_circuits: [Arc<InstCircuit<F>>; 256],

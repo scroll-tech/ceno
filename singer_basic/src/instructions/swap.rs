@@ -23,8 +23,7 @@ register_wires_in!(
         phase0_clk => 1,
 
         phase0_pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        phase0_stack_ts_add_1 => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-        phase0_stack_ts_add_2 => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        phase0_stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
         phase0_old_stack_ts_1 => TSUInt::N_OPRAND_CELLS,
         phase0_old_stack_ts_lt_1 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
@@ -58,8 +57,7 @@ register_wires_out!(
         current => 1
     },
     range_chip_size {
-        stack_ts_add_1 => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
-        stack_ts_add_2 => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
+        stack_ts_add => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
         old_stack_ts_lt_1 => TSUInt::N_RANGE_CHECK_CELLS,
         old_stack_ts_lt_n_plus_1 => TSUInt::N_RANGE_CHECK_CELLS
     }
@@ -127,8 +125,8 @@ impl<const N: usize> Instruction for SwapInstruction<N> {
         let next_stack_ts = range_chip_handler.add_ts_with_const(
             &mut circuit_builder,
             &stack_ts,
-            2,
-            &phase0[Self::phase0_stack_ts_add_2()],
+            1,
+            &phase0[Self::phase0_stack_ts_add()],
         )?;
 
         global_state_out_handler.state_out(
@@ -192,16 +190,10 @@ impl<const N: usize> Instruction for SwapInstruction<N> {
             challenges,
         );
         // Push stack_rlc_n_plus_1 to the stack at top - 1
-        let stack_ts_plus_1 = range_chip_handler.add_ts_with_const(
-            &mut circuit_builder,
-            &stack_ts,
-            1,
-            &phase0[Self::phase0_stack_ts_add_1()],
-        )?;
         stack_push_handler.stack_push_rlc(
             &mut circuit_builder,
             stack_top_expr.sub(F::ONE),
-            stack_ts_plus_1.values(),
+            stack_ts.values(),
             stack_rlc_n_plus_1,
             challenges,
         );

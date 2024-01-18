@@ -71,6 +71,7 @@ impl ChipChallenges {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct InstCircuit<F: SmallField> {
     circuit: Circuit<F>,
 

@@ -23,8 +23,7 @@ register_wires_in!(
         phase0_clk => 1,
 
         phase0_pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        phase0_stack_ts_add_1 => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-        phase0_stack_ts_add_2 => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        phase0_stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
         phase0_old_stack_ts => TSUInt::N_OPRAND_CELLS,
         phase0_old_stack_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS
@@ -56,8 +55,7 @@ register_wires_out!(
     range_chip_size {
         stack_top_old => 1,
         stack_top_new => 1,
-        stack_ts_add_1 => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
-        stack_ts_add_2 => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
+        stack_ts_add => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
         old_stack_ts_lt => TSUInt::N_RANGE_CHECK_CELLS
     }
 );
@@ -123,8 +121,8 @@ impl<const N: usize> Instruction for DupInstruction<N> {
         let next_stack_ts = range_chip_handler.add_ts_with_const(
             &mut circuit_builder,
             &stack_ts,
-            2,
-            &phase0[Self::phase0_stack_ts_add_2()],
+            1,
+            &phase0[Self::phase0_stack_ts_add()],
         )?;
 
         global_state_out_handler.state_out(
@@ -169,16 +167,10 @@ impl<const N: usize> Instruction for DupInstruction<N> {
             stack_rlc,
             challenges,
         );
-        let dup_stack_ts = range_chip_handler.add_ts_with_const(
-            &mut circuit_builder,
-            &stack_ts,
-            1,
-            &phase0[Self::phase0_stack_ts_add_1()],
-        )?;
         stack_push_handler.stack_push_rlc(
             &mut circuit_builder,
             stack_top_expr,
-            dup_stack_ts.values(),
+            stack_ts.values(),
             stack_rlc,
             challenges,
         );

@@ -27,7 +27,7 @@ register_wires_in!(
         phase0_clk => 1,
 
         phase0_pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        phase0_memory_ts_add_i_plus_1 => EVM_STACK_BYTE_WIDTH * UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        phase0_memory_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
         phase0_old_stack_ts_offset => TSUInt::N_OPRAND_CELLS,
         phase0_old_stack_ts_lt_offset => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
@@ -64,6 +64,7 @@ register_wires_out!(
         old_stack_ts_lt0 => TSUInt::N_RANGE_CHECK_CELLS,
         old_stack_ts_lt1 => TSUInt::N_RANGE_CHECK_CELLS,
         offset_add => (EVM_STACK_BYTE_WIDTH - 1) * StackUInt::N_RANGE_CHECK_CELLS,
+        memory_ts_add => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
         old_memory_ts_lt => EVM_STACK_BYTE_WIDTH * TSUInt::N_RANGE_CHECK_CELLS
     },
     memory_load_size {
@@ -128,14 +129,11 @@ impl Instruction for MstoreInstruction {
             1,
             &phase0[Self::phase0_pc_add()],
         )?;
-        let all_memory_ts_add_i_plus_1 = &phase0[Self::phase0_memory_ts_add_i_plus_1()]
-            .chunks(UIntAddSub::<TSUInt>::N_WITNESS_CELLS)
-            .collect_vec();
         let next_memory_ts = range_chip_handler.add_ts_with_const(
             &mut circuit_builder,
             &memory_ts,
-            32,
-            &all_memory_ts_add_i_plus_1[31],
+            1,
+            &phase0[Self::phase0_memory_ts_add()],
         )?;
         global_state_out_handler.state_out(
             &mut circuit_builder,
@@ -204,24 +202,16 @@ impl Instruction for MstoreInstruction {
             .chunks(UIntAddSub::<StackUInt>::N_WITNESS_CELLS)
             .collect_vec();
         for i in 0..EVM_STACK_BYTE_WIDTH {
-            let (offset_plus_i, memory_ts_plus_i) = if i == 0 {
-                (offset.clone(), memory_ts.clone())
+            let offset_plus_i = if i == 0 {
+                offset.clone()
             } else {
-                (
-                    UIntAddSub::<StackUInt>::add_const(
-                        &mut circuit_builder,
-                        &mut range_chip_handler,
-                        &offset,
-                        &F::from(i as u64),
-                        all_offset_add_i_plus_1[i - 1],
-                    )?,
-                    range_chip_handler.add_ts_with_const(
-                        &mut circuit_builder,
-                        &memory_ts,
-                        i as i64,
-                        &all_memory_ts_add_i_plus_1[i - 1],
-                    )?,
-                )
+                UIntAddSub::<StackUInt>::add_const(
+                    &mut circuit_builder,
+                    &mut range_chip_handler,
+                    &offset,
+                    &F::from(i as u64),
+                    all_offset_add_i_plus_1[i - 1],
+                )?
             };
             UIntCmp::<TSUInt>::assert_lt(
                 &mut circuit_builder,
@@ -240,7 +230,7 @@ impl Instruction for MstoreInstruction {
             memory_store_handler.mem_store(
                 &mut circuit_builder,
                 offset_plus_i.values(),
-                memory_ts_plus_i.values(),
+                memory_ts.values(),
                 mem_bytes[i],
                 challenges,
             )
