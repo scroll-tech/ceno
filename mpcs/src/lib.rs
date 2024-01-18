@@ -4,9 +4,12 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use poly::{Polynomial, PolynomialEvalExt};
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt::Debug;
-use util::transcript::{TranscriptRead, TranscriptWrite};
+use util::{
+    hash::Digest,
+    transcript::{InMemoryTranscript, PoseidonTranscript, TranscriptRead, TranscriptWrite},
+};
 
 pub mod poly;
 pub mod sum_check;
@@ -111,6 +114,70 @@ pub trait PolynomialCommitmentScheme<F: SmallField, PF: SmallField>: Clone + Deb
     ) -> Result<(), Error>
     where
         Self::Commitment: 'a;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PCSProof<F: SmallField>(Vec<F::BaseField>)
+where
+    F::BaseField: Serialize + DeserializeOwned;
+
+pub trait NoninteractivePCS<F: SmallField, PF: SmallField>:
+    PolynomialCommitmentScheme<F, PF, CommitmentChunk = Digest<F>>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn ni_open(
+        pp: &Self::ProverParam,
+        poly: &Self::Polynomial,
+        comm: &Self::CommitmentWithData,
+        point: &Point<F, Self::Polynomial>,
+        eval: &F,
+    ) -> Result<PCSProof<F>, Error> {
+        let mut transcript = PoseidonTranscript::<F>::new();
+        Self::open(pp, poly, comm, point, eval, &mut transcript)?;
+        Ok(PCSProof(transcript.into_proof()))
+    }
+
+    fn ni_batch_open<'a>(
+        pp: &Self::ProverParam,
+        polys: impl IntoIterator<Item = &'a Self::Polynomial>,
+        comms: impl IntoIterator<Item = &'a Self::CommitmentWithData>,
+        points: &[Point<F, Self::Polynomial>],
+        evals: &[Evaluation<F>],
+    ) -> Result<PCSProof<F>, Error>
+    where
+        Self::Polynomial: 'a,
+        Self::CommitmentWithData: 'a,
+    {
+        let mut transcript = PoseidonTranscript::<F>::new();
+        Self::batch_open(pp, polys, comms, points, evals, &mut transcript)?;
+        Ok(PCSProof(transcript.into_proof()))
+    }
+
+    fn ni_verify(
+        vp: &Self::VerifierParam,
+        comm: &Self::Commitment,
+        point: &Point<F, Self::Polynomial>,
+        eval: &F,
+        proof: &PCSProof<F>,
+    ) -> Result<(), Error> {
+        let mut transcript = PoseidonTranscript::<F>::from_proof(proof.0.as_slice());
+        Self::verify(vp, comm, point, eval, &mut transcript)
+    }
+
+    fn ni_batch_verify<'a>(
+        vp: &Self::VerifierParam,
+        comms: impl IntoIterator<Item = &'a Self::Commitment>,
+        points: &[Point<F, Self::Polynomial>],
+        evals: &[Evaluation<F>],
+        proof: &PCSProof<F>,
+    ) -> Result<(), Error>
+    where
+        Self::Commitment: 'a,
+    {
+        let mut transcript = PoseidonTranscript::<F>::from_proof(proof.0.as_slice());
+        Self::batch_verify(vp, comms, points, evals, &mut transcript)
+    }
 }
 
 #[derive(Clone, Debug)]
