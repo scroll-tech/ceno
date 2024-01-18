@@ -544,7 +544,7 @@ where
         count_idx
     }
 
-    pub fn add_input_item(&mut self, table_type: TableType, cell: CellId) {
+    pub fn add_lookup_input_item(&mut self, table_type: TableType, cell: CellId) {
         assert!(self.tables.contains_key(&table_type));
         self.tables
             .get_mut(&table_type)
@@ -552,7 +552,7 @@ where
             .add_input_item(cell);
     }
 
-    pub fn add_table_item(&mut self, table_type: TableType, cell: CellId) {
+    pub fn add_lookup_table_item(&mut self, table_type: TableType, cell: CellId) {
         assert!(self.tables.contains_key(&table_type));
         self.tables
             .get_mut(&table_type)
@@ -605,9 +605,8 @@ where
             }
             if *self.cells[i].layer.as_ref().unwrap() == 0 {
                 assert!(
-                    self.cells[i].cell_type.is_some()
-                        && (matches!(self.cells[i].cell_type.unwrap(), CellType::WireIn(_))
-                            || matches!(self.cells[i].cell_type.unwrap(), CellType::ConstantIn(_)))
+                    matches!(self.cells[i].cell_type.unwrap(), CellType::WireIn(_))
+                        || matches!(self.cells[i].cell_type.unwrap(), CellType::ConstantIn(_))
                 );
             }
         }
@@ -685,8 +684,6 @@ where
     fn build_lookup_circuits(&mut self) {
         let tables = self.tables.clone();
         for (_, table_data) in tables.iter() {
-            assert!(table_data.challenge.is_some());
-
             let challenge = table_data.challenge.unwrap();
             let counts = self
                 .create_cells(table_data.table_items.len() + table_data.table_items_const.len());

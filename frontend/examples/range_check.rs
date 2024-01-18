@@ -17,7 +17,7 @@ fn main() {
     }
 
     inputs.iter().for_each(|input| {
-        circuit_builder.add_input_item(table_type, *input);
+        circuit_builder.add_lookup_input_item(table_type, *input);
     });
 
     circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));
