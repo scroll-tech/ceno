@@ -150,6 +150,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase1State<'a, F> {
         //     .fold(F::ZERO, |acc, (&f1_value_j, g1_value_j)| {
         //         acc + f1_value_j * g1_value_j
         //     });
+        
         // f2(t) = layers[i](t || ry)
         let f2 = Arc::new(self.layer_out_poly.fix_variables(&self.sumcheck_point_1));
         // g2^{(j)}(t) = \alpha^j copy_to[j](ry_j, ry) eq(rt_j, t)

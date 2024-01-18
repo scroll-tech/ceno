@@ -62,7 +62,7 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
         AllInputIndex {
             other_x_pows_idx,
             inputs_idx,
-            count_idx,
+            count_idx: count_idx,
         },
     )
 }
