@@ -603,6 +603,7 @@ name = "mpcs"
 version = "0.1.0"
 dependencies = [
  "aes",
+ "ark-std",
  "bitvec",
  "blake2",
  "blake2b_simd",
