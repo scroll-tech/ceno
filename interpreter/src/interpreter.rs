@@ -52,6 +52,8 @@ pub struct Interpreter<F: SmallField> {
     /// Set inside CALL or CREATE instructions and RETURN or REVERT instructions. Additionally those instructions will set
     /// InstructionResult to CallOrCreate/Return/Revert so we know the reason.
     pub next_action: Option<InterpreterAction>,
+    /// The current timestamp (number of cycles executed)
+    pub timestamp: u64,
     // TODO: ZKVM
     // pub zkvm: SingerBasic<F>,
     _phantom: PhantomData<F>,
@@ -96,6 +98,7 @@ impl<F: SmallField> Interpreter<F> {
             shared_memory: EMPTY_SHARED_MEMORY,
             stack: Stack::new(),
             next_action: None,
+            timestamp: 0,
             // zkvm: SingerBasic::new(&challenges).expect("failed to initialize singer basic"),
             _phantom: PhantomData::default(),
         }

@@ -202,7 +202,7 @@ impl SharedMemory {
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_byte(&self, offset: usize, ts: u64) -> (u8, u64) {
+    pub fn get_byte(&mut self, offset: usize, ts: u64) -> (u8, u64) {
         let ret = self.slice(offset, 1, ts);
         (ret.0[0], ret.1[0])
     }
@@ -213,7 +213,7 @@ impl SharedMemory {
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_word(&self, offset: usize, ts: u64) -> (B256, Vec<u64>) {
+    pub fn get_word(&mut self, offset: usize, ts: u64) -> (B256, Vec<u64>) {
         let ret = self.slice(offset, 32, ts);
         (ret.0.try_into().unwrap(), ret.1)
     }
@@ -224,7 +224,7 @@ impl SharedMemory {
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_u256(&self, offset: usize, ts: u64) -> (U256, Vec<u64>) {
+    pub fn get_u256(&mut self, offset: usize, ts: u64) -> (U256, Vec<u64>) {
         let ret = self.get_word(offset, ts);
         (ret.0.into(), ret.1)
     }

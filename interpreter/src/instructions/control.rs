@@ -10,7 +10,7 @@ use crate::{
 pub fn jump<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
     gas!(interpreter, gas::MID);
     pop!(interpreter, dest);
-    let dest = as_usize_or_fail!(interpreter, dest, InstructionResult::InvalidJump);
+    let dest = as_usize_or_fail!(interpreter, dest.0, InstructionResult::InvalidJump);
     if interpreter.contract.is_valid_jump(dest) {
         // SAFETY: In analysis we are checking create our jump table and we do check above to be
         // sure that jump is safe to execute.
@@ -24,8 +24,8 @@ pub fn jump<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mu
 pub fn jumpi<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
     gas!(interpreter, gas::HIGH);
     pop!(interpreter, dest, value);
-    if value != U256::ZERO {
-        let dest = as_usize_or_fail!(interpreter, dest, InstructionResult::InvalidJump);
+    if value.0 != U256::ZERO {
+        let dest = as_usize_or_fail!(interpreter, dest.0, InstructionResult::InvalidJump);
         if interpreter.contract.is_valid_jump(dest) {
             // SAFETY: In analysis we are checking if jump is valid destination and
             // this `if` makes this unsafe block safe.
@@ -55,14 +55,19 @@ fn return_inner<F: SmallField>(
     // zero gas cost
     // gas!(interpreter, gas::ZERO);
     pop!(interpreter, offset, len);
-    let len = as_usize_or_fail!(interpreter, len);
+    let len = as_usize_or_fail!(interpreter, len.0);
     // important: offset must be ignored if len is zeros
     let mut output = Bytes::default();
     if len != 0 {
-        let offset = as_usize_or_fail!(interpreter, offset);
+        let offset = as_usize_or_fail!(interpreter, offset.0);
         shared_memory_resize!(interpreter, offset, len);
 
-        output = interpreter.shared_memory.slice(offset, len).to_vec().into()
+        output = interpreter
+            .shared_memory
+            .slice(offset, len, interpreter.timestamp)
+            .0
+            .to_vec()
+            .into()
     }
     interpreter.instruction_result = instruction_result;
     interpreter.next_action = Some(crate::InterpreterAction::Return {

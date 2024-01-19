@@ -6,7 +6,7 @@ use crate::{
     Transfer, MAX_INITCODE_SIZE,
 };
 use alloc::{boxed::Box, vec::Vec};
-use core::cmp::min;
+use core::{cmp::min, num};
 use goldilocks::SmallField;
 use revm_primitives::BLOCK_HASH_HISTORY;
 
@@ -111,7 +111,7 @@ pub fn extcodecopy<H: Host, F: SmallField, SPEC: Spec>(
         return;
     };
 
-    let len = as_usize_or_fail!(interpreter, len_u256);
+    let len = as_usize_or_fail!(interpreter, len_u256.0);
     gas_or_fail!(
         interpreter,
         gas::extcodecopy_cost::<SPEC>(len as u64, is_cold)
@@ -119,39 +119,45 @@ pub fn extcodecopy<H: Host, F: SmallField, SPEC: Spec>(
     if len == 0 {
         return;
     }
-    let memory_offset = as_usize_or_fail!(interpreter, memory_offset);
-    let code_offset = min(as_usize_saturated!(code_offset), code.len());
+    let memory_offset = as_usize_or_fail!(interpreter, memory_offset.0);
+    let code_offset = min(as_usize_saturated!(code_offset.0), code.len());
     shared_memory_resize!(interpreter, memory_offset, len);
 
     // Note: this can't panic because we resized memory to fit.
-    interpreter
-        .shared_memory
-        .set_data(memory_offset, code_offset, len, code.bytes());
+    interpreter.shared_memory.set_data(
+        memory_offset,
+        code_offset,
+        len,
+        code.bytes(),
+        interpreter.timestamp,
+    );
 }
 
 pub fn blockhash<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::BLOCKHASH);
     pop_top!(interpreter, number);
 
-    if let Some(diff) = host.env().block.number.checked_sub(*number) {
+    if let Some(diff) = host.env().block.number.checked_sub(*number.0) {
         let diff = as_usize_saturated!(diff);
         // blockhash should push zero if number is same as current block number.
         if diff <= BLOCK_HASH_HISTORY && diff != 0 {
-            let Some(hash) = host.block_hash(*number) else {
+            let Some(hash) = host.block_hash(*number.0) else {
                 interpreter.instruction_result = InstructionResult::FatalExternalError;
                 return;
             };
-            *number = U256::from_be_bytes(hash.0);
+            *number.0 = U256::from_be_bytes(hash.0);
+            *number.1 = interpreter.timestamp;
             return;
         }
     }
-    *number = U256::ZERO;
+    *number.0 = U256::ZERO;
+    *number.1 = interpreter.timestamp;
 }
 
 pub fn sload<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, host: &mut H) {
     pop!(interpreter, index);
 
-    let Some((value, is_cold)) = host.sload(interpreter.contract.address, index) else {
+    let Some((value, is_cold)) = host.sload(interpreter.contract.address, index.0) else {
         interpreter.instruction_result = InstructionResult::FatalExternalError;
         return;
     };
@@ -164,7 +170,7 @@ pub fn sstore<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<
 
     pop!(interpreter, index, value);
     let Some((original, old, new, is_cold)) =
-        host.sstore(interpreter.contract.address, index, value)
+        host.sstore(interpreter.contract.address, index.0, value.0)
     else {
         interpreter.instruction_result = InstructionResult::FatalExternalError;
         return;
@@ -185,7 +191,7 @@ pub fn tstore<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<
 
     pop!(interpreter, index, value);
 
-    host.tstore(interpreter.contract.address, index, value);
+    host.tstore(interpreter.contract.address, index.0, value.0);
 }
 
 /// EIP-1153: Transient storage opcodes
@@ -196,21 +202,26 @@ pub fn tload<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F
 
     pop_top!(interpreter, index);
 
-    *index = host.tload(interpreter.contract.address, *index);
+    *index.0 = host.tload(interpreter.contract.address, *index.0);
 }
 
 pub fn log<const N: usize, H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     check_staticcall!(interpreter);
 
     pop!(interpreter, offset, len);
-    let len = as_usize_or_fail!(interpreter, len);
+    let len = as_usize_or_fail!(interpreter, len.0);
     gas_or_fail!(interpreter, gas::log_cost(N as u8, len as u64));
     let data = if len == 0 {
         Bytes::new()
     } else {
-        let offset = as_usize_or_fail!(interpreter, offset);
+        let offset = as_usize_or_fail!(interpreter, offset.0);
         shared_memory_resize!(interpreter, offset, len);
-        Bytes::copy_from_slice(interpreter.shared_memory.slice(offset, len))
+        Bytes::copy_from_slice(
+            interpreter
+                .shared_memory
+                .slice(offset, len, interpreter.timestamp)
+                .0,
+        )
     };
 
     if interpreter.stack.len() < N {
@@ -221,7 +232,7 @@ pub fn log<const N: usize, H: Host, F: SmallField>(interpreter: &mut Interpreter
     let mut topics = Vec::with_capacity(N);
     for _ in 0..N {
         // SAFETY: stack bounds already checked few lines above
-        topics.push(B256::from(unsafe { interpreter.stack.pop_unsafe() }));
+        topics.push(B256::from(unsafe { interpreter.stack.pop_unsafe().0 }));
     }
 
     host.log(interpreter.contract.address, topics, data);
@@ -260,7 +271,7 @@ pub fn create<const IS_CREATE2: bool, H: Host, F: SmallField, SPEC: Spec>(
     }
 
     pop!(interpreter, value, code_offset, len);
-    let len = as_usize_or_fail!(interpreter, len);
+    let len = as_usize_or_fail!(interpreter, len.0);
 
     let mut code = Bytes::new();
     if len != 0 {
@@ -280,16 +291,21 @@ pub fn create<const IS_CREATE2: bool, H: Host, F: SmallField, SPEC: Spec>(
             gas!(interpreter, gas::initcode_cost(len as u64));
         }
 
-        let code_offset = as_usize_or_fail!(interpreter, code_offset);
+        let code_offset = as_usize_or_fail!(interpreter, code_offset.0);
         shared_memory_resize!(interpreter, code_offset, len);
-        code = Bytes::copy_from_slice(interpreter.shared_memory.slice(code_offset, len));
+        code = Bytes::copy_from_slice(
+            interpreter
+                .shared_memory
+                .slice(code_offset, len, interpreter.timestamp)
+                .0,
+        );
     }
 
     // EIP-1014: Skinny CREATE2
     let scheme = if IS_CREATE2 {
         pop!(interpreter, salt);
         gas_or_fail!(interpreter, gas::create2_cost(len));
-        CreateScheme::Create2 { salt }
+        CreateScheme::Create2 { salt: salt.0 }
     } else {
         gas!(interpreter, gas::CREATE);
         CreateScheme::Create
@@ -309,7 +325,7 @@ pub fn create<const IS_CREATE2: bool, H: Host, F: SmallField, SPEC: Spec>(
         inputs: Box::new(CreateInputs {
             caller: interpreter.contract.address,
             scheme,
-            value,
+            value: value.0,
             init_code: code,
             gas_limit,
         }),
@@ -318,28 +334,28 @@ pub fn create<const IS_CREATE2: bool, H: Host, F: SmallField, SPEC: Spec>(
 }
 
 pub fn call<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, host: &mut H) {
-    call_inner::<SPEC, H>(CallScheme::Call, interpreter, host);
+    call_inner::<SPEC, H, F>(CallScheme::Call, interpreter, host);
 }
 
 pub fn call_code<H: Host, F: SmallField, SPEC: Spec>(
     interpreter: &mut Interpreter<F>,
     host: &mut H,
 ) {
-    call_inner::<SPEC, H>(CallScheme::CallCode, interpreter, host);
+    call_inner::<SPEC, H, F>(CallScheme::CallCode, interpreter, host);
 }
 
 pub fn delegate_call<H: Host, F: SmallField, SPEC: Spec>(
     interpreter: &mut Interpreter<F>,
     host: &mut H,
 ) {
-    call_inner::<SPEC, H>(CallScheme::DelegateCall, interpreter, host);
+    call_inner::<SPEC, H, F>(CallScheme::DelegateCall, interpreter, host);
 }
 
 pub fn static_call<H: Host, F: SmallField, SPEC: Spec>(
     interpreter: &mut Interpreter<F>,
     host: &mut H,
 ) {
-    call_inner::<SPEC, H>(CallScheme::StaticCall, interpreter, host);
+    call_inner::<SPEC, H, F>(CallScheme::StaticCall, interpreter, host);
 }
 
 pub fn call_inner<SPEC: Spec, H: Host, F: SmallField>(
@@ -361,38 +377,43 @@ pub fn call_inner<SPEC: Spec, H: Host, F: SmallField>(
     // max gas limit is not possible in real ethereum situation.
     // But for tests we would not like to fail on this.
     // Gas limit for subcall is taken as min of this value and current gas limit.
-    let local_gas_limit = u64::try_from(local_gas_limit).unwrap_or(u64::MAX);
+    let local_gas_limit = u64::try_from(local_gas_limit.0).unwrap_or(u64::MAX);
 
     let value = match scheme {
         CallScheme::CallCode => {
             pop!(interpreter, value);
-            value
+            value.0
         }
         CallScheme::Call => {
             pop!(interpreter, value);
-            if interpreter.is_static && value != U256::ZERO {
+            if interpreter.is_static && value.0 != U256::ZERO {
                 interpreter.instruction_result = InstructionResult::CallNotAllowedInsideStatic;
                 return;
             }
-            value
+            value.0
         }
         CallScheme::DelegateCall | CallScheme::StaticCall => U256::ZERO,
     };
 
     pop!(interpreter, in_offset, in_len, out_offset, out_len);
 
-    let in_len = as_usize_or_fail!(interpreter, in_len);
+    let in_len = as_usize_or_fail!(interpreter, in_len.0);
     let input = if in_len != 0 {
-        let in_offset = as_usize_or_fail!(interpreter, in_offset);
+        let in_offset = as_usize_or_fail!(interpreter, in_offset.0);
         shared_memory_resize!(interpreter, in_offset, in_len);
-        Bytes::copy_from_slice(interpreter.shared_memory.slice(in_offset, in_len))
+        Bytes::copy_from_slice(
+            interpreter
+                .shared_memory
+                .slice(in_offset, in_len, interpreter.timestamp)
+                .0,
+        )
     } else {
         Bytes::new()
     };
 
-    let out_len = as_usize_or_fail!(interpreter, out_len);
+    let out_len = as_usize_or_fail!(interpreter, out_len.0);
     let out_offset = if out_len != 0 {
-        let out_offset = as_usize_or_fail!(interpreter, out_offset);
+        let out_offset = as_usize_or_fail!(interpreter, out_offset.0);
         shared_memory_resize!(interpreter, out_offset, out_len);
         out_offset
     } else {

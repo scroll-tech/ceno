@@ -75,7 +75,7 @@ macro_rules! pop_address {
             return;
         }
         // SAFETY: Length is checked above.
-        let $x1 = Address::from_word(B256::from(unsafe { $interp.stack.pop_unsafe() }));
+        let $x1 = Address::from_word(B256::from(unsafe { $interp.stack.pop_unsafe().0 }));
     };
     ($interp:expr, $x1:ident, $x2:ident) => {
         if $interp.stack.len() < 2 {
@@ -83,8 +83,8 @@ macro_rules! pop_address {
             return;
         }
         // SAFETY: Length is checked above.
-        let $x1 = Address::from_word(B256::from(unsafe { $interp.stack.pop_unsafe() }));
-        let $x2 = Address::from_word(B256::from(unsafe { $interp.stack.pop_unsafe() }));
+        let $x1 = Address::from_word(B256::from(unsafe { $interp.stack.pop_unsafe().0 }));
+        let $x2 = Address::from_word(B256::from(unsafe { $interp.stack.pop_unsafe().0 }));
     };
 }
 
@@ -154,7 +154,7 @@ macro_rules! pop_top {
 #[macro_export]
 macro_rules! push_b256 {
 	($interp:expr, $($x:expr),* $(,)?) => ($(
-        match $interp.stack.push_b256($x) {
+        match $interp.stack.push_b256($x, $interp.timestamp) {
             Ok(()) => {},
             Err(e) => {
                 $interp.instruction_result = e;
@@ -167,7 +167,7 @@ macro_rules! push_b256 {
 #[macro_export]
 macro_rules! push {
     ($interp:expr, $($x:expr),* $(,)?) => ($(
-        match $interp.stack.push($x) {
+        match $interp.stack.push($x, $interp.timestamp) {
             Ok(()) => {},
             Err(e) => {
                 $interp.instruction_result = e;

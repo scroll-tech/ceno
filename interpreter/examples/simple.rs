@@ -1,3 +1,4 @@
+use goldilocks::Goldilocks;
 use revm_interpreter::{
     analysis::to_analysed, opcode::make_instruction_table, BytecodeLocked, Contract, DummyHost,
     Interpreter, SharedMemory, EMPTY_SHARED_MEMORY,
@@ -15,7 +16,7 @@ fn main() {
     };
     let mut shared_memory = SharedMemory::new();
     let mut host = DummyHost::new(Env::default());
-    let instruction_table = make_instruction_table::<DummyHost, BerlinSpec>();
+    let instruction_table = make_instruction_table::<DummyHost, Goldilocks, BerlinSpec>();
     // replace memory with empty memory to use it inside interpreter.
     // Later return memory back.
     let temp = core::mem::replace(&mut shared_memory, EMPTY_SHARED_MEMORY);

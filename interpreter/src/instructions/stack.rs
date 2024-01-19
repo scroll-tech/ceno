@@ -19,7 +19,7 @@ pub fn pop<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut
 pub fn push0<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, _host: &mut H) {
     check!(interpreter, SHANGHAI);
     gas!(interpreter, gas::BASE);
-    if let Err(result) = interpreter.stack.push(U256::ZERO) {
+    if let Err(result) = interpreter.stack.push(U256::ZERO, interpreter.timestamp) {
         interpreter.instruction_result = result;
     }
 }
@@ -32,10 +32,10 @@ pub fn push<const N: usize, H: Host, F: SmallField>(
     // SAFETY: In analysis we append trailing bytes to the bytecode so that this is safe to do
     // without bounds checking.
     let ip = interpreter.instruction_pointer;
-    if let Err(result) = interpreter
-        .stack
-        .push_slice(unsafe { core::slice::from_raw_parts(ip, N) })
-    {
+    if let Err(result) = interpreter.stack.push_slice(
+        unsafe { core::slice::from_raw_parts(ip, N) },
+        interpreter.timestamp,
+    ) {
         interpreter.instruction_result = result;
         return;
     }
@@ -47,7 +47,7 @@ pub fn dup<const N: usize, H: Host, F: SmallField>(
     _host: &mut H,
 ) {
     gas!(interpreter, gas::VERYLOW);
-    if let Err(result) = interpreter.stack.dup::<N>() {
+    if let Err(result) = interpreter.stack.dup::<N>(interpreter.timestamp) {
         interpreter.instruction_result = result;
     }
 }
@@ -57,7 +57,7 @@ pub fn swap<const N: usize, H: Host, F: SmallField>(
     _host: &mut H,
 ) {
     gas!(interpreter, gas::VERYLOW);
-    if let Err(result) = interpreter.stack.swap::<N>() {
+    if let Err(result) = interpreter.stack.swap::<N>(interpreter.timestamp) {
         interpreter.instruction_result = result;
     }
 }
