@@ -1,5 +1,5 @@
 mod circuit;
-mod error;
+pub mod error;
 mod prover;
 pub mod structs;
 pub mod utils;
