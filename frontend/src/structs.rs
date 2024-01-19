@@ -117,6 +117,7 @@ pub(crate) struct TableData<F: SmallField> {
     pub(crate) count_witness_cell_type: CellType,
 }
 
+#[derive(Clone)]
 pub struct CircuitBuilder<F: SmallField> {
     pub cells: Vec<Cell<F>>,
 
