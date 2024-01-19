@@ -73,7 +73,7 @@ macro_rules! opcodes {
         };
 
         /// Returns the instruction function for the given opcode and spec.
-        pub fn instruction<H: Host, SPEC: Spec, F: SmallField>(opcode: u8) -> Instruction<H, F> {
+        pub fn instruction<H: Host, F: SmallField, SPEC: Spec>(opcode: u8) -> Instruction<H, F> {
             match opcode {
                 $($name => $f,)*
                 _ => control::unknown,
@@ -83,10 +83,10 @@ macro_rules! opcodes {
 }
 
 /// Make instruction table.
-pub fn make_instruction_table<H: Host, SPEC: Spec, F: SmallField>() -> InstructionTable<H, F> {
+pub fn make_instruction_table<H: Host, F: SmallField, SPEC: Spec>() -> InstructionTable<H, F> {
     core::array::from_fn(|i| {
         debug_assert!(i <= u8::MAX as usize);
-        instruction::<H, SPEC>(i as u8)
+        instruction::<H, F, SPEC>(i as u8)
     })
 }
 
@@ -120,7 +120,7 @@ opcodes! {
     0x07 => SMOD       => arithmetic::smod,
     0x08 => ADDMOD     => arithmetic::addmod,
     0x09 => MULMOD     => arithmetic::mulmod,
-    0x0A => EXP        => arithmetic::exp::<H, SPEC>,
+    0x0A => EXP        => arithmetic::exp::<H, F, SPEC>,
     0x0B => SIGNEXTEND => arithmetic::signextend,
     // 0x0C
     // 0x0D
@@ -137,9 +137,9 @@ opcodes! {
     0x18 => XOR    => bitwise::bitxor,
     0x19 => NOT    => bitwise::not,
     0x1A => BYTE   => bitwise::byte,
-    0x1B => SHL    => bitwise::shl::<H, SPEC>,
-    0x1C => SHR    => bitwise::shr::<H, SPEC>,
-    0x1D => SAR    => bitwise::sar::<H, SPEC>,
+    0x1B => SHL    => bitwise::shl::<H, F, SPEC>,
+    0x1C => SHR    => bitwise::shr::<H, F, SPEC>,
+    0x1D => SAR    => bitwise::sar::<H, F, SPEC>,
     // 0x1E
     // 0x1F
     0x20 => KECCAK256 => system::keccak256,
@@ -159,7 +159,7 @@ opcodes! {
     // 0x2E
     // 0x2F
     0x30 => ADDRESS   => system::address,
-    0x31 => BALANCE   => host::balance::<H, SPEC>,
+    0x31 => BALANCE   => host::balance::<H, F, SPEC>,
     0x32 => ORIGIN    => host_env::origin,
     0x33 => CALLER    => system::caller,
     0x34 => CALLVALUE => system::callvalue,
@@ -170,22 +170,22 @@ opcodes! {
     0x39 => CODECOPY     => system::codecopy,
 
     0x3A => GASPRICE       => host_env::gasprice,
-    0x3B => EXTCODESIZE    => host::extcodesize::<H, SPEC>,
-    0x3C => EXTCODECOPY    => host::extcodecopy::<H, SPEC>,
-    0x3D => RETURNDATASIZE => system::returndatasize::<H, SPEC>,
-    0x3E => RETURNDATACOPY => system::returndatacopy::<H, SPEC>,
-    0x3F => EXTCODEHASH    => host::extcodehash::<H, SPEC>,
+    0x3B => EXTCODESIZE    => host::extcodesize::<H, F, SPEC>,
+    0x3C => EXTCODECOPY    => host::extcodecopy::<H, F, SPEC>,
+    0x3D => RETURNDATASIZE => system::returndatasize::<H, F, SPEC>,
+    0x3E => RETURNDATACOPY => system::returndatacopy::<H, F, SPEC>,
+    0x3F => EXTCODEHASH    => host::extcodehash::<H, F, SPEC>,
     0x40 => BLOCKHASH      => host::blockhash,
     0x41 => COINBASE       => host_env::coinbase,
     0x42 => TIMESTAMP      => host_env::timestamp,
     0x43 => NUMBER         => host_env::number,
-    0x44 => DIFFICULTY     => host_env::difficulty::<H, SPEC>,
+    0x44 => DIFFICULTY     => host_env::difficulty::<H, F, SPEC>,
     0x45 => GASLIMIT       => host_env::gaslimit,
-    0x46 => CHAINID        => host_env::chainid::<H, SPEC>,
-    0x47 => SELFBALANCE    => host::selfbalance::<H, SPEC>,
-    0x48 => BASEFEE        => host_env::basefee::<H, SPEC>,
-    0x49 => BLOBHASH       => host_env::blob_hash::<H, SPEC>,
-    0x4A => BLOBBASEFEE    => host_env::blob_basefee::<H, SPEC>,
+    0x46 => CHAINID        => host_env::chainid::<H, F, SPEC>,
+    0x47 => SELFBALANCE    => host::selfbalance::<H, F, SPEC>,
+    0x48 => BASEFEE        => host_env::basefee::<H, F, SPEC>,
+    0x49 => BLOBHASH       => host_env::blob_hash::<H, F, SPEC>,
+    0x4A => BLOBBASEFEE    => host_env::blob_basefee::<H, F, SPEC>,
     // 0x4B
     // 0x4C
     // 0x4D
@@ -195,19 +195,19 @@ opcodes! {
     0x51 => MLOAD    => memory::mload,
     0x52 => MSTORE   => memory::mstore,
     0x53 => MSTORE8  => memory::mstore8,
-    0x54 => SLOAD    => host::sload::<H, SPEC>,
-    0x55 => SSTORE   => host::sstore::<H, SPEC>,
+    0x54 => SLOAD    => host::sload::<H, F, SPEC>,
+    0x55 => SSTORE   => host::sstore::<H, F, SPEC>,
     0x56 => JUMP     => control::jump,
     0x57 => JUMPI    => control::jumpi,
     0x58 => PC       => control::pc,
     0x59 => MSIZE    => memory::msize,
     0x5A => GAS      => system::gas,
     0x5B => JUMPDEST => control::jumpdest,
-    0x5C => TLOAD    => host::tload::<H, SPEC>,
-    0x5D => TSTORE   => host::tstore::<H, SPEC>,
-    0x5E => MCOPY    => memory::mcopy::<H, SPEC>,
+    0x5C => TLOAD    => host::tload::<H, F, SPEC>,
+    0x5D => TSTORE   => host::tstore::<H, F, SPEC>,
+    0x5E => MCOPY    => memory::mcopy::<H, F, SPEC>,
 
-    0x5F => PUSH0  => stack::push0::<H, SPEC>,
+    0x5F => PUSH0  => stack::push0::<H, F, SPEC>,
     0x60 => PUSH1  => stack::push::<1, H, F>,
     0x61 => PUSH2  => stack::push::<2, H, F>,
     0x62 => PUSH3  => stack::push::<3, H, F>,
@@ -355,22 +355,22 @@ opcodes! {
     // 0xED
     // 0xEE
     // 0xEF
-    0xF0 => CREATE       => host::create::<false, H, SPEC>,
-    0xF1 => CALL         => host::call::<H, SPEC>,
-    0xF2 => CALLCODE     => host::call_code::<H, SPEC>,
+    0xF0 => CREATE       => host::create::<false, H, F, SPEC>,
+    0xF1 => CALL         => host::call::<H, F, SPEC>,
+    0xF2 => CALLCODE     => host::call_code::<H, F, SPEC>,
     0xF3 => RETURN       => control::ret,
-    0xF4 => DELEGATECALL => host::delegate_call::<H, SPEC>,
-    0xF5 => CREATE2      => host::create::<true, H, SPEC>,
+    0xF4 => DELEGATECALL => host::delegate_call::<H, F, SPEC>,
+    0xF5 => CREATE2      => host::create::<true, H, F, SPEC>,
     // 0xF6
     // 0xF7
     // 0xF8
     // 0xF9
-    0xFA => STATICCALL   => host::static_call::<H, SPEC>,
+    0xFA => STATICCALL   => host::static_call::<H, F, SPEC>,
     // 0xFB
     // 0xFC
-    0xFD => REVERT       => control::revert::<H, SPEC>,
+    0xFD => REVERT       => control::revert::<H, F, SPEC>,
     0xFE => INVALID      => control::invalid,
-    0xFF => SELFDESTRUCT => host::selfdestruct::<H, SPEC>,
+    0xFF => SELFDESTRUCT => host::selfdestruct::<H, F, SPEC>,
 }
 
 /// An EVM opcode.

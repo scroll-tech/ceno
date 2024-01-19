@@ -7,7 +7,7 @@ pub use analysis::BytecodeLocked;
 pub use contract::Contract;
 use goldilocks::SmallField;
 pub use shared_memory::{next_multiple_of_32, SharedMemory};
-use singer_basic::{instructions::ChipChallenges, SingerBasic};
+use singer::instructions::ChipChallenges;
 pub use stack::{Stack, STACK_LIMIT};
 
 use crate::{
@@ -15,8 +15,8 @@ use crate::{
     Host, InstructionResult,
 };
 use alloc::boxed::Box;
-use core::cmp::min;
 use core::ops::Range;
+use core::{cmp::min, marker::PhantomData};
 use revm_primitives::{Address, U256};
 
 pub use self::shared_memory::EMPTY_SHARED_MEMORY;
@@ -52,9 +52,9 @@ pub struct Interpreter<F: SmallField> {
     /// Set inside CALL or CREATE instructions and RETURN or REVERT instructions. Additionally those instructions will set
     /// InstructionResult to CallOrCreate/Return/Revert so we know the reason.
     pub next_action: Option<InterpreterAction>,
-
-    /// ZKVM
-    pub zkvm: SingerBasic<F>,
+    // TODO: ZKVM
+    // pub zkvm: SingerBasic<F>,
+    _phantom: PhantomData<F>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,7 +96,8 @@ impl<F: SmallField> Interpreter<F> {
             shared_memory: EMPTY_SHARED_MEMORY,
             stack: Stack::new(),
             next_action: None,
-            zkvm: SingerBasic::new(&challenges).expect("failed to initialize singer basic"),
+            // zkvm: SingerBasic::new(&challenges).expect("failed to initialize singer basic"),
+            _phantom: PhantomData::default(),
         }
     }
 

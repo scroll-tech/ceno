@@ -7,6 +7,21 @@ use crate::{
     Host, InstructionResult, Interpreter,
 };
 
+trait WrappingArithmetic {
+    fn wrapping_add(self, rhs: Self) -> Self;
+    fn wrapping_sub(self, rhs: Self) -> Self;
+}
+
+impl WrappingArithmetic for (U256, u64) {
+    fn wrapping_add(self, rhs: Self) -> Self {
+        (self.0.wrapping_add(rhs.0), self.1.wrapping_add(rhs.1))
+    }
+
+    fn wrapping_sub(self, rhs: Self) -> Self {
+        (self.0.wrapping_sub(rhs.0), self.1.wrapping_sub(rhs.1))
+    }
+}
+
 pub fn wrapped_add<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
@@ -67,7 +82,7 @@ pub fn mulmod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &
     *op3 = op1.mul_mod(op2, *op3)
 }
 
-pub fn exp<H: Host, SPEC: Spec, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn exp<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, _host: &mut H) {
     pop_top!(interpreter, op1, op2);
     gas_or_fail!(interpreter, gas::exp_cost::<SPEC>(*op2));
     *op2 = op1.pow(*op2);
