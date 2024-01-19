@@ -137,6 +137,7 @@ pub struct Gate3In<C> {
 pub struct CircuitWitness<F: SmallField> {
     /// Three vectors denote 1. layer_id, 2. instance_id, 3. wire_id.
     pub(crate) layers: Vec<Vec<Vec<F>>>,
+    /// 1. wires_in id, 2. instance_id, 3. wire_id.
     pub(crate) wires_in: Vec<Vec<Vec<F>>>,
     pub(crate) wires_out: Vec<Vec<Vec<F>>>,
     /// Challenges

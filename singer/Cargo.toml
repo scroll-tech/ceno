@@ -1,5 +1,5 @@
 [package]
-name = "singer_basic"
+name = "singer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

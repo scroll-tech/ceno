@@ -90,6 +90,10 @@ pub struct InstCircuit<F: SmallField> {
     phases_wire_id: [Option<WireId>; 2],
 }
 
+#[derive(Clone, Debug)]
+pub struct InstInfo<F: SmallField> {
+    _marker: std::marker::PhantomData<F>,
+}
 pub(crate) trait Instruction {
     const OPCODE: OpcodeType;
 

@@ -29,23 +29,23 @@ pub mod error;
 pub mod instructions;
 pub mod scheme;
 
+// 1. Construct instruction circuits and circuit gadgets => circuit gadgets
+// 2. (bytecode + input) => Run revm interpreter, generate all wires in
+//      2.1 phase 0 wire in + commitment
+//      2.2 phase 1 wire in + commitment
+//      2.3 phase 2 wire in + commitment
+// 3. (circuit gadgets + wires in) => gkr graph + gkr witness
+// 4. (gkr graph + gkr witness) => (gkr proof + point)
+// 5. (commitments + point) => pcs proof
+
 #[derive(Clone, Debug)]
-pub struct SingerBasic<F: SmallField> {
+pub struct SingerCircuitBuilder<F: SmallField> {
     /// Opcode circuits
     opcode_circuits: [Arc<InstCircuit<F>>; 256],
     chip_circuit_gadgets: ChipCircuitGadgets<F>,
 }
 
-pub struct SingerBasicCircuit<F: SmallField>(CircuitGraph<F>);
-
-pub struct SingerBasicWitness<F: SmallField>(CircuitGraphWitness<F>);
-
-pub struct SingerBasicPublicIO<F: SmallField> {
-    bytecode: Vec<F>,
-    public_input: Vec<F>,
-}
-
-impl<F: SmallField> SingerBasic<F> {
+impl<F: SmallField> SingerCircuitBuilder<F> {
     pub fn new(challenges: &ChipChallenges) -> Result<Self, ZKVMError> {
         let mut opcode_circuits = Vec::with_capacity(256);
         for opcode in 0..=255 {
@@ -60,6 +60,12 @@ impl<F: SmallField> SingerBasic<F> {
             opcode_circuits,
             chip_circuit_gadgets,
         })
+    }
+
+    pub fn construct_gkr_graph(
+        singer_wires_in: &SingerWiresIn<F>,
+    ) -> (SingerCircuit<F>, SingerWitness<F>) {
+        todo!()
     }
 }
 
@@ -84,4 +90,12 @@ fn construct_opcode_circuit<F: SmallField>(
         0xF3 => ReturnInstruction::construct_circuit(challenges),
         _ => unimplemented!(),
     }
+}
+
+pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
+
+pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
+
+pub struct SingerWiresIn<F: SmallField> {
+    marker: std::marker::PhantomData<F>,
 }

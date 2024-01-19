@@ -1452,7 +1452,7 @@ dependencies = [
  "goldilocks",
  "revm-primitives",
  "serde",
- "singer_basic",
+ "singer",
 ]
 
 [[package]]
@@ -1690,7 +1690,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "singer_basic"
+name = "singer"
 version = "0.1.0"
 dependencies = [
  "ark-std 0.4.0",
