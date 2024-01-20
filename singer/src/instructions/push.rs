@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use frontend::structs::{CircuitBuilder, MixedCell};
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
@@ -9,7 +11,7 @@ use crate::{
 
 use super::{
     utils::{uint::UIntAddSub, ChipHandler, PCUInt, TSUInt, UInt},
-    ChipChallenges, InstCircuit, Instruction,
+    ChipChallenges, InstCircuit, InstOutputType, Instruction,
 };
 
 pub struct PushInstruction<const N: usize>;
@@ -40,11 +42,11 @@ register_wires_out!(
     global_state_out_size {
         state_out => 1
     },
-    stack_push_size {
-        value => N
-    },
     bytecode_chip_size {
         current => N + 1
+    },
+    stack_push_size {
+        value => N
     },
     range_chip_size {
         stack_top => 1,
@@ -67,6 +69,19 @@ impl<const N: usize> Instruction for PushInstruction<N> {
             _ => 0,
         }
     }
+
+    #[inline]
+    fn output_size(inst_out: InstOutputType) -> usize {
+        match inst_out {
+            InstOutputType::GlobalStateIn => Self::global_state_in_size(),
+            InstOutputType::GlobalStateOut => Self::global_state_out_size(),
+            InstOutputType::BytecodeChip => Self::bytecode_chip_size(),
+            InstOutputType::StackPush => Self::stack_push_size(),
+            InstOutputType::RangeChip => Self::range_chip_size(),
+            _ => 0,
+        }
+    }
+
     fn construct_circuit<F: SmallField>(
         challenges: &ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
@@ -126,7 +141,7 @@ impl<const N: usize> Instruction for PushInstruction<N> {
         );
 
         // Check the range of stack_top is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        range_chip_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr);
+        range_chip_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr)?;
 
         let stack_bytes = &phase0[Self::phase0_stack_bytes()];
         let stack_values =
@@ -170,19 +185,23 @@ impl<const N: usize> Instruction for PushInstruction<N> {
         bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
         stack_push_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
         range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-
         circuit_builder.configure();
+
+        let outputs_wire_id = [
+            Some(global_state_in_handler.wire_out_id()),
+            Some(global_state_out_handler.wire_out_id()),
+            Some(bytecode_chip_handler.wire_out_id()),
+            None,
+            Some(stack_push_handler.wire_out_id()),
+            Some(range_chip_handler.wire_out_id()),
+            None,
+            None,
+            None,
+        ];
+
         Ok(InstCircuit {
-            circuit: Circuit::new(&circuit_builder),
-            state_in_wire_id: global_state_in_handler.wire_out_id(),
-            state_out_wire_id: global_state_out_handler.wire_out_id(),
-            bytecode_chip_wire_id: bytecode_chip_handler.wire_out_id(),
-            stack_pop_wire_id: None,
-            stack_push_wire_id: Some(stack_push_handler.wire_out_id()),
-            range_chip_wire_id: Some(range_chip_handler.wire_out_id()),
-            memory_load_wire_id: None,
-            memory_store_wire_id: None,
-            calldata_chip_wire_id: None,
+            circuit: Arc::new(Circuit::new(&circuit_builder)),
+            outputs_wire_id,
             phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
         })
     }

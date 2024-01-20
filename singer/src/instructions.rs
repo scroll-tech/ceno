@@ -1,8 +1,18 @@
+use std::sync::Arc;
+
 use frontend::structs::WireId;
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
+use strum_macros::EnumIter;
 
 use crate::{constants::OpcodeType, error::ZKVMError};
+
+use self::{
+    add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
+    gt::GtInstruction, jump::JumpInstruction, jumpdest::JumpdestInstruction,
+    jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
+    ret::ReturnInstruction, swap::SwapInstruction,
+};
 
 #[macro_use]
 mod macros;
@@ -71,23 +81,91 @@ impl ChipChallenges {
     }
 }
 
+#[derive(Clone, Copy, Debug, EnumIter)]
+pub(crate) enum InstOutputType {
+    GlobalStateIn,
+    GlobalStateOut,
+    BytecodeChip,
+    StackPop,
+    StackPush,
+    RangeChip,
+    MemoryLoad,
+    MemoryStore,
+    CalldataChip,
+}
+
 #[derive(Clone, Debug)]
 pub struct InstCircuit<F: SmallField> {
-    circuit: Circuit<F>,
+    pub(crate) circuit: Arc<Circuit<F>>,
 
     // Wires out index
-    state_in_wire_id: WireId,
-    state_out_wire_id: WireId,
-    bytecode_chip_wire_id: WireId,
-    stack_pop_wire_id: Option<WireId>,
-    stack_push_wire_id: Option<WireId>,
-    range_chip_wire_id: Option<WireId>,
-    memory_load_wire_id: Option<WireId>,
-    memory_store_wire_id: Option<WireId>,
-    calldata_chip_wire_id: Option<WireId>,
+    pub(crate) outputs_wire_id: [Option<WireId>; 9],
 
     // Wires in index
-    phases_wire_id: [Option<WireId>; 2],
+    pub(crate) phases_wire_id: [Option<WireId>; 2],
+}
+
+pub(crate) fn construct_opcode_circuit<F: SmallField>(
+    opcode: u8,
+    challenges: &ChipChallenges,
+) -> Result<InstCircuit<F>, ZKVMError> {
+    match opcode {
+        0x01 => AddInstruction::construct_circuit(challenges),
+        0x11 => GtInstruction::construct_circuit(challenges),
+        0x35 => CalldataloadInstruction::construct_circuit(challenges),
+        0x50 => PopInstruction::construct_circuit(challenges),
+        0x52 => MstoreInstruction::construct_circuit(challenges),
+        0x56 => JumpInstruction::construct_circuit(challenges),
+        0x57 => JumpiInstruction::construct_circuit(challenges),
+        0x5B => JumpdestInstruction::construct_circuit(challenges),
+        0x60 => PushInstruction::<1>::construct_circuit(challenges),
+        0x80 => DupInstruction::<1>::construct_circuit(challenges),
+        0x81 => DupInstruction::<2>::construct_circuit(challenges),
+        0x91 => SwapInstruction::<2>::construct_circuit(challenges),
+        0x93 => SwapInstruction::<4>::construct_circuit(challenges),
+        0xF3 => ReturnInstruction::construct_circuit(challenges),
+        _ => unimplemented!(),
+    }
+}
+
+pub(crate) fn witness_size(opcode: u8, phase: usize) -> usize {
+    match opcode {
+        0x01 => AddInstruction::witness_size(phase),
+        0x11 => GtInstruction::witness_size(phase),
+        0x35 => CalldataloadInstruction::witness_size(phase),
+        0x50 => PopInstruction::witness_size(phase),
+        0x52 => MstoreInstruction::witness_size(phase),
+        0x56 => JumpInstruction::witness_size(phase),
+        0x57 => JumpiInstruction::witness_size(phase),
+        0x5B => JumpdestInstruction::witness_size(phase),
+        0x60 => PushInstruction::<1>::witness_size(phase),
+        0x80 => DupInstruction::<1>::witness_size(phase),
+        0x81 => DupInstruction::<2>::witness_size(phase),
+        0x91 => SwapInstruction::<2>::witness_size(phase),
+        0x93 => SwapInstruction::<4>::witness_size(phase),
+        0xF3 => ReturnInstruction::witness_size(phase),
+        _ => unimplemented!(),
+    }
+}
+
+pub(crate) fn output_size(opcode: u8, inst_out: InstOutputType) -> usize {
+    match opcode {
+        0x01 => AddInstruction::output_size(inst_out),
+        0x11 => GtInstruction::output_size(inst_out),
+        0x35 => CalldataloadInstruction::output_size(inst_out),
+        0x50 => PopInstruction::output_size(inst_out),
+        0x52 => MstoreInstruction::output_size(inst_out),
+        0x56 => JumpInstruction::output_size(inst_out),
+        0x57 => JumpiInstruction::output_size(inst_out),
+        0x5B => JumpdestInstruction::output_size(inst_out),
+        0x60 => PushInstruction::<1>::output_size(inst_out),
+        0x80 => DupInstruction::<1>::output_size(inst_out),
+        0x81 => DupInstruction::<2>::output_size(inst_out),
+        0x91 => SwapInstruction::<2>::output_size(inst_out),
+        0x93 => SwapInstruction::<4>::output_size(inst_out),
+        0xF3 => ReturnInstruction::output_size(inst_out),
+        _ => unimplemented!(),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -98,6 +176,7 @@ pub(crate) trait Instruction {
     const OPCODE: OpcodeType;
 
     fn witness_size(phase: usize) -> usize;
+    fn output_size(inst_out: InstOutputType) -> usize;
 
     fn construct_circuit<F: SmallField>(
         challenges: &ChipChallenges,

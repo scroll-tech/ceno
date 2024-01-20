@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use frontend::structs::{CircuitBuilder, MixedCell};
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
@@ -6,7 +8,7 @@ use crate::{constants::OpcodeType, error::ZKVMError};
 
 use super::{
     utils::{uint::UIntCmp, ChipHandler, TSUInt},
-    ChipChallenges, InstCircuit, Instruction,
+    ChipChallenges, InstCircuit, InstOutputType, Instruction,
 };
 
 pub struct JumpInstruction;
@@ -36,12 +38,12 @@ register_wires_out!(
     global_state_out_size {
         state_out => 1
     },
-    stack_pop_size {
-        next_pc => 1
-    },
     bytecode_chip_size {
         current => 1,
         next => 1
+    },
+    stack_pop_size {
+        next_pc => 1
     },
     range_chip_size {
         stack_top => 1,
@@ -57,6 +59,17 @@ impl Instruction for JumpInstruction {
         match phase {
             0 => Self::phase0_size(),
             1 => Self::phase1_size(),
+            _ => 0,
+        }
+    }
+
+    fn output_size(inst_out: InstOutputType) -> usize {
+        match inst_out {
+            InstOutputType::GlobalStateIn => Self::global_state_in_size(),
+            InstOutputType::GlobalStateOut => Self::global_state_out_size(),
+            InstOutputType::BytecodeChip => Self::bytecode_chip_size(),
+            InstOutputType::StackPop => Self::stack_pop_size(),
+            InstOutputType::RangeChip => Self::range_chip_size(),
             _ => 0,
         }
     }
@@ -96,7 +109,8 @@ impl Instruction for JumpInstruction {
         );
 
         // Pop next pc from stack
-        range_chip_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(F::ONE));
+        range_chip_handler
+            .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(F::ONE))?;
 
         let next_pc_rlc = phase1[Self::phase1_next_pc_rlc().start];
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
@@ -145,19 +159,23 @@ impl Instruction for JumpInstruction {
         bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
         stack_pop_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
         range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-
         circuit_builder.configure();
+
+        let outputs_wire_id = [
+            Some(global_state_in_handler.wire_out_id()),
+            Some(global_state_out_handler.wire_out_id()),
+            Some(bytecode_chip_handler.wire_out_id()),
+            Some(stack_pop_handler.wire_out_id()),
+            None,
+            Some(range_chip_handler.wire_out_id()),
+            None,
+            None,
+            None,
+        ];
+
         Ok(InstCircuit {
-            circuit: Circuit::new(&circuit_builder),
-            state_in_wire_id: global_state_in_handler.wire_out_id(),
-            state_out_wire_id: global_state_out_handler.wire_out_id(),
-            bytecode_chip_wire_id: bytecode_chip_handler.wire_out_id(),
-            stack_pop_wire_id: Some(stack_pop_handler.wire_out_id()),
-            stack_push_wire_id: None,
-            range_chip_wire_id: Some(range_chip_handler.wire_out_id()),
-            memory_load_wire_id: None,
-            memory_store_wire_id: None,
-            calldata_chip_wire_id: None,
+            circuit: Arc::new(Circuit::new(&circuit_builder)),
+            outputs_wire_id,
             phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
         })
     }

@@ -7,7 +7,7 @@ use crate::{
     instructions::ChipChallenges,
 };
 
-use super::{i64_to_field, uint::UIntAddSub, ChipHandler, PCUInt, StackUInt, TSUInt, UInt};
+use super::{i64_to_field, uint::UIntAddSub, ChipHandler, PCUInt, TSUInt, UInt};
 
 impl ChipHandler {
     pub(in crate::instructions) fn new<F: SmallField>(
@@ -298,22 +298,22 @@ impl ChipHandler {
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
         stack_top: MixedCell<F>,
-    ) {
-        self.small_range_check(circuit_builder, stack_top, STACK_TOP_BIT_WIDTH);
+    ) -> Result<(), ZKVMError> {
+        self.small_range_check(circuit_builder, stack_top, STACK_TOP_BIT_WIDTH)
     }
 
-    /// Check the range of stack values within [0, 1 << STACK_VALUE_BYTE_WIDTH * 8).
-    /// Return the verified values.
-    pub(in crate::instructions) fn range_check_stack_values<F: SmallField>(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<F>,
-        values: &[CellId],
-        range_value_witness: Option<&[CellId]>,
-    ) -> Result<Vec<CellId>, ZKVMError> {
-        let value = StackUInt::try_from(values)?;
-        let result = self.range_check_uint(circuit_builder, &value, range_value_witness)?;
-        Ok(result.values)
-    }
+    // /// Check the range of stack values within [0, 1 << STACK_VALUE_BYTE_WIDTH * 8).
+    // /// Return the verified values.
+    // pub(in crate::instructions) fn range_check_stack_values<F: SmallField>(
+    //     &mut self,
+    //     circuit_builder: &mut CircuitBuilder<F>,
+    //     values: &[CellId],
+    //     range_value_witness: Option<&[CellId]>,
+    // ) -> Result<Vec<CellId>, ZKVMError> {
+    //     let value = StackUInt::try_from(values)?;
+    //     let result = self.range_check_uint(circuit_builder, &value, range_value_witness)?;
+    //     Ok(result.values)
+    // }
 
     /// Check the range of stack values within [0, 1 << STACK_VALUE_BYTE_WIDTH * 8).
     /// Return the verified values.
@@ -329,9 +329,9 @@ impl ChipHandler {
         let n_cell = (M + C - 1) / C;
         if C <= RANGE_CHIP_BIT_WIDTH {
             for value in uint.values.iter().take(n_cell - 1) {
-                self.small_range_check(circuit_builder, (*value).into(), VALUE_BIT_WIDTH);
+                self.small_range_check(circuit_builder, (*value).into(), VALUE_BIT_WIDTH)?;
             }
-            self.small_range_check(circuit_builder, uint.values[n_cell - 1].into(), M % C);
+            self.small_range_check(circuit_builder, uint.values[n_cell - 1].into(), M % C)?;
             Ok((*uint).clone())
         } else if let Some(range_values) = range_value_witness {
             let range_value = UInt::<M, C>::from_range_values(circuit_builder, range_values)?;
@@ -340,13 +340,13 @@ impl ChipHandler {
             let chunk_size = (b + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
             for chunk in range_values.chunks(chunk_size) {
                 for i in 0..chunk_size - 1 {
-                    self.small_range_check(circuit_builder, chunk[i].into(), RANGE_CHIP_BIT_WIDTH);
+                    self.small_range_check(circuit_builder, chunk[i].into(), RANGE_CHIP_BIT_WIDTH)?;
                 }
                 self.small_range_check(
                     circuit_builder,
                     chunk[chunk_size - 1].into(),
                     b - (chunk_size - 1) * RANGE_CHIP_BIT_WIDTH,
-                );
+                )?;
             }
             Ok(range_value)
         } else {
@@ -354,23 +354,24 @@ impl ChipHandler {
         }
     }
 
-    pub(in crate::instructions) fn range_check_bytes<F: SmallField>(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<F>,
-        bytes: &[CellId],
-    ) {
-        for byte in bytes {
-            self.small_range_check(circuit_builder, (*byte).into(), 8);
-        }
-    }
+    // pub(in crate::instructions) fn range_check_bytes<F: SmallField>(
+    //     &mut self,
+    //     circuit_builder: &mut CircuitBuilder<F>,
+    //     bytes: &[CellId],
+    // ) -> Result<(), ZKVMError> {
+    //     for byte in bytes {
+    //         self.small_range_check(circuit_builder, (*byte).into(), 8)?;
+    //     }
+    //     Ok(())
+    // }
 
-    pub(in crate::instructions) fn range_check_bit<F: SmallField>(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<F>,
-        bit: CellId,
-    ) {
-        self.small_range_check(circuit_builder, bit.into(), 1);
-    }
+    // pub(in crate::instructions) fn range_check_bit<F: SmallField>(
+    //     &mut self,
+    //     circuit_builder: &mut CircuitBuilder<F>,
+    //     bit: CellId,
+    // ) -> Result<(), ZKVMError> {
+    //     self.small_range_check(circuit_builder, bit.into(), 1)
+    // }
 
     pub(in crate::instructions) fn mem_load<F: SmallField>(
         &mut self,

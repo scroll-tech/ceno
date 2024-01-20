@@ -22,11 +22,11 @@ pub(super) struct ChipHandler {
 
 /// Unsigned integer with `M` bits. C denotes the cell bit width.
 #[derive(Clone, Debug)]
-pub(super) struct UInt<const M: usize, const C: usize> {
+pub(crate) struct UInt<const M: usize, const C: usize> {
     values: Vec<CellId>,
 }
 
-pub(super) type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
-pub(super) type PCUInt = UInt64;
-pub(super) type TSUInt = UInt<56, 56>;
-pub(super) type StackUInt = UInt<{ EVM_STACK_BIT_WIDTH as usize }, { VALUE_BIT_WIDTH as usize }>;
+pub(crate) type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
+pub(crate) type PCUInt = UInt64;
+pub(crate) type TSUInt = UInt<56, 56>;
+pub(crate) type StackUInt = UInt<{ EVM_STACK_BIT_WIDTH as usize }, { VALUE_BIT_WIDTH as usize }>;

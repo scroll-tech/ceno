@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use frontend::structs::{CircuitBuilder, MixedCell};
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
@@ -6,7 +8,7 @@ use crate::{constants::OpcodeType, error::ZKVMError};
 
 use super::{
     utils::{ChipHandler, PCUInt},
-    ChipChallenges, InstCircuit, Instruction,
+    ChipChallenges, InstCircuit, InstOutputType, Instruction,
 };
 
 pub struct JumpdestInstruction;
@@ -49,6 +51,16 @@ impl Instruction for JumpdestInstruction {
             _ => 0,
         }
     }
+
+    fn output_size(inst_out: InstOutputType) -> usize {
+        match inst_out {
+            InstOutputType::GlobalStateIn => Self::global_state_in_size(),
+            InstOutputType::GlobalStateOut => Self::global_state_out_size(),
+            InstOutputType::BytecodeChip => Self::bytecode_chip_size(),
+            _ => 0,
+        }
+    }
+
     fn construct_circuit<F: SmallField>(
         challenges: &ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
@@ -107,18 +119,22 @@ impl Instruction for JumpdestInstruction {
         global_state_out_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
         bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
 
+        let outputs_wire_id = [
+            Some(global_state_in_handler.wire_out_id()),
+            Some(global_state_out_handler.wire_out_id()),
+            Some(bytecode_chip_handler.wire_out_id()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ];
+
         circuit_builder.configure();
         Ok(InstCircuit {
-            circuit: Circuit::new(&circuit_builder),
-            state_in_wire_id: global_state_in_handler.wire_out_id(),
-            state_out_wire_id: global_state_out_handler.wire_out_id(),
-            bytecode_chip_wire_id: bytecode_chip_handler.wire_out_id(),
-            stack_pop_wire_id: None,
-            stack_push_wire_id: None,
-            range_chip_wire_id: None,
-            memory_load_wire_id: None,
-            memory_store_wire_id: None,
-            calldata_chip_wire_id: None,
+            circuit: Arc::new(Circuit::new(&circuit_builder)),
+            outputs_wire_id,
             phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
         })
     }

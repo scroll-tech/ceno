@@ -9,7 +9,6 @@ members = [
     "mpcs",
     "gkr-graph",
     "singer",
-    "interpreter",
 ]
 
 [workspace.package]

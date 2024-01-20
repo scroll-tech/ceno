@@ -1,100 +1,62 @@
-use std::collections::HashMap;
+use std::sync::Arc;
 
-use frontend::structs::{CellId, CircuitBuilder, MixedCell, WireId};
+use frontend::structs::CircuitBuilder;
 use gkr::structs::Circuit;
+use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
+use itertools::Itertools;
 
-use crate::{constants::OpcodeType, error::ZKVMError, instructions::ChipChallenges};
+use crate::chips::utils::inner_den_to_frac_circuit;
+use crate::instructions::utils::PCUInt;
+use crate::{error::ZKVMError, instructions::ChipChallenges};
 
-use super::{
-    circuit_gadgets::{frac_sum_pad_with_zero_frac, inv_pad_with_zero_frac},
-    Chip, InputWiresInfo,
-};
+/// Add bytecode table circuit to the circuit graph. Return node id and lookup
+/// instance log size.
+pub(crate) fn construct_bytecode_table<F: SmallField>(
+    builder: &mut CircuitGraphBuilder<F>,
+    bytecode: &[u8],
+    challenges: &ChipChallenges,
+    real_challenges: &[F],
+) -> Result<(usize, usize), ZKVMError> {
+    let mut circuit_builder = CircuitBuilder::<F>::new();
+    let (_, bytecode_cells) = circuit_builder.create_wire_in(1);
+    let (_, pc_cells) = circuit_builder.create_wire_in(PCUInt::N_OPRAND_CELLS);
+    let pc_rlc = circuit_builder.create_cell();
+    circuit_builder.rlc(pc_rlc, &pc_cells, challenges.record_item_rlc());
+    let rlc = circuit_builder.create_cell();
+    circuit_builder.rlc(rlc, &[pc_rlc, bytecode_cells[0]], challenges.bytecode());
+    circuit_builder.configure();
+    let bytecode_circuit = Arc::new(Circuit::new(&circuit_builder));
 
-pub struct BytecodeChip<F: SmallField> {
-    input_wires_id: HashMap<u8, WireId>,
-    input_pad_circuit: Circuit<F>,
-
-    pc_wire_id: WireId,
-    bytecode_wire_id: WireId,
-    table_circuit: Circuit<F>,
-
-    rlc_wire_id: WireId,
-    count_wire_id: WireId,
-    table_pad_circuit: Circuit<F>,
-}
-
-impl<F: SmallField> BytecodeChip<F> {
-    fn new(
-        prep_wires: &[InputWiresInfo],
-        challenges: &ChipChallenges,
-        bytecode_size: usize,
-    ) -> Result<Self, ZKVMError> {
-        let (input_pad_circuit, wires_in_id) = {
-            let old_sizes = prep_wires
-                .iter()
-                .map(|wire_in| {
-                    #[cfg(debug_assertions)]
-                    assert_eq!(
-                        wire_in.instance_size,
-                        wire_in.instance_size.next_power_of_two()
-                    );
-                    wire_in.n_instance * wire_in.instance_size
-                })
-                .collect_vec();
-            inv_pad_with_zero_frac(&old_sizes)
-        };
-        let input_wires_id = prep_wires
+    let wires_in = vec![
+        bytecode
             .iter()
-            .zip(wires_in_id.iter())
-            .map(|(info, wire_in_id)| (info.opcode, wire_in_id))
-            .collect::<HashMap<u8, WireId>>();
+            .map(|x| vec![F::from(*x as u64)])
+            .collect_vec(),
+        PCUInt::counter_vector(bytecode.len().next_power_of_two())
+            .into_iter()
+            .map(|x| vec![x])
+            .collect_vec(),
+    ];
 
-        let (table_circuit, table_pad_circuit, pc_wire_id, bytecode_wire_id) = {
-            let mut circuit_builder = CircuitBuilder::<F>::new();
-            let (bytecode_wire_id, bytecode) = circuit_builder.create_wire_in(1);
-            let (pc_wire_id, pc) = circuit_builder.create_wire_in(1);
-            let rlc = circuit_builder.create_wire_out(1);
-            circuit_builder.rlc(rlc[0], &[pc[0], bytecode[0]], challenges.bytecode());
-        };
-        let (table_pad_circuit, rlc_wire_id, count_wire_id) = {
-            let old_sizes = vec![bytecode_size];
-            frac_sum_pad_with_zero_frac(&old_sizes)
-        };
+    let (table_node_id, _) = builder.add_node_with_witness(
+        "bytecode table circuit",
+        &bytecode_circuit,
+        vec![PredType::Source; 2],
+        real_challenges.to_vec(),
+        wires_in,
+    )?;
 
-        Self {
-            input_wires_id,
-            input_pad_circuit,
-            table_circuit,
-            pc_wire_id,
-            bytecode_wire_id,
-            rlc_wire_id: rlc_wire_id[0],
-            count_wire_id: count_wire_id[0],
-            table_pad_circuit,
-        }
-    }
+    let pad_circuit = Arc::new(inner_den_to_frac_circuit(bytecode.len()));
+    let (pad_node_id, _) = builder.add_node_with_witness(
+        "bytecode table padding circuit",
+        &pad_circuit,
+        vec![PredType::PredWireTrans(NodeOutputType::OutputLayer(
+            table_node_id,
+        ))],
+        real_challenges.to_vec(),
+        vec![vec![]; pad_circuit.n_wires_in],
+    )?;
 
-    pub fn check_pc_opcode(
-        circuit_builder: &CircuitBuilder<F>,
-        bytecode_cell: CellId,
-        pc: &[CellId],
-        opcode: u8,
-        challenges: &ChipChallenges,
-    ) {
-        let mut items = pc.iter().map(|x| (*x).into()).collect_vec();
-        items.push(MixedCell::Constant(F::from(OpcodeType::JUMPDEST as u64)));
-        circuit_builder.rlc_mixed(bytecode_cell, &items, challenges.bytecode());
-    }
-
-    pub fn check_pc_byte(
-        circuit_builder: &CircuitBuilder<F>,
-        bytecode_cell: CellId,
-        pc: &[CellId],
-        byte: CellId,
-        challenges: &ChipChallenges,
-    ) {
-        let mut items = pc.to_vec();
-        items.push(byte);
-        circuit_builder.rlc(bytecode_cell, &items, challenges.bytecode());
-    }
+    Ok((pad_node_id, pad_circuit.max_wires_in_num_vars))
 }

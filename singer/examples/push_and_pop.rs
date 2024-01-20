@@ -1,5 +1,5 @@
 use goldilocks::Goldilocks;
-use singer_basic::constants::OpcodeType;
+use singer::constants::OpcodeType;
 use transcript::Transcript;
 
 fn main() {
