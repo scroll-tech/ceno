@@ -1,3 +1,4 @@
+use ff::FromUniformBytes;
 use gkr::structs::IOPProverPhase2Message;
 use goldilocks::SmallField;
 use itertools::izip;
@@ -12,7 +13,7 @@ use crate::{
     },
 };
 
-impl<F: SmallField> IOPVerifierState<F> {
+impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
     pub fn verify(
         circuit: &CircuitGraph<F>,
         challenges: &[F],
@@ -55,7 +56,7 @@ impl<F: SmallField> IOPVerifierState<F> {
             izip!(sumcheck_proofs, sumcheck_eval_values).for_each(|(proof, evals)| {
                 izip!(0.., &node.preds, evals).for_each(|(_, pred, eval)| match pred {
                     PredType::Source => {}
-                    PredType::PredWireO2O(out) | PredType::PredWireO2M(out) => match out {
+                    PredType::PredWire(out) => match out {
                         NodeOutputType::OutputLayer(id) => {
                             output_evals[*id].push((proof.point.clone(), *eval))
                         }
@@ -64,6 +65,7 @@ impl<F: SmallField> IOPVerifierState<F> {
                             wires_out_evals[*id][*wire_id as usize] = (proof.point.clone(), *eval);
                         }
                     },
+                    _ => unreachable!(),
                 });
             });
         }
