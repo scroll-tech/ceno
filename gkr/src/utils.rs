@@ -5,6 +5,14 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 
+pub(crate) fn i64_to_field<F: SmallField>(x: i64) -> F {
+    if x >= 0 {
+        F::from(x as u64)
+    } else {
+        -F::from((-x) as u64)
+    }
+}
+
 pub(crate) fn ceil_log2(x: usize) -> usize {
     assert!(x > 0, "ceil_log2: x must be positive");
     // Calculate the number of bits in usize
@@ -132,6 +140,15 @@ pub(crate) fn eq_eval_less_or_equal_than<F: SmallField>(max_idx: usize, a: &[F],
     }
     for i in b.len()..a.len() {
         ans *= F::ONE - a[i];
+    }
+    ans
+}
+
+pub fn counter_eval<F: SmallField>(num_vars: usize, x: &[F]) -> F {
+    assert_eq!(x.len(), num_vars, "invalid size of x");
+    let mut ans = F::ZERO;
+    for (i, &xi) in x.iter().enumerate() {
+        ans += xi * F::from(1 << i)
     }
     ans
 }
@@ -422,5 +439,20 @@ mod test {
         );
         let got2: DenseMultilinearExtension<Goldilocks> = fix_high_variables(&poly, &partial_point);
         assert_eq!(got2, expected2);
+    }
+
+    #[test]
+    fn test_counter_eval() {
+        let vec = (0..(1 << 4)).map(|x| Goldilocks::from(x)).collect_vec();
+        let point = vec![
+            Goldilocks::from(97),
+            Goldilocks::from(101),
+            Goldilocks::from(23),
+            Goldilocks::from(29),
+        ];
+        let got_value = counter_eval(4, &point);
+        let poly = DenseMultilinearExtension::from_evaluations_vec(4, vec);
+        let expected_value = poly.evaluate(&point);
+        assert_eq!(got_value, expected_value);
     }
 }

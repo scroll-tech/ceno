@@ -332,7 +332,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         let prover_phase2_state = IOPProverPhase2InputState::prover_init_parallel(
             &layer_out_point,
             self.circuit_witness.wires_in_ref(),
-            &circuit.paste_from_wires_in,
+            &circuit.paste_from_in,
             layer.num_vars,
             circuit.max_wires_in_num_vars,
             hi_num_vars,
@@ -409,7 +409,8 @@ struct IOPProverPhase2State<'a, F: SmallField> {
 
 struct IOPProverPhase2InputState<'a, F: SmallField> {
     layer_out_point: &'a Point<F>,
-    paste_from_wires_in: &'a [(CellId, CellId)],
+    paste_from_wires_in: Vec<(CellId, CellId)>,
+    paste_from_counter_in: Vec<(CellId, CellId)>,
     wires_in: &'a [Vec<Vec<F>>],
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
