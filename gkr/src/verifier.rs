@@ -318,10 +318,10 @@ impl<F: SmallField> IOPVerifierState<F> {
         let hi_out_num_vars = layer_out_point.len() - lo_out_num_vars;
 
         let verifier_phase2_state = IOPVerifierPhase2InputState::verifier_init_parallel(
+            circuit.n_wires_in,
             layer_out_point,
             *layer_out_value,
-            &circuit.paste_from_constant,
-            &circuit.paste_from_wires_in,
+            &circuit.paste_from_in,
             layer.num_vars,
             lo_in_num_vars,
             hi_out_num_vars,
@@ -391,8 +391,9 @@ struct IOPVerifierPhase2State<'a, F: SmallField> {
 struct IOPVerifierPhase2InputState<'a, F: SmallField> {
     layer_out_point: &'a Point<F>,
     layer_out_value: F,
-    paste_from_constant: &'a [(F, CellId, CellId)],
-    paste_from_wires_in: &'a [(CellId, CellId)],
+    paste_from_wires_in: Vec<(CellId, CellId)>,
+    paste_from_counter_in: Vec<(CellId, CellId)>,
+    paste_from_const_in: Vec<(F, CellId, CellId)>,
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
     hi_num_vars: usize,
