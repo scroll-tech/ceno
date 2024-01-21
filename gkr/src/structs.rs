@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use frontend::structs::{CellId, ConstantType, LayerId};
+use frontend::structs::{CellId, ConstantType, InType, LayerId};
 use goldilocks::SmallField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::Serialize;
@@ -95,11 +95,9 @@ pub struct Circuit<F: SmallField> {
     /// Copied from the circuit output to segments for convenience of later use.
     pub copy_to_wires_out: Vec<Vec<CellId>>,
 
-    /// The left and right endpoints in the input layer assigned as a constant.
-    pub paste_from_constant: Vec<(F, CellId, CellId)>,
     pub n_wires_in: usize,
     /// The left endpoint in the input layer copied from each wire_in.
-    pub paste_from_wires_in: Vec<(CellId, CellId)>,
+    pub paste_from_in: Vec<(InType, CellId, CellId)>,
     pub max_wires_in_num_vars: usize,
 }
 
