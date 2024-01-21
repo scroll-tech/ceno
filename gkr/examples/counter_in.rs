@@ -5,50 +5,28 @@ use goldilocks::{Goldilocks, SmallField};
 use itertools::Itertools;
 use transcript::Transcript;
 
-enum TableType {
-    FakeHashTable,
-}
-
 struct AllInputIndex {
     // public
     inputs_idx: WireId,
-
     // private
-    other_x_pows_idx: WireId,
     count_idx: WireId,
 }
 
 fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let one = ConstantType::Field(F::ONE);
-    let neg_one = ConstantType::Field(-F::ONE);
-
-    let table_size = 4;
-    let x = circuit_builder.create_constant_in(1, 2);
-    let (other_x_pows_idx, other_pows_of_x) = circuit_builder.create_wire_in(table_size - 1);
-    let pow_of_xs = [x, other_pows_of_x].concat();
-    for i in 0..table_size - 1 {
-        // circuit_builder.mul2(
-        //     pow_of_xs[i + 1],
-        //     pow_of_xs[i],
-        //     pow_of_xs[i],
-        //     Goldilocks::ONE,
-        // );
-        let tmp = circuit_builder.create_cell();
-        circuit_builder.mul2(tmp, pow_of_xs[i], pow_of_xs[i], one);
-        let diff = circuit_builder.create_cell();
-        circuit_builder.add(diff, pow_of_xs[i + 1], one);
-        circuit_builder.add(diff, tmp, neg_one);
-        circuit_builder.assert_const(diff, &F::ZERO);
-    }
-
-    let table_type = TableType::FakeHashTable as u16;
-    let count_idx = circuit_builder.define_table_type(table_type);
-    for i in 0..table_size {
-        circuit_builder.add_table_item(table_type, pow_of_xs[i]);
-    }
 
     let (inputs_idx, inputs) = circuit_builder.create_wire_in(5);
+
+    let table_size = 4;
+    let table = circuit_builder.create_counter_in(2);
+
+    let table_type = 0;
+    let count_idx = circuit_builder.define_table_type(table_type);
+    // table should be [0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], ...
+    for i in 0..table_size {
+        circuit_builder.add_table_item(table_type, table[i]);
+    }
+
     inputs.iter().for_each(|input| {
         circuit_builder.add_input_item(table_type, *input);
     });
@@ -56,13 +34,11 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
     circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));
 
     circuit_builder.configure();
-    // circuit_builder.print_info();
     (
         Circuit::<F>::new(&circuit_builder),
         AllInputIndex {
-            other_x_pows_idx,
             inputs_idx,
-            count_idx: count_idx,
+            count_idx,
         },
     )
 }
@@ -70,32 +46,39 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
 fn main() {
     let (circuit, all_input_index) = construct_circuit::<Goldilocks>();
     // println!("circuit: {:?}", circuit);
-    let mut wires_in = vec![vec![]; circuit.n_wires_in];
-    wires_in[all_input_index.inputs_idx as usize] = vec![
-        Goldilocks::from(2u64),
-        Goldilocks::from(2u64),
-        Goldilocks::from(4u64),
-        Goldilocks::from(16u64),
-        Goldilocks::from(2u64),
-    ];
-    // x = 2, 2^2 = 4, 2^2^2 = 16, 2^2^2^2 = 256
-    wires_in[all_input_index.other_x_pows_idx as usize] = vec![
-        Goldilocks::from(4u64),
-        Goldilocks::from(16u64),
-        Goldilocks::from(256u64),
-    ];
-    wires_in[all_input_index.count_idx as usize] = vec![
-        Goldilocks::from(3u64),
-        Goldilocks::from(1u64),
+    let mut wires_in = vec![vec![vec![]; circuit.n_wires_in]; 2];
+    wires_in[0][all_input_index.inputs_idx as usize] = vec![
+        Goldilocks::from(0u64),
         Goldilocks::from(1u64),
         Goldilocks::from(0u64),
+        Goldilocks::from(2u64),
+        Goldilocks::from(3u64),
+    ];
+    wires_in[1][all_input_index.inputs_idx as usize] = vec![
+        Goldilocks::from(7u64),
+        Goldilocks::from(7u64),
+        Goldilocks::from(4u64),
+        Goldilocks::from(5u64),
+        Goldilocks::from(5u64),
+    ];
+    wires_in[0][all_input_index.count_idx as usize] = vec![
+        Goldilocks::from(2u64),
+        Goldilocks::from(1u64),
+        Goldilocks::from(1u64),
+        Goldilocks::from(1u64),
+    ];
+    wires_in[1][all_input_index.count_idx as usize] = vec![
+        Goldilocks::from(1u64),
+        Goldilocks::from(2u64),
+        Goldilocks::from(0u64),
+        Goldilocks::from(2u64),
     ];
 
     let circuit_witness = {
         let challenge = Goldilocks::from(9);
         let mut circuit_witness = CircuitWitness::new(&circuit, vec![challenge]);
-        for _ in 0..4 {
-            circuit_witness.add_instance(&circuit, &wires_in);
+        for i in 0..2 {
+            circuit_witness.add_instance(&circuit, &wires_in[i]);
         }
         circuit_witness
     };

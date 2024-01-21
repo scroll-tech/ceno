@@ -44,11 +44,22 @@ pub struct Cell<F: SmallField> {
     pub cell_type: Option<CellType>,
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize)]
+pub enum InType {
+    Counter(usize),
+    Constant(i64),
+    Wire(WireId),
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize)]
+pub enum OutType {
+    Wire(WireId),
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize)]
 pub enum CellType {
-    ConstantIn(i64), // just for implementation convenience.
-    WireIn(WireId),
-    WireOut(WireId),
+    In(InType),
+    Out(OutType),
 }
 
 #[derive(Clone)]

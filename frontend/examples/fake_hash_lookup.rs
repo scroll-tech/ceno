@@ -1,5 +1,5 @@
 use ff::Field;
-use frontend::structs::{CellId, CircuitBuilder, ConstantType};
+use frontend::structs::{CircuitBuilder, ConstantType};
 use goldilocks::Goldilocks;
 
 enum TableType {
@@ -13,7 +13,7 @@ fn main() {
 
     let table_size = 4;
     let pow_of_xs = {
-        let (_, x): (usize, Vec<CellId>) = circuit_builder.create_wire_in(1);
+        let (_, x) = circuit_builder.create_wire_in(1);
         let (_, other_pows_of_x) = circuit_builder.create_wire_in(table_size - 1);
         [x, other_pows_of_x].concat()
     };

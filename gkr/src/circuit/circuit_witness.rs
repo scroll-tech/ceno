@@ -1,13 +1,13 @@
 use std::{fmt::Debug, sync::Arc};
 
-use frontend::structs::{ConstantType, LayerId};
+use frontend::structs::{ConstantType, InType, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 
 use crate::{
     structs::{Circuit, CircuitWitness},
-    utils::{ceil_log2, MultilinearExtensionFromVectors},
+    utils::{ceil_log2, i64_to_field, MultilinearExtensionFromVectors},
 };
 
 impl<F: SmallField> CircuitWitness<F> {
@@ -25,6 +25,7 @@ impl<F: SmallField> CircuitWitness<F> {
     /// Generate a fresh instance for the circuit, return layer witnesses and
     /// wire out witnesses.
     fn new_instance(
+        instance_id: usize,
         circuit: &Circuit<F>,
         wires_in: &[Vec<F>],
         challenges: &[F],
@@ -35,14 +36,15 @@ impl<F: SmallField> CircuitWitness<F> {
         // The first layer.
         layer_witnesses[n_layers - 1] = {
             let mut layer_witness = vec![F::ZERO; circuit.layers[n_layers - 1].size()];
-            for (id, (l, r)) in circuit.paste_from_wires_in.iter().enumerate() {
+            for (ty, l, r) in circuit.paste_from_in.iter() {
                 for i in *l..*r {
-                    layer_witness[i] = wires_in[id][i - *l];
-                }
-            }
-            for (c, l, r) in circuit.paste_from_constant.iter() {
-                for i in *l..*r {
-                    layer_witness[i] = *c;
+                    layer_witness[i] = match *ty {
+                        InType::Counter(num_vars) => {
+                            F::from(((instance_id << num_vars) ^ (i - *l)) as u64)
+                        }
+                        InType::Constant(c) => i64_to_field(c),
+                        InType::Wire(id) => wires_in[id as usize][i - *l],
+                    }
                 }
             }
             layer_witness
@@ -136,7 +138,7 @@ impl<F: SmallField> CircuitWitness<F> {
     pub fn add_instance(&mut self, circuit: &Circuit<F>, wires_in: &[Vec<F>]) {
         assert!(wires_in.len() == circuit.n_wires_in);
         let (new_layer_witnesses, new_wires_out) =
-            CircuitWitness::new_instance(circuit, wires_in, &self.challenges);
+            CircuitWitness::new_instance(self.n_instances, circuit, wires_in, &self.challenges);
 
         // Merge self and circuit_witness.
         for (layer_witness, new_layer_witness) in

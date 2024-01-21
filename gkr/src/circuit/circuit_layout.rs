@@ -1,7 +1,9 @@
 use core::fmt;
 use std::collections::HashMap;
 
-use frontend::structs::{CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId};
+use frontend::structs::{
+    CellId, CellType, CircuitBuilder, ConstantType, GateType, InType, LayerId, OutType,
+};
 use goldilocks::SmallField;
 use itertools::Itertools;
 
@@ -51,44 +53,29 @@ impl<F: SmallField> Circuit<F> {
         // copy them to the last layer.
 
         // Input layer if pasted from wires_in and constant.
-        let (wires_const_cell_ids, wires_in_cell_ids, wires_out_cell_ids) = {
-            let mut wires_const_cell_ids = vec![];
-            let mut wires_in_cell_ids = vec![vec![]; circuit_builder.n_wires_in()];
-            let mut wires_out_cell_ids = vec![vec![]; circuit_builder.n_wires_out()];
+        let (in_cell_ids, out_cell_ids) = {
+            let mut in_cell_ids = vec![];
+            let mut out_cell_ids = vec![vec![]; circuit_builder.n_wires_out() as usize];
             for marked_cell in circuit_builder.marked_cells.iter() {
                 match marked_cell.0 {
-                    CellType::ConstantIn(constant) => {
-                        let field_element = if *constant >= 0 {
-                            F::from(*constant as u64)
-                        } else {
-                            -F::from((-constant) as u64)
-                        };
-
-                        wires_const_cell_ids.push((
-                            field_element,
-                            marked_cell.1.iter().map(|x| *x).collect_vec(),
-                        ));
-                        wires_const_cell_ids.last_mut().unwrap().1.sort();
+                    CellType::In(input) => {
+                        in_cell_ids.push((*input, marked_cell.1.iter().map(|x| *x).collect_vec()));
+                        in_cell_ids.last_mut().unwrap().1.sort();
                     }
-                    CellType::WireIn(wire_id) => {
-                        wires_in_cell_ids[*wire_id as usize] =
+                    CellType::Out(OutType::Wire(wire_id)) => {
+                        out_cell_ids[*wire_id as usize] =
                             marked_cell.1.iter().map(|x| *x).collect();
-                        wires_in_cell_ids[*wire_id as usize].sort();
-                    }
-                    CellType::WireOut(wire_id) => {
-                        wires_out_cell_ids[*wire_id as usize] =
-                            marked_cell.1.iter().map(|x| *x).collect();
-                        wires_out_cell_ids[*wire_id as usize].sort();
+                        out_cell_ids[*wire_id as usize].sort();
                     }
                 }
             }
-            (wires_const_cell_ids, wires_in_cell_ids, wires_out_cell_ids)
+            (in_cell_ids, out_cell_ids)
         };
 
-        let mut input_paste_from_wires_in = Vec::with_capacity(wires_in_cell_ids.len());
-        for wire_in in wires_in_cell_ids.iter() {
+        let mut input_paste_from_in = Vec::with_capacity(in_cell_ids.len());
+        for (ty, in_cell_ids) in in_cell_ids.iter() {
             #[cfg(feature = "debug")]
-            wire_in.iter().enumerate().map(|(i, cell_id)| {
+            in_cell_ids.iter().enumerate().map(|(i, cell_id)| {
                 // Each wire_in should be assigned with a consecutive
                 // input layer segment. Then we can use a special
                 // sumcheck protocol to prove it.
@@ -96,39 +83,35 @@ impl<F: SmallField> Circuit<F> {
                     i == 0 || wire_ids_in_layer[*cell_id] == wire_ids_in_layer[wire_in[i - 1]] + 1
                 );
             });
-            input_paste_from_wires_in.push((
-                wire_ids_in_layer[wire_in[0]],
-                wire_ids_in_layer[wire_in[wire_in.len() - 1]] + 1,
+            input_paste_from_in.push((
+                *ty,
+                wire_ids_in_layer[in_cell_ids[0]],
+                wire_ids_in_layer[in_cell_ids[in_cell_ids.len() - 1]] + 1,
             ));
         }
 
         // TODO: This is to avoid incorrect use of input paste_from. To be refined.
-        for (id, wire_in) in input_paste_from_wires_in.iter().enumerate() {
-            layers[n_layers as usize - 1]
-                .paste_from
-                .insert(id as LayerId, (wire_in.0..wire_in.1).collect_vec());
+        for (ty, left, right) in input_paste_from_in.iter() {
+            if let InType::Wire(id) = *ty {
+                layers[n_layers as usize - 1]
+                    .paste_from
+                    .insert(id as LayerId, (*left..*right).collect_vec());
+            }
         }
 
-        let max_wires_in_num_vars =
-            ceil_log2(wires_in_cell_ids.iter().map(|x| x.len()).max().unwrap());
-
-        let mut input_paste_from_constant = vec![];
-        for wire_const in wires_const_cell_ids.iter() {
-            #[cfg(feature = "debug")]
-            wire_const.1.iter().enumerate().map(|(i, cell_id)| {
-                assert_eq!(
-                    i == 0
-                        || wire_ids_in_layer[*cell_id]
-                            == wire_ids_in_layer[wire_const.1[i - 1]] + 1,
-                    true
-                );
-            });
-            input_paste_from_constant.push((
-                wire_const.0,
-                wire_ids_in_layer[wire_const.1[0]],
-                wire_ids_in_layer[wire_const.1[wire_const.1.len() - 1]] + 1,
-            ));
-        }
+        let max_wires_in_num_vars = ceil_log2(
+            in_cell_ids
+                .iter()
+                .map(|(ty, vec)| {
+                    if let InType::Constant(_) = *ty {
+                        0
+                    } else {
+                        vec.len()
+                    }
+                })
+                .max()
+                .unwrap(),
+        );
 
         // Compute gates and copy constraints of the other layers.
         for layer_id in (0..n_layers - 1).rev() {
@@ -266,7 +249,7 @@ impl<F: SmallField> Circuit<F> {
         // Compute the copy_to from the output layer to the wires_out.
         layers[0].num_vars = ceil_log2(layers_of_cell_id[0].len()) as usize;
 
-        let output_copy_to = wires_out_cell_ids
+        let output_copy_to = out_cell_ids
             .iter()
             .map(|cell_ids| {
                 cell_ids
@@ -286,9 +269,8 @@ impl<F: SmallField> Circuit<F> {
         Self {
             layers,
             copy_to_wires_out: output_copy_to,
-            paste_from_constant: input_paste_from_constant,
             n_wires_in: circuit_builder.n_wires_in(),
-            paste_from_wires_in: input_paste_from_wires_in,
+            paste_from_in: input_paste_from_in,
             max_wires_in_num_vars,
         }
     }
@@ -420,9 +402,8 @@ impl<F: SmallField> fmt::Debug for Circuit<F> {
             writeln!(f, "    {:?}", layer)?;
         }
         writeln!(f, "  n_wires_in: {}", self.n_wires_in)?;
-        writeln!(f, "  paste_from_wires_in: {:?}", self.paste_from_wires_in)?;
+        writeln!(f, "  paste_from_in: {:?}", self.paste_from_in)?;
         writeln!(f, "  max_wires_in_num_vars: {}", self.max_wires_in_num_vars)?;
-        writeln!(f, "  paste_from_constant: {:?}", self.paste_from_constant)?;
         writeln!(f, "}}")
     }
 }

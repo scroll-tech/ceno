@@ -2,8 +2,8 @@ use goldilocks::SmallField;
 use std::collections::{HashMap, HashSet};
 
 use crate::structs::{
-    Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId, TableData, TableType,
-    WireId,
+    Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, InType, LayerId, OutType,
+    TableData, TableType, WireId,
 };
 
 impl<F: SmallField> Cell<F> {
@@ -75,25 +75,36 @@ where
         });
     }
 
-    pub fn create_wire_in(&mut self, num: usize) -> (usize, Vec<CellId>) {
+    pub fn create_wire_in(&mut self, num: usize) -> (WireId, Vec<CellId>) {
         let cell = self.create_cells(num);
-        self.mark_cells(CellType::WireIn(self.n_wires_in as WireId), &cell);
+        self.mark_cells(CellType::In(InType::Wire(self.n_wires_in as WireId)), &cell);
         self.n_wires_in += 1;
-        (self.n_wires_in - 1, cell)
+        ((self.n_wires_in - 1) as WireId, cell)
     }
 
     /// Create input cells and assign it to be constant.
     pub fn create_constant_in(&mut self, num: usize, constant: i64) -> Vec<CellId> {
         let cell = self.create_cells(num);
-        self.mark_cells(CellType::ConstantIn(constant), &cell);
+        self.mark_cells(CellType::In(InType::Constant(constant)), &cell);
         cell
     }
 
-    pub fn create_wire_out(&mut self, num: usize) -> (usize, Vec<CellId>) {
+    /// Create input cells as a counter. It should count from 0 to n_instance *
+    /// num through the whole circuit.
+    pub fn create_counter_in(&mut self, num_vars: usize) -> Vec<CellId> {
+        let cell = self.create_cells(1 << num_vars);
+        self.mark_cells(CellType::In(InType::Counter(num_vars)), &cell);
+        cell
+    }
+
+    pub fn create_wire_out(&mut self, num: usize) -> (WireId, Vec<CellId>) {
         let cell = self.create_cells(num);
-        self.mark_cells(CellType::WireOut(self.n_wires_out as WireId), &cell);
+        self.mark_cells(
+            CellType::Out(OutType::Wire(self.n_wires_out as WireId)),
+            &cell,
+        );
         self.n_wires_out += 1;
-        (self.n_wires_out - 1, cell)
+        ((self.n_wires_out - 1) as WireId, cell)
     }
 
     fn create_wire_in_empty(&mut self) -> WireId {
@@ -427,8 +438,10 @@ where
     pub fn define_table_type(&mut self, table_type: TableType) -> WireId {
         let count_idx = self.create_wire_in_empty();
         assert!(!self.tables.contains_key(&table_type));
-        self.tables
-            .insert(table_type, TableData::new(CellType::WireIn(count_idx)));
+        self.tables.insert(
+            table_type,
+            TableData::new(CellType::In(InType::Wire(count_idx))),
+        );
         count_idx
     }
 
@@ -473,12 +486,7 @@ where
         // Assign layers and challenge levels to all cells.
         for (cell_type, cells) in self.marked_cells.iter() {
             match cell_type {
-                CellType::WireIn(_) => {
-                    for cell in cells.iter() {
-                        self.cells[*cell].layer = Some(0);
-                    }
-                }
-                CellType::ConstantIn(_) => {
+                CellType::In(_) => {
                     for cell in cells.iter() {
                         self.cells[*cell].layer = Some(0);
                     }
@@ -494,8 +502,7 @@ where
             if *self.cells[i].layer.as_ref().unwrap() == 0 {
                 assert!(
                     self.cells[i].cell_type.is_some()
-                        && (matches!(self.cells[i].cell_type.unwrap(), CellType::WireIn(_))
-                            || matches!(self.cells[i].cell_type.unwrap(), CellType::ConstantIn(_)))
+                        && matches!(self.cells[i].cell_type.unwrap(), CellType::In(_))
                 );
             }
         }
@@ -512,7 +519,7 @@ where
 
         // Force wire_out to be at the last layer.
         for i in 0..self.cells.len() {
-            if matches!(self.cells[i].cell_type, Some(CellType::WireOut(_))) {
+            if matches!(self.cells[i].cell_type, Some(CellType::Out(_))) {
                 self.cells[i].layer = Some(max_layer_id);
             }
         }
@@ -664,12 +671,12 @@ where
         println!("The number of layers: {}", self.n_layers.as_ref().unwrap());
         println!("The number of cells: {}", self.cells.len());
         self.marked_cells.iter().for_each(|(ty, set)| {
-            if let CellType::WireIn(i) = ty {
+            if let CellType::In(InType::Wire(i)) = ty {
                 println!("wire_in[{}] size: {}", i, set.len());
             }
         });
         self.marked_cells.iter().for_each(|(ty, set)| {
-            if let CellType::WireOut(i) = ty {
+            if let CellType::Out(OutType::Wire(i)) = ty {
                 println!("wire_out[{}] size: {}", i, set.len());
             }
         });
@@ -677,11 +684,5 @@ where
         for (i, cell) in self.cells.iter().enumerate() {
             println!("Cell {}: {:?}", i, cell);
         }
-    }
-
-    pub fn is_wire_in(&self, cell: CellId) -> bool {
-        self.cells[cell]
-            .cell_type
-            .map_or(false, |x| matches!(x, CellType::WireIn(_)))
     }
 }
