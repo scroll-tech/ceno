@@ -150,7 +150,7 @@ impl SharedMemory {
     /// Panics on out of bounds.
     #[inline]
     #[cfg_attr(debug_assertions, track_caller)]
-    pub fn slice(&mut self, offset: usize, size: usize, ts: u64) -> (&[u8], Vec<u64>) {
+    pub fn slice(&self, offset: usize, size: usize) -> (&[u8], Vec<u64>) {
         let end = offset + size;
         let last_checkpoint = self.last_checkpoint;
 
@@ -160,13 +160,9 @@ impl SharedMemory {
             .unwrap_or_else(|| {
                 debug_unreachable!("slice OOB: {offset}..{end}; len: {}", self.len())
             });
-        let timestamps = self
-            .timestamps
-            .splice(
-                last_checkpoint + offset..last_checkpoint + offset + size,
-                iter::repeat(ts).take(size),
-            )
-            .collect();
+        let timestamps = self.timestamps.as_slice()
+            [last_checkpoint + offset..last_checkpoint + offset + size]
+            .to_vec();
         (data, timestamps)
     }
 
@@ -202,8 +198,19 @@ impl SharedMemory {
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_byte(&mut self, offset: usize, ts: u64) -> (u8, u64) {
-        let ret = self.slice(offset, 1, ts);
+    pub fn get_byte(&mut self, offset: usize) -> (u8, u64) {
+        let ret = self.slice(offset, 1);
+        (ret.0[0], ret.1[0])
+    }
+
+    /// Returns the byte at the given offset.
+    ///
+    /// # Panics
+    ///
+    /// Panics on out of bounds.
+    #[inline]
+    pub fn get_byte_mut(&mut self, offset: usize, ts: u64) -> (u8, u64) {
+        let ret = self.slice_mut(offset, 1, ts);
         (ret.0[0], ret.1[0])
     }
 
@@ -213,8 +220,19 @@ impl SharedMemory {
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_word(&mut self, offset: usize, ts: u64) -> (B256, Vec<u64>) {
-        let ret = self.slice(offset, 32, ts);
+    pub fn get_word(&self, offset: usize) -> (B256, Vec<u64>) {
+        let ret = self.slice(offset, 32);
+        (ret.0.try_into().unwrap(), ret.1)
+    }
+
+    /// Returns a 32-byte slice of the memory region at the given offset.
+    ///
+    /// # Panics
+    ///
+    /// Panics on out of bounds.
+    #[inline]
+    pub fn get_word_mut(&mut self, offset: usize, ts: u64) -> (B256, Vec<u64>) {
+        let ret = self.slice_mut(offset, 32, ts);
         (ret.0.try_into().unwrap(), ret.1)
     }
 
@@ -224,8 +242,19 @@ impl SharedMemory {
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_u256(&mut self, offset: usize, ts: u64) -> (U256, Vec<u64>) {
-        let ret = self.get_word(offset, ts);
+    pub fn get_u256(&self, offset: usize) -> (U256, Vec<u64>) {
+        let ret = self.get_word(offset);
+        (ret.0.into(), ret.1)
+    }
+
+    /// Returns a U256 of the memory region at the given offset.
+    ///
+    /// # Panics
+    ///
+    /// Panics on out of bounds.
+    #[inline]
+    pub fn get_u256_mut(&mut self, offset: usize, ts: u64) -> (U256, Vec<u64>) {
+        let ret = self.get_word_mut(offset, ts);
         (ret.0.into(), ret.1)
     }
 

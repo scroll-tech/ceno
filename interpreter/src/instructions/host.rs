@@ -216,12 +216,7 @@ pub fn log<const N: usize, H: Host, F: SmallField>(interpreter: &mut Interpreter
     } else {
         let offset = as_usize_or_fail!(interpreter, offset.0);
         shared_memory_resize!(interpreter, offset, len);
-        Bytes::copy_from_slice(
-            interpreter
-                .shared_memory
-                .slice(offset, len, interpreter.timestamp)
-                .0,
-        )
+        Bytes::copy_from_slice(interpreter.shared_memory.slice(offset, len).0)
     };
 
     if interpreter.stack.len() < N {
@@ -293,12 +288,7 @@ pub fn create<const IS_CREATE2: bool, H: Host, F: SmallField, SPEC: Spec>(
 
         let code_offset = as_usize_or_fail!(interpreter, code_offset.0);
         shared_memory_resize!(interpreter, code_offset, len);
-        code = Bytes::copy_from_slice(
-            interpreter
-                .shared_memory
-                .slice(code_offset, len, interpreter.timestamp)
-                .0,
-        );
+        code = Bytes::copy_from_slice(interpreter.shared_memory.slice(code_offset, len).0);
     }
 
     // EIP-1014: Skinny CREATE2
@@ -401,12 +391,7 @@ pub fn call_inner<SPEC: Spec, H: Host, F: SmallField>(
     let input = if in_len != 0 {
         let in_offset = as_usize_or_fail!(interpreter, in_offset.0);
         shared_memory_resize!(interpreter, in_offset, in_len);
-        Bytes::copy_from_slice(
-            interpreter
-                .shared_memory
-                .slice(in_offset, in_len, interpreter.timestamp)
-                .0,
-        )
+        Bytes::copy_from_slice(interpreter.shared_memory.slice(in_offset, in_len).0)
     } else {
         Bytes::new()
     };

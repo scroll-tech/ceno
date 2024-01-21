@@ -64,7 +64,7 @@ fn return_inner<F: SmallField>(
 
         output = interpreter
             .shared_memory
-            .slice(offset, len, interpreter.timestamp)
+            .slice(offset, len)
             .0
             .to_vec()
             .into()

@@ -16,7 +16,7 @@ pub fn mload<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &m
         interpreter,
         interpreter
             .shared_memory
-            .get_u256(index, interpreter.timestamp)
+            .get_u256_mut(index, interpreter.timestamp)
             .0
     );
 }

@@ -15,7 +15,7 @@ pub fn keccak256<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host
     } else {
         let from = as_usize_or_fail!(interpreter, from.0);
         shared_memory_resize!(interpreter, from, len);
-        crate::primitives::keccak256(interpreter.shared_memory.slice(from, len, 0).0)
+        crate::primitives::keccak256(interpreter.shared_memory.slice(from, len).0)
     };
 
     push_b256!(interpreter, hash);
