@@ -62,7 +62,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
                             *eval
                         );
                     }
-                    PredType::PredWire(out) | PredType::PredWire(out) => match out {
+                    PredType::PredWire(out) => match out {
                         NodeOutputType::OutputLayer(id) => {
                             output_evals[*id].push((proof.point.clone(), *eval))
                         }

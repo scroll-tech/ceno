@@ -105,7 +105,6 @@ fn main() -> Result<(), GKRGraphError> {
                 challenge,
                 vec![input_circuit_wires_in.clone()],
             )?
-            .0
     };
     let pad_with_one = graph_builder
         .add_node_with_witness(
@@ -114,8 +113,7 @@ fn main() -> Result<(), GKRGraphError> {
             vec![PredType::PredWire(NodeOutputType::WireOut(input, 0))],
             vec![],
             vec![vec![]],
-        )?
-        .0;
+        )?;
     let mut input_size = input_circuit_wires_in.len();
     let inv_sum = graph_builder
         .add_node_with_witness(
@@ -126,8 +124,7 @@ fn main() -> Result<(), GKRGraphError> {
             ))],
             vec![],
             vec![vec![]; input_size / 2],
-        )?
-        .0;
+        )?;
     input_size >>= 1;
     let mut frac_sum_input = inv_sum;
     let frac_sum_circuit = Arc::new(frac_sum_circuit);
@@ -141,8 +138,7 @@ fn main() -> Result<(), GKRGraphError> {
                 ))],
                 vec![],
                 vec![vec![]; input_size / 2],
-            )?
-            .0;
+            )?;
         input_size >>= 1;
     }
 

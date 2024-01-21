@@ -30,7 +30,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         preds: Vec<PredType>,
         challenges: Vec<F>,
         sources: Vec<Vec<Vec<F>>>, // instances
-    ) -> Result<(usize, usize), GKRGraphError> {
+    ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
         assert_eq!(preds.len(), circuit.n_wires_in);
 
@@ -79,10 +79,9 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
             circuit: circuit.clone(),
             preds,
         });
-        let instance_num_vars = witness.instance_num_vars();
         self.witness.node_witnesses.push(witness);
 
-        Ok((id, instance_num_vars))
+        Ok(id)
     }
 
     /// Collect the information of `self.sources` and `self.targets`.

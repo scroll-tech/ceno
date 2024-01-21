@@ -31,7 +31,7 @@ pub(crate) enum NodeInputType {
     WireIn(usize, WireId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NodeOutputType {
     OutputLayer(usize),
     WireOut(usize, WireId),
@@ -44,6 +44,7 @@ pub enum NodeOutputType {
 pub enum PredType {
     Source,
     PredWire(NodeOutputType),
+    PredWireDup(NodeOutputType),
     PredWireTrans(NodeOutputType),
 }
 
