@@ -1,4 +1,4 @@
-use frontend::structs::{CircuitBuilder, ConstantType};
+use frontend::structs::{CircuitBuilder, ConstantType, WireId};
 use gkr::{
     structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState},
     utils::MultilinearExtensionFromVectors,
@@ -8,9 +8,9 @@ use itertools::Itertools;
 use transcript::Transcript;
 struct InputCircuitIOIndex {
     // input
-    inputs_idx: usize,
+    inputs_idx: WireId,
     // output
-    lookup_inputs_idx: usize,
+    lookup_inputs_idx: WireId,
 }
 
 fn construct_input<F: SmallField>(challenge: usize) -> (Circuit<F>, InputCircuitIOIndex) {
@@ -37,11 +37,11 @@ fn construct_input<F: SmallField>(challenge: usize) -> (Circuit<F>, InputCircuit
 #[allow(dead_code)]
 struct TableCircuitIOIndex {
     // input
-    x_idx: usize,
-    other_x_pows_idx: usize,
-    counts_idx: usize,
+    x_idx: WireId,
+    other_x_pows_idx: WireId,
+    counts_idx: WireId,
     // output
-    lookup_tables_idx: usize,
+    lookup_tables_idx: WireId,
 }
 
 #[allow(dead_code)]
@@ -97,7 +97,7 @@ fn construct_table<F: SmallField>(challenge: usize) -> (Circuit<F>, TableCircuit
 #[allow(dead_code)]
 struct PadWithConstIOIndex {
     // input
-    original_input_idx: usize,
+    original_input_idx: WireId,
 }
 
 fn construct_pad_with_const<F: SmallField>(constant: i64) -> (Circuit<F>, PadWithConstIOIndex) {
@@ -113,7 +113,7 @@ fn construct_pad_with_const<F: SmallField>(constant: i64) -> (Circuit<F>, PadWit
 
 #[allow(dead_code)]
 struct InvSumIOIndex {
-    input_idx: usize,
+    input_idx: WireId,
 }
 
 fn construct_inv_sum<F: SmallField>() -> (Circuit<F>, InvSumIOIndex) {
@@ -129,7 +129,7 @@ fn construct_inv_sum<F: SmallField>() -> (Circuit<F>, InvSumIOIndex) {
 
 #[allow(dead_code)]
 struct FracSumIOIndex {
-    input_idx: usize,
+    input_idx: WireId,
 }
 
 fn construct_frac_sum<F: SmallField>() -> (Circuit<F>, FracSumIOIndex) {
@@ -168,7 +168,7 @@ fn main() {
     // Compute lookup input and output (lookup_input + beta)
     let mut input_circuit_witness = CircuitWitness::new(&input_circuit, challenge.to_vec());
     let mut input_circuit_wires_in = vec![vec![]; input_circuit.n_wires_in];
-    input_circuit_wires_in[input_circuit_io_index.inputs_idx] = vec![
+    input_circuit_wires_in[input_circuit_io_index.inputs_idx as usize] = vec![
         Goldilocks::from(2u64),
         Goldilocks::from(2u64),
         Goldilocks::from(4u64),
@@ -184,7 +184,7 @@ fn main() {
     // Pad (lookup_input + beta) with zeros
     let mut input_pad_with_zero_witness = CircuitWitness::new(&pad_with_one_circuit, vec![]);
     let input_pad_with_zero_wires_in =
-        &input_circuit_witness.wires_out_ref()[input_circuit_io_index.lookup_inputs_idx];
+        &input_circuit_witness.wires_out_ref()[input_circuit_io_index.lookup_inputs_idx as usize];
     println!(
         "input_pad_with_zero_wires_in: {:?}",
         input_pad_with_zero_wires_in
