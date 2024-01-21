@@ -28,54 +28,56 @@ impl<F: SmallField> IOPProverState<F> {
             NodeOutputType::WireOut(id, _) => wires_out_evals[*id].push(eval.clone()),
         });
 
-        let gkr_proofs = izip!(
-            0..circuit.nodes.len(),
-            &circuit.nodes,
-            &circuit_witness.node_witnesses
-        )
-        .rev()
-        .map(|(id, node, witness)| {
-            let proof = gkr::structs::IOPProverState::prove_parallel(
-                &node.circuit,
-                witness,
-                &mem::take(&mut output_evals[id]),
-                &mem::take(&mut wires_out_evals[id]),
-                transcript,
-            );
+        let gkr_proofs = izip!(&circuit.nodes, &circuit_witness.node_witnesses)
+            .rev()
+            .map(|(node, witness)| {
+                let proof = gkr::structs::IOPProverState::prove_parallel(
+                    &node.circuit,
+                    witness,
+                    &mem::take(&mut output_evals[node.id]),
+                    &mem::take(&mut wires_out_evals[node.id]),
+                    transcript,
+                );
 
-            let IOPProverPhase2Message {
-                sumcheck_proofs,
-                sumcheck_eval_values,
-            } = &proof.sumcheck_proofs.last().unwrap().1;
-            izip!(sumcheck_proofs, sumcheck_eval_values).for_each(|(proof, evals)| {
-                izip!(0.., &node.preds, evals).for_each(|(wire_id, pred, eval)| match pred {
-                    PredType::Source => {
-                        assert_eq!(
-                            witness.wires_in_ref()[wire_id]
-                                .as_slice()
-                                .mle(
-                                    node.circuit.max_wires_in_num_vars,
-                                    witness.instance_num_vars(),
-                                )
-                                .evaluate(&proof.point),
-                            *eval
-                        );
-                    }
-                    PredType::PredWireO2O(out) | PredType::PredWireO2M(out) => match out {
-                        NodeOutputType::OutputLayer(id) => {
-                            output_evals[*id].push((proof.point.clone(), *eval))
+                let IOPProverPhase2Message {
+                    sumcheck_proofs,
+                    sumcheck_eval_values,
+                } = &proof.sumcheck_proofs.last().unwrap().1;
+                izip!(sumcheck_proofs, sumcheck_eval_values).for_each(|(proof, evals)| {
+                    izip!(0.., &node.preds, evals).for_each(|(wire_id, pred, eval)| match pred {
+                        PredType::Source => {
+                            debug_assert_eq!(
+                                witness.wires_in_ref()[wire_id]
+                                    .as_slice()
+                                    .mle(
+                                        node.circuit.max_wires_in_num_vars,
+                                        witness.instance_num_vars(),
+                                    )
+                                    .evaluate(&proof.point),
+                                *eval
+                            );
                         }
-                        NodeOutputType::WireOut(id, wire_id) => {
-                            wires_out_evals[*id].resize(*wire_id as usize + 1, (vec![], F::ZERO));
-                            wires_out_evals[*id][*wire_id as usize] = (proof.point.clone(), *eval);
-                        }
-                    },
+                        PredType::PredWire(out) | PredType::PredWireTrans(out) => match out {
+                            NodeOutputType::OutputLayer(id) => {
+                                output_evals[*id].push((proof.point.clone(), *eval))
+                            }
+                            NodeOutputType::WireOut(id, wire_id) => {
+                                wires_out_evals[*id]
+                                    .resize(*wire_id as usize + 1, (vec![], F::ZERO));
+                                let evals = &mut wires_out_evals[*id][*wire_id as usize];
+                                assert!(
+                                    evals.0.is_empty() && evals.1.is_zero_vartime(),
+                                    "unimplemented",
+                                );
+                                *evals = (proof.point.clone(), *eval);
+                            }
+                        },
+                    });
                 });
-            });
 
-            proof
-        })
-        .collect();
+                proof
+            })
+            .collect();
 
         Ok(IOPProof { gkr_proofs })
     }

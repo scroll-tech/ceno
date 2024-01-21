@@ -1,5 +1,5 @@
 use frontend::structs::{CircuitBuilder, ConstantType};
-use gkr::utils::MultilinearExtensionFromVectors;
+use gkr::{structs::Circuit, utils::MultilinearExtensionFromVectors};
 use gkr_graph::{
     error::GKRGraphError,
     structs::{
@@ -8,9 +8,10 @@ use gkr_graph::{
     },
 };
 use goldilocks::{Goldilocks, SmallField};
+use std::sync::Arc;
 use transcript::Transcript;
 
-fn construct_input<F: SmallField>(challenge: usize) -> CircuitBuilder<F> {
+fn construct_input<F: SmallField>(challenge: usize) -> Arc<Circuit<F>> {
     let input_size = 5;
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let (_, inputs) = circuit_builder.create_wire_in(input_size);
@@ -21,27 +22,30 @@ fn construct_input<F: SmallField>(challenge: usize) -> CircuitBuilder<F> {
         circuit_builder.add(lookup_inputs[i], *input, ConstantType::Field(F::ONE));
         circuit_builder.add_const(lookup_inputs[i], ConstantType::Challenge(challenge));
     }
-    circuit_builder
+    circuit_builder.configure();
+    Arc::new(Circuit::new(&circuit_builder))
 }
 
-fn construct_pad_with_const<F: SmallField>(constant: i64) -> CircuitBuilder<F> {
+fn construct_pad_with_const<F: SmallField>(constant: i64) -> Arc<Circuit<F>> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let (_, _) = circuit_builder.create_wire_in(5);
     let _ = circuit_builder.create_constant_in(3, constant);
-    circuit_builder
+    circuit_builder.configure();
+    Arc::new(Circuit::new(&circuit_builder))
 }
 
-fn construct_inv_sum<F: SmallField>() -> CircuitBuilder<F> {
+fn construct_inv_sum<F: SmallField>() -> Arc<Circuit<F>> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let (_, input) = circuit_builder.create_wire_in(2);
     let output = circuit_builder.create_cells(2);
     circuit_builder.mul2(output[0], input[0], input[1], ConstantType::Field(F::ONE));
     circuit_builder.add(output[1], input[0], ConstantType::Field(F::ONE));
     circuit_builder.add(output[1], input[1], ConstantType::Field(F::ONE));
-    circuit_builder
+    circuit_builder.configure();
+    Arc::new(Circuit::new(&circuit_builder))
 }
 
-fn construct_frac_sum<F: SmallField>() -> CircuitBuilder<F> {
+fn construct_frac_sum<F: SmallField>() -> Arc<Circuit<F>> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     // (den1, num1, den2, num2)
     let (_, input) = circuit_builder.create_wire_in(4);
@@ -49,7 +53,8 @@ fn construct_frac_sum<F: SmallField>() -> CircuitBuilder<F> {
     circuit_builder.mul2(output[0], input[0], input[2], ConstantType::Field(F::ONE));
     circuit_builder.mul2(output[1], input[0], input[3], ConstantType::Field(F::ONE));
     circuit_builder.mul2(output[1], input[1], input[2], ConstantType::Field(F::ONE));
-    circuit_builder
+    circuit_builder.configure();
+    Arc::new(Circuit::new(&circuit_builder))
 }
 
 fn main() -> Result<(), GKRGraphError> {
@@ -93,7 +98,7 @@ fn main() -> Result<(), GKRGraphError> {
     let input = {
         graph_builder.add_node_with_witness(
             "input",
-            input_circuit,
+            &input_circuit,
             vec![PredType::Source],
             challenge,
             vec![input_circuit_wires_in.clone()],
@@ -101,16 +106,16 @@ fn main() -> Result<(), GKRGraphError> {
     };
     let pad_with_one = graph_builder.add_node_with_witness(
         "pad_with_one",
-        pad_with_one_circuit,
-        vec![PredType::PredWireO2O(NodeOutputType::WireOut(input, 0))],
+        &pad_with_one_circuit,
+        vec![PredType::PredWire(NodeOutputType::WireOut(input, 0))],
         vec![],
         vec![vec![]],
     )?;
     let mut input_size = input_circuit_wires_in.len();
     let inv_sum = graph_builder.add_node_with_witness(
         "inv_sum",
-        inv_sum_circuit,
-        vec![PredType::PredWireO2O(NodeOutputType::OutputLayer(
+        &inv_sum_circuit,
+        vec![PredType::PredWire(NodeOutputType::OutputLayer(
             pad_with_one,
         ))],
         vec![],
@@ -121,8 +126,8 @@ fn main() -> Result<(), GKRGraphError> {
     while input_size > 1 {
         frac_sum_input = graph_builder.add_node_with_witness(
             "frac_sum",
-            frac_sum_circuit.clone(),
-            vec![PredType::PredWireO2O(NodeOutputType::OutputLayer(
+            &frac_sum_circuit,
+            vec![PredType::PredWire(NodeOutputType::OutputLayer(
                 frac_sum_input,
             ))],
             vec![],
