@@ -3,6 +3,8 @@ use goldilocks::SmallField;
 
 use crate::constants::{EVM_STACK_BIT_WIDTH, VALUE_BIT_WIDTH};
 
+use super::ChipChallenges;
+
 pub(in crate::instructions) mod chip_handler;
 pub(in crate::instructions) mod uint;
 
@@ -18,6 +20,7 @@ pub(super) struct ChipHandler {
     wire_out_id: WireId,
     records: Vec<usize>,
     count: usize,
+    challenges: ChipChallenges,
 }
 
 /// Unsigned integer with `M` bits. C denotes the cell bit width.

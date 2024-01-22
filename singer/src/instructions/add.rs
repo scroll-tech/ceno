@@ -4,8 +4,10 @@ use frontend::structs::{CircuitBuilder, MixedCell};
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
 
+use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
 
+use super::InstructionGraph;
 use super::{
     utils::{
         uint::{UIntAddSub, UIntCmp},
@@ -15,6 +17,10 @@ use super::{
 };
 
 pub struct AddInstruction;
+
+impl InstructionGraph for AddInstruction {
+    type InstType = Self;
+}
 
 register_wires_in!(
     AddInstruction,
@@ -69,9 +75,11 @@ register_wires_out!(
     }
 );
 
-impl Instruction for AddInstruction {
+impl AddInstruction {
     const OPCODE: OpcodeType = OpcodeType::ADD;
+}
 
+impl Instruction for AddInstruction {
     #[inline]
     fn witness_size(phase: usize) -> usize {
         match phase {
@@ -95,22 +103,29 @@ impl Instruction for AddInstruction {
     }
 
     fn construct_circuit<F: SmallField>(
-        challenges: &ChipChallenges,
+        challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
         let (phase1_wire_id, phase1) = circuit_builder.create_wire_in(Self::phase1_size());
-        let mut global_state_in_handler =
-            ChipHandler::new(&mut circuit_builder, Self::global_state_in_size());
-        let mut global_state_out_handler =
-            ChipHandler::new(&mut circuit_builder, Self::global_state_out_size());
+        let mut global_state_in_handler = ChipHandler::new(
+            &mut circuit_builder,
+            challenges,
+            Self::global_state_in_size(),
+        );
+        let mut global_state_out_handler = ChipHandler::new(
+            &mut circuit_builder,
+            challenges,
+            Self::global_state_out_size(),
+        );
         let mut bytecode_chip_handler =
-            ChipHandler::new(&mut circuit_builder, Self::bytecode_chip_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::bytecode_chip_size());
         let mut stack_push_handler =
-            ChipHandler::new(&mut circuit_builder, Self::stack_push_size());
-        let mut stack_pop_handler = ChipHandler::new(&mut circuit_builder, Self::stack_pop_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::stack_push_size());
+        let mut stack_pop_handler =
+            ChipHandler::new(&mut circuit_builder, challenges, Self::stack_pop_size());
         let mut range_chip_handler =
-            ChipHandler::new(&mut circuit_builder, Self::range_chip_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::range_chip_size());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -127,7 +142,6 @@ impl Instruction for AddInstruction {
             &[memory_ts_rlc],
             stack_top,
             clk,
-            challenges,
         );
 
         let next_pc = ChipHandler::add_pc_const(
@@ -150,7 +164,6 @@ impl Instruction for AddInstruction {
             &[memory_ts_rlc],
             stack_top_expr.sub(F::from(1)),
             clk_expr.add(F::ONE),
-            challenges,
         );
 
         // Execution result = addend0 + addend1, with carry.
@@ -182,7 +195,6 @@ impl Instruction for AddInstruction {
             stack_top_expr.sub(F::from(1)),
             old_stack_ts0.values(),
             addend_0.values(),
-            challenges,
         );
 
         let old_stack_ts1 = (&phase0[Self::phase0_old_stack_ts1()]).try_into()?;
@@ -198,7 +210,6 @@ impl Instruction for AddInstruction {
             stack_top_expr.sub(F::from(2)),
             &old_stack_ts1.values(),
             addend_1.values(),
-            challenges,
         );
 
         // Push one result to stack
@@ -207,7 +218,6 @@ impl Instruction for AddInstruction {
             stack_top_expr.sub(F::from(2)),
             stack_ts.values(),
             result.values(),
-            challenges,
         );
 
         // Bytecode check for (pc, add)
@@ -215,7 +225,6 @@ impl Instruction for AddInstruction {
             &mut circuit_builder,
             pc.values(),
             Self::OPCODE,
-            challenges,
         );
 
         global_state_in_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
@@ -240,8 +249,11 @@ impl Instruction for AddInstruction {
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
-            outputs_wire_id,
-            phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
+            layout: InstCircuitLayout {
+                chip_check_wire_id: outputs_wire_id,
+                phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
+                ..Default::default()
+            },
         })
     }
 }

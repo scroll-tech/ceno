@@ -12,12 +12,14 @@ use super::{i64_to_field, uint::UIntAddSub, ChipHandler, PCUInt, TSUInt, UInt};
 impl ChipHandler {
     pub(in crate::instructions) fn new<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
+        challenges: ChipChallenges,
         size: usize,
     ) -> Self {
         let (wire_out_id, records) = circuit_builder.create_wire_out(size);
         Self {
             wire_out_id,
             records,
+            challenges,
             count: 0,
         }
     }
@@ -59,33 +61,32 @@ impl ChipHandler {
         memory_ts: &[CellId],
         stack_top: CellId,
         clk: CellId,
-        challenges: &ChipChallenges,
     ) {
         let pc_rlc = if pc.len() == 1 {
             pc[0]
         } else {
             let pc_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(pc_rlc, pc, challenges.record_item_rlc());
+            circuit_builder.rlc(pc_rlc, pc, self.challenges.record_item_rlc());
             pc_rlc
         };
         let stack_ts_rlc = if stack_ts.len() == 1 {
             stack_ts[0]
         } else {
             let stack_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(stack_ts_rlc, stack_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(stack_ts_rlc, stack_ts, self.challenges.record_item_rlc());
             stack_ts_rlc
         };
         let memory_ts_rlc = if memory_ts.len() == 1 {
             memory_ts[0]
         } else {
             let memory_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(memory_ts_rlc, memory_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(memory_ts_rlc, memory_ts, self.challenges.record_item_rlc());
             memory_ts_rlc
         };
         circuit_builder.rlc(
             self.records[self.count],
             &[pc_rlc, stack_ts_rlc, memory_ts_rlc, stack_top, clk],
-            challenges.global_state(),
+            self.challenges.global_state(),
         );
 
         self.count += 1;
@@ -120,27 +121,26 @@ impl ChipHandler {
         memory_ts: &[CellId],
         stack_top: MixedCell<F>,
         clk: MixedCell<F>,
-        challenges: &ChipChallenges,
     ) {
         let pc_rlc = if pc.len() == 1 {
             pc[0]
         } else {
             let pc_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(pc_rlc, pc, challenges.record_item_rlc());
+            circuit_builder.rlc(pc_rlc, pc, self.challenges.record_item_rlc());
             pc_rlc
         };
         let stack_ts_rlc = if stack_ts.len() == 1 {
             stack_ts[0]
         } else {
             let stack_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(stack_ts_rlc, stack_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(stack_ts_rlc, stack_ts, self.challenges.record_item_rlc());
             stack_ts_rlc
         };
         let memory_ts_rlc = if memory_ts.len() == 1 {
             memory_ts[0]
         } else {
             let memory_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(memory_ts_rlc, memory_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(memory_ts_rlc, memory_ts, self.challenges.record_item_rlc());
             memory_ts_rlc
         };
         circuit_builder.rlc_mixed(
@@ -152,7 +152,7 @@ impl ChipHandler {
                 stack_top,
                 clk,
             ],
-            challenges.global_state(),
+            self.challenges.global_state(),
         );
 
         self.count += 1;
@@ -163,14 +163,13 @@ impl ChipHandler {
         circuit_builder: &mut CircuitBuilder<F>,
         pc: &[CellId],
         opcode: OpcodeType,
-        challenges: &ChipChallenges,
     ) {
         let pc_rlc = circuit_builder.create_cell();
-        circuit_builder.rlc(pc_rlc, pc, challenges.record_item_rlc());
+        circuit_builder.rlc(pc_rlc, pc, self.challenges.record_item_rlc());
         circuit_builder.rlc_mixed(
             self.records[self.count],
             &[pc_rlc.into(), MixedCell::Constant(F::from(opcode as u64))],
-            challenges.bytecode(),
+            self.challenges.bytecode(),
         );
 
         self.count += 1;
@@ -181,14 +180,13 @@ impl ChipHandler {
         circuit_builder: &mut CircuitBuilder<F>,
         pc: &[CellId],
         byte: CellId,
-        challenges: &ChipChallenges,
     ) {
         let pc_rlc = circuit_builder.create_cell();
-        circuit_builder.rlc(pc_rlc, pc, challenges.record_item_rlc());
+        circuit_builder.rlc(pc_rlc, pc, self.challenges.record_item_rlc());
         circuit_builder.rlc(
             self.records[self.count],
             &[pc_rlc, byte],
-            challenges.bytecode(),
+            self.challenges.bytecode(),
         );
 
         self.count += 1;
@@ -200,21 +198,20 @@ impl ChipHandler {
         stack_top: MixedCell<F>,
         stack_ts: &[CellId],
         values: &[CellId],
-        challenges: &ChipChallenges,
     ) {
         let stack_ts_rlc = if stack_ts.len() == 1 {
             stack_ts[0]
         } else {
             let stack_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(stack_ts_rlc, stack_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(stack_ts_rlc, stack_ts, self.challenges.record_item_rlc());
             stack_ts_rlc
         };
         let value_rlc = circuit_builder.create_cell();
-        circuit_builder.rlc(value_rlc, values, challenges.record_item_rlc());
+        circuit_builder.rlc(value_rlc, values, self.challenges.record_item_rlc());
         circuit_builder.rlc_mixed(
             self.records[self.count],
             &[stack_top, stack_ts_rlc.into(), value_rlc.into()],
-            challenges.stack(),
+            self.challenges.stack(),
         );
 
         self.count += 1;
@@ -226,19 +223,18 @@ impl ChipHandler {
         stack_top: MixedCell<F>,
         stack_ts: &[CellId],
         rlc: CellId,
-        challenges: &ChipChallenges,
     ) {
         let stack_ts_rlc = if stack_ts.len() == 1 {
             stack_ts[0]
         } else {
             let stack_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(stack_ts_rlc, stack_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(stack_ts_rlc, stack_ts, self.challenges.record_item_rlc());
             stack_ts_rlc
         };
         circuit_builder.rlc_mixed(
             self.records[self.count],
             &[stack_top, stack_ts_rlc.into(), rlc.into()],
-            challenges.stack(),
+            self.challenges.stack(),
         );
 
         self.count += 1;
@@ -250,21 +246,20 @@ impl ChipHandler {
         stack_top: MixedCell<F>,
         stack_ts: &[CellId],
         values: &[CellId],
-        challenges: &ChipChallenges,
     ) {
         let stack_ts_rlc = if stack_ts.len() == 1 {
             stack_ts[0]
         } else {
             let stack_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(stack_ts_rlc, stack_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(stack_ts_rlc, stack_ts, self.challenges.record_item_rlc());
             stack_ts_rlc
         };
         let value_rlc = circuit_builder.create_cell();
-        circuit_builder.rlc(value_rlc, values, challenges.record_item_rlc());
+        circuit_builder.rlc(value_rlc, values, self.challenges.record_item_rlc());
         circuit_builder.rlc_mixed(
             self.records[self.count],
             &[stack_top, stack_ts_rlc.into(), value_rlc.into()],
-            challenges.stack(),
+            self.challenges.stack(),
         );
 
         self.count += 1;
@@ -276,19 +271,18 @@ impl ChipHandler {
         stack_top: MixedCell<F>,
         stack_ts: &[CellId],
         rlc: CellId,
-        challenges: &ChipChallenges,
     ) {
         let stack_ts_rlc = if stack_ts.len() == 1 {
             stack_ts[0]
         } else {
             let stack_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(stack_ts_rlc, stack_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(stack_ts_rlc, stack_ts, self.challenges.record_item_rlc());
             stack_ts_rlc
         };
         circuit_builder.rlc_mixed(
             self.records[self.count],
             &[stack_top, stack_ts_rlc.into(), rlc.into()],
-            challenges.stack(),
+            self.challenges.stack(),
         );
 
         self.count += 1;
@@ -354,16 +348,16 @@ impl ChipHandler {
         }
     }
 
-    // pub(in crate::instructions) fn range_check_bytes<F: SmallField>(
-    //     &mut self,
-    //     circuit_builder: &mut CircuitBuilder<F>,
-    //     bytes: &[CellId],
-    // ) -> Result<(), ZKVMError> {
-    //     for byte in bytes {
-    //         self.small_range_check(circuit_builder, (*byte).into(), 8)?;
-    //     }
-    //     Ok(())
-    // }
+    pub(in crate::instructions) fn range_check_bytes<F: SmallField>(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<F>,
+        bytes: &[CellId],
+    ) -> Result<(), ZKVMError> {
+        for byte in bytes {
+            self.small_range_check(circuit_builder, (*byte).into(), 8)?;
+        }
+        Ok(())
+    }
 
     // pub(in crate::instructions) fn range_check_bit<F: SmallField>(
     //     &mut self,
@@ -379,26 +373,25 @@ impl ChipHandler {
         offset: &[CellId],
         memory_ts: &[CellId],
         byte: CellId,
-        challenges: &ChipChallenges,
     ) {
         let offset_rlc = if offset.len() == 1 {
             offset[0]
         } else {
             let offset_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(offset_rlc, offset, challenges.record_item_rlc());
+            circuit_builder.rlc(offset_rlc, offset, self.challenges.record_item_rlc());
             offset_rlc
         };
         let memory_ts_rlc = if memory_ts.len() == 1 {
             memory_ts[0]
         } else {
             let memory_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(memory_ts_rlc, memory_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(memory_ts_rlc, memory_ts, self.challenges.record_item_rlc());
             memory_ts_rlc
         };
         circuit_builder.rlc(
             self.records[self.count],
             &[offset_rlc, memory_ts_rlc, byte],
-            challenges.mem(),
+            self.challenges.mem(),
         );
 
         self.count += 1;
@@ -410,26 +403,25 @@ impl ChipHandler {
         offset: &[CellId],
         memory_ts: &[CellId],
         byte: CellId,
-        challenges: &ChipChallenges,
     ) {
         let offset_rlc = if offset.len() == 1 {
             offset[0]
         } else {
             let offset_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(offset_rlc, offset, challenges.record_item_rlc());
+            circuit_builder.rlc(offset_rlc, offset, self.challenges.record_item_rlc());
             offset_rlc
         };
         let memory_ts_rlc = if memory_ts.len() == 1 {
             memory_ts[0]
         } else {
             let memory_ts_rlc = circuit_builder.create_cell();
-            circuit_builder.rlc(memory_ts_rlc, memory_ts, challenges.record_item_rlc());
+            circuit_builder.rlc(memory_ts_rlc, memory_ts, self.challenges.record_item_rlc());
             memory_ts_rlc
         };
         circuit_builder.rlc(
             self.records[self.count],
             &[offset_rlc, memory_ts_rlc, byte],
-            challenges.mem(),
+            self.challenges.mem(),
         );
 
         self.count += 1;
@@ -440,12 +432,11 @@ impl ChipHandler {
         circuit_builder: &mut CircuitBuilder<F>,
         offset: &[CellId],
         data_rlc: CellId,
-        challenges: &ChipChallenges,
     ) {
         circuit_builder.rlc(
             self.records[self.count],
             &[offset, &[data_rlc]].concat(),
-            challenges.calldata(),
+            self.challenges.calldata(),
         );
 
         self.count += 1;

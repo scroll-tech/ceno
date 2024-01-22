@@ -12,7 +12,7 @@ use crate::instructions::utils::StackUInt;
 use crate::instructions::ChipChallenges;
 use crate::ZKVMError;
 
-use super::utils::inner_den_to_frac_circuit;
+use super::utils::den_to_frac_circuit;
 
 /// Add calldata table circuit to the circuit graph. Return node id and lookup
 /// instance log size.
@@ -46,16 +46,16 @@ pub(crate) fn construct_calldata_table<F: SmallField>(
             .collect_vec(),
     ];
 
-    let (table_node_id, _) = builder.add_node_with_witness(
-        "cakkdata table circuit",
+    let table_node_id = builder.add_node_with_witness(
+        "calldata table circuit",
         &calldata_circuit,
         vec![PredType::Source; 2],
         real_challenges.to_vec(),
         wires_in,
     )?;
 
-    let pad_circuit = Arc::new(inner_den_to_frac_circuit(calldata.len()));
-    let (pad_node_id, _) = builder.add_node_with_witness(
+    let pad_circuit = Arc::new(den_to_frac_circuit(calldata.len()));
+    let pad_node_id = builder.add_node_with_witness(
         "bytecode table padding circuit",
         &pad_circuit,
         vec![PredType::PredWireTrans(NodeOutputType::OutputLayer(

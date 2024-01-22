@@ -1,11 +1,17 @@
-use std::sync::Arc;
+use std::{mem, sync::Arc};
 
 use frontend::structs::WireId;
 use gkr::structs::Circuit;
+use gkr_graph::structs::{NodeOutputType, PredType};
 use goldilocks::SmallField;
+use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-use crate::{constants::OpcodeType, error::ZKVMError};
+use crate::{
+    chips::{construct_inst_chip_circuits, ChipCircuitGadgets},
+    error::ZKVMError,
+    CircuitWiresIn, SingerGraphBuilder,
+};
 
 use self::{
     add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
@@ -42,6 +48,65 @@ pub mod mstore;
 pub mod calldataload;
 
 pub mod utils;
+
+/// Construct instruction circuits and its extensions.
+pub(crate) fn construct_instruction_circuits<F: SmallField>(
+    opcode: u8,
+    challenges: ChipChallenges,
+) -> Result<Vec<InstCircuit<F>>, ZKVMError> {
+    match opcode {
+        0x01 => AddInstruction::construct_circuits(challenges),
+        0x11 => GtInstruction::construct_circuits(challenges),
+        0x35 => CalldataloadInstruction::construct_circuits(challenges),
+        0x50 => PopInstruction::construct_circuits(challenges),
+        0x52 => MstoreInstruction::construct_circuits(challenges),
+        0x56 => JumpInstruction::construct_circuits(challenges),
+        0x57 => JumpiInstruction::construct_circuits(challenges),
+        0x5B => JumpdestInstruction::construct_circuits(challenges),
+        0x60 => PushInstruction::<1>::construct_circuits(challenges),
+        0x80 => DupInstruction::<1>::construct_circuits(challenges),
+        0x81 => DupInstruction::<2>::construct_circuits(challenges),
+        0x91 => SwapInstruction::<2>::construct_circuits(challenges),
+        0x93 => SwapInstruction::<4>::construct_circuits(challenges),
+        0xF3 => ReturnInstruction::construct_circuits(challenges),
+        _ => unimplemented!(),
+    }
+}
+
+pub(crate) fn construct_inst_circuit_graph<F: SmallField>(
+    opcode: u8,
+    builder: &mut SingerGraphBuilder<F>,
+    inst_circuits: &[InstCircuit<F>],
+    chip_gadgets: &ChipCircuitGadgets<F>,
+    sources: Vec<CircuitWiresIn<F>>,
+    real_challenges: &[F],
+) -> Result<(), ZKVMError> {
+    let construct_circuit_graph = match opcode {
+        0x01 => AddInstruction::construct_circuit_graph,
+        0x11 => GtInstruction::construct_circuit_graph,
+        0x35 => CalldataloadInstruction::construct_circuit_graph,
+        0x50 => PopInstruction::construct_circuit_graph,
+        0x52 => MstoreInstruction::construct_circuit_graph,
+        0x56 => JumpInstruction::construct_circuit_graph,
+        0x57 => JumpiInstruction::construct_circuit_graph,
+        0x5B => JumpdestInstruction::construct_circuit_graph,
+        0x60 => PushInstruction::<1>::construct_circuit_graph,
+        0x80 => DupInstruction::<1>::construct_circuit_graph,
+        0x81 => DupInstruction::<2>::construct_circuit_graph,
+        0x91 => SwapInstruction::<2>::construct_circuit_graph,
+        0x93 => SwapInstruction::<4>::construct_circuit_graph,
+        0xF3 => ReturnInstruction::construct_circuit_graph,
+        _ => unimplemented!(),
+    };
+
+    construct_circuit_graph(
+        builder,
+        inst_circuits,
+        chip_gadgets,
+        sources,
+        real_challenges,
+    )
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ChipChallenges {
@@ -97,88 +162,86 @@ pub(crate) enum InstOutputType {
 #[derive(Clone, Debug)]
 pub struct InstCircuit<F: SmallField> {
     pub(crate) circuit: Arc<Circuit<F>>,
+    pub(crate) layout: InstCircuitLayout,
+}
 
-    // Wires out index
-    pub(crate) outputs_wire_id: [Option<WireId>; 9],
+#[derive(Clone, Debug, Default)]
+pub struct InstCircuitLayout {
+    // Will be connected to the chips.
+    pub(crate) chip_check_wire_id: [Option<WireId>; 9],
+    // Target. Especially for return the size of public output.
+    pub(crate) target_wire_id: Option<WireId>,
+    // Will be connected to the extension circuit.
+    pub(crate) succ_wires_id: Vec<WireId>,
 
     // Wires in index
     pub(crate) phases_wire_id: [Option<WireId>; 2],
+    // wire id fetched from pred circuit.
+    pub(crate) pred_wire_id: Option<WireId>,
+    // wire id fetched from public_io.
+    pub(crate) public_io_wire_id: Option<WireId>,
 }
 
-pub(crate) fn construct_opcode_circuit<F: SmallField>(
-    opcode: u8,
-    challenges: &ChipChallenges,
-) -> Result<InstCircuit<F>, ZKVMError> {
-    match opcode {
-        0x01 => AddInstruction::construct_circuit(challenges),
-        0x11 => GtInstruction::construct_circuit(challenges),
-        0x35 => CalldataloadInstruction::construct_circuit(challenges),
-        0x50 => PopInstruction::construct_circuit(challenges),
-        0x52 => MstoreInstruction::construct_circuit(challenges),
-        0x56 => JumpInstruction::construct_circuit(challenges),
-        0x57 => JumpiInstruction::construct_circuit(challenges),
-        0x5B => JumpdestInstruction::construct_circuit(challenges),
-        0x60 => PushInstruction::<1>::construct_circuit(challenges),
-        0x80 => DupInstruction::<1>::construct_circuit(challenges),
-        0x81 => DupInstruction::<2>::construct_circuit(challenges),
-        0x91 => SwapInstruction::<2>::construct_circuit(challenges),
-        0x93 => SwapInstruction::<4>::construct_circuit(challenges),
-        0xF3 => ReturnInstruction::construct_circuit(challenges),
-        _ => unimplemented!(),
-    }
-}
-
-pub(crate) fn witness_size(opcode: u8, phase: usize) -> usize {
-    match opcode {
-        0x01 => AddInstruction::witness_size(phase),
-        0x11 => GtInstruction::witness_size(phase),
-        0x35 => CalldataloadInstruction::witness_size(phase),
-        0x50 => PopInstruction::witness_size(phase),
-        0x52 => MstoreInstruction::witness_size(phase),
-        0x56 => JumpInstruction::witness_size(phase),
-        0x57 => JumpiInstruction::witness_size(phase),
-        0x5B => JumpdestInstruction::witness_size(phase),
-        0x60 => PushInstruction::<1>::witness_size(phase),
-        0x80 => DupInstruction::<1>::witness_size(phase),
-        0x81 => DupInstruction::<2>::witness_size(phase),
-        0x91 => SwapInstruction::<2>::witness_size(phase),
-        0x93 => SwapInstruction::<4>::witness_size(phase),
-        0xF3 => ReturnInstruction::witness_size(phase),
-        _ => unimplemented!(),
-    }
-}
-
-pub(crate) fn output_size(opcode: u8, inst_out: InstOutputType) -> usize {
-    match opcode {
-        0x01 => AddInstruction::output_size(inst_out),
-        0x11 => GtInstruction::output_size(inst_out),
-        0x35 => CalldataloadInstruction::output_size(inst_out),
-        0x50 => PopInstruction::output_size(inst_out),
-        0x52 => MstoreInstruction::output_size(inst_out),
-        0x56 => JumpInstruction::output_size(inst_out),
-        0x57 => JumpiInstruction::output_size(inst_out),
-        0x5B => JumpdestInstruction::output_size(inst_out),
-        0x60 => PushInstruction::<1>::output_size(inst_out),
-        0x80 => DupInstruction::<1>::output_size(inst_out),
-        0x81 => DupInstruction::<2>::output_size(inst_out),
-        0x91 => SwapInstruction::<2>::output_size(inst_out),
-        0x93 => SwapInstruction::<4>::output_size(inst_out),
-        0xF3 => ReturnInstruction::output_size(inst_out),
-        _ => unimplemented!(),
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct InstInfo<F: SmallField> {
-    _marker: std::marker::PhantomData<F>,
-}
 pub(crate) trait Instruction {
-    const OPCODE: OpcodeType;
-
     fn witness_size(phase: usize) -> usize;
     fn output_size(inst_out: InstOutputType) -> usize;
 
     fn construct_circuit<F: SmallField>(
-        challenges: &ChipChallenges,
+        challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError>;
+}
+
+/// Construct the part of the circuit graph for an instruction.
+pub(crate) trait InstructionGraph {
+    type InstType: Instruction;
+
+    /// Construct instruction circuits and its extensions. Mostly there is no
+    /// extensions.
+    fn construct_circuits<F: SmallField>(
+        challenges: ChipChallenges,
+    ) -> Result<Vec<InstCircuit<F>>, ZKVMError> {
+        let circuits = vec![Self::InstType::construct_circuit(challenges)?];
+        Ok(circuits)
+    }
+
+    /// Add instruction circuits and its extensions to the graph. Besides,
+    /// Generate the tree-structured circuit to compute the product or fraction
+    /// summation of the chip check wires.
+    fn construct_circuit_graph<F: SmallField>(
+        builder: &mut SingerGraphBuilder<F>,
+        inst_circuits: &[InstCircuit<F>],
+        chip_gadgets: &ChipCircuitGadgets<F>,
+        mut sources: Vec<CircuitWiresIn<F>>,
+        real_challenges: &[F],
+    ) -> Result<(), ZKVMError> {
+        let inst_circuit = &inst_circuits[0];
+        let inst_wires_in = mem::take(&mut sources[0]);
+        let n_instances = inst_wires_in[0].len();
+        let graph_builder = &mut builder.graph_builder;
+        let inst_id = graph_builder.add_node_with_witness(
+            stringify!(Self::InstType),
+            &inst_circuits[0].circuit,
+            vec![PredType::Source; inst_wires_in.len()],
+            real_challenges.to_vec(),
+            inst_wires_in,
+        )?;
+
+        // Add chip circuits to the graph, generate witness correspondingly.
+        for output_type in InstOutputType::iter() {
+            if let Some(output_wire_id) =
+                inst_circuit.layout.chip_check_wire_id[output_type as usize]
+            {
+                let chip_out_id = construct_inst_chip_circuits(
+                    graph_builder,
+                    output_type,
+                    NodeOutputType::WireOut(inst_id, output_wire_id),
+                    n_instances,
+                    &chip_gadgets,
+                    real_challenges,
+                )?;
+                builder.output_wires_id[output_type as usize].push(chip_out_id);
+            }
+        }
+        Ok(())
+    }
 }

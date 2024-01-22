@@ -4,17 +4,23 @@ use frontend::structs::{CircuitBuilder, MixedCell};
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
 
+use crate::instructions::InstCircuitLayout;
 use crate::{
     constants::{OpcodeType, VALUE_BIT_WIDTH},
     error::ZKVMError,
 };
 
+use super::InstructionGraph;
 use super::{
     utils::{uint::UIntAddSub, ChipHandler, PCUInt, TSUInt, UInt},
     ChipChallenges, InstCircuit, InstOutputType, Instruction,
 };
 
 pub struct PushInstruction<const N: usize>;
+
+impl<const N: usize> InstructionGraph for PushInstruction<N> {
+    type InstType = Self;
+}
 
 register_wires_in!(
     PushInstruction<N>,
@@ -55,12 +61,14 @@ register_wires_out!(
     }
 );
 
-impl<const N: usize> Instruction for PushInstruction<N> {
+impl<const N: usize> PushInstruction<N> {
     const OPCODE: OpcodeType = match N {
         1 => OpcodeType::PUSH1,
         _ => unimplemented!(),
     };
+}
 
+impl<const N: usize> Instruction for PushInstruction<N> {
     #[inline]
     fn witness_size(phase: usize) -> usize {
         match phase {
@@ -83,21 +91,27 @@ impl<const N: usize> Instruction for PushInstruction<N> {
     }
 
     fn construct_circuit<F: SmallField>(
-        challenges: &ChipChallenges,
+        challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
         let (phase1_wire_id, phase1) = circuit_builder.create_wire_in(Self::phase1_size());
-        let mut global_state_in_handler =
-            ChipHandler::new(&mut circuit_builder, Self::global_state_in_size());
-        let mut global_state_out_handler =
-            ChipHandler::new(&mut circuit_builder, Self::global_state_out_size());
+        let mut global_state_in_handler = ChipHandler::new(
+            &mut circuit_builder,
+            challenges,
+            Self::global_state_in_size(),
+        );
+        let mut global_state_out_handler = ChipHandler::new(
+            &mut circuit_builder,
+            challenges,
+            Self::global_state_out_size(),
+        );
         let mut bytecode_chip_handler =
-            ChipHandler::new(&mut circuit_builder, Self::bytecode_chip_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::bytecode_chip_size());
         let mut stack_push_handler =
-            ChipHandler::new(&mut circuit_builder, Self::stack_push_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::stack_push_size());
         let mut range_chip_handler =
-            ChipHandler::new(&mut circuit_builder, Self::range_chip_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::range_chip_size());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -114,7 +128,6 @@ impl<const N: usize> Instruction for PushInstruction<N> {
             &[memory_ts_rlc],
             stack_top,
             clk,
-            challenges,
         );
 
         let next_pc = ChipHandler::add_pc_const(
@@ -137,7 +150,6 @@ impl<const N: usize> Instruction for PushInstruction<N> {
             &[memory_ts_rlc],
             stack_top_expr.add(F::from(1)),
             clk_expr.add(F::ONE),
-            challenges,
         );
 
         // Check the range of stack_top is within [0, 1 << STACK_TOP_BIT_WIDTH).
@@ -152,7 +164,6 @@ impl<const N: usize> Instruction for PushInstruction<N> {
             stack_top_expr,
             stack_ts.values(),
             stack_values.values(),
-            challenges,
         );
 
         // Bytecode check for (pc, PUSH{N}), (pc + 1, byte[0]), ..., (pc + N, byte[N - 1])
@@ -160,7 +171,6 @@ impl<const N: usize> Instruction for PushInstruction<N> {
             &mut circuit_builder,
             pc.values(),
             Self::OPCODE,
-            challenges,
         );
         for (i, pc_add_i_plus_1) in phase0[Self::phase0_pc_add_i_plus_1()]
             .chunks(UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
@@ -176,7 +186,6 @@ impl<const N: usize> Instruction for PushInstruction<N> {
                 &mut circuit_builder,
                 next_pc.values(),
                 stack_bytes[i],
-                challenges,
             );
         }
 
@@ -201,8 +210,11 @@ impl<const N: usize> Instruction for PushInstruction<N> {
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
-            outputs_wire_id,
-            phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
+            layout: InstCircuitLayout {
+                chip_check_wire_id: outputs_wire_id,
+                phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
+                ..Default::default()
+            },
         })
     }
 }

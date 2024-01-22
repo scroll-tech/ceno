@@ -6,7 +6,7 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
 
-use crate::chips::utils::inner_den_to_frac_circuit;
+use crate::chips::utils::den_to_frac_circuit;
 use crate::instructions::utils::PCUInt;
 use crate::{error::ZKVMError, instructions::ChipChallenges};
 
@@ -39,7 +39,7 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
             .collect_vec(),
     ];
 
-    let (table_node_id, _) = builder.add_node_with_witness(
+    let table_node_id = builder.add_node_with_witness(
         "bytecode table circuit",
         &bytecode_circuit,
         vec![PredType::Source; 2],
@@ -47,8 +47,8 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
         wires_in,
     )?;
 
-    let pad_circuit = Arc::new(inner_den_to_frac_circuit(bytecode.len()));
-    let (pad_node_id, _) = builder.add_node_with_witness(
+    let pad_circuit = Arc::new(den_to_frac_circuit(bytecode.len()));
+    let pad_node_id = builder.add_node_with_witness(
         "bytecode table padding circuit",
         &pad_circuit,
         vec![PredType::PredWireTrans(NodeOutputType::OutputLayer(

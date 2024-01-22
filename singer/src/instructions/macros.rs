@@ -58,3 +58,24 @@ macro_rules! register_wires_out {
         }
     };
 }
+
+macro_rules! register_succ_wire_out {
+    ($struct_name:ident, $($succ_name:ident),*) => {
+        impl $struct_name {
+            register_succ_wire_out!(@internal 0usize; $($succ_name),*);
+        }
+    };
+
+    (@internal $offset:expr; $name:ident $(, $rest:ident)*) => {
+        fn $name() -> usize {
+            $offset
+        }
+        register_succ_wire_out!(@internal $offset + 1; $($rest),*);
+    };
+
+    (@internal $offset:expr;) => {
+        fn succ_wire_out_num() -> usize {
+            $offset
+        }
+    };
+}

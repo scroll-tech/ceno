@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use frontend::structs::CircuitBuilder;
 use gkr::structs::Circuit;
-use gkr_graph::structs::{CircuitGraphBuilder, PredType};
+use gkr_graph::structs::CircuitGraphBuilder;
 use goldilocks::SmallField;
-use itertools::Itertools;
 
 use crate::error::ZKVMError;
 use crate::instructions::ChipChallenges;
@@ -18,22 +17,18 @@ pub(crate) fn construct_range_table<F: SmallField>(
     real_challenges: &[F],
 ) -> Result<(usize, usize), ZKVMError> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (_, cells) = circuit_builder.create_wire_in(1);
+    let cells = circuit_builder.create_counter_in(0);
     let rlc = circuit_builder.create_cell();
     circuit_builder.rlc(rlc, &[cells[0]], challenges.range());
     circuit_builder.configure();
     let range_circuit = Arc::new(Circuit::new(&circuit_builder));
 
-    let wires_in = vec![(0..(1 << bit_with))
-        .map(|x| vec![F::from(x as u64)])
-        .collect_vec()];
-
-    let (table_node_id, table_instance_nv) = builder.add_node_with_witness(
+    let table_node_id = builder.add_node_with_witness(
         "range table circuit",
         &range_circuit,
-        vec![PredType::Source; 2],
+        vec![],
         real_challenges.to_vec(),
-        wires_in,
+        vec![],
     )?;
-    Ok((table_node_id, table_instance_nv - 1))
+    Ok((table_node_id, bit_with - 1))
 }
