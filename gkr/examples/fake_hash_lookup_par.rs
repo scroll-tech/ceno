@@ -45,12 +45,12 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
     let table_type = TableType::FakeHashTable as u16;
     let count_idx = circuit_builder.define_table_type(table_type);
     for i in 0..table_size {
-        circuit_builder.add_table_item(table_type, pow_of_xs[i]);
+        circuit_builder.add_lookup_table_item(table_type, pow_of_xs[i]);
     }
 
     let (inputs_idx, inputs) = circuit_builder.create_wire_in(5);
     inputs.iter().for_each(|input| {
-        circuit_builder.add_input_item(table_type, *input);
+        circuit_builder.add_lookup_input_item(table_type, *input);
     });
 
     circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));

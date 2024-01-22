@@ -1,9 +1,10 @@
 use goldilocks::SmallField;
+use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 
 use crate::structs::{
-    Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, InType, LayerId, OutType,
-    TableData, TableType, WireId,
+    Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, InType, LayerId, MixedCell,
+    OutType, TableData, TableType, WireId,
 };
 
 impl<F: SmallField> Cell<F> {
@@ -135,6 +136,11 @@ where
         in_2: CellId,
         scaler: ConstantType<F>,
     ) {
+        if let ConstantType::Field(constant) = scaler {
+            if constant == F::ZERO {
+                return;
+            }
+        }
         let out_cell = &mut self.cells[out];
         out_cell
             .gates
@@ -144,6 +150,97 @@ where
     pub fn assert_const(&mut self, out: CellId, constant: &F) {
         let out_cell = &mut self.cells[out];
         out_cell.assert_const = Some(*constant);
+    }
+
+    pub fn add_cell_expr(&mut self, out: CellId, in_0: &MixedCell<F>) {
+        match in_0 {
+            MixedCell::Constant(constant) => {
+                self.add_const(out, ConstantType::Field(*constant));
+            }
+            MixedCell::Cell(cell_id) => {
+                self.add(out, *cell_id, ConstantType::Field(F::ONE));
+            }
+            MixedCell::CellExpr(cell_id, a, b) => {
+                self.add(out, *cell_id, ConstantType::Field(*a));
+                self.add_const(out, ConstantType::Field(*b));
+            }
+        };
+    }
+
+    pub fn sel(&mut self, out: CellId, in_0: CellId, in_1: CellId, cond: CellId) {
+        // (1 - cond) * in_0 + cond * in_1 = (in_1 - in_0) * cond + in_0
+        let diff = self.create_cell();
+        self.add(diff, in_1, ConstantType::Field(F::ONE));
+        self.add(diff, in_0, ConstantType::Field(-F::ONE));
+        self.mul2(out, diff, cond, ConstantType::Field(F::ONE));
+        self.add(out, in_0, ConstantType::Field(F::ONE));
+    }
+
+    pub fn sel_mixed(&mut self, out: CellId, in_0: MixedCell<F>, in_1: MixedCell<F>, cond: CellId) {
+        // (1 - cond) * in_0 + cond * in_1 = (in_1 - in_0) * cond + in_0
+        match (in_0, in_1) {
+            (MixedCell::Constant(in_0), MixedCell::Constant(in_1)) => {
+                self.add(out, cond, ConstantType::Field(in_1 - in_0));
+            }
+            (MixedCell::Constant(in_0), in_1) => {
+                let diff = in_1.expr(F::ONE, -in_0);
+                let diff_cell = self.create_cell();
+                self.add_cell_expr(diff_cell, &diff);
+                self.mul2(out, diff_cell, cond, ConstantType::Field(F::ONE));
+                self.add_const(out, ConstantType::Field(in_0));
+            }
+            (in_0, MixedCell::Constant(in_1)) => {
+                self.add_cell_expr(out, &in_0);
+                let diff = in_0.expr(-F::ONE, in_1);
+                let diff_cell = self.create_cell();
+                self.add_cell_expr(diff_cell, &diff);
+                self.mul2(out, diff_cell, cond, ConstantType::Field(F::ONE));
+            }
+            (in_0, in_1) => {
+                self.add_cell_expr(out, &in_0);
+                let diff = self.create_cell();
+                self.add_cell_expr(diff, &in_1);
+                self.add_cell_expr(diff, &in_0.expr(-F::ONE, F::ZERO));
+                self.mul2(out, diff, cond, ConstantType::Field(F::ONE));
+            }
+        }
+    }
+
+    /// Compute the random linear combination of `in_array` by challenge.
+    /// out = \sum_{i = 0}^{in_array.len()} challenge^i * in_array[i] + challenge^{in_array.len()}.
+    pub fn rlc(&mut self, out: CellId, in_array: &[CellId], challenge: usize) {
+        let const_array = (0..in_array.len())
+            .map(|i| ConstantType::ChallengePow(challenge, i))
+            .collect_vec();
+        self.inner_product_const(out, in_array, &const_array);
+        self.add_const(out, ConstantType::ChallengePow(challenge, in_array.len()));
+    }
+
+    /// Compute the random linear combination of `in_array` with mixed types by challenge.
+    /// out = \sum_{i = 0}^{in_array.len()} challenge^i * (\sum_j in_array[i][j]) + challenge^{in_array.len()}.
+    pub fn rlc_mixed(&mut self, out: CellId, in_array: &[MixedCell<F>], challenge: usize) {
+        for (i, item) in in_array.iter().enumerate() {
+            match item {
+                MixedCell::Constant(constant) => {
+                    self.add_const(
+                        out,
+                        ConstantType::ChallengePowScaled(challenge, i, *constant),
+                    );
+                }
+                MixedCell::Cell(cell_id) => {
+                    self.add(out, *cell_id, ConstantType::ChallengePow(challenge, i));
+                }
+                MixedCell::CellExpr(cell_id, a, b) => {
+                    self.add(
+                        out,
+                        *cell_id,
+                        ConstantType::ChallengePowScaled(challenge, i, *a),
+                    );
+                    self.add_const(out, ConstantType::ChallengePowScaled(challenge, i, *b));
+                }
+            }
+        }
+        self.add_const(out, ConstantType::ChallengePow(challenge, in_array.len()));
     }
 
     /// Compute \sum_{i = 0}^{in_0_array.len()} scalers[i] * in_0_array[i] * in_1_array[i].
@@ -445,7 +542,7 @@ where
         count_idx
     }
 
-    pub fn add_input_item(&mut self, table_type: TableType, cell: CellId) {
+    pub fn add_lookup_input_item(&mut self, table_type: TableType, cell: CellId) {
         assert!(self.tables.contains_key(&table_type));
         self.tables
             .get_mut(&table_type)
@@ -453,7 +550,7 @@ where
             .add_input_item(cell);
     }
 
-    pub fn add_table_item(&mut self, table_type: TableType, cell: CellId) {
+    pub fn add_lookup_table_item(&mut self, table_type: TableType, cell: CellId) {
         assert!(self.tables.contains_key(&table_type));
         self.tables
             .get_mut(&table_type)
@@ -580,8 +677,6 @@ where
     fn build_lookup_circuits(&mut self) {
         let tables = self.tables.clone();
         for (_, table_data) in tables.iter() {
-            assert!(table_data.challenge.is_some());
-
             let challenge = table_data.challenge.unwrap();
             let counts = self
                 .create_cells(table_data.table_items.len() + table_data.table_items_const.len());
