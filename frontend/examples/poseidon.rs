@@ -434,7 +434,7 @@ fn main() {
     let poseidon_ex_out = poseidon_ex(
         &mut circuit_builder,
         1,
-        &poseidon_ex_inputs,
+        poseidon_ex_inputs.as_slice(),
         poseidon_ex_initial_state[0],
     );
     println!("The output is located at cell {:?}", poseidon_ex_out[0]);

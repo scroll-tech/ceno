@@ -24,11 +24,11 @@ fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
     let count_idx = circuit_builder.define_table_type(table_type);
     // table should be [0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], ...
     for i in 0..table_size {
-        circuit_builder.add_table_item(table_type, table[i]);
+        circuit_builder.add_lookup_table_item(table_type, table[i]);
     }
 
     inputs.iter().for_each(|input| {
-        circuit_builder.add_input_item(table_type, *input);
+        circuit_builder.add_lookup_input_item(table_type, *input);
     });
 
     circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));

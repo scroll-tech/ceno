@@ -54,12 +54,9 @@ impl<F: SmallField> CircuitWitness<F> {
         let constant = |c: ConstantType<F>| match c {
             ConstantType::Field(x) => x,
             ConstantType::Challenge(i) => challenges[i],
-            ConstantType::Challenge2(i) => challenges[i] * challenges[i],
-            ConstantType::Challenge3(i) => challenges[i] * challenges[i] * challenges[i],
-            ConstantType::Challenge4(i) => {
-                let tmp = challenges[i] * challenges[i];
-                tmp * tmp
-            }
+            ConstantType::ChallengeScaled(i, x) => challenges[i] * x,
+            ConstantType::ChallengePow(i, j) => challenges[i].pow(&[j as u64]),
+            ConstantType::ChallengePowScaled(i, j, x) => challenges[i].pow(&[j as u64]) * x,
         };
         for (layer_id, layer) in circuit.layers.iter().enumerate().rev().skip(1) {
             let size = circuit.layers[layer_id].size();
@@ -309,14 +306,9 @@ impl<F: SmallField> CircuitWitness<F> {
         match *c {
             ConstantType::Field(x) => x,
             ConstantType::Challenge(i) => self.challenges[i],
-            ConstantType::Challenge2(i) => self.challenges[i] * self.challenges[i],
-            ConstantType::Challenge3(i) => {
-                self.challenges[i] * self.challenges[i] * self.challenges[i]
-            }
-            ConstantType::Challenge4(i) => {
-                let tmp = self.challenges[i] * self.challenges[i];
-                tmp * tmp
-            }
+            ConstantType::ChallengeScaled(i, x) => self.challenges[i] * x,
+            ConstantType::ChallengePow(i, j) => self.challenges[i].pow(&[j as u64]),
+            ConstantType::ChallengePowScaled(i, j, x) => self.challenges[i].pow(&[j as u64]) * x,
         }
     }
 }
