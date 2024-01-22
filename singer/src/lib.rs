@@ -1,27 +1,22 @@
 #![feature(generic_const_exprs)]
 
-use std::sync::Arc;
-
 use chips::ChipCircuitGadgets;
+use chips::LookupChipType;
 use error::ZKVMError;
 use gkr_graph::structs::CircuitGraph;
+use gkr_graph::structs::CircuitGraphBuilder;
 use gkr_graph::structs::CircuitGraphWitness;
+use gkr_graph::structs::NodeOutputType;
 use goldilocks::SmallField;
-use instructions::add::AddInstruction;
-use instructions::calldataload::CalldataloadInstruction;
-use instructions::dup::DupInstruction;
-use instructions::gt::GtInstruction;
-use instructions::jump::JumpInstruction;
-use instructions::jumpdest::JumpdestInstruction;
-use instructions::jumpi::JumpiInstruction;
-use instructions::mstore::MstoreInstruction;
-use instructions::pop::PopInstruction;
-use instructions::push::PushInstruction;
-use instructions::ret::ReturnInstruction;
-use instructions::swap::SwapInstruction;
+use instructions::construct_inst_circuit_graph;
+use instructions::construct_instruction_circuits;
 use instructions::ChipChallenges;
 use instructions::InstCircuit;
-use instructions::Instruction;
+use instructions::InstOutputType;
+use std::mem;
+use strum::IntoEnumIterator;
+
+use crate::chips::construct_table_circuits;
 
 pub mod chips;
 pub mod constants;
@@ -29,6 +24,7 @@ pub mod error;
 pub mod instructions;
 pub mod scheme;
 
+// Process sketch:
 // 1. Construct instruction circuits and circuit gadgets => circuit gadgets
 // 2. (bytecode + input) => Run revm interpreter, generate all wires in
 //      2.1 phase 0 wire in + commitment
@@ -41,54 +37,120 @@ pub mod scheme;
 #[derive(Clone, Debug)]
 pub struct SingerCircuitBuilder<F: SmallField> {
     /// Opcode circuits
-    opcode_circuits: [Arc<InstCircuit<F>>; 256],
+    insts_circuits: [Vec<InstCircuit<F>>; 256],
     chip_circuit_gadgets: ChipCircuitGadgets<F>,
+
+    challenges: ChipChallenges,
 }
 
 impl<F: SmallField> SingerCircuitBuilder<F> {
-    pub fn new(challenges: &ChipChallenges) -> Result<Self, ZKVMError> {
+    pub fn new(challenges: ChipChallenges) -> Result<Self, ZKVMError> {
         let mut opcode_circuits = Vec::with_capacity(256);
         for opcode in 0..=255 {
-            opcode_circuits.push(Arc::new(construct_opcode_circuit(opcode, challenges)?));
+            opcode_circuits.push(construct_instruction_circuits(opcode, challenges)?);
         }
-        let opcode_circuits: [Arc<InstCircuit<F>>; 256] = opcode_circuits
+        let opcode_circuits: [Vec<InstCircuit<F>>; 256] = opcode_circuits
             .try_into()
             .map_err(|_| ZKVMError::CircuitError)?;
 
         let chip_circuit_gadgets = ChipCircuitGadgets::new();
         Ok(Self {
-            opcode_circuits,
+            insts_circuits: opcode_circuits,
             chip_circuit_gadgets,
+            challenges,
         })
-    }
-
-    pub fn construct_gkr_graph(
-        singer_wires_in: &SingerWiresIn<F>,
-    ) -> (SingerCircuit<F>, SingerWitness<F>) {
-        todo!()
     }
 }
 
-fn construct_opcode_circuit<F: SmallField>(
-    opcode: u8,
-    challenges: &ChipChallenges,
-) -> Result<InstCircuit<F>, ZKVMError> {
-    match opcode {
-        0x01 => AddInstruction::construct_circuit(challenges),
-        0x11 => GtInstruction::construct_circuit(challenges),
-        0x35 => CalldataloadInstruction::construct_circuit(challenges),
-        0x50 => PopInstruction::construct_circuit(challenges),
-        0x52 => MstoreInstruction::construct_circuit(challenges),
-        0x56 => JumpInstruction::construct_circuit(challenges),
-        0x57 => JumpiInstruction::construct_circuit(challenges),
-        0x5B => JumpdestInstruction::construct_circuit(challenges),
-        0x60 => PushInstruction::<1>::construct_circuit(challenges),
-        0x80 => DupInstruction::<1>::construct_circuit(challenges),
-        0x81 => DupInstruction::<2>::construct_circuit(challenges),
-        0x91 => SwapInstruction::<2>::construct_circuit(challenges),
-        0x93 => SwapInstruction::<4>::construct_circuit(challenges),
-        0xF3 => ReturnInstruction::construct_circuit(challenges),
-        _ => unimplemented!(),
+/// Circuit graph builder for Singer. `output_wires_id` is indexed by
+/// InstOutputType, corresponding to the product of summation of the chip check
+/// records. `public_output_size` is the wire id stores the size of public
+/// output.
+pub struct SingerGraphBuilder<F: SmallField> {
+    graph_builder: CircuitGraphBuilder<F>,
+    output_wires_id: Vec<Vec<NodeOutputType>>,
+    public_output_size: Option<NodeOutputType>,
+}
+
+impl<F: SmallField> SingerGraphBuilder<F> {
+    pub fn new() -> Result<Self, ZKVMError> {
+        Ok(Self {
+            graph_builder: CircuitGraphBuilder::new(),
+            output_wires_id: vec![vec![]; InstOutputType::iter().count()],
+            public_output_size: None,
+        })
+    }
+
+    pub fn construct(
+        mut self,
+        circuit_builder: &SingerCircuitBuilder<F>,
+        mut singer_wires_in: SingerWiresIn<F>,
+        bytecode: &[u8],
+        program_input: &[u8],
+        real_challenges: &[F],
+    ) -> Result<(SingerCircuit<F>, SingerWitness<F>, SingerWiresOutID), ZKVMError> {
+        // Add instruction and its extension (if any) circuits to the graph.
+        for (opcode, opcode_wires_in) in singer_wires_in.opcode_wires_in.iter_mut() {
+            let inst_circuits = &circuit_builder.insts_circuits[*opcode as usize];
+            construct_inst_circuit_graph(
+                *opcode,
+                &mut self,
+                &inst_circuits,
+                &circuit_builder.chip_circuit_gadgets,
+                mem::take(opcode_wires_in),
+                real_challenges,
+            )?;
+        }
+
+        // Construct tables for lookup arguments, including bytecode, range and
+        // calldata.
+        let mut table_out_node_id = Vec::new();
+        for table_type in LookupChipType::iter() {
+            table_out_node_id.push(construct_table_circuits(
+                table_type,
+                &mut self.graph_builder,
+                bytecode,
+                program_input,
+                &circuit_builder.challenges,
+                real_challenges,
+                &circuit_builder.chip_circuit_gadgets,
+            )?);
+        }
+
+        let SingerGraphBuilder {
+            graph_builder,
+            mut output_wires_id,
+            public_output_size,
+        } = self;
+
+        let singer_wire_out_id = SingerWiresOutID {
+            global_state_in: mem::take(
+                &mut output_wires_id[InstOutputType::GlobalStateIn as usize],
+            ),
+            global_state_out: mem::take(
+                &mut output_wires_id[InstOutputType::GlobalStateOut as usize],
+            ),
+            bytecode_chip_input: mem::take(
+                &mut output_wires_id[InstOutputType::BytecodeChip as usize],
+            ),
+            bytecode_chip_table: table_out_node_id[LookupChipType::BytecodeChip as usize],
+            stack_push: mem::take(&mut output_wires_id[InstOutputType::StackPush as usize]),
+            stack_pop: mem::take(&mut output_wires_id[InstOutputType::StackPop as usize]),
+            range_chip_input: mem::take(&mut output_wires_id[InstOutputType::RangeChip as usize]),
+            range_chip_table: table_out_node_id[LookupChipType::RangeChip as usize],
+            calldata_chip_input: mem::take(
+                &mut output_wires_id[InstOutputType::CalldataChip as usize],
+            ),
+            calldata_chip_table: table_out_node_id[LookupChipType::CalldataChip as usize],
+            public_output_size: public_output_size,
+        };
+
+        let (graph, graph_witness) = graph_builder.finalize();
+        Ok((
+            SingerCircuit(graph),
+            SingerWitness(graph_witness),
+            singer_wire_out_id,
+        ))
     }
 }
 
@@ -96,6 +158,35 @@ pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
 
 pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 
+// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
+pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
+
 pub struct SingerWiresIn<F: SmallField> {
-    marker: std::marker::PhantomData<F>,
+    opcode_wires_in: Vec<(u8, Vec<CircuitWiresIn<F>>)>,
+}
+
+impl<F: SmallField> SingerWiresIn<F> {
+    pub fn new() -> Self {
+        let mut opcode_wires_in = Vec::with_capacity(256);
+        for opcode in 0..=255 {
+            opcode_wires_in.push((opcode, Vec::new()));
+        }
+        Self { opcode_wires_in }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SingerWiresOutID {
+    global_state_in: Vec<NodeOutputType>,
+    global_state_out: Vec<NodeOutputType>,
+    bytecode_chip_input: Vec<NodeOutputType>,
+    bytecode_chip_table: NodeOutputType,
+    stack_push: Vec<NodeOutputType>,
+    stack_pop: Vec<NodeOutputType>,
+    range_chip_input: Vec<NodeOutputType>,
+    range_chip_table: NodeOutputType,
+    calldata_chip_input: Vec<NodeOutputType>,
+    calldata_chip_table: NodeOutputType,
+
+    public_output_size: Option<NodeOutputType>,
 }

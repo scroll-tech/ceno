@@ -136,6 +136,63 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
+    /// Little-endian addition with a small number. Notice that the user should
+    /// guarantee addend_1 < 1 << C.
+    pub(in crate::instructions) fn add_small_unsafe<F: SmallField>(
+        circuit_builder: &mut CircuitBuilder<F>,
+        addend_0: &UInt<M, C>,
+        addend_1: CellId,
+        carry: &[CellId],
+    ) -> Result<UInt<M, C>, ZKVMError> {
+        let result: UInt<M, C> = circuit_builder
+            .create_cells(UInt::<M, C>::N_OPRAND_CELLS)
+            .try_into()?;
+        for i in 0..result.values.len() {
+            let (a, result) = (addend_0.values[i], result.values[i]);
+            // result = addend_0 + addend_1 + last_carry - carry * (256 << BYTE_WIDTH)
+            circuit_builder.add(result, a, ConstantType::Field(F::ONE));
+            circuit_builder.add(result, addend_1, ConstantType::Field(F::ONE));
+            // It is equivalent to pad carry with 0s.
+            if i < carry.len() {
+                circuit_builder.add(result, carry[i], ConstantType::Field(-F::from(1 << C)));
+            }
+            if i > 0 && i - 1 < carry.len() {
+                circuit_builder.add(result, carry[i - 1], ConstantType::Field(F::ONE));
+            }
+        }
+        Ok(result)
+    }
+
+    /// Little-endian addition with a small number. Notice that the user should
+    /// guarantee addend_1 < 1 << C.
+    pub(in crate::instructions) fn add_small<F: SmallField>(
+        circuit_builder: &mut CircuitBuilder<F>,
+        range_chip_handler: &mut ChipHandler,
+        addend_0: &UInt<M, C>,
+        addend_1: CellId,
+        witness: &[CellId],
+    ) -> Result<UInt<M, C>, ZKVMError> {
+        let carry = Self::extract_carry(witness);
+        let range_values = Self::extract_range_values(witness);
+        let computed_result = Self::add_small_unsafe(circuit_builder, addend_0, addend_1, carry)?;
+        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+    }
+
+    /// Little-endian addition with a small number, guaranteed no overflow.
+    /// Notice that the user should guarantee addend_1 < 1 << C.
+    pub(in crate::instructions) fn add_small_no_overflow<F: SmallField>(
+        circuit_builder: &mut CircuitBuilder<F>,
+        range_chip_handler: &mut ChipHandler,
+        addend_0: &UInt<M, C>,
+        addend_1: CellId,
+        witness: &[CellId],
+    ) -> Result<UInt<M, C>, ZKVMError> {
+        let carry = Self::extract_carry_no_overflow(witness);
+        let range_values = Self::extract_range_values_no_overflow(witness);
+        let computed_result = Self::add_small_unsafe(circuit_builder, addend_0, addend_1, carry)?;
+        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+    }
+
     /// Little-endian subtraction. Assume users to check the correct range of
     /// the result by themselves.
     pub(in crate::instructions) fn sub_unsafe<F: SmallField>(

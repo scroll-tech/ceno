@@ -6,7 +6,6 @@ pub(crate) const EVM_STACK_BIT_WIDTH: usize = 256;
 pub(crate) const EVM_STACK_BYTE_WIDTH: usize = EVM_STACK_BIT_WIDTH / 8;
 
 // opcode bytecode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OpcodeType {
     ADD = 0x01,
     GT = 0x11,

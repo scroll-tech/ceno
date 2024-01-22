@@ -13,7 +13,7 @@ pub(crate) fn i64_to_field<F: SmallField>(x: i64) -> F {
     }
 }
 
-pub(crate) fn ceil_log2(x: usize) -> usize {
+pub fn ceil_log2(x: usize) -> usize {
     assert!(x > 0, "ceil_log2: x must be positive");
     // Calculate the number of bits in usize
     let usize_bits = std::mem::size_of::<usize>() * 8;
