@@ -45,7 +45,7 @@ pub(crate) enum NodeInputType {
     WireIn(usize, WireId),
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NodeOutputType {
     OutputLayer(usize),
     WireOut(usize, WireId),
@@ -54,10 +54,12 @@ pub enum NodeOutputType {
 /// The predecessor of a node can be a source or a wire. If it is a wire, it can
 /// be one wire_out instance connected to one wire_in instance, or one wire_out
 /// connected to multiple wire_in instances.
+#[derive(Clone, Debug)]
 pub enum PredType {
     Source,
-    PredWireO2O(NodeOutputType),
-    PredWireO2M(NodeOutputType),
+    PredWire(NodeOutputType),
+    PredWireDup(NodeOutputType),
+    PredWireTrans(NodeOutputType),
 }
 
 pub struct CircuitNode<F: SmallField> {
