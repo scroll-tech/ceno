@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, sync::Arc};
 
-use frontend::structs::{CircuitBuilder, WireId};
+use frontend::structs::WireId;
 use gkr::structs::{Circuit, CircuitWitness};
 use goldilocks::SmallField;
 use itertools::{chain, Itertools};
@@ -26,15 +26,12 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
     pub fn add_node_with_witness(
         &mut self,
         label: &'static str,
-        mut circuit_builder: CircuitBuilder<F>,
+        circuit: &Arc<Circuit<F>>,
         preds: Vec<PredType>,
         challenges: Vec<F>,
-        sources: Vec<Vec<F>>, // instances
+        sources: Vec<Vec<Vec<F>>>, // instances
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
-
-        circuit_builder.configure();
-        let circuit = Circuit::new(&circuit_builder);
         assert_eq!(preds.len(), circuit.n_wires_in);
 
         let mut witness = CircuitWitness::new(&circuit, challenges);
@@ -42,9 +39,10 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         for instance_id in 0..num_instances {
             let wires_in = preds
                 .iter()
-                .map(|pred| match pred {
-                    PredType::Source => sources[instance_id].clone(),
-                    PredType::PredWireO2O(out) | PredType::PredWireO2M(out) => match out {
+                .enumerate()
+                .map(|(wire_in_id, pred)| match pred {
+                    PredType::Source => sources[wire_in_id][instance_id].clone(),
+                    PredType::PredWire(out) => match out {
                         NodeOutputType::OutputLayer(id) => {
                             let output = &self.witness.node_witnesses[*id].last_layer_witness_ref();
                             let size = output.len() * output[0].len() / num_instances;
@@ -69,6 +67,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
                                 .collect_vec()
                         }
                     },
+                    _ => unimplemented!(),
                 })
                 .collect_vec();
             witness.add_instance(&circuit, &wires_in);
@@ -77,7 +76,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         self.graph.nodes.push(CircuitNode {
             id,
             label,
-            circuit: Arc::new(circuit),
+            circuit: circuit.clone(),
             preds,
         });
         self.witness.node_witnesses.push(witness);
@@ -114,9 +113,10 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
                         PredType::Source => {
                             sources.insert(NodeInputType::WireIn(id, wire_id as WireId));
                         }
-                        PredType::PredWireO2O(out) | PredType::PredWireO2M(out) => {
+                        PredType::PredWire(out) => {
                             targets.remove(out);
                         }
+                        _ => unimplemented!(),
                     }
                 }
 
