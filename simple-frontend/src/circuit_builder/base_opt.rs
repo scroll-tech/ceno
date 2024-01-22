@@ -3,7 +3,7 @@ use goldilocks::SmallField;
 
 use crate::structs::{
     Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, InType, MixedCell, OutType,
-    WireId,
+    WitnessId,
 };
 
 impl<Ext: SmallField> CircuitBuilder<Ext> {
@@ -24,11 +24,14 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         });
     }
 
-    pub fn create_wire_in(&mut self, num: usize) -> (WireId, Vec<CellId>) {
+    pub fn create_witness_in(&mut self, num: usize) -> (WitnessId, Vec<CellId>) {
         let cell = self.create_cells(num);
-        self.mark_cells(CellType::In(InType::Wire(self.n_wires_in as WireId)), &cell);
-        self.n_wires_in += 1;
-        ((self.n_wires_in - 1) as WireId, cell)
+        self.mark_cells(
+            CellType::In(InType::Witness(self.n_witness_in as WitnessId)),
+            &cell,
+        );
+        self.n_witness_in += 1;
+        ((self.n_witness_in - 1) as WitnessId, cell)
     }
 
     /// Create input cells and assign it to be constant.
@@ -46,23 +49,23 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         cell
     }
 
-    pub fn create_wire_out(&mut self, num: usize) -> (WireId, Vec<CellId>) {
+    pub fn create_witness_out(&mut self, num: usize) -> (WitnessId, Vec<CellId>) {
         let cell = self.create_cells(num);
         self.mark_cells(
-            CellType::Out(OutType::Wire(self.n_wires_out as WireId)),
+            CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)),
             &cell,
         );
-        self.n_wires_out += 1;
-        ((self.n_wires_out - 1) as WireId, cell)
+        self.n_witness_out += 1;
+        ((self.n_witness_out - 1) as WitnessId, cell)
     }
 
-    pub fn create_wire_out_from_cells(&mut self, cells: &[CellId]) -> WireId {
+    pub fn create_witness_out_from_cells(&mut self, cells: &[CellId]) -> WitnessId {
         self.mark_cells(
-            CellType::Out(OutType::Wire(self.n_wires_out as WireId)),
+            CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)),
             &cells,
         );
-        self.n_wires_out += 1;
-        (self.n_wires_out - 1) as WireId
+        self.n_witness_out += 1;
+        (self.n_witness_out - 1) as WitnessId
     }
 
     pub fn add_const(&mut self, out: CellId, constant: Ext::BaseField) {
@@ -78,7 +81,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
 
     pub(crate) fn add_const_internal(&mut self, out: CellId, constant: ConstantType<Ext>) {
         let out_cell = &mut self.cells[out];
-        out_cell.gates.push(GateType::AddC(constant));
+        out_cell.gates.push(GateType::add_const(constant));
     }
 
     pub fn add(&mut self, out: CellId, in_0: CellId, scalar: Ext::BaseField) {
@@ -90,7 +93,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
 
     pub(crate) fn add_internal(&mut self, out: CellId, in_0: CellId, scalar: ConstantType<Ext>) {
         let out_cell = &mut self.cells[out];
-        out_cell.gates.push(GateType::Add(in_0, scalar));
+        out_cell.gates.push(GateType::add(in_0, scalar));
     }
 
     pub fn mul2(&mut self, out: CellId, in_0: CellId, in_1: CellId, scalar: Ext::BaseField) {
@@ -108,7 +111,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         scalar: ConstantType<Ext>,
     ) {
         let out_cell = &mut self.cells[out];
-        out_cell.gates.push(GateType::Mul2(in_0, in_1, scalar));
+        out_cell.gates.push(GateType::mul2(in_0, in_1, scalar));
     }
 
     pub fn mul3(
@@ -136,12 +139,11 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         let out_cell = &mut self.cells[out];
         out_cell
             .gates
-            .push(GateType::Mul3(in_0, in_1, in_2, scalar));
+            .push(GateType::mul3(in_0, in_1, in_2, scalar));
     }
 
-    pub fn assert_const(&mut self, out: CellId, constant: Ext::BaseField) {
-        let out_cell = &mut self.cells[out];
-        out_cell.assert_const = Some(constant);
+    pub fn assert_const(&mut self, out: CellId, constant: i64) {
+        self.mark_cells(CellType::Out(OutType::AssertConst(constant)), &[out]);
     }
 
     pub fn add_cell_expr(&mut self, out: CellId, in_0: MixedCell<Ext>) {

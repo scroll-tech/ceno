@@ -1,11 +1,11 @@
 use std::mem;
 use std::sync::Arc;
 
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use gkr::utils::ceil_log2;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
-use simple_frontend::structs::WireId;
+use simple_frontend::structs::WitnessId;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -14,7 +14,7 @@ use crate::chips::calldata::construct_calldata_table;
 use crate::component::{ChipType, ToChipsWires};
 use crate::constants::RANGE_CHIP_BIT_WIDTH;
 use crate::error::ZKVMError;
-use crate::{ChipChallenges, WirsInValues};
+use crate::ChipChallenges;
 
 use self::circuit_gadgets::{LeafCircuit, LeafFracSumCircuit, LeafFracSumNoSelectorCircuit};
 use self::range::construct_range_table;
@@ -50,19 +50,20 @@ impl<F: SmallField> SingerChipBuilder<F> {
         real_challenges: &[F],
         n_instances: usize,
     ) -> Result<(), ZKVMError> {
-        let mut build = |n_instances: usize,
+        let mut build = |real_n_instances: usize,
                          num: usize,
-                         input_wire_id: WireId,
+                         input_wire_id: WitnessId,
                          leaf: &LeafCircuit<F>,
                          inner: &Arc<Circuit<F>>|
          -> Result<NodeOutputType, ZKVMError> {
-            let selector = ChipCircuitGadgets::construct_prefix_selector(n_instances, num);
+            let selector = ChipCircuitGadgets::construct_prefix_selector(real_n_instances, num);
             let selector_node_id = graph_builder.add_node_with_witness(
                 "selector circuit",
                 &selector.circuit,
                 vec![],
                 real_challenges.to_vec(),
                 vec![],
+                real_n_instances.next_power_of_two(),
             )?;
             let mut preds = vec![PredType::Source; 2];
             preds[leaf.input_id as usize] =
@@ -70,7 +71,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
             preds[leaf.cond_id as usize] =
                 PredType::PredWire(NodeOutputType::OutputLayer(selector_node_id));
 
-            let instance_num_vars = ceil_log2(n_instances * num) - 1;
+            let instance_num_vars = ceil_log2(real_n_instances * num) - 1;
             build_tree_circuits(
                 graph_builder,
                 preds,
@@ -132,7 +133,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
         graph_builder: &mut CircuitGraphBuilder<F>,
         basic_blocks: &[Vec<u8>],
         program_input: &[u8],
-        mut table_count_witness: Vec<WirsInValues<F::BaseField>>,
+        mut table_count_witness: Vec<LayerWitness<F::BaseField>>,
         challenges: &ChipChallenges,
         real_challenges: &[F],
     ) -> Result<Vec<NodeOutputType>, ZKVMError> {
@@ -144,7 +145,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
             let mut preds = vec![PredType::Source; 3];
             preds[leaf.input_den_id as usize] = table_pred;
             preds[leaf.cond_id as usize] = selector_pred;
-            let mut sources = vec![vec![]; 3];
+            let mut sources = vec![LayerWitness { instances: vec![] }; 3];
             sources[leaf.input_num_id as usize] =
                 mem::take(&mut table_count_witness[table_type as usize]);
             (preds, sources)
@@ -188,7 +189,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
         let mut preds_no_selector = |table_type, table_pred| {
             let mut preds = vec![PredType::Source; 2];
             preds[leaf.input_den_id as usize] = table_pred;
-            let mut sources = vec![vec![]; 3];
+            let mut sources = vec![LayerWitness { instances: vec![] }; 3];
             sources[leaf.input_num_id as usize] =
                 mem::take(&mut table_count_witness[table_type as usize]);
             (preds, sources)
@@ -236,34 +237,36 @@ fn build_tree_circuits<F: SmallField>(
     first_pred: Vec<PredType>,
     leaf: &Arc<Circuit<F>>,
     inner: &Arc<Circuit<F>>,
-    first_source: Vec<Vec<Vec<F::BaseField>>>,
+    first_source: Vec<LayerWitness<F::BaseField>>,
     real_challenges: &[F],
     instance_num_vars: usize,
 ) -> Result<NodeOutputType, ZKVMError> {
     let (last_pred, _) =
-        (0..instance_num_vars).fold(Ok((first_pred, first_source)), |prev, i| {
-            let circuit = if i == 0 { leaf } else { inner };
-            match prev {
-                Ok((pred, source)) => graph_builder
-                    .add_node_with_witness(
-                        "tree inner node",
-                        circuit,
-                        pred,
-                        real_challenges.to_vec(),
-                        source,
-                    )
-                    .map(|id| {
-                        (
-                            vec![PredType::PredWire(NodeOutputType::OutputLayer(id))],
-                            vec![vec![]],
+        (0..=instance_num_vars)
+            .rev()
+            .fold(Ok((first_pred, first_source)), |prev, i| {
+                let circuit = if i == 0 { leaf } else { inner };
+                match prev {
+                    Ok((pred, source)) => graph_builder
+                        .add_node_with_witness(
+                            "tree inner node",
+                            circuit,
+                            pred,
+                            real_challenges.to_vec(),
+                            source,
+                            1 << i,
                         )
-                    }),
-                Err(err) => Err(err),
-            }
-        })?;
+                        .map(|id| {
+                            (
+                                vec![PredType::PredWire(NodeOutputType::OutputLayer(id))],
+                                vec![LayerWitness { instances: vec![] }],
+                            )
+                        }),
+                    Err(err) => Err(err),
+                }
+            })?;
     match last_pred[0] {
         PredType::PredWire(out) => Ok(out),
-        PredType::PredWireTrans(out) => Ok(out),
         _ => unreachable!(),
     }
 }

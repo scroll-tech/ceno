@@ -43,13 +43,13 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From witness
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
-        let (dest_id, dest) = circuit_builder.create_wire_in(StackUInt::N_OPRAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (dest_id, dest) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
         let (cond_values_id, cond_values) =
-            circuit_builder.create_wire_in(StackUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
         let mut bytecode_chip_handler = ChipHandler::new(challenges.bytecode());
         let mut range_chip_handler = ChipHandler::new(challenges.range());
@@ -75,7 +75,7 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
 
         // If cond_non_zero, next_pc = dest, otherwise, pc = pc + 1
         let pc_plus_1 = &phase0[Self::phase0_pc_plus_1()];
-        let (next_pc_id, next_pc) = circuit_builder.create_wire_out(PCUInt::N_OPRAND_CELLS);
+        let (next_pc_id, next_pc) = circuit_builder.create_witness_out(PCUInt::N_OPRAND_CELLS);
         for i in 0..PCUInt::N_OPRAND_CELLS {
             circuit_builder.select(next_pc[i], pc_plus_1[i], dest[i], cond_non_zero);
         }
@@ -94,7 +94,7 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
 
         // To successor instruction
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_wire_out(TSUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips

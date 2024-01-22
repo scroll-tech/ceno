@@ -20,5 +20,19 @@ serde.workspace = true
 serde_json = "1.0.108"
 rayon.workspace = true
 
+[features]
+debug_wenqing = []
+
+[[bin]]
+name = "counter_in"
+path = "examples/counter_in.rs"
+
+[[bin]]
+name = "wire_in_with_pad"
+path = "examples/wire_in_with_pad.rs"
+
+[[bin]]
+name = "fake_hash_lookup_par"
+path = "examples/fake_hash_lookup_par.rs"
 [dev-dependencies]
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }

@@ -141,7 +141,7 @@ macro_rules! register_witness_multi {
 // macro_rules! define_wires_in {
 //     ($builder:ident, {$($wire_name:ident $name:ident => $length:expr),*}) => {
 //         $(
-//             let ($wire_name, $name) = $builder.create_wire_in($length);
+//             let ($wire_name, $name) = $builder.create_witness_in($length);
 //         )*
 //     };
 // }

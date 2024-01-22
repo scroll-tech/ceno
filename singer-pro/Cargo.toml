@@ -20,3 +20,6 @@ simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 strum = "0.25.0"
 strum_macros = "0.25.3"
 transcript = { version = "0.1.0", path = "../transcript" }
+
+[features]
+debug_wenqing = []

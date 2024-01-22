@@ -1,10 +1,11 @@
-use ff::Field;
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, iter, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
+use ff::Field;
 use goldilocks::SmallField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use rayon::prelude::*;
+use itertools::Itertools;
 
 pub fn i64_to_field<F: SmallField>(x: i64) -> F {
     if x >= 0 {
@@ -237,6 +238,7 @@ pub fn tensor_product<F: SmallField>(a: &[F], b: &[F]) -> Vec<F> {
 
 pub trait MultilinearExtensionFromVectors<F: SmallField> {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>>;
+    fn original_mle(&self) -> Arc<DenseMultilinearExtension<F>>;
 }
 
 impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] {
@@ -256,6 +258,26 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] 
                 .chain(vec![F::BaseField::ZERO; n_zero_vecs])
                 .map(|x| F::from_base(&x))
                 .collect(),
+        ))
+    }
+    fn original_mle(&self) -> Arc<DenseMultilinearExtension<F>> {
+        let lo_num_vars = ceil_log2(self[0].len());
+        let hi_num_vars = ceil_log2(self.len());
+        let n_zeros = (1 << lo_num_vars) - self[0].len();
+        let n_zero_vecs = (1 << hi_num_vars) - self.len();
+        let vecs = self.to_vec();
+
+        Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            lo_num_vars + hi_num_vars,
+            vecs.into_iter()
+                .flat_map(|instance| {
+                    instance
+                        .into_iter()
+                        .chain(iter::repeat(F::BaseField::ZERO).take(n_zeros))
+                })
+                .chain(vec![F::BaseField::ZERO; n_zero_vecs])
+                .map(|x| F::from_base(&x))
+                .collect_vec(),
         ))
     }
 }
@@ -341,6 +363,31 @@ impl<F: SmallField> MatrixMLERowFirst<F> for &[usize] {
             .fold(F::ZERO, |acc, (row, &non_zero_col)| {
                 acc + row_point_eq[row] * col_point_eq[non_zero_col]
             })
+    }
+}
+
+pub(crate) trait SubsetIndices<F: SmallField> {
+    fn subset_eq_with_scalar(&self, eq: &[F], scalar: &F) -> Vec<F>;
+    fn subset_eq_eval(&self, eq_1: &[F]) -> F;
+    fn subset_eq2_eval(&self, eq_1: &[F], eq_2: &[F]) -> F;
+}
+
+impl<F: SmallField> SubsetIndices<F> for &[usize] {
+    fn subset_eq_with_scalar(&self, eq: &[F], scalar: &F) -> Vec<F> {
+        let mut ans = vec![F::ZERO; eq.len()];
+        for &non_zero_i in self.iter() {
+            ans[non_zero_i] = eq[non_zero_i] * scalar;
+        }
+        ans
+    }
+    fn subset_eq_eval(&self, eq_1: &[F]) -> F {
+        self.iter()
+            .fold(F::ZERO, |acc, &non_zero_i| acc + eq_1[non_zero_i])
+    }
+    fn subset_eq2_eval(&self, eq_1: &[F], eq_2: &[F]) -> F {
+        self.iter().fold(F::ZERO, |acc, &non_zero_i| {
+            acc + eq_1[non_zero_i] * eq_2[non_zero_i]
+        })
     }
 }
 

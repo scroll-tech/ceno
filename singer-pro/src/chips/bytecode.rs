@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use gkr::{structs::Circuit, utils::ceil_log2};
+use gkr::{
+    structs::{Circuit, LayerWitness},
+    utils::ceil_log2,
+};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -20,8 +23,8 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
 ) -> Result<(PredType, PredType, usize), ZKVMError> {
     let bytecode = bytecode.concat();
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (_, pc_cells) = circuit_builder.create_wire_in(PCUInt::N_OPRAND_CELLS);
-    let (_, bytecode_cells) = circuit_builder.create_wire_in(1);
+    let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
+    let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
     let rlc = circuit_builder.create_ext_cell();
     let mut items = pc_cells.clone();
@@ -38,17 +41,22 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
         vec![],
         real_challenges.to_vec(),
         vec![],
+        bytecode.len().next_power_of_two(),
     )?;
 
     let wires_in = vec![
-        PCUInt::counter_vector::<F::BaseField>(bytecode.len().next_power_of_two())
-            .into_iter()
-            .map(|x| vec![x])
-            .collect_vec(),
-        bytecode
-            .iter()
-            .map(|x| vec![F::BaseField::from(*x as u64)])
-            .collect_vec(),
+        LayerWitness {
+            instances: PCUInt::counter_vector::<F::BaseField>(bytecode.len().next_power_of_two())
+                .into_iter()
+                .map(|x| vec![x])
+                .collect_vec(),
+        },
+        LayerWitness {
+            instances: bytecode
+                .iter()
+                .map(|x| vec![F::BaseField::from(*x as u64)])
+                .collect_vec(),
+        },
     ];
 
     let table_node_id = builder.add_node_with_witness(
@@ -57,6 +65,7 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
         vec![PredType::Source; 2],
         real_challenges.to_vec(),
         wires_in,
+        bytecode.len().next_power_of_two(),
     )?;
 
     Ok((

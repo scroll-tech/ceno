@@ -1,12 +1,11 @@
-use std::sync::Arc;
-
 use gkr::structs::{Circuit, CircuitWitness, Point, PointAndEval};
 use goldilocks::SmallField;
-use simple_frontend::structs::WireId;
+use simple_frontend::structs::WitnessId;
+use std::sync::Arc;
 
-type GKRProverState<F> = gkr::structs::IOPProverState<F>;
-type GKRVerifierState<F> = gkr::structs::IOPVerifierState<F>;
-type GKRProof<F> = gkr::structs::IOPProof<F>;
+pub(crate) type GKRProverState<F> = gkr::structs::IOPProverState<F>;
+pub(crate) type GKRVerifierState<F> = gkr::structs::IOPVerifierState<F>;
+pub(crate) type GKRProof<F> = gkr::structs::IOPProof<F>;
 
 /// Corresponds to the `output_evals` and `wires_out_evals` in gkr
 /// `prove_parallel`.
@@ -28,24 +27,23 @@ pub struct IOPVerifierState<F: SmallField> {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum NodeInputType {
-    WireIn(usize, WireId),
+    WireIn(usize, WitnessId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NodeOutputType {
     OutputLayer(usize),
-    WireOut(usize, WireId),
+    WireOut(usize, WitnessId),
 }
 
 /// The predecessor of a node can be a source or a wire. If it is a wire, it can
 /// be one wire_out instance connected to one wire_in instance, or one wire_out
 /// connected to multiple wire_in instances.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PredType {
     Source,
     PredWire(NodeOutputType),
     PredWireDup(NodeOutputType),
-    PredWireTrans(NodeOutputType),
 }
 
 pub struct CircuitNode<F: SmallField> {

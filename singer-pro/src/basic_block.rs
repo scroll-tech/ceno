@@ -189,18 +189,19 @@ impl<F: SmallField> BasicBlock<F> {
         let bb_start_circuit = &self.bb_start_circuit;
         let bb_final_circuit = &self.bb_final_circuit;
         let bb_acc_circuits = &self.bb_acc_circuits;
+        let real_n_instances = bb_wires_in.real_n_instance;
 
         let bb_start_node_id = graph_builder.add_node_with_witness(
             "BB start",
             &bb_start_circuit.circuit,
-            vec![PredType::Source; bb_start_circuit.circuit.n_wires_in],
+            vec![PredType::Source; bb_start_circuit.circuit.n_witness_in],
             real_challenges.to_vec(),
             mem::take(&mut bb_wires_in.bb_start),
+            real_n_instances,
         )?;
 
         // The instances wire in values are padded to the power of two, but we
         // need the real number of instances here.
-        let real_n_instances = bb_wires_in.real_n_instance;
         chip_builder.construct_chip_checks(
             graph_builder,
             bb_start_node_id,
@@ -226,7 +227,7 @@ impl<F: SmallField> BasicBlock<F> {
             let stack = local_stack.pop_node_outputs(mode);
             let memory_ts = NodeOutputType::WireOut(pred_node_id, to_succ.next_memory_ts_id);
             let preds = inst_circuit.layout.input(
-                inst_circuit.circuit.n_wires_in,
+                inst_circuit.circuit.n_witness_in,
                 opcode,
                 stack,
                 memory_ts,
@@ -264,7 +265,7 @@ impl<F: SmallField> BasicBlock<F> {
         let clk =
             NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.clk_id);
         let preds = bb_final_circuit.layout.input(
-            bb_final_circuit.circuit.n_wires_in,
+            bb_final_circuit.circuit.n_witness_in,
             stack,
             stack_ts,
             memory_ts,
@@ -277,6 +278,7 @@ impl<F: SmallField> BasicBlock<F> {
             preds,
             real_challenges.to_vec(),
             mem::take(&mut bb_wires_in.bb_final),
+            real_n_instances,
         )?;
         chip_builder.construct_chip_checks(
             graph_builder,
@@ -299,9 +301,10 @@ impl<F: SmallField> BasicBlock<F> {
             let acc_node_id = graph_builder.add_node_with_witness(
                 "BB acc",
                 &acc.circuit,
-                vec![PredType::Source; acc.circuit.n_wires_in],
+                vec![PredType::Source; acc.circuit.n_witness_in],
                 real_challenges.to_vec(),
                 mem::take(acc_wires_in),
+                real_n_instances,
             )?;
             chip_builder.construct_chip_checks(
                 graph_builder,

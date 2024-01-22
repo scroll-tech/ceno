@@ -5,7 +5,7 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use simple_frontend::structs::CircuitBuilder;
 
-use crate::{component::ChipChallenges, error::ZKVMError};
+use crate::{component::ChipChallenges, constants::RANGE_CHIP_BIT_WIDTH, error::ZKVMError};
 
 /// Add range table circuit to the circuit graph. Return node id and lookup
 /// instance log size.
@@ -28,6 +28,7 @@ pub(crate) fn construct_range_table<F: SmallField>(
         vec![],
         real_challenges.to_vec(),
         vec![],
+        1 << RANGE_CHIP_BIT_WIDTH,
     )?;
     Ok((
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),

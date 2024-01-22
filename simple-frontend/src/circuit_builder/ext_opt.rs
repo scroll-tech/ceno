@@ -8,7 +8,7 @@ use crate::{
     rlc_base_term, rlc_const_term,
     structs::{
         CellId, CellType, ChallengeConst, ChallengeId, CircuitBuilder, ConstantType, ExtCellId,
-        InType, MixedCell, OutType, WireId,
+        InType, MixedCell, OutType, WitnessId,
     },
 };
 
@@ -69,15 +69,15 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
             .collect()
     }
 
-    pub fn create_ext_wire_in(&mut self, num: usize) -> (WireId, Vec<ExtCellId<Ext>>) {
+    pub fn create_ext_witness_in(&mut self, num: usize) -> (WitnessId, Vec<ExtCellId<Ext>>) {
         let cells = self.create_cells(num * Ext::DEGREE);
         self.mark_cells(
-            CellType::In(InType::Wire(self.n_wires_in as WireId)),
+            CellType::In(InType::Witness(self.n_witness_in as WitnessId)),
             &cells,
         );
-        self.n_wires_in += 1;
+        self.n_witness_in += 1;
         (
-            (self.n_wires_in - 1) as WireId,
+            (self.n_witness_in - 1) as WitnessId,
             cells
                 .chunks_exact(Ext::DEGREE)
                 .map(|x| x.to_vec().into())
@@ -100,15 +100,15 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         cells
     }
 
-    pub fn create_ext_wire_out(&mut self, num: usize) -> (WireId, Vec<ExtCellId<Ext>>) {
+    pub fn create_ext_witness_out(&mut self, num: usize) -> (WitnessId, Vec<ExtCellId<Ext>>) {
         let cells = self.create_cells(num * Ext::DEGREE);
         self.mark_cells(
-            CellType::Out(OutType::Wire(self.n_wires_out as WireId)),
+            CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)),
             &cells,
         );
-        self.n_wires_out += 1;
+        self.n_witness_out += 1;
         (
-            (self.n_wires_out - 1) as WireId,
+            (self.n_witness_out - 1) as WitnessId,
             cells
                 .chunks_exact(Ext::DEGREE)
                 .map(|x| x.to_vec().into())
@@ -116,15 +116,15 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         )
     }
 
-    pub fn create_wire_out_from_exts(&mut self, exts: &[ExtCellId<Ext>]) -> WireId {
+    pub fn create_witness_out_from_exts(&mut self, exts: &[ExtCellId<Ext>]) -> WitnessId {
         for ext in exts {
             self.mark_cells(
-                CellType::Out(OutType::Wire(self.n_wires_out as WireId)),
+                CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)),
                 ext.as_ref(),
             );
         }
-        self.n_wires_out += 1;
-        (self.n_wires_out - 1) as WireId
+        self.n_witness_out += 1;
+        (self.n_witness_out - 1) as WitnessId
     }
 
     // ======================================
