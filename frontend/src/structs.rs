@@ -15,10 +15,10 @@ pub type CellId = usize;
 #[derive(Clone, Copy, Debug, Serialize)]
 pub enum ConstantType<F: SmallField> {
     Field(F),
-    Challenge(CellId),
-    Challenge2(CellId), // challenge^2
-    Challenge3(CellId), // challenge^3
-    Challenge4(CellId), // challenge^4
+    Challenge(usize),
+    ChallengeScaled(usize, F),
+    ChallengePow(usize, usize),
+    ChallengePowScaled(usize, usize, F),
 }
 
 /// Represent a gate in the circuit. The inner variables denote the input
@@ -60,6 +60,50 @@ pub enum OutType {
 pub enum CellType {
     In(InType),
     Out(OutType),
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
+pub enum MixedCell<F: SmallField> {
+    Constant(F),
+    Cell(usize),
+    CellExpr(usize, F, F),
+}
+
+impl<F: SmallField> From<CellId> for MixedCell<F> {
+    fn from(cell_id: CellId) -> Self {
+        MixedCell::Cell(cell_id)
+    }
+}
+
+impl<F: SmallField> MixedCell<F> {
+    pub fn add(&self, shift: F) -> Self {
+        match self {
+            MixedCell::Constant(c) => MixedCell::Constant(*c + shift),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, F::ONE, shift),
+            MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s, *sh + shift),
+        }
+    }
+    pub fn sub(&self, shift: F) -> Self {
+        match self {
+            MixedCell::Constant(c) => MixedCell::Constant(*c - shift),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, F::ONE, -shift),
+            MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s, *sh - shift),
+        }
+    }
+    pub fn mul(&self, scaler: F) -> Self {
+        match self {
+            MixedCell::Constant(c) => MixedCell::Constant(*c * scaler),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, scaler, F::ZERO),
+            MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s * scaler, *sh * scaler),
+        }
+    }
+    pub fn expr(&self, scaler: F, shift: F) -> Self {
+        match self {
+            MixedCell::Constant(c) => MixedCell::Constant(*c * scaler + shift),
+            MixedCell::Cell(c) => MixedCell::Cell(*c),
+            MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s * scaler, *sh * shift),
+        }
+    }
 }
 
 #[derive(Clone)]
