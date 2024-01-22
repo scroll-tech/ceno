@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use frontend::structs::{CellId, CircuitBuilder, ConstantType};
+use gkr::utils::ceil_log2;
 use goldilocks::SmallField;
 use itertools::Itertools;
 
@@ -32,7 +33,7 @@ impl<const M: usize, const C: usize> TryFrom<Vec<usize>> for UInt<M, C> {
 }
 
 impl<const M: usize, const C: usize> UInt<M, C> {
-    pub(in crate::instructions) const N_OPRAND_CELLS: usize = (M + C - 1) / C;
+    pub(crate) const N_OPRAND_CELLS: usize = (M + C - 1) / C;
 
     const N_CARRY_CELLS: usize = Self::N_OPRAND_CELLS;
     const N_CARRY_NO_OVERFLOW_CELLS: usize = Self::N_OPRAND_CELLS - 1;
@@ -107,6 +108,26 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         for i in length..self.values.len() {
             circuit_builder.assert_const(self.values[i], &F::ZERO);
         }
+    }
+
+    pub(crate) fn counter_vector<F: SmallField>(size: usize) -> Vec<F> {
+        let num_vars = ceil_log2(size);
+        let tensor = |a: &[F], b: Vec<F>| {
+            let mut res = vec![F::ZERO; a.len() * b.len()];
+            for i in 0..b.len() {
+                for j in 0..a.len() {
+                    res[i * a.len() + j] = b[i] * a[j];
+                }
+            }
+            res
+        };
+        let counter = (0..(1 << C)).map(|x| F::from(x as u64)).collect_vec();
+        let (di, mo) = (num_vars / C, num_vars % C);
+        let mut res = (0..(1 << mo)).map(|x| F::from(x as u64)).collect_vec();
+        for _ in 0..di {
+            res = tensor(&counter, res);
+        }
+        res
     }
 }
 

@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use frontend::structs::{CircuitBuilder, MixedCell};
 
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
 
+use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
 
 use super::{
@@ -12,6 +15,11 @@ use super::{
     },
     ChipChallenges, InstCircuit, Instruction,
 };
+use super::{InstOutputType, InstructionGraph};
+
+impl InstructionGraph for CalldataloadInstruction {
+    type InstType = Self;
+}
 
 pub struct CalldataloadInstruction;
 
@@ -44,28 +52,30 @@ register_wires_out!(
     global_state_out_size {
         state_out => 1
     },
+    bytecode_chip_size {
+        current => 1
+    },
     stack_pop_size {
         offset => 1
     },
     stack_push_size {
         data => 1
     },
-    bytecode_chip_size {
-        current => 1
-    },
     range_chip_size {
         stack_top => 1,
         stack_ts_add => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
         old_stack_ts_lt => TSUInt::N_RANGE_CHECK_CELLS
     },
-    calldata_record_size {
+    calldata_chip_size {
         calldata_record => 1
     }
 );
 
-impl Instruction for CalldataloadInstruction {
+impl CalldataloadInstruction {
     const OPCODE: OpcodeType = OpcodeType::CALLDATALOAD;
+}
 
+impl Instruction for CalldataloadInstruction {
     fn witness_size(phase: usize) -> usize {
         match phase {
             0 => Self::phase0_size(),
@@ -74,25 +84,45 @@ impl Instruction for CalldataloadInstruction {
         }
     }
 
+    fn output_size(inst_out: InstOutputType) -> usize {
+        match inst_out {
+            InstOutputType::GlobalStateIn => Self::global_state_in_size(),
+            InstOutputType::GlobalStateOut => Self::global_state_out_size(),
+            InstOutputType::BytecodeChip => Self::bytecode_chip_size(),
+            InstOutputType::StackPop => Self::stack_pop_size(),
+            InstOutputType::StackPush => Self::stack_push_size(),
+            InstOutputType::RangeChip => Self::range_chip_size(),
+            InstOutputType::CalldataChip => Self::calldata_chip_size(),
+            _ => 0,
+        }
+    }
+
     fn construct_circuit<F: SmallField>(
-        challenges: &ChipChallenges,
+        challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
         let (phase1_wire_id, phase1) = circuit_builder.create_wire_in(Self::phase1_size());
-        let mut global_state_in_handler =
-            ChipHandler::new(&mut circuit_builder, Self::global_state_in_size());
-        let mut global_state_out_handler =
-            ChipHandler::new(&mut circuit_builder, Self::global_state_out_size());
+        let mut global_state_in_handler = ChipHandler::new(
+            &mut circuit_builder,
+            challenges,
+            Self::global_state_in_size(),
+        );
+        let mut global_state_out_handler = ChipHandler::new(
+            &mut circuit_builder,
+            challenges,
+            Self::global_state_out_size(),
+        );
         let mut bytecode_chip_handler =
-            ChipHandler::new(&mut circuit_builder, Self::bytecode_chip_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::bytecode_chip_size());
         let mut stack_push_handler =
-            ChipHandler::new(&mut circuit_builder, Self::stack_push_size());
-        let mut stack_pop_handler = ChipHandler::new(&mut circuit_builder, Self::stack_pop_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::stack_push_size());
+        let mut stack_pop_handler =
+            ChipHandler::new(&mut circuit_builder, challenges, Self::stack_pop_size());
         let mut range_chip_handler =
-            ChipHandler::new(&mut circuit_builder, Self::range_chip_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::range_chip_size());
         let mut calldata_chip_handler =
-            ChipHandler::new(&mut circuit_builder, Self::calldata_record_size());
+            ChipHandler::new(&mut circuit_builder, challenges, Self::calldata_chip_size());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -109,7 +139,6 @@ impl Instruction for CalldataloadInstruction {
             &[memory_ts_rlc],
             stack_top,
             clk,
-            challenges,
         );
 
         let next_pc = ChipHandler::add_pc_const(
@@ -132,12 +161,11 @@ impl Instruction for CalldataloadInstruction {
             &[memory_ts_rlc],
             stack_top_expr,
             clk_expr.add(F::ONE),
-            challenges,
         );
 
         // Range check for stack top
         range_chip_handler
-            .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(F::from(1)));
+            .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(F::from(1)))?;
 
         // Stack pop offset from the stack.
         let old_stack_ts = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts()])?;
@@ -147,7 +175,6 @@ impl Instruction for CalldataloadInstruction {
             stack_top_expr.sub(F::ONE),
             old_stack_ts.values(),
             offset,
-            challenges,
         );
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
@@ -159,7 +186,7 @@ impl Instruction for CalldataloadInstruction {
 
         // CallDataLoad check (offset, data_rlc)
         let data_rlc = phase1[Self::phase1_data_rlc().start];
-        calldata_chip_handler.calldataload_rlc(&mut circuit_builder, offset, data_rlc, challenges);
+        calldata_chip_handler.calldataload_rlc(&mut circuit_builder, offset, data_rlc);
 
         // Stack push data_rlc to the stack.
         stack_push_handler.stack_push_rlc(
@@ -167,18 +194,16 @@ impl Instruction for CalldataloadInstruction {
             stack_top_expr.sub(F::ONE),
             stack_ts.values(),
             data_rlc,
-            challenges,
         );
 
         // CallDataLoad check (offset, data_rlc)
-        calldata_chip_handler.calldataload_rlc(&mut circuit_builder, offset, data_rlc, challenges);
+        calldata_chip_handler.calldataload_rlc(&mut circuit_builder, offset, data_rlc);
 
         // Bytecode table (pc, CalldataLoad)
         bytecode_chip_handler.bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
             Self::OPCODE,
-            challenges,
         );
 
         global_state_in_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
@@ -188,21 +213,27 @@ impl Instruction for CalldataloadInstruction {
         stack_pop_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
         range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
         calldata_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-
         circuit_builder.configure();
 
+        let outputs_wire_id = [
+            Some(global_state_in_handler.wire_out_id()),
+            Some(global_state_out_handler.wire_out_id()),
+            Some(bytecode_chip_handler.wire_out_id()),
+            Some(stack_pop_handler.wire_out_id()),
+            Some(stack_push_handler.wire_out_id()),
+            Some(range_chip_handler.wire_out_id()),
+            None,
+            None,
+            Some(calldata_chip_handler.wire_out_id()),
+        ];
+
         Ok(InstCircuit {
-            circuit: Circuit::new(&circuit_builder),
-            state_in_wire_id: global_state_in_handler.wire_out_id(),
-            state_out_wire_id: global_state_out_handler.wire_out_id(),
-            bytecode_chip_wire_id: bytecode_chip_handler.wire_out_id(),
-            stack_pop_wire_id: Some(stack_pop_handler.wire_out_id()),
-            stack_push_wire_id: Some(stack_push_handler.wire_out_id()),
-            range_chip_wire_id: Some(range_chip_handler.wire_out_id()),
-            memory_load_wire_id: None,
-            memory_store_wire_id: None,
-            calldata_chip_wire_id: Some(calldata_chip_handler.wire_out_id()),
-            phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
+            circuit: Arc::new(Circuit::new(&circuit_builder)),
+            layout: InstCircuitLayout {
+                chip_check_wire_id: outputs_wire_id,
+                phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
+                ..Default::default()
+            },
         })
     }
 }
