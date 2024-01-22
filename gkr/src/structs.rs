@@ -6,7 +6,7 @@ use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::Serialize;
 
 pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
-pub(crate) type Point<F> = Vec<F>;
+pub type Point<F> = Vec<F>;
 
 /// Represent the prover state for each layer in the IOP protocol. To support
 /// gates between non-adjeacent layers, we leverage the techniques in
@@ -135,6 +135,7 @@ pub struct Gate3In<C> {
 pub struct CircuitWitness<F: SmallField> {
     /// Three vectors denote 1. layer_id, 2. instance_id, 3. wire_id.
     pub(crate) layers: Vec<Vec<Vec<F>>>,
+    /// 1. wires_in id, 2. instance_id, 3. wire_id.
     pub(crate) wires_in: Vec<Vec<Vec<F>>>,
     pub(crate) wires_out: Vec<Vec<Vec<F>>>,
     /// Challenges

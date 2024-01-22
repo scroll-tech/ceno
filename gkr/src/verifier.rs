@@ -189,12 +189,9 @@ impl<F: SmallField> IOPVerifierState<F> {
             |c| match *c {
                 ConstantType::Field(x) => x,
                 ConstantType::Challenge(i) => challenges[i],
-                ConstantType::Challenge2(i) => challenges[i] * challenges[i],
-                ConstantType::Challenge3(i) => challenges[i] * challenges[i] * challenges[i],
-                ConstantType::Challenge4(i) => {
-                    let tmp = challenges[i] * challenges[i];
-                    tmp * tmp
-                }
+                ConstantType::ChallengeScaled(i, x) => challenges[i] * x,
+                ConstantType::ChallengePow(i, j) => challenges[i].pow(&[j as u64]),
+                ConstantType::ChallengePowScaled(i, j, x) => challenges[i].pow(&[j as u64]) * x,
             },
             hi_out_num_vars,
         );
