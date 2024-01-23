@@ -60,6 +60,10 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
             challenges,
         })
     }
+
+    pub fn execute(bytecode: &[u8], input: &[u8]) -> SingerWiresIn<F> {
+        let records = Interpreter::execute(bytecode, input);
+    }
 }
 
 /// Circuit graph builder for Singer. `output_wires_id` is indexed by
@@ -158,7 +162,15 @@ pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
 
 pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 
-// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
+/// The structure for storing the input values for an instruction. The values
+/// are stored in a three-dimensional array, where
+/// - the first dimension is indexed by the phase index, so the outmost vector
+///   usually has length only 2, each for one phase;
+/// - the second dimension is indexed by the number of repetitions this opcode appears
+///   during the execution;
+/// - the last dimension is indexed by the offsets of the input wire values for this opcode,
+///   in another word, the innermost vector is the input for this opcode for a particular
+///   execution
 pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
 
 pub struct SingerWiresIn<F: SmallField> {
