@@ -187,3 +187,19 @@ fn convert_decomp<F: SmallField>(
         .collect_vec();
     values
 }
+
+
+#[cfg(test)]
+mod test {
+    use super::UInt;
+
+    #[test]
+    fn test_uint_constants() {
+        // M = 256 is the number of bits for unsigned integer
+        // C = 63 is the cell bit width
+        type UInt_256_63 = UInt<256, 63>;
+        assert_eq!(UInt_256_63::N_CARRY_CELLS, 5);
+        let u_int = UInt_256_63::try_from(vec![1,2,3,4,5]);
+        println!("{:?}", u_int);
+    }
+}
