@@ -178,8 +178,6 @@ where
         let hash: [F::BaseField; OUTPUT_WIDTH] = self.state.squeeze_vec()[0..OUTPUT_WIDTH]
             .try_into()
             .unwrap();
-        self.state = new_hasher::<F>();
-        self.state.update(&hash);
         F::from_limbs(&hash[..F::DEGREE])
     }
 
