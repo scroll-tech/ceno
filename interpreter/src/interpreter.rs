@@ -54,6 +54,8 @@ pub struct Interpreter<F: SmallField> {
     pub next_action: Option<InterpreterAction>,
     /// The current timestamp (number of cycles executed)
     pub timestamp: u64,
+    /// The current opcode being executed
+    pub opcode: Option<u8>,
     // TODO: ZKVM
     // pub zkvm: SingerBasic<F>,
     _phantom: PhantomData<F>,
@@ -99,6 +101,7 @@ impl<F: SmallField> Interpreter<F> {
             stack: Stack::new(),
             next_action: None,
             timestamp: 0,
+            opcode: None,
             // zkvm: SingerBasic::new(&challenges).expect("failed to initialize singer basic"),
             _phantom: PhantomData::default(),
         }
@@ -222,6 +225,7 @@ impl<F: SmallField> Interpreter<F> {
         // byte instruction is STOP so we are safe to just increment program_counter bcs on last instruction
         // it will do noop and just stop execution of this contract
         self.instruction_pointer = unsafe { self.instruction_pointer.offset(1) };
+        self.opcode = Some(opcode);
 
         // execute instruction.
         (instruction_table[opcode as usize])(self, host)
@@ -248,6 +252,7 @@ impl<F: SmallField> Interpreter<F> {
         // main loop
         while self.instruction_result == InstructionResult::Continue {
             self.step(instruction_table, host);
+            self.timestamp += 1;
         }
 
         // Return next action if it is some.

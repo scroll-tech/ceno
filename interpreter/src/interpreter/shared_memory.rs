@@ -365,7 +365,7 @@ impl SharedMemory {
     #[inline]
     #[cfg_attr(debug_assertions, track_caller)]
     pub fn copy(&mut self, dst: usize, src: usize, len: usize, ts: u64) -> (Vec<u8>, Vec<u64>) {
-        let (slice, timestamps) = self.context_memory_mut(ts);
+        let (slice, timestamps) = self.context_memory_mut();
         let old_slice = slice[src..src + len].to_vec();
         let old_ts = timestamps[src..src + len].to_vec();
         timestamps[dst..dst + len].fill(ts);
@@ -385,7 +385,7 @@ impl SharedMemory {
 
     /// Returns a mutable reference to the memory of the current context.
     #[inline]
-    fn context_memory_mut(&mut self, ts: u64) -> (&mut [u8], &mut [u64]) {
+    fn context_memory_mut(&mut self) -> (&mut [u8], &mut [u64]) {
         let buf_len = self.buffer.len();
         // SAFETY: access bounded by buffer length
         unsafe {

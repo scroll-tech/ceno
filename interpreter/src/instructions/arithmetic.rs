@@ -3,15 +3,19 @@ use goldilocks::SmallField;
 use super::i256::{i256_div, i256_mod};
 use crate::{
     gas,
+    host::Record,
     primitives::{Spec, U256},
     Host, InstructionResult, Interpreter,
 };
 
-pub fn wrapped_add<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn wrapped_add<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
     *op2.0 = op1.0.wrapping_add(*op2.0);
     *op2.1 = interpreter.timestamp;
+    host.record(Record {
+        opcode: interpreter.opcode.unwrap(),
+    });
 }
 
 pub fn wrapping_mul<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {

@@ -5,6 +5,8 @@ use crate::{
 };
 use alloc::vec::Vec;
 
+use super::Record;
+
 /// A dummy [Host] implementation.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DummyHost {
@@ -12,6 +14,7 @@ pub struct DummyHost {
     pub storage: HashMap<U256, U256>,
     pub transient_storage: HashMap<U256, U256>,
     pub log: Vec<Log>,
+    pub records: Vec<Record>,
 }
 
 impl DummyHost {
@@ -112,6 +115,12 @@ impl Host for DummyHost {
             topics,
             data,
         })
+    }
+
+    #[inline]
+    fn record(&mut self, record: Record) {
+        self.records.push(record);
+        println!("Recording {:?}", record);
     }
 
     #[inline]
