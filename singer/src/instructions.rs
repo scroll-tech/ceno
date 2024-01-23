@@ -90,6 +90,20 @@ pub struct InstCircuit<F: SmallField> {
     phases_wire_id: [Option<WireId>; 2],
 }
 
+/// The structure for storing the input values for an instruction. The values
+/// are stored in a three-dimensional array, where
+/// - the first dimension is indexed by the phase index, so the outmost vector
+///   usually has length only 2, each for one phase;
+/// - the second dimension is indexed by the number of repetitions this opcode appears
+///   during the execution;
+/// - the last dimension is indexed by the offsets of the input values for this opcode,
+///   in another word, the innermost vector is the input for this opcode for a particular
+///   execution
+#[derive(Clone, Debug)]
+pub struct InstWireIn<F: SmallField> {
+    values: Vec<Vec<Vec<F>>>,
+}
+
 #[derive(Clone, Debug)]
 pub struct InstInfo<F: SmallField> {
     _marker: std::marker::PhantomData<F>,

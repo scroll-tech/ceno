@@ -21,6 +21,7 @@ use instructions::ret::ReturnInstruction;
 use instructions::swap::SwapInstruction;
 use instructions::ChipChallenges;
 use instructions::InstCircuit;
+use instructions::InstWireIn;
 use instructions::Instruction;
 
 pub mod chips;
@@ -62,6 +63,10 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
         })
     }
 
+    pub fn execute(bytecode: &[u8], input: &[u8]) -> SingerWiresIn<F> {
+        let records = Interpreter::execute(bytecode, input);
+    }
+
     pub fn construct_gkr_graph(
         singer_wires_in: &SingerWiresIn<F>,
     ) -> (SingerCircuit<F>, SingerWitness<F>) {
@@ -97,5 +102,5 @@ pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
 pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 
 pub struct SingerWiresIn<F: SmallField> {
-    marker: std::marker::PhantomData<F>,
+    instruction_wires_in: InstWireIn<F>,
 }

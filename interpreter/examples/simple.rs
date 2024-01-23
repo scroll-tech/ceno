@@ -1,8 +1,8 @@
-use goldilocks::Goldilocks;
-use revm_interpreter::{
+use crate::{
     analysis::to_analysed, opcode::make_instruction_table, BytecodeLocked, Contract, DummyHost,
     Interpreter, SharedMemory, EMPTY_SHARED_MEMORY,
 };
+use goldilocks::Goldilocks;
 use revm_primitives::{BerlinSpec, Bytecode, Bytes, Env};
 
 fn main() {

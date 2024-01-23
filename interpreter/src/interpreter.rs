@@ -10,6 +10,7 @@ pub use shared_memory::{next_multiple_of_32, SharedMemory};
 use singer::instructions::ChipChallenges;
 pub use stack::{Stack, STACK_LIMIT};
 
+use crate::host::Record;
 use crate::{
     primitives::Bytes, push, push_b256, return_ok, return_revert, CallInputs, CreateInputs, Gas,
     Host, InstructionResult,
@@ -87,6 +88,11 @@ pub enum InterpreterAction {
 }
 
 impl<F: SmallField> Interpreter<F> {
+    /// Execute
+    pub fn execute(bytecode: &[u8], input: &[u8]) -> Vec<Record> {
+        Vec::new()
+    }
+
     /// Create new interpreter
     pub fn new(contract: Box<Contract>, gas_limit: u64, is_static: bool) -> Self {
         let challenges = ChipChallenges::new();
