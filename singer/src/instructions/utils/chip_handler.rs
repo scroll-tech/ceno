@@ -427,15 +427,29 @@ impl ChipHandler {
         self.count += 1;
     }
 
-    pub(in crate::instructions) fn calldataload_rlc<F: SmallField>(
+    pub(in crate::instructions) fn calldataload<F: SmallField>(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
         offset: &[CellId],
-        data_rlc: CellId,
+        data: &[CellId],
     ) {
+        let offset_rlc = if offset.len() == 1 {
+            offset[0]
+        } else {
+            let offset_rlc = circuit_builder.create_cell();
+            circuit_builder.rlc(offset_rlc, offset, self.challenges.record_item_rlc());
+            offset_rlc
+        };
+        let data_rlc = if data.len() == 1 {
+            data[0]
+        } else {
+            let data_rlc = circuit_builder.create_cell();
+            circuit_builder.rlc(data_rlc, data, self.challenges.record_item_rlc());
+            data_rlc
+        };
         circuit_builder.rlc(
             self.records[self.count],
-            &[offset, &[data_rlc]].concat(),
+            &[offset_rlc, data_rlc],
             self.challenges.calldata(),
         );
 

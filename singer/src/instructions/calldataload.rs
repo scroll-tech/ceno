@@ -186,7 +186,7 @@ impl Instruction for CalldataloadInstruction {
 
         // CallDataLoad check (offset, data_rlc)
         let data_rlc = phase1[Self::phase1_data_rlc().start];
-        calldata_chip_handler.calldataload_rlc(&mut circuit_builder, offset, data_rlc);
+        calldata_chip_handler.calldataload(&mut circuit_builder, offset, &[data_rlc]);
 
         // Stack push data_rlc to the stack.
         stack_push_handler.stack_push_rlc(
@@ -195,9 +195,6 @@ impl Instruction for CalldataloadInstruction {
             stack_ts.values(),
             data_rlc,
         );
-
-        // CallDataLoad check (offset, data_rlc)
-        calldata_chip_handler.calldataload_rlc(&mut circuit_builder, offset, data_rlc);
 
         // Bytecode table (pc, CalldataLoad)
         bytecode_chip_handler.bytecode_with_pc_opcode(
