@@ -1,3 +1,4 @@
+use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
@@ -134,6 +135,7 @@ fn merkelize<F: SmallField>(values: &Vec<F>, hasher: &Hasher<F>) -> Vec<Vec<Dige
 where
     F::BaseField: Serialize + DeserializeOwned,
 {
+    let timer = start_timer!(|| format!("merkelize {} values", values.len()));
     let log_v = log2_strict(values.len());
     let mut tree = Vec::with_capacity(log_v);
     // The first layer of hashes, half the number of leaves
@@ -152,6 +154,7 @@ where
 
         tree.push(oracle);
     }
+    end_timer!(timer);
     tree
 }
 

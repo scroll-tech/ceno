@@ -271,13 +271,14 @@ mod test {
     use crate::{
         poly::multilinear::MultilinearPolynomial,
         util::transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},
-        Evaluation, PolynomialCommitmentScheme,
+        Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
     };
     use goldilocks::SmallField;
     use itertools::{chain, Itertools};
     use rand::prelude::*;
     use rand::rngs::OsRng;
     use rand_chacha::ChaCha8Rng;
+    use serde::Deserialize;
     use std::time::Instant;
     #[test]
     fn test_transcript() {
@@ -556,13 +557,9 @@ mod test {
     where
         F: SmallField,
         F::BaseField: Into<F>,
-        Pcs: PolynomialCommitmentScheme<
-            F,
-            F,
-            Polynomial = MultilinearPolynomial<F>,
-            Rng = ChaCha8Rng,
-        >,
+        Pcs: NoninteractivePCS<F, F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
         for<'a> &'a Pcs::CommitmentWithData: Into<Pcs::Commitment>,
+        for<'de> <F as SmallField>::BaseField: Deserialize<'de>,
         T: TranscriptRead<Pcs::CommitmentChunk, F>
             + TranscriptWrite<Pcs::CommitmentChunk, F>
             + InMemoryTranscript<F>,
@@ -630,6 +627,7 @@ mod test {
         );
         let comms_with_data = Pcs::batch_commit(&pp, &polys).unwrap();
         let comms: Vec<Pcs::Commitment> = comms_with_data.iter().map(|cm| cm.into()).collect_vec();
+        println!("Finish commitment");
 
         // Commitments should be part of the proof, which is not yet
 
@@ -683,7 +681,6 @@ mod test {
         };
 
         // Generate pcs proof
-        let mut transcript = T::new();
         let expected_values = circuit_witness
             .wires_in_ref()
             .iter()
@@ -704,17 +701,9 @@ mod test {
                 value: *e,
             })
             .collect_vec();
-        Pcs::batch_open(
-            &pp,
-            &polys,
-            &comms_with_data,
-            &points,
-            &evals,
-            &mut transcript,
-        )
-        .unwrap();
         // This should be part of the GKR proof
-        let proof = transcript.into_proof();
+        let pcs_proof = Pcs::ni_batch_open(&pp, &polys, &comms_with_data, &points, &evals).unwrap();
+        println!("Finish opening");
 
         // Check outside of the GKR verifier
         for i in 0..gkr_input_claims.values.len() {
@@ -722,7 +711,6 @@ mod test {
         }
 
         // This should be part of the GKR verifier
-        let mut transcript = T::from_proof(&proof);
         let evals = gkr_input_claims
             .values
             .iter()
@@ -733,7 +721,7 @@ mod test {
                 value: *e,
             })
             .collect_vec();
-        Pcs::batch_verify(&vp, &comms, &points, &evals, &mut transcript).unwrap();
+        Pcs::ni_batch_verify(&vp, &comms, &points, &evals, &pcs_proof).unwrap();
 
         println!("verification succeeded");
     }
