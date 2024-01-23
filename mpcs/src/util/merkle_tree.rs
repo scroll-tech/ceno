@@ -168,7 +168,7 @@ fn authenticate_merkle_path_root<F: SmallField, EF: SmallField<BaseField = F::Ba
     F::BaseField: Serialize + DeserializeOwned,
 {
     let mut x_index = x_index;
-    let mut hash = Digest::<F>(hash_two_leaves(&leaves.0, &leaves.1, hasher).0);
+    let mut hash = Digest::<F>(hash_two_leaves::<F, EF>(&leaves.0, &leaves.1, hasher).0);
 
     // The lowest bit in the index is ignored. It can point to either leaves
     x_index >>= 1;
@@ -235,6 +235,7 @@ mod tests {
 
     fn test_leaves(leaves: &Vec<F>) {
         let hasher = new_hasher::<F>();
+        let hasher_2 = new_hasher::<GoldilocksExt2>();
         let tree = MerkleTree::<F>::from_leaves(leaves.clone(), &hasher);
         let root = tree.root();
         for (i, _) in leaves.iter().enumerate() {
@@ -268,7 +269,7 @@ mod tests {
                 right_leaf_ext.try_into().unwrap(),
                 i,
                 &Digest(root.0),
-                &hasher,
+                &hasher_2,
             );
         }
     }

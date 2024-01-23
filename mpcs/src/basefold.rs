@@ -321,7 +321,6 @@ where
         pp: &Self::ProverParam,
         poly: &Self::Polynomial,
     ) -> Result<Self::CommitmentWithData, Error> {
-        let hasher = new_hasher::<F>();
         let timer = start_timer!(|| "Basefold::commit");
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
@@ -356,6 +355,7 @@ where
         reverse_index_bits_in_place(&mut codeword);
 
         // Compute and store all the layers of the Merkle tree
+        let hasher = new_hasher::<PF>();
         let codeword_tree = MerkleTree::<PF>::from_leaves(codeword, &hasher);
 
         end_timer!(timer);
