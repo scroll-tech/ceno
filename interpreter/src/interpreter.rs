@@ -7,7 +7,6 @@ pub use analysis::BytecodeLocked;
 pub use contract::Contract;
 use goldilocks::SmallField;
 pub use shared_memory::{next_multiple_of_32, SharedMemory};
-use singer::instructions::ChipChallenges;
 pub use stack::{Stack, STACK_LIMIT};
 
 use crate::host::Record;
@@ -95,7 +94,6 @@ impl<F: SmallField> Interpreter<F> {
 
     /// Create new interpreter
     pub fn new(contract: Box<Contract>, gas_limit: u64, is_static: bool) -> Self {
-        let challenges = ChipChallenges::new();
         Self {
             instruction_pointer: contract.bytecode.as_ptr(),
             contract,

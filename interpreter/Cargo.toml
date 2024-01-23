@@ -22,7 +22,6 @@ ff.workspace = true
 goldilocks.workspace = true
 serde.workspace = true
 revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "6a8b44d", default-features = false }
-singer = { version = "0.1.0", path = "../singer" }
 
 # serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 

@@ -13,6 +13,7 @@ use instructions::construct_instruction_circuits;
 use instructions::ChipChallenges;
 use instructions::InstCircuit;
 use instructions::InstOutputType;
+use revm_interpreter::Interpreter;
 use std::mem;
 use strum::IntoEnumIterator;
 
@@ -62,7 +63,9 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
     }
 
     pub fn execute(bytecode: &[u8], input: &[u8]) -> SingerWiresIn<F> {
-        let records = Interpreter::execute(bytecode, input);
+        let records = Interpreter::<F>::execute(bytecode, input);
+        let mut opcode_wires_in = Vec::new();
+        SingerWiresIn { opcode_wires_in }
     }
 }
 
