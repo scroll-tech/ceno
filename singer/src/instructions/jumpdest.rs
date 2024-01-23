@@ -153,4 +153,10 @@ impl Instruction for JumpdestInstruction {
             },
         })
     }
+
+    fn generate_wires_in<F: SmallField>(
+        record: &revm_interpreter::Record,
+    ) -> crate::CircuitWiresIn<F> {
+        todo!()
+    }
 }

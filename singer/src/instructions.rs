@@ -1,4 +1,5 @@
 use num_traits::FromPrimitive;
+use revm_interpreter::Record;
 use std::{mem, sync::Arc};
 
 use frontend::structs::WireId;
@@ -200,6 +201,8 @@ pub(crate) trait Instruction {
     fn construct_circuit<F: SmallField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError>;
+
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F>;
 }
 
 /// Construct the part of the circuit graph for an instruction.

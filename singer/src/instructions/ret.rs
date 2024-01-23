@@ -400,6 +400,10 @@ impl Instruction for ReturnInstruction {
             },
         })
     }
+
+    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+        todo!()
+    }
 }
 
 register_wires_in!(
@@ -516,6 +520,10 @@ impl Instruction for ReturnPublicOutLoad {
             },
         })
     }
+
+    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+        todo!()
+    }
 }
 
 register_wires_in!(
@@ -619,6 +627,10 @@ impl Instruction for ReturnRestMemLoad {
             },
         })
     }
+
+    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+        todo!()
+    }
 }
 
 register_wires_in!(
@@ -704,6 +716,10 @@ impl Instruction for ReturnRestMemStore {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+        todo!()
     }
 }
 
@@ -809,5 +825,9 @@ impl Instruction for ReturnRestStackPop {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+        todo!()
     }
 }

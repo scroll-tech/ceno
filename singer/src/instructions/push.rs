@@ -217,4 +217,10 @@ impl<const N: usize> Instruction for PushInstruction<N> {
             },
         })
     }
+
+    fn generate_wires_in<F: SmallField>(
+        record: &revm_interpreter::Record,
+    ) -> crate::CircuitWiresIn<F> {
+        todo!()
+    }
 }

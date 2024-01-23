@@ -14,6 +14,13 @@ use instructions::construct_instruction_circuits;
 use instructions::ChipChallenges;
 use instructions::InstCircuit;
 use instructions::InstOutputType;
+use instructions::Instruction;
+use instructions::{
+    add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
+    gt::GtInstruction, jump::JumpInstruction, jumpdest::JumpdestInstruction,
+    jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
+    ret::ReturnInstruction, swap::SwapInstruction,
+};
 use num_traits::FromPrimitive;
 use revm_interpreter::{Interpreter, Record};
 use std::collections::HashMap;
@@ -189,23 +196,22 @@ pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
 
 fn circuit_wires_in_from_record<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
     match OpcodeType::from_u8(record.opcode) {
-        Some(OpcodeType::ADD) => todo!(),
-        Some(OpcodeType::GT) => todo!(),
-        Some(OpcodeType::CALLDATALOAD) => todo!(),
-        Some(OpcodeType::POP) => todo!(),
-        Some(OpcodeType::MSTORE) => todo!(),
-        Some(OpcodeType::JUMP) => todo!(),
-        Some(OpcodeType::JUMPI) => todo!(),
-        Some(OpcodeType::JUMPDEST) => todo!(),
-        Some(OpcodeType::PUSH0) => todo!(),
-        Some(OpcodeType::PUSH1) => todo!(),
-        Some(OpcodeType::DUP1) => todo!(),
-        Some(OpcodeType::DUP2) => todo!(),
-        Some(OpcodeType::SWAP1) => todo!(),
-        Some(OpcodeType::SWAP2) => todo!(),
-        Some(OpcodeType::SWAP4) => todo!(),
-        Some(OpcodeType::RETURN) => todo!(),
+        Some(OpcodeType::ADD) => AddInstruction::generate_wires_in(record),
+        Some(OpcodeType::GT) => GtInstruction::generate_wires_in(record),
+        Some(OpcodeType::CALLDATALOAD) => CalldataloadInstruction::generate_wires_in(record),
+        Some(OpcodeType::POP) => PopInstruction::generate_wires_in(record),
+        Some(OpcodeType::MSTORE) => MstoreInstruction::generate_wires_in(record),
+        Some(OpcodeType::JUMP) => JumpInstruction::generate_wires_in(record),
+        Some(OpcodeType::JUMPI) => JumpiInstruction::generate_wires_in(record),
+        Some(OpcodeType::JUMPDEST) => JumpdestInstruction::generate_wires_in(record),
+        Some(OpcodeType::PUSH1) => PushInstruction::<1>::generate_wires_in(record),
+        Some(OpcodeType::DUP1) => DupInstruction::<1>::generate_wires_in(record),
+        Some(OpcodeType::DUP2) => DupInstruction::<2>::generate_wires_in(record),
+        Some(OpcodeType::SWAP2) => SwapInstruction::<2>::generate_wires_in(record),
+        Some(OpcodeType::SWAP4) => SwapInstruction::<4>::generate_wires_in(record),
+        Some(OpcodeType::RETURN) => ReturnInstruction::generate_wires_in(record),
         None => panic!("Unsupported opcode: {}", record.opcode),
+        _ => unimplemented!(),
     }
 }
 
