@@ -22,3 +22,5 @@ revm-interpreter = { path = "../interpreter" }
 itertools = "0.12.0"
 strum = "0.25.0"
 strum_macros = "0.25.3"
+num-traits = "0.2"
+num-derive = "0.2"

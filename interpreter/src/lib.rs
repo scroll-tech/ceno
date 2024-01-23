@@ -24,7 +24,7 @@ mod interpreter;
 
 // Reexport primary types.
 pub use gas::Gas;
-pub use host::{DummyHost, Host};
+pub use host::{DummyHost, Host, Record};
 pub use inner_models::*;
 pub use instruction_result::*;
 pub use instructions::{opcode, Instruction, OpCode, OPCODE_JUMPMAP};

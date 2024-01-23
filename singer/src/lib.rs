@@ -2,6 +2,7 @@
 
 use chips::ChipCircuitGadgets;
 use chips::LookupChipType;
+use constants::OpcodeType;
 use error::ZKVMError;
 use gkr_graph::structs::CircuitGraph;
 use gkr_graph::structs::CircuitGraphBuilder;
@@ -13,7 +14,9 @@ use instructions::construct_instruction_circuits;
 use instructions::ChipChallenges;
 use instructions::InstCircuit;
 use instructions::InstOutputType;
-use revm_interpreter::Interpreter;
+use num_traits::FromPrimitive;
+use revm_interpreter::{Interpreter, Record};
+use std::collections::HashMap;
 use std::mem;
 use strum::IntoEnumIterator;
 
@@ -64,8 +67,16 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
 
     pub fn execute(bytecode: &[u8], input: &[u8]) -> SingerWiresIn<F> {
         let records = Interpreter::<F>::execute(bytecode, input);
-        let mut opcode_wires_in = Vec::new();
-        SingerWiresIn { opcode_wires_in }
+        let mut opcode_wires_in = HashMap::<u8, Vec<CircuitWiresIn<F>>>::new();
+        for record in records.iter() {
+            opcode_wires_in
+                .entry(record.opcode)
+                .or_insert(Vec::new())
+                .push(circuit_wires_in_from_record(record));
+        }
+        SingerWiresIn {
+            opcode_wires_in: opcode_wires_in.into_iter().collect(),
+        }
     }
 }
 
@@ -175,6 +186,28 @@ pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 ///   in another word, the innermost vector is the input for this opcode for a particular
 ///   execution
 pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
+
+fn circuit_wires_in_from_record<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+    match OpcodeType::from_u8(record.opcode) {
+        Some(OpcodeType::ADD) => todo!(),
+        Some(OpcodeType::GT) => todo!(),
+        Some(OpcodeType::CALLDATALOAD) => todo!(),
+        Some(OpcodeType::POP) => todo!(),
+        Some(OpcodeType::MSTORE) => todo!(),
+        Some(OpcodeType::JUMP) => todo!(),
+        Some(OpcodeType::JUMPI) => todo!(),
+        Some(OpcodeType::JUMPDEST) => todo!(),
+        Some(OpcodeType::PUSH0) => todo!(),
+        Some(OpcodeType::PUSH1) => todo!(),
+        Some(OpcodeType::DUP1) => todo!(),
+        Some(OpcodeType::DUP2) => todo!(),
+        Some(OpcodeType::SWAP1) => todo!(),
+        Some(OpcodeType::SWAP2) => todo!(),
+        Some(OpcodeType::SWAP4) => todo!(),
+        Some(OpcodeType::RETURN) => todo!(),
+        None => panic!("Unsupported opcode: {}", record.opcode),
+    }
+}
 
 pub struct SingerWiresIn<F: SmallField> {
     opcode_wires_in: Vec<(u8, Vec<CircuitWiresIn<F>>)>,
