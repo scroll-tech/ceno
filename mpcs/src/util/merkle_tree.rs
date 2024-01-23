@@ -10,7 +10,7 @@ use crate::util::{
     Deserialize, DeserializeOwned, Serialize,
 };
 
-use super::hash::{hash_two_digests, hash_two_leaves, Digest};
+use super::hash::{hash_two_digests, hash_two_leaves, Digest, Hasher};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize", deserialize = "F: DeserializeOwned"))]
@@ -26,9 +26,9 @@ impl<F: SmallField> MerkleTree<F>
 where
     F::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn from_leaves(leaves: Vec<F>) -> Self {
+    pub fn from_leaves(leaves: Vec<F>, hasher: &Hasher<F>) -> Self {
         Self {
-            inner: merkelize::<F>(&leaves),
+            inner: merkelize::<F>(&leaves, hasher),
             leaves,
         }
     }
@@ -124,12 +124,13 @@ where
         right: EF,
         index: usize,
         root: &Digest<F>,
+        hasher: &Hasher<F>,
     ) {
-        authenticate_merkle_path_root::<F, EF>(&self.inner, (left, right), index, root)
+        authenticate_merkle_path_root::<F, EF>(&self.inner, (left, right), index, root, hasher)
     }
 }
 
-fn merkelize<F: SmallField>(values: &Vec<F>) -> Vec<Vec<Digest<F>>>
+fn merkelize<F: SmallField>(values: &Vec<F>, hasher: &Hasher<F>) -> Vec<Vec<Digest<F>>>
 where
     F::BaseField: Serialize + DeserializeOwned,
 {
@@ -138,7 +139,7 @@ where
     // The first layer of hashes, half the number of leaves
     let mut hashes = vec![Digest::default(); values.len() >> 1];
     hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
-        *hash = hash_two_leaves(&values[i << 1], &values[(i << 1) + 1]);
+        *hash = hash_two_leaves(&values[i << 1], &values[(i << 1) + 1], hasher);
     });
 
     tree.push(hashes);
@@ -146,7 +147,7 @@ where
     for i in 1..(log_v) {
         let oracle = tree[i - 1]
             .par_chunks_exact(2)
-            .map(|ys| hash_two_digests(&ys[0], &ys[1]))
+            .map(|ys| hash_two_digests(&ys[0], &ys[1], hasher))
             .collect::<Vec<_>>();
 
         tree.push(oracle);
@@ -159,19 +160,20 @@ fn authenticate_merkle_path_root<F: SmallField, EF: SmallField<BaseField = F::Ba
     leaves: (EF, EF),
     x_index: usize,
     root: &Digest<F>,
+    hasher: &Hasher<F>,
 ) where
     F::BaseField: Serialize + DeserializeOwned,
 {
     let mut x_index = x_index;
-    let mut hash = Digest::<F>(hash_two_leaves(&leaves.0, &leaves.1).0);
+    let mut hash = Digest::<F>(hash_two_leaves(&leaves.0, &leaves.1, hasher).0);
 
     // The lowest bit in the index is ignored. It can point to either leaves
     x_index >>= 1;
     for i in 0..path.len() {
         hash = if x_index & 1 == 0 {
-            hash_two_digests(&hash, &path[i])
+            hash_two_digests(&hash, &path[i], hasher)
         } else {
-            hash_two_digests(&path[i], &hash)
+            hash_two_digests(&path[i], &hash, hasher)
         };
         x_index >>= 1;
     }
@@ -182,7 +184,10 @@ fn authenticate_merkle_path_root<F: SmallField, EF: SmallField<BaseField = F::Ba
 mod tests {
     use goldilocks::{Goldilocks, GoldilocksExt2};
 
-    use crate::util::transcript::{InMemoryTranscript, PoseidonTranscript};
+    use crate::util::{
+        hash::new_hasher,
+        transcript::{InMemoryTranscript, PoseidonTranscript},
+    };
 
     use super::*;
     type F = goldilocks::Goldilocks;
@@ -226,13 +231,14 @@ mod tests {
     }
 
     fn test_leaves(leaves: &Vec<F>) {
-        let tree = MerkleTree::<F>::from_leaves(leaves.clone());
+        let hasher = new_hasher::<F>();
+        let tree = MerkleTree::<F>::from_leaves(leaves.clone(), &hasher);
         let root = tree.root();
         for (i, _) in leaves.iter().enumerate() {
             let path = tree.merkle_path_without_leaf_sibling_or_root(i);
             let left_leaf = leaves[(i | 1) - 1];
             let right_leaf = leaves[i | 1];
-            path.authenticate_leaves_root(left_leaf, right_leaf, i, &root);
+            path.authenticate_leaves_root(left_leaf, right_leaf, i, &root, &hasher);
 
             let mut transcript = PoseidonTranscript::new();
             path.write_transcript(&mut transcript);
@@ -240,7 +246,7 @@ mod tests {
             let mut transcript = PoseidonTranscript::from_proof(&proof);
             let path =
                 MerklePathWithoutLeafOrRoot::<F>::read_transcript(&mut transcript, tree.height());
-            path.authenticate_leaves_root(left_leaf, right_leaf, i, &root);
+            path.authenticate_leaves_root(left_leaf, right_leaf, i, &root, &hasher);
 
             let mut transcript = PoseidonTranscript::<GoldilocksExt2>::new();
             let path = tree.merkle_path_without_leaf_sibling_or_root::<GoldilocksExt2>(i);
@@ -259,6 +265,7 @@ mod tests {
                 right_leaf_ext.try_into().unwrap(),
                 i,
                 &Digest(root.0),
+                &hasher,
             );
         }
     }

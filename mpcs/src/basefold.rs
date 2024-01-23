@@ -1,3 +1,4 @@
+use crate::util::hash::{new_hasher, Hasher};
 use crate::util::merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree};
 use crate::util::{field_to_usize, u32_to_field};
 use crate::{
@@ -223,6 +224,7 @@ where
         scalars: impl IntoIterator<Item = &'a F> + 'a,
         bases: impl IntoIterator<Item = &'a Self> + 'a,
     ) -> Self {
+        let hasher = new_hasher::<F>();
         let bases = bases.into_iter().collect_vec();
 
         let scalars = scalars.into_iter().collect_vec();
@@ -244,7 +246,7 @@ where
             }
         });
 
-        let tree = MerkleTree::<F>::from_leaves(new_codeword);
+        let tree = MerkleTree::<F>::from_leaves(new_codeword, &hasher);
 
         Self {
             bh_evals: Vec::new(),
@@ -342,7 +344,8 @@ where
         reverse_index_bits_in_place(&mut codeword);
 
         // Compute and store all the layers of the Merkle tree
-        let codeword_tree = MerkleTree::<PF>::from_leaves(codeword);
+        let hasher = new_hasher::<F>();
+        let codeword_tree = MerkleTree::<PF>::from_leaves(codeword, &hasher);
 
         Ok(Self::CommitmentWithData {
             codeword_tree,
@@ -391,6 +394,7 @@ where
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
         assert!(comm.num_vars >= V::get_basecode());
+        let hasher = new_hasher::<F>();
         let (trees, oracles) = commit_phase(
             &point,
             &comm,
@@ -399,6 +403,7 @@ where
             poly.num_vars() - V::get_basecode(),
             &pp.table_w_weights,
             pp.log_rate,
+            &hasher,
         );
 
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
@@ -421,6 +426,7 @@ where
         evals: &[Evaluation<F>],
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
+        let hasher = new_hasher::<F>();
         let polys = polys
             .into_iter()
             .map(|poly| poly.extend::<F>())
@@ -581,6 +587,7 @@ where
             &pp.table_w_weights,
             pp.log_rate,
             coeffs.as_slice(),
+            &hasher,
         );
 
         let query_result = batch_query_phase(
@@ -645,6 +652,7 @@ where
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
         assert!(comm.num_vars().unwrap() >= V::get_basecode());
+        let hasher = new_hasher::<F>();
 
         let _field_size = 255;
         let num_vars = point.len();
@@ -701,6 +709,7 @@ where
             eq.as_slice(),
             vp.rng.clone(),
             &eval,
+            &hasher,
         );
 
         Ok(())
@@ -715,6 +724,7 @@ where
     ) -> Result<(), Error> {
         //	let key = "RAYON_NUM_THREADS";
         //	env::set_var(key, "32");
+        let hasher = new_hasher::<F>();
         let comms = comms.into_iter().collect_vec();
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
         let num_rounds = num_vars - V::get_basecode();
@@ -815,6 +825,7 @@ where
             eq.as_slice(),
             vp.rng.clone(),
             &new_target_sum,
+            &hasher,
         );
         Ok(())
     }
@@ -1270,6 +1281,7 @@ fn commit_phase<F: SmallField, PF: SmallField + Into<F>>(
     num_rounds: usize,
     table_w_weights: &Vec<Vec<(F::BaseField, F::BaseField)>>,
     log_rate: usize,
+    hasher: &Hasher<F>,
 ) -> (Vec<MerkleTree<F>>, Vec<Vec<F>>)
 where
     F::BaseField: Into<F>,
@@ -1316,7 +1328,7 @@ where
         if i < num_rounds - 1 {
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
-            let running_tree = MerkleTree::<F>::from_leaves(running_oracle.clone());
+            let running_tree = MerkleTree::<F>::from_leaves(running_oracle.clone(), hasher);
             let running_root = running_tree.root();
             transcript.write_commitment(&running_root).unwrap();
 
@@ -1360,6 +1372,7 @@ fn batch_commit_phase<F: SmallField, PF: SmallField + Into<F>>(
     table_w_weights: &Vec<Vec<(F::BaseField, F::BaseField)>>,
     log_rate: usize,
     coeffs: &[F],
+    hasher: &Hasher<F>,
 ) -> (Vec<MerkleTree<F>>, Vec<Vec<F>>)
 where
     F::BaseField: Into<F>,
@@ -1436,7 +1449,7 @@ where
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
             sumcheck_messages.push(last_sumcheck_message.clone());
-            let running_tree = MerkleTree::<F>::from_leaves(running_oracle.clone());
+            let running_tree = MerkleTree::<F>::from_leaves(running_oracle.clone(), hasher);
             let running_root = running_tree.root();
             transcript.write_commitment(&running_root).unwrap();
 
@@ -1590,8 +1603,11 @@ where
 
     /// Check this query against a Merkle root. The Merkle path and root are possibly
     /// created when the leaves are in a different field
-    pub fn check_merkle_path<PF: SmallField<BaseField = F::BaseField>>(&self, root: &Digest<F>)
-    where
+    pub fn check_merkle_path<PF: SmallField<BaseField = F::BaseField>>(
+        &self,
+        root: &Digest<F>,
+        hasher: &Hasher<F>,
+    ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
     {
@@ -1600,6 +1616,7 @@ where
             self.query.right.try_into().unwrap(),
             self.query.index,
             root,
+            hasher,
         );
     }
 }
@@ -1753,11 +1770,13 @@ trait ListQueryResult<F: SmallField> {
                 let path =
                     trees(i).merkle_path_without_leaf_sibling_or_root::<F>(query_result.index);
                 if cfg!(feature = "sanity-check") {
+                    let hasher = new_hasher::<F>();
                     path.authenticate_leaves_root::<PF>(
                         query_result.left.try_into().unwrap(),
                         query_result.right.try_into().unwrap(),
                         query_result.index,
                         &Digest::<F>(trees(i).root().0.try_into().unwrap()),
+                        &hasher,
                     );
                 }
                 path
@@ -1809,8 +1828,11 @@ where
             .for_each(|q| q.write_transcript(transcript));
     }
 
-    fn check_merkle_paths<PF: SmallField<BaseField = F::BaseField>>(&self, roots: &Vec<Digest<F>>)
-    where
+    fn check_merkle_paths<PF: SmallField<BaseField = F::BaseField>>(
+        &self,
+        roots: &Vec<Digest<F>>,
+        hasher: &Hasher<F>,
+    ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
     {
@@ -1818,7 +1840,7 @@ where
             .iter()
             .zip(roots.iter())
             .for_each(|(q, root)| {
-                q.check_merkle_path::<PF>(root);
+                q.check_merkle_path::<PF>(root, hasher);
             });
     }
 }
@@ -1905,14 +1927,15 @@ where
         comm: &BasefoldCommitment<PF>,
         mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
+        hasher: &Hasher<F>,
     ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
         PF::BaseField: Serialize + DeserializeOwned,
     {
-        self.oracle_query.check_merkle_paths::<F>(roots);
+        self.oracle_query.check_merkle_paths::<F>(roots, hasher);
         self.commitment_query
-            .check_merkle_path::<PF>(&Digest(comm.root().0.try_into().unwrap()));
+            .check_merkle_path::<PF>(&Digest(comm.root().0.try_into().unwrap()), hasher);
 
         let mut curr_left = self.commitment_query.query.left;
         let mut curr_right = self.commitment_query.query.right;
@@ -2038,17 +2061,19 @@ where
         coeffs: &[F],
         mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
+        hasher: &Hasher<F>,
     ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
         PF::BaseField: Serialize + DeserializeOwned,
     {
-        self.oracle_query.check_merkle_paths::<F>(roots);
+        self.oracle_query.check_merkle_paths::<F>(roots, hasher);
         self.commitments_query.check_merkle_paths::<PF>(
             &comms
                 .iter()
                 .map(|comm| comm.as_field::<F>().root())
                 .collect(),
+            hasher,
         );
 
         let mut curr_left = F::ZERO;
@@ -2217,6 +2242,7 @@ where
         comms: &Vec<&BasefoldCommitment<PF>>,
         coeffs: &[F],
         cipher: ctr::Ctr32LE<aes::Aes128>,
+        hasher: &Hasher<F>,
     ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
@@ -2234,6 +2260,7 @@ where
                 coeffs,
                 cipher.clone(),
                 *index,
+                hasher,
             );
         });
     }
@@ -2322,6 +2349,7 @@ where
         roots: &Vec<Digest<F>>,
         comm: &BasefoldCommitment<PF>,
         cipher: ctr::Ctr32LE<aes::Aes128>,
+        hasher: &Hasher<F>,
     ) where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
@@ -2338,6 +2366,7 @@ where
                 comm,
                 cipher.clone(),
                 *index,
+                hasher,
             );
         });
     }
@@ -2388,6 +2417,7 @@ fn verifier_query_phase<F: SmallField + TryInto<PF>, PF: SmallField<BaseField = 
     partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
+    hasher: &Hasher<F>,
 ) where
     <F as TryInto<PF>>::Error: Debug,
     F::BaseField: Serialize + DeserializeOwned,
@@ -2422,6 +2452,7 @@ fn verifier_query_phase<F: SmallField + TryInto<PF>, PF: SmallField<BaseField = 
         roots,
         comm,
         cipher,
+        hasher,
     );
 
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
@@ -2462,6 +2493,7 @@ fn batch_verifier_query_phase<
     partial_eq: &[F],
     rng: ChaCha8Rng,
     eval: &F,
+    hasher: &Hasher<F>,
 ) where
     <F as TryInto<PF>>::Error: Debug,
     F::BaseField: Serialize + DeserializeOwned,
@@ -2497,6 +2529,7 @@ fn batch_verifier_query_phase<
         comms,
         coeffs,
         cipher,
+        hasher,
     );
 
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));

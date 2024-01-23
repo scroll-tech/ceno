@@ -1,13 +1,5 @@
 use goldilocks::SmallField;
 
-use plonky2::{
-    field::{
-        goldilocks_field::GoldilocksField,
-        types::{Field, PrimeField64},
-    },
-    hash::{hash_types::HashOut, poseidon::PoseidonHash},
-    plonk::config::Hasher as _,
-};
 use poseidon::Poseidon;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -27,65 +19,71 @@ where
     Hasher::<F>::new(8, 22)
 }
 
-pub fn hash_two_leaves<F: SmallField>(a: &F, b: &F) -> Digest<F>
+pub fn hash_two_leaves<F: SmallField>(a: &F, b: &F, hasher: &Hasher<F>) -> Digest<F>
 where
     F::BaseField: Serialize + DeserializeOwned,
 {
-    let repr = a
-        .to_canonical_u64_vec()
-        .iter()
-        .chain(b.to_canonical_u64_vec().iter())
-        .map(|x| GoldilocksField::from_canonical_u64(*x))
-        .collect::<Vec<GoldilocksField>>();
+    // This is the Plonky2 part
+    // let repr = a
+    //     .to_canonical_u64_vec()
+    //     .iter()
+    //     .chain(b.to_canonical_u64_vec().iter())
+    //     .map(|x| GoldilocksField::from_canonical_u64(*x))
+    //     .collect::<Vec<GoldilocksField>>();
 
-    let result = PoseidonHash::hash_no_pad(repr.as_slice());
-    Digest(
-        result
-            .elements
-            .iter()
-            .map(|x| F::BaseField::from(x.to_canonical_u64()))
-            .collect::<Vec<_>>()
-            .as_slice()
-            .try_into()
-            .unwrap(),
-    )
+    // let result = PoseidonHash::hash_no_pad(repr.as_slice());
+    // Digest(
+    //     result
+    //         .elements
+    //         .iter()
+    //         .map(|x| F::BaseField::from(x.to_canonical_u64()))
+    //         .collect::<Vec<_>>()
+    //         .as_slice()
+    //         .try_into()
+    //         .unwrap(),
+    // )
 
-    // let mut hasher = new_hasher::<F>();
-    // hasher.update(a.to_limbs().as_slice());
-    // hasher.update(b.to_limbs().as_slice());
-    // let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
-    // Digest(result)
+    let mut hasher = hasher.clone();
+    hasher.update(a.to_limbs().as_slice());
+    hasher.update(b.to_limbs().as_slice());
+    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
+    Digest(result)
 }
 
-pub fn hash_two_digests<F: SmallField>(a: &Digest<F>, b: &Digest<F>) -> Digest<F>
+pub fn hash_two_digests<F: SmallField>(
+    a: &Digest<F>,
+    b: &Digest<F>,
+    hasher: &Hasher<F>,
+) -> Digest<F>
 where
     F::BaseField: Serialize + DeserializeOwned,
 {
-    let a = HashOut::<GoldilocksField>::from_vec(
-        a.0.iter()
-            .map(|x| GoldilocksField::from_canonical_u64(x.to_canonical_u64_vec()[0]))
-            .collect::<Vec<_>>(),
-    );
-    let b = HashOut::<GoldilocksField>::from_vec(
-        b.0.iter()
-            .map(|x| GoldilocksField::from_canonical_u64(x.to_canonical_u64_vec()[0]))
-            .collect::<Vec<_>>(),
-    );
+    // Plonky2 version
+    // let a = HashOut::<GoldilocksField>::from_vec(
+    //     a.0.iter()
+    //         .map(|x| GoldilocksField::from_canonical_u64(x.to_canonical_u64_vec()[0]))
+    //         .collect::<Vec<_>>(),
+    // );
+    // let b = HashOut::<GoldilocksField>::from_vec(
+    //     b.0.iter()
+    //         .map(|x| GoldilocksField::from_canonical_u64(x.to_canonical_u64_vec()[0]))
+    //         .collect::<Vec<_>>(),
+    // );
 
-    let result = PoseidonHash::two_to_one(a, b);
-    Digest(
-        result
-            .elements
-            .iter()
-            .map(|x| F::BaseField::from(x.to_canonical_u64()))
-            .collect::<Vec<_>>()
-            .as_slice()
-            .try_into()
-            .unwrap(),
-    )
-    // let mut hasher = new_hasher::<F>();
-    // hasher.update(a.0.as_slice());
-    // hasher.update(b.0.as_slice());
-    // let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
-    // Digest(result)
+    // let result = PoseidonHash::two_to_one(a, b);
+    // Digest(
+    //     result
+    //         .elements
+    //         .iter()
+    //         .map(|x| F::BaseField::from(x.to_canonical_u64()))
+    //         .collect::<Vec<_>>()
+    //         .as_slice()
+    //         .try_into()
+    //         .unwrap(),
+    // )
+    let mut hasher = hasher.clone();
+    hasher.update(a.0.as_slice());
+    hasher.update(b.0.as_slice());
+    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
+    Digest(result)
 }
