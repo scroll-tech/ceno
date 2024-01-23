@@ -1,3 +1,4 @@
+use num_traits::FromPrimitive;
 use std::{mem, sync::Arc};
 
 use frontend::structs::WireId;
@@ -9,6 +10,7 @@ use strum_macros::EnumIter;
 
 use crate::{
     chips::{construct_inst_chip_circuits, ChipCircuitGadgets},
+    constants::OpcodeType,
     error::ZKVMError,
     CircuitWiresIn, SingerGraphBuilder,
 };
@@ -54,21 +56,21 @@ pub(crate) fn construct_instruction_circuits<F: SmallField>(
     opcode: u8,
     challenges: ChipChallenges,
 ) -> Result<Vec<InstCircuit<F>>, ZKVMError> {
-    match opcode {
-        0x01 => AddInstruction::construct_circuits(challenges),
-        0x11 => GtInstruction::construct_circuits(challenges),
-        0x35 => CalldataloadInstruction::construct_circuits(challenges),
-        0x50 => PopInstruction::construct_circuits(challenges),
-        0x52 => MstoreInstruction::construct_circuits(challenges),
-        0x56 => JumpInstruction::construct_circuits(challenges),
-        0x57 => JumpiInstruction::construct_circuits(challenges),
-        0x5B => JumpdestInstruction::construct_circuits(challenges),
-        0x60 => PushInstruction::<1>::construct_circuits(challenges),
-        0x80 => DupInstruction::<1>::construct_circuits(challenges),
-        0x81 => DupInstruction::<2>::construct_circuits(challenges),
-        0x91 => SwapInstruction::<2>::construct_circuits(challenges),
-        0x93 => SwapInstruction::<4>::construct_circuits(challenges),
-        0xF3 => ReturnInstruction::construct_circuits(challenges),
+    match OpcodeType::from_u8(opcode) {
+        Some(OpcodeType::ADD) => AddInstruction::construct_circuits(challenges),
+        Some(OpcodeType::GT) => GtInstruction::construct_circuits(challenges),
+        Some(OpcodeType::CALLDATALOAD) => CalldataloadInstruction::construct_circuits(challenges),
+        Some(OpcodeType::POP) => PopInstruction::construct_circuits(challenges),
+        Some(OpcodeType::MSTORE) => MstoreInstruction::construct_circuits(challenges),
+        Some(OpcodeType::JUMP) => JumpInstruction::construct_circuits(challenges),
+        Some(OpcodeType::JUMPI) => JumpiInstruction::construct_circuits(challenges),
+        Some(OpcodeType::JUMPDEST) => JumpdestInstruction::construct_circuits(challenges),
+        Some(OpcodeType::PUSH1) => PushInstruction::<1>::construct_circuits(challenges),
+        Some(OpcodeType::DUP1) => DupInstruction::<1>::construct_circuits(challenges),
+        Some(OpcodeType::DUP2) => DupInstruction::<2>::construct_circuits(challenges),
+        Some(OpcodeType::SWAP2) => SwapInstruction::<2>::construct_circuits(challenges),
+        Some(OpcodeType::SWAP4) => SwapInstruction::<4>::construct_circuits(challenges),
+        Some(OpcodeType::RETURN) => ReturnInstruction::construct_circuits(challenges),
         _ => unimplemented!(),
     }
 }
@@ -81,21 +83,21 @@ pub(crate) fn construct_inst_circuit_graph<F: SmallField>(
     sources: Vec<CircuitWiresIn<F>>,
     real_challenges: &[F],
 ) -> Result<(), ZKVMError> {
-    let construct_circuit_graph = match opcode {
-        0x01 => AddInstruction::construct_circuit_graph,
-        0x11 => GtInstruction::construct_circuit_graph,
-        0x35 => CalldataloadInstruction::construct_circuit_graph,
-        0x50 => PopInstruction::construct_circuit_graph,
-        0x52 => MstoreInstruction::construct_circuit_graph,
-        0x56 => JumpInstruction::construct_circuit_graph,
-        0x57 => JumpiInstruction::construct_circuit_graph,
-        0x5B => JumpdestInstruction::construct_circuit_graph,
-        0x60 => PushInstruction::<1>::construct_circuit_graph,
-        0x80 => DupInstruction::<1>::construct_circuit_graph,
-        0x81 => DupInstruction::<2>::construct_circuit_graph,
-        0x91 => SwapInstruction::<2>::construct_circuit_graph,
-        0x93 => SwapInstruction::<4>::construct_circuit_graph,
-        0xF3 => ReturnInstruction::construct_circuit_graph,
+    let construct_circuit_graph = match OpcodeType::from_u8(opcode) {
+        Some(OpcodeType::ADD) => AddInstruction::construct_circuit_graph,
+        Some(OpcodeType::GT) => GtInstruction::construct_circuit_graph,
+        Some(OpcodeType::CALLDATALOAD) => CalldataloadInstruction::construct_circuit_graph,
+        Some(OpcodeType::POP) => PopInstruction::construct_circuit_graph,
+        Some(OpcodeType::MSTORE) => MstoreInstruction::construct_circuit_graph,
+        Some(OpcodeType::JUMP) => JumpInstruction::construct_circuit_graph,
+        Some(OpcodeType::JUMPI) => JumpiInstruction::construct_circuit_graph,
+        Some(OpcodeType::JUMPDEST) => JumpdestInstruction::construct_circuit_graph,
+        Some(OpcodeType::PUSH1) => PushInstruction::<1>::construct_circuit_graph,
+        Some(OpcodeType::DUP1) => DupInstruction::<1>::construct_circuit_graph,
+        Some(OpcodeType::DUP2) => DupInstruction::<2>::construct_circuit_graph,
+        Some(OpcodeType::SWAP2) => SwapInstruction::<2>::construct_circuit_graph,
+        Some(OpcodeType::SWAP4) => SwapInstruction::<4>::construct_circuit_graph,
+        Some(OpcodeType::RETURN) => ReturnInstruction::construct_circuit_graph,
         _ => unimplemented!(),
     };
 
