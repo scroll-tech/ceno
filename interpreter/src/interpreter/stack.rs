@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn push_slices() {
         // no-op
-        let mut ts: u64 = 0;
+        let ts: u64 = 0;
         run(|stack| {
             stack.push_slice(b"", ts).unwrap();
             assert_eq!(stack.data, []);

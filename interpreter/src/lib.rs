@@ -8,6 +8,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 extern crate alloc;
+use ark_std as _;
+use ff as _;
+use serde as _;
 
 #[macro_use]
 mod macros;

@@ -5,19 +5,19 @@ mod stack;
 
 pub use analysis::BytecodeLocked;
 pub use contract::Contract;
-use goldilocks::SmallField;
+use goldilocks::{Goldilocks, SmallField};
 pub use shared_memory::{next_multiple_of_32, SharedMemory};
 pub use stack::{Stack, STACK_LIMIT};
 
+use crate::analysis::to_analysed;
 use crate::host::Record;
-use crate::{
-    primitives::Bytes, push, push_b256, return_ok, return_revert, CallInputs, CreateInputs, Gas,
-    Host, InstructionResult,
-};
+use crate::opcode::make_instruction_table;
+use crate::DummyHost;
+use crate::{primitives::Bytes, CallInputs, CreateInputs, Gas, Host, InstructionResult};
 use alloc::boxed::Box;
+use core::marker::PhantomData;
 use core::ops::Range;
-use core::{cmp::min, marker::PhantomData};
-use revm_primitives::{Address, U256};
+use revm_primitives::{BerlinSpec, Bytecode, Env, U256};
 
 pub use self::shared_memory::EMPTY_SHARED_MEMORY;
 
@@ -89,7 +89,23 @@ pub enum InterpreterAction {
 impl<F: SmallField> Interpreter<F> {
     /// Execute
     pub fn execute(bytecode: &[u8], input: &[u8]) -> Vec<Record> {
-        Vec::new()
+        let contract = Contract {
+            input: Bytes::copy_from_slice(input),
+            bytecode: BytecodeLocked::try_from(to_analysed(Bytecode::new_raw(
+                Bytes::copy_from_slice(bytecode),
+            )))
+            .unwrap(),
+            ..Default::default()
+        };
+        let mut shared_memory = SharedMemory::new();
+        let mut host = DummyHost::new(Env::default());
+        let instruction_table = make_instruction_table::<DummyHost, Goldilocks, BerlinSpec>();
+        // replace memory with empty memory to use it inside interpreter.
+        // Later return memory back.
+        let temp = core::mem::replace(&mut shared_memory, EMPTY_SHARED_MEMORY);
+        let mut interpreter = Interpreter::new(Box::new(contract.clone()), u64::MAX, false);
+        let _ = interpreter.run(temp, &instruction_table, &mut host);
+        host.records
     }
 
     /// Create new interpreter
