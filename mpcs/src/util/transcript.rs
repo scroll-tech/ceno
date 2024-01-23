@@ -134,7 +134,7 @@ impl<T: Copy> Stream<T> {
 
 #[derive(Debug)]
 pub struct PoseidonTranscript<F: SmallField> {
-    state: Hasher,
+    state: Hasher<F>,
     stream: Stream<F::BaseField>,
 }
 
@@ -144,7 +144,7 @@ where
 {
     fn default() -> Self {
         Self {
-            state: new_hasher(),
+            state: new_hasher::<F>(),
             stream: Stream::default(),
         }
     }
@@ -164,7 +164,7 @@ where
 
     fn from_proof(proof: &[F::BaseField]) -> Self {
         Self {
-            state: new_hasher(),
+            state: new_hasher::<F>(),
             stream: Stream::new(proof.to_vec()),
         }
     }
@@ -175,10 +175,10 @@ where
     F::BaseField: Serialize + DeserializeOwned,
 {
     fn squeeze_challenge(&mut self) -> F {
-        let hash: [F::BaseField; OUTPUT_WIDTH] = self.state.squeeze_vec::<F>()[0..OUTPUT_WIDTH]
+        let hash: [F::BaseField; OUTPUT_WIDTH] = self.state.squeeze_vec()[0..OUTPUT_WIDTH]
             .try_into()
             .unwrap();
-        self.state = new_hasher();
+        self.state = new_hasher::<F>();
         self.state.update(&hash);
         F::from_limbs(&hash[..F::DEGREE])
     }

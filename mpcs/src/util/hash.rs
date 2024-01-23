@@ -1,20 +1,14 @@
-use std::iter::repeat;
-
 use goldilocks::SmallField;
 
-use itertools::Itertools;
 use plonky2::{
     field::{
         goldilocks_field::GoldilocksField,
         types::{Field, PrimeField64},
     },
-    hash::{
-        hash_types::HashOut, hashing::PlonkyPermutation as _, poseidon::PoseidonHash,
-        poseidon::PoseidonPermutation,
-    },
+    hash::{hash_types::HashOut, poseidon::PoseidonHash},
     plonk::config::Hasher as _,
 };
-// use poseidon::Poseidon;
+use poseidon::Poseidon;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub const DIGEST_WIDTH: usize = super::transcript::OUTPUT_WIDTH;
@@ -22,44 +16,15 @@ pub const DIGEST_WIDTH: usize = super::transcript::OUTPUT_WIDTH;
 pub struct Digest<F: SmallField>(pub [F::BaseField; DIGEST_WIDTH])
 where
     F::BaseField: Serialize + DeserializeOwned;
-// pub type Hasher<F> = Poseidon<<F as SmallField>::BaseField, 12, 11>;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Hasher {
-    inner: PoseidonPermutation<GoldilocksField>,
-}
+pub type Hasher<F> = Poseidon<<F as SmallField>::BaseField, 12, 11>;
 
-impl Hasher {
-    pub fn update<F: SmallField>(&mut self, input: &[F]) {
-        self.inner.set_from_slice(
-            input
-                .iter()
-                .map(|x| GoldilocksField::from_canonical_u64(x.to_canonical_u64_vec()[0]))
-                .collect_vec()
-                .as_slice(),
-            0,
-        );
-        self.inner.permute();
-    }
-
-    pub fn squeeze_vec<F: SmallField>(&mut self) -> Vec<F::BaseField> {
-        self.inner
-            .squeeze()
-            .iter()
-            .map(|x| F::BaseField::from(x.to_canonical_u64()))
-            .collect_vec()
-    }
-}
-
-// pub fn new_hasher<F: SmallField>() -> Hasher<F> {
-// FIXME: Change to the right parameter
-//    Hasher::<F>::new(8, 22)
-// }
-
-pub fn new_hasher() -> Hasher {
-    Hasher {
-        inner: PoseidonPermutation::<GoldilocksField>::new(repeat(GoldilocksField::ZERO)),
-    }
+pub fn new_hasher<F: SmallField>() -> Hasher<F>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    // FIXME: Change to the right parameter
+    Hasher::<F>::new(8, 22)
 }
 
 pub fn hash_two_leaves<F: SmallField>(a: &F, b: &F) -> Digest<F>

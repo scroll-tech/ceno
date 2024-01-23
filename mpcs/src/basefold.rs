@@ -1,6 +1,5 @@
 use crate::util::merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree};
 use crate::util::{field_to_usize, u32_to_field};
-use crate::NoninteractivePCS;
 use crate::{
     poly::{multilinear::MultilinearPolynomial, Polynomial},
     util::{
@@ -20,7 +19,6 @@ use crate::{
     util::num_of_bytes,
 };
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
-use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
 use ctr;
 use ff::BatchInverter;
@@ -271,8 +269,10 @@ where
     <F as TryInto<PF>>::Error: Debug,
     F::BaseField: Serialize + DeserializeOwned + Into<F> + Into<PF>,
     PF: SmallField + Serialize + DeserializeOwned + Into<F>,
-    PF::BaseField: Serialize + DeserializeOwned + Into<PF> + Into<F>,
+    PF::BaseField: Into<PF> + Into<F>,
     V: BasefoldExtParams,
+    F::BaseField: Serialize + DeserializeOwned,
+    PF::BaseField: Serialize + DeserializeOwned,
 {
     type Param = BasefoldParams<F::BaseField, ChaCha8Rng>;
     type ProverParam = BasefoldProverParams<F::BaseField>;
@@ -319,7 +319,6 @@ where
         pp: &Self::ProverParam,
         poly: &Self::Polynomial,
     ) -> Result<Self::CommitmentWithData, Error> {
-        let timer = start_timer!(|| "Basefold::commit");
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
@@ -355,8 +354,6 @@ where
         // Compute and store all the layers of the Merkle tree
         let codeword_tree = MerkleTree::<PF>::from_leaves(codeword);
 
-        end_timer!(timer);
-
         Ok(Self::CommitmentWithData {
             codeword_tree,
             bh_evals,
@@ -372,7 +369,6 @@ where
     where
         Self::Polynomial: 'a,
     {
-        let timer = start_timer!(|| "Basefold::batch_commit_and_write");
         let comms = Self::batch_commit(pp, polys)?;
         comms.iter().for_each(|comm| {
             transcript
@@ -382,7 +378,6 @@ where
                 .write_field_element(&u32_to_field(comm.num_vars as u32))
                 .unwrap();
         });
-        end_timer!(timer);
         Ok(comms)
     }
 
@@ -406,7 +401,6 @@ where
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
         assert!(comm.num_vars >= V::get_basecode());
-        let timer = start_timer!(|| "Basefold::open");
         let (trees, oracles) = commit_phase(
             &point,
             &comm,
@@ -417,22 +411,14 @@ where
             pp.log_rate,
         );
 
-        let query_timer = start_timer!(|| "Basefold::open::query_phase");
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
         let queries = query_phase(transcript, &comm, &oracles, pp.num_verifier_queries);
-        end_timer!(query_timer);
 
-        let query_timer = start_timer!(|| "Basefold::open::build_query_result");
         let queries_with_merkle_path =
             QueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
-        end_timer!(query_timer);
 
-        let query_timer = start_timer!(|| "Basefold::open::write_queries");
         queries_with_merkle_path.write_transcript(transcript);
-        end_timer!(query_timer);
-
-        end_timer!(timer);
 
         Ok(())
     }
@@ -445,7 +431,6 @@ where
         evals: &[Evaluation<F>],
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        let timer = start_timer!(|| "Basefold::batch_open");
         let polys = polys
             .into_iter()
             .map(|poly| poly.extend::<F>())
@@ -466,7 +451,6 @@ where
 
         validate_input("batch open", pp.max_num_vars, &polys.clone(), points)?;
 
-        let sumcheck_timer = start_timer!(|| "Basefold::batch_open::initial sumcheck");
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = transcript.squeeze_challenges(batch_size_log);
@@ -557,8 +541,6 @@ where
         let (challenges, merged_poly_evals) =
             SumCheck::prove(&(), num_vars, virtual_poly, target_sum, transcript)?;
 
-        end_timer!(sumcheck_timer);
-
         // Now the verifier has obtained the new target sum, and is able to compute the random
         // linear coefficients, and is able to evaluate eq_xy(point) for each poly to open.
         // The remaining tasks for the prover is to prove that
@@ -611,7 +593,6 @@ where
             coeffs.as_slice(),
         );
 
-        let query_timer = start_timer!(|| "Basefold::batch_open query phase");
         let query_result = batch_query_phase(
             transcript,
             1 << (num_vars + pp.log_rate),
@@ -619,21 +600,15 @@ where
             &oracles,
             pp.num_verifier_queries,
         );
-        end_timer!(query_timer);
 
-        let query_timer = start_timer!(|| "Basefold::batch_open build query result");
         let query_result_with_merkle_path =
             BatchedQueriesResultWithMerklePath::from_batched_query_result(
                 query_result,
                 &trees,
                 &comms,
             );
-        end_timer!(query_timer);
 
-        let query_timer = start_timer!(|| "Basefold::batch_open write query result");
         query_result_with_merkle_path.write_transcript(transcript);
-        end_timer!(query_timer);
-        end_timer!(timer);
 
         Ok(())
     }
@@ -679,7 +654,6 @@ where
         eval: &F,
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        let timer = start_timer!(|| "Basefold::verify");
         assert!(comm.num_vars().unwrap() >= V::get_basecode());
 
         let _field_size = 255;
@@ -690,7 +664,6 @@ where
         let _size = 0;
         let mut roots = Vec::new();
         let mut sumcheck_messages = Vec::with_capacity(num_rounds);
-        let sumcheck_timer = start_timer!(|| "Basefold::verify::interaction");
         for i in 0..num_rounds {
             sumcheck_messages.push(transcript.read_field_elements(3).unwrap());
             fold_challenges.push(transcript.squeeze_challenge());
@@ -698,9 +671,6 @@ where
                 roots.push(transcript.read_commitment().unwrap());
             }
         }
-        end_timer!(sumcheck_timer);
-
-        let read_timer = start_timer!(|| "Basefold::verify::read transcript");
         let final_message = transcript
             .read_field_elements(1 << V::get_basecode())
             .unwrap();
@@ -709,7 +679,6 @@ where
             .iter()
             .map(|index| field_to_usize(index) % (1 << (num_vars + vp.log_rate)))
             .collect_vec();
-        let read_query_timer = start_timer!(|| "Basefold::verify::read query");
         let query_result_with_merkle_path = QueriesResultWithMerklePath::read_transcript(
             transcript,
             num_rounds,
@@ -717,8 +686,6 @@ where
             num_vars,
             query_challenges.as_slice(),
         );
-        end_timer!(read_query_timer);
-        end_timer!(read_timer);
 
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
@@ -745,7 +712,6 @@ where
             vp.rng.clone(),
             &eval,
         );
-        end_timer!(timer);
 
         Ok(())
     }
@@ -757,7 +723,6 @@ where
         evals: &[Evaluation<F>],
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, F>,
     ) -> Result<(), Error> {
-        let timer = start_timer!(|| "Basefold::batch_verify");
         //	let key = "RAYON_NUM_THREADS";
         //	env::set_var(key, "32");
         let comms = comms.into_iter().collect_vec();
@@ -765,15 +730,16 @@ where
         let num_rounds = num_vars - V::get_basecode();
         validate_input("batch verify", vp.max_num_vars, [], points)?;
         let poly_num_vars = comms.iter().map(|c| c.num_vars().unwrap()).collect_vec();
-        evals.iter().for_each(|eval| {
-            assert_eq!(
-                points[eval.point()].len(),
-                comms[eval.poly()].num_vars().unwrap()
-            );
-        });
+        if cfg!(feature = "sanity-check") {
+            evals.iter().for_each(|eval| {
+                assert_eq!(
+                    points[eval.point()].len(),
+                    comms[eval.poly()].num_vars().unwrap()
+                );
+            });
+        }
         assert!(poly_num_vars.iter().min().unwrap() >= &V::get_basecode());
 
-        let sumcheck_timer = start_timer!(|| "Basefold::batch_verify::initial sumcheck");
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = transcript.squeeze_challenges(batch_size_log);
 
@@ -789,7 +755,6 @@ where
 
         let (new_target_sum, verify_point) =
             SumCheck::verify(&(), num_vars, 2, target_sum, transcript)?;
-        end_timer!(sumcheck_timer);
 
         // Now the goal is to use the BaseFold to check the new target sum. Note that this time
         // we only have one eq polynomial in the sum-check.
@@ -805,7 +770,6 @@ where
 
         //start of verify
         //read first $(num_var - 1) commitments
-        let read_timer = start_timer!(|| "Basefold::verify::read transcript");
         let mut sumcheck_messages = Vec::with_capacity(num_rounds);
         let mut roots: Vec<Digest<F>> = Vec::with_capacity(num_rounds - 1);
         let mut fold_challenges: Vec<F> = Vec::with_capacity(num_rounds);
@@ -826,7 +790,6 @@ where
             .map(|index| field_to_usize(index) % (1 << (num_vars + vp.log_rate)))
             .collect_vec();
 
-        let read_query_timer = start_timer!(|| "Basefold::verify::read query");
         let query_result_with_merkle_path = BatchedQueriesResultWithMerklePath::read_transcript(
             transcript,
             num_rounds,
@@ -834,8 +797,6 @@ where
             poly_num_vars.as_slice(),
             query_challenges.as_slice(),
         );
-        end_timer!(read_query_timer);
-        end_timer!(read_timer);
 
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
@@ -865,21 +826,8 @@ where
             vp.rng.clone(),
             &new_target_sum,
         );
-        end_timer!(timer);
         Ok(())
     }
-}
-
-impl<F: SmallField, PF: SmallField, V: BasefoldExtParams> NoninteractivePCS<F, PF>
-    for Basefold<F, V>
-where
-    F: SmallField<BaseField = PF::BaseField> + Serialize + DeserializeOwned + TryInto<PF>,
-    <F as TryInto<PF>>::Error: Debug,
-    F::BaseField: Serialize + DeserializeOwned + Into<F> + Into<PF>,
-    PF: SmallField + Serialize + DeserializeOwned + Into<F>,
-    PF::BaseField: Serialize + DeserializeOwned + Into<PF> + Into<F>,
-    V: BasefoldExtParams,
-{
 }
 
 // Split the input into chunks of message size, encode each message, and return the codewords
@@ -888,7 +836,6 @@ fn encode_rs_basecode<F: SmallField>(
     rate: usize,
     message_size: usize,
 ) -> Vec<Vec<F>> {
-    let timer = start_timer!(|| "Encode basecode");
     // The domain is just counting 1, 2, 3, ... , domain_size
     let domain: Vec<F> = steps(F::ONE).take(message_size * rate).collect();
     let res = poly
@@ -903,7 +850,6 @@ fn encode_rs_basecode<F: SmallField>(
             target
         })
         .collect::<Vec<Vec<F>>>();
-    end_timer!(timer);
 
     res
 }
@@ -929,7 +875,6 @@ pub fn evaluate_over_foldable_domain_generic_basecode<F: SmallField, PF: SmallFi
     base_codewords: Vec<Vec<F>>,
     table: &Vec<Vec<PF>>,
 ) -> Vec<F> {
-    let timer = start_timer!(|| "evaluate over foldable domain");
     let k = num_coeffs;
     let logk = log2_strict(k);
     let base_log_k = log2_strict(base_message_length);
@@ -963,7 +908,6 @@ pub fn evaluate_over_foldable_domain_generic_basecode<F: SmallField, PF: SmallFi
                 }
             });
     }
-    end_timer!(timer);
     coeffs_with_bc
 }
 
@@ -1011,7 +955,6 @@ pub fn evaluate_over_foldable_domain<F: SmallField>(
 }
 
 fn interpolate_over_boolean_hypercube<F: SmallField>(evals: &Vec<F>) -> Vec<F> {
-    let timer = start_timer!(|| "interpolate_over_hypercube");
     //iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
     let n = log2_strict(evals.len());
     let mut coeffs = vec![F::ZERO; evals.len()];
@@ -1034,7 +977,6 @@ fn interpolate_over_boolean_hypercube<F: SmallField>(evals: &Vec<F>) -> Vec<F> {
             }
         });
     }
-    end_timer!(timer);
 
     coeffs
 }
@@ -1344,7 +1286,6 @@ where
     PF::BaseField: Serialize + DeserializeOwned,
     F::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Commit phase");
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
@@ -1360,17 +1301,11 @@ where
         .collect_vec();
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let build_eq_timer = start_timer!(|| "Basefold::open");
     let mut eq = build_eq_x_r_vec::<F>(&point);
-    end_timer!(build_eq_timer);
     reverse_index_bits_in_place(&mut eq);
-
-    let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round::<F>(&mut eq, &mut running_evals);
-    end_timer!(sumcheck_timer);
 
     for i in 0..num_rounds {
-        let sumcheck_timer = start_timer!(|| format!("Basefold round {}", i));
         // For the first round, no need to send the running root, because this root is
         // committing to a vector that can be recovered from linearly combining other
         // already-committed vectors.
@@ -1421,9 +1356,7 @@ where
                 assert_eq!(basecode, running_oracle);
             }
         }
-        end_timer!(sumcheck_timer);
     }
-    end_timer!(timer);
     return (trees, oracles);
 }
 
@@ -1443,13 +1376,11 @@ where
     PF::BaseField: Serialize + DeserializeOwned,
     F::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Batch Commit phase");
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let mut running_oracle = vec![F::ZERO; 1 << (num_vars + log_rate)];
 
-    let build_oracle_timer = start_timer!(|| "Basefold build initial oracle");
     // Before the interaction, collect all the polynomials whose num variables match the
     // max num variables
     let running_oracle_len = running_oracle.len();
@@ -1463,9 +1394,7 @@ where
                 .zip_eq(comm.get_codeword().par_iter())
                 .for_each(|(r, &a)| *r += Into::<F>::into(a) * coeffs[index]);
         });
-    end_timer!(build_oracle_timer);
 
-    let build_oracle_timer = start_timer!(|| "Basefold build initial sumcheck evals");
     // Unlike the FRI part, the sum-check part still follows the original procedure,
     // and linearly combine all the polynomials once for all
     let mut sum_of_all_evals_for_sumcheck = vec![F::ZERO; 1 << num_vars];
@@ -1485,21 +1414,17 @@ where
                 ) * coeffs[index]
             });
     });
-    end_timer!(build_oracle_timer);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let mut eq = build_eq_x_r_vec::<F>(&point);
     reverse_index_bits_in_place(&mut eq);
 
-    let sumcheck_timer = start_timer!(|| "Basefold first round");
     let mut sumcheck_messages = Vec::with_capacity(num_rounds + 1);
     let mut last_sumcheck_message =
         sum_check_first_round::<F>(&mut eq, &mut sum_of_all_evals_for_sumcheck);
     sumcheck_messages.push(last_sumcheck_message.clone());
-    end_timer!(sumcheck_timer);
 
     for i in 0..num_rounds {
-        let sumcheck_timer = start_timer!(|| format!("Batch basefold round {}", i));
         // For the first round, no need to send the running root, because this root is
         // committing to a vector that can be recovered from linearly combining other
         // already-committed vectors.
@@ -1566,9 +1491,7 @@ where
                 assert_eq!(basecode, running_oracle);
             }
         }
-        end_timer!(sumcheck_timer);
     }
-    end_timer!(timer);
     return (trees, oracles);
 }
 
@@ -1682,14 +1605,12 @@ where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
     {
-        // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
         self.merkle_path.authenticate_leaves_root::<PF>(
             self.query.left.try_into().unwrap(),
             self.query.right.try_into().unwrap(),
             self.query.index,
             root,
         );
-        // end_timer!(timer);
     }
 }
 
@@ -1903,14 +1824,12 @@ where
         F: TryInto<PF>,
         <F as TryInto<PF>>::Error: Debug,
     {
-        // let timer = start_timer!(|| "ListQuery::Check Merkle Path");
         self.get_inner()
             .iter()
             .zip(roots.iter())
             .for_each(|(q, root)| {
                 q.check_merkle_path::<PF>(root);
             });
-        // end_timer!(timer);
     }
 }
 
@@ -2001,14 +1920,9 @@ where
         <F as TryInto<PF>>::Error: Debug,
         PF::BaseField: Serialize + DeserializeOwned,
     {
-        let timer = start_timer!(|| "SingleQueryResult::check");
-        let oracle_timer = start_timer!(|| "SingleQueryResult::oracle query check");
         self.oracle_query.check_merkle_paths::<F>(roots);
-        end_timer!(oracle_timer);
-        let commit_timer = start_timer!(|| "SingleQueryResult::commit query check");
         self.commitment_query
             .check_merkle_path::<PF>(&Digest(comm.root().0.try_into().unwrap()));
-        end_timer!(commit_timer);
 
         let mut curr_left = self.commitment_query.query.left;
         let mut curr_right = self.commitment_query.query.right;
@@ -2017,7 +1931,6 @@ where
         let mut left_index = right_index - 1;
 
         for i in 0..num_rounds {
-            // let round_timer = start_timer!(|| format!("SingleQueryResult::round {}", i));
             let ri0 = reverse_bits(left_index, num_vars + log_rate - i);
 
             let x0: F = query_point(
@@ -2048,9 +1961,7 @@ where
                 final_codeword[next_index]
             };
             assert_eq!(res, next_oracle_value);
-            // end_timer!(round_timer);
         }
-        end_timer!(timer);
     }
 }
 
@@ -2142,18 +2053,13 @@ where
         <F as TryInto<PF>>::Error: Debug,
         PF::BaseField: Serialize + DeserializeOwned,
     {
-        //let timer = start_timer!(|| "BatchedSingleQueryResult::check");
-        // let oracle_timer = start_timer!(|| "SingleQueryResult::oracle query check");
         self.oracle_query.check_merkle_paths::<F>(roots);
-        // end_timer!(oracle_timer);
-        // let commit_timer = start_timer!(|| "SingleQueryResult::commit query check");
         self.commitments_query.check_merkle_paths::<PF>(
             &comms
                 .iter()
                 .map(|comm| comm.as_field::<F>().root())
                 .collect(),
         );
-        // end_timer!(commit_timer);
 
         let mut curr_left = F::ZERO;
         let mut curr_right = F::ZERO;
@@ -2162,7 +2068,6 @@ where
         let mut left_index = right_index - 1;
 
         for i in 0..num_rounds {
-            // let round_timer = start_timer!(|| format!("BatchedSingleQueryResult::round {}", i));
             let ri0 = reverse_bits(left_index, num_vars + log_rate - i);
             let matching_comms = comms
                 .iter()
@@ -2232,9 +2137,7 @@ where
                 final_codeword[next_index]
             };
             assert_eq!(res, next_oracle_value, "Failed at round {}", i);
-            // end_timer!(round_timer);
         }
-        //end_timer!(timer);
     }
 }
 
@@ -2329,7 +2232,6 @@ where
         <F as TryInto<PF>>::Error: Debug,
         PF::BaseField: Serialize + DeserializeOwned,
     {
-        let timer = start_timer!(|| "BatchedQueriesResult::check");
         self.inner.par_iter().for_each(|(index, query)| {
             query.check::<PF>(
                 fold_challenges,
@@ -2344,7 +2246,6 @@ where
                 *index,
             );
         });
-        end_timer!(timer);
     }
 }
 
@@ -2436,7 +2337,6 @@ where
         <F as TryInto<PF>>::Error: Debug,
         PF::BaseField: Serialize + DeserializeOwned,
     {
-        let timer = start_timer!(|| "QueriesResult::check");
         self.inner.par_iter().for_each(|(index, query)| {
             query.check::<PF>(
                 fold_challenges,
@@ -2450,7 +2350,6 @@ where
                 *index,
             );
         });
-        end_timer!(timer);
     }
 }
 
@@ -2503,19 +2402,14 @@ fn verifier_query_phase<F: SmallField + TryInto<PF>, PF: SmallField<BaseField = 
     <F as TryInto<PF>>::Error: Debug,
     F::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Verifier query phase");
-
-    let encode_timer = start_timer!(|| "Encode final codeword");
     let message = interpolate_over_boolean_hypercube(&final_message);
     let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
     assert_eq!(final_codeword.len(), 1);
     let mut final_codeword = final_codeword.remove(0);
     reverse_index_bits_in_place(&mut final_codeword);
-    end_timer!(encode_timer);
 
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
-    let aes_timer = start_timer!(|| "Initialize AES");
     let mut key: [u8; 16] = [0u8; 16];
     let mut iv: [u8; 16] = [0u8; 16];
     let mut rng = rng.clone();
@@ -2528,7 +2422,6 @@ fn verifier_query_phase<F: SmallField + TryInto<PF>, PF: SmallField<BaseField = 
         GenericArray::from_slice(&key[..]),
         GenericArray::from_slice(&iv[..]),
     );
-    end_timer!(aes_timer);
 
     queries.check::<PF>(
         fold_challenges,
@@ -2541,7 +2434,6 @@ fn verifier_query_phase<F: SmallField + TryInto<PF>, PF: SmallField<BaseField = 
         cipher,
     );
 
-    let final_timer = start_timer!(|| "Final checks");
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
 
     // The sum-check part of the protocol
@@ -2561,9 +2453,6 @@ fn verifier_query_phase<F: SmallField + TryInto<PF>, PF: SmallField<BaseField = 
         ),
         inner_product(final_message, partial_eq)
     );
-    end_timer!(final_timer);
-
-    end_timer!(timer);
 }
 
 fn batch_verifier_query_phase<
@@ -2587,18 +2476,14 @@ fn batch_verifier_query_phase<
     <F as TryInto<PF>>::Error: Debug,
     F::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Verifier batch query phase");
-    let encode_timer = start_timer!(|| "Encode final codeword");
     let message = interpolate_over_boolean_hypercube(&final_message);
     let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
     assert_eq!(final_codeword.len(), 1);
     let mut final_codeword = final_codeword.remove(0);
     reverse_index_bits_in_place(&mut final_codeword);
-    end_timer!(encode_timer);
 
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
-    let aes_timer = start_timer!(|| "Initialize AES");
     let mut key: [u8; 16] = [0u8; 16];
     let mut iv: [u8; 16] = [0u8; 16];
     let mut rng = rng.clone();
@@ -2611,7 +2496,6 @@ fn batch_verifier_query_phase<
         GenericArray::from_slice(&key[..]),
         GenericArray::from_slice(&iv[..]),
     );
-    end_timer!(aes_timer);
 
     queries.check::<PF>(
         fold_challenges,
@@ -2625,7 +2509,6 @@ fn batch_verifier_query_phase<
         cipher,
     );
 
-    let final_timer = start_timer!(|| "Final checks");
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
 
     // The sum-check part of the protocol
@@ -2645,8 +2528,6 @@ fn batch_verifier_query_phase<
         ),
         inner_product(final_message, partial_eq)
     );
-    end_timer!(final_timer);
-    end_timer!(timer);
 }
 
 fn get_table_aes<F: SmallField, Rng: RngCore + Clone>(
