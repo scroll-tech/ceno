@@ -273,4 +273,13 @@ impl<F: SmallField> Interpreter<F> {
             },
         }
     }
+
+    pub(crate) fn generate_record(&self, operands: &Vec<U256>) -> Record {
+        Record {
+            opcode: self.opcode.unwrap(),
+            pc: self.program_counter(),
+            operands: operands.clone(),
+            timestamp: self.timestamp,
+        }
+    }
 }

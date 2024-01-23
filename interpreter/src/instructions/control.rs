@@ -7,10 +7,12 @@ use crate::{
     Host, InstructionResult, Interpreter, InterpreterResult,
 };
 
-pub fn jump<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn jump<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::MID);
     pop!(interpreter, dest);
     let dest = as_usize_or_fail!(interpreter, dest.0, InstructionResult::InvalidJump);
+    let operands = vec![U256::from(dest)];
+    host.record(&interpreter.generate_record(&operands));
     if interpreter.contract.is_valid_jump(dest) {
         // SAFETY: In analysis we are checking create our jump table and we do check above to be
         // sure that jump is safe to execute.
@@ -21,9 +23,11 @@ pub fn jump<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mu
     }
 }
 
-pub fn jumpi<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn jumpi<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::HIGH);
     pop!(interpreter, dest, value);
+    let operands = vec![dest.0, value.0];
+    host.record(&interpreter.generate_record(&operands));
     if value.0 != U256::ZERO {
         let dest = as_usize_or_fail!(interpreter, dest.0, InstructionResult::InvalidJump);
         if interpreter.contract.is_valid_jump(dest) {
@@ -37,20 +41,24 @@ pub fn jumpi<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &m
     }
 }
 
-pub fn jumpdest<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn jumpdest<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::JUMPDEST);
+    host.record(&interpreter.generate_record(&Vec::new()));
 }
 
-pub fn pc<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn pc<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::BASE);
     // - 1 because we have already advanced the instruction pointer in `Interpreter::step`
+    let operands = vec![U256::from(interpreter.program_counter() - 1)];
+    host.record(&interpreter.generate_record(&operands));
     push!(interpreter, U256::from(interpreter.program_counter() - 1));
 }
 
 #[inline(always)]
-fn return_inner<F: SmallField>(
+fn return_inner<H: Host, F: SmallField>(
     interpreter: &mut Interpreter<F>,
     instruction_result: InstructionResult,
+    host: &mut H,
 ) {
     // zero gas cost
     // gas!(interpreter, gas::ZERO);
@@ -69,6 +77,8 @@ fn return_inner<F: SmallField>(
             .to_vec()
             .into()
     }
+    let operands = vec![U256::from(offset.0), U256::from(len)];
+    host.record(&interpreter.generate_record(&operands));
     interpreter.instruction_result = instruction_result;
     interpreter.next_action = Some(crate::InterpreterAction::Return {
         result: InterpreterResult {
@@ -79,27 +89,30 @@ fn return_inner<F: SmallField>(
     });
 }
 
-pub fn ret<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
-    return_inner(interpreter, InstructionResult::Return);
+pub fn ret<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
+    return_inner(interpreter, InstructionResult::Return, host);
 }
 
 /// EIP-140: REVERT instruction
-pub fn revert<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn revert<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, host: &mut H) {
     check!(interpreter, BYZANTIUM);
-    return_inner(interpreter, InstructionResult::Revert);
+    return_inner(interpreter, InstructionResult::Revert, host);
 }
 
 /// Stop opcode. This opcode halts the execution.
-pub fn stop<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn stop<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     interpreter.instruction_result = InstructionResult::Stop;
+    host.record(&interpreter.generate_record(&Vec::new()));
 }
 
 /// Invalid opcode. This opcode halts the execution.
-pub fn invalid<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn invalid<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     interpreter.instruction_result = InstructionResult::InvalidFEOpcode;
+    host.record(&interpreter.generate_record(&Vec::new()));
 }
 
 /// Unknown opcode. This opcode halts the execution.
-pub fn unknown<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn unknown<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     interpreter.instruction_result = InstructionResult::OpcodeNotFound;
+    host.record(&interpreter.generate_record(&Vec::new()));
 }

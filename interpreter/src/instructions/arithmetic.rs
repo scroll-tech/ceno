@@ -3,7 +3,6 @@ use goldilocks::SmallField;
 use super::i256::{i256_div, i256_mod};
 use crate::{
     gas,
-    host::Record,
     primitives::{Spec, U256},
     Host, InstructionResult, Interpreter,
 };
@@ -13,78 +12,95 @@ pub fn wrapped_add<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, hos
     pop_top!(interpreter, op1, op2);
     *op2.0 = op1.0.wrapping_add(*op2.0);
     *op2.1 = interpreter.timestamp;
-    host.record(Record {
-        opcode: interpreter.opcode.unwrap(),
-    });
+    let operands = vec![op1.0, *op2.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
-pub fn wrapping_mul<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn wrapping_mul<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
     *op2.0 = op1.0.wrapping_mul(*op2.0);
     *op2.1 = interpreter.timestamp;
+    let operands = vec![op1.0, *op2.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
-pub fn wrapping_sub<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn wrapping_sub<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
     *op2.0 = op1.0.wrapping_sub(*op2.0);
     *op2.1 = interpreter.timestamp;
+    let operands = vec![op1.0, *op2.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
-pub fn div<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn div<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
     if *op2.0 != U256::ZERO {
         *op2.0 = op1.0.wrapping_div(*op2.0);
     }
     *op2.1 = interpreter.timestamp;
+    let operands = vec![op1.0, *op2.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
-pub fn sdiv<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn sdiv<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
     *op2.0 = i256_div(op1.0, *op2.0);
     *op2.1 = interpreter.timestamp;
+    let operands = vec![op1.0, *op2.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
-pub fn rem<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn rem<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
     if *op2.0 != U256::ZERO {
         *op2.0 = op1.0.wrapping_rem(*op2.0);
     }
     *op2.1 = interpreter.timestamp;
+    let operands = vec![op1.0, *op2.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
-pub fn smod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn smod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
     if *op2.0 != U256::ZERO {
         *op2.0 = i256_mod(op1.0, *op2.0);
     }
     *op2.1 = interpreter.timestamp;
+    let operands = vec![op1.0, *op2.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
-pub fn addmod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn addmod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::MID);
     pop_top!(interpreter, op1, op2, op3);
     *op3.0 = op1.0.add_mod(op2.0, *op3.0);
     *op3.1 = interpreter.timestamp;
+    let operands = vec![op1.0, op2.0, *op3.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
-pub fn mulmod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn mulmod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::MID);
     pop_top!(interpreter, op1, op2, op3);
     *op3.0 = op1.0.mul_mod(op2.0, *op3.0);
     *op3.1 = interpreter.timestamp;
+    let operands = vec![op1.0, op2.0, *op3.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
-pub fn exp<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn exp<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, host: &mut H) {
     pop_top!(interpreter, op1, op2);
     gas_or_fail!(interpreter, gas::exp_cost::<SPEC>(*op2.0));
     *op2.0 = op1.0.pow(*op2.0);
     *op2.1 = interpreter.timestamp;
+    let operands = vec![op1.0, *op2.0];
+    host.record(&interpreter.generate_record(&operands));
 }
 
 /// In the yellow paper `SIGNEXTEND` is defined to take two inputs, we will call them
@@ -102,7 +118,7 @@ pub fn exp<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>,
 /// `y | !mask` where `|` is the bitwise `OR` and `!` is bitwise negation. Similarly, if
 /// `b == 0` then the yellow paper says the output should start with all zeros, then end with
 /// bits from `b`; this is equal to `y & mask` where `&` is bitwise `AND`.
-pub fn signextend<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _host: &mut H) {
+pub fn signextend<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
     if op1.0 < U256::from(32) {
@@ -113,4 +129,6 @@ pub fn signextend<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, _hos
         *op2.0 = if bit { *op2.0 | !mask } else { *op2.0 & mask };
     }
     *op2.1 = interpreter.timestamp;
+    let operands = vec![op1.0, *op2.0];
+    host.record(&interpreter.generate_record(&operands));
 }

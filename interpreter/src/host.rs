@@ -7,9 +7,12 @@ use alloc::vec::Vec;
 mod dummy;
 pub use dummy::DummyHost;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
     pub opcode: u8,
+    pub pc: usize,
+    pub operands: Vec<U256>,
+    pub timestamp: u64,
 }
 
 /// EVM context host.
@@ -57,7 +60,7 @@ pub trait Host {
     fn log(&mut self, address: Address, topics: Vec<B256>, data: Bytes);
 
     /// Record the instruction being executed
-    fn record(&mut self, record: Record);
+    fn record(&mut self, record: &Record);
 
     /// Mark `address` to be deleted, with funds transferred to `target`.
     fn selfdestruct(&mut self, address: Address, target: Address) -> Option<SelfDestructResult>;

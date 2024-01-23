@@ -118,8 +118,8 @@ impl Host for DummyHost {
     }
 
     #[inline]
-    fn record(&mut self, record: Record) {
-        self.records.push(record);
+    fn record(&mut self, record: &Record) {
+        self.records.push(record.clone());
         println!("Recording {:?}", record);
     }
 
