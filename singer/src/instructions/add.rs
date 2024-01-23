@@ -257,3 +257,19 @@ impl Instruction for AddInstruction {
         })
     }
 }
+
+
+#[cfg(test)]
+mod test{
+    use goldilocks::Goldilocks;
+    use crate::instructions::{ChipChallenges, Instruction, AddInstruction};
+
+    #[test]
+    fn test_add_construct_circuit() {
+        let chip_challenges = ChipChallenges::default();
+        let add_InstCircuit 
+            = AddInstruction::construct_circuit::<Goldilocks>(chip_challenges);
+        // this test fails at singer/src/instructions/utils/uint.rs:168:49:
+        // attempt to shift left with overflow
+    }
+}
