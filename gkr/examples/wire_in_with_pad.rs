@@ -1,4 +1,3 @@
-use frontend::structs::CircuitBuilder;
 use gkr::{
     structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState},
     utils::MultilinearExtensionFromVectors,
@@ -6,6 +5,7 @@ use gkr::{
 use goldilocks::Goldilocks;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec;
+use simple_frontend::structs::CircuitBuilder;
 use transcript::Transcript;
 
 fn main() {

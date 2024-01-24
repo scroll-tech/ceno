@@ -1,10 +1,13 @@
-use frontend::structs::{CircuitBuilder, ConstantType, WireId};
+use std::mem;
+
+use ff::Field;
 use gkr::{
     structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState},
     utils::MultilinearExtensionFromVectors,
 };
-use goldilocks::{Goldilocks, SmallField};
+use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
 use itertools::Itertools;
+use simple_frontend::structs::{ChallengeId, CircuitBuilder, MixedCell, WireId};
 use transcript::Transcript;
 struct InputCircuitIOIndex {
     // input
@@ -13,16 +16,17 @@ struct InputCircuitIOIndex {
     lookup_inputs_idx: WireId,
 }
 
-fn construct_input<F: SmallField>(challenge: usize) -> (Circuit<F>, InputCircuitIOIndex) {
-    let input_size = 5;
+fn construct_input<F: SmallField>(
+    challenge: usize,
+    input_size: usize,
+) -> (Circuit<F>, InputCircuitIOIndex) {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let (inputs_idx, inputs) = circuit_builder.create_wire_in(input_size);
-    let (lookup_inputs_idx, lookup_inputs) = circuit_builder.create_wire_out(input_size);
+    let (lookup_inputs_idx, lookup_inputs) = circuit_builder.create_ext_wire_out(input_size);
 
     for (i, input) in inputs.iter().enumerate() {
         // denominator = (input + challenge)
-        circuit_builder.add(lookup_inputs[i], *input, ConstantType::Field(F::ONE));
-        circuit_builder.add_const(lookup_inputs[i], ConstantType::Challenge(challenge));
+        circuit_builder.rlc(&lookup_inputs[i], &[*input], challenge as ChallengeId);
     }
     circuit_builder.configure();
     (
@@ -34,114 +38,127 @@ fn construct_input<F: SmallField>(challenge: usize) -> (Circuit<F>, InputCircuit
     )
 }
 
-#[allow(dead_code)]
-struct TableCircuitIOIndex {
-    // input
-    x_idx: WireId,
-    other_x_pows_idx: WireId,
-    counts_idx: WireId,
-    // output
-    lookup_tables_idx: WireId,
-}
-
-#[allow(dead_code)]
-fn construct_table<F: SmallField>(challenge: usize) -> (Circuit<F>, TableCircuitIOIndex) {
+fn construct_select<F: SmallField>(n_instances: usize, num: usize) -> Circuit<F> {
+    assert_eq!(num, num.next_power_of_two());
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let one = ConstantType::Field(F::ONE);
-    let neg_one = ConstantType::Field(-F::ONE);
-
-    let table_size = 4;
-    let (x_idx, x) = circuit_builder.create_wire_in(1);
-    let (other_x_pows_idx, other_pows_of_x) = circuit_builder.create_wire_in(table_size - 1);
-    let pow_of_xs = [x, other_pows_of_x].concat();
-    for i in 0..table_size - 1 {
-        // circuit_builder.mul2(
-        //     pow_of_xs[i + 1],
-        //     pow_of_xs[i],
-        //     pow_of_xs[i],
-        //     Goldilocks::ONE,
-        // );
-        let tmp = circuit_builder.create_cell();
-        circuit_builder.mul2(tmp, pow_of_xs[i], pow_of_xs[i], one);
-        let diff = circuit_builder.create_cell();
-        circuit_builder.add(diff, pow_of_xs[i + 1], one);
-        circuit_builder.add(diff, tmp, neg_one);
-        circuit_builder.assert_const(diff, &F::ZERO);
-    }
-
-    let (counts_idx, counts) = circuit_builder.create_wire_in(table_size);
-    let (lookup_tables_idx, lookup_tables) = circuit_builder.create_wire_out(table_size * 2);
-    for (i, table) in pow_of_xs.iter().enumerate() {
-        // denominator = (table + challenge)
-        circuit_builder.add(lookup_tables[i << 1], *table, ConstantType::Field(F::ONE));
-        circuit_builder.add_const(lookup_tables[i << 1], ConstantType::Challenge(challenge));
-        // numerator = counts[i]
-        circuit_builder.add(
-            lookup_tables[(i << 1) ^ 1],
-            counts[i],
-            ConstantType::Field(F::ONE),
-        );
-    }
+    let _ = circuit_builder.create_constant_in(n_instances * num, 1);
     circuit_builder.configure();
-    (
-        Circuit::new(&circuit_builder),
-        TableCircuitIOIndex {
-            x_idx,
-            other_x_pows_idx,
-            counts_idx,
-            lookup_tables_idx,
-        },
-    )
-}
-
-#[allow(dead_code)]
-struct PadWithConstIOIndex {
-    // input
-    original_input_idx: WireId,
-}
-
-fn construct_pad_with_const<F: SmallField>(constant: i64) -> (Circuit<F>, PadWithConstIOIndex) {
-    let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (original_input_idx, _) = circuit_builder.create_wire_in(5);
-    let _ = circuit_builder.create_constant_in(3, constant);
-    circuit_builder.configure();
-    (
-        Circuit::new(&circuit_builder),
-        PadWithConstIOIndex { original_input_idx },
-    )
+    Circuit::new(&circuit_builder)
 }
 
 #[allow(dead_code)]
 struct InvSumIOIndex {
     input_idx: WireId,
+    sel_idx: WireId,
 }
 
 fn construct_inv_sum<F: SmallField>() -> (Circuit<F>, InvSumIOIndex) {
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (input_idx, input) = circuit_builder.create_wire_in(2);
-    let output = circuit_builder.create_cells(2);
-    circuit_builder.mul2(output[0], input[0], input[1], ConstantType::Field(F::ONE));
-    circuit_builder.add(output[1], input[0], ConstantType::Field(F::ONE));
-    circuit_builder.add(output[1], input[1], ConstantType::Field(F::ONE));
+    let (input_idx, input) = circuit_builder.create_ext_wire_in(2);
+    let (sel_idx, sel) = circuit_builder.create_wire_in(2);
+    let output_den = circuit_builder.create_ext();
+    let output_num = circuit_builder.create_ext();
+    // selector denominator 1 or input[0] or input[0] * input[1]
+    let den_mul = circuit_builder.create_ext();
+    circuit_builder.mul2_ext(&den_mul, &input[0], &input[1], F::BaseField::ONE);
+    let tmp = circuit_builder.create_ext();
+    circuit_builder.sel_mixed_and_ext(
+        &tmp,
+        MixedCell::Constant(F::BaseField::ONE),
+        &input[0],
+        sel[0],
+    );
+    circuit_builder.sel_ext(&output_den, &tmp, &den_mul, sel[1]);
+
+    // select the numerator 0 or 1 or input[0] + input[1]
+    let den_add = circuit_builder.create_ext();
+    circuit_builder.add_ext(&den_add, &input[0], &input[1]);
+    circuit_builder.sel_mixed_and_ext(&output_num, sel[0].into(), &den_add, sel[1]);
+
     circuit_builder.configure();
-    (Circuit::new(&circuit_builder), InvSumIOIndex { input_idx })
+    (
+        Circuit::new(&circuit_builder),
+        InvSumIOIndex { input_idx, sel_idx },
+    )
 }
 
 #[allow(dead_code)]
+struct FracSumIOIndexLeaf {
+    input_den_idx: WireId,
+    input_num_idx: WireId,
+    sel_idx: WireId,
+}
+
+fn construct_frac_sum_leaf<F: SmallField>() -> (Circuit<F>, FracSumIOIndexLeaf) {
+    let mut circuit_builder = CircuitBuilder::<F>::new();
+    let (input_den_idx, input_den) = circuit_builder.create_ext_wire_in(2);
+    let (input_num_idx, input_num) = circuit_builder.create_wire_in(2);
+    let (sel_idx, sel) = circuit_builder.create_wire_in(2);
+    let output_den = circuit_builder.create_ext();
+    let output_num = circuit_builder.create_ext();
+    // selector denominator, 1 or input_den[0] or input_den[0] * input_den[1]
+    let den_mul = circuit_builder.create_ext();
+    circuit_builder.mul2_ext(&den_mul, &input_den[0], &input_den[1], F::BaseField::ONE);
+    let tmp = circuit_builder.create_ext();
+    circuit_builder.sel_mixed_and_ext(
+        &tmp,
+        MixedCell::Constant(F::BaseField::ONE),
+        &input_den[0],
+        sel[0],
+    );
+    circuit_builder.sel_ext(&output_den, &tmp, &den_mul, sel[1]);
+
+    // select the numerator, 0 or input_num[0] or input_den[0] * input_num[1] + input_num[0] * input_den[1]
+    let num = circuit_builder.create_ext();
+    circuit_builder.mul_ext_base(&num, &input_den[0], input_num[1], F::BaseField::ONE);
+    circuit_builder.mul_ext_base(&num, &input_den[1], input_num[0], F::BaseField::ONE);
+    let tmp = circuit_builder.create_cell();
+    circuit_builder.sel_mixed(
+        tmp,
+        MixedCell::Constant(F::BaseField::ZERO),
+        input_num[0].into(),
+        sel[0],
+    );
+    circuit_builder.sel_mixed_and_ext(&output_num, tmp.into(), &num, sel[1]);
+
+    circuit_builder.configure();
+    (
+        Circuit::new(&circuit_builder),
+        FracSumIOIndexLeaf {
+            input_den_idx,
+            input_num_idx,
+            sel_idx,
+        },
+    )
+}
+
 struct FracSumIOIndex {
-    input_idx: WireId,
+    input_den_idx: WireId,
+    input_num_idx: WireId,
 }
 
 fn construct_frac_sum<F: SmallField>() -> (Circuit<F>, FracSumIOIndex) {
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    // (den1, num1, den2, num2)
-    let (input_idx, input) = circuit_builder.create_wire_in(4);
-    let output = circuit_builder.create_cells(2);
-    circuit_builder.mul2(output[0], input[0], input[2], ConstantType::Field(F::ONE));
-    circuit_builder.mul2(output[1], input[0], input[3], ConstantType::Field(F::ONE));
-    circuit_builder.mul2(output[1], input[1], input[2], ConstantType::Field(F::ONE));
+    let (input_den_idx, input_den) = circuit_builder.create_ext_wire_in(2);
+    let (input_num_idx, input_num) = circuit_builder.create_ext_wire_in(2);
+    let output_den = circuit_builder.create_ext();
+    let output_num = circuit_builder.create_ext();
+    // denominator
+    circuit_builder.mul2_ext(&output_den, &input_den[0], &input_den[1], F::BaseField::ONE);
+
+    // numerator
+    let num = circuit_builder.create_ext();
+    circuit_builder.mul2_ext(&output_num, &input_den[0], &input_num[1], F::BaseField::ONE);
+    circuit_builder.mul2_ext(&output_num, &input_num[0], &input_den[1], F::BaseField::ONE);
+
     circuit_builder.configure();
-    (Circuit::new(&circuit_builder), FracSumIOIndex { input_idx })
+    (
+        Circuit::new(&circuit_builder),
+        FracSumIOIndex {
+            input_den_idx,
+            input_num_idx,
+        },
+    )
 }
 
 fn main() {
@@ -151,67 +168,75 @@ fn main() {
 
     // Construct circuit
     let challenge_no = 0;
-    let (input_circuit, input_circuit_io_index) = construct_input::<Goldilocks>(challenge_no);
-    let (pad_with_one_circuit, _) = construct_pad_with_const::<Goldilocks>(1);
-    let (inv_sum_circuit, _) = construct_inv_sum::<Goldilocks>();
-    let (frac_sum_circuit, _) = construct_frac_sum::<Goldilocks>();
+    let input_size = 4;
+    let instance_size = 4;
+    let (input_circuit, input_circuit_io_index) =
+        construct_input::<GoldilocksExt2>(challenge_no, input_size);
+    let (inv_sum_circuit, inv_sum_io_index) = construct_inv_sum::<GoldilocksExt2>();
+    let (frac_sum_circuit, _) = construct_frac_sum::<GoldilocksExt2>();
 
     // ==================
     // Witness generation
     // ==================
 
-    let mut prover_transcript = Transcript::<Goldilocks>::new(b"test");
+    let mut prover_transcript = Transcript::<GoldilocksExt2>::new(b"test");
     let challenge = [prover_transcript
         .get_and_append_challenge(b"lookup challenge")
         .elements];
 
     // Compute lookup input and output (lookup_input + beta)
-    let mut input_circuit_witness = CircuitWitness::new(&input_circuit, challenge.to_vec());
+    let mut input_circuit_witness =
+        CircuitWitness::<Goldilocks>::new(&input_circuit, challenge.to_vec());
     let mut input_circuit_wires_in = vec![vec![]; input_circuit.n_wires_in];
     input_circuit_wires_in[input_circuit_io_index.inputs_idx as usize] = vec![
         Goldilocks::from(2u64),
         Goldilocks::from(2u64),
         Goldilocks::from(4u64),
         Goldilocks::from(16u64),
-        Goldilocks::from(2u64),
     ];
 
-    input_circuit_witness.add_instance(&input_circuit, &input_circuit_wires_in);
+    for _ in 0..instance_size {
+        input_circuit_witness.add_instance(&input_circuit, &input_circuit_wires_in);
+    }
 
     println!("input_circuit: {:?}", input_circuit);
     println!("input_circuit_witness: {:?}", input_circuit_witness);
 
-    // Pad (lookup_input + beta) with zeros
-    let mut input_pad_with_zero_witness = CircuitWitness::new(&pad_with_one_circuit, vec![]);
-    let input_pad_with_zero_wires_in =
-        &input_circuit_witness.wires_out_ref()[input_circuit_io_index.lookup_inputs_idx as usize];
-    println!(
-        "input_pad_with_zero_wires_in: {:?}",
-        input_pad_with_zero_wires_in
-    );
-    input_pad_with_zero_witness.add_instance(
-        &pad_with_one_circuit,
-        &input_pad_with_zero_wires_in.to_vec(),
-    );
+    // Pad (lookup_input + beta) with zeros, only compute the first 3 instances.
+    let select_circuit = construct_select::<GoldilocksExt2>(3, input_size);
+    let mut select_circuit_witness = CircuitWitness::new(&select_circuit, vec![]);
+    println!("select_circuit_witness_wires_in: []");
+    select_circuit_witness.add_instance(&select_circuit, &[]);
 
     // Compute the sum(1 / (lookup_input + beta))
     let mut inv_sum_witness = CircuitWitness::new(&inv_sum_circuit, vec![]);
-    let input_pad_with_zero_output = &input_pad_with_zero_witness.last_layer_witness_ref()[0];
-    let lookup_input_inv_sum_wires_in = input_pad_with_zero_output.chunks(2);
+    let select_output = &select_circuit_witness.last_layer_witness_ref()[0];
+    let mut sels = select_output.chunks(2).map(|x| x.to_vec()).collect_vec();
+    let mut inv_sum_inputs = input_circuit_witness.wires_out_ref()[0]
+        .iter()
+        .flatten()
+        .cloned()
+        .collect_vec()
+        .chunks(2 * GoldilocksExt2::DEGREE)
+        .map(|x| x.to_vec())
+        .collect_vec();
 
-    for wire_in in lookup_input_inv_sum_wires_in {
-        inv_sum_witness.add_instance(&inv_sum_circuit, &[wire_in.to_vec()]);
+    println!("inv_sum_inputs: {:?}", inv_sum_inputs);
+    println!("sels: {:?}", sels);
+
+    for i in 0..sels.len() {
+        let mut wires_in = vec![vec![]; 2];
+        wires_in[inv_sum_io_index.input_idx as usize] = mem::take(&mut inv_sum_inputs[i]);
+        wires_in[inv_sum_io_index.sel_idx as usize] = mem::take(&mut sels[i]);
+        inv_sum_witness.add_instance(&inv_sum_circuit, &wires_in);
     }
 
     let mut frac_sum_witnesses = vec![];
-    let mut frac_sum_output = inv_sum_witness.last_layer_witness_ref().to_vec();
+    let mut frac_sum_output = inv_sum_witness.wires_out_ref();
     while frac_sum_output.len() > 1 {
         println!("frac_sum_output: {:?}", frac_sum_output);
         let mut frac_sum_witness = CircuitWitness::new(&frac_sum_circuit, vec![]);
-        let frac_sum_wires_in: Vec<Vec<Goldilocks>> = frac_sum_output
-            .chunks(2)
-            .map(|chunk| chunk.iter().flatten().cloned().collect())
-            .collect();
+        let frac_sum_wires_in: Vec<Vec<Goldilocks>> = frac_sum_output;
         for wire_in in frac_sum_wires_in {
             frac_sum_witness.add_instance(&frac_sum_circuit, &[wire_in.to_vec()]);
         }
@@ -265,8 +290,8 @@ fn main() {
     lookup_circuit_proofs.push(proof);
 
     let proof = IOPProverState::prove_parallel(
-        &pad_with_one_circuit,
-        &input_pad_with_zero_witness,
+        &select_circuit,
+        &select_circuit_witness,
         &[(output_point, output_value)],
         &[],
         &mut prover_transcript,
@@ -291,7 +316,7 @@ fn main() {
     // Verify proofs
     // =============
 
-    let mut verifier_transcript = Transcript::<Goldilocks>::new(b"test");
+    let mut verifier_transcript = Transcript::<GoldilocksExt2>::new(b"test");
     let challenge = [verifier_transcript
         .get_and_append_challenge(b"lookup challenge")
         .elements];
@@ -340,12 +365,12 @@ fn main() {
     output_value = claim.values[0];
 
     let claim = IOPVerifierState::verify_parallel(
-        &pad_with_one_circuit,
+        &select_circuit,
         &[],
         &[(output_point, output_value)],
         &[],
         &lookup_circuit_proofs[frac_sum_witnesses.len() + 1],
-        input_pad_with_zero_witness.instance_num_vars(),
+        select_circuit_witness.instance_num_vars(),
         &mut verifier_transcript,
     )
     .expect("verification failed: pad with one");
@@ -370,7 +395,7 @@ fn main() {
             witness
                 .as_slice()
                 .mle(
-                    input_circuit.max_wires_in_num_vars,
+                    input_circuit.max_wires_in_num_vars.unwrap(),
                     input_circuit_witness.instance_num_vars(),
                 )
                 .evaluate(&claim.point)

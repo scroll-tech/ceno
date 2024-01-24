@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use ark_std::{end_timer, start_timer};
-use frontend::structs::{CellId, ConstantType, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
+use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId};
 
 use transcript::Transcript;
 
@@ -34,6 +34,8 @@ impl<F: SmallField> IOPVerifierState<F> {
     ) -> Result<GKRInputClaims<F>, GKRError> {
         let timer = start_timer!(|| "Verification");
         assert_eq!(wires_out_evals.len(), circuit.copy_to_wires_out.len());
+
+        let challenges = circuit.generate_basefield_challenges(challenges);
 
         let mut verifier_state = Self::verifier_init_parallel(output_evals, wires_out_evals);
         for layer_id in 0..circuit.layers.len() as LayerId {
@@ -170,7 +172,7 @@ impl<F: SmallField> IOPVerifierState<F> {
     fn verify_and_update_state_phase2_parallel(
         &mut self,
         circuit: &Circuit<F>,
-        challenges: &[F],
+        challenges: &HashMap<ChallengeConst, Vec<F::BaseField>>,
         layer_out_point: &Point<F>,
         layer_out_value: &F,
         prover_msg: &IOPProverPhase2Message<F>,
@@ -186,12 +188,12 @@ impl<F: SmallField> IOPVerifierState<F> {
             layer,
             layer_out_point,
             layer_out_value,
-            |c| match *c {
-                ConstantType::Field(x) => x,
-                ConstantType::Challenge(i) => challenges[i],
-                ConstantType::ChallengeScaled(i, x) => challenges[i] * x,
-                ConstantType::ChallengePow(i, j) => challenges[i].pow(&[j as u64]),
-                ConstantType::ChallengePowScaled(i, j, x) => challenges[i].pow(&[j as u64]) * x,
+            |constant: ConstantType<F>| -> F::BaseField {
+                match constant {
+                    ConstantType::Challenge(c, j) => challenges[&c][j],
+                    ConstantType::ChallengeScaled(c, j, scalar) => challenges[&c][j] * scalar,
+                    ConstantType::Field(c) => c,
+                }
             },
             hi_out_num_vars,
         );
@@ -365,11 +367,11 @@ struct IOPVerifierPhase2State<'a, F: SmallField> {
     layer_out_point: Point<F>,
     layer_out_value: F,
 
-    mul3s: Vec<Gate3In<F>>,
-    mul2s: Vec<Gate2In<F>>,
-    adds: Vec<Gate1In<F>>,
-    add_consts: Vec<GateCIn<F>>,
-    assert_consts: Vec<GateCIn<F>>,
+    mul3s: Vec<Gate3In<F::BaseField>>,
+    mul2s: Vec<Gate2In<F::BaseField>>,
+    adds: Vec<Gate1In<F::BaseField>>,
+    add_consts: Vec<GateCIn<F::BaseField>>,
+    assert_consts: Vec<GateCIn<F::BaseField>>,
     paste_from: &'a HashMap<LayerId, Vec<CellId>>,
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
@@ -392,6 +394,6 @@ struct IOPVerifierPhase2InputState<'a, F: SmallField> {
     paste_from_counter_in: Vec<(CellId, CellId)>,
     paste_from_const_in: Vec<(F, CellId, CellId)>,
     lo_out_num_vars: usize,
-    lo_in_num_vars: usize,
+    lo_in_num_vars: Option<usize>,
     hi_num_vars: usize,
 }

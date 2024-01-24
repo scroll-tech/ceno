@@ -29,7 +29,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         circuit: &Arc<Circuit<F>>,
         preds: Vec<PredType>,
         challenges: Vec<F>,
-        sources: Vec<Vec<Vec<F>>>, // instances
+        sources: Vec<Vec<Vec<F::BaseField>>>, // instances
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
         assert_eq!(preds.len(), circuit.n_wires_in);
