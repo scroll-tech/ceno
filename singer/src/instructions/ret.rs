@@ -6,6 +6,7 @@ use gkr::structs::Circuit;
 use gkr_graph::structs::{NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
+use revm_interpreter::Record;
 use strum::IntoEnumIterator;
 
 use crate::chips::ChipCircuitGadgets;
@@ -401,7 +402,11 @@ impl Instruction for ReturnInstruction {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in<F: SmallField>(
+        record: &Record,
+        challenge: Option<Vec<F>>,
+        index: usize,
+    ) -> Option<Vec<Vec<F>>> {
         todo!()
     }
 }
@@ -521,7 +526,11 @@ impl Instruction for ReturnPublicOutLoad {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in<F: SmallField>(
+        record: &Record,
+        challenge: Option<Vec<F>>,
+        index: usize,
+    ) -> Option<Vec<Vec<F>>> {
         todo!()
     }
 }
@@ -628,7 +637,11 @@ impl Instruction for ReturnRestMemLoad {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in<F: SmallField>(
+        record: &Record,
+        challenge: Option<Vec<F>>,
+        index: usize,
+    ) -> Option<Vec<Vec<F>>> {
         todo!()
     }
 }
@@ -718,7 +731,11 @@ impl Instruction for ReturnRestMemStore {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in<F: SmallField>(
+        record: &Record,
+        challenge: Option<Vec<F>>,
+        index: usize,
+    ) -> Option<Vec<Vec<F>>> {
         todo!()
     }
 }
@@ -827,7 +844,11 @@ impl Instruction for ReturnRestStackPop {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &revm_interpreter::Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in<F: SmallField>(
+        record: &Record,
+        challenge: Option<Vec<F>>,
+        index: usize,
+    ) -> Option<Vec<Vec<F>>> {
         todo!()
     }
 }

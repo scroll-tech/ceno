@@ -75,11 +75,22 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
     pub fn execute(bytecode: &[u8], input: &[u8]) -> SingerWiresIn<F> {
         let records = Interpreter::<F>::execute(bytecode, input);
         let mut opcode_wires_in = HashMap::<u8, Vec<CircuitWiresIn<F>>>::new();
-        for record in records.iter() {
-            opcode_wires_in
-                .entry(record.opcode)
-                .or_insert(Vec::new())
-                .push(circuit_wires_in_from_record(record));
+        let mut challenge: Option<F> = None;
+        for phase_index in 0.. {
+            let mut has_wires_in_in_this_phase = false;
+            for record in records.iter() {
+                let wires_in = circuit_wires_in_from_record(record, challenge, phase_index);
+                if let Some(wires_in) = wires_in {
+                    let wires = opcode_wires_in.entry(record.opcode).or_insert(Vec::new());
+                    wires.resize(phase_index + 1, Vec::new());
+                    let wire = &mut wires[phase_index];
+                    wire.push(wires_in);
+                }
+                has_wires_in_in_this_phase = true;
+            }
+            if !has_wires_in_in_this_phase {
+                break;
+            }
         }
         SingerWiresIn {
             opcode_wires_in: opcode_wires_in.into_iter().collect(),
@@ -194,22 +205,36 @@ pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 ///   execution
 pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
 
-fn circuit_wires_in_from_record<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+fn circuit_wires_in_from_record<F: SmallField>(
+    record: &Record,
+    challenge: Option<F>,
+    index: usize,
+) -> Option<Vec<Vec<F>>> {
     match OpcodeType::from_u8(record.opcode) {
-        Some(OpcodeType::ADD) => AddInstruction::generate_wires_in(record),
-        Some(OpcodeType::GT) => GtInstruction::generate_wires_in(record),
-        Some(OpcodeType::CALLDATALOAD) => CalldataloadInstruction::generate_wires_in(record),
-        Some(OpcodeType::POP) => PopInstruction::generate_wires_in(record),
-        Some(OpcodeType::MSTORE) => MstoreInstruction::generate_wires_in(record),
-        Some(OpcodeType::JUMP) => JumpInstruction::generate_wires_in(record),
-        Some(OpcodeType::JUMPI) => JumpiInstruction::generate_wires_in(record),
-        Some(OpcodeType::JUMPDEST) => JumpdestInstruction::generate_wires_in(record),
-        Some(OpcodeType::PUSH1) => PushInstruction::<1>::generate_wires_in(record),
-        Some(OpcodeType::DUP1) => DupInstruction::<1>::generate_wires_in(record),
-        Some(OpcodeType::DUP2) => DupInstruction::<2>::generate_wires_in(record),
-        Some(OpcodeType::SWAP2) => SwapInstruction::<2>::generate_wires_in(record),
-        Some(OpcodeType::SWAP4) => SwapInstruction::<4>::generate_wires_in(record),
-        Some(OpcodeType::RETURN) => ReturnInstruction::generate_wires_in(record),
+        Some(OpcodeType::ADD) => AddInstruction::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::GT) => GtInstruction::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::CALLDATALOAD) => {
+            CalldataloadInstruction::generate_wires_in(record, challenge, index)
+        }
+        Some(OpcodeType::POP) => PopInstruction::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::MSTORE) => MstoreInstruction::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::JUMP) => JumpInstruction::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::JUMPI) => JumpiInstruction::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::JUMPDEST) => {
+            JumpdestInstruction::generate_wires_in(record, challenge, index)
+        }
+        Some(OpcodeType::PUSH1) => {
+            PushInstruction::<1>::generate_wires_in(record, challenge, index)
+        }
+        Some(OpcodeType::DUP1) => DupInstruction::<1>::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::DUP2) => DupInstruction::<2>::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::SWAP2) => {
+            SwapInstruction::<2>::generate_wires_in(record, challenge, index)
+        }
+        Some(OpcodeType::SWAP4) => {
+            SwapInstruction::<4>::generate_wires_in(record, challenge, index)
+        }
+        Some(OpcodeType::RETURN) => ReturnInstruction::generate_wires_in(record, challenge, index),
         None => panic!("Unsupported opcode: {}", record.opcode),
         _ => unimplemented!(),
     }

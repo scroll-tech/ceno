@@ -202,7 +202,11 @@ pub(crate) trait Instruction {
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError>;
 
-    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F>;
+    fn generate_wires_in<F: SmallField>(
+        record: &Record,
+        challenge: Option<Vec<F>>,
+        index: usize,
+    ) -> Option<Vec<Vec<F>>>;
 }
 
 /// Construct the part of the circuit graph for an instruction.

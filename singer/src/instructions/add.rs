@@ -3,6 +3,7 @@ use std::sync::Arc;
 use frontend::structs::{CircuitBuilder, MixedCell};
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
+use revm_interpreter::Record;
 
 use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
@@ -258,8 +259,10 @@ impl Instruction for AddInstruction {
     }
 
     fn generate_wires_in<F: SmallField>(
-        record: &revm_interpreter::Record,
-    ) -> crate::CircuitWiresIn<F> {
+        record: &Record,
+        challenge: Option<Vec<F>>,
+        index: usize,
+    ) -> Option<Vec<Vec<F>>> {
         todo!()
     }
 }
