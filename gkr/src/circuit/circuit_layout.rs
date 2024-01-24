@@ -217,28 +217,28 @@ impl<F: SmallField> Circuit<F> {
                                 constant: *c,
                             });
                         }
-                        GateType::Add(in_0, scaler) => {
+                        GateType::Add(in_0, scalar) => {
                             layers[layer_id as usize].adds.push(Gate1In {
                                 idx_in: current_wire_id(*in_0),
                                 idx_out: i,
-                                scaler: *scaler,
+                                scalar: *scalar,
                             });
                         }
-                        GateType::Mul2(in_0, in_1, scaler) => {
+                        GateType::Mul2(in_0, in_1, scalar) => {
                             layers[layer_id as usize].mul2s.push(Gate2In {
                                 idx_in1: current_wire_id(*in_0),
                                 idx_in2: current_wire_id(*in_1),
                                 idx_out: i,
-                                scaler: *scaler,
+                                scalar: *scalar,
                             });
                         }
-                        GateType::Mul3(in_0, in_1, in_2, scaler) => {
+                        GateType::Mul3(in_0, in_1, in_2, scalar) => {
                             layers[layer_id as usize].mul3s.push(Gate3In {
                                 idx_in1: current_wire_id(*in_0),
                                 idx_in2: current_wire_id(*in_1),
                                 idx_in3: current_wire_id(*in_2),
                                 idx_out: i,
-                                scaler: *scaler,
+                                scalar: *scalar,
                             });
                         }
                     }
