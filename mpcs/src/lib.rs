@@ -486,7 +486,7 @@ mod test {
         }
     }
 
-    use frontend::structs::{CircuitBuilder, ConstantType};
+    use frontend::structs::{CircuitBuilder, ConstantType, WireId};
     use gkr::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState};
     use gkr::utils::MultilinearExtensionFromVectors;
     use transcript::Transcript;
@@ -497,11 +497,11 @@ mod test {
 
     struct AllInputIndex {
         // public
-        inputs_idx: usize,
+        inputs_idx: WireId,
 
         // private
-        other_x_pows_idx: usize,
-        count_idx: usize,
+        other_x_pows_idx: WireId,
+        count_idx: WireId,
     }
 
     fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
@@ -528,15 +528,15 @@ mod test {
             circuit_builder.assert_const(diff, &F::ZERO);
         }
 
-        let table_type = TableType::FakeHashTable as usize;
+        let table_type = TableType::FakeHashTable as u16;
         let count_idx = circuit_builder.define_table_type(table_type);
         for i in 0..table_size {
-            circuit_builder.add_table_item(table_type, pow_of_xs[i]);
+            circuit_builder.add_lookup_table_item(table_type, pow_of_xs[i]);
         }
 
         let (inputs_idx, inputs) = circuit_builder.create_wire_in(5);
         inputs.iter().for_each(|input| {
-            circuit_builder.add_input_item(table_type, *input);
+            circuit_builder.add_lookup_input_item(table_type, *input);
         });
 
         circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));
@@ -548,7 +548,7 @@ mod test {
             AllInputIndex {
                 other_x_pows_idx,
                 inputs_idx,
-                count_idx,
+                count_idx: count_idx,
             },
         )
     }
@@ -579,7 +579,7 @@ mod test {
         let (circuit, all_input_index) = construct_circuit::<F>();
         // println!("circuit: {:?}", circuit);
         let mut wires_in = vec![vec![]; circuit.n_wires_in];
-        wires_in[all_input_index.inputs_idx] = vec![
+        wires_in[all_input_index.inputs_idx as usize] = vec![
             F::from(2u64),
             F::from(2u64),
             F::from(4u64),
@@ -587,9 +587,9 @@ mod test {
             F::from(2u64),
         ];
         // x = 2, 2^2 = 4, 2^2^2 = 16, 2^2^2^2 = 256
-        wires_in[all_input_index.other_x_pows_idx] =
+        wires_in[all_input_index.other_x_pows_idx as usize] =
             vec![F::from(4u64), F::from(16u64), F::from(256u64)];
-        wires_in[all_input_index.count_idx] =
+        wires_in[all_input_index.count_idx as usize] =
             vec![F::from(3u64), F::from(1u64), F::from(1u64), F::from(0u64)];
 
         let circuit_witness = {
@@ -632,14 +632,14 @@ mod test {
         // Commitments should be part of the proof, which is not yet
 
         let (proof, output_num_vars, output_eval) = {
-            let mut prover_transcript = Transcript::new(b"example");
+            let mut prover_transcript = Transcript::<F>::new(b"example");
             let output_num_vars = instance_num_vars + circuit.last_layer_ref().num_vars();
 
             let output_point = (0..output_num_vars)
                 .map(|_| {
                     prover_transcript
                         .get_and_append_challenge(b"output point")
-                        .elements[0]
+                        .elements
                 })
                 .collect_vec();
 
@@ -660,12 +660,12 @@ mod test {
         };
 
         let gkr_input_claims = {
-            let mut verifier_transcript = &mut Transcript::new(b"example");
+            let mut verifier_transcript = &mut Transcript::<F>::new(b"example");
             let output_point = (0..output_num_vars)
                 .map(|_| {
                     verifier_transcript
                         .get_and_append_challenge(b"output point")
-                        .elements[0]
+                        .elements
                 })
                 .collect_vec();
             IOPVerifierState::verify_parallel(
