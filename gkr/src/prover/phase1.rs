@@ -98,7 +98,7 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
 
                 assert!(copy_to.len() <= lo_eq_w_p.len());
                 let g1_j =
-                    copy_to.fix_row_row_first_with_scaler(&lo_eq_w_p, self.lo_num_vars, alpha_pow);
+                    copy_to.fix_row_row_first_with_scalar(&lo_eq_w_p, self.lo_num_vars, alpha_pow);
                 g1.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
                     self.lo_num_vars,
                     g1_j,

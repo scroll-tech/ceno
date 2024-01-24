@@ -38,7 +38,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                 idx_in2: gate.idx_in2,
                 idx_in3: gate.idx_in3,
                 idx_out: gate.idx_out,
-                scaler: constant(&gate.scaler),
+                scalar: constant(&gate.scalar),
             })
             .collect_vec();
         let mul2s = layer
@@ -48,7 +48,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                 idx_in1: gate.idx_in1,
                 idx_in2: gate.idx_in2,
                 idx_out: gate.idx_out,
-                scaler: constant(&gate.scaler),
+                scalar: constant(&gate.scalar),
             })
             .collect_vec();
         let adds = layer
@@ -57,7 +57,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
             .map(|gate| Gate1In {
                 idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                scaler: constant(&gate.scaler),
+                scalar: constant(&gate.scalar),
             })
             .collect_vec();
         let assert_consts = layer
@@ -211,7 +211,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                     for s in 0..(1 << hi_num_vars) {
                         g1[(s << lo_in_num_vars) ^ gate.idx_in1] += tensor_eq_ty_rtry
                             [(s << lo_out_num_vars) ^ gate.idx_out]
-                            * gate.scaler
+                            * gate.scalar
                             * layer_in_vec[s][gate.idx_in2]
                             * layer_in_vec[s][gate.idx_in3];
                     }
@@ -220,14 +220,14 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                     for s in 0..(1 << hi_num_vars) {
                         g1[(s << lo_in_num_vars) ^ gate.idx_in1] += tensor_eq_ty_rtry
                             [(s << lo_out_num_vars) ^ gate.idx_out]
-                            * gate.scaler
+                            * gate.scalar
                             * layer_in_vec[s][gate.idx_in2];
                     }
                 });
                 adds.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
                         g1[(s << lo_in_num_vars) ^ gate.idx_in] +=
-                            tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out] * gate.scaler;
+                            tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out] * gate.scalar;
                     }
                 });
                 Arc::new(DenseMultilinearExtension::from_evaluations_vec(
@@ -342,7 +342,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                     g2[(s << lo_in_num_vars) ^ gate.idx_in2] += tensor_eq_ty_rtry
                         [(s << lo_out_num_vars) ^ gate.idx_out]
                         * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in1]
-                        * gate.scaler
+                        * gate.scalar
                         * layer_in_vec[s][gate.idx_in3];
                 }
             });
@@ -351,7 +351,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                     g2[(s << lo_in_num_vars) ^ gate.idx_in2] += tensor_eq_ty_rtry
                         [(s << lo_out_num_vars) ^ gate.idx_out]
                         * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in1]
-                        * gate.scaler;
+                        * gate.scalar;
                 }
             });
             Arc::new(DenseMultilinearExtension::from_evaluations_vec(
@@ -417,7 +417,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                         [(s << lo_out_num_vars) ^ gate.idx_out]
                         * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in1]
                         * tensor_eq_s2x2_rs2rx2[(s << lo_in_num_vars) ^ gate.idx_in2]
-                        * gate.scaler;
+                        * gate.scalar;
                 }
             });
             Arc::new(DenseMultilinearExtension::from_evaluations_vec(

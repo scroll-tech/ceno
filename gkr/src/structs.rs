@@ -111,7 +111,7 @@ pub struct GateCIn<C> {
 pub struct Gate1In<C> {
     pub(crate) idx_in: CellId,
     pub(crate) idx_out: CellId,
-    pub(crate) scaler: C,
+    pub(crate) scalar: C,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -119,7 +119,7 @@ pub struct Gate2In<C> {
     pub(crate) idx_in1: CellId,
     pub(crate) idx_in2: CellId,
     pub(crate) idx_out: CellId,
-    pub(crate) scaler: C,
+    pub(crate) scalar: C,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -128,7 +128,7 @@ pub struct Gate3In<C> {
     pub(crate) idx_in2: CellId,
     pub(crate) idx_in3: CellId,
     pub(crate) idx_out: CellId,
-    pub(crate) scaler: C,
+    pub(crate) scalar: C,
 }
 
 #[derive(Clone, Serialize)]

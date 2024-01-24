@@ -118,14 +118,14 @@ where
         out_cell.gates.push(GateType::AddC(constant));
     }
 
-    pub fn add(&mut self, out: CellId, in_0: CellId, scaler: ConstantType<F>) {
+    pub fn add(&mut self, out: CellId, in_0: CellId, scalar: ConstantType<F>) {
         let out_cell = &mut self.cells[out];
-        out_cell.gates.push(GateType::Add(in_0, scaler));
+        out_cell.gates.push(GateType::Add(in_0, scalar));
     }
 
-    pub fn mul2(&mut self, out: CellId, in_0: CellId, in_1: CellId, scaler: ConstantType<F>) {
+    pub fn mul2(&mut self, out: CellId, in_0: CellId, in_1: CellId, scalar: ConstantType<F>) {
         let out_cell = &mut self.cells[out];
-        out_cell.gates.push(GateType::Mul2(in_0, in_1, scaler));
+        out_cell.gates.push(GateType::Mul2(in_0, in_1, scalar));
     }
 
     pub fn mul3(
@@ -134,9 +134,9 @@ where
         in_0: CellId,
         in_1: CellId,
         in_2: CellId,
-        scaler: ConstantType<F>,
+        scalar: ConstantType<F>,
     ) {
-        if let ConstantType::Field(constant) = scaler {
+        if let ConstantType::Field(constant) = scalar {
             if constant == F::ZERO {
                 return;
             }
@@ -144,7 +144,7 @@ where
         let out_cell = &mut self.cells[out];
         out_cell
             .gates
-            .push(GateType::Mul3(in_0, in_1, in_2, scaler));
+            .push(GateType::Mul3(in_0, in_1, in_2, scalar));
     }
 
     pub fn assert_const(&mut self, out: CellId, constant: &F) {
@@ -243,29 +243,29 @@ where
         self.add_const(out, ConstantType::ChallengePow(challenge, in_array.len()));
     }
 
-    /// Compute \sum_{i = 0}^{in_0_array.len()} scalers[i] * in_0_array[i] * in_1_array[i].
+    /// Compute \sum_{i = 0}^{in_0_array.len()} scalars[i] * in_0_array[i] * in_1_array[i].
     pub fn inner_product(
         &mut self,
         out: CellId,
         in_0_array: &[CellId],
         in_1_array: &[CellId],
-        scaler_array: &[ConstantType<F>],
+        scalar_array: &[ConstantType<F>],
     ) {
         assert_eq!(in_0_array.len(), in_1_array.len());
-        assert_eq!(in_0_array.len(), scaler_array.len());
-        for ((in_0, in_1), scaler) in in_0_array.iter().zip(in_1_array).zip(scaler_array) {
-            self.mul2(out, *in_0, *in_1, *scaler);
+        assert_eq!(in_0_array.len(), scalar_array.len());
+        for ((in_0, in_1), scalar) in in_0_array.iter().zip(in_1_array).zip(scalar_array) {
+            self.mul2(out, *in_0, *in_1, *scalar);
         }
     }
     pub fn inner_product_const(
         &mut self,
         out: CellId,
         in_0_array: &[CellId],
-        scaler_array: &[ConstantType<F>],
+        scalar_array: &[ConstantType<F>],
     ) {
-        assert_eq!(in_0_array.len(), scaler_array.len());
-        for (in_0, scaler) in in_0_array.iter().zip(scaler_array) {
-            self.add(out, *in_0, *scaler);
+        assert_eq!(in_0_array.len(), scalar_array.len());
+        for (in_0, scalar) in in_0_array.iter().zip(scalar_array) {
+            self.add(out, *in_0, *scalar);
         }
     }
     pub fn product_of_array(&mut self, out: CellId, in_array: &[CellId]) {
