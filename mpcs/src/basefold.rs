@@ -24,7 +24,7 @@ use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
 use ctr;
-use ff::BatchInverter;
+use ff::{BatchInverter, Field};
 use generic_array::GenericArray;
 use goldilocks::SmallField;
 use std::{ops::Deref, time::Instant};
@@ -173,6 +173,20 @@ where
             root: Digest::<EF>(self.root().0),
             num_vars: self.num_vars,
         }
+    }
+}
+
+impl<F: SmallField, EF: SmallField<BaseField = F>> Into<Vec<EF>> for BasefoldCommitment<F>
+where
+    F: SmallField<BaseField = F>,
+    F::BaseField: Serialize + DeserializeOwned,
+{
+    fn into(self) -> Vec<EF> {
+        let mut data = self.root.0.to_vec();
+        data.resize(data.len().next_multiple_of(EF::DEGREE), F::ZERO);
+        data.chunks(EF::DEGREE)
+            .map(|chunk| EF::from_limbs(chunk))
+            .collect_vec()
     }
 }
 
@@ -2751,6 +2765,44 @@ fn get_table_aes<F: SmallField, Rng: RngCore + Clone>(
 
     return (unflattened_table_w_weights, unflattened_table);
 }
+
+#[derive(Debug)]
+pub struct StandardBasefoldParams;
+
+impl BasefoldExtParams for StandardBasefoldParams {
+    // TODO: Change to strictly analyzed numbers
+    fn get_reps() -> usize {
+        120
+    }
+
+    fn get_rate() -> usize {
+        2
+    }
+
+    fn get_basecode() -> usize {
+        16
+    }
+}
+
+pub type StandardBasefold<F> = Basefold<F, StandardBasefoldParams>;
+pub type StandardBasefoldCommitment<F> = <StandardBasefold<F> as PolynomialCommitmentScheme<
+    F,
+    <F as SmallField>::BaseField,
+>>::Commitment;
+pub type StandardBasefoldCommitmentWithData<F> = <StandardBasefold<F> as PolynomialCommitmentScheme<
+    F,
+    <F as SmallField>::BaseField,
+>>::CommitmentWithData;
+pub type StandardBasefoldParam<F> =
+    <StandardBasefold<F> as PolynomialCommitmentScheme<F, <F as SmallField>::BaseField>>::Param;
+pub type StandardBasefoldProverParam<F> = <StandardBasefold<F> as PolynomialCommitmentScheme<
+    F,
+    <F as SmallField>::BaseField,
+>>::ProverParam;
+pub type StandardBasefoldVerifierParam<F> = <StandardBasefold<F> as PolynomialCommitmentScheme<
+    F,
+    <F as SmallField>::BaseField,
+>>::VerifierParam;
 
 #[cfg(test)]
 mod test {

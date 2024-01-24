@@ -24,8 +24,15 @@ use instructions::{
     jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
     ret::ReturnInstruction, swap::SwapInstruction,
 };
+use mpcs::poly::multilinear::MultilinearPolynomial;
+use mpcs::PolynomialCommitmentScheme;
+use mpcs::StandardBasefold;
+use mpcs::StandardBasefoldProverParam;
 use num_traits::FromPrimitive;
+use rand::RngCore;
 use revm_interpreter::{Interpreter, Record};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::mem;
 use strum::IntoEnumIterator;
@@ -76,11 +83,17 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
         })
     }
 
-    pub fn execute<EF: SmallField<BaseField = F>>(
+    pub fn execute<EF: SmallField<BaseField = F>, Rng: RngCore + Clone>(
         bytecode: &[u8],
         input: &[u8],
         transcript: &mut Transcript<EF>,
-    ) -> SingerWiresIn<F> {
+        pp: &StandardBasefoldProverParam<EF>,
+    ) -> SingerWiresIn<F>
+    where
+        F: SmallField<BaseField = F> + Serialize + DeserializeOwned + Into<EF>,
+        EF: Serialize + DeserializeOwned + TryInto<F>,
+        <EF as TryInto<F>>::Error: core::fmt::Debug,
+    {
         let records = Interpreter::<F>::execute(bytecode, input);
         let mut opcode_wires_in = HashMap::<u8, Vec<CircuitWiresIn<F>>>::new();
         let mut challenges: Option<Vec<F>> = None;
@@ -108,18 +121,30 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
             if !has_wires_in_in_this_phase {
                 break;
             }
-            for (opcode, wires) in opcode_wires_in.iter() {
-                let wire = &wires[phase_index];
-                // wire is a three dimensional array respectively indexed by
-                // 1. Different circuits for one opcode
-                // 2. Repetition of this circuit in the execution
-                // 3. The wire values for one wire_in
-                // The repetitions of one circuit should be processed by GKR as a single
-                // parallel circuit, and the inputs should be in one polynomial
-                for wire_in in wire.iter() {
-                    let mut values = wire_in.concat();
-                    values.resize(values.len().next_power_of_two(), F::ZERO);
+            // Only generate the challenges once, because we know that there are at most
+            // two phases, where only the second phase requires the challenge
+            if challenges.is_none() {
+                for (_, wires) in opcode_wires_in.iter() {
+                    let wire = &wires[phase_index];
+                    // wire is a three dimensional array respectively indexed by
+                    // 1. Different circuits for one opcode
+                    // 2. Repetition of this circuit in the execution
+                    // 3. The wire values for one wire_in
+                    // The repetitions of one circuit should be processed by GKR as a single
+                    // parallel circuit, and the inputs should be in one polynomial
+                    for wire_in in wire.iter() {
+                        let mut values = wire_in.concat();
+                        values.resize(values.len().next_power_of_two(), F::ZERO);
+                        let poly = MultilinearPolynomial::new(values);
+                        let cm = StandardBasefold::<EF>::commit(pp, &poly).unwrap();
+                        let elements: Vec<EF> = cm.to_commitment().into();
+                        for element in elements {
+                            transcript.append_field_element(&element);
+                        }
+                    }
                 }
+                let challenge = transcript.get_and_append_challenge(b"phase");
+                challenges = Some(challenge.elements.to_limbs());
             }
         }
         SingerWiresIn {
