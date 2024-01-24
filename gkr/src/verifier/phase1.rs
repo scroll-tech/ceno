@@ -1,8 +1,8 @@
 use ark_std::{end_timer, start_timer};
-use frontend::structs::{CellId, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
+use simple_frontend::structs::{CellId, LayerId};
 use transcript::Transcript;
 
 use crate::{

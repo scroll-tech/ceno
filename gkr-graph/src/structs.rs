@@ -8,20 +8,6 @@ type GKRProverState<F: SmallField> = gkr::structs::IOPProverState<F>;
 type GKRVerifierState<F: SmallField> = gkr::structs::IOPVerifierState<F>;
 type GKRProof<F: SmallField> = gkr::structs::IOPProof<F>;
 
-pub struct NodeWireIn {
-    node_id: usize,
-    prep_wire_id: WireId,
-    /// The number of variables of the preceding nodes.
-    num_vars: usize,
-}
-
-pub struct NodeWireOut {
-    node_id: usize,
-    succ_wire_id: WireId,
-    /// The number of variables of the succeeding nodes.
-    num_vars: usize,
-}
-
 /// Corresponds to the `output_evals` and `wires_out_evals` in gkr
 /// `prove_parallel`.
 pub struct IOPProverState<F: SmallField> {
