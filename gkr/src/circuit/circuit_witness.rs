@@ -87,14 +87,14 @@ impl<F: SmallField> CircuitWitness<F> {
 
             for add in layer.adds.iter() {
                 current_layer_witness[add.idx_out] +=
-                    last_layer_witness[add.idx_in] * constant(add.scaler);
+                    last_layer_witness[add.idx_in] * constant(add.scalar);
             }
 
             for mul2 in layer.mul2s.iter() {
                 current_layer_witness[mul2.idx_out] = current_layer_witness[mul2.idx_out]
                     + last_layer_witness[mul2.idx_in1]
                         * last_layer_witness[mul2.idx_in2]
-                        * constant(mul2.scaler);
+                        * constant(mul2.scalar);
             }
 
             for mul3 in layer.mul3s.iter() {
@@ -102,7 +102,7 @@ impl<F: SmallField> CircuitWitness<F> {
                     + last_layer_witness[mul3.idx_in1]
                         * last_layer_witness[mul3.idx_in2]
                         * last_layer_witness[mul3.idx_in3]
-                        * constant(mul3.scaler);
+                        * constant(mul3.scalar);
             }
             for assert_const in layer.assert_consts.iter() {
                 assert_eq!(
@@ -202,18 +202,18 @@ impl<F: SmallField> CircuitWitness<F> {
                         expected[add_const.idx_out] + self.constant(&add_const.constant);
                 }
                 for add in layer.adds.iter() {
-                    expected[add.idx_out] += prev[add.idx_in] * self.constant(&add.scaler);
+                    expected[add.idx_out] += prev[add.idx_in] * self.constant(&add.scalar);
                 }
                 for mul2 in layer.mul2s.iter() {
                     expected[mul2.idx_out] = expected[mul2.idx_out]
-                        + prev[mul2.idx_in1] * prev[mul2.idx_in2] * self.constant(&mul2.scaler);
+                        + prev[mul2.idx_in1] * prev[mul2.idx_in2] * self.constant(&mul2.scalar);
                 }
                 for mul3 in layer.mul3s.iter() {
                     expected[mul3.idx_out] = expected[mul3.idx_out]
                         + prev[mul3.idx_in1]
                             * prev[mul3.idx_in2]
                             * prev[mul3.idx_in3]
-                            * self.constant(&mul3.scaler);
+                            * self.constant(&mul3.scalar);
                 }
 
                 let mut expected_max_previous_size = prev.len();

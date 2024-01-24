@@ -22,7 +22,7 @@ pub enum ConstantType<F: SmallField> {
 }
 
 /// Represent a gate in the circuit. The inner variables denote the input
-/// indices and scaler.
+/// indices and scalar.
 #[derive(Clone, Debug)]
 pub enum GateType<F: SmallField> {
     AddC(ConstantType<F>),
@@ -90,18 +90,18 @@ impl<F: SmallField> MixedCell<F> {
             MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s, *sh - shift),
         }
     }
-    pub fn mul(&self, scaler: F) -> Self {
+    pub fn mul(&self, scalar: F) -> Self {
         match self {
-            MixedCell::Constant(c) => MixedCell::Constant(*c * scaler),
-            MixedCell::Cell(c) => MixedCell::CellExpr(*c, scaler, F::ZERO),
-            MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s * scaler, *sh * scaler),
+            MixedCell::Constant(c) => MixedCell::Constant(*c * scalar),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, scalar, F::ZERO),
+            MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s * scalar, *sh * scalar),
         }
     }
-    pub fn expr(&self, scaler: F, shift: F) -> Self {
+    pub fn expr(&self, scalar: F, shift: F) -> Self {
         match self {
-            MixedCell::Constant(c) => MixedCell::Constant(*c * scaler + shift),
+            MixedCell::Constant(c) => MixedCell::Constant(*c * scalar + shift),
             MixedCell::Cell(c) => MixedCell::Cell(*c),
-            MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s * scaler, *sh * shift),
+            MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s * scalar, *sh * shift),
         }
     }
 }

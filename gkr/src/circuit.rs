@@ -43,13 +43,13 @@ where
 {
     fn eval(&self, out_eq_vec: &[F], in_eq_vec: &[F]) -> F {
         self.iter().fold(F::ZERO, |acc, gate| {
-            acc + out_eq_vec[gate.idx_out] * in_eq_vec[gate.idx_in] * gate.scaler
+            acc + out_eq_vec[gate.idx_out] * in_eq_vec[gate.idx_in] * gate.scalar
         })
     }
     fn fix_out_variables(&self, in_size: usize, out_eq_vec: &[F]) -> Vec<F> {
         let mut ans = vec![F::ZERO; in_size];
         for gate in self.iter() {
-            ans[gate.idx_in] += out_eq_vec[gate.idx_out] * gate.scaler;
+            ans[gate.idx_in] += out_eq_vec[gate.idx_out] * gate.scalar;
         }
         ans
     }
@@ -71,7 +71,7 @@ where
             acc + out_eq_vec[gate.idx_out]
                 * in1_eq_vec[gate.idx_in1]
                 * in2_eq_vec[gate.idx_in2]
-                * gate.scaler
+                * gate.scalar
         })
     }
 }
@@ -93,7 +93,7 @@ where
                 * in1_eq_vec[gate.idx_in1]
                 * in2_eq_vec[gate.idx_in2]
                 * in3_eq_vec[gate.idx_in3]
-                * gate.scaler
+                * gate.scalar
         })
     }
 }
