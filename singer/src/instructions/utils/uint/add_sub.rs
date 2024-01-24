@@ -220,3 +220,41 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         Ok(result)
     }
 }
+
+
+#[cfg(test)]
+mod test {
+    use goldilocks::Goldilocks;
+    use frontend::structs::CircuitBuilder;
+    use super::{UInt, UIntAddSub};
+
+    #[test]
+    fn test_add_unsafe() {
+        type Uint256_63 = UInt<256, 63>;
+        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let addend_0 = Uint256_63::try_from(vec![1, 2, 3, 4, 5]);
+        let addend_1 = Uint256_63::try_from(vec![0, 2, 4, 6, 8]);
+        let carry = vec![1, 2];
+        let result = UIntAddSub::<Uint256_63>::add_unsafe(
+                                                                 &mut circuit_builder, 
+                                                                 &addend_0.unwrap(),
+                                                                 &addend_1.unwrap(),
+                                                                 &carry);
+        assert_eq!(result.unwrap().values, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_sub_unsafe() {
+        type Uint256_63 = UInt<256, 63>;
+        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let minuend = Uint256_63::try_from(vec![1, 2, 3, 4, 5]);
+        let subtrahend = Uint256_63::try_from(vec![0, 2, 4, 6, 8]);
+        let borrow = vec![1, 2];
+        let result = UIntAddSub::<Uint256_63>::sub_unsafe(
+                                                                 &mut circuit_builder, 
+                                                                 &minuend.unwrap(),
+                                                                 &subtrahend.unwrap(),
+                                                                 &borrow);
+        assert_eq!(result.unwrap().values, vec![0, 1, 2, 3, 4]);
+    }
+}
