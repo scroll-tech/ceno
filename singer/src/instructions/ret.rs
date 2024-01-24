@@ -404,9 +404,9 @@ impl Instruction for ReturnInstruction {
 
     fn generate_wires_in<F: SmallField>(
         record: &Record,
-        challenge: Option<Vec<F>>,
+        challenge: &Option<Vec<F>>,
         index: usize,
-    ) -> Option<Vec<Vec<F>>> {
+    ) -> Option<Vec<F>> {
         todo!()
     }
 }
@@ -528,9 +528,9 @@ impl Instruction for ReturnPublicOutLoad {
 
     fn generate_wires_in<F: SmallField>(
         record: &Record,
-        challenge: Option<Vec<F>>,
+        challenge: &Option<Vec<F>>,
         index: usize,
-    ) -> Option<Vec<Vec<F>>> {
+    ) -> Option<Vec<F>> {
         todo!()
     }
 }
@@ -639,9 +639,9 @@ impl Instruction for ReturnRestMemLoad {
 
     fn generate_wires_in<F: SmallField>(
         record: &Record,
-        challenge: Option<Vec<F>>,
+        challenge: &Option<Vec<F>>,
         index: usize,
-    ) -> Option<Vec<Vec<F>>> {
+    ) -> Option<Vec<F>> {
         todo!()
     }
 }
@@ -733,9 +733,9 @@ impl Instruction for ReturnRestMemStore {
 
     fn generate_wires_in<F: SmallField>(
         record: &Record,
-        challenge: Option<Vec<F>>,
+        challenge: &Option<Vec<F>>,
         index: usize,
-    ) -> Option<Vec<Vec<F>>> {
+    ) -> Option<Vec<F>> {
         todo!()
     }
 }
@@ -846,9 +846,9 @@ impl Instruction for ReturnRestStackPop {
 
     fn generate_wires_in<F: SmallField>(
         record: &Record,
-        challenge: Option<Vec<F>>,
+        challenge: &Option<Vec<F>>,
         index: usize,
-    ) -> Option<Vec<Vec<F>>> {
+    ) -> Option<Vec<F>> {
         todo!()
     }
 }

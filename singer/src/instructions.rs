@@ -204,9 +204,9 @@ pub(crate) trait Instruction {
 
     fn generate_wires_in<F: SmallField>(
         record: &Record,
-        challenge: Option<Vec<F>>,
+        challenges: &Option<Vec<F>>,
         index: usize,
-    ) -> Option<Vec<Vec<F>>>;
+    ) -> Option<Vec<F>>;
 }
 
 /// Construct the part of the circuit graph for an instruction.

@@ -202,9 +202,9 @@ impl Instruction for PopInstruction {
 
     fn generate_wires_in<F: SmallField>(
         record: &Record,
-        challenge: Option<Vec<F>>,
+        challenge: &Option<Vec<F>>,
         index: usize,
-    ) -> Option<Vec<Vec<F>>> {
+    ) -> Option<Vec<F>> {
         todo!()
     }
 }

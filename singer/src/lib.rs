@@ -11,6 +11,9 @@ use gkr_graph::structs::NodeOutputType;
 use goldilocks::SmallField;
 use instructions::construct_inst_circuit_graph;
 use instructions::construct_instruction_circuits;
+use instructions::ret::ReturnPublicOutLoad;
+use instructions::ret::ReturnRestMemLoad;
+use instructions::ret::ReturnRestMemStore;
 use instructions::ChipChallenges;
 use instructions::InstCircuit;
 use instructions::InstOutputType;
@@ -26,6 +29,7 @@ use revm_interpreter::{Interpreter, Record};
 use std::collections::HashMap;
 use std::mem;
 use strum::IntoEnumIterator;
+use transcript::Transcript;
 
 use crate::chips::construct_table_circuits;
 
@@ -72,24 +76,50 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
         })
     }
 
-    pub fn execute(bytecode: &[u8], input: &[u8]) -> SingerWiresIn<F> {
+    pub fn execute<EF: SmallField<BaseField = F>>(
+        bytecode: &[u8],
+        input: &[u8],
+        transcript: &mut Transcript<EF>,
+    ) -> SingerWiresIn<F> {
         let records = Interpreter::<F>::execute(bytecode, input);
         let mut opcode_wires_in = HashMap::<u8, Vec<CircuitWiresIn<F>>>::new();
-        let mut challenge: Option<F> = None;
+        let mut challenges: Option<Vec<F>> = None;
         for phase_index in 0.. {
             let mut has_wires_in_in_this_phase = false;
             for record in records.iter() {
-                let wires_in = circuit_wires_in_from_record(record, challenge, phase_index);
+                let wires_in = circuit_wires_in_from_record(record, &challenges, phase_index);
                 if let Some(wires_in) = wires_in {
-                    let wires = opcode_wires_in.entry(record.opcode).or_insert(Vec::new());
-                    wires.resize(phase_index + 1, Vec::new());
-                    let wire = &mut wires[phase_index];
-                    wire.push(wires_in);
+                    let wires = opcode_wires_in
+                        .entry(record.opcode)
+                        .or_insert(vec![Vec::new(); wires_in.len()]);
+                    // wires is a four-dimensional array indexed by
+                    // 1. Different circuits for one opcode
+                    // 2. Different phase/wire_in for one circuit
+                    // 3. Different repetitions/instances for one circuit
+                    // 4. Different wire values for one wire_in
+                    for (wires_in, wires) in wires_in.iter().zip(wires.iter_mut()) {
+                        wires.resize(phase_index + 1, Vec::new());
+                        let wire = &mut wires[phase_index];
+                        wire.push(wires_in.clone());
+                        has_wires_in_in_this_phase = true;
+                    }
                 }
-                has_wires_in_in_this_phase = true;
             }
             if !has_wires_in_in_this_phase {
                 break;
+            }
+            for (opcode, wires) in opcode_wires_in.iter() {
+                let wire = &wires[phase_index];
+                // wire is a three dimensional array respectively indexed by
+                // 1. Different circuits for one opcode
+                // 2. Repetition of this circuit in the execution
+                // 3. The wire values for one wire_in
+                // The repetitions of one circuit should be processed by GKR as a single
+                // parallel circuit, and the inputs should be in one polynomial
+                for wire_in in wire.iter() {
+                    let mut values = wire_in.concat();
+                    values.resize(values.len().next_power_of_two(), F::ZERO);
+                }
             }
         }
         SingerWiresIn {
@@ -207,34 +237,73 @@ pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
 
 fn circuit_wires_in_from_record<F: SmallField>(
     record: &Record,
-    challenge: Option<F>,
+    challenges: &Option<Vec<F>>,
     index: usize,
 ) -> Option<Vec<Vec<F>>> {
     match OpcodeType::from_u8(record.opcode) {
-        Some(OpcodeType::ADD) => AddInstruction::generate_wires_in(record, challenge, index),
-        Some(OpcodeType::GT) => GtInstruction::generate_wires_in(record, challenge, index),
-        Some(OpcodeType::CALLDATALOAD) => {
-            CalldataloadInstruction::generate_wires_in(record, challenge, index)
+        Some(OpcodeType::ADD) => {
+            AddInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
         }
-        Some(OpcodeType::POP) => PopInstruction::generate_wires_in(record, challenge, index),
-        Some(OpcodeType::MSTORE) => MstoreInstruction::generate_wires_in(record, challenge, index),
-        Some(OpcodeType::JUMP) => JumpInstruction::generate_wires_in(record, challenge, index),
-        Some(OpcodeType::JUMPI) => JumpiInstruction::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::GT) => {
+            GtInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+        }
+        Some(OpcodeType::CALLDATALOAD) => {
+            CalldataloadInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+        }
+        Some(OpcodeType::POP) => {
+            PopInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+        }
+        Some(OpcodeType::MSTORE) => {
+            MstoreInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+        }
+        Some(OpcodeType::JUMP) => {
+            JumpInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+        }
+        Some(OpcodeType::JUMPI) => {
+            JumpiInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+        }
         Some(OpcodeType::JUMPDEST) => {
-            JumpdestInstruction::generate_wires_in(record, challenge, index)
+            JumpdestInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
         }
         Some(OpcodeType::PUSH1) => {
-            PushInstruction::<1>::generate_wires_in(record, challenge, index)
+            PushInstruction::<1>::generate_wires_in(record, challenges, index).map(|x| vec![x])
         }
-        Some(OpcodeType::DUP1) => DupInstruction::<1>::generate_wires_in(record, challenge, index),
-        Some(OpcodeType::DUP2) => DupInstruction::<2>::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::DUP1) => {
+            DupInstruction::<1>::generate_wires_in(record, challenges, index).map(|x| vec![x])
+        }
+        Some(OpcodeType::DUP2) => {
+            DupInstruction::<2>::generate_wires_in(record, challenges, index).map(|x| vec![x])
+        }
         Some(OpcodeType::SWAP2) => {
-            SwapInstruction::<2>::generate_wires_in(record, challenge, index)
+            SwapInstruction::<2>::generate_wires_in(record, challenges, index).map(|x| vec![x])
         }
         Some(OpcodeType::SWAP4) => {
-            SwapInstruction::<4>::generate_wires_in(record, challenge, index)
+            SwapInstruction::<4>::generate_wires_in(record, challenges, index).map(|x| vec![x])
         }
-        Some(OpcodeType::RETURN) => ReturnInstruction::generate_wires_in(record, challenge, index),
+        Some(OpcodeType::RETURN) => {
+            let results = vec![
+                ReturnInstruction::generate_wires_in(record, challenges, index),
+                ReturnPublicOutLoad::generate_wires_in(record, challenges, index),
+                ReturnRestMemLoad::generate_wires_in(record, challenges, index),
+                ReturnRestMemStore::generate_wires_in(record, challenges, index),
+            ];
+            if results.iter().all(|x: &Option<Vec<F>>| x.is_none()) {
+                None
+            } else {
+                Some(
+                    results
+                        .into_iter()
+                        .map(|result| {
+                            if let Some(result) = result {
+                                result
+                            } else {
+                                Vec::new()
+                            }
+                        })
+                        .collect(),
+                )
+            }
+        }
         None => panic!("Unsupported opcode: {}", record.opcode),
         _ => unimplemented!(),
     }
