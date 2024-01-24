@@ -178,14 +178,45 @@ fn convert_decomp<F: SmallField>(
 #[cfg(test)]
 mod test {
     use super::UInt;
+    use goldilocks::Goldilocks;
+    use frontend::structs::CircuitBuilder;
+    use crate::instructions::utils::uint::convert_decomp;
 
     #[test]
-    fn test_uint_constants() {
+    fn test_UInt() {
         // M = 256 is the number of bits for unsigned integer
         // C = 63 is the cell bit width
-        type UInt_256_63 = UInt<256, 63>;
-        assert_eq!(UInt_256_63::N_CARRY_CELLS, 5);
-        let u_int = UInt_256_63::try_from(vec![1,2,3,4,5]);
-        println!("{:?}", u_int);
+        type Uint256_63 = UInt<256, 63>;
+        assert_eq!(Uint256_63::N_OPRAND_CELLS, 5);
+        assert_eq!(Uint256_63::N_CARRY_CELLS, 5);
+        assert_eq!(Uint256_63::N_CARRY_NO_OVERFLOW_CELLS, 4);
+        assert_eq!(Uint256_63::N_RANGE_CHECK_CELLS, 24);
+        assert_eq!(Uint256_63::N_RANGE_CHECK_NO_OVERFLOW_CELLS, 19);
+        let u_int = Uint256_63::try_from(vec![1,2,3,4,5]);
+        assert_eq!(u_int.unwrap().values, vec![1,2,3,4,5]);
+        // TODO: implement tests for methods in UInt
+        // they mostly depend on convert_decomp which will be tested separately
+    }
+
+    #[test]
+    fn test_convert_decomp() {
+        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let small_values: Vec<usize> = vec![1; 64];
+        let values = convert_decomp(&mut circuit_builder, 
+                                    &small_values,
+                                    1,
+                                    2,
+                                    true);
+        let vec: Vec<usize> = (0..=31).collect();
+        assert_eq!(values, vec);
+        // this test will fail if small_len * small_bit_width exceeds 
+        //      the field's max bit size
+        // e.g.
+        // let values = convert_decomp(&mut circuit_builder, 
+        //                                 &small_values,
+        //                                 2,
+        //                                 2,
+        //                                 true);
+
     }
 }
