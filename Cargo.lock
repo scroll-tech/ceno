@@ -247,12 +247,12 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "ff",
- "frontend",
  "goldilocks",
  "itertools 0.12.0",
  "multilinear_extensions",
  "serde",
  "serde_json",
+ "simple-frontend",
  "sumcheck",
  "transcript",
 ]
@@ -582,6 +582,18 @@ checksum = "176e46fa42316f18edd598015a5166857fc835ec732f5215eac6b7bdbf0a84f4"
 dependencies = [
  "itoa",
  "ryu",
+ "serde",
+]
+
+[[package]]
+name = "simple-frontend"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "ff",
+ "goldilocks",
+ "itertools 0.12.0",
+ "rayon",
  "serde",
 ]
 

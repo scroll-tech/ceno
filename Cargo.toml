@@ -7,6 +7,7 @@ members = [
     "sumcheck",
     "transcript",
     "mpcs",
+    "simple-frontend",
     "gkr-graph",
     "singer",
 ]
