@@ -242,11 +242,11 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F>] {
 
 pub(crate) trait MatrixMLEColumnFirst<F: SmallField> {
     fn fix_row_col_first(&self, row_point_eq: &[F], col_num_vars: usize) -> Vec<F>;
-    fn fix_row_col_first_with_scaler(
+    fn fix_row_col_first_with_scalar(
         &self,
         row_point_eq: &[F],
         col_num_vars: usize,
-        scaler: &F,
+        scalar: &F,
     ) -> Vec<F>;
     fn eval_col_first(&self, row_point_eq: &[F], col_point_eq: &[F]) -> F;
 }
@@ -260,15 +260,15 @@ impl<F: SmallField> MatrixMLEColumnFirst<F> for &[usize] {
         ans
     }
 
-    fn fix_row_col_first_with_scaler(
+    fn fix_row_col_first_with_scalar(
         &self,
         row_point_eq: &[F],
         col_num_vars: usize,
-        scaler: &F,
+        scalar: &F,
     ) -> Vec<F> {
         let mut ans = vec![F::ZERO; 1 << col_num_vars];
         for (col, &non_zero_row) in self.iter().enumerate() {
-            ans[col] = row_point_eq[non_zero_row] * scaler;
+            ans[col] = row_point_eq[non_zero_row] * scalar;
         }
         ans
     }
@@ -284,11 +284,11 @@ impl<F: SmallField> MatrixMLEColumnFirst<F> for &[usize] {
 
 pub(crate) trait MatrixMLERowFirst<F: SmallField> {
     fn fix_row_row_first(&self, row_point_eq: &[F], col_num_vars: usize) -> Vec<F>;
-    fn fix_row_row_first_with_scaler(
+    fn fix_row_row_first_with_scalar(
         &self,
         row_point_eq: &[F],
         col_num_vars: usize,
-        scaler: &F,
+        scalar: &F,
     ) -> Vec<F>;
     fn eval_row_first(&self, row_point_eq: &[F], col_point_eq: &[F]) -> F;
 }
@@ -302,15 +302,15 @@ impl<F: SmallField> MatrixMLERowFirst<F> for &[usize] {
         ans
     }
 
-    fn fix_row_row_first_with_scaler(
+    fn fix_row_row_first_with_scalar(
         &self,
         row_point_eq: &[F],
         col_num_vars: usize,
-        scaler: &F,
+        scalar: &F,
     ) -> Vec<F> {
         let mut ans = vec![F::ZERO; 1 << col_num_vars];
         for (row, &non_zero_col) in self.iter().enumerate() {
-            ans[non_zero_col] = row_point_eq[row] * scaler;
+            ans[non_zero_col] = row_point_eq[row] * scalar;
         }
         ans
     }
