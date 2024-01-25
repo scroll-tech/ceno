@@ -14,7 +14,7 @@ pub fn balance<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter
     pop_address!(interpreter, address);
     let Some((balance, is_cold)) = host.balance(address) else {
         interpreter.instruction_result = InstructionResult::FatalExternalError;
-        host.record(&interpreter.generate_record(&Vec::new()));
+        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
         return;
     };
     gas!(
@@ -30,7 +30,7 @@ pub fn balance<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter
     );
     push!(interpreter, balance);
     let operands = vec![balance];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 /// EIP-1884: Repricing for trie-size-dependent opcodes
@@ -42,12 +42,12 @@ pub fn selfbalance<H: Host, F: SmallField, SPEC: Spec>(
     gas!(interpreter, gas::LOW);
     let Some((balance, _)) = host.balance(interpreter.contract.address) else {
         interpreter.instruction_result = InstructionResult::FatalExternalError;
-        host.record(&interpreter.generate_record(&Vec::new()));
+        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
         return;
     };
     push!(interpreter, balance);
     let operands = vec![balance];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn extcodesize<H: Host, F: SmallField, SPEC: Spec>(
@@ -57,7 +57,7 @@ pub fn extcodesize<H: Host, F: SmallField, SPEC: Spec>(
     pop_address!(interpreter, address);
     let Some((code, is_cold)) = host.code(address) else {
         interpreter.instruction_result = InstructionResult::FatalExternalError;
-        host.record(&interpreter.generate_record(&Vec::new()));
+        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
         return;
     };
     if SPEC::enabled(BERLIN) {
@@ -77,7 +77,7 @@ pub fn extcodesize<H: Host, F: SmallField, SPEC: Spec>(
 
     push!(interpreter, U256::from(code.len()));
     let operands = vec![U256::from(code.len())];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 /// EIP-1052: EXTCODEHASH opcode
@@ -89,7 +89,7 @@ pub fn extcodehash<H: Host, F: SmallField, SPEC: Spec>(
     pop_address!(interpreter, address);
     let Some((code_hash, is_cold)) = host.code_hash(address) else {
         interpreter.instruction_result = InstructionResult::FatalExternalError;
-        host.record(&interpreter.generate_record(&Vec::new()));
+        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
         return;
     };
     if SPEC::enabled(BERLIN) {
@@ -111,7 +111,7 @@ pub fn extcodehash<H: Host, F: SmallField, SPEC: Spec>(
         U256::try_from(address.into_word()).unwrap(),
         U256::try_from(code_hash).unwrap(),
     ];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn extcodecopy<H: Host, F: SmallField, SPEC: Spec>(
@@ -152,7 +152,7 @@ pub fn extcodecopy<H: Host, F: SmallField, SPEC: Spec>(
         U256::from(code_offset),
         len_u256.0,
     ];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn blockhash<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
@@ -165,20 +165,20 @@ pub fn blockhash<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host:
         if diff <= BLOCK_HASH_HISTORY && diff != 0 {
             let Some(hash) = host.block_hash(*number.0) else {
                 interpreter.instruction_result = InstructionResult::FatalExternalError;
-                host.record(&interpreter.generate_record(&Vec::new()));
+                host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
                 return;
             };
             *number.0 = U256::from_be_bytes(hash.0);
             *number.1 = interpreter.stack_timestamp;
             let operands = vec![*number.0];
-            host.record(&interpreter.generate_record(&operands));
+            host.record(&interpreter.generate_record(&operands, &Vec::new()));
             return;
         }
     }
     *number.0 = U256::ZERO;
     *number.1 = interpreter.stack_timestamp;
     let operands = vec![*number.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn sload<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, host: &mut H) {
@@ -186,13 +186,13 @@ pub fn sload<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F
 
     let Some((value, is_cold)) = host.sload(interpreter.contract.address, index.0) else {
         interpreter.instruction_result = InstructionResult::FatalExternalError;
-        host.record(&interpreter.generate_record(&Vec::new()));
+        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
         return;
     };
     gas!(interpreter, gas::sload_cost::<SPEC>(is_cold));
     push!(interpreter, value);
     let operands = vec![index.0, value];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn sstore<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, host: &mut H) {
@@ -203,7 +203,7 @@ pub fn sstore<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<
         host.sstore(interpreter.contract.address, index.0, value.0)
     else {
         interpreter.instruction_result = InstructionResult::FatalExternalError;
-        host.record(&interpreter.generate_record(&Vec::new()));
+        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
         return;
     };
     gas_or_fail!(interpreter, {
@@ -212,7 +212,7 @@ pub fn sstore<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<
     });
     refund!(interpreter, gas::sstore_refund::<SPEC>(original, old, new));
     let operands = vec![index.0, value.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 /// EIP-1153: Transient storage opcodes
@@ -226,7 +226,7 @@ pub fn tstore<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<
 
     host.tstore(interpreter.contract.address, index.0, value.0);
     let operands = vec![index.0, value.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 /// EIP-1153: Transient storage opcodes
@@ -239,7 +239,7 @@ pub fn tload<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F
 
     *index.0 = host.tload(interpreter.contract.address, *index.0);
     let operands = vec![*index.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn log<const N: usize, H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
@@ -269,7 +269,7 @@ pub fn log<const N: usize, H: Host, F: SmallField>(interpreter: &mut Interpreter
 
     let mut operands = vec![offset.0, U256::from(len)];
     operands.extend(topics.iter().map(|x| U256::try_from(*x).unwrap()));
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
     host.log(interpreter.contract.address, topics, data);
 }
 
@@ -293,7 +293,7 @@ pub fn selfdestruct<H: Host, F: SmallField, SPEC: Spec>(
 
     interpreter.instruction_result = InstructionResult::SelfDestruct;
     let operands = vec![U256::try_from(target.into_word()).unwrap()];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn create<const IS_CREATE2: bool, H: Host, F: SmallField, SPEC: Spec>(
@@ -345,7 +345,7 @@ pub fn create<const IS_CREATE2: bool, H: Host, F: SmallField, SPEC: Spec>(
         CreateScheme::Create
     };
 
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 
     let mut gas_limit = interpreter.gas().remaining();
 
@@ -440,7 +440,7 @@ pub fn call_inner<SPEC: Spec, H: Host, F: SmallField>(
         out_offset.0,
         out_len.0,
     ];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 
     let in_len = as_usize_or_fail!(interpreter, in_len.0);
     let input = if in_len != 0 {

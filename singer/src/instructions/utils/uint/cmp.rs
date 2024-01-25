@@ -50,6 +50,11 @@ where
         if borrow.len() == UInt::<M, C>::N_CARRY_CELLS {
             Ok((borrow[UInt::<M, C>::N_CARRY_CELLS - 1], diff))
         } else {
+            // TODO: Need double check. This new cell is not connected in the sub_unsafe circuit.
+            // The prover can provide a value 1 here when operand_0 > operand_1, and the sub_unsafe
+            // circuit still works.
+            // Maybe this check should happen before constructing sub_unsafe. In this branch, the
+            // created cell should be pushed to borrow.
             Ok((circuit_builder.create_cell(), diff))
         }
     }

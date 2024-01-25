@@ -1,3 +1,5 @@
+use std::cmp::min;
+
 use frontend::structs::{CellId, CircuitBuilder, ConstantType};
 use goldilocks::SmallField;
 
@@ -88,6 +90,55 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
             if i < ret.len() - 1 {
                 ret[i] = if carry { F::ONE } else { F::ZERO };
             }
+        }
+        ret
+    }
+
+    pub(in crate::instructions) fn compute_borrows_no_overflow<F: SmallField>(
+        minuend: u64,
+        subtrahend: u64,
+    ) -> [F; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut borrow = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::uint_to_limbs(minuend)
+            .iter()
+            .zip(UInt::<M, C>::uint_to_limbs(subtrahend).iter())
+            .enumerate()
+        {
+            // If a - borrow (from previous limb) < b, then should borrow in this limb
+            borrow = b + if borrow { 1 } else { 0 } > *a;
+            // The highest borrow is omitted since we assume it's not overflowing
+            if i < ret.len() - 1 {
+                ret[i] = if borrow { F::ONE } else { F::ZERO };
+            }
+        }
+        ret
+    }
+
+    pub(in crate::instructions) fn compute_borrows<F: SmallField>(
+        minuend: u64,
+        subtrahend: u64,
+    ) -> [F; UInt::<M, C>::N_CARRY_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut borrow = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::uint_to_limbs(minuend)
+            .iter()
+            .zip(UInt::<M, C>::uint_to_limbs(subtrahend).iter())
+            .enumerate()
+        {
+            // If a - borrow (from previous limb) < b, then should borrow in this limb
+            borrow = b + if borrow { 1 } else { 0 } > *a;
+            ret[i] = if borrow { F::ONE } else { F::ZERO };
         }
         ret
     }
@@ -262,6 +313,8 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
                 (minuend.values[i], subtrahend.values[i], result.values[i]);
             circuit_builder.add(result, minuend, ConstantType::Field(F::ONE));
             circuit_builder.add(result, subtrahend, ConstantType::Field(-F::ONE));
+            // When borrow does not provide the highest bit, the highest borrow bit is treated
+            // as zero.
             if i < borrow.len() {
                 circuit_builder.add(result, borrow[i], ConstantType::Field(F::from(1 << C)));
             }

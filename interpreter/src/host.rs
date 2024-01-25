@@ -18,7 +18,7 @@ pub(crate) struct PreRecord {
 }
 
 impl PreRecord {
-    pub(crate) fn complete(self, operands: Vec<U256>) -> Record {
+    pub(crate) fn complete(self, operands: Vec<U256>, operands_timestamps: Vec<u64>) -> Record {
         Record {
             opcode: self.opcode,
             clock: self.clock,
@@ -26,6 +26,7 @@ impl PreRecord {
             stack_timestamp: self.stack_timestamp,
             memory_timestamp: self.memory_timestamp,
             operands,
+            operands_timestamps,
             stack_top: self.stack_top,
         }
     }
@@ -39,6 +40,7 @@ pub struct Record {
     pub stack_timestamp: u64,
     pub memory_timestamp: u64,
     pub operands: Vec<U256>,
+    pub operands_timestamps: Vec<u64>,
     pub stack_top: u64,
 }
 

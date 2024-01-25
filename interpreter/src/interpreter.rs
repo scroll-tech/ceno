@@ -320,7 +320,14 @@ impl<F: SmallField> Interpreter<F> {
     /// for an instruction execution. This function take the temporarily saved info by the
     /// previous function and produce a complete record using the info produced during the
     /// execution.
-    pub(crate) fn generate_record(&mut self, operands: &Vec<U256>) -> Record {
-        self.pre_record.take().unwrap().complete(operands.clone())
+    pub(crate) fn generate_record(
+        &mut self,
+        operands: &Vec<U256>,
+        operand_timestamps: &Vec<u64>,
+    ) -> Record {
+        self.pre_record
+            .take()
+            .unwrap()
+            .complete(operands.clone(), operand_timestamps.clone())
     }
 }

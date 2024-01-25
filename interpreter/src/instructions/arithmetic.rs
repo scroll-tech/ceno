@@ -10,97 +10,107 @@ use crate::{
 pub fn wrapped_add<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = op1.0.wrapping_add(*op2.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn wrapping_mul<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = op1.0.wrapping_mul(*op2.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn wrapping_sub<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = op1.0.wrapping_sub(*op2.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn div<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     if *op2.0 != U256::ZERO {
         *op2.0 = op1.0.wrapping_div(*op2.0);
     }
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn sdiv<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = i256_div(op1.0, *op2.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn rem<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     if *op2.0 != U256::ZERO {
         *op2.0 = op1.0.wrapping_rem(*op2.0);
     }
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn smod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     if *op2.0 != U256::ZERO {
         *op2.0 = i256_mod(op1.0, *op2.0);
     }
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn addmod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::MID);
     pop_top!(interpreter, op1, op2, op3);
+    let operands = vec![op1.0, op2.0, *op3.0];
+    let timestamps = vec![op1.1, op2.1, *op3.1];
     *op3.0 = op1.0.add_mod(op2.0, *op3.0);
     *op3.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, op2.0, *op3.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn mulmod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::MID);
     pop_top!(interpreter, op1, op2, op3);
+    let operands = vec![op1.0, op2.0, *op3.0];
+    let timestamps = vec![op1.1, op2.1, *op3.1];
     *op3.0 = op1.0.mul_mod(op2.0, *op3.0);
     *op3.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, op2.0, *op3.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn exp<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, host: &mut H) {
     pop_top!(interpreter, op1, op2);
     gas_or_fail!(interpreter, gas::exp_cost::<SPEC>(*op2.0));
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = op1.0.pow(*op2.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 /// In the yellow paper `SIGNEXTEND` is defined to take two inputs, we will call them
@@ -121,6 +131,8 @@ pub fn exp<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>,
 pub fn signextend<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     if op1.0 < U256::from(32) {
         // `low_u32` works since op1 < 32
         let bit_index = (8 * op1.0.as_limbs()[0] + 7) as usize;
@@ -129,6 +141,5 @@ pub fn signextend<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host
         *op2.0 = if bit { *op2.0 | !mask } else { *op2.0 & mask };
     }
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }

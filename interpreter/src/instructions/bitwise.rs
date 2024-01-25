@@ -11,96 +11,108 @@ use core::cmp::Ordering;
 pub fn lt<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = U256::from(op1.0 < *op2.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn gt<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = U256::from(op1.0 > *op2.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn slt<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = U256::from(i256_cmp(&op1.0, op2.0) == Ordering::Less);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn sgt<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = U256::from(i256_cmp(&op1.0, op2.0) == Ordering::Greater);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn eq<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = U256::from(op1.0 == *op2.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn iszero<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1);
+    let operands = vec![*op1.0];
+    let timestamps = vec![*op1.1];
     *op1.0 = U256::from(*op1.0 == U256::ZERO);
     *op1.1 = interpreter.stack_timestamp;
-    let operands = vec![*op1.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn bitand<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = op1.0 & *op2.0;
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn bitor<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = op1.0 | *op2.0;
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn bitxor<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 = op1.0 ^ *op2.0;
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn not<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1);
+    let operands = vec![*op1.0];
+    let timestamps = vec![*op1.1];
     *op1.0 = !*op1.0;
     *op1.1 = interpreter.stack_timestamp;
-    let operands = vec![*op1.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 pub fn byte<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
 
     let o1 = as_usize_saturated!(op1.0);
     *op2.0 = if o1 < 32 {
@@ -110,8 +122,7 @@ pub fn byte<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut
         U256::ZERO
     };
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 /// EIP-145: Bitwise shifting instructions in EVM
@@ -119,10 +130,11 @@ pub fn shl<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>,
     check!(interpreter, CONSTANTINOPLE);
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 <<= as_usize_saturated!(op1.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 /// EIP-145: Bitwise shifting instructions in EVM
@@ -130,10 +142,11 @@ pub fn shr<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>,
     check!(interpreter, CONSTANTINOPLE);
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
     *op2.0 >>= as_usize_saturated!(op1.0);
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }
 
 /// EIP-145: Bitwise shifting instructions in EVM
@@ -141,6 +154,8 @@ pub fn sar<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>,
     check!(interpreter, CONSTANTINOPLE);
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
+    let operands = vec![op1.0, *op2.0];
+    let timestamps = vec![op1.1, *op2.1];
 
     let value_sign = i256_sign_compl(op2.0);
 
@@ -165,6 +180,5 @@ pub fn sar<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>,
         }
     };
     *op2.1 = interpreter.stack_timestamp;
-    let operands = vec![op1.0, *op2.0];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 }

@@ -16,7 +16,7 @@ pub fn pop<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut 
     } else {
         Vec::new()
     };
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 /// EIP-3855: PUSH0 instruction
@@ -31,7 +31,7 @@ pub fn push0<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F
     {
         interpreter.instruction_result = result;
     }
-    host.record(&interpreter.generate_record(&Vec::new()));
+    host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
     interpreter.stack_timestamp += 1;
 }
 
@@ -48,13 +48,13 @@ pub fn push<const N: usize, H: Host, F: SmallField>(
         interpreter.stack_timestamp,
     ) {
         interpreter.instruction_result = result;
-        host.record(&interpreter.generate_record(&Vec::new()));
+        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
         return;
     }
     interpreter.instruction_pointer = unsafe { ip.add(N) };
     let n_words = (N + 31) / 32;
     let operands = interpreter.stack.data()[interpreter.stack.len() - n_words..].to_vec();
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
     interpreter.stack_timestamp += 1;
 }
 
@@ -62,10 +62,11 @@ pub fn dup<const N: usize, H: Host, F: SmallField>(interpreter: &mut Interpreter
     gas!(interpreter, gas::VERYLOW);
     if let Err(result) = interpreter.stack.dup::<N>(interpreter.stack_timestamp) {
         interpreter.instruction_result = result;
-        host.record(&interpreter.generate_record(&Vec::new()));
+        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
     } else {
         let operands = interpreter.stack.data()[interpreter.stack.len() - N..].to_vec();
-        host.record(&interpreter.generate_record(&operands));
+        let timestamps = interpreter.stack.timestamps()[interpreter.stack.len() - N..].to_vec();
+        host.record(&interpreter.generate_record(&operands, &timestamps));
         interpreter.stack_timestamp += 1;
     }
 }
@@ -77,13 +78,17 @@ pub fn swap<const N: usize, H: Host, F: SmallField>(
     gas!(interpreter, gas::VERYLOW);
     if let Err(result) = interpreter.stack.swap::<N>(interpreter.stack_timestamp) {
         interpreter.instruction_result = result;
-        host.record(&interpreter.generate_record(&Vec::new()));
+        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
     } else {
         let operands = vec![
             interpreter.stack.data()[interpreter.stack.len() - 1 - N],
             interpreter.stack.data()[interpreter.stack.len() - 1],
         ];
-        host.record(&interpreter.generate_record(&operands));
+        let timestamps = vec![
+            interpreter.stack.timestamps()[interpreter.stack.len() - 1 - N],
+            interpreter.stack.timestamps()[interpreter.stack.len() - 1],
+        ];
+        host.record(&interpreter.generate_record(&operands, &timestamps));
         interpreter.stack_timestamp += 1;
     }
 }

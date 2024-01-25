@@ -21,28 +21,28 @@ pub fn keccak256<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host:
 
     push_b256!(interpreter, hash);
     let operands = vec![from.0, U256::from(len), U256::try_from(hash).unwrap()];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn address<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::BASE);
     push_b256!(interpreter, interpreter.contract.address.into_word());
     let operands = vec![U256::try_from(interpreter.contract.address.into_word()).unwrap()];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn caller<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::BASE);
     push_b256!(interpreter, interpreter.contract.caller.into_word());
     let operands = vec![U256::try_from(interpreter.contract.caller.into_word()).unwrap()];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn codesize<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::BASE);
     push!(interpreter, U256::from(interpreter.contract.bytecode.len()));
     let operands = vec![U256::from(interpreter.contract.bytecode.len())];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn codecopy<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
@@ -61,7 +61,7 @@ pub fn codecopy<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: 
         U256::from(code_offset),
         U256::from(len),
     ];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 
     // Note: this can't panic because we resized memory to fit.
     interpreter.shared_memory.set_data(
@@ -88,21 +88,21 @@ pub fn calldataload<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, ho
 
     push_b256!(interpreter, load);
     let operands = vec![U256::from(index), U256::try_from(load).unwrap()];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn calldatasize<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::BASE);
     push!(interpreter, U256::from(interpreter.contract.input.len()));
     let operands = vec![U256::from(interpreter.contract.input.len())];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn callvalue<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::BASE);
     push!(interpreter, interpreter.contract.value);
     let operands = vec![interpreter.contract.value];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn calldatacopy<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
@@ -121,7 +121,7 @@ pub fn calldatacopy<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, ho
         U256::from(data_offset),
         U256::from(len),
     ];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 
     // Note: this can't panic because we resized memory to fit.
     interpreter.shared_memory.set_data(
@@ -145,7 +145,7 @@ pub fn returndatasize<H: Host, F: SmallField, SPEC: Spec>(
         U256::from(interpreter.return_data_buffer.len())
     );
     let operands = vec![U256::from(interpreter.return_data_buffer.len())];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 /// EIP-211: New opcodes: RETURNDATASIZE and RETURNDATACOPY
@@ -164,7 +164,7 @@ pub fn returndatacopy<H: Host, F: SmallField, SPEC: Spec>(
         U256::from(data_offset),
         U256::from(len),
     ];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
     if overflow || data_end > interpreter.return_data_buffer.len() {
         interpreter.instruction_result = InstructionResult::OutOfOffset;
         return;
@@ -184,5 +184,5 @@ pub fn gas<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut 
     gas!(interpreter, gas::BASE);
     push!(interpreter, U256::from(interpreter.gas.remaining()));
     let operands = vec![U256::from(interpreter.gas.remaining())];
-    host.record(&interpreter.generate_record(&operands));
+    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
