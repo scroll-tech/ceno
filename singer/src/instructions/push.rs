@@ -219,11 +219,7 @@ impl<const N: usize> Instruction for PushInstruction<N> {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(
-        record: &Record,
-        challenge: &Option<Vec<F>>,
-        index: usize,
-    ) -> Option<Vec<F>> {
+    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
         todo!()
     }
 }

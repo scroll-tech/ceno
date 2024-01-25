@@ -86,9 +86,8 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
     pub fn execute<EF: SmallField<BaseField = F>, Rng: RngCore + Clone>(
         bytecode: &[u8],
         input: &[u8],
-        transcript: &mut Transcript<EF>,
         pp: &StandardBasefoldProverParam<EF>,
-    ) -> SingerWiresIn<F>
+    ) -> PrepareSingerWiresIn<F>
     where
         F: SmallField<BaseField = F> + Serialize + DeserializeOwned + Into<EF>,
         EF: Serialize + DeserializeOwned + TryInto<F>,
@@ -96,11 +95,10 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
     {
         let records = Interpreter::<F>::execute(bytecode, input);
         let mut opcode_wires_in = HashMap::<u8, Vec<CircuitWiresIn<F>>>::new();
-        let mut challenges: Option<Vec<F>> = None;
         for phase_index in 0.. {
             let mut has_wires_in_in_this_phase = false;
             for record in records.iter() {
-                let wires_in = circuit_wires_in_from_record(record, &challenges, phase_index);
+                let wires_in = circuit_wires_in_from_record(record, phase_index);
                 if let Some(wires_in) = wires_in {
                     let wires = opcode_wires_in
                         .entry(record.opcode)
@@ -121,33 +119,8 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
             if !has_wires_in_in_this_phase {
                 break;
             }
-            // Only generate the challenges once, because we know that there are at most
-            // two phases, where only the second phase requires the challenge
-            if challenges.is_none() {
-                for (_, wires) in opcode_wires_in.iter() {
-                    let wire = &wires[phase_index];
-                    // wire is a three dimensional array respectively indexed by
-                    // 1. Different circuits for one opcode
-                    // 2. Repetition of this circuit in the execution
-                    // 3. The wire values for one wire_in
-                    // The repetitions of one circuit should be processed by GKR as a single
-                    // parallel circuit, and the inputs should be in one polynomial
-                    for wire_in in wire.iter() {
-                        let mut values = wire_in.concat();
-                        values.resize(values.len().next_power_of_two(), F::ZERO);
-                        let poly = MultilinearPolynomial::new(values);
-                        let cm = StandardBasefold::<EF>::commit(pp, &poly).unwrap();
-                        let elements: Vec<EF> = cm.to_commitment().into();
-                        for element in elements {
-                            transcript.append_field_element(&element);
-                        }
-                    }
-                }
-                let challenge = transcript.get_and_append_challenge(b"phase");
-                challenges = Some(challenge.elements.to_limbs());
-            }
         }
-        SingerWiresIn {
+        PrepareSingerWiresIn {
             opcode_wires_in: opcode_wires_in.into_iter().collect(),
         }
     }
@@ -262,55 +235,54 @@ pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
 
 fn circuit_wires_in_from_record<F: SmallField>(
     record: &Record,
-    challenges: &Option<Vec<F>>,
     index: usize,
 ) -> Option<Vec<Vec<F>>> {
     match OpcodeType::from_u8(record.opcode) {
         Some(OpcodeType::ADD) => {
-            AddInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            AddInstruction::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::GT) => {
-            GtInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            GtInstruction::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::CALLDATALOAD) => {
-            CalldataloadInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            CalldataloadInstruction::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::POP) => {
-            PopInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            PopInstruction::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::MSTORE) => {
-            MstoreInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            MstoreInstruction::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::JUMP) => {
-            JumpInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            JumpInstruction::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::JUMPI) => {
-            JumpiInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            JumpiInstruction::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::JUMPDEST) => {
-            JumpdestInstruction::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            JumpdestInstruction::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::PUSH1) => {
-            PushInstruction::<1>::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            PushInstruction::<1>::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::DUP1) => {
-            DupInstruction::<1>::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            DupInstruction::<1>::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::DUP2) => {
-            DupInstruction::<2>::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            DupInstruction::<2>::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::SWAP2) => {
-            SwapInstruction::<2>::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            SwapInstruction::<2>::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::SWAP4) => {
-            SwapInstruction::<4>::generate_wires_in(record, challenges, index).map(|x| vec![x])
+            SwapInstruction::<4>::generate_pre_wires_in(record, index).map(|x| vec![x])
         }
         Some(OpcodeType::RETURN) => {
             let results = vec![
-                ReturnInstruction::generate_wires_in(record, challenges, index),
-                ReturnPublicOutLoad::generate_wires_in(record, challenges, index),
-                ReturnRestMemLoad::generate_wires_in(record, challenges, index),
-                ReturnRestMemStore::generate_wires_in(record, challenges, index),
+                ReturnInstruction::generate_pre_wires_in(record, index),
+                ReturnPublicOutLoad::generate_pre_wires_in(record, index),
+                ReturnRestMemLoad::generate_pre_wires_in(record, index),
+                ReturnRestMemStore::generate_pre_wires_in(record, index),
             ];
             if results.iter().all(|x: &Option<Vec<F>>| x.is_none()) {
                 None
@@ -332,6 +304,12 @@ fn circuit_wires_in_from_record<F: SmallField>(
         None => panic!("Unsupported opcode: {}", record.opcode),
         _ => unimplemented!(),
     }
+}
+
+/// The information used to generate the wires in values once the challenge
+/// is ready.
+pub struct PrepareSingerWiresIn<F: SmallField> {
+    opcode_wires_in: Vec<(u8, Vec<CircuitWiresIn<F>>)>,
 }
 
 pub struct SingerWiresIn<F: SmallField> {

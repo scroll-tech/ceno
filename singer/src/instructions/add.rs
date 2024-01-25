@@ -258,11 +258,7 @@ impl Instruction for AddInstruction {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(
-        record: &Record,
-        challenge: &Option<Vec<F>>,
-        index: usize,
-    ) -> Option<Vec<F>> {
+    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
         match index {
             0 => {
                 let mut wire_values = vec![F::ZERO; Self::phase0_size()];
