@@ -6,7 +6,7 @@ use crate::{
     instructions::utils::{ChipHandler, UInt},
 };
 
-use super::UIntAddSub;
+use super::{u2vec, UIntAddSub};
 
 impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     pub(in crate::instructions) const N_NO_OVERFLOW_WITNESS_CELLS: usize =
@@ -22,22 +22,74 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         &witness[..UInt::<M, C>::N_RANGE_CHECK_CELLS]
     }
 
+    pub(in crate::instructions) fn range_values_range(offset: usize) -> std::ops::Range<usize> {
+        offset..offset + UInt::<M, C>::N_RANGE_CHECK_CELLS
+    }
+
     pub(in crate::instructions) fn extract_range_values_no_overflow(
         witness: &[CellId],
     ) -> &[CellId] {
         &witness[..UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS]
     }
 
+    pub(in crate::instructions) fn range_values_no_overflow_range(
+        offset: usize,
+    ) -> std::ops::Range<usize> {
+        offset..offset + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
+    }
+
     pub(in crate::instructions) fn extract_carry_no_overflow(witness: &[CellId]) -> &[CellId] {
         &witness[UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS..]
+    }
+
+    pub(in crate::instructions) fn carry_no_overflow_range(
+        offset: usize,
+    ) -> std::ops::Range<usize> {
+        offset + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
+            ..offset
+                + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
+                + UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS
     }
 
     pub(in crate::instructions) fn extract_carry(witness: &[CellId]) -> &[CellId] {
         &witness[UInt::<M, C>::N_RANGE_CHECK_CELLS..]
     }
 
+    pub(in crate::instructions) fn carry_range(offset: usize) -> std::ops::Range<usize> {
+        offset + UInt::<M, C>::N_RANGE_CHECK_CELLS
+            ..offset + UInt::<M, C>::N_RANGE_CHECK_CELLS + UInt::<M, C>::N_CARRY_CELLS
+    }
+
     pub(in crate::instructions) fn extract_unsafe_carry(witness: &[CellId]) -> &[CellId] {
         witness
+    }
+
+    pub(in crate::instructions) fn unsafe_range(offset: usize) -> std::ops::Range<usize> {
+        offset..offset + UInt::<M, C>::N_CARRY_CELLS
+    }
+
+    pub(in crate::instructions) fn compute_no_overflow_carries<F: SmallField>(
+        addend_0: u64,
+        addend_1: u64,
+    ) -> [F; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut carry = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::uint_to_limbs(addend_0)
+            .iter()
+            .zip(UInt::<M, C>::uint_to_limbs(addend_1).iter())
+            .enumerate()
+        {
+            carry = a + b + if carry { 1 } else { 0 } >= (1 << C);
+            if i < ret.len() - 1 {
+                ret[i] = if carry { F::ONE } else { F::ZERO };
+            }
+        }
+        ret
     }
 
     /// Little-endian addition. Assume users to check the correct range of the

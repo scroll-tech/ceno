@@ -12,6 +12,32 @@ use super::UInt;
 pub(in crate::instructions) mod add_sub;
 pub(in crate::instructions) mod cmp;
 
+pub(in crate::instructions) fn u2fvec<F: SmallField, const W: usize, const C: usize>(
+    x: u64,
+) -> [F; W] {
+    let mut x = x;
+    let mut ret = [F::ZERO; W];
+    for i in 0..ret.len() {
+        ret[i] = F::from(x & ((1 << C) - 1));
+        x >>= C;
+    }
+    ret
+}
+
+pub(in crate::instructions) fn u2vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
+    let mut x = x;
+    let mut ret = [0; W];
+    for i in 0..ret.len() {
+        ret[i] = x & ((1 << C) - 1);
+        x >>= C;
+    }
+    ret
+}
+
+pub(in crate::instructions) fn u2range_limbs<const W: usize>(x: u64) -> [u64; W] {
+    u2vec::<W, RANGE_CHIP_BIT_WIDTH>(x)
+}
+
 impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
     type Error = ZKVMError;
     fn try_from(values: &[usize]) -> Result<Self, Self::Error> {
@@ -44,6 +70,58 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     pub(in crate::instructions) fn values(&self) -> &[CellId] {
         &self.values
+    }
+
+    /// Split the given unsigned integer into limbs in little endian.
+    /// The given integer should have <= C * n effective bits. If it has more bits, then the
+    /// extra bits would be ignored.
+    pub(in crate::instructions) fn uint_to_limbs(x: u64) -> [u64; Self::N_OPRAND_CELLS] {
+        u2vec::<{ Self::N_OPRAND_CELLS }, C>(x)
+    }
+
+    /// Split the given unsigned integer into limbs in little endian for range check.
+    /// The given integer should have <= range_bits * n effective bits. If it has more bits, then
+    /// the extra bits would be ignored.
+    pub(in crate::instructions) fn uint_to_range_no_overflow_limbs(
+        x: u64,
+    ) -> [u64; Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS] {
+        u2vec::<{ Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS }, C>(x)
+    }
+
+    /// Split the given unsigned integer into limbs in little endian for range check, then turn
+    /// into field elements.
+    /// The given integer should have <= range_bits * n effective bits. If it has more bits, then
+    /// the extra bits would be ignored.
+    pub(in crate::instructions) fn uint_to_range_no_overflow_field_limbs<F: SmallField>(
+        x: u64,
+    ) -> [F; Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS] {
+        u2fvec::<F, { Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS }, C>(x)
+    }
+
+    /// Split the given unsigned integer into limbs in little endian for range check, then turn
+    /// into field elements.
+    /// The given integer should have <= range_bits * n effective bits. If it has more bits, then
+    /// the extra bits would be ignored.
+    pub(in crate::instructions) fn uint_to_range_field_limbs<F: SmallField>(
+        x: u64,
+    ) -> [F; Self::N_RANGE_CHECK_CELLS] {
+        u2fvec::<F, { Self::N_RANGE_CHECK_CELLS }, C>(x)
+    }
+
+    /// Split the given unsigned integer into limbs in little endian for range check.
+    /// The given integer should have <= range_bits * n effective bits. If it has more bits, then
+    /// the extra bits would be ignored.
+    pub(in crate::instructions) fn uint_to_range_limbs(x: u64) -> [u64; Self::N_RANGE_CHECK_CELLS] {
+        u2vec::<{ Self::N_RANGE_CHECK_CELLS }, C>(x)
+    }
+
+    /// Split the given unsigned integer into limbs in little endian, and put in field elements.
+    /// The given integer should have <= C * n effective bits. If it has more bits, then the
+    /// extra bits would be ignored.
+    pub(in crate::instructions) fn uint_to_field_elems<F: SmallField>(
+        x: u64,
+    ) -> [F; Self::N_OPRAND_CELLS] {
+        u2fvec::<F, { Self::N_OPRAND_CELLS }, C>(x)
     }
 
     pub(in crate::instructions) fn from_range_values<F: SmallField>(
