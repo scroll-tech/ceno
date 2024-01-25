@@ -8,6 +8,7 @@ use revm_interpreter::Record;
 
 use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
+use crate::{PrepareSingerWiresIn, SingerWiresIn};
 
 use super::{
     utils::{
@@ -240,5 +241,11 @@ impl Instruction for CalldataloadInstruction {
 
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
         todo!()
+    }
+    fn complete_wires_in<F: SmallField>(
+        pre_wires_in: &PrepareSingerWiresIn<F>,
+        challenges: &Vec<F>,
+    ) -> SingerWiresIn<F> {
+        todo!();
     }
 }

@@ -13,7 +13,7 @@ use crate::{
     chips::{construct_inst_chip_circuits, ChipCircuitGadgets},
     constants::OpcodeType,
     error::ZKVMError,
-    CircuitWiresIn, SingerGraphBuilder,
+    CircuitWiresIn, PrepareSingerWiresIn, SingerGraphBuilder, SingerWiresIn,
 };
 
 use self::{
@@ -203,6 +203,10 @@ pub(crate) trait Instruction {
     ) -> Result<InstCircuit<F>, ZKVMError>;
 
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>>;
+    fn complete_wires_in<F: SmallField>(
+        pre_wires_in: &PrepareSingerWiresIn<F>,
+        challenges: &Vec<F>,
+    ) -> SingerWiresIn<F>;
 }
 
 /// Construct the part of the circuit graph for an instruction.

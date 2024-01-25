@@ -7,6 +7,7 @@ use revm_interpreter::Record;
 
 use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
+use crate::{PrepareSingerWiresIn, SingerWiresIn};
 
 use super::InstructionGraph;
 use super::{
@@ -270,5 +271,11 @@ impl Instruction for AddInstruction {
             }
             _ => None,
         }
+    }
+    fn complete_wires_in<F: SmallField>(
+        pre_wires_in: &PrepareSingerWiresIn<F>,
+        challenges: &Vec<F>,
+    ) -> SingerWiresIn<F> {
+        todo!();
     }
 }

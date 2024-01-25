@@ -13,6 +13,7 @@ use crate::chips::ChipCircuitGadgets;
 use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
 use crate::{CircuitWiresIn, SingerGraphBuilder};
+use crate::{PrepareSingerWiresIn, SingerWiresIn};
 
 use super::{
     utils::{
@@ -405,6 +406,12 @@ impl Instruction for ReturnInstruction {
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
         todo!()
     }
+    fn complete_wires_in<F: SmallField>(
+        pre_wires_in: &PrepareSingerWiresIn<F>,
+        challenges: &Vec<F>,
+    ) -> SingerWiresIn<F> {
+        todo!();
+    }
 }
 
 register_wires_in!(
@@ -525,6 +532,12 @@ impl Instruction for ReturnPublicOutLoad {
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
         todo!()
     }
+    fn complete_wires_in<F: SmallField>(
+        pre_wires_in: &PrepareSingerWiresIn<F>,
+        challenges: &Vec<F>,
+    ) -> SingerWiresIn<F> {
+        todo!();
+    }
 }
 
 register_wires_in!(
@@ -632,6 +645,12 @@ impl Instruction for ReturnRestMemLoad {
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
         todo!()
     }
+    fn complete_wires_in<F: SmallField>(
+        pre_wires_in: &PrepareSingerWiresIn<F>,
+        challenges: &Vec<F>,
+    ) -> SingerWiresIn<F> {
+        todo!();
+    }
 }
 
 register_wires_in!(
@@ -721,6 +740,12 @@ impl Instruction for ReturnRestMemStore {
 
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
         todo!()
+    }
+    fn complete_wires_in<F: SmallField>(
+        pre_wires_in: &PrepareSingerWiresIn<F>,
+        challenges: &Vec<F>,
+    ) -> SingerWiresIn<F> {
+        todo!();
     }
 }
 
@@ -830,5 +855,11 @@ impl Instruction for ReturnRestStackPop {
 
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
         todo!()
+    }
+    fn complete_wires_in<F: SmallField>(
+        pre_wires_in: &PrepareSingerWiresIn<F>,
+        challenges: &Vec<F>,
+    ) -> SingerWiresIn<F> {
+        todo!();
     }
 }
