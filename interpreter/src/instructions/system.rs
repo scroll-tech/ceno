@@ -69,7 +69,7 @@ pub fn codecopy<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: 
         code_offset,
         len,
         interpreter.contract.bytecode.original_bytecode_slice(),
-        interpreter.timestamp,
+        interpreter.memory_timestamp,
     );
 }
 
@@ -129,7 +129,7 @@ pub fn calldatacopy<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, ho
         data_offset,
         len,
         &interpreter.contract.input,
-        interpreter.timestamp,
+        interpreter.memory_timestamp,
     );
 }
 
@@ -175,7 +175,7 @@ pub fn returndatacopy<H: Host, F: SmallField, SPEC: Spec>(
         interpreter.shared_memory.set(
             memory_offset,
             &interpreter.return_data_buffer[data_offset..data_end],
-            interpreter.timestamp,
+            interpreter.memory_timestamp,
         );
     }
 }

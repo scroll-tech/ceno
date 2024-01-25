@@ -25,10 +25,14 @@ pub fn pop<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut 
 pub fn push0<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>, host: &mut H) {
     check!(interpreter, SHANGHAI);
     gas!(interpreter, gas::BASE);
-    if let Err(result) = interpreter.stack.push(U256::ZERO, interpreter.timestamp) {
+    if let Err(result) = interpreter
+        .stack
+        .push(U256::ZERO, interpreter.stack_timestamp)
+    {
         interpreter.instruction_result = result;
     }
     host.record(&interpreter.generate_record(&Vec::new()));
+    interpreter.stack_timestamp += 1;
 }
 
 pub fn push<const N: usize, H: Host, F: SmallField>(
@@ -41,7 +45,7 @@ pub fn push<const N: usize, H: Host, F: SmallField>(
     let ip = interpreter.instruction_pointer;
     if let Err(result) = interpreter.stack.push_slice(
         unsafe { core::slice::from_raw_parts(ip, N) },
-        interpreter.timestamp,
+        interpreter.stack_timestamp,
     ) {
         interpreter.instruction_result = result;
         host.record(&interpreter.generate_record(&Vec::new()));
@@ -51,16 +55,18 @@ pub fn push<const N: usize, H: Host, F: SmallField>(
     let n_words = (N + 31) / 32;
     let operands = interpreter.stack.data()[interpreter.stack.len() - n_words..].to_vec();
     host.record(&interpreter.generate_record(&operands));
+    interpreter.stack_timestamp += 1;
 }
 
 pub fn dup<const N: usize, H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
-    if let Err(result) = interpreter.stack.dup::<N>(interpreter.timestamp) {
+    if let Err(result) = interpreter.stack.dup::<N>(interpreter.stack_timestamp) {
         interpreter.instruction_result = result;
         host.record(&interpreter.generate_record(&Vec::new()));
     } else {
         let operands = interpreter.stack.data()[interpreter.stack.len() - N..].to_vec();
         host.record(&interpreter.generate_record(&operands));
+        interpreter.stack_timestamp += 1;
     }
 }
 
@@ -69,7 +75,7 @@ pub fn swap<const N: usize, H: Host, F: SmallField>(
     host: &mut H,
 ) {
     gas!(interpreter, gas::VERYLOW);
-    if let Err(result) = interpreter.stack.swap::<N>(interpreter.timestamp) {
+    if let Err(result) = interpreter.stack.swap::<N>(interpreter.stack_timestamp) {
         interpreter.instruction_result = result;
         host.record(&interpreter.generate_record(&Vec::new()));
     } else {
@@ -78,5 +84,6 @@ pub fn swap<const N: usize, H: Host, F: SmallField>(
             interpreter.stack.data()[interpreter.stack.len() - 1],
         ];
         host.record(&interpreter.generate_record(&operands));
+        interpreter.stack_timestamp += 1;
     }
 }

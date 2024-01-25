@@ -95,7 +95,7 @@ pub fn blob_hash<H: Host, F: SmallField, SPEC: Spec>(
         Some(hash) => U256::from_be_bytes(hash.0),
         None => U256::ZERO,
     };
-    *index.1 = interpreter.timestamp;
+    *index.1 = interpreter.stack_timestamp;
     let operands = vec![U256::from(i), *index.0];
     host.record(&interpreter.generate_record(&operands));
 }

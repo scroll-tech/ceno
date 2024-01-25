@@ -10,7 +10,7 @@ pub use shared_memory::{next_multiple_of_32, SharedMemory};
 pub use stack::{Stack, STACK_LIMIT};
 
 use crate::analysis::to_analysed;
-use crate::host::Record;
+use crate::host::{PreRecord, Record};
 use crate::opcode::make_instruction_table;
 use crate::DummyHost;
 use crate::{primitives::Bytes, CallInputs, CreateInputs, Gas, Host, InstructionResult};
@@ -52,10 +52,17 @@ pub struct Interpreter<F: SmallField> {
     /// Set inside CALL or CREATE instructions and RETURN or REVERT instructions. Additionally those instructions will set
     /// InstructionResult to CallOrCreate/Return/Revert so we know the reason.
     pub next_action: Option<InterpreterAction>,
-    /// The current timestamp (number of cycles executed)
-    pub timestamp: u64,
+    /// The current clock (number of cycles executed)
+    pub clock: u64,
+    /// The current stack timestamp (number of stack operations)
+    pub stack_timestamp: u64,
+    /// The current memory timestamp (number of memory operations)
+    pub memory_timestamp: u64,
     /// The current opcode being executed
     pub opcode: Option<u8>,
+    // For temporarily store the status before the instruction is executed, so that
+    // after the instruction is finished, can record the instruction with the correct info
+    pre_record: Option<PreRecord>,
     // TODO: ZKVM
     // pub zkvm: SingerBasic<F>,
     _phantom: PhantomData<F>,
@@ -120,8 +127,11 @@ impl<F: SmallField> Interpreter<F> {
             shared_memory: EMPTY_SHARED_MEMORY,
             stack: Stack::new(),
             next_action: None,
-            timestamp: 0,
+            clock: 0,
+            stack_timestamp: 0,
+            memory_timestamp: 0,
             opcode: None,
+            pre_record: None,
             // zkvm: SingerBasic::new(&challenges).expect("failed to initialize singer basic"),
             _phantom: PhantomData::default(),
         }
@@ -246,6 +256,7 @@ impl<F: SmallField> Interpreter<F> {
         // it will do noop and just stop execution of this contract
         self.instruction_pointer = unsafe { self.instruction_pointer.offset(1) };
         self.opcode = Some(opcode);
+        self.save_for_record();
 
         // execute instruction.
         (instruction_table[opcode as usize])(self, host)
@@ -272,7 +283,7 @@ impl<F: SmallField> Interpreter<F> {
         // main loop
         while self.instruction_result == InstructionResult::Continue {
             self.step(instruction_table, host);
-            self.timestamp += 1;
+            self.clock += 1;
         }
 
         // Return next action if it is some.
@@ -290,12 +301,26 @@ impl<F: SmallField> Interpreter<F> {
         }
     }
 
-    pub(crate) fn generate_record(&self, operands: &Vec<U256>) -> Record {
-        Record {
+    /// This function, and the next function, are invoked in pair to generate a record
+    /// for an instruction execution. This function is called at the beginning of an instruction
+    /// to save the status (including the timestamps, pc, etc.) before the instruction is
+    /// executed. These info will be put into record.
+    pub(crate) fn save_for_record(&mut self) {
+        self.pre_record = Some(PreRecord {
             opcode: self.opcode.unwrap(),
-            pc: self.program_counter(),
-            operands: operands.clone(),
-            timestamp: self.timestamp,
-        }
+            clock: self.clock,
+            pc: self.program_counter() as u64,
+            stack_timestamp: self.stack_timestamp,
+            memory_timestamp: self.memory_timestamp,
+            stack_top: self.stack.len() as u64 - 1,
+        })
+    }
+
+    /// This function, and the previous function, are invoked in pair to generate a record
+    /// for an instruction execution. This function take the temporarily saved info by the
+    /// previous function and produce a complete record using the info produced during the
+    /// execution.
+    pub(crate) fn generate_record(&mut self, operands: &Vec<U256>) -> Record {
+        self.pre_record.take().unwrap().complete(operands.clone())
     }
 }

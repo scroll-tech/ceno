@@ -166,14 +166,15 @@ impl SharedMemory {
         (data, timestamps)
     }
 
-    /// Returns a byte slice of the memory region at the given offset.
+    /// Returns a byte slice of the memory region at the given offset. Meanwhile, update the
+    /// timestamps of the read bytes.
     ///
     /// # Panics
     ///
     /// Panics on out of bounds.
     #[inline]
     #[cfg_attr(debug_assertions, track_caller)]
-    pub fn slice_mut(&mut self, offset: usize, size: usize, ts: u64) -> (&mut [u8], Vec<u64>) {
+    pub fn read_slice(&mut self, offset: usize, size: usize, ts: u64) -> (&mut [u8], Vec<u64>) {
         let len = self.len();
         let end = offset + size;
         let last_checkpoint = self.last_checkpoint;
@@ -203,14 +204,15 @@ impl SharedMemory {
         (ret.0[0], ret.1[0])
     }
 
-    /// Returns the byte at the given offset.
+    /// Returns the byte at the given offset. Meanwhile, update the
+    /// timestamps of the read byte.
     ///
     /// # Panics
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_byte_mut(&mut self, offset: usize, ts: u64) -> (u8, u64) {
-        let ret = self.slice_mut(offset, 1, ts);
+    pub fn read_byte(&mut self, offset: usize, ts: u64) -> (u8, u64) {
+        let ret = self.read_slice(offset, 1, ts);
         (ret.0[0], ret.1[0])
     }
 
@@ -225,14 +227,15 @@ impl SharedMemory {
         (ret.0.try_into().unwrap(), ret.1)
     }
 
-    /// Returns a 32-byte slice of the memory region at the given offset.
+    /// Returns a 32-byte slice of the memory region at the given offset. Meanwhile, update the
+    /// timestamps of the read bytes.
     ///
     /// # Panics
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_word_mut(&mut self, offset: usize, ts: u64) -> (B256, Vec<u64>) {
-        let ret = self.slice_mut(offset, 32, ts);
+    pub fn read_word(&mut self, offset: usize, ts: u64) -> (B256, Vec<u64>) {
+        let ret = self.read_slice(offset, 32, ts);
         (ret.0.try_into().unwrap(), ret.1)
     }
 
@@ -247,14 +250,15 @@ impl SharedMemory {
         (ret.0.into(), ret.1)
     }
 
-    /// Returns a U256 of the memory region at the given offset.
+    /// Returns a U256 of the memory region at the given offset. Meanwhile, update the
+    /// timestamps of the read bytes.
     ///
     /// # Panics
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_u256_mut(&mut self, offset: usize, ts: u64) -> (U256, Vec<u64>) {
-        let ret = self.get_word_mut(offset, ts);
+    pub fn read_u256(&mut self, offset: usize, ts: u64) -> (U256, Vec<u64>) {
+        let ret = self.read_word(offset, ts);
         (ret.0.into(), ret.1)
     }
 
@@ -304,7 +308,7 @@ impl SharedMemory {
     #[cfg_attr(debug_assertions, track_caller)]
     pub fn set(&mut self, offset: usize, value: &[u8], ts: u64) -> (Vec<u8>, Vec<u64>) {
         if !value.is_empty() {
-            let (slice, old_ts) = self.slice_mut(offset, value.len(), ts);
+            let (slice, old_ts) = self.read_slice(offset, value.len(), ts);
             let old_slice = slice.to_vec();
             slice.copy_from_slice(value);
             (old_slice, old_ts)
@@ -331,7 +335,7 @@ impl SharedMemory {
     ) -> (Vec<u8>, Vec<u64>) {
         if data_offset >= data.len() {
             // nullify all memory slots
-            let (slice, old_ts) = self.slice_mut(memory_offset, len, ts);
+            let (slice, old_ts) = self.read_slice(memory_offset, len, ts);
             let old_slice = slice.to_vec();
             slice.fill(0);
 
@@ -342,13 +346,13 @@ impl SharedMemory {
         let data_len = data_end - data_offset;
         debug_assert!(data_offset < data.len() && data_end <= data.len());
         let data = unsafe { data.get_unchecked(data_offset..data_end) };
-        let (slice_0, old_ts_0) = self.slice_mut(memory_offset, data_len, ts);
+        let (slice_0, old_ts_0) = self.read_slice(memory_offset, data_len, ts);
         let old_slice_0 = slice_0.to_vec();
         slice_0.copy_from_slice(data);
 
         // nullify rest of memory slots
         // SAFETY: Memory is assumed to be valid, and it is commented where this assumption is made.
-        let (slice_1, old_ts_1) = self.slice_mut(memory_offset + data_len, len - data_len, ts);
+        let (slice_1, old_ts_1) = self.read_slice(memory_offset + data_len, len - data_len, ts);
         let old_slice_1 = slice_1.to_vec();
         slice_1.fill(0);
         (

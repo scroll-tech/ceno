@@ -140,6 +140,7 @@ macro_rules! pop_top {
         }
         // SAFETY: Length is checked above.
         let ($x1, $x2) = unsafe { $interp.stack.pop_top_unsafe() };
+        $interp.stack_timestamp += 1;
     };
     ($interp:expr, $x1:ident, $x2:ident, $x3:ident) => {
         if $interp.stack.len() < 3 {
@@ -148,14 +149,17 @@ macro_rules! pop_top {
         }
         // SAFETY: Length is checked above.
         let ($x1, $x2, $x3) = unsafe { $interp.stack.pop2_top_unsafe() };
+        $interp.stack_timestamp += 2;
     };
 }
 
 #[macro_export]
 macro_rules! push_b256 {
 	($interp:expr, $($x:expr),* $(,)?) => ($(
-        match $interp.stack.push_b256($x, $interp.timestamp) {
-            Ok(()) => {},
+        match $interp.stack.push_b256($x, $interp.stack_timestamp) {
+            Ok(()) => {
+                $interp.stack_timestamp += 1;
+            },
             Err(e) => {
                 $interp.instruction_result = e;
                 return;
@@ -167,8 +171,10 @@ macro_rules! push_b256 {
 #[macro_export]
 macro_rules! push {
     ($interp:expr, $($x:expr),* $(,)?) => ($(
-        match $interp.stack.push($x, $interp.timestamp) {
-            Ok(()) => {},
+        match $interp.stack.push($x, $interp.stack_timestamp) {
+            Ok(()) => {
+                $interp.stack_timestamp += 1;
+            },
             Err(e) => {
                 $interp.instruction_result = e;
                 return;

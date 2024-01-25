@@ -11,7 +11,7 @@ pub fn wrapped_add<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, hos
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
     *op2.0 = op1.0.wrapping_add(*op2.0);
-    *op2.1 = interpreter.timestamp;
+    *op2.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, *op2.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -20,7 +20,7 @@ pub fn wrapping_mul<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, ho
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
     *op2.0 = op1.0.wrapping_mul(*op2.0);
-    *op2.1 = interpreter.timestamp;
+    *op2.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, *op2.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -29,7 +29,7 @@ pub fn wrapping_sub<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, ho
     gas!(interpreter, gas::VERYLOW);
     pop_top!(interpreter, op1, op2);
     *op2.0 = op1.0.wrapping_sub(*op2.0);
-    *op2.1 = interpreter.timestamp;
+    *op2.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, *op2.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -40,7 +40,7 @@ pub fn div<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut 
     if *op2.0 != U256::ZERO {
         *op2.0 = op1.0.wrapping_div(*op2.0);
     }
-    *op2.1 = interpreter.timestamp;
+    *op2.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, *op2.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -49,7 +49,7 @@ pub fn sdiv<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut
     gas!(interpreter, gas::LOW);
     pop_top!(interpreter, op1, op2);
     *op2.0 = i256_div(op1.0, *op2.0);
-    *op2.1 = interpreter.timestamp;
+    *op2.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, *op2.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -60,7 +60,7 @@ pub fn rem<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut 
     if *op2.0 != U256::ZERO {
         *op2.0 = op1.0.wrapping_rem(*op2.0);
     }
-    *op2.1 = interpreter.timestamp;
+    *op2.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, *op2.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -71,7 +71,7 @@ pub fn smod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut
     if *op2.0 != U256::ZERO {
         *op2.0 = i256_mod(op1.0, *op2.0);
     }
-    *op2.1 = interpreter.timestamp;
+    *op2.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, *op2.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -80,7 +80,7 @@ pub fn addmod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &m
     gas!(interpreter, gas::MID);
     pop_top!(interpreter, op1, op2, op3);
     *op3.0 = op1.0.add_mod(op2.0, *op3.0);
-    *op3.1 = interpreter.timestamp;
+    *op3.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, op2.0, *op3.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -89,7 +89,7 @@ pub fn mulmod<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &m
     gas!(interpreter, gas::MID);
     pop_top!(interpreter, op1, op2, op3);
     *op3.0 = op1.0.mul_mod(op2.0, *op3.0);
-    *op3.1 = interpreter.timestamp;
+    *op3.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, op2.0, *op3.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -98,7 +98,7 @@ pub fn exp<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F>,
     pop_top!(interpreter, op1, op2);
     gas_or_fail!(interpreter, gas::exp_cost::<SPEC>(*op2.0));
     *op2.0 = op1.0.pow(*op2.0);
-    *op2.1 = interpreter.timestamp;
+    *op2.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, *op2.0];
     host.record(&interpreter.generate_record(&operands));
 }
@@ -128,7 +128,7 @@ pub fn signextend<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host
         let mask = (U256::from(1) << bit_index) - U256::from(1);
         *op2.0 = if bit { *op2.0 | !mask } else { *op2.0 & mask };
     }
-    *op2.1 = interpreter.timestamp;
+    *op2.1 = interpreter.stack_timestamp;
     let operands = vec![op1.0, *op2.0];
     host.record(&interpreter.generate_record(&operands));
 }

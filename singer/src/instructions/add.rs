@@ -263,6 +263,16 @@ impl Instruction for AddInstruction {
         challenge: &Option<Vec<F>>,
         index: usize,
     ) -> Option<Vec<F>> {
-        todo!()
+        match index {
+            0 => {
+                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+                Some(wire_values)
+            }
+            1 => {
+                let mut wire_values = vec![F::ZERO; Self::phase1_size()];
+                Some(wire_values)
+            }
+            _ => None,
+        }
     }
 }

@@ -8,11 +8,38 @@ mod dummy;
 pub use dummy::DummyHost;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PreRecord {
+    pub(crate) opcode: u8,
+    pub(crate) clock: u64,
+    pub(crate) pc: u64,
+    pub(crate) stack_timestamp: u64,
+    pub(crate) memory_timestamp: u64,
+    pub(crate) stack_top: u64,
+}
+
+impl PreRecord {
+    pub(crate) fn complete(self, operands: Vec<U256>) -> Record {
+        Record {
+            opcode: self.opcode,
+            clock: self.clock,
+            pc: self.pc,
+            stack_timestamp: self.stack_timestamp,
+            memory_timestamp: self.memory_timestamp,
+            operands,
+            stack_top: self.stack_top,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
     pub opcode: u8,
-    pub pc: usize,
+    pub clock: u64,
+    pub pc: u64,
+    pub stack_timestamp: u64,
+    pub memory_timestamp: u64,
     pub operands: Vec<U256>,
-    pub timestamp: u64,
+    pub stack_top: u64,
 }
 
 /// EVM context host.

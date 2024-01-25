@@ -144,7 +144,7 @@ pub fn extcodecopy<H: Host, F: SmallField, SPEC: Spec>(
         code_offset,
         len,
         code.bytes(),
-        interpreter.timestamp,
+        interpreter.memory_timestamp,
     );
     let operands = vec![
         U256::try_from(address.into_word()).unwrap(),
@@ -165,17 +165,18 @@ pub fn blockhash<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host:
         if diff <= BLOCK_HASH_HISTORY && diff != 0 {
             let Some(hash) = host.block_hash(*number.0) else {
                 interpreter.instruction_result = InstructionResult::FatalExternalError;
+                host.record(&interpreter.generate_record(&Vec::new()));
                 return;
             };
             *number.0 = U256::from_be_bytes(hash.0);
-            *number.1 = interpreter.timestamp;
+            *number.1 = interpreter.stack_timestamp;
             let operands = vec![*number.0];
             host.record(&interpreter.generate_record(&operands));
             return;
         }
     }
     *number.0 = U256::ZERO;
-    *number.1 = interpreter.timestamp;
+    *number.1 = interpreter.stack_timestamp;
     let operands = vec![*number.0];
     host.record(&interpreter.generate_record(&operands));
 }

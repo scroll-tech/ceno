@@ -14,11 +14,12 @@ pub fn mload<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mu
     shared_memory_resize!(interpreter, index, 32);
     let value = interpreter
         .shared_memory
-        .get_u256_mut(index, interpreter.timestamp)
+        .read_u256(index, interpreter.memory_timestamp)
         .0;
     push!(interpreter, value);
     let operands = vec![U256::from(index), value];
     host.record(&interpreter.generate_record(&operands));
+    interpreter.memory_timestamp += 1;
 }
 
 pub fn mstore<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
@@ -28,9 +29,10 @@ pub fn mstore<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &m
     shared_memory_resize!(interpreter, index, 32);
     interpreter
         .shared_memory
-        .set_u256(index, value.0, interpreter.timestamp);
+        .set_u256(index, value.0, interpreter.memory_timestamp);
     let operands = vec![U256::from(index), value.0];
     host.record(&interpreter.generate_record(&operands));
+    interpreter.memory_timestamp += 1;
 }
 
 pub fn mstore8<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
@@ -40,9 +42,10 @@ pub fn mstore8<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &
     shared_memory_resize!(interpreter, index, 1);
     interpreter
         .shared_memory
-        .set_byte(index, value.0.byte(0), interpreter.timestamp);
+        .set_byte(index, value.0.byte(0), interpreter.memory_timestamp);
     let operands = vec![U256::from(index), value.0];
     host.record(&interpreter.generate_record(&operands));
+    interpreter.memory_timestamp += 1;
 }
 
 pub fn msize<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
@@ -50,6 +53,7 @@ pub fn msize<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mu
     push!(interpreter, U256::from(interpreter.shared_memory.len()));
     let operands = vec![U256::from(interpreter.shared_memory.len())];
     host.record(&interpreter.generate_record(&operands));
+    interpreter.memory_timestamp += 1;
 }
 
 // EIP-5656: MCOPY - Memory copying instruction
@@ -62,6 +66,7 @@ pub fn mcopy<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F
     // deduce gas
     gas_or_fail!(interpreter, gas::verylowcopy_cost(len as u64));
     if len == 0 {
+        host.record(&interpreter.generate_record(&Vec::new()));
         return;
     }
 
@@ -72,8 +77,9 @@ pub fn mcopy<H: Host, F: SmallField, SPEC: Spec>(interpreter: &mut Interpreter<F
     // copy memory in place
     interpreter
         .shared_memory
-        .copy(dst, src, len, interpreter.timestamp);
+        .copy(dst, src, len, interpreter.memory_timestamp);
 
     let operands = vec![U256::from(dst), U256::from(src), U256::from(len)];
     host.record(&interpreter.generate_record(&operands));
+    interpreter.memory_timestamp += 1;
 }
