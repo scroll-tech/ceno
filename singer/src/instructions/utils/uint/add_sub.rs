@@ -94,7 +94,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         ret
     }
 
-    pub(in crate::instructions) fn compute_borrows_no_overflow<F: SmallField>(
+    pub(in crate::instructions) fn compute_no_overflow_borrows<F: SmallField>(
         minuend: u64,
         subtrahend: u64,
     ) -> [F; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS]

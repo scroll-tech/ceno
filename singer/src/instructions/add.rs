@@ -286,6 +286,28 @@ impl Instruction for AddInstruction {
                 .copy_from_slice(
                     &UIntAddSub::<TSUInt>::compute_no_overflow_carries(record.stack_timestamp, 1),
                 );
+                wire_values[Self::phase0_old_stack_ts0()]
+                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.operands_timestamps[0]));
+                wire_values[Self::phase0_old_stack_ts1()]
+                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.operands_timestamps[1]));
+                wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
+                    Self::phase0_old_stack_ts_lt0().start,
+                )]
+                .copy_from_slice(
+                    &UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
+                        record.operands_timestamps[0],
+                        record.stack_timestamp,
+                    ),
+                );
+                wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
+                    Self::phase0_old_stack_ts_lt1().start,
+                )]
+                .copy_from_slice(
+                    &UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
+                        record.operands_timestamps[1],
+                        record.stack_timestamp,
+                    ),
+                );
 
                 Some(wire_values)
             }
