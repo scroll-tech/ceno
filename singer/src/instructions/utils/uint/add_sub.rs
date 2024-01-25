@@ -241,6 +241,7 @@ mod test {
                                                                  &addend_1.unwrap(),
                                                                  &carry);
         assert_eq!(result.unwrap().values, vec![0, 1, 2, 3, 4]);
+        // TODO: take circuit_builder's cells and check the addition
     }
 
     #[test]
@@ -256,5 +257,6 @@ mod test {
                                                                  &subtrahend.unwrap(),
                                                                  &borrow);
         assert_eq!(result.unwrap().values, vec![0, 1, 2, 3, 4]);
+        // TODO: take circuit_builder's cells and check the subtraction
     }
 }
