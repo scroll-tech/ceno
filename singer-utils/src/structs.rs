@@ -1,0 +1,48 @@
+use goldilocks::SmallField;
+use simple_frontend::structs::{CellId, ChallengeId, ExtCellId};
+
+use crate::constants::{EVM_STACK_BIT_WIDTH, VALUE_BIT_WIDTH};
+
+pub enum RAMType {
+    Stack,
+    Memory,
+    GlobalState,
+}
+
+pub enum ROMType {
+    Bytecode,
+    Calldata,
+    Range,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ChipChallenges {
+    // Challenges for multiple-tuple chip records
+    pub record_rlc: ChallengeId,
+    // Challenges for multiple-cell values
+    pub record_item_rlc: ChallengeId,
+}
+
+#[derive(Clone, Debug)]
+pub struct RAMHandler<Ext: SmallField> {
+    pub(crate) rd_records: Vec<ExtCellId<Ext>>,
+    pub(crate) wt_records: Vec<ExtCellId<Ext>>,
+    pub(crate) challenge: ChipChallenges,
+}
+
+#[derive(Clone, Debug)]
+pub struct ROMHandler<Ext: SmallField> {
+    pub(crate) records: Vec<ExtCellId<Ext>>,
+    pub(crate) challenge: ChipChallenges,
+}
+
+/// Unsigned integer with `M` bits. C denotes the cell bit width.
+#[derive(Clone, Debug)]
+pub struct UInt<const M: usize, const C: usize> {
+    pub(crate) values: Vec<CellId>,
+}
+
+pub type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
+pub type PCUInt = UInt64;
+pub type TSUInt = UInt<56, 56>;
+pub type StackUInt = UInt<{ EVM_STACK_BIT_WIDTH as usize }, { VALUE_BIT_WIDTH as usize }>;
