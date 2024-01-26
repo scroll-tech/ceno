@@ -275,6 +275,14 @@ impl Instruction for CalldataloadInstruction {
 
                 wire_values[Self::phase0_old_stack_ts()]
                     .copy_from_slice(&TSUInt::uint_to_field_elems(record.operands_timestamps[0]));
+
+                wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
+                    Self::phase0_old_stack_ts_lt().start,
+                )]
+                .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
+                    record.operands_timestamps[0] + (1 << TSUInt::BIT_SIZE)
+                        - record.stack_timestamp,
+                ));
                 wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
                     Self::phase0_old_stack_ts_lt().start,
                 )]

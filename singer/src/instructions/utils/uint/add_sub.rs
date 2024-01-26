@@ -192,6 +192,29 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         ret
     }
 
+    pub(in crate::instructions) fn compute_borrows_u256<F: SmallField>(
+        minuend: U256,
+        subtrahend: U256,
+    ) -> [F; UInt::<M, C>::N_CARRY_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut borrow = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::u256_to_limbs(minuend)
+            .iter()
+            .zip(UInt::<M, C>::u256_to_limbs(subtrahend).iter())
+            .enumerate()
+        {
+            // If a - borrow (from previous limb) < b, then should borrow in this limb
+            borrow = b + if borrow { 1 } else { 0 } > *a;
+            ret[i] = if borrow { F::ONE } else { F::ZERO };
+        }
+        ret
+    }
+
     /// Little-endian addition. Assume users to check the correct range of the
     /// result by themselves.
     pub(in crate::instructions) fn add_unsafe<F: SmallField>(

@@ -290,6 +290,7 @@ impl Instruction for AddInstruction {
                     .copy_from_slice(&TSUInt::uint_to_field_elems(record.operands_timestamps[0]));
                 wire_values[Self::phase0_old_stack_ts1()]
                     .copy_from_slice(&TSUInt::uint_to_field_elems(record.operands_timestamps[1]));
+
                 wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
                     Self::phase0_old_stack_ts_lt0().start,
                 )]
@@ -308,6 +309,22 @@ impl Instruction for AddInstruction {
                         record.stack_timestamp,
                     ),
                 );
+
+                wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
+                    Self::phase0_old_stack_ts_lt0().start,
+                )]
+                .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
+                    record.operands_timestamps[0] + (1 << TSUInt::BIT_SIZE)
+                        - record.stack_timestamp,
+                ));
+                wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
+                    Self::phase0_old_stack_ts_lt1().start,
+                )]
+                .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
+                    record.operands_timestamps[1] + (1 << TSUInt::BIT_SIZE)
+                        - record.stack_timestamp,
+                ));
+
                 wire_values[Self::phase0_addend_0()]
                     .copy_from_slice(&StackUInt::u256_to_field_elems(record.operands[0]));
                 wire_values[Self::phase0_addend_1()]

@@ -99,6 +99,8 @@ impl<const M: usize, const C: usize> TryFrom<Vec<usize>> for UInt<M, C> {
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     pub(crate) const N_OPRAND_CELLS: usize = (M + C - 1) / C;
+    pub(crate) const BIT_SIZE: usize = M;
+    pub(crate) const LIMB_BIT_SIZE: usize = C;
 
     const N_CARRY_CELLS: usize = Self::N_OPRAND_CELLS;
     const N_CARRY_NO_OVERFLOW_CELLS: usize = Self::N_OPRAND_CELLS - 1;
