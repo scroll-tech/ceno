@@ -9,6 +9,7 @@ use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
 use crate::{PrepareSingerWiresIn, SingerWiresIn};
 
+use super::utils::uint::{u2fvec, UIntAddSub};
 use super::InstructionGraph;
 use super::{
     utils::{uint::UIntCmp, ChipHandler, TSUInt},
@@ -196,12 +197,54 @@ impl Instruction for JumpInstruction {
     }
 
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        todo!()
+        match index {
+            0 => {
+                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+                wire_values[Self::phase0_stack_ts()]
+                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.stack_timestamp));
+                wire_values[Self::phase0_stack_top()]
+                    .copy_from_slice(&u2fvec::<F, 1, 64>(record.stack_top));
+                wire_values[Self::phase0_clk()].copy_from_slice(&u2fvec::<F, 1, 64>(record.clock));
+
+                wire_values[Self::phase0_old_stack_ts()]
+                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.operands_timestamps[0]));
+
+                wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
+                    Self::phase0_old_stack_ts_lt().start,
+                )]
+                .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
+                    record.operands_timestamps[0] + (1 << TSUInt::BIT_SIZE)
+                        - record.stack_timestamp,
+                ));
+                wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
+                    Self::phase0_old_stack_ts_lt().start,
+                )]
+                .copy_from_slice(
+                    &UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
+                        record.operands_timestamps[0],
+                        record.stack_timestamp,
+                    ),
+                );
+
+                Some(wire_values)
+            }
+            1 => {
+                // TODO: Not finished yet. Waiting for redesign of phase 1.
+                let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
+                wire_values[..]
+                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.memory_timestamp));
+                Some(wire_values)
+            }
+            _ => None,
+        }
     }
     fn complete_wires_in<F: SmallField>(
         pre_wires_in: &PrepareSingerWiresIn<F>,
-        challenges: &Vec<F>,
+        _challenges: &Vec<F>,
     ) -> SingerWiresIn<F> {
-        todo!();
+        // TODO: Not finished yet. Waiting for redesign of phase 1.
+        SingerWiresIn {
+            opcode_wires_in: pre_wires_in.opcode_wires_in.clone(),
+        }
     }
 }
