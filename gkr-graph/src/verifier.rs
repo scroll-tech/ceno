@@ -4,7 +4,7 @@ use gkr::{
 };
 use goldilocks::SmallField;
 use itertools::izip;
-use simple_frontend::structs::OutType;
+
 use std::mem;
 use transcript::Transcript;
 
