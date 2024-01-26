@@ -10,9 +10,10 @@ use crate::{
 pub fn jump<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::MID);
     pop!(interpreter, dest);
+    let timestamps = vec![dest.1];
     let dest = as_usize_or_fail!(interpreter, dest.0, InstructionResult::InvalidJump);
     let operands = vec![U256::from(dest)];
-    host.record(&interpreter.generate_record(&operands, &Vec::new()));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
     if interpreter.contract.is_valid_jump(dest) {
         // SAFETY: In analysis we are checking create our jump table and we do check above to be
         // sure that jump is safe to execute.
@@ -27,7 +28,8 @@ pub fn jumpi<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mu
     gas!(interpreter, gas::HIGH);
     pop!(interpreter, dest, value);
     let operands = vec![dest.0, value.0];
-    host.record(&interpreter.generate_record(&operands, &Vec::new()));
+    let timestamps = vec![dest.1, value.1];
+    host.record(&interpreter.generate_record(&operands, &timestamps));
     if value.0 != U256::ZERO {
         let dest = as_usize_or_fail!(interpreter, dest.0, InstructionResult::InvalidJump);
         if interpreter.contract.is_valid_jump(dest) {
