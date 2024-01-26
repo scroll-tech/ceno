@@ -41,9 +41,10 @@ pub enum NodeOutputType {
 /// be one wire_out instance connected to one wire_in instance, or one wire_out
 /// connected to multiple wire_in instances.
 pub enum PredType {
-    Source,
+    Source(WireId),
     PredWire(NodeOutputType),
     PredWireTrans(NodeOutputType),
+    PredWireDup(NodeOutputType),
 }
 
 pub struct CircuitNode<F: SmallField> {

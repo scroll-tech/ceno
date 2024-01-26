@@ -28,44 +28,56 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         circuit: &Arc<Circuit<F>>,
         preds: Vec<PredType>,
         challenges: Vec<F>,
-        sources: Vec<Vec<F>>, // instances
+        sources: Vec<Vec<Vec<F>>>, // 1. wire_id, 2. instance_id, 3. cell_id.
+        num_instances: usize,
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
 
         assert_eq!(preds.len(), circuit.n_wires_in);
+        assert!(num_instances.is_power_of_two());
+        assert!(!sources.iter().any(|source| source.len() != num_instances));
 
         let mut witness = CircuitWitness::new(circuit, challenges);
-        let num_instances = sources.len();
         for instance_id in 0..num_instances {
             let wires_in = preds
                 .iter()
                 .map(|pred| match pred {
-                    PredType::Source => sources[instance_id].clone(),
-                    PredType::PredWire(out) | PredType::PredWireTrans(out) => match out {
-                        NodeOutputType::OutputLayer(id) => {
-                            let output = &self.witness.node_witnesses[*id].last_layer_witness_ref();
-                            let size = output.len() * output[0].len() / num_instances;
-                            output
-                                .iter()
-                                .flatten()
-                                .skip(size * instance_id)
-                                .take(size)
-                                .copied()
-                                .collect_vec()
+                    PredType::Source(wire_id) => sources[*wire_id as usize][instance_id].clone(),
+                    PredType::PredWire(out)
+                    | PredType::PredWireTrans(out)
+                    | PredType::PredWireDup(out) => {
+                        let out = match out {
+                            NodeOutputType::OutputLayer(id) => {
+                                self.witness.node_witnesses[*id].last_layer_witness_ref()
+                            }
+                            NodeOutputType::WireOut(id, wire_id) => {
+                                &self.witness.node_witnesses[*id].wires_out_ref()[*wire_id as usize]
+                            }
+                        };
+                        match pred {
+                            PredType::PredWire(_) => {
+                                let size = (out.len() * out[0].len()) / num_instances;
+                                out.iter()
+                                    .flatten()
+                                    .skip(size * instance_id)
+                                    .take(size)
+                                    .copied()
+                                    .collect_vec()
+                            }
+                            PredType::PredWireTrans(_) => {
+                                let size = (out.len() * out[0].len()) / num_instances;
+                                out.iter()
+                                    .flatten()
+                                    .skip(instance_id)
+                                    .step_by(num_instances)
+                                    .take(size)
+                                    .copied()
+                                    .collect_vec()
+                            }
+                            PredType::PredWireDup(_) => out.iter().flatten().copied().collect_vec(),
+                            _ => unreachable!(),
                         }
-                        NodeOutputType::WireOut(id, wire_id) => {
-                            let wire_out = &self.witness.node_witnesses[*id].wires_out_ref()
-                                [*wire_id as usize];
-                            let size = wire_out.len() * wire_out[0].len() / num_instances;
-                            wire_out
-                                .iter()
-                                .flatten()
-                                .skip(size * instance_id)
-                                .take(size)
-                                .copied()
-                                .collect_vec()
-                        }
-                    },
+                    }
                 })
                 .collect_vec();
             witness.add_instance(circuit, &wires_in);
@@ -106,12 +118,14 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         let (sources, targets) = self.graph.nodes.iter().enumerate().fold(
             (BTreeSet::new(), outs),
             |(mut sources, mut targets), (id, node)| {
-                for (wire_id, pred) in node.preds.iter().enumerate() {
+                for pred in &node.preds {
                     match pred {
-                        PredType::Source => {
-                            sources.insert(NodeInputType::WireIn(id, wire_id as WireId));
+                        PredType::Source(wire_id) => {
+                            sources.insert(NodeInputType::WireIn(id, *wire_id));
                         }
-                        PredType::PredWire(out) | PredType::PredWireTrans(out) => {
+                        PredType::PredWire(out)
+                        | PredType::PredWireTrans(out)
+                        | PredType::PredWireDup(out) => {
                             targets.remove(out);
                         }
                     }
