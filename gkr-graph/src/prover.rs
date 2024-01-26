@@ -1,8 +1,15 @@
+use gkr::{structs::IOPProverPhase2Message, utils::MultilinearExtensionFromVectors};
 use goldilocks::SmallField;
+use itertools::izip;
+use std::mem;
 use transcript::Transcript;
 
-use crate::structs::{
-    CircuitGraph, CircuitGraphWitness, IOPProof, IOPProverState, TargetEvaluations,
+use crate::{
+    error::GKRGraphError,
+    structs::{
+        CircuitGraph, CircuitGraphWitness, IOPProof, IOPProverState, NodeOutputType, PredType,
+        TargetEvaluations,
+    },
 };
 
 impl<F: SmallField> IOPProverState<F> {
@@ -11,7 +18,67 @@ impl<F: SmallField> IOPProverState<F> {
         circuit_witness: &CircuitGraphWitness<F>,
         target_evals: &TargetEvaluations<F>,
         transcript: &mut Transcript<F>,
-    ) -> IOPProof<F> {
-        todo!()
+    ) -> Result<IOPProof<F>, GKRGraphError> {
+        assert_eq!(target_evals.0.len(), circuit.targets.len());
+
+        let mut output_evals = vec![vec![]; circuit.nodes.len()];
+        let mut wires_out_evals = vec![vec![]; circuit.nodes.len()];
+        izip!(&circuit.targets, &target_evals.0).for_each(|(target, eval)| match target {
+            NodeOutputType::OutputLayer(id) => output_evals[*id].push(eval.clone()),
+            NodeOutputType::WireOut(id, _) => wires_out_evals[*id].push(eval.clone()),
+        });
+
+        let gkr_proofs = izip!(&circuit.nodes, &circuit_witness.node_witnesses)
+            .rev()
+            .map(|(node, witness)| {
+                let proof = gkr::structs::IOPProverState::prove_parallel(
+                    &node.circuit,
+                    witness,
+                    &mem::take(&mut output_evals[node.id]),
+                    &mem::take(&mut wires_out_evals[node.id]),
+                    transcript,
+                );
+
+                let IOPProverPhase2Message {
+                    sumcheck_proofs,
+                    sumcheck_eval_values,
+                } = &proof.sumcheck_proofs.last().unwrap().1;
+                izip!(sumcheck_proofs, sumcheck_eval_values).for_each(|(proof, evals)| {
+                    izip!(0.., &node.preds, evals).for_each(|(wire_id, pred, eval)| match pred {
+                        PredType::Source => {
+                            debug_assert_eq!(
+                                witness.wires_in_ref()[wire_id]
+                                    .as_slice()
+                                    .mle(
+                                        node.circuit.max_wires_in_num_vars,
+                                        witness.instance_num_vars(),
+                                    )
+                                    .evaluate(&proof.point),
+                                *eval
+                            );
+                        }
+                        PredType::PredWire(out) | PredType::PredWireTrans(out) => match out {
+                            NodeOutputType::OutputLayer(id) => {
+                                output_evals[*id].push((proof.point.clone(), *eval))
+                            }
+                            NodeOutputType::WireOut(id, wire_id) => {
+                                wires_out_evals[*id]
+                                    .resize(*wire_id as usize + 1, (vec![], F::ZERO));
+                                let evals = &mut wires_out_evals[*id][*wire_id as usize];
+                                assert!(
+                                    evals.0.is_empty() && evals.1.is_zero_vartime(),
+                                    "unimplemented",
+                                );
+                                *evals = (proof.point.clone(), *eval);
+                            }
+                        },
+                    });
+                });
+
+                proof
+            })
+            .collect();
+
+        Ok(IOPProof { gkr_proofs })
     }
 }
