@@ -197,7 +197,7 @@ mod test {
     use crate::instructions::utils::uint::convert_decomp;
 
     #[test]
-    fn test_UInt() {
+    fn test_uint() {
         // M = 256 is the number of bits for unsigned integer
         // C = 63 is the cell bit width
         type Uint256_63 = UInt<256, 63>;
