@@ -8,15 +8,19 @@ use crate::{
 
 pub fn pop<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::BASE);
-    if let Err(result) = interpreter.stack.pop() {
-        interpreter.instruction_result = result;
+    let result = interpreter.stack.pop();
+    interpreter.stack_timestamp += 1;
+    match result {
+        Ok(result) => {
+            let operands = vec![result.0];
+            let timestamps = vec![result.1];
+            host.record(&interpreter.generate_record(&operands, &timestamps));
+        }
+        Err(result) => {
+            interpreter.instruction_result = result;
+            host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
+        }
     }
-    let operands = if interpreter.stack.len() > 0 {
-        unsafe { vec![*interpreter.stack.top_unsafe().0] }
-    } else {
-        Vec::new()
-    };
-    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 /// EIP-3855: PUSH0 instruction
@@ -43,31 +47,35 @@ pub fn push<const N: usize, H: Host, F: SmallField>(
     // SAFETY: In analysis we append trailing bytes to the bytecode so that this is safe to do
     // without bounds checking.
     let ip = interpreter.instruction_pointer;
-    if let Err(result) = interpreter.stack.push_slice(
-        unsafe { core::slice::from_raw_parts(ip, N) },
-        interpreter.stack_timestamp,
-    ) {
+    let pushed_data = unsafe { core::slice::from_raw_parts(ip, N) };
+    if let Err(result) = interpreter
+        .stack
+        .push_slice(pushed_data, interpreter.stack_timestamp)
+    {
         interpreter.instruction_result = result;
         host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
         return;
     }
     interpreter.instruction_pointer = unsafe { ip.add(N) };
-    let n_words = (N + 31) / 32;
-    let operands = interpreter.stack.data()[interpreter.stack.len() - n_words..].to_vec();
+    let operands = pushed_data.to_vec().into_iter().map(U256::from).collect();
     host.record(&interpreter.generate_record(&operands, &Vec::new()));
     interpreter.stack_timestamp += 1;
 }
 
 pub fn dup<const N: usize, H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
-    if let Err(result) = interpreter.stack.dup::<N>(interpreter.stack_timestamp) {
-        interpreter.instruction_result = result;
-        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
-    } else {
-        let operands = interpreter.stack.data()[interpreter.stack.len() - N..].to_vec();
-        let timestamps = interpreter.stack.timestamps()[interpreter.stack.len() - N..].to_vec();
-        host.record(&interpreter.generate_record(&operands, &timestamps));
-        interpreter.stack_timestamp += 1;
+    let result = interpreter.stack.dup::<N>(interpreter.stack_timestamp);
+    interpreter.stack_timestamp += 1;
+    match result {
+        Ok(result) => {
+            let operands = vec![result.0];
+            let timestamps = vec![result.1];
+            host.record(&interpreter.generate_record(&operands, &timestamps));
+        }
+        Err(result) => {
+            interpreter.instruction_result = result;
+            host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
+        }
     }
 }
 
@@ -76,19 +84,17 @@ pub fn swap<const N: usize, H: Host, F: SmallField>(
     host: &mut H,
 ) {
     gas!(interpreter, gas::VERYLOW);
-    if let Err(result) = interpreter.stack.swap::<N>(interpreter.stack_timestamp) {
-        interpreter.instruction_result = result;
-        host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
-    } else {
-        let operands = vec![
-            interpreter.stack.data()[interpreter.stack.len() - 1 - N],
-            interpreter.stack.data()[interpreter.stack.len() - 1],
-        ];
-        let timestamps = vec![
-            interpreter.stack.timestamps()[interpreter.stack.len() - 1 - N],
-            interpreter.stack.timestamps()[interpreter.stack.len() - 1],
-        ];
-        host.record(&interpreter.generate_record(&operands, &timestamps));
-        interpreter.stack_timestamp += 1;
+    let result = interpreter.stack.swap::<N>(interpreter.stack_timestamp);
+    interpreter.stack_timestamp += 1;
+    match result {
+        Ok(result) => {
+            let operands = vec![result.0, result.2];
+            let timestamps = vec![result.1, result.3];
+            host.record(&interpreter.generate_record(&operands, &timestamps));
+        }
+        Err(result) => {
+            interpreter.instruction_result = result;
+            host.record(&interpreter.generate_record(&Vec::new(), &Vec::new()));
+        }
     }
 }

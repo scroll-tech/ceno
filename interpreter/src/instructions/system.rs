@@ -76,6 +76,7 @@ pub fn codecopy<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: 
 pub fn calldataload<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop!(interpreter, index);
+    let timestamps = vec![index.1];
     let index = as_usize_saturated!(index.0);
     let load = if index < interpreter.contract.input.len() {
         let have_bytes = 32.min(interpreter.contract.input.len() - index);
@@ -85,10 +86,10 @@ pub fn calldataload<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, ho
     } else {
         B256::ZERO
     };
+    let operands = vec![U256::from(index), U256::try_from(load).unwrap()];
+    host.record(&interpreter.generate_record(&operands, &timestamps));
 
     push_b256!(interpreter, load);
-    let operands = vec![U256::from(index), U256::try_from(load).unwrap()];
-    host.record(&interpreter.generate_record(&operands, &Vec::new()));
 }
 
 pub fn calldatasize<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
