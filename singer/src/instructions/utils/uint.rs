@@ -4,6 +4,7 @@ use frontend::structs::{CellId, CircuitBuilder, ConstantType};
 use gkr::utils::ceil_log2;
 use goldilocks::SmallField;
 use itertools::Itertools;
+use revm_primitives::U256;
 
 use crate::{constants::RANGE_CHIP_BIT_WIDTH, error::ZKVMError};
 
@@ -24,6 +25,32 @@ pub(in crate::instructions) fn u2fvec<F: SmallField, const W: usize, const C: us
     ret
 }
 
+pub(in crate::instructions) fn u256_to_fvec<F: SmallField, const W: usize, const C: usize>(
+    x: U256,
+) -> [F; W] {
+    let mut x = x;
+    let mut ret = [F::ZERO; W];
+    for i in 0..ret.len() {
+        // U256 is least significant first. The limbs are u64. C is assumed to be
+        // no more than 64.
+        ret[i] = F::from(x.as_limbs()[0] & ((1 << C) - 1));
+        x >>= C;
+    }
+    ret
+}
+
+pub(in crate::instructions) fn u256_to_vec<const W: usize, const C: usize>(x: U256) -> [u64; W] {
+    let mut x = x;
+    let mut ret = [0; W];
+    for i in 0..ret.len() {
+        // U256 is least significant first. The limbs are u64. C is assumed to be
+        // no more than 64.
+        ret[i] = x.as_limbs()[0] & ((1 << C) - 1);
+        x >>= C;
+    }
+    ret
+}
+
 pub(in crate::instructions) fn u2vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
     let mut x = x;
     let mut ret = [0; W];
@@ -36,6 +63,18 @@ pub(in crate::instructions) fn u2vec<const W: usize, const C: usize>(x: u64) -> 
 
 pub(in crate::instructions) fn u2range_limbs<const W: usize>(x: u64) -> [u64; W] {
     u2vec::<W, RANGE_CHIP_BIT_WIDTH>(x)
+}
+
+pub(in crate::instructions) fn u2range_field_limbs<F: SmallField, const W: usize>(
+    x: u64,
+) -> [F; W] {
+    u2fvec::<F, W, RANGE_CHIP_BIT_WIDTH>(x)
+}
+
+pub(in crate::instructions) fn u256_to_range_field_limbs<F: SmallField, const W: usize>(
+    x: U256,
+) -> [F; W] {
+    u256_to_fvec::<F, W, RANGE_CHIP_BIT_WIDTH>(x)
 }
 
 impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
@@ -85,7 +124,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     pub(in crate::instructions) fn uint_to_range_no_overflow_limbs(
         x: u64,
     ) -> [u64; Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS] {
-        u2vec::<{ Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS }, C>(x)
+        u2range_limbs::<{ Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS }>(x)
     }
 
     /// Split the given unsigned integer into limbs in little endian for range check, then turn
@@ -95,7 +134,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     pub(in crate::instructions) fn uint_to_range_no_overflow_field_limbs<F: SmallField>(
         x: u64,
     ) -> [F; Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS] {
-        u2fvec::<F, { Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS }, C>(x)
+        u2range_field_limbs::<F, { Self::N_RANGE_CHECK_NO_OVERFLOW_CELLS }>(x)
     }
 
     /// Split the given unsigned integer into limbs in little endian for range check, then turn
@@ -105,14 +144,24 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     pub(in crate::instructions) fn uint_to_range_field_limbs<F: SmallField>(
         x: u64,
     ) -> [F; Self::N_RANGE_CHECK_CELLS] {
-        u2fvec::<F, { Self::N_RANGE_CHECK_CELLS }, C>(x)
+        u2range_field_limbs::<F, { Self::N_RANGE_CHECK_CELLS }>(x)
+    }
+
+    /// Split the given unsigned 256-bit integer into limbs in little endian for range check, then
+    /// turn into field elements.
+    /// The given integer should have <= range_bits * n effective bits. If it has more bits, then
+    /// the extra bits would be ignored.
+    pub(in crate::instructions) fn u256_to_range_field_limbs<F: SmallField>(
+        x: U256,
+    ) -> [F; Self::N_RANGE_CHECK_CELLS] {
+        u256_to_range_field_limbs::<F, { Self::N_RANGE_CHECK_CELLS }>(x)
     }
 
     /// Split the given unsigned integer into limbs in little endian for range check.
     /// The given integer should have <= range_bits * n effective bits. If it has more bits, then
     /// the extra bits would be ignored.
     pub(in crate::instructions) fn uint_to_range_limbs(x: u64) -> [u64; Self::N_RANGE_CHECK_CELLS] {
-        u2vec::<{ Self::N_RANGE_CHECK_CELLS }, C>(x)
+        u2range_limbs::<{ Self::N_RANGE_CHECK_CELLS }>(x)
     }
 
     /// Split the given unsigned integer into limbs in little endian, and put in field elements.
@@ -122,6 +171,23 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         x: u64,
     ) -> [F; Self::N_OPRAND_CELLS] {
         u2fvec::<F, { Self::N_OPRAND_CELLS }, C>(x)
+    }
+
+    /// Split the given unsigned 256-bit integer into limbs in little endian, and put in
+    /// field elements.
+    /// The given integer should have <= C * n effective bits. If it has more bits, then the
+    /// extra bits would be ignored.
+    pub(in crate::instructions) fn u256_to_field_elems<F: SmallField>(
+        x: U256,
+    ) -> [F; Self::N_OPRAND_CELLS] {
+        u256_to_fvec::<F, { Self::N_OPRAND_CELLS }, C>(x)
+    }
+
+    /// Split the given unsigned 256-bit integer into limbs in little endian.
+    /// The given integer should have <= C * n effective bits. If it has more bits, then the
+    /// extra bits would be ignored.
+    pub(in crate::instructions) fn u256_to_limbs(x: U256) -> [u64; Self::N_OPRAND_CELLS] {
+        u256_to_vec::<{ Self::N_OPRAND_CELLS }, C>(x)
     }
 
     pub(in crate::instructions) fn from_range_values<F: SmallField>(

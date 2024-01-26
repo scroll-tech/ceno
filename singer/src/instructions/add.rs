@@ -308,6 +308,23 @@ impl Instruction for AddInstruction {
                         record.stack_timestamp,
                     ),
                 );
+                wire_values[Self::phase0_addend_0()]
+                    .copy_from_slice(&StackUInt::u256_to_field_elems(record.operands[0]));
+                wire_values[Self::phase0_addend_1()]
+                    .copy_from_slice(&StackUInt::u256_to_field_elems(record.operands[1]));
+
+                wire_values[UIntAddSub::<StackUInt>::range_values_range(
+                    Self::phase0_instruction_add().start,
+                )]
+                .copy_from_slice(&StackUInt::u256_to_range_field_limbs(
+                    record.operands[0] + record.operands[1],
+                ));
+                wire_values
+                    [UIntAddSub::<StackUInt>::carry_range(Self::phase0_instruction_add().start)]
+                .copy_from_slice(&UIntAddSub::<StackUInt>::compute_carries_u256(
+                    record.operands[0],
+                    record.operands[1],
+                ));
 
                 Some(wire_values)
             }

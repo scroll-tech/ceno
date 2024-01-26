@@ -2092,6 +2092,7 @@ dependencies = [
  "rand",
  "rayon",
  "revm-interpreter",
+ "revm-primitives",
  "serde",
  "strum",
  "strum_macros",

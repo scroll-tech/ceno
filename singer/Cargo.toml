@@ -19,6 +19,7 @@ transcript = { path = "../transcript" }
 mpcs = { path = "../mpcs" }
 gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
 revm-interpreter = { path = "../interpreter" }
+revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "6a8b44d", default-features = false }
 itertools = "0.12.0"
 strum = "0.25.0"
 strum_macros = "0.25.3"

@@ -312,7 +312,7 @@ impl<F: SmallField> Interpreter<F> {
             pc: self.program_counter() as u64,
             stack_timestamp: self.stack_timestamp,
             memory_timestamp: self.memory_timestamp,
-            stack_top: self.stack.len() as u64 - 1,
+            stack_top: self.stack.len() as u64,
         })
     }
 
