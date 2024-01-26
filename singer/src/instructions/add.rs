@@ -329,7 +329,9 @@ impl Instruction for AddInstruction {
                 Some(wire_values)
             }
             1 => {
-                let mut wire_values = vec![F::ZERO; Self::phase1_size()];
+                let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
+                wire_values[..]
+                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.memory_timestamp));
                 Some(wire_values)
             }
             _ => None,
@@ -337,8 +339,12 @@ impl Instruction for AddInstruction {
     }
     fn complete_wires_in<F: SmallField>(
         pre_wires_in: &PrepareSingerWiresIn<F>,
-        challenges: &Vec<F>,
+        _challenges: &Vec<F>,
     ) -> SingerWiresIn<F> {
-        todo!();
+        // Currently the memory timestamp only takes one element, so no need to do anything
+        // and no need to use the challenges.
+        SingerWiresIn {
+            opcode_wires_in: pre_wires_in.opcode_wires_in.clone(),
+        }
     }
 }
