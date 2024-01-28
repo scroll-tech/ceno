@@ -198,13 +198,11 @@ impl<F: SmallField> CircuitBuilder<F> {
         }
     }
 
-    pub fn add_ext(&mut self, out: &[CellId], in_0: &[CellId], in_1: &[CellId]) {
+    pub fn add_ext(&mut self, out: &[CellId], in_0: &[CellId], scalar: F::BaseField) {
         assert_eq!(out.len(), F::DEGREE);
         assert_eq!(in_0.len(), F::DEGREE);
-        assert_eq!(in_1.len(), F::DEGREE);
         for i in 0..F::DEGREE {
-            self.add(out[i], in_0[i], F::BaseField::ONE);
-            self.add(out[i], in_1[i], F::BaseField::ONE);
+            self.add(out[i], in_0[i], scalar);
         }
     }
 

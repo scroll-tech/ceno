@@ -72,6 +72,12 @@ where
     /// This is to mark the cells with special functionality.
     fn mark_cells(&mut self, cell_type: CellType, cells: &[CellId]) {
         cells.iter().for_each(|cell| {
+            if self.cells[*cell].cell_type.is_some() {
+                panic!(
+                    "Cell {} has been assigned to be {:?}",
+                    cell, self.cells[*cell].cell_type
+                );
+            }
             self.cells[*cell].cell_type = Some(cell_type);
         });
     }
@@ -106,6 +112,15 @@ where
         );
         self.n_wires_out += 1;
         ((self.n_wires_out - 1) as WireId, cell)
+    }
+
+    pub fn create_wire_out_from_cells(&mut self, cells: &[CellId]) -> WireId {
+        self.mark_cells(
+            CellType::Out(OutType::Wire(self.n_wires_out as WireId)),
+            &cells,
+        );
+        self.n_wires_out += 1;
+        (self.n_wires_out - 1) as WireId
     }
 
     fn create_wire_in_empty(&mut self) -> WireId {
