@@ -16,7 +16,7 @@ use crate::{
 impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     pub fn prove(
         circuit: &CircuitGraph<F>,
-        circuit_witness: &CircuitGraphWitness<F>,
+        circuit_witness: &CircuitGraphWitness<F::BaseField>,
         target_evals: &TargetEvaluations<F>,
         transcript: &mut Transcript<F>,
     ) -> Result<IOPProof<F>, GKRGraphError> {
@@ -55,7 +55,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
                             witness.wires_in_ref()[wire_id]
                                 .as_slice()
                                 .mle(
-                                    node.circuit.max_wires_in_num_vars,
+                                    node.circuit.max_wires_in_num_vars.unwrap(),
                                     witness.instance_num_vars(),
                                 )
                                 .evaluate(&proof.point),

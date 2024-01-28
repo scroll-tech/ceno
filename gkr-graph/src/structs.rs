@@ -40,7 +40,7 @@ pub enum NodeOutputType {
 /// The predecessor of a node can be a source or a wire. If it is a wire, it can
 /// be one wire_out instance connected to one wire_in instance, or one wire_out
 /// connected to multiple wire_in instances.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum PredType {
     Source,
     PredWire(NodeOutputType),
@@ -70,7 +70,7 @@ pub struct CircuitGraphWitness<F: SmallField> {
 
 pub struct CircuitGraphBuilder<F: SmallField> {
     pub(crate) graph: CircuitGraph<F>,
-    pub(crate) witness: CircuitGraphWitness<F>,
+    pub(crate) witness: CircuitGraphWitness<F::BaseField>,
 }
 
 pub struct CircuitGraphAuxInfo {
