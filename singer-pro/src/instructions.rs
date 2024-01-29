@@ -8,7 +8,7 @@ use crate::{
     chips::SingerChipBuilder,
     component::{AccessoryCircuit, ChipChallenges, InstCircuit},
     error::ZKVMError,
-    CircuitWiresInValues,
+    CircuitWiresInValues, SingerParams,
 };
 
 use self::{
@@ -72,7 +72,7 @@ pub(crate) fn insts_graph_method<F: SmallField>(
     sources: Vec<CircuitWiresInValues<F::BaseField>>,
     real_challenges: &[F],
     real_n_instances: usize,
-    n_public_output_bytes: usize,
+    params: SingerParams,
 ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
     let method = match opcode {
         0x01 => AddInstruction::construct_circuit_graph,
@@ -92,7 +92,7 @@ pub(crate) fn insts_graph_method<F: SmallField>(
         sources,
         real_challenges,
         real_n_instances,
-        n_public_output_bytes,
+        params,
     )
 }
 
@@ -124,7 +124,7 @@ pub(crate) trait InstructionGraph<F: SmallField> {
         mut sources: Vec<CircuitWiresInValues<F::BaseField>>,
         real_challenges: &[F],
         real_n_instances: usize,
-        n_public_output_bytes: usize,
+        params: SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
         let node_id = graph_builder.add_node_with_witness(
             stringify!(Self::InstType),

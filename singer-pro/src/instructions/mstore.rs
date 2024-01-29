@@ -22,7 +22,7 @@ use crate::{
         chip_handler::{ChipHandler, MemoryChipOperations, RangeChipOperations},
         uint::{StackUInt, TSUInt, UIntAddSub, UIntCmp},
     },
-    CircuitWiresInValues,
+    CircuitWiresInValues, SingerParams,
 };
 
 use super::{Instruction, InstructionGraph};
@@ -50,7 +50,7 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
         mut sources: Vec<CircuitWiresInValues<F::BaseField>>,
         real_challenges: &[F],
         real_n_instances: usize,
-        _: usize,
+        _: SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
         // Add the instruction circuit to the graph.
         let node_id = graph_builder.add_node_with_witness(
@@ -153,7 +153,7 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
         let mut to_chip_ids = vec![None; ChipType::iter().count()];
         to_chip_ids[ChipType::RangeChip as usize] = Some(range_chip_id);
 
-        // To successory
+        // To accessory circuits.
         let (to_acc_dup_id, to_acc_dup) =
             circuit_builder.create_wire_out(MstoreAccessory::pred_dup_size());
         add_assign_each_cell(

@@ -69,6 +69,7 @@ impl<F: SmallField> SingerGraphBuilder<F> {
         program_input: &[u8],
         program_output: &[u8],
         real_challenges: &[F],
+        params: SingerParams,
     ) -> Result<
         (
             SingerCircuit<F>,
@@ -84,7 +85,7 @@ impl<F: SmallField> SingerGraphBuilder<F> {
             &mut self.chip_builder,
             singer_wires_in.basic_blocks,
             real_challenges,
-            program_output.len(),
+            params,
         )?;
         // calldata.
         let table_out_node_id = self.chip_builder.construct_chip_tables(
@@ -125,17 +126,12 @@ pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
 
 pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 
-pub(crate) type WirsInValues<F> = Vec<Vec<F>>;
-// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
-pub(crate) type CircuitWiresInValues<F> = Vec<WirsInValues<F>>;
-
-#[derive(Clone, Debug, Default)]
-pub struct BasicBlockWiresIn<F: SmallField> {
-    real_n_instance: usize,
-    bb_start: CircuitWiresInValues<F>,
-    opcodes: Vec<Vec<CircuitWiresInValues<F>>>,
-    bb_final: CircuitWiresInValues<F>,
-    bb_accs: Vec<CircuitWiresInValues<F>>,
+#[derive(Clone, Copy, Debug)]
+pub struct SingerParams {
+    pub n_public_output_bytes: usize,
+    pub n_mem_initialize: usize,
+    pub n_mem_finalize: usize,
+    pub n_stack_finalize: usize,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -158,4 +154,17 @@ pub struct SingerWiresOutID {
     calldata_chip_table: NodeOutputType,
 
     public_output_size: Option<NodeOutputType>,
+}
+
+pub(crate) type WirsInValues<F> = Vec<Vec<F>>;
+// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
+pub(crate) type CircuitWiresInValues<F> = Vec<WirsInValues<F>>;
+
+#[derive(Clone, Debug, Default)]
+pub struct BasicBlockWiresIn<F: SmallField> {
+    real_n_instance: usize,
+    bb_start: CircuitWiresInValues<F>,
+    opcodes: Vec<Vec<CircuitWiresInValues<F>>>,
+    bb_final: CircuitWiresInValues<F>,
+    bb_accs: Vec<CircuitWiresInValues<F>>,
 }

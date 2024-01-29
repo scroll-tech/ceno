@@ -20,7 +20,7 @@ use crate::{
         chip_handler::{ChipHandler, MemoryChipOperations},
         uint::{StackUInt, TSUInt, UIntAddSub, UIntCmp},
     },
-    CircuitWiresInValues,
+    CircuitWiresInValues, SingerParams,
 };
 
 use super::{Instruction, InstructionGraph};
@@ -40,7 +40,7 @@ impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
         mut sources: Vec<CircuitWiresInValues<F::BaseField>>,
         real_challenges: &[F],
         _: usize,
-        n_public_output_bytes: usize,
+        params: SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
         let public_output_size =
             preds[inst_circuit.layout.from_pred_inst.stack_operand_ids[1] as usize];
@@ -59,7 +59,7 @@ impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
             node_id,
             &inst_circuit.layout.to_chip_ids,
             real_challenges,
-            n_public_output_bytes,
+            params.n_public_output_bytes,
         )?;
 
         if let PredType::PredWire(out) = public_output_size {
