@@ -8,7 +8,7 @@ members = [
     "transcript",
     "mpcs",
     "gkr-graph",
-    "singer",
+    "simple-frontend",
 ]
 
 [workspace.package]

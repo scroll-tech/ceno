@@ -1,9 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use frontend::structs::{CellId, ConstantType, InType, LayerId};
 use goldilocks::SmallField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::Serialize;
+use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, InType, LayerId};
 
 pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
 pub type Point<F> = Vec<F>;
@@ -18,7 +18,7 @@ pub struct IOPProverState<F: SmallField> {
     /// Evaluations of subsets from layers closer to the output. Hashmap is used
     /// to map from the current layer id to the later layer id, point and value.
     pub(crate) subset_evals: HashMap<LayerId, Vec<(LayerId, Point<F>, F)>>,
-    pub(crate) circuit_witness: CircuitWitness<F>,
+    pub(crate) circuit_witness: CircuitWitness<F::BaseField>,
     pub(crate) layer_out_poly: Arc<DenseMultilinearExtension<F>>,
 }
 
@@ -98,7 +98,7 @@ pub struct Circuit<F: SmallField> {
     pub n_wires_in: usize,
     /// The left endpoint in the input layer copied from each wire_in.
     pub paste_from_in: Vec<(InType, CellId, CellId)>,
-    pub max_wires_in_num_vars: usize,
+    pub max_wires_in_num_vars: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -139,7 +139,7 @@ pub struct CircuitWitness<F: SmallField> {
     pub(crate) wires_in: Vec<Vec<Vec<F>>>,
     pub(crate) wires_out: Vec<Vec<Vec<F>>>,
     /// Challenges
-    pub(crate) challenges: Vec<F>,
+    pub(crate) challenges: HashMap<ChallengeConst, Vec<F>>,
     /// The number of instances for the same sub-circuit.
     pub(crate) n_instances: usize,
 }

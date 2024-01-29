@@ -3,10 +3,10 @@ use std::{collections::HashMap, sync::Arc};
 use ark_std::{end_timer, start_timer};
 use ff::FromUniformBytes;
 
-use frontend::structs::{CellId, LayerId};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
+use simple_frontend::structs::{CellId, LayerId};
 use transcript::Transcript;
 
 use crate::structs::{
@@ -27,7 +27,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     /// Prove process for data parallel circuits.
     pub fn prove_parallel(
         circuit: &Circuit<F>,
-        circuit_witness: &CircuitWitness<F>,
+        circuit_witness: &CircuitWitness<F::BaseField>,
         output_evals: &[(Point<F>, F)],
         wires_out_evals: &[(Point<F>, F)],
         transcript: &mut Transcript<F>,
@@ -85,7 +85,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
 
     /// Initialize proving state for data parallel circuits.
     fn prover_init_parallel(
-        circuit_witness: &CircuitWitness<F>,
+        circuit_witness: &CircuitWitness<F::BaseField>,
         output_evals: &[(Point<F>, F)],
         wires_out_evals: &[(Point<F>, F)],
     ) -> Self {
@@ -204,7 +204,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             *layer_out_value,
             &self.circuit_witness.layers[self.layer_id as usize + 1],
             self.circuit_witness.layers_ref(),
-            |c| self.circuit_witness.constant(c),
+            |c| self.circuit_witness.constant(*c),
             hi_num_vars,
         );
 
@@ -362,7 +362,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     // TODO: Define special protocols of special layers for optimization.
 }
 
-struct IOPProverPhase1State<'a, F> {
+struct IOPProverPhase1State<'a, F: SmallField> {
     layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
     next_evals: &'a [(Point<F>, F)],
     subset_evals: &'a [(LayerId, Point<F>, F)],
@@ -379,13 +379,13 @@ struct IOPProverPhase2State<'a, F: SmallField> {
     layer_out_point: Point<F>,
     layer_out_value: F,
     layer_in_poly: Arc<DenseMultilinearExtension<F>>,
-    layer_in_vec: &'a [Vec<F>],
-    mul3s: Vec<Gate3In<F>>,
-    mul2s: Vec<Gate2In<F>>,
-    adds: Vec<Gate1In<F>>,
-    assert_consts: Vec<GateCIn<F>>,
+    layer_in_vec: &'a [Vec<F::BaseField>],
+    mul3s: Vec<Gate3In<F::BaseField>>,
+    mul2s: Vec<Gate2In<F::BaseField>>,
+    adds: Vec<Gate1In<F::BaseField>>,
+    assert_consts: Vec<GateCIn<F::BaseField>>,
     paste_from: &'a HashMap<LayerId, Vec<CellId>>,
-    paste_from_sources: &'a [Vec<Vec<F>>],
+    paste_from_sources: &'a [Vec<Vec<F::BaseField>>],
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
     hi_num_vars: usize,
@@ -411,8 +411,8 @@ struct IOPProverPhase2InputState<'a, F: SmallField> {
     layer_out_point: &'a Point<F>,
     paste_from_wires_in: Vec<(CellId, CellId)>,
     paste_from_counter_in: Vec<(CellId, CellId)>,
-    wires_in: &'a [Vec<Vec<F>>],
+    wires_in: &'a [Vec<Vec<F::BaseField>>],
     lo_out_num_vars: usize,
-    lo_in_num_vars: usize,
+    lo_in_num_vars: Option<usize>,
     hi_num_vars: usize,
 }

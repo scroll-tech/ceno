@@ -1,8 +1,8 @@
 use ark_std::{end_timer, start_timer};
-use frontend::structs::{CellId, InType};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
+use simple_frontend::structs::{CellId, InType};
 use transcript::Transcript;
 
 use crate::{
@@ -23,7 +23,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
         layer_out_value: F,
         paste_from_in: &'a [(InType, CellId, CellId)],
         lo_out_num_vars: usize,
-        lo_in_num_vars: usize,
+        lo_in_num_vars: Option<usize>,
         hi_num_vars: usize,
     ) -> Self {
         let mut paste_from_wires_in = vec![(0, 0); n_wires_in];
@@ -76,7 +76,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier phase 2 input step 1");
         let lo_out_num_vars = self.lo_out_num_vars;
-        let lo_in_num_vars = self.lo_in_num_vars;
+        let lo_in_num_vars = self.lo_in_num_vars.unwrap_or(0);
         let hi_num_vars = self.hi_num_vars;
         let in_num_vars = lo_in_num_vars + hi_num_vars;
         let lo_point = &self.layer_out_point[..lo_out_num_vars];
@@ -95,7 +95,14 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
                 (*c) * (segment_greater_than_l_1 - segment_greater_than_r_1)
             })
             .sum::<F>();
+
         let sigma = self.layer_out_value - g_value_const;
+        if self.lo_in_num_vars.is_none() {
+            if sigma != F::ZERO {
+                return Err(GKRError::VerifyError);
+            }
+            return Ok(());
+        }
 
         let claim = SumcheckState::verify(
             sigma,

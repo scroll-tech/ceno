@@ -1,3 +1,4 @@
+use ff::Field;
 use std::{iter, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
@@ -5,7 +6,7 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 
-pub(crate) fn i64_to_field<F: SmallField>(x: i64) -> F {
+pub fn i64_to_field<F: SmallField>(x: i64) -> F {
     if x >= 0 {
         F::from(x as u64)
     } else {
@@ -220,7 +221,7 @@ pub trait MultilinearExtensionFromVectors<F: SmallField> {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>>;
 }
 
-impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F>] {
+impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>> {
         let n_zeros = (1 << lo_num_vars) - self[0].len();
         let n_zero_vecs = (1 << hi_num_vars) - self.len();
@@ -232,9 +233,10 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F>] {
                 .flat_map(|instance| {
                     instance
                         .into_iter()
-                        .chain(iter::repeat(F::ZERO).take(n_zeros))
+                        .chain(iter::repeat(F::BaseField::ZERO).take(n_zeros))
                 })
-                .chain(vec![F::ZERO; n_zero_vecs])
+                .chain(vec![F::BaseField::ZERO; n_zero_vecs])
+                .map(|x| F::from_base(&x))
                 .collect_vec(),
         ))
     }

@@ -8,20 +8,6 @@ type GKRProverState<F: SmallField> = gkr::structs::IOPProverState<F>;
 type GKRVerifierState<F: SmallField> = gkr::structs::IOPVerifierState<F>;
 type GKRProof<F: SmallField> = gkr::structs::IOPProof<F>;
 
-pub struct NodeWireIn {
-    node_id: usize,
-    prep_wire_id: WireId,
-    /// The number of variables of the preceding nodes.
-    num_vars: usize,
-}
-
-pub struct NodeWireOut {
-    node_id: usize,
-    succ_wire_id: WireId,
-    /// The number of variables of the succeeding nodes.
-    num_vars: usize,
-}
-
 /// Corresponds to the `output_evals` and `wires_out_evals` in gkr
 /// `prove_parallel`.
 pub struct IOPProverState<F: SmallField> {
@@ -54,7 +40,7 @@ pub enum NodeOutputType {
 /// The predecessor of a node can be a source or a wire. If it is a wire, it can
 /// be one wire_out instance connected to one wire_in instance, or one wire_out
 /// connected to multiple wire_in instances.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum PredType {
     Source,
     PredWire(NodeOutputType),
@@ -84,7 +70,7 @@ pub struct CircuitGraphWitness<F: SmallField> {
 
 pub struct CircuitGraphBuilder<F: SmallField> {
     pub(crate) graph: CircuitGraph<F>,
-    pub(crate) witness: CircuitGraphWitness<F>,
+    pub(crate) witness: CircuitGraphWitness<F::BaseField>,
 }
 
 pub struct CircuitGraphAuxInfo {
