@@ -1,7 +1,7 @@
 use ff::Field;
 use goldilocks::SmallField;
 use serde::Serialize;
-use std::hash::Hash;
+use std::{hash::Hash, marker::PhantomData};
 
 // We make use of the following identifiers.
 // For type safety we want different alias for those identifiers; while disallow arithmetics cross different identifiers.
@@ -48,6 +48,12 @@ pub struct Cell<F: SmallField> {
     pub assert_const: Option<F::BaseField>,
     /// The type of the cell, e.g., public input, witness, challenge, etc.
     pub cell_type: Option<CellType>,
+}
+
+/// An ExtCell consists DEGREE number of cells.
+pub struct ExtCell<Ext: SmallField> {
+    pub cells: Vec<CellId>,
+    pub phantom: PhantomData<Ext>,
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize)]

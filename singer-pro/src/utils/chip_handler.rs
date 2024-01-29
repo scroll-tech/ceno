@@ -140,7 +140,7 @@ impl ChipHandler {
     ) -> (WireId, usize) {
         let count = self.records.len().next_power_of_two() - self.records.len();
         for _ in 0..count {
-            let out = circuit_builder.create_ext();
+            let out = circuit_builder.create_ext_cell();
             circuit_builder.add_const(out[0], constant);
             self.records.push(out);
         }
@@ -159,7 +159,7 @@ impl ChipHandler {
         let count = self.records.len().next_power_of_two() - self.records.len();
         let last = self.records[self.records.len() - 1].clone();
         for _ in 0..count {
-            let out = circuit_builder.create_ext();
+            let out = circuit_builder.create_ext_cell();
             circuit_builder.add_ext(&out, &last, F::BaseField::ONE);
             self.records.push(out);
         }

@@ -7,16 +7,10 @@ use goldilocks::SmallField;
 use crate::{
     rlc_base_term, rlc_const_term,
     structs::{
-        CellId, CellType, ChallengeConst, ChallengeId, CircuitBuilder, ConstantType, InType,
-        MixedCell, OutType, WireId,
+        CellId, CellType, ChallengeConst, ChallengeId, CircuitBuilder, ConstantType, ExtCell,
+        InType, MixedCell, OutType, WireId,
     },
 };
-
-/// An ExtCell consists DEGREE number of cells.
-pub struct ExtCell<Ext: SmallField> {
-    cells: Vec<CellId>,
-    phantom: PhantomData<Ext>,
-}
 
 impl<Ext: SmallField> From<Vec<CellId>> for ExtCell<Ext> {
     /// converting a vector of CellIds into an ext cell
@@ -253,14 +247,6 @@ impl<F: SmallField> CircuitBuilder<F> {
     // ======================================
     // Cell random linear combinations
     // ======================================
-    pub fn rlc_ext(&mut self, out: &ExtCell<F>, in_array: &[ExtCell<F>], challenge: ChallengeId) {
-        assert_eq!(out.degree(), F::DEGREE);
-        match F::DEGREE {
-            2 => self.rlc_ext_2(out, in_array, challenge),
-            3 => self.rlc_ext_3(out, in_array, challenge),
-            _ => unimplemented!(),
-        }
-    }
 
     /// Compute the random linear combination of `in_array` by challenge.
     /// out = \sum_{i = 0}^{in_array.len()} challenge^i * in_array[i] + challenge^{in_array.len()}.
@@ -278,6 +264,17 @@ impl<F: SmallField> CircuitBuilder<F> {
             exp: in_array.len() as u64,
         };
         rlc_const_term!(self, F::DEGREE, out.cells; c);
+    }
+
+    /// Compute the random linear combination of `in_array` by challenge.
+    /// out = \sum_{i = 0}^{in_array.len()} challenge^i * in_array[i] + challenge^{in_array.len()}.
+    pub fn rlc_ext(&mut self, out: &ExtCell<F>, in_array: &[ExtCell<F>], challenge: ChallengeId) {
+        assert_eq!(out.degree(), F::DEGREE);
+        match F::DEGREE {
+            2 => self.rlc_ext_2(out, in_array, challenge),
+            3 => self.rlc_ext_3(out, in_array, challenge),
+            _ => unimplemented!(),
+        }
     }
 
     /// Compute the random linear combination of `in_array` with mixed types by challenge.
