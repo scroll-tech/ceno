@@ -1,16 +1,29 @@
+use ff::Field;
+use itertools::Itertools;
 use std::marker::PhantomData;
 
-use frontend::structs::{CellId, CircuitBuilder, ConstantType};
 use gkr::utils::ceil_log2;
 use goldilocks::SmallField;
-use itertools::Itertools;
+use simple_frontend::structs::{CellId, CircuitBuilder};
 
-use crate::{constants::RANGE_CHIP_BIT_WIDTH, error::ZKVMError};
+use crate::{
+    constants::{EVM_STACK_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH, VALUE_BIT_WIDTH},
+    error::ZKVMError,
+};
 
-use super::UInt;
+/// Unsigned integer with `M` bits. C denotes the cell bit width.
+#[derive(Clone, Debug)]
+pub(crate) struct UInt<const M: usize, const C: usize> {
+    values: Vec<CellId>,
+}
 
-pub(in crate::instructions) mod add_sub;
-pub(in crate::instructions) mod cmp;
+pub(crate) type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
+pub(crate) type PCUInt = UInt64;
+pub(crate) type TSUInt = UInt<56, 56>;
+pub(crate) type StackUInt = UInt<{ EVM_STACK_BIT_WIDTH as usize }, { VALUE_BIT_WIDTH as usize }>;
+
+pub(crate) mod add_sub;
+pub(crate) mod cmp;
 
 impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
     type Error = ZKVMError;
@@ -37,16 +50,16 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     const N_CARRY_CELLS: usize = Self::N_OPRAND_CELLS;
     const N_CARRY_NO_OVERFLOW_CELLS: usize = Self::N_OPRAND_CELLS - 1;
-    pub(in crate::instructions) const N_RANGE_CHECK_CELLS: usize =
+    pub(crate) const N_RANGE_CHECK_CELLS: usize =
         Self::N_OPRAND_CELLS * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
-    pub(in crate::instructions) const N_RANGE_CHECK_NO_OVERFLOW_CELLS: usize =
+    pub(crate) const N_RANGE_CHECK_NO_OVERFLOW_CELLS: usize =
         (Self::N_OPRAND_CELLS - 1) * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
 
-    pub(in crate::instructions) fn values(&self) -> &[CellId] {
+    pub(crate) fn values(&self) -> &[CellId] {
         &self.values
     }
 
-    pub(in crate::instructions) fn from_range_values<F: SmallField>(
+    pub(crate) fn from_range_values<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
         range_values: &[CellId],
     ) -> Result<Self, ZKVMError> {
@@ -61,7 +74,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Self::try_from(values)
     }
 
-    pub(in crate::instructions) fn from_bytes_big_endien<F: SmallField>(
+    pub(crate) fn from_bytes_big_endien<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
         bytes: &[CellId],
     ) -> Result<Self, ZKVMError> {
@@ -72,20 +85,20 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         }
     }
 
-    pub(in crate::instructions) fn assert_eq<F: SmallField>(
+    pub(crate) fn assert_eq<F: SmallField>(
         &self,
         circuit_builder: &mut CircuitBuilder<F>,
         other: &Self,
     ) {
         for i in 0..self.values.len() {
             let diff = circuit_builder.create_cell();
-            circuit_builder.add(diff, self.values[i], ConstantType::Field(F::ONE));
-            circuit_builder.add(diff, other.values[i], ConstantType::Field(-F::ONE));
-            circuit_builder.assert_const(diff, &F::ZERO);
+            circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
+            circuit_builder.add(diff, other.values[i], -F::BaseField::ONE);
+            circuit_builder.assert_const(diff, F::BaseField::ZERO);
         }
     }
 
-    pub(in crate::instructions) fn assert_eq_range_values<F: SmallField>(
+    pub(crate) fn assert_eq_range_values<F: SmallField>(
         &self,
         circuit_builder: &mut CircuitBuilder<F>,
         range_values: &[CellId],
@@ -98,18 +111,19 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let length = self.values.len().min(values.len());
         for i in 0..length {
             let diff = circuit_builder.create_cell();
-            circuit_builder.add(diff, self.values[i], ConstantType::Field(F::ONE));
-            circuit_builder.add(diff, values[i], ConstantType::Field(-F::ONE));
-            circuit_builder.assert_const(diff, &F::ZERO);
+            circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
+            circuit_builder.add(diff, values[i], -F::BaseField::ONE);
+            circuit_builder.assert_const(diff, F::BaseField::ZERO);
         }
         for i in length..values.len() {
-            circuit_builder.assert_const(values[i], &F::ZERO);
+            circuit_builder.assert_const(values[i], F::BaseField::ZERO);
         }
         for i in length..self.values.len() {
-            circuit_builder.assert_const(self.values[i], &F::ZERO);
+            circuit_builder.assert_const(self.values[i], F::BaseField::ZERO);
         }
     }
 
+    /// Generate (0, 1, ...,  size)
     pub(crate) fn counter_vector<F: SmallField>(size: usize) -> Vec<F> {
         let num_vars = ceil_log2(size);
         let tensor = |a: &[F], b: Vec<F>| {
@@ -131,10 +145,10 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 }
 
-pub(in crate::instructions) struct UIntAddSub<UInt> {
+pub(crate) struct UIntAddSub<UInt> {
     _phantom: PhantomData<UInt>,
 }
-pub(in crate::instructions) struct UIntCmp<UInt> {
+pub(crate) struct UIntCmp<UInt> {
     _phantom: PhantomData<UInt>,
 }
 
@@ -165,7 +179,7 @@ fn convert_decomp<F: SmallField>(
                 circuit_builder.add(
                     tmp,
                     small_values[k],
-                    ConstantType::Field(F::from((1 as u64) << j * small_bit_width)),
+                    F::BaseField::from((1 as u64) << j * small_bit_width),
                 );
             }
             tmp

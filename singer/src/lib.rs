@@ -1,7 +1,7 @@
 #![feature(generic_const_exprs)]
 
-use chips::ChipCircuitGadgets;
 use chips::LookupChipType;
+use chips::SingerChipBuilder;
 use error::ZKVMError;
 use gkr_graph::structs::CircuitGraph;
 use gkr_graph::structs::CircuitGraphBuilder;
@@ -14,15 +14,16 @@ use instructions::ChipChallenges;
 use instructions::InstCircuit;
 use instructions::InstOutputType;
 use std::mem;
-use strum::IntoEnumIterator;
 
-use crate::chips::construct_table_circuits;
+#[macro_use]
+mod macros;
 
 pub mod chips;
 pub mod constants;
 pub mod error;
 pub mod instructions;
 pub mod scheme;
+pub mod utils;
 
 // Process sketch:
 // 1. Construct instruction circuits and circuit gadgets => circuit gadgets
@@ -38,25 +39,20 @@ pub mod scheme;
 pub struct SingerCircuitBuilder<F: SmallField> {
     /// Opcode circuits
     insts_circuits: [Vec<InstCircuit<F>>; 256],
-    chip_circuit_gadgets: ChipCircuitGadgets<F>,
-
     challenges: ChipChallenges,
 }
 
 impl<F: SmallField> SingerCircuitBuilder<F> {
     pub fn new(challenges: ChipChallenges) -> Result<Self, ZKVMError> {
-        let mut opcode_circuits = Vec::with_capacity(256);
+        let mut insts_circuits = Vec::with_capacity(256);
         for opcode in 0..=255 {
-            opcode_circuits.push(construct_instruction_circuits(opcode, challenges)?);
+            insts_circuits.push(construct_instruction_circuits(opcode, challenges)?);
         }
-        let opcode_circuits: [Vec<InstCircuit<F>>; 256] = opcode_circuits
+        let insts_circuits: [Vec<InstCircuit<F>>; 256] = insts_circuits
             .try_into()
             .map_err(|_| ZKVMError::CircuitError)?;
-
-        let chip_circuit_gadgets = ChipCircuitGadgets::new();
         Ok(Self {
-            insts_circuits: opcode_circuits,
-            chip_circuit_gadgets,
+            insts_circuits,
             challenges,
         })
     }
@@ -68,7 +64,7 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
 /// output.
 pub struct SingerGraphBuilder<F: SmallField> {
     graph_builder: CircuitGraphBuilder<F>,
-    output_wires_id: Vec<Vec<NodeOutputType>>,
+    chip_builder: SingerChipBuilder<F>,
     public_output_size: Option<NodeOutputType>,
 }
 
@@ -76,7 +72,7 @@ impl<F: SmallField> SingerGraphBuilder<F> {
     pub fn new() -> Result<Self, ZKVMError> {
         Ok(Self {
             graph_builder: CircuitGraphBuilder::new(),
-            output_wires_id: vec![vec![]; InstOutputType::iter().count()],
+            chip_builder: SingerChipBuilder::new(),
             public_output_size: None,
         })
     }
@@ -84,44 +80,60 @@ impl<F: SmallField> SingerGraphBuilder<F> {
     pub fn construct(
         mut self,
         circuit_builder: &SingerCircuitBuilder<F>,
-        mut singer_wires_in: SingerWiresIn<F>,
+        singer_wires_in: SingerWiresIn<F::BaseField>,
         bytecode: &[u8],
         program_input: &[u8],
         real_challenges: &[F],
-    ) -> Result<(SingerCircuit<F>, SingerWitness<F>, SingerWiresOutID), ZKVMError> {
+        params: SingerParams,
+    ) -> Result<
+        (
+            SingerCircuit<F>,
+            SingerWitness<F::BaseField>,
+            SingerWiresOutID,
+        ),
+        ZKVMError,
+    > {
         // Add instruction and its extension (if any) circuits to the graph.
-        for (opcode, opcode_wires_in) in singer_wires_in.opcode_wires_in.iter_mut() {
-            let inst_circuits = &circuit_builder.insts_circuits[*opcode as usize];
-            construct_inst_circuit_graph(
-                *opcode,
-                &mut self,
+        for inst_wires_in in singer_wires_in.instructions.into_iter() {
+            let InstWiresIn {
+                opcode,
+                real_n_instances,
+                wires_in,
+            } = inst_wires_in;
+            let inst_circuits = &circuit_builder.insts_circuits[opcode as usize];
+            let pub_out_id = construct_inst_circuit_graph(
+                opcode,
+                &mut self.graph_builder,
+                &mut self.chip_builder,
                 &inst_circuits,
-                &circuit_builder.chip_circuit_gadgets,
-                mem::take(opcode_wires_in),
+                wires_in,
                 real_challenges,
+                real_n_instances,
+                params,
             )?;
+            if pub_out_id.is_some() {
+                self.public_output_size = pub_out_id;
+            }
         }
 
         // Construct tables for lookup arguments, including bytecode, range and
         // calldata.
-        let mut table_out_node_id = Vec::new();
-        for table_type in LookupChipType::iter() {
-            table_out_node_id.push(construct_table_circuits(
-                table_type,
-                &mut self.graph_builder,
-                bytecode,
-                program_input,
-                &circuit_builder.challenges,
-                real_challenges,
-                &circuit_builder.chip_circuit_gadgets,
-            )?);
-        }
+        let mut table_out_node_id = self.chip_builder.construct_chip_tables(
+            &mut self.graph_builder,
+            bytecode,
+            program_input,
+            singer_wires_in.table_count,
+            &circuit_builder.challenges,
+            real_challenges,
+        )?;
 
         let SingerGraphBuilder {
             graph_builder,
-            mut output_wires_id,
+            chip_builder,
             public_output_size,
         } = self;
+
+        let mut output_wires_id = chip_builder.output_wires_id;
 
         let singer_wire_out_id = SingerWiresOutID {
             global_state_in: mem::take(
@@ -158,23 +170,33 @@ pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
 
 pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 
-// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
-pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
-
+#[derive(Clone, Debug, Default)]
 pub struct SingerWiresIn<F: SmallField> {
-    opcode_wires_in: Vec<(u8, Vec<CircuitWiresIn<F>>)>,
+    instructions: Vec<InstWiresIn<F>>,
+    table_count: Vec<WirsInValues<F>>,
 }
 
 impl<F: SmallField> SingerWiresIn<F> {
     pub fn new() -> Self {
-        let mut opcode_wires_in = Vec::with_capacity(256);
+        let mut opcodes = Vec::with_capacity(256);
         for opcode in 0..=255 {
-            opcode_wires_in.push((opcode, Vec::new()));
+            opcodes.push(InstWiresIn::default());
         }
-        Self { opcode_wires_in }
+        let table_count = Vec::new();
+        Self {
+            instructions: opcodes,
+            table_count,
+        }
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct SingerParams {
+    pub n_public_output_bytes: usize,
+    pub n_mem_initialize: usize,
+    pub n_mem_finalize: usize,
+    pub n_stack_finalize: usize,
+}
 #[derive(Clone, Debug)]
 pub struct SingerWiresOutID {
     global_state_in: Vec<NodeOutputType>,
@@ -190,3 +212,17 @@ pub struct SingerWiresOutID {
 
     public_output_size: Option<NodeOutputType>,
 }
+
+// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
+pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
+
+#[derive(Clone, Debug, Default)]
+pub struct InstWiresIn<F: SmallField> {
+    pub opcode: u8,
+    pub real_n_instances: usize,
+    pub wires_in: Vec<CircuitWiresIn<F>>,
+}
+
+pub(crate) type WirsInValues<F> = Vec<Vec<F>>;
+// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
+pub(crate) type CircuitWiresInValues<F> = Vec<WirsInValues<F>>;

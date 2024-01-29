@@ -1,21 +1,23 @@
-use std::sync::Arc;
-
-use frontend::structs::{CircuitBuilder, MixedCell};
-
+use ff::Field;
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
+use paste::paste;
+use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use std::sync::Arc;
 
-use crate::instructions::InstCircuitLayout;
-use crate::{constants::OpcodeType, error::ZKVMError};
-
-use super::{
+use crate::{
+    constants::OpcodeType,
+    error::ZKVMError,
     utils::{
-        uint::{UIntAddSub, UIntCmp},
-        ChipHandler, PCUInt, TSUInt, UInt64,
+        chip_handler::{
+            BytecodeChipOperations, CalldataChip, ChipHandler, GlobalStateChipOperations,
+            RangeChipOperations, StackChipOperations,
+        },
+        uint::{PCUInt, StackUInt, TSUInt, UInt64, UIntAddSub, UIntCmp},
     },
-    ChipChallenges, InstCircuit, Instruction,
 };
-use super::{InstOutputType, InstructionGraph};
+
+use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 impl InstructionGraph for CalldataloadInstruction {
     type InstType = Self;
@@ -23,51 +25,23 @@ impl InstructionGraph for CalldataloadInstruction {
 
 pub struct CalldataloadInstruction;
 
-register_wires_in!(
+register_witness!(
     CalldataloadInstruction,
-    phase0_size {
-        phase0_pc => PCUInt::N_OPRAND_CELLS,
-        phase0_stack_ts => TSUInt::N_OPRAND_CELLS,
-        phase0_stack_top => 1,
-        phase0_clk => 1,
-
-        phase0_pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        phase0_stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-
-        phase0_offset => UInt64::N_OPRAND_CELLS,
-        phase0_old_stack_ts => TSUInt::N_OPRAND_CELLS,
-        phase0_old_stack_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS
-    },
-    phase1_size {
-        phase1_memory_ts_rlc => 1,
-        phase1_data_rlc => 1
-    }
-);
-
-register_wires_out!(
-    CalldataloadInstruction,
-    global_state_in_size {
-        state_in => 1
-    },
-    global_state_out_size {
-        state_out => 1
-    },
-    bytecode_chip_size {
-        current => 1
-    },
-    stack_pop_size {
-        offset => 1
-    },
-    stack_push_size {
-        data => 1
-    },
-    range_chip_size {
+    phase0 {
+        pc => PCUInt::N_OPRAND_CELLS,
+        stack_ts => TSUInt::N_OPRAND_CELLS,
+        memory_ts => TSUInt::N_OPRAND_CELLS,
+        ts => TSUInt::N_OPRAND_CELLS,
         stack_top => 1,
-        stack_ts_add => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
-        old_stack_ts_lt => TSUInt::N_RANGE_CHECK_CELLS
-    },
-    calldata_chip_size {
-        calldata_record => 1
+        clk => 1,
+
+        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+
+        data => StackUInt::N_OPRAND_CELLS,
+        offset => UInt64::N_OPRAND_CELLS,
+        old_stack_ts => TSUInt::N_OPRAND_CELLS,
+        old_stack_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS
     }
 );
 
@@ -76,58 +50,23 @@ impl CalldataloadInstruction {
 }
 
 impl Instruction for CalldataloadInstruction {
-    fn witness_size(phase: usize) -> usize {
-        match phase {
-            0 => Self::phase0_size(),
-            1 => Self::phase1_size(),
-            _ => 0,
-        }
-    }
-
-    fn output_size(inst_out: InstOutputType) -> usize {
-        match inst_out {
-            InstOutputType::GlobalStateIn => Self::global_state_in_size(),
-            InstOutputType::GlobalStateOut => Self::global_state_out_size(),
-            InstOutputType::BytecodeChip => Self::bytecode_chip_size(),
-            InstOutputType::StackPop => Self::stack_pop_size(),
-            InstOutputType::StackPush => Self::stack_push_size(),
-            InstOutputType::RangeChip => Self::range_chip_size(),
-            InstOutputType::CalldataChip => Self::calldata_chip_size(),
-            _ => 0,
-        }
-    }
-
     fn construct_circuit<F: SmallField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
-        let (phase1_wire_id, phase1) = circuit_builder.create_wire_in(Self::phase1_size());
-        let mut global_state_in_handler = ChipHandler::new(
-            &mut circuit_builder,
-            challenges,
-            Self::global_state_in_size(),
-        );
-        let mut global_state_out_handler = ChipHandler::new(
-            &mut circuit_builder,
-            challenges,
-            Self::global_state_out_size(),
-        );
-        let mut bytecode_chip_handler =
-            ChipHandler::new(&mut circuit_builder, challenges, Self::bytecode_chip_size());
-        let mut stack_push_handler =
-            ChipHandler::new(&mut circuit_builder, challenges, Self::stack_push_size());
-        let mut stack_pop_handler =
-            ChipHandler::new(&mut circuit_builder, challenges, Self::stack_pop_size());
-        let mut range_chip_handler =
-            ChipHandler::new(&mut circuit_builder, challenges, Self::range_chip_size());
-        let mut calldata_chip_handler =
-            ChipHandler::new(&mut circuit_builder, challenges, Self::calldata_chip_size());
+        let mut global_state_in_handler = ChipHandler::new(challenges.global_state());
+        let mut global_state_out_handler = ChipHandler::new(challenges.global_state());
+        let mut bytecode_chip_handler = ChipHandler::new(challenges.bytecode());
+        let mut stack_push_handler = ChipHandler::new(challenges.stack());
+        let mut stack_pop_handler = ChipHandler::new(challenges.stack());
+        let mut range_chip_handler = ChipHandler::new(challenges.range());
+        let mut calldata_chip_handler = ChipHandler::new(challenges.calldata());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
         let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()])?;
-        let memory_ts_rlc = phase1[Self::phase1_memory_ts_rlc().start];
+        let memory_ts = &phase0[Self::phase0_memory_ts()];
         let stack_top = phase0[Self::phase0_stack_top().start];
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
@@ -136,7 +75,7 @@ impl Instruction for CalldataloadInstruction {
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
-            &[memory_ts_rlc],
+            &memory_ts,
             stack_top,
             clk,
         );
@@ -158,21 +97,23 @@ impl Instruction for CalldataloadInstruction {
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
-            &[memory_ts_rlc],
+            &memory_ts,
             stack_top_expr,
-            clk_expr.add(F::ONE),
+            clk_expr.add(F::BaseField::ONE),
         );
 
         // Range check for stack top
-        range_chip_handler
-            .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(F::from(1)))?;
+        range_chip_handler.range_check_stack_top(
+            &mut circuit_builder,
+            stack_top_expr.sub(F::BaseField::from(1)),
+        )?;
 
         // Stack pop offset from the stack.
         let old_stack_ts = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts()])?;
         let offset = &phase0[Self::phase0_offset()];
-        stack_pop_handler.stack_pop_values(
+        stack_pop_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::ONE),
+            stack_top_expr.sub(F::BaseField::ONE),
             old_stack_ts.values(),
             offset,
         );
@@ -184,16 +125,16 @@ impl Instruction for CalldataloadInstruction {
             &phase0[Self::phase0_old_stack_ts_lt()],
         )?;
 
-        // CallDataLoad check (offset, data_rlc)
-        let data_rlc = phase1[Self::phase1_data_rlc().start];
-        calldata_chip_handler.calldataload(&mut circuit_builder, offset, &[data_rlc]);
+        // CallDataLoad check (offset, data)
+        let data = &phase0[Self::phase0_data()];
+        calldata_chip_handler.calldataload(&mut circuit_builder, offset, data);
 
-        // Stack push data_rlc to the stack.
-        stack_push_handler.stack_push_rlc(
+        // Stack push data to the stack.
+        stack_push_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::ONE),
+            stack_top_expr.sub(F::BaseField::ONE),
             stack_ts.values(),
-            data_rlc,
+            data,
         );
 
         // Bytecode table (pc, CalldataLoad)
@@ -203,32 +144,38 @@ impl Instruction for CalldataloadInstruction {
             Self::OPCODE,
         );
 
-        global_state_in_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
-        global_state_out_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
-        bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        stack_push_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
-        stack_pop_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
-        range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        calldata_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
+        let global_state_in_id = global_state_in_handler
+            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
+        let global_state_out_id = global_state_out_handler
+            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
+        let bytecode_chip_id =
+            bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
+        let stack_push_id =
+            stack_push_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
+        let stack_pop_id =
+            stack_pop_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
+        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
+        let calldata_chip_id =
+            calldata_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [
-            Some(global_state_in_handler.wire_out_id()),
-            Some(global_state_out_handler.wire_out_id()),
-            Some(bytecode_chip_handler.wire_out_id()),
-            Some(stack_pop_handler.wire_out_id()),
-            Some(stack_push_handler.wire_out_id()),
-            Some(range_chip_handler.wire_out_id()),
+            Some(global_state_in_id),
+            Some(global_state_out_id),
+            Some(bytecode_chip_id),
+            Some(stack_pop_id),
+            Some(stack_push_id),
+            Some(range_chip_id),
             None,
             None,
-            Some(calldata_chip_handler.wire_out_id()),
+            Some(calldata_chip_id),
         ];
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
                 chip_check_wire_id: outputs_wire_id,
-                phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
+                phases_wire_id: vec![phase0_wire_id],
                 ..Default::default()
             },
         })
