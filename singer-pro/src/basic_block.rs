@@ -11,7 +11,7 @@ use crate::{
     constants::OpcodeType,
     error::ZKVMError,
     instructions::{insts_graph_method, SingerInstCircuitBuilder},
-    BasicBlockWiresIn,
+    BasicBlockWiresIn, SingerParams,
 };
 
 use self::{
@@ -57,7 +57,7 @@ impl<F: SmallField> SingerBasicBlockBuilder<F> {
         chip_builder: &mut SingerChipBuilder<F>,
         mut bbs_wires_in: Vec<BasicBlockWiresIn<F::BaseField>>,
         real_challenges: &[F],
-        n_public_output_bytse: usize,
+        params: SingerParams,
     ) -> Result<(), ZKVMError> {
         for (bb, bb_wires_in) in self.basic_blocks.iter().zip(bbs_wires_in.iter_mut()) {
             bb.construct_gkr_graph(
@@ -66,7 +66,7 @@ impl<F: SmallField> SingerBasicBlockBuilder<F> {
                 &self.inst_builder,
                 mem::take(bb_wires_in),
                 real_challenges,
-                n_public_output_bytse,
+                params,
             )?;
         }
         Ok(())
@@ -81,7 +81,7 @@ impl<F: SmallField> SingerBasicBlockBuilder<F> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BasicBlockInfo {
+pub struct BasicBlockInfo {
     pub(crate) pc_start: u64,
     pub(crate) bb_start_stack_top_offsets: Vec<i64>,
     pub(crate) bb_final_stack_top_offsets: Vec<i64>,
@@ -158,7 +158,6 @@ impl<F: SmallField> BasicBlock<F> {
                     vec![
                         BBReturnRestMemLoad::construct_circuit(challenges)?,
                         BBReturnRestMemStore::construct_circuit(challenges)?,
-                        BBReturnRestMemStore::construct_circuit(challenges)?,
                         BBReturnRestStackPop::construct_circuit(challenges)?,
                     ],
                 )
@@ -185,7 +184,7 @@ impl<F: SmallField> BasicBlock<F> {
         inst_builder: &SingerInstCircuitBuilder<F>,
         mut bb_wires_in: BasicBlockWiresIn<F::BaseField>,
         real_challenges: &[F],
-        n_public_output_bytes: usize,
+        params: SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
         let bb_start_circuit = &self.bb_start_circuit;
         let bb_final_circuit = &self.bb_final_circuit;
@@ -242,7 +241,7 @@ impl<F: SmallField> BasicBlock<F> {
                 opcode_wires_in,
                 real_challenges,
                 real_n_instances,
-                n_public_output_bytes,
+                params,
             )?;
             if let Some(po) = po {
                 public_output_size = Some(po);
@@ -287,7 +286,16 @@ impl<F: SmallField> BasicBlock<F> {
             real_n_instances,
         )?;
 
-        for (acc, acc_wires_in) in bb_acc_circuits.iter().zip(bb_wires_in.bb_accs.iter_mut()) {
+        let real_n_instances_bb_accs = vec![
+            params.n_mem_finalize,
+            params.n_mem_initialize,
+            params.n_stack_finalize,
+        ];
+        for ((acc, acc_wires_in), real_n_instances) in bb_acc_circuits
+            .iter()
+            .zip(bb_wires_in.bb_accs.iter_mut())
+            .zip(real_n_instances_bb_accs)
+        {
             let acc_node_id = graph_builder.add_node_with_witness(
                 "BB acc",
                 &acc.circuit,
