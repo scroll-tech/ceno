@@ -77,7 +77,6 @@ register_witness!(
     },
     phase0 {
         old_memory_ts => TSUInt::N_OPRAND_CELLS,
-        old_memory_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
         offset_add => UIntAddSub::<StackUInt>::N_WITNESS_CELLS
     }
 );
@@ -115,14 +114,7 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         let mem_byte = public_io[Self::public_io_byte().start];
         let memory_ts = TSUInt::try_from(memory_ts.as_slice())?;
         let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()])?;
-        let old_memory_ts_lt = &phase0[Self::phase0_old_memory_ts_lt()];
-        UIntCmp::<TSUInt>::assert_lt(
-            &mut circuit_builder,
-            &mut range_chip_handler,
-            &old_memory_ts,
-            &memory_ts,
-            old_memory_ts_lt,
-        )?;
+
         memory_load_handler.mem_load(
             &mut circuit_builder,
             offset_plus_delta.values(),

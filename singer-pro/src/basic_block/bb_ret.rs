@@ -16,7 +16,7 @@ use crate::utils::chip_handler::{
     ChipHandler, MemoryChipOperations, RangeChipOperations, StackChipOperations,
 };
 use crate::utils::i64_to_base_field;
-use crate::utils::uint::{StackUInt, TSUInt, UIntCmp};
+use crate::utils::uint::{StackUInt, TSUInt};
 
 use super::BasicBlockInfo;
 
@@ -198,7 +198,6 @@ register_witness!(
     BBReturnRestStackPop,
     phase0 {
         old_stack_ts => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
         stack_values => StackUInt::N_OPRAND_CELLS
     }
 );
