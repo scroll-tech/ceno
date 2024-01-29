@@ -155,7 +155,8 @@ impl<F: SmallField> CircuitBuilder<F> {
         };
     }
 
-    pub fn sel(&mut self, out: CellId, in_0: CellId, in_1: CellId, cond: CellId) {
+    /// IMHO This is `enforce_selection` gate rather than `select` gate.
+    pub fn select(&mut self, out: CellId, in_0: CellId, in_1: CellId, cond: CellId) {
         // (1 - cond) * in_0 + cond * in_1 = (in_1 - in_0) * cond + in_0
         let diff = self.create_cell();
         self.add(diff, in_1, F::BaseField::ONE);

@@ -3,7 +3,7 @@ use goldilocks::SmallField;
 use serde::Serialize;
 use std::hash::Hash;
 
-// we make use of three identifiers.
+// We make use of the following identifiers.
 // For type safety we want different alias for those identifiers; while disallow arithmetics cross different identifiers.
 // We achieve this via setting them to different primitive types.
 // This works better/simpler than struct-wrapping
@@ -20,10 +20,11 @@ pub struct ChallengeConst {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
-pub enum ConstantType<F: SmallField> {
-    Field(F::BaseField),
+pub enum ConstantType<Ext: SmallField> {
+    Field(Ext::BaseField),
+    // Q: should the usize be ChallengeId or CellId?
     Challenge(ChallengeConst, usize),
-    ChallengeScaled(ChallengeConst, usize, F::BaseField),
+    ChallengeScaled(ChallengeConst, usize, Ext::BaseField),
 }
 
 /// Represent a gate in the circuit. The inner variables denote the input
@@ -54,7 +55,7 @@ pub enum InType {
     /// Constant keeps the same for all instances.
     Constant(i64),
     /// Constant(num_vars) acts like a counter (0, 1, 2, ...) through all
-    /// instances. Each instance hold 1 << num_vars of them.
+    /// instances. Each instance holds 1 << num_vars of them.
     Counter(usize),
     Wire(WireId),
 }
@@ -70,42 +71,43 @@ pub enum CellType {
     Out(OutType),
 }
 
+/// A MixedCell can be a constant, a cell, or a Cell Expression
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
-pub enum MixedCell<F: SmallField> {
-    Constant(F::BaseField),
-    Cell(usize),
-    CellExpr(usize, F::BaseField, F::BaseField),
+pub enum MixedCell<Ext: SmallField> {
+    Constant(Ext::BaseField),
+    Cell(CellId),
+    CellExpr(CellId, Ext::BaseField, Ext::BaseField),
 }
 
-impl<F: SmallField> From<CellId> for MixedCell<F> {
+impl<Ext: SmallField> From<CellId> for MixedCell<Ext> {
     fn from(cell_id: CellId) -> Self {
         MixedCell::Cell(cell_id)
     }
 }
 
-impl<F: SmallField> MixedCell<F> {
-    pub fn add(&self, shift: F::BaseField) -> Self {
+impl<Ext: SmallField> MixedCell<Ext> {
+    pub fn add(&self, shift: Ext::BaseField) -> Self {
         match self {
             MixedCell::Constant(c) => MixedCell::Constant(*c + shift),
-            MixedCell::Cell(c) => MixedCell::CellExpr(*c, F::BaseField::ONE, shift),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, Ext::BaseField::ONE, shift),
             MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s, *sh + shift),
         }
     }
-    pub fn sub(&self, shift: F::BaseField) -> Self {
+    pub fn sub(&self, shift: Ext::BaseField) -> Self {
         match self {
             MixedCell::Constant(c) => MixedCell::Constant(*c - shift),
-            MixedCell::Cell(c) => MixedCell::CellExpr(*c, F::BaseField::ONE, -shift),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, Ext::BaseField::ONE, -shift),
             MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s, *sh - shift),
         }
     }
-    pub fn mul(&self, scalar: F::BaseField) -> Self {
+    pub fn mul(&self, scalar: Ext::BaseField) -> Self {
         match self {
             MixedCell::Constant(c) => MixedCell::Constant(*c * scalar),
-            MixedCell::Cell(c) => MixedCell::CellExpr(*c, scalar, F::BaseField::ZERO),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, scalar, Ext::BaseField::ZERO),
             MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s * scalar, *sh * scalar),
         }
     }
-    pub fn expr(&self, scalar: F::BaseField, shift: F::BaseField) -> Self {
+    pub fn expr(&self, scalar: Ext::BaseField, shift: Ext::BaseField) -> Self {
         match self {
             MixedCell::Constant(c) => MixedCell::Constant(*c * scalar + shift),
             MixedCell::Cell(c) => MixedCell::Cell(*c),
