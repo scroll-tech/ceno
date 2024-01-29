@@ -3,6 +3,7 @@ use goldilocks::SmallField;
 use crate::structs::{Cell, CellId, CellType, CircuitBuilder, GateType, LayerId};
 
 mod base_opt;
+mod derives;
 mod ext_opt;
 
 impl<F: SmallField> Cell<F> {
