@@ -77,7 +77,7 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
         let tmp = circuit_builder.create_ext_cell();
         circuit_builder.sel_mixed_and_ext(
             &tmp,
-            MixedCell::Constant(F::BaseField::ONE),
+            &MixedCell::Constant(F::BaseField::ONE),
             &input[0],
             cond[0],
         );
@@ -87,7 +87,7 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
         let den_add = circuit_builder.create_ext_cell();
         circuit_builder.add_ext(&den_add, &input[0], F::BaseField::ONE);
         circuit_builder.add_ext(&den_add, &input[0], F::BaseField::ONE);
-        circuit_builder.sel_mixed_and_ext(&output[1], cond[0].into(), &den_add, cond[1]);
+        circuit_builder.sel_mixed_and_ext(&output[1], &cond[0].into(), &den_add, cond[1]);
 
         circuit_builder.configure();
         LeafCircuit {
@@ -116,7 +116,7 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
         let tmp = circuit_builder.create_ext_cell();
         circuit_builder.sel_mixed_and_ext(
             &tmp,
-            MixedCell::Constant(F::BaseField::ONE),
+            &MixedCell::Constant(F::BaseField::ONE),
             &input_den[0],
             cond[0],
         );
@@ -133,7 +133,7 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
             input_num[0].into(),
             cond[0],
         );
-        circuit_builder.sel_mixed_and_ext(&output[1], tmp.into(), &num, cond[1]);
+        circuit_builder.sel_mixed_and_ext(&output[1], &tmp.into(), &num, cond[1]);
 
         circuit_builder.configure();
         LeafFracSumCircuit {
@@ -233,7 +233,7 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
         let tmp = circuit_builder.create_ext_cell();
         circuit_builder.sel_mixed_and_ext(
             &tmp,
-            MixedCell::Constant(F::BaseField::ONE),
+            &MixedCell::Constant(F::BaseField::ONE),
             &input[0],
             sel[0],
         );
