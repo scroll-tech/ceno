@@ -30,22 +30,22 @@ pub enum ConstantType<Ext: SmallField> {
 /// Represent a gate in the circuit. The inner variables denote the input
 /// indices and scalar.
 #[derive(Clone, Debug)]
-pub enum GateType<F: SmallField> {
-    AddC(ConstantType<F>),
-    Add(CellId, ConstantType<F>),
-    Mul2(CellId, CellId, ConstantType<F>),
-    Mul3(CellId, CellId, CellId, ConstantType<F>),
+pub enum GateType<Ext: SmallField> {
+    AddC(ConstantType<Ext>),
+    Add(CellId, ConstantType<Ext>),
+    Mul2(CellId, CellId, ConstantType<Ext>),
+    Mul3(CellId, CellId, CellId, ConstantType<Ext>),
 }
 
 /// Store wire structure of the circuit.
 #[derive(Clone, Debug)]
-pub struct Cell<F: SmallField> {
+pub struct Cell<Ext: SmallField> {
     /// The layer of the cell.
     pub layer: Option<LayerId>,
     /// The value of the cell is the sum of all gates.
-    pub gates: Vec<GateType<F>>,
+    pub gates: Vec<GateType<Ext>>,
     /// The value of the cell should equal to a constant.
-    pub assert_const: Option<F::BaseField>,
+    pub assert_const: Option<Ext::BaseField>,
     /// The type of the cell, e.g., public input, witness, challenge, etc.
     pub cell_type: Option<CellType>,
 }
@@ -123,8 +123,8 @@ impl<Ext: SmallField> MixedCell<Ext> {
     }
 }
 
-pub struct CircuitBuilder<F: SmallField> {
-    pub cells: Vec<Cell<F>>,
+pub struct CircuitBuilder<Ext: SmallField> {
+    pub cells: Vec<Cell<Ext>>,
 
     /// Number of layers in the circuit.
     pub n_layers: Option<u32>,

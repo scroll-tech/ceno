@@ -1,9 +1,9 @@
 use std::{collections::BTreeSet, sync::Arc};
 
-use simple_frontend::structs::WireId;
 use gkr::structs::{Circuit, CircuitWitness};
 use goldilocks::SmallField;
 use itertools::{chain, Itertools};
+use simple_frontend::structs::WireId;
 
 use crate::{
     error::GKRGraphError,
