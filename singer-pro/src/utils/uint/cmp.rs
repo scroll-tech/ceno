@@ -33,7 +33,7 @@ where
     /// Greater than implemented by little-endian subtraction.
     pub(crate) fn lt<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler,
+        range_chip_handler: &mut ChipHandler<F>,
         oprand_0: &UInt<M, C>,
         oprand_1: &UInt<M, C>,
         witness: &[CellId],
@@ -56,7 +56,7 @@ where
 
     pub(crate) fn assert_lt<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler,
+        range_chip_handler: &mut ChipHandler<F>,
         oprand_0: &UInt<M, C>,
         oprand_1: &UInt<M, C>,
         witness: &[CellId],
@@ -75,7 +75,7 @@ where
     /// Greater or equal than implemented by little-endian subtraction.
     pub(crate) fn assert_leq<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler,
+        range_chip_handler: &mut ChipHandler<F>,
         oprand_0: &UInt<M, C>,
         oprand_1: &UInt<M, C>,
         witness: &[CellId],

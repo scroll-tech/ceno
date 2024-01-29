@@ -3,7 +3,7 @@ use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
 use super::{ChipHandler, GlobalStateChipOperations};
 
-impl<F: SmallField> GlobalStateChipOperations<F> for ChipHandler {
+impl<F: SmallField> GlobalStateChipOperations<F> for ChipHandler<F> {
     fn state_in(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
@@ -13,7 +13,7 @@ impl<F: SmallField> GlobalStateChipOperations<F> for ChipHandler {
         stack_top: CellId,
         clk: CellId,
     ) {
-        let out = circuit_builder.create_ext();
+        let out = circuit_builder.create_ext_cell();
         let mut items = pc.to_vec();
         items.extend_from_slice(stack_ts);
         items.extend_from_slice(memory_ts);
@@ -32,7 +32,7 @@ impl<F: SmallField> GlobalStateChipOperations<F> for ChipHandler {
         stack_top: MixedCell<F>,
         clk: MixedCell<F>,
     ) {
-        let out = circuit_builder.create_ext();
+        let out = circuit_builder.create_ext_cell();
         let mut items = pc.to_vec();
         items.extend_from_slice(stack_ts);
         items.extend_from_slice(memory_ts);

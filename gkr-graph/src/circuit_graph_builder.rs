@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use frontend::structs::CircuitBuilder;
 use gkr::structs::{Circuit, CircuitWitness};
 use goldilocks::SmallField;
+use simple_frontend::structs::CircuitBuilder;
 
 use crate::{
     error::GKRGraphError,
@@ -21,6 +21,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         label: &'static str,
         circuit: &Arc<CircuitBuilder<F>>,
         preds: Vec<PredType>,
+        challenges: Vec<F>,
         sources: Vec<Vec<F>>,
     ) -> Result<usize, GKRGraphError> {
         todo!()

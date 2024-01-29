@@ -1,6 +1,6 @@
 use ff::Field;
 use goldilocks::SmallField;
-use simple_frontend::structs::{CellId, ChallengeId, CircuitBuilder, MixedCell, WireId};
+use simple_frontend::structs::{CellId, ChallengeId, CircuitBuilder, ExtCellId, MixedCell, WireId};
 
 use crate::{constants::OpcodeType, error::ZKVMError};
 
@@ -118,12 +118,12 @@ pub(crate) trait CalldataChip<F: SmallField> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ChipHandler {
-    records: Vec<Vec<usize>>,
+pub(crate) struct ChipHandler<F: SmallField> {
+    records: Vec<ExtCellId<F>>,
     challenge: ChallengeId,
 }
 
-impl ChipHandler {
+impl<F: SmallField> ChipHandler<F> {
     pub(crate) fn new(challenge: ChallengeId) -> Self {
         Self {
             records: Vec::new(),
@@ -133,7 +133,7 @@ impl ChipHandler {
 
     /// Pad th remaining cells with constants, return the wire id and the number
     /// of cells.
-    pub(crate) fn finalize_with_const_pad<F: SmallField>(
+    pub(crate) fn finalize_with_const_pad(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
         constant: F::BaseField,
@@ -141,7 +141,7 @@ impl ChipHandler {
         let count = self.records.len().next_power_of_two() - self.records.len();
         for _ in 0..count {
             let out = circuit_builder.create_ext_cell();
-            circuit_builder.add_const(out[0], constant);
+            circuit_builder.add_const(out.cells[0], constant);
             self.records.push(out);
         }
         (
@@ -152,7 +152,7 @@ impl ChipHandler {
 
     /// Pad th remaining cells with the last one, return the wire id and the
     /// number of cells.
-    pub(crate) fn finalize_with_repeated_last<F: SmallField>(
+    pub(crate) fn finalize_with_repeated_last(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
     ) -> (WireId, usize) {

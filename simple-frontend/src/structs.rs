@@ -51,7 +51,8 @@ pub struct Cell<F: SmallField> {
 }
 
 /// An ExtCell consists DEGREE number of cells.
-pub struct ExtCell<Ext: SmallField> {
+#[derive(Clone, Debug)]
+pub struct ExtCellId<Ext: SmallField> {
     pub cells: Vec<CellId>,
     pub phantom: PhantomData<Ext>,
 }

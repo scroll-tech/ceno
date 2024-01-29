@@ -69,7 +69,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     /// Little-endian addition.
     pub(crate) fn add<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler,
+        range_chip_handler: &mut ChipHandler<F>,
         addend_0: &UInt<M, C>,
         addend_1: &UInt<M, C>,
         witness: &[CellId],
@@ -110,7 +110,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     /// Little-endian addition with a constant.
     pub(crate) fn add_const<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler,
+        range_chip_handler: &mut ChipHandler<F>,
         addend_0: &UInt<M, C>,
         constant: F::BaseField,
         witness: &[CellId],
@@ -124,7 +124,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     /// Little-endian addition with a constant, guaranteed no overflow.
     pub(crate) fn add_const_no_overflow<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler,
+        range_chip_handler: &mut ChipHandler<F>,
         addend_0: &UInt<M, C>,
         constant: F::BaseField,
         witness: &[CellId],
@@ -166,7 +166,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     /// guarantee addend_1 < 1 << C.
     pub(crate) fn add_small<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler,
+        range_chip_handler: &mut ChipHandler<F>,
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         witness: &[CellId],
@@ -181,7 +181,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     /// Notice that the user should guarantee addend_1 < 1 << C.
     pub(crate) fn add_small_no_overflow<F: SmallField>(
         circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler,
+        range_chip_handler: &mut ChipHandler<F>,
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         witness: &[CellId],
