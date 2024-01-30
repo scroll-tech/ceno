@@ -22,8 +22,8 @@ pub struct ChallengeConst {
 #[derive(Clone, Copy, Debug, Serialize)]
 pub enum ConstantType<Ext: SmallField> {
     Field(Ext::BaseField),
-    /// Challenge is DEGREE number of ChallengeIds
-    /// the usize is used to indicate which ChallengeId
+    /// ChallengeConst is an extension field element represents a power of ChallengeId.
+    /// The usize here denotes the `usize`-th base field element of the const.
     Challenge(ChallengeConst, usize),
     ChallengeScaled(ChallengeConst, usize, Ext::BaseField),
 }
