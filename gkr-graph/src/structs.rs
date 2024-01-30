@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use frontend::structs::WireId;
 use gkr::structs::{Circuit, CircuitWitness, Point};
 use goldilocks::SmallField;
+use simple_frontend::structs::WireId;
 
 type GKRProverState<F: SmallField> = gkr::structs::IOPProverState<F>;
 type GKRVerifierState<F: SmallField> = gkr::structs::IOPVerifierState<F>;

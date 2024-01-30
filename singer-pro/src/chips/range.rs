@@ -17,7 +17,7 @@ pub(crate) fn construct_range_table<F: SmallField>(
 ) -> Result<(PredType, usize), ZKVMError> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let cells = circuit_builder.create_counter_in(0);
-    let rlc = circuit_builder.create_ext();
+    let rlc = circuit_builder.create_ext_cell();
     circuit_builder.rlc(&rlc, &[cells[0]], challenges.range());
     circuit_builder.configure();
     let range_circuit = Arc::new(Circuit::new(&circuit_builder));
