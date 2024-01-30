@@ -1,6 +1,4 @@
-//! This code is not working after the merge. Will fix in the next commit.
-
-use simple_frontend::structs::{CircuitBuilder, ConstantType};
+use ff::Field;
 use gkr::{structs::Circuit, utils::MultilinearExtensionFromVectors};
 use gkr_graph::{
     error::GKRGraphError,
@@ -9,7 +7,8 @@ use gkr_graph::{
         PredType, TargetEvaluations,
     },
 };
-use goldilocks::{Goldilocks, SmallField};
+use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
+use simple_frontend::structs::{ChallengeConst, CircuitBuilder, ConstantType};
 use std::sync::Arc;
 use transcript::Transcript;
 
@@ -21,8 +20,14 @@ fn construct_input<F: SmallField>(challenge: usize) -> Arc<Circuit<F>> {
 
     for (i, input) in inputs.iter().enumerate() {
         // denominator = (input + challenge)
-        circuit_builder.add(lookup_inputs[i], *input, ConstantType::Field(F::ONE));
-        circuit_builder.add_const(lookup_inputs[i], ConstantType::Challenge(challenge));
+        circuit_builder.add(lookup_inputs[i], *input, F::BaseField::ONE);
+
+        let challenge_cost = ChallengeConst {
+            challenge: challenge as u8,
+            exp: 1,
+        };
+        circuit_builder
+            .add_const_type(lookup_inputs[i], ConstantType::Challenge(challenge_cost, 0));
     }
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))
@@ -40,9 +45,9 @@ fn construct_inv_sum<F: SmallField>() -> Arc<Circuit<F>> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let (_, input) = circuit_builder.create_wire_in(2);
     let output = circuit_builder.create_cells(2);
-    circuit_builder.mul2(output[0], input[0], input[1], ConstantType::Field(F::ONE));
-    circuit_builder.add(output[1], input[0], ConstantType::Field(F::ONE));
-    circuit_builder.add(output[1], input[1], ConstantType::Field(F::ONE));
+    circuit_builder.mul2(output[0], input[0], input[1], F::BaseField::ONE);
+    circuit_builder.add(output[1], input[0], F::BaseField::ONE);
+    circuit_builder.add(output[1], input[1], F::BaseField::ONE);
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))
 }
@@ -52,9 +57,9 @@ fn construct_frac_sum<F: SmallField>() -> Arc<Circuit<F>> {
     // (den1, num1, den2, num2)
     let (_, input) = circuit_builder.create_wire_in(4);
     let output = circuit_builder.create_cells(2);
-    circuit_builder.mul2(output[0], input[0], input[2], ConstantType::Field(F::ONE));
-    circuit_builder.mul2(output[1], input[0], input[3], ConstantType::Field(F::ONE));
-    circuit_builder.mul2(output[1], input[1], input[2], ConstantType::Field(F::ONE));
+    circuit_builder.mul2(output[0], input[0], input[2], F::BaseField::ONE);
+    circuit_builder.mul2(output[1], input[0], input[3], F::BaseField::ONE);
+    circuit_builder.mul2(output[1], input[1], input[2], F::BaseField::ONE);
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))
 }
@@ -65,10 +70,10 @@ fn main() -> Result<(), GKRGraphError> {
     // ==================
 
     let challenge_no = 0;
-    let input_circuit = construct_input::<Goldilocks>(challenge_no);
-    let pad_with_one_circuit = construct_pad_with_const::<Goldilocks>(1);
-    let inv_sum_circuit = construct_inv_sum::<Goldilocks>();
-    let frac_sum_circuit = construct_frac_sum::<Goldilocks>();
+    let input_circuit = construct_input::<GoldilocksExt2>(challenge_no);
+    let pad_with_one_circuit = construct_pad_with_const::<GoldilocksExt2>(1);
+    let inv_sum_circuit = construct_inv_sum::<GoldilocksExt2>();
+    let frac_sum_circuit = construct_frac_sum::<GoldilocksExt2>();
 
     // ==================
     // Witness generation (only source)
@@ -89,12 +94,12 @@ fn main() -> Result<(), GKRGraphError> {
     // Graph construction
     // ==================
 
-    let mut graph_builder = CircuitGraphBuilder::<Goldilocks>::new();
-    let mut prover_transcript = Transcript::new(b"test");
+    let mut graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
+    let mut prover_transcript = Transcript::<GoldilocksExt2>::new(b"test");
     let challenge = vec![
         prover_transcript
             .get_and_append_challenge(b"lookup challenge")
-            .elements[0],
+            .elements,
     ];
 
     let input = {
@@ -103,7 +108,8 @@ fn main() -> Result<(), GKRGraphError> {
             &input_circuit,
             vec![PredType::Source],
             challenge,
-            vec![input_circuit_wires_in.clone()],
+            // input_circuit_wires_in.clone()
+            vec![vec![input_circuit_wires_in.clone()]],
         )?
     };
     let pad_with_one = graph_builder.add_node_with_witness(
@@ -154,7 +160,7 @@ fn main() -> Result<(), GKRGraphError> {
     let output_point = vec![
         prover_transcript
             .get_and_append_challenge(b"output point")
-            .elements[0],
+            .elements,
     ];
     let output_eval = circuit_witness
         .node_witnesses
@@ -174,15 +180,15 @@ fn main() -> Result<(), GKRGraphError> {
     // Verify proofs
     // =============
 
-    let mut verifier_transcript = Transcript::new(b"test");
+    let mut verifier_transcript = Transcript::<GoldilocksExt2>::new(b"test");
     let challenge = [verifier_transcript
         .get_and_append_challenge(b"lookup challenge")
-        .elements[0]];
+        .elements];
 
     let output_point = vec![
         verifier_transcript
             .get_and_append_challenge(b"output point")
-            .elements[0],
+            .elements,
     ];
 
     IOPVerifierState::verify(

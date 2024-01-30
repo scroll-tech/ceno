@@ -9,7 +9,7 @@ pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
 pub type Point<F> = Vec<F>;
 
 /// Represent the prover state for each layer in the IOP protocol. To support
-/// gates between non-adjeacent layers, we leverage the techniques in
+/// gates between non-adjacent layers, we leverage the techniques in
 /// [Virgo++](https://eprint.iacr.org/2020/1247).
 pub struct IOPProverState<F: SmallField> {
     pub(crate) layer_id: LayerId,

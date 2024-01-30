@@ -72,6 +72,10 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         self.add_const_internal(out, ConstantType::Field(constant));
     }
 
+    pub fn add_const_type(&mut self, out: CellId, constant_type: ConstantType<Ext>) {
+        self.add_const_internal(out, constant_type);
+    }
+
     pub(crate) fn add_const_internal(&mut self, out: CellId, constant: ConstantType<Ext>) {
         let out_cell = &mut self.cells[out];
         out_cell.gates.push(GateType::AddC(constant));
