@@ -22,7 +22,8 @@ pub struct ChallengeConst {
 #[derive(Clone, Copy, Debug, Serialize)]
 pub enum ConstantType<Ext: SmallField> {
     Field(Ext::BaseField),
-    // Q: should the usize be ChallengeId or CellId?
+    /// Challenge is DEGREE number of ChallengeIds
+    /// the usize is used to indicate which ChallengeId
     Challenge(ChallengeConst, usize),
     ChallengeScaled(ChallengeConst, usize, Ext::BaseField),
 }

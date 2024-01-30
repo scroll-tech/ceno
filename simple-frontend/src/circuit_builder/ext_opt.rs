@@ -89,9 +89,13 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
     pub fn create_ext_constant_in(&mut self, num: usize, constant: i64) -> Vec<ExtCellId<Ext>> {
         let cells = self.create_ext_cells(num);
         cells.iter().for_each(|ext_cell| {
-            ext_cell.cells.iter().for_each(|&cell| {
-                self.mark_cells(CellType::In(InType::Constant(constant)), &[cell])
-            })
+            // first base field is the constant
+            self.mark_cells(
+                CellType::In(InType::Constant(constant)),
+                &[ext_cell.cells[0]],
+            );
+            // the rest fields are 0s
+            self.mark_cells(CellType::In(InType::Constant(0)), &ext_cell.cells[1..]);
         });
         cells
     }
@@ -157,7 +161,15 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         in_1: &ExtCellId<Ext>,
         cond: CellId,
     ) {
-        self.sel_ext_and_mixed(out, in_1, in_0, cond)
+        assert_eq!(out.degree(), Ext::DEGREE);
+        assert_eq!(in_1.degree(), Ext::DEGREE);
+
+        out.cells
+            .iter()
+            .zip_eq(in_1.cells.iter().zip_eq([*in_0].iter().chain(
+                std::iter::repeat(&MixedCell::Constant(Ext::BaseField::ZERO)).take(Ext::DEGREE - 1),
+            )))
+            .for_each(|(&out, (&in1, &in0))| self.sel_mixed(out, in0, in1.into(), cond));
     }
 
     /// Base on the condition, select extension cells in_0 or in_1
@@ -348,8 +360,6 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
 
     fn add_ext_mul_challenge_2(&mut self, out: &[CellId], in_0: &[CellId], c: ChallengeConst) {
         let a0b0 = self.create_cell();
-        // todo: understand this...
-        // Q: why same challenge c?
         let in_1 = [ConstantType::Challenge(c, 0), ConstantType::Challenge(c, 1)];
         self.add_internal(a0b0, in_0[0], in_1[0]);
         let a0b1 = self.create_cell();
