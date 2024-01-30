@@ -72,22 +72,22 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
         let (cond_id, cond) = circuit_builder.create_wire_in(2);
         let (_, output) = circuit_builder.create_ext_wire_out(2);
         // selector denominator 1 or input[0] or input[0] * input[1]
-        let den_mul = circuit_builder.create_ext();
+        let den_mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&den_mul, &input[0], &input[1], F::BaseField::ONE);
-        let tmp = circuit_builder.create_ext();
+        let tmp = circuit_builder.create_ext_cell();
         circuit_builder.sel_mixed_and_ext(
             &tmp,
-            MixedCell::Constant(F::BaseField::ONE),
+            &MixedCell::Constant(F::BaseField::ONE),
             &input[0],
             cond[0],
         );
         circuit_builder.sel_ext(&output[0], &tmp, &den_mul, cond[1]);
 
         // select the numerator 0 or 1 or input[0] + input[1]
-        let den_add = circuit_builder.create_ext();
+        let den_add = circuit_builder.create_ext_cell();
         circuit_builder.add_ext(&den_add, &input[0], F::BaseField::ONE);
         circuit_builder.add_ext(&den_add, &input[0], F::BaseField::ONE);
-        circuit_builder.sel_mixed_and_ext(&output[1], cond[0].into(), &den_add, cond[1]);
+        circuit_builder.sel_mixed_and_ext(&output[1], &cond[0].into(), &den_add, cond[1]);
 
         circuit_builder.configure();
         LeafCircuit {
@@ -111,19 +111,19 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
         let (cond_id, cond) = circuit_builder.create_wire_in(2);
         let (_, output) = circuit_builder.create_ext_wire_out(2);
         // selector denominator, 1 or input_den[0] or input_den[0] * input_den[1]
-        let den_mul = circuit_builder.create_ext();
+        let den_mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&den_mul, &input_den[0], &input_den[1], F::BaseField::ONE);
-        let tmp = circuit_builder.create_ext();
+        let tmp = circuit_builder.create_ext_cell();
         circuit_builder.sel_mixed_and_ext(
             &tmp,
-            MixedCell::Constant(F::BaseField::ONE),
+            &MixedCell::Constant(F::BaseField::ONE),
             &input_den[0],
             cond[0],
         );
         circuit_builder.sel_ext(&output[0], &tmp, &den_mul, cond[1]);
 
         // select the numerator, 0 or input_num[0] or input_den[0] * input_num[1] + input_num[0] * input_den[1]
-        let num = circuit_builder.create_ext();
+        let num = circuit_builder.create_ext_cell();
         circuit_builder.mul_ext_base(&num, &input_den[0], input_num[1], F::BaseField::ONE);
         circuit_builder.mul_ext_base(&num, &input_den[1], input_num[0], F::BaseField::ONE);
         let tmp = circuit_builder.create_cell();
@@ -133,7 +133,7 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
             input_num[0].into(),
             cond[0],
         );
-        circuit_builder.sel_mixed_and_ext(&output[1], tmp.into(), &num, cond[1]);
+        circuit_builder.sel_mixed_and_ext(&output[1], &tmp.into(), &num, cond[1]);
 
         circuit_builder.configure();
         LeafFracSumCircuit {
@@ -228,12 +228,12 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
         let (cond_id, sel) = circuit_builder.create_wire_in(2);
         let (_, output) = circuit_builder.create_ext_wire_out(1);
         // selector elements, 1 or input[0] or input[0] * input[1]
-        let mul = circuit_builder.create_ext();
+        let mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&mul, &input[0], &input[1], F::BaseField::ONE);
-        let tmp = circuit_builder.create_ext();
+        let tmp = circuit_builder.create_ext_cell();
         circuit_builder.sel_mixed_and_ext(
             &tmp,
-            MixedCell::Constant(F::BaseField::ONE),
+            &MixedCell::Constant(F::BaseField::ONE),
             &input[0],
             sel[0],
         );

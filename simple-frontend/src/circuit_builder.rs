@@ -3,9 +3,10 @@ use goldilocks::SmallField;
 use crate::structs::{Cell, CellId, CellType, CircuitBuilder, GateType, LayerId};
 
 mod base_opt;
+mod derives;
 mod ext_opt;
 
-impl<F: SmallField> Cell<F> {
+impl<Ext: SmallField> Cell<Ext> {
     pub fn new() -> Self {
         Self {
             layer: None,
@@ -16,10 +17,7 @@ impl<F: SmallField> Cell<F> {
     }
 }
 
-impl<F> CircuitBuilder<F>
-where
-    F: SmallField,
-{
+impl<Ext: SmallField> CircuitBuilder<Ext> {
     pub fn new() -> Self {
         Self {
             cells: vec![],
@@ -45,6 +43,7 @@ where
                 let _ = self.assign_layer(i);
             }
             if let Some(layer) = self.cells[i].layer {
+                // todo: remove
                 println!("Cell: {:?}", self.cells[i]);
                 // assert!(layer > 0 || matches!(self.cells[i].cell_type, Some(CellType::In(_))));
                 max_layer_id = max_layer_id.max(layer);

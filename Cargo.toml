@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "frontend",
+    # "frontend",
     "gkr",
     "multilinear_extensions",
     "poseidon",
