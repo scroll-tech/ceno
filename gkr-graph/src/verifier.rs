@@ -1,4 +1,3 @@
-use ff::FromUniformBytes;
 use gkr::structs::IOPProverPhase2Message;
 use goldilocks::SmallField;
 use itertools::izip;
@@ -13,7 +12,7 @@ use crate::{
     },
 };
 
-impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
+impl<F: SmallField> IOPVerifierState<F> {
     pub fn verify(
         circuit: &CircuitGraph<F>,
         challenges: &[F],

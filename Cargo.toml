@@ -1,15 +1,13 @@
 [workspace]
 members = [
-    # "frontend",
     "gkr",
+    "gkr-graph",
+    "mpcs",
     "multilinear_extensions",
-    "poseidon",
+    "simple-frontend",
+    "singer-pro",
     "sumcheck",
     "transcript",
-    "mpcs",
-    "simple-frontend",
-    "gkr-graph",
-    "singer-pro",
 ]
 
 [workspace.package]
