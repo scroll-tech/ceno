@@ -162,21 +162,16 @@ impl Instruction for JumpdestInstruction {
         match index {
             0 => {
                 let mut wire_values = vec![F::ZERO; Self::phase0_size()];
-                wire_values[Self::phase0_pc()]
-                    .copy_from_slice(&PCUInt::uint_to_field_elems(record.pc));
-                wire_values[Self::phase0_stack_top()]
-                    .copy_from_slice(&u2fvec::<F, 1, 64>(record.stack_top));
-                wire_values[Self::phase0_clk()].copy_from_slice(&u2fvec::<F, 1, 64>(record.clock));
-                wire_values[Self::phase0_pc_add()].copy_from_slice(
-                    &UIntAddSub::<PCUInt>::compute_no_overflow_carries(record.pc, 1),
-                );
+                copy_pc_from_record!(wire_values, record);
+                copy_stack_top_from_record!(wire_values, record);
+                copy_clock_from_record!(wire_values, record);
+                copy_pc_add_from_record!(wire_values, record);
 
                 Some(wire_values)
             }
             1 => {
                 let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
-                wire_values[..]
-                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.memory_timestamp));
+                copy_memory_ts_from_record!(wire_values, record);
                 Some(wire_values)
             }
             _ => None,
