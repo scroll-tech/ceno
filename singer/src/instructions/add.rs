@@ -264,84 +264,27 @@ impl Instruction for AddInstruction {
         match index {
             0 => {
                 let mut wire_values = vec![F::ZERO; Self::phase0_size()];
-                wire_values[Self::phase0_pc()]
-                    .copy_from_slice(&PCUInt::uint_to_field_elems(record.pc));
-                wire_values[Self::phase0_stack_ts()]
-                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.stack_timestamp));
-                wire_values[Self::phase0_stack_top()]
-                    .copy_from_slice(&u2fvec::<F, 1, 64>(record.stack_top));
-                wire_values[Self::phase0_clk()].copy_from_slice(&u2fvec::<F, 1, 64>(record.clock));
-                wire_values[Self::phase0_pc_add()].copy_from_slice(
-                    &UIntAddSub::<PCUInt>::compute_no_overflow_carries(record.pc, 1),
+                copy_pc_from_record!(wire_values, record);
+                copy_stack_ts_from_record!(wire_values, record);
+                copy_stack_top_from_record!(wire_values, record);
+                copy_clock_from_record!(wire_values, record);
+                copy_pc_add_from_record!(wire_values, record);
+                copy_stack_ts_add_from_record!(wire_values, record);
+                copy_stack_ts_lt_from_record!(wire_values, record, 0);
+                copy_stack_ts_lt_from_record!(wire_values, record, 1);
+                copy_operand_from_record!(wire_values, record, phase0_addend_0, 0);
+                copy_operand_from_record!(wire_values, record, phase0_addend_1, 1);
+                copy_range_values_from_u256!(
+                    wire_values,
+                    phase0_instruction_add,
+                    record.operands[0] + record.operands[1]
                 );
-                wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
-                    Self::phase0_stack_ts_add().start,
-                )]
-                .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
-                    record.stack_timestamp + 1,
-                ));
-                wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
-                    Self::phase0_stack_ts_add().start,
-                )]
-                .copy_from_slice(
-                    &UIntAddSub::<TSUInt>::compute_no_overflow_carries(record.stack_timestamp, 1),
-                );
-                wire_values[Self::phase0_old_stack_ts0()]
-                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.operands_timestamps[0]));
-                wire_values[Self::phase0_old_stack_ts1()]
-                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.operands_timestamps[1]));
-
-                wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
-                    Self::phase0_old_stack_ts_lt0().start,
-                )]
-                .copy_from_slice(
-                    &UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
-                        record.operands_timestamps[0],
-                        record.stack_timestamp,
-                    ),
-                );
-                wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
-                    Self::phase0_old_stack_ts_lt1().start,
-                )]
-                .copy_from_slice(
-                    &UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
-                        record.operands_timestamps[1],
-                        record.stack_timestamp,
-                    ),
-                );
-
-                wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
-                    Self::phase0_old_stack_ts_lt0().start,
-                )]
-                .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
-                    record.operands_timestamps[0] + (1 << TSUInt::BIT_SIZE)
-                        - record.stack_timestamp,
-                ));
-                wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
-                    Self::phase0_old_stack_ts_lt1().start,
-                )]
-                .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
-                    record.operands_timestamps[1] + (1 << TSUInt::BIT_SIZE)
-                        - record.stack_timestamp,
-                ));
-
-                wire_values[Self::phase0_addend_0()]
-                    .copy_from_slice(&StackUInt::u256_to_field_elems(record.operands[0]));
-                wire_values[Self::phase0_addend_1()]
-                    .copy_from_slice(&StackUInt::u256_to_field_elems(record.operands[1]));
-
-                wire_values[UIntAddSub::<StackUInt>::range_values_range(
-                    Self::phase0_instruction_add().start,
-                )]
-                .copy_from_slice(&StackUInt::u256_to_range_field_limbs(
-                    record.operands[0] + record.operands[1],
-                ));
-                wire_values
-                    [UIntAddSub::<StackUInt>::carry_range(Self::phase0_instruction_add().start)]
-                .copy_from_slice(&UIntAddSub::<StackUInt>::compute_carries_u256(
+                copy_carry_values_from_addends!(
+                    wire_values,
+                    phase0_instruction_add,
                     record.operands[0],
-                    record.operands[1],
-                ));
+                    record.operands[1]
+                );
 
                 Some(wire_values)
             }
