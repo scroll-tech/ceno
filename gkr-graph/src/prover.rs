@@ -1,4 +1,3 @@
-use ff::FromUniformBytes;
 use gkr::{structs::IOPProverPhase2Message, utils::MultilinearExtensionFromVectors};
 use goldilocks::SmallField;
 use itertools::izip;
@@ -13,7 +12,7 @@ use crate::{
     },
 };
 
-impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
+impl<F: SmallField> IOPProverState<F> {
     pub fn prove(
         circuit: &CircuitGraph<F>,
         circuit_witness: &CircuitGraphWitness<F::BaseField>,

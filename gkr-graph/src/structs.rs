@@ -4,9 +4,9 @@ use gkr::structs::{Circuit, CircuitWitness, Point};
 use goldilocks::SmallField;
 use simple_frontend::structs::WireId;
 
-type GKRProverState<F: SmallField> = gkr::structs::IOPProverState<F>;
-type GKRVerifierState<F: SmallField> = gkr::structs::IOPVerifierState<F>;
-type GKRProof<F: SmallField> = gkr::structs::IOPProof<F>;
+type GKRProverState<F> = gkr::structs::IOPProverState<F>;
+type GKRVerifierState<F> = gkr::structs::IOPVerifierState<F>;
+type GKRProof<F> = gkr::structs::IOPProof<F>;
 
 /// Corresponds to the `output_evals` and `wires_out_evals` in gkr
 /// `prove_parallel`.
