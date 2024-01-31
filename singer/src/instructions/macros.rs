@@ -120,20 +120,40 @@ macro_rules! copy_pc_add_from_record {
     };
 }
 
+macro_rules! copy_stack_memory_ts_add_from_record {
+    ($wire_values: expr, $record: expr, $dst_slice: tt, $timestamp: tt) => {
+        $wire_values
+            [UIntAddSub::<TSUInt>::range_values_no_overflow_range(Self::$dst_slice().start)]
+        .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
+            $record.$timestamp + 1,
+        ));
+        $wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::$dst_slice().start)]
+            .copy_from_slice(&UIntAddSub::<TSUInt>::compute_no_overflow_carries(
+                $record.$timestamp,
+                1,
+            ));
+    };
+}
+
 macro_rules! copy_stack_ts_add_from_record {
     ($wire_values: expr, $record: expr) => {
-        $wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
-            Self::phase0_stack_ts_add().start,
-        )]
-        .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
-            $record.stack_timestamp + 1,
-        ));
-        $wire_values
-            [UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::phase0_stack_ts_add().start)]
-        .copy_from_slice(&UIntAddSub::<TSUInt>::compute_no_overflow_carries(
-            $record.stack_timestamp,
-            1,
-        ));
+        copy_stack_memory_ts_add_from_record!(
+            $wire_values,
+            $record,
+            phase0_stack_ts_add,
+            stack_timestamp
+        );
+    };
+}
+
+macro_rules! copy_memory_ts_add_from_record {
+    ($wire_values: expr, $record: expr) => {
+        copy_stack_memory_ts_add_from_record!(
+            $wire_values,
+            $record,
+            phase0_memory_ts_add,
+            memory_timestamp
+        );
     };
 }
 
@@ -185,6 +205,39 @@ macro_rules! copy_stack_ts_lt_from_record {
     };
 }
 
+macro_rules! copy_memory_ts_lt_from_record {
+    ($wire_values: expr, $record: expr, $memory_ts: tt, $memory_ts_lt: tt, $timestamps_offset: expr) => {
+        for index in 0..EVM_STACK_BYTE_WIDTH {
+            copy_operand_timestamp_from_record!($wire_values, $record, $memory_ts, index);
+            $wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
+                Self::$memory_ts_lt().start + index * TSUInt::N_CARRY_NO_OVERFLOW_CELLS,
+            )]
+            .copy_from_slice(&UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
+                $record.operands_timestamps[index + $timestamps_offset],
+                $record.memory_timestamp,
+            ));
+
+            $wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
+                Self::$memory_ts_lt().start + index * TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
+            )]
+            .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
+                $record.operands_timestamps[index + $timestamps_offset] + (1 << TSUInt::BIT_SIZE)
+                    - $record.memory_timestamp,
+            ));
+        }
+    };
+
+    ($wire_values: expr, $record: expr, $timestamps_offset: expr) => {
+        copy_memory_ts_lt_from_record!(
+            $wire_values,
+            $record,
+            phase0_old_memory_ts,
+            phase0_old_memory_ts_lt,
+            $timestamps_offset
+        );
+    };
+}
+
 macro_rules! copy_operand_from_record {
     ($wire_values: expr, $record: expr, $dst_slice: tt, $index: expr) => {
         $wire_values[Self::$dst_slice()]
@@ -216,16 +269,28 @@ macro_rules! copy_operand_timestamp_from_record {
 }
 
 macro_rules! copy_range_values_from_u256 {
+    ($wire_values: expr, $dst_slice: tt, $val: expr, $offset: expr) => {
+        $wire_values[UIntAddSub::<StackUInt>::range_values_range(
+            Self::$dst_slice().start + StackUInt::N_RANGE_CHECK_CELLS * $offset,
+        )]
+        .copy_from_slice(&StackUInt::u256_to_range_field_limbs($val));
+    };
+
     ($wire_values: expr, $dst_slice: tt, $val: expr) => {
-        $wire_values[UIntAddSub::<StackUInt>::range_values_range(Self::$dst_slice().start)]
-            .copy_from_slice(&StackUInt::u256_to_range_field_limbs($val));
+        copy_range_values_from_u256!($wire_values, $dst_slice, $val, 0);
     };
 }
 
 macro_rules! copy_carry_values_from_addends {
+    ($wire_values: expr, $dst_slice: tt, $lval: expr, $rval: expr, $offset: expr) => {
+        $wire_values[UIntAddSub::<StackUInt>::carry_range(
+            Self::$dst_slice().start + StackUInt::N_CARRY_CELLS * $offset,
+        )]
+        .copy_from_slice(&UIntAddSub::<StackUInt>::compute_carries_u256($lval, $rval));
+    };
+
     ($wire_values: expr, $dst_slice: tt, $lval: expr, $rval: expr) => {
-        $wire_values[UIntAddSub::<StackUInt>::carry_range(Self::$dst_slice().start)]
-            .copy_from_slice(&UIntAddSub::<StackUInt>::compute_carries_u256($lval, $rval));
+        copy_carry_values_from_addends!($wire_values, $dst_slice, $lval, $rval, 0);
     };
 }
 

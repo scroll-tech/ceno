@@ -5,11 +5,13 @@ use gkr::structs::Circuit;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use revm_interpreter::Record;
+use revm_primitives::U256;
 
+use super::utils::uint::u2fvec;
 use crate::{
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     error::ZKVMError,
-    instructions::InstCircuitLayout,
+    instructions::{utils::uint::u256_to_fvec, InstCircuitLayout},
 };
 use crate::{PrepareSingerWiresIn, SingerWiresIn};
 
@@ -304,12 +306,75 @@ impl Instruction for MstoreInstruction {
     }
 
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        todo!()
+        match index {
+            0 => {
+                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+                copy_pc_from_record!(wire_values, record);
+                copy_stack_ts_from_record!(wire_values, record);
+                copy_memory_ts_from_record!(wire_values, record);
+                copy_stack_top_from_record!(wire_values, record);
+                copy_clock_from_record!(wire_values, record);
+                copy_pc_add_from_record!(wire_values, record);
+                copy_memory_ts_add_from_record!(wire_values, record);
+                copy_stack_ts_lt_from_record!(
+                    wire_values,
+                    record,
+                    phase0_old_stack_ts_offset,
+                    phase0_old_stack_ts_lt_offset,
+                    0
+                );
+                copy_stack_ts_lt_from_record!(
+                    wire_values,
+                    record,
+                    phase0_old_stack_ts_value,
+                    phase0_old_stack_ts_lt_value,
+                    0
+                );
+                // The memory value timestamps are stored starting from the third cell
+                copy_memory_ts_lt_from_record!(wire_values, record, 2);
+                copy_operand_from_record!(wire_values, record, phase0_offset, 0);
+                for offset in 0..EVM_STACK_BYTE_WIDTH {
+                    copy_range_values_from_u256!(
+                        wire_values,
+                        phase0_offset_add_i_plus_1,
+                        record.operands[0] + U256::from(offset),
+                        offset
+                    );
+                    copy_carry_values_from_addends!(
+                        wire_values,
+                        phase0_offset_add_i_plus_1,
+                        record.operands[0],
+                        U256::from(offset)
+                    );
+                }
+                wire_values[Self::phase0_mem_bytes()].copy_from_slice(&u256_to_fvec::<
+                    F,
+                    { StackUInt::BIT_SIZE },
+                    8,
+                >(
+                    record.operands[1]
+                ));
+                wire_values[Self::phase0_prev_mem_bytes()].copy_from_slice(&u256_to_fvec::<
+                    F,
+                    { StackUInt::BIT_SIZE },
+                    8,
+                >(
+                    record.operands[2]
+                ));
+
+                Some(wire_values)
+            }
+            _ => None,
+        }
     }
     fn complete_wires_in<F: SmallField>(
         pre_wires_in: &PrepareSingerWiresIn<F>,
-        challenges: &Vec<F>,
+        _challenges: &Vec<F>,
     ) -> SingerWiresIn<F> {
-        todo!();
+        // Currently the memory timestamp only takes one element, so no need to do anything
+        // and no need to use the challenges.
+        SingerWiresIn {
+            opcode_wires_in: pre_wires_in.opcode_wires_in.clone(),
+        }
     }
 }

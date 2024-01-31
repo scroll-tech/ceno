@@ -102,8 +102,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     pub(crate) const BIT_SIZE: usize = M;
     pub(crate) const LIMB_BIT_SIZE: usize = C;
 
-    const N_CARRY_CELLS: usize = Self::N_OPRAND_CELLS;
-    const N_CARRY_NO_OVERFLOW_CELLS: usize = Self::N_OPRAND_CELLS - 1;
+    pub(crate) const N_CARRY_CELLS: usize = Self::N_OPRAND_CELLS;
+    pub(crate) const N_CARRY_NO_OVERFLOW_CELLS: usize = Self::N_OPRAND_CELLS - 1;
     pub(in crate::instructions) const N_RANGE_CHECK_CELLS: usize =
         Self::N_OPRAND_CELLS * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
     pub(in crate::instructions) const N_RANGE_CHECK_NO_OVERFLOW_CELLS: usize =

@@ -26,13 +26,15 @@ pub fn mload<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mu
 pub fn mstore<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::VERYLOW);
     pop!(interpreter, index, value);
-    let timestamps = vec![index.1, value.1];
+    let mut timestamps = vec![index.1, value.1];
     let index = as_usize_or_fail!(interpreter, index.0);
     shared_memory_resize!(interpreter, index, 32);
-    interpreter
-        .shared_memory
-        .set_u256(index, value.0, interpreter.memory_timestamp);
-    let operands = vec![U256::from(index), value.0];
+    let (old_value, old_timestamps) =
+        interpreter
+            .shared_memory
+            .set_u256(index, value.0, interpreter.memory_timestamp);
+    timestamps.extend(old_timestamps);
+    let operands = vec![U256::from(index), value.0, old_value];
     host.record(&interpreter.generate_record(&operands, &timestamps));
     interpreter.memory_timestamp += 1;
 }
