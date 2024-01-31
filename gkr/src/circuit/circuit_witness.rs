@@ -73,6 +73,9 @@ impl<F: SmallField> CircuitWitness<F> {
                                 .copy_to
                                 .get(&(layer_id as LayerId))
                                 .unwrap()[subset_wire_id];
+                            assert!(layer_id < *old_layer_id as usize, 
+                                    "layer paste_from err: old_layer_id {:?} = layer_id {:?}",
+                                    *old_layer_id, layer_id);
                             current_layer_witness[*new_wire_id] =
                                 layer_witnesses[*old_layer_id as usize][old_wire_id];
                         });
