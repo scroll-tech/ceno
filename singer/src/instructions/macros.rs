@@ -227,3 +227,10 @@ macro_rules! copy_carry_values_from_addends {
             .copy_from_slice(&UIntAddSub::<StackUInt>::compute_carries_u256($lval, $rval));
     };
 }
+
+macro_rules! copy_borrow_values_from_oprands {
+    ($wire_values: expr, $dst_slice: tt, $lval: expr, $rval: expr) => {
+        $wire_values[UIntAddSub::<StackUInt>::carry_range(Self::$dst_slice().start)]
+            .copy_from_slice(&UIntAddSub::<StackUInt>::compute_borrows_u256($lval, $rval));
+    };
+}
