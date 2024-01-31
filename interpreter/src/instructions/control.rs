@@ -27,7 +27,12 @@ pub fn jump<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut
 pub fn jumpi<H: Host, F: SmallField>(interpreter: &mut Interpreter<F>, host: &mut H) {
     gas!(interpreter, gas::HIGH);
     pop!(interpreter, dest, value);
-    let operands = vec![dest.0, value.0];
+    assert!(interpreter.program_counter() < interpreter.contract.bytecode.len());
+    let operands = vec![
+        dest.0,
+        value.0,
+        U256::from(unsafe { *interpreter.instruction_pointer }),
+    ];
     let timestamps = vec![dest.1, value.1];
     host.record(&interpreter.generate_record(&operands, &timestamps));
     if value.0 != U256::ZERO {

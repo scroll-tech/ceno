@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::utils::uint::u2fvec;
 use frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
@@ -13,7 +14,7 @@ use super::InstructionGraph;
 use super::{
     utils::{
         uint::{UIntAddSub, UIntCmp},
-        ChipHandler, PCUInt, TSUInt,
+        ChipHandler, PCUInt, StackUInt, TSUInt,
     },
     ChipChallenges, InstCircuit, InstOutputType, Instruction,
 };
@@ -254,12 +255,54 @@ impl Instruction for JumpiInstruction {
     }
 
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        todo!()
+        match index {
+            0 => {
+                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+                copy_pc_from_record!(wire_values, record);
+                copy_stack_ts_from_record!(wire_values, record);
+                copy_stack_top_from_record!(wire_values, record);
+                copy_clock_from_record!(wire_values, record);
+                copy_stack_ts_lt_from_record!(
+                    wire_values,
+                    record,
+                    phase0_old_stack_ts_dest,
+                    phase0_old_stack_ts_dest_lt,
+                    0
+                );
+                copy_stack_ts_lt_from_record!(
+                    wire_values,
+                    record,
+                    phase0_old_stack_ts_cond,
+                    phase0_old_stack_ts_cond_lt,
+                    1
+                );
+                copy_operand_single_cell_from_record!(wire_values, record, phase0_cond, 1);
+                copy_pc_add_from_record!(wire_values, record);
+                // Although the pc_plus_1_opcode is not strictly speaking an operand,
+                // it is passed from the interpreter in the operands array.
+                copy_operand_single_cell_from_record!(
+                    wire_values,
+                    record,
+                    phase0_pc_plus_1_opcode,
+                    2
+                );
+                Some(wire_values)
+            }
+            1 => {
+                let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
+                copy_memory_ts_from_record!(wire_values, record);
+                Some(wire_values)
+            }
+            _ => None,
+        }
     }
+
     fn complete_wires_in<F: SmallField>(
         pre_wires_in: &PrepareSingerWiresIn<F>,
-        challenges: &Vec<F>,
+        _challenges: &Vec<F>,
     ) -> SingerWiresIn<F> {
-        todo!();
+        SingerWiresIn {
+            opcode_wires_in: pre_wires_in.opcode_wires_in.clone(),
+        }
     }
 }
