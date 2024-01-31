@@ -1820,6 +1820,7 @@ dependencies = [
  "ark-std 0.4.0",
  "ff",
  "goldilocks",
+ "itertools 0.12.0",
  "revm-primitives",
  "serde",
 ]

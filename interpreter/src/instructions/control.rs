@@ -1,4 +1,5 @@
 use goldilocks::SmallField;
+use itertools::Itertools;
 use revm_primitives::Bytes;
 
 use crate::{
@@ -73,6 +74,7 @@ fn return_inner<H: Host, F: SmallField>(
     let len = as_usize_or_fail!(interpreter, len.0);
     // important: offset must be ignored if len is zeros
     let mut output = Bytes::default();
+    let mut timestamps: Vec<u64> = Vec::new();
     if len != 0 {
         let offset = as_usize_or_fail!(interpreter, offset.0);
         shared_memory_resize!(interpreter, offset, len);
@@ -82,10 +84,17 @@ fn return_inner<H: Host, F: SmallField>(
             .slice(offset, len)
             .0
             .to_vec()
-            .into()
+            .into();
+        timestamps = interpreter
+            .shared_memory
+            .slice(offset, len)
+            .1
+            .to_vec()
+            .into();
     }
-    let operands = vec![U256::from(offset.0), U256::from(len)];
-    host.record(&interpreter.generate_record(&operands, &Vec::new()));
+    let mut operands = vec![U256::from(offset.0), U256::from(len)];
+    operands.extend(output.iter().map(|b| U256::from(*b)));
+    host.record(&interpreter.generate_record(&operands, &timestamps));
     interpreter.instruction_result = instruction_result;
     interpreter.next_action = Some(crate::InterpreterAction::Return {
         result: InterpreterResult {

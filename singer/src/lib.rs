@@ -86,7 +86,6 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
     pub fn execute<EF: SmallField<BaseField = F>, Rng: RngCore + Clone>(
         bytecode: &[u8],
         input: &[u8],
-        pp: &StandardBasefoldProverParam<EF>,
     ) -> PrepareSingerWiresIn<F>
     where
         F: SmallField<BaseField = F> + Serialize + DeserializeOwned + Into<EF>,

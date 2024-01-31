@@ -204,9 +204,9 @@ pub(crate) trait Instruction {
 
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>>;
     fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &PrepareSingerWiresIn<F>,
+        pre_wires_in: &CircuitWiresIn<F>,
         challenges: &Vec<F>,
-    ) -> SingerWiresIn<F>;
+    ) -> CircuitWiresIn<F>;
 }
 
 /// Construct the part of the circuit graph for an instruction.

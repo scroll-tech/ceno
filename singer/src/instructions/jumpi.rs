@@ -8,7 +8,7 @@ use revm_interpreter::Record;
 
 use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
-use crate::{PrepareSingerWiresIn, SingerWiresIn};
+use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
 use super::InstructionGraph;
 use super::{
@@ -298,11 +298,9 @@ impl Instruction for JumpiInstruction {
     }
 
     fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &PrepareSingerWiresIn<F>,
+        pre_wires_in: &CircuitWiresIn<F>,
         _challenges: &Vec<F>,
-    ) -> SingerWiresIn<F> {
-        SingerWiresIn {
-            opcode_wires_in: pre_wires_in.opcode_wires_in.clone(),
-        }
+    ) -> CircuitWiresIn<F> {
+        pre_wires_in.clone()
     }
 }

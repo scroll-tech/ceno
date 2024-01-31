@@ -7,7 +7,7 @@ use revm_interpreter::Record;
 
 use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
-use crate::{PrepareSingerWiresIn, SingerWiresIn};
+use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
 use super::utils::uint::u2fvec;
 use super::InstructionGraph;
@@ -297,13 +297,11 @@ impl Instruction for AddInstruction {
         }
     }
     fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &PrepareSingerWiresIn<F>,
+        pre_wires_in: &CircuitWiresIn<F>,
         _challenges: &Vec<F>,
-    ) -> SingerWiresIn<F> {
+    ) -> CircuitWiresIn<F> {
         // Currently the memory timestamp only takes one element, so no need to do anything
         // and no need to use the challenges.
-        SingerWiresIn {
-            opcode_wires_in: pre_wires_in.opcode_wires_in.clone(),
-        }
+        pre_wires_in.clone()
     }
 }

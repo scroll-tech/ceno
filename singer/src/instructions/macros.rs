@@ -210,8 +210,8 @@ macro_rules! copy_stack_ts_lt_from_record {
 }
 
 macro_rules! copy_memory_ts_lt_from_record {
-    ($wire_values: expr, $record: expr, $memory_ts: tt, $memory_ts_lt: tt, $timestamps_offset: expr) => {
-        for index in 0..EVM_STACK_BYTE_WIDTH {
+    ($wire_values: expr, $record: expr, $memory_ts: tt, $memory_ts_lt: tt, $timestamps_offset: expr, $num_mem_bytes: expr) => {
+        for index in 0..$num_mem_bytes {
             copy_operand_timestamp_from_record!($wire_values, $record, $memory_ts, index);
             $wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
                 Self::$memory_ts_lt().start + index * TSUInt::N_CARRY_NO_OVERFLOW_CELLS,
@@ -237,7 +237,8 @@ macro_rules! copy_memory_ts_lt_from_record {
             $record,
             phase0_old_memory_ts,
             phase0_old_memory_ts_lt,
-            $timestamps_offset
+            $timestamps_offset,
+            EVM_STACK_BYTE_WIDTH
         );
     };
 }

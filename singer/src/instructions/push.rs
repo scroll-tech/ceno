@@ -12,7 +12,7 @@ use crate::{
     constants::{OpcodeType, VALUE_BIT_WIDTH},
     error::ZKVMError,
 };
-use crate::{PrepareSingerWiresIn, SingerWiresIn};
+use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
 use super::InstructionGraph;
 use super::{
@@ -257,12 +257,10 @@ impl<const N: usize> Instruction for PushInstruction<N> {
         }
     }
     fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &PrepareSingerWiresIn<F>,
+        pre_wires_in: &CircuitWiresIn<F>,
         _challenges: &Vec<F>,
-    ) -> SingerWiresIn<F> {
+    ) -> CircuitWiresIn<F> {
         // TODO: Not finished yet. Waiting for redesign of phase 1.
-        SingerWiresIn {
-            opcode_wires_in: pre_wires_in.opcode_wires_in.clone(),
-        }
+        pre_wires_in.clone()
     }
 }
