@@ -114,8 +114,12 @@ macro_rules! copy_clock_from_record {
 
 macro_rules! copy_pc_add_from_record {
     ($wire_values: expr, $record: expr) => {
-        $wire_values[Self::phase0_pc_add()].copy_from_slice(
-            &UIntAddSub::<PCUInt>::compute_no_overflow_carries($record.pc, 1),
+        copy_pc_add_from_record!($wire_values, $record, phase0_pc_add, 1);
+    };
+
+    ($wire_values: expr, $record: expr, $dst_slice: tt, $added: expr) => {
+        $wire_values[Self::$dst_slice()].copy_from_slice(
+            &UIntAddSub::<PCUInt>::compute_no_overflow_carries($record.pc, $added),
         );
     };
 }

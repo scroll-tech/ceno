@@ -5,6 +5,7 @@ use gkr::structs::Circuit;
 use goldilocks::SmallField;
 use revm_interpreter::Record;
 
+use super::utils::uint::u2fvec;
 use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
 use crate::{PrepareSingerWiresIn, SingerWiresIn};
@@ -202,12 +203,33 @@ impl Instruction for PopInstruction {
     }
 
     fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        todo!()
+        match index {
+            0 => {
+                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+                copy_pc_from_record!(wire_values, record);
+                copy_stack_ts_from_record!(wire_values, record);
+                copy_stack_top_from_record!(wire_values, record);
+                copy_clock_from_record!(wire_values, record);
+                copy_pc_add_from_record!(wire_values, record);
+                copy_stack_ts_lt_from_record!(wire_values, record);
+                Some(wire_values)
+            }
+            1 => {
+                // TODO: Not finished yet. Waiting for redesign of phase 1.
+                let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
+                copy_memory_ts_from_record!(wire_values, record);
+                Some(wire_values)
+            }
+            _ => None,
+        }
     }
     fn complete_wires_in<F: SmallField>(
         pre_wires_in: &PrepareSingerWiresIn<F>,
-        challenges: &Vec<F>,
+        _challenges: &Vec<F>,
     ) -> SingerWiresIn<F> {
-        todo!();
+        // TODO: Not finished yet. Waiting for redesign of phase 1.
+        SingerWiresIn {
+            opcode_wires_in: pre_wires_in.opcode_wires_in.clone(),
+        }
     }
 }
