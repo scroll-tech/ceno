@@ -424,10 +424,6 @@ checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 
 [[package]]
 name = "poseidon"
-version = "0.1.0"
-
-[[package]]
-name = "poseidon"
 version = "0.2.0"
 source = "git+https://github.com/zhenfeizhang/poseidon#da4bffbf4a4cf47719783c670aeb83a45b8b7b1d"
 dependencies = [
@@ -691,7 +687,7 @@ dependencies = [
  "ff",
  "goldilocks",
  "halo2curves",
- "poseidon 0.2.0",
+ "poseidon",
  "rayon",
  "serde",
 ]
