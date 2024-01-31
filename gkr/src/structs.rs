@@ -66,6 +66,7 @@ pub struct GKRInputClaims<F: SmallField> {
 
 #[derive(Clone, Serialize)]
 pub struct Layer<F: SmallField> {
+    pub(crate) layer_id: u32,
     pub(crate) num_vars: usize,
 
     // Gates. Should be all None if it's the input layer.

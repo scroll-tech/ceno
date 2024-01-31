@@ -35,7 +35,7 @@ impl<F: SmallField> Circuit<F> {
         layers_of_cell_id.reverse();
 
         let mut layers = (0..n_layers)
-            .map(|_| Layer::<F> {
+            .map(|i| Layer::<F> {
                 add_consts: vec![],
                 adds: vec![],
                 mul2s: vec![],
@@ -45,6 +45,7 @@ impl<F: SmallField> Circuit<F> {
                 paste_from: HashMap::new(),
                 num_vars: 0,
                 max_previous_num_vars: 0,
+                layer_id: i,
             })
             .collect_vec();
 
@@ -369,6 +370,7 @@ impl<F: SmallField> Layer<F> {
 impl<F: SmallField> fmt::Debug for Layer<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Layer {{")?;
+        writeln!(f, "  layer_id: {}", self.layer_id)?;
         writeln!(f, "  num_vars: {}", self.num_vars)?;
         writeln!(f, "  max_previous_num_vars: {}", self.max_previous_num_vars)?;
         writeln!(f, "  adds: ")?;
