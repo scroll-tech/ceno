@@ -262,6 +262,8 @@ mod test{
             = PushInstruction::<1>::construct_circuit::<Goldilocks>(chip_challenges).unwrap();
         let phase0_idx_map = PushInstruction::<1>::phase0_sizes();
         let phase1_idx_map = PushInstruction::<1>::phase1_sizes();
+        println!("{:?}", &phase0_idx_map);
+        println!("{:?}", &phase1_idx_map);
         let phase0_witness_size = PushInstruction::<1>::witness_size(0);
         let phase1_witness_size = PushInstruction::<1>::witness_size(1);
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
@@ -300,17 +302,18 @@ mod test{
         phase0_values_map.insert(
         "phase0_stack_bytes".to_string(), 
         vec![
-            Goldilocks::from(0u64),
+            Goldilocks::from(1u64),
         ]);
         phase1_values_map.insert(
         "phase1_memory_ts_rlc".to_string(), 
         vec![
-            Goldilocks::from(0u64),
+            Goldilocks::from(1u64),
         ]);
 
         // TODO: Refactor general opcode test logic below 
         // configure circuit
         let circuit = InstCircuit.circuit.as_ref();
+        println!("{:?}", circuit);
         
         // get indexes for circuit inputs and wire_in
         // they are divided into phase0 and phase1
@@ -346,16 +349,16 @@ mod test{
             };
             for key in idx_map.keys() {
                 let range = idx_map
-                                        .get(key)
-                                        .unwrap()
-                                        .clone()
-                                        .collect::<Vec<_>>();
-                let values = values_map
                                             .get(key)
-                                            .unwrap();
+                                            .unwrap()
+                                            .clone()
+                                            .collect::<Vec<_>>();
+                let values = values_map
+                                                .get(key)
+                                                .unwrap();
                 for (value_idx, wire_in_idx) in range
-                                                            .into_iter()
-                                                            .enumerate() {
+                                                                .into_iter()
+                                                                .enumerate() {
                     if value_idx < values.len() {
                         wires_in[input_idx as usize][wire_in_idx] 
                             = values[value_idx];
