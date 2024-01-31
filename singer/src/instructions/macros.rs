@@ -93,6 +93,12 @@ macro_rules! copy_stack_ts_from_record {
     };
 }
 
+macro_rules! copy_memory_ts_from_record {
+    ($wire_values: expr, $record: expr) => {
+        $wire_values[..].copy_from_slice(&TSUInt::uint_to_field_elems($record.memory_timestamp));
+    };
+}
+
 macro_rules! copy_stack_top_from_record {
     ($wire_values: expr, $record: expr) => {
         $wire_values[Self::phase0_stack_top()]
@@ -133,8 +139,7 @@ macro_rules! copy_stack_ts_add_from_record {
 
 macro_rules! copy_stack_ts_lt_from_record {
     ($wire_values: expr, $record: expr, 0) => {
-        $wire_values[Self::phase0_old_stack_ts0()]
-            .copy_from_slice(&TSUInt::uint_to_field_elems($record.operands_timestamps[0]));
+        copy_operand_timestamp_from_record!($wire_values, $record, phase0_old_stack_ts0, 0);
 
         $wire_values
             [UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::phase0_old_stack_ts_lt0().start)]
@@ -152,8 +157,7 @@ macro_rules! copy_stack_ts_lt_from_record {
     };
 
     ($wire_values: expr, $record: expr, 1) => {
-        $wire_values[Self::phase0_old_stack_ts1()]
-            .copy_from_slice(&TSUInt::uint_to_field_elems($record.operands_timestamps[1]));
+        copy_operand_timestamp_from_record!($wire_values, $record, phase0_old_stack_ts1, 0);
 
         $wire_values
             [UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::phase0_old_stack_ts_lt1().start)]
@@ -171,9 +175,7 @@ macro_rules! copy_stack_ts_lt_from_record {
     };
 
     ($wire_values: expr, $record: expr) => {
-        $wire_values[Self::phase0_old_stack_ts()]
-            .copy_from_slice(&TSUInt::uint_to_field_elems($record.operands_timestamps[0]));
-
+        copy_operand_timestamp_from_record!($wire_values, $record, phase0_old_stack_ts, 0);
         $wire_values
             [UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::phase0_old_stack_ts_lt().start)]
         .copy_from_slice(&UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
@@ -193,6 +195,22 @@ macro_rules! copy_operand_from_record {
     ($wire_values: expr, $record: expr, $dst_slice: tt, $index: expr) => {
         $wire_values[Self::$dst_slice()]
             .copy_from_slice(&StackUInt::u256_to_field_elems($record.operands[$index]));
+    };
+}
+
+macro_rules! copy_operand_u64_from_record {
+    ($wire_values: expr, $record: expr, $dst_slice: tt, $index: expr) => {
+        $wire_values[Self::$dst_slice()].copy_from_slice(&UInt64::uint_to_field_elems(
+            $record.operands[$index].as_limbs()[0],
+        ));
+    };
+}
+
+macro_rules! copy_operand_timestamp_from_record {
+    ($wire_values: expr, $record: expr, $dst_slice: tt, $index: expr) => {
+        $wire_values[Self::$dst_slice()].copy_from_slice(&TSUInt::uint_to_field_elems(
+            $record.operands_timestamps[$index],
+        ));
     };
 }
 

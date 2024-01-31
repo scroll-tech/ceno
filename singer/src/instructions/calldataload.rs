@@ -244,54 +244,16 @@ impl Instruction for CalldataloadInstruction {
         match index {
             0 => {
                 let mut wire_values = vec![F::ZERO; Self::phase0_size()];
-                wire_values[Self::phase0_pc()]
-                    .copy_from_slice(&PCUInt::uint_to_field_elems(record.pc));
-                wire_values[Self::phase0_stack_ts()]
-                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.stack_timestamp));
-                wire_values[Self::phase0_stack_top()]
-                    .copy_from_slice(&u2fvec::<F, 1, 64>(record.stack_top));
-                wire_values[Self::phase0_clk()].copy_from_slice(&u2fvec::<F, 1, 64>(record.clock));
-
-                wire_values[Self::phase0_pc_add()].copy_from_slice(
-                    &UIntAddSub::<PCUInt>::compute_no_overflow_carries(record.pc, 1),
-                );
-                wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
-                    Self::phase0_stack_ts_add().start,
-                )]
-                .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
-                    record.stack_timestamp + 1,
-                ));
-                wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
-                    Self::phase0_stack_ts_add().start,
-                )]
-                .copy_from_slice(
-                    &UIntAddSub::<TSUInt>::compute_no_overflow_carries(record.stack_timestamp, 1),
-                );
+                copy_pc_from_record!(wire_values, record);
+                copy_stack_ts_from_record!(wire_values, record);
+                copy_stack_top_from_record!(wire_values, record);
+                copy_clock_from_record!(wire_values, record);
+                copy_pc_add_from_record!(wire_values, record);
+                copy_stack_ts_add_from_record!(wire_values, record);
 
                 // The operand offset is assumed to be 64 bit, although stored in a U256
-                wire_values[Self::phase0_offset()].copy_from_slice(&UInt64::uint_to_field_elems(
-                    record.operands[0].as_limbs()[0],
-                ));
-
-                wire_values[Self::phase0_old_stack_ts()]
-                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.operands_timestamps[0]));
-
-                wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
-                    Self::phase0_old_stack_ts_lt().start,
-                )]
-                .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
-                    record.operands_timestamps[0] + (1 << TSUInt::BIT_SIZE)
-                        - record.stack_timestamp,
-                ));
-                wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
-                    Self::phase0_old_stack_ts_lt().start,
-                )]
-                .copy_from_slice(
-                    &UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
-                        record.operands_timestamps[0],
-                        record.stack_timestamp,
-                    ),
-                );
+                copy_operand_u64_from_record!(wire_values, record, phase0_offset, 0);
+                copy_stack_ts_lt_from_record!(wire_values, record);
 
                 Some(wire_values)
             }

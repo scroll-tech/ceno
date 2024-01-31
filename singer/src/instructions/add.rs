@@ -290,8 +290,7 @@ impl Instruction for AddInstruction {
             }
             1 => {
                 let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
-                wire_values[..]
-                    .copy_from_slice(&TSUInt::uint_to_field_elems(record.memory_timestamp));
+                copy_memory_ts_from_record!(wire_values, record);
                 Some(wire_values)
             }
             _ => None,
