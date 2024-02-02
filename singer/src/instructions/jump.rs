@@ -7,30 +7,24 @@ use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
 use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
-use super::utils::uint::{u2fvec, UIntAddSub};
 use super::InstructionGraph;
-use super::{
-    utils::{uint::UIntCmp, ChipHandler, TSUInt},
-    ChipChallenges, InstCircuit, InstOutputType, Instruction,
+use super::{ChipChallenges, InstCircuit, InstOutputType, Instruction};
+use crate::utils::uint::{u2fvec, UIntAddSub};
+use crate::utils::{
+    chip_handler::ChipHandler,
+    uint::{TSUInt, UIntCmp},
 };
 
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use std::sync::Arc;
 
-use crate::{
-    constants::OpcodeType,
-    error::ZKVMError,
-    utils::{
-        chip_handler::{
-            BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
-            StackChipOperations,
-        },
-        uint::{PCUInt, TSUInt, UIntCmp},
+use crate::utils::{
+    chip_handler::{
+        BytecodeChipOperations, GlobalStateChipOperations, RangeChipOperations, StackChipOperations,
     },
+    uint::PCUInt,
 };
-
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 pub struct JumpInstruction;
 

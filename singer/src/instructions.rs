@@ -9,14 +9,9 @@ use simple_frontend::structs::{ChallengeId, WireId};
 
 use strum_macros::EnumIter;
 
-use crate::{
-    chips::{construct_inst_chip_circuits, ChipCircuitGadgets},
-    constants::OpcodeType,
-    error::ZKVMError,
-    CircuitWiresIn, PrepareSingerWiresIn, SingerGraphBuilder, SingerWiresIn,
-};
+use crate::{constants::OpcodeType, error::ZKVMError, CircuitWiresIn};
 
-use crate::{chips::SingerChipBuilder, error::ZKVMError, CircuitWiresIn, SingerParams};
+use crate::{chips::SingerChipBuilder, SingerParams};
 
 use self::{
     add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,

@@ -1,14 +1,10 @@
-use std::cmp::min;
-
-use frontend::structs::{CellId, CircuitBuilder, ConstantType};
 use goldilocks::SmallField;
 use revm_primitives::U256;
-
-use ff::Field;
-use goldilocks::SmallField;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
-use super::{u2vec, UInt, UIntAddSub};
+use ff::Field;
+
+use super::{UInt, UIntAddSub};
 use crate::{
     error::ZKVMError,
     utils::chip_handler::{ChipHandler, RangeChipOperations},
@@ -28,65 +24,47 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         &witness[..UInt::<M, C>::N_RANGE_CHECK_CELLS]
     }
 
-    pub(in crate::instructions) fn range_values_range(offset: usize) -> std::ops::Range<usize> {
+    pub(crate) fn range_values_range(offset: usize) -> std::ops::Range<usize> {
         offset..offset + UInt::<M, C>::N_RANGE_CHECK_CELLS
-    }
-
-    pub(in crate::instructions) fn extract_range_values_no_overflow(
-        witness: &[CellId],
-    ) -> &[CellId] {
-        &witness[..UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS]
-    }
-
-    pub(in crate::instructions) fn range_values_no_overflow_range(
-        offset: usize,
-    ) -> std::ops::Range<usize> {
-        offset..offset + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
-    }
-
-    pub(in crate::instructions) fn extract_carry_no_overflow(witness: &[CellId]) -> &[CellId] {
-        &witness[UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS..]
-    }
-
-    pub(in crate::instructions) fn carry_no_overflow_range(
-        offset: usize,
-    ) -> std::ops::Range<usize> {
-        offset + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
-            ..offset
-                + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
-                + UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS
-    }
-
-    pub(in crate::instructions) fn extract_carry(witness: &[CellId]) -> &[CellId] {
-        &witness[UInt::<M, C>::N_RANGE_CHECK_CELLS..]
-    }
-
-    pub(in crate::instructions) fn carry_range(offset: usize) -> std::ops::Range<usize> {
-        offset + UInt::<M, C>::N_RANGE_CHECK_CELLS
-            ..offset + UInt::<M, C>::N_RANGE_CHECK_CELLS + UInt::<M, C>::N_CARRY_CELLS
     }
 
     pub(crate) fn extract_range_values_no_overflow(witness: &[CellId]) -> &[CellId] {
         &witness[..UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS]
     }
 
+    pub(crate) fn range_values_no_overflow_range(offset: usize) -> std::ops::Range<usize> {
+        offset..offset + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
+    }
+
     pub(crate) fn extract_carry_no_overflow(witness: &[CellId]) -> &[CellId] {
         &witness[UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS..]
+    }
+
+    pub(crate) fn carry_no_overflow_range(offset: usize) -> std::ops::Range<usize> {
+        offset + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
+            ..offset
+                + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
+                + UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS
     }
 
     pub(crate) fn extract_carry(witness: &[CellId]) -> &[CellId] {
         &witness[UInt::<M, C>::N_RANGE_CHECK_CELLS..]
     }
 
+    pub(crate) fn carry_range(offset: usize) -> std::ops::Range<usize> {
+        offset + UInt::<M, C>::N_RANGE_CHECK_CELLS
+            ..offset + UInt::<M, C>::N_RANGE_CHECK_CELLS + UInt::<M, C>::N_CARRY_CELLS
+    }
+
     pub(crate) fn extract_unsafe_carry(witness: &[CellId]) -> &[CellId] {
         witness
     }
 
-    pub(in crate::instructions) fn unsafe_range(offset: usize) -> std::ops::Range<usize> {
+    pub(crate) fn unsafe_range(offset: usize) -> std::ops::Range<usize> {
         offset..offset + UInt::<M, C>::N_CARRY_CELLS
     }
 
-    pub(in crate::instructions) fn compute_no_overflow_carries<F: SmallField>(
+    pub(crate) fn compute_no_overflow_carries<F: SmallField>(
         addend_0: u64,
         addend_1: u64,
     ) -> [F; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS]
@@ -110,7 +88,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         ret
     }
 
-    pub(in crate::instructions) fn compute_carries<F: SmallField>(
+    pub(crate) fn compute_carries<F: SmallField>(
         addend_0: u64,
         addend_1: u64,
     ) -> [F; UInt::<M, C>::N_CARRY_CELLS]
@@ -134,7 +112,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         ret
     }
 
-    pub(in crate::instructions) fn compute_carries_u256<F: SmallField>(
+    pub(crate) fn compute_carries_u256<F: SmallField>(
         addend_0: U256,
         addend_1: U256,
     ) -> [F; UInt::<M, C>::N_CARRY_CELLS]
@@ -158,7 +136,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         ret
     }
 
-    pub(in crate::instructions) fn compute_no_overflow_borrows<F: SmallField>(
+    pub(crate) fn compute_no_overflow_borrows<F: SmallField>(
         minuend: u64,
         subtrahend: u64,
     ) -> [F; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS]
@@ -184,7 +162,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         ret
     }
 
-    pub(in crate::instructions) fn compute_borrows<F: SmallField>(
+    pub(crate) fn compute_borrows<F: SmallField>(
         minuend: u64,
         subtrahend: u64,
     ) -> [F; UInt::<M, C>::N_CARRY_CELLS]
@@ -207,7 +185,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         ret
     }
 
-    pub(in crate::instructions) fn compute_borrows_u256<F: SmallField>(
+    pub(crate) fn compute_borrows_u256<F: SmallField>(
         minuend: U256,
         subtrahend: U256,
     ) -> [F; UInt::<M, C>::N_CARRY_CELLS]

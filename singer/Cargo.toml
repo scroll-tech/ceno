@@ -15,6 +15,7 @@ serde.workspace = true
 
 gkr = { path = "../gkr" }
 transcript = { path = "../transcript" }
+frontend = { path = "../frontend" }
 mpcs = { path = "../mpcs" }
 gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
 revm-interpreter = { path = "../interpreter" }

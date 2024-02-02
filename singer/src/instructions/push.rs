@@ -5,13 +5,14 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use revm_interpreter::Record;
 
-use super::utils::uint::u2fvec;
 use crate::instructions::InstCircuitLayout;
+use crate::utils::uint::u2fvec;
 
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use std::sync::Arc;
 
+use crate::CircuitWiresIn;
 use crate::{
     constants::OpcodeType,
     error::ZKVMError,
@@ -23,9 +24,8 @@ use crate::{
         uint::{PCUInt, StackUInt, TSUInt, UIntAddSub},
     },
 };
-use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
 pub struct PushInstruction<const N: usize>;
 

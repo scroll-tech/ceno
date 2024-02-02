@@ -5,31 +5,24 @@ use revm_interpreter::Record;
 use revm_primitives::U256;
 
 use crate::instructions::InstCircuitLayout;
+use crate::CircuitWiresIn;
 use crate::{constants::OpcodeType, error::ZKVMError};
-use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
-use super::utils::uint::u2fvec;
 use super::InstructionGraph;
-use super::{
-    utils::{
-        chip_handler::{
-            BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
-            StackChipOperations,
-        },
-        uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
+use crate::utils::uint::u2fvec;
+use crate::utils::{
+    chip_handler::{
+        BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
+        StackChipOperations,
     },
+    uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
 };
 
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use std::sync::Arc;
 
-use crate::{
-    constants::OpcodeType,
-    error::ZKVMError,
-}
-
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction};
 
 pub struct GtInstruction;
 

@@ -4,27 +4,25 @@ use goldilocks::SmallField;
 
 use revm_interpreter::Record;
 
-use super::utils::uint::u2fvec;
 use crate::instructions::InstCircuitLayout;
+use crate::utils::uint::u2fvec;
+use crate::CircuitWiresIn;
 use crate::{constants::OpcodeType, error::ZKVMError};
-use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
-use super::utils::{
+use super::InstructionGraph;
+use crate::utils::{
     chip_handler::{
         BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
         StackChipOperations,
     },
     uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
 };
-use super::InstructionGraph;
 
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use std::sync::Arc;
 
-use crate::{constants::OpcodeType, error::ZKVMError};
-
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction};
 pub struct PopInstruction;
 
 impl InstructionGraph for PopInstruction {

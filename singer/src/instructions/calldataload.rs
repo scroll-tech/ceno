@@ -7,8 +7,8 @@ use crate::instructions::InstCircuitLayout;
 use crate::{constants::OpcodeType, error::ZKVMError};
 use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
-use super::utils::uint::u2fvec;
-use super::utils::{
+use crate::utils::uint::u2fvec;
+use crate::utils::{
     chip_handler::{
         BytecodeChipOperations, CalldataChip, ChipHandler, GlobalStateChipOperations,
         RangeChipOperations, StackChipOperations,
@@ -20,9 +20,7 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use std::sync::Arc;
 
-use crate::{constants::OpcodeType, error::ZKVMError};
-
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
 impl InstructionGraph for CalldataloadInstruction {
     type InstType = Self;

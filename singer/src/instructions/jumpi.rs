@@ -1,42 +1,30 @@
 use std::sync::Arc;
 
-use super::utils::uint::u2fvec;
-use frontend::structs::{CellId, CircuitBuilder, MixedCell};
+use crate::utils::uint::u2fvec;
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
 use revm_interpreter::Record;
+use simple_frontend::structs::{CircuitBuilder, MixedCell};
 
 use crate::instructions::InstCircuitLayout;
+use crate::CircuitWiresIn;
 use crate::{constants::OpcodeType, error::ZKVMError};
-use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
-use super::utils::{
-    uint::{UIntAddSub, UIntCmp},
-    ChipHandler, PCUInt, StackUInt, TSUInt,
-};
 use super::InstructionGraph;
+use crate::utils::{
+    chip_handler::ChipHandler,
+    uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
+};
 
 use ff::Field;
-use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use itertools::izip;
 use paste::paste;
-use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use std::sync::Arc;
 
-use crate::{
-    constants::OpcodeType,
-    error::ZKVMError,
-    utils::{
-        chip_handler::{
-            BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
-            StackChipOperations,
-        },
-        uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
-    },
+use crate::utils::chip_handler::{
+    BytecodeChipOperations, GlobalStateChipOperations, RangeChipOperations, StackChipOperations,
 };
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction};
 
 pub struct JumpiInstruction;
 
@@ -257,7 +245,8 @@ impl Instruction for JumpiInstruction {
                     phase0_old_stack_ts_cond_lt,
                     1
                 );
-                copy_operand_single_cell_from_record!(wire_values, record, phase0_cond, 1);
+                copy_operand_from_record!(wire_values, record, phase0_cond_values, 0);
+                // TODO: cond values inv and cond_nonzero_or_inv
                 copy_pc_add_from_record!(wire_values, record);
                 // Although the pc_plus_1_opcode is not strictly speaking an operand,
                 // it is passed from the interpreter in the operands array.

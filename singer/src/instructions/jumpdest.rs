@@ -4,31 +4,20 @@ use goldilocks::SmallField;
 use revm_interpreter::Record;
 
 use crate::instructions::InstCircuitLayout;
+use crate::CircuitWiresIn;
 use crate::{constants::OpcodeType, error::ZKVMError};
-use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
 
-use super::utils::uint::{u2fvec, UIntAddSub};
-use super::utils::TSUInt;
 use super::InstructionGraph;
-use super::{
-    utils::{ChipHandler, PCUInt},
-    ChipChallenges, InstCircuit, InstOutputType, Instruction,
-};
+use super::{ChipChallenges, InstCircuit, Instruction};
+use crate::utils::uint::TSUInt;
+use crate::utils::uint::{u2fvec, UIntAddSub};
+use crate::utils::{chip_handler::ChipHandler, uint::PCUInt};
 
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use std::sync::Arc;
 
-use crate::{
-    constants::OpcodeType,
-    error::ZKVMError,
-    utils::{
-        chip_handler::{BytecodeChipOperations, ChipHandler, GlobalStateChipOperations},
-        uint::{PCUInt, TSUInt, UIntAddSub},
-    },
-};
-
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use crate::utils::chip_handler::{BytecodeChipOperations, GlobalStateChipOperations};
 
 pub struct JumpdestInstruction;
 

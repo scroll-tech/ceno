@@ -370,9 +370,6 @@ pub struct SingerWiresOutID {
     public_output_size: Option<NodeOutputType>,
 }
 
-// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
-pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
-
 #[derive(Clone, Debug, Default)]
 pub struct InstWiresIn<F: SmallField> {
     pub opcode: u8,
