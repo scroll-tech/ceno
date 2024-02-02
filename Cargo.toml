@@ -8,6 +8,7 @@ members = [
     "transcript",
     "mpcs",
     "gkr-graph",
+    "simple-frontend",
     "singer",
 ]
 

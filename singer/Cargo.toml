@@ -13,7 +13,6 @@ goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
 
-frontend = { path = "../frontend" }
 gkr = { path = "../gkr" }
 transcript = { path = "../transcript" }
 mpcs = { path = "../mpcs" }
@@ -26,3 +25,5 @@ strum_macros = "0.25.3"
 num-traits = "0.2"
 num-derive = "0.2"
 rand = "0.8"
+simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
+paste = "1.0.14"

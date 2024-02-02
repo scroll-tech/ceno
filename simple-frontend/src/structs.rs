@@ -1,24 +1,29 @@
+use ff::Field;
 use goldilocks::SmallField;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 // we make use of three identifiers.
 // For type safety we want different alias for those identifiers; while disallow arithmetics cross different identifiers.
 // We achieve this via setting them to different primitive types.
 // This works better/simpler than struct-wrapping
+pub type ChallengeId = u8;
 pub type TableType = u16;
 pub type WireId = u16;
 pub type LayerId = u32;
 pub type CellId = usize;
 
+#[derive(Clone, Copy, Debug, Serialize, Eq, PartialEq, Hash)]
+pub struct ChallengeConst {
+    pub challenge: ChallengeId,
+    pub exp: u64,
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 pub enum ConstantType<F: SmallField> {
-    Field(F),
-    Challenge(usize),
-    ChallengeScaled(usize, F),
-    ChallengePow(usize, usize),
-    ChallengePowScaled(usize, usize, F),
+    Field(F::BaseField),
+    Challenge(ChallengeConst, usize),
+    ChallengeScaled(ChallengeConst, usize, F::BaseField),
 }
 
 /// Represent a gate in the circuit. The inner variables denote the input
@@ -39,15 +44,18 @@ pub struct Cell<F: SmallField> {
     /// The value of the cell is the sum of all gates.
     pub gates: Vec<GateType<F>>,
     /// The value of the cell should equal to a constant.
-    pub assert_const: Option<F>,
+    pub assert_const: Option<F::BaseField>,
     /// The type of the cell, e.g., public input, witness, challenge, etc.
     pub cell_type: Option<CellType>,
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize)]
 pub enum InType {
-    Counter(usize),
+    /// Constant keeps the same for all instances.
     Constant(i64),
+    /// Constant(num_vars) acts like a counter (0, 1, 2, ...) through all
+    /// instances. Each instance hold 1 << num_vars of them.
+    Counter(usize),
     Wire(WireId),
 }
 
@@ -64,9 +72,9 @@ pub enum CellType {
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
 pub enum MixedCell<F: SmallField> {
-    Constant(F),
+    Constant(F::BaseField),
     Cell(usize),
-    CellExpr(usize, F, F),
+    CellExpr(usize, F::BaseField, F::BaseField),
 }
 
 impl<F: SmallField> From<CellId> for MixedCell<F> {
@@ -76,28 +84,28 @@ impl<F: SmallField> From<CellId> for MixedCell<F> {
 }
 
 impl<F: SmallField> MixedCell<F> {
-    pub fn add(&self, shift: F) -> Self {
+    pub fn add(&self, shift: F::BaseField) -> Self {
         match self {
             MixedCell::Constant(c) => MixedCell::Constant(*c + shift),
-            MixedCell::Cell(c) => MixedCell::CellExpr(*c, F::ONE, shift),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, F::BaseField::ONE, shift),
             MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s, *sh + shift),
         }
     }
-    pub fn sub(&self, shift: F) -> Self {
+    pub fn sub(&self, shift: F::BaseField) -> Self {
         match self {
             MixedCell::Constant(c) => MixedCell::Constant(*c - shift),
-            MixedCell::Cell(c) => MixedCell::CellExpr(*c, F::ONE, -shift),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, F::BaseField::ONE, -shift),
             MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s, *sh - shift),
         }
     }
-    pub fn mul(&self, scalar: F) -> Self {
+    pub fn mul(&self, scalar: F::BaseField) -> Self {
         match self {
             MixedCell::Constant(c) => MixedCell::Constant(*c * scalar),
-            MixedCell::Cell(c) => MixedCell::CellExpr(*c, scalar, F::ZERO),
+            MixedCell::Cell(c) => MixedCell::CellExpr(*c, scalar, F::BaseField::ZERO),
             MixedCell::CellExpr(c, s, sh) => MixedCell::CellExpr(*c, *s * scalar, *sh * scalar),
         }
     }
-    pub fn expr(&self, scalar: F, shift: F) -> Self {
+    pub fn expr(&self, scalar: F::BaseField, shift: F::BaseField) -> Self {
         match self {
             MixedCell::Constant(c) => MixedCell::Constant(*c * scalar + shift),
             MixedCell::Cell(c) => MixedCell::Cell(*c),
@@ -106,30 +114,11 @@ impl<F: SmallField> MixedCell<F> {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct TableData<F: SmallField> {
-    pub(crate) table_items: Vec<CellId>,
-    pub(crate) table_items_const: Vec<F>,
-    pub(crate) input_items: Vec<CellId>,
-    /// Indicate the challenge used to construct the lookup circuit.
-    pub(crate) challenge: Option<ConstantType<F>>,
-    /// Witness vector index.
-    pub(crate) count_witness_cell_type: CellType,
-}
-
-#[derive(Clone)]
 pub struct CircuitBuilder<F: SmallField> {
     pub cells: Vec<Cell<F>>,
 
     /// Number of layers in the circuit.
     pub n_layers: Option<u32>,
-
-    /// Collect all cells that have the same functionally. For example,
-    /// public_input, witnesses, and challenge, etc.
-    pub marked_cells: HashMap<CellType, HashSet<CellId>>,
-
-    /// Store all tables.
-    pub(crate) tables: HashMap<TableType, TableData<F>>,
 
     pub(crate) n_wires_in: usize,
     pub(crate) n_wires_out: usize,

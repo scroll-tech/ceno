@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use frontend::structs::{CircuitBuilder, MixedCell};
+use ff::Field;
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
 use revm_interpreter::Record;
@@ -14,11 +12,24 @@ use super::utils::uint::u2fvec;
 use super::InstructionGraph;
 use super::{
     utils::{
-        uint::{UIntAddSub, UIntCmp},
-        ChipHandler, PCUInt, StackUInt, TSUInt,
+        chip_handler::{
+            BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
+            StackChipOperations,
+        },
+        uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
     },
-    ChipChallenges, InstCircuit, InstOutputType, Instruction,
 };
+
+use paste::paste;
+use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use std::sync::Arc;
+
+use crate::{
+    constants::OpcodeType,
+    error::ZKVMError,
+}
+
+use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 pub struct GtInstruction;
 
@@ -26,55 +37,26 @@ impl InstructionGraph for GtInstruction {
     type InstType = Self;
 }
 
-register_wires_in!(
+register_witness!(
     GtInstruction,
-    phase0_size {
-        phase0_pc => PCUInt::N_OPRAND_CELLS,
-        phase0_stack_ts => TSUInt::N_OPRAND_CELLS,
-        phase0_stack_top => 1,
-        phase0_clk => 1,
-
-        phase0_pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        phase0_stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-
-        phase0_old_stack_ts0 => TSUInt::N_OPRAND_CELLS,
-        phase0_old_stack_ts_lt0 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-        phase0_old_stack_ts1 => TSUInt::N_OPRAND_CELLS,
-        phase0_old_stack_ts_lt1 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-
-        phase0_oprand_0 => StackUInt::N_OPRAND_CELLS,
-        phase0_oprand_1 => StackUInt::N_OPRAND_CELLS,
-        phase0_instruction_gt => UIntCmp::<StackUInt>::N_WITNESS_CELLS
-    },
-    phase1_size {
-        phase1_memory_ts_rlc => 1
-    }
-);
-
-register_wires_out!(
-    GtInstruction,
-    global_state_in_size {
-        state_in => 1
-    },
-    global_state_out_size {
-        state_out => 1
-    },
-    bytecode_chip_size {
-        current => 1
-    },
-    stack_pop_size {
-        oprand_0 => 1,
-        oprand_1 => 1
-    },
-    stack_push_size {
-        result => 1
-    },
-    range_chip_size {
+    phase0 {
+        pc => PCUInt::N_OPRAND_CELLS,
+        stack_ts => TSUInt::N_OPRAND_CELLS,
+        memory_ts => TSUInt::N_OPRAND_CELLS,
         stack_top => 1,
-        stack_ts_add => TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
-        old_stack_ts_lt0 => TSUInt::N_RANGE_CHECK_CELLS,
-        old_stack_ts_lt1 => TSUInt::N_RANGE_CHECK_CELLS,
-        diff_gt => StackUInt::N_RANGE_CHECK_CELLS
+        clk => 1,
+
+        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+
+        old_stack_ts0 => TSUInt::N_OPRAND_CELLS,
+        old_stack_ts_lt0 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts1 => TSUInt::N_OPRAND_CELLS,
+        old_stack_ts_lt1 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+
+        oprand_0 => StackUInt::N_OPRAND_CELLS,
+        oprand_1 => StackUInt::N_OPRAND_CELLS,
+        instruction_gt => UIntCmp::<StackUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -83,57 +65,22 @@ impl GtInstruction {
 }
 
 impl Instruction for GtInstruction {
-    #[inline]
-    fn witness_size(phase: usize) -> usize {
-        match phase {
-            0 => Self::phase0_size(),
-            1 => Self::phase1_size(),
-            _ => 0,
-        }
-    }
-
-    #[inline]
-    fn output_size(inst_out: InstOutputType) -> usize {
-        match inst_out {
-            InstOutputType::GlobalStateIn => Self::global_state_in_size(),
-            InstOutputType::GlobalStateOut => Self::global_state_out_size(),
-            InstOutputType::BytecodeChip => Self::bytecode_chip_size(),
-            InstOutputType::StackPop => Self::stack_pop_size(),
-            InstOutputType::StackPush => Self::stack_push_size(),
-            InstOutputType::RangeChip => Self::range_chip_size(),
-            _ => 0,
-        }
-    }
-
     fn construct_circuit<F: SmallField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
-        let (phase1_wire_id, phase1) = circuit_builder.create_wire_in(Self::phase1_size());
-        let mut global_state_in_handler = ChipHandler::new(
-            &mut circuit_builder,
-            challenges,
-            Self::global_state_in_size(),
-        );
-        let mut global_state_out_handler = ChipHandler::new(
-            &mut circuit_builder,
-            challenges,
-            Self::global_state_out_size(),
-        );
-        let mut bytecode_chip_handler =
-            ChipHandler::new(&mut circuit_builder, challenges, Self::bytecode_chip_size());
-        let mut stack_push_handler =
-            ChipHandler::new(&mut circuit_builder, challenges, Self::stack_push_size());
-        let mut stack_pop_handler =
-            ChipHandler::new(&mut circuit_builder, challenges, Self::stack_pop_size());
-        let mut range_chip_handler =
-            ChipHandler::new(&mut circuit_builder, challenges, Self::range_chip_size());
+        let mut global_state_in_handler = ChipHandler::new(challenges.global_state());
+        let mut global_state_out_handler = ChipHandler::new(challenges.global_state());
+        let mut bytecode_chip_handler = ChipHandler::new(challenges.bytecode());
+        let mut stack_push_handler = ChipHandler::new(challenges.stack());
+        let mut stack_pop_handler = ChipHandler::new(challenges.stack());
+        let mut range_chip_handler = ChipHandler::new(challenges.range());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
         let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()])?;
-        let memory_ts_rlc = phase1[Self::phase1_memory_ts_rlc().start];
+        let memory_ts = &phase0[Self::phase0_memory_ts()];
         let stack_top = phase0[Self::phase0_stack_top().start];
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
@@ -142,7 +89,7 @@ impl Instruction for GtInstruction {
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
-            &[memory_ts_rlc],
+            &memory_ts,
             stack_top,
             clk,
         );
@@ -164,9 +111,9 @@ impl Instruction for GtInstruction {
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
-            &[memory_ts_rlc],
-            stack_top_expr.sub(F::from(1)),
-            clk_expr.add(F::ONE),
+            &memory_ts,
+            stack_top_expr.sub(F::BaseField::from(1)),
+            clk_expr.add(F::BaseField::ONE),
         );
 
         // Execution result = addend0 + addend1, with carry.
@@ -181,8 +128,10 @@ impl Instruction for GtInstruction {
         )?;
 
         // Check the range of stack_top - 2 is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        range_chip_handler
-            .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(F::from(2)))?;
+        range_chip_handler.range_check_stack_top(
+            &mut circuit_builder,
+            stack_top_expr.sub(F::BaseField::from(2)),
+        )?;
 
         // Pop two values from stack
         let old_stack_ts0 = (&phase0[Self::phase0_old_stack_ts0()]).try_into()?;
@@ -193,9 +142,9 @@ impl Instruction for GtInstruction {
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt0()],
         )?;
-        stack_pop_handler.stack_pop_values(
+        stack_pop_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::from(1)),
+            stack_top_expr.sub(F::BaseField::from(1)),
             old_stack_ts0.values(),
             oprand_0.values(),
         );
@@ -208,18 +157,18 @@ impl Instruction for GtInstruction {
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt1()],
         )?;
-        stack_pop_handler.stack_pop_values(
+        stack_pop_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::from(2)),
+            stack_top_expr.sub(F::BaseField::from(2)),
             &old_stack_ts1.values(),
             oprand_1.values(),
         );
 
         // Push one result to stack. Since values are little-endien, it is
         // equivalent to pad result with 0s.
-        stack_push_handler.stack_push_values(
+        stack_push_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::from(2)),
+            stack_top_expr.sub(F::BaseField::from(2)),
             stack_ts.values(),
             &[result],
         );
@@ -231,21 +180,26 @@ impl Instruction for GtInstruction {
             Self::OPCODE,
         );
 
-        global_state_in_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
-        global_state_out_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
-        bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        stack_push_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
-        stack_pop_handler.finalize_with_const_pad(&mut circuit_builder, &F::ONE);
-        range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
+        let global_state_in_id = global_state_in_handler
+            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
+        let global_state_out_id = global_state_out_handler
+            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
+        let bytecode_chip_id =
+            bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
+        let stack_push_id =
+            stack_push_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
+        let stack_pop_id =
+            stack_pop_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
+        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [
-            Some(global_state_in_handler.wire_out_id()),
-            Some(global_state_out_handler.wire_out_id()),
-            Some(bytecode_chip_handler.wire_out_id()),
-            Some(stack_pop_handler.wire_out_id()),
-            Some(stack_push_handler.wire_out_id()),
-            Some(range_chip_handler.wire_out_id()),
+            Some(global_state_in_id),
+            Some(global_state_out_id),
+            Some(bytecode_chip_id),
+            Some(stack_pop_id),
+            Some(stack_push_id),
+            Some(range_chip_id),
             None,
             None,
             None,
@@ -255,7 +209,7 @@ impl Instruction for GtInstruction {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
                 chip_check_wire_id: outputs_wire_id,
-                phases_wire_id: [Some(phase0_wire_id), Some(phase1_wire_id)],
+                phases_wire_id: vec![phase0_wire_id],
                 ..Default::default()
             },
         })

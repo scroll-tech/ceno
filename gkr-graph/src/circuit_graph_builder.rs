@@ -29,7 +29,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         circuit: &Arc<Circuit<F>>,
         preds: Vec<PredType>,
         challenges: Vec<F>,
-        sources: Vec<Vec<Vec<F>>>, // instances
+        sources: Vec<Vec<Vec<F::BaseField>>>, // instances
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
         assert_eq!(preds.len(), circuit.n_wires_in);
@@ -42,31 +42,31 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
                 .enumerate()
                 .map(|(wire_in_id, pred)| match pred {
                     PredType::Source => sources[wire_in_id][instance_id].clone(),
-                    PredType::PredWire(out) => match out {
-                        NodeOutputType::OutputLayer(id) => {
-                            let output = &self.witness.node_witnesses[*id].last_layer_witness_ref();
-                            let size = output.len() * output[0].len() / num_instances;
-                            output
-                                .iter()
-                                .flatten()
-                                .skip(size * instance_id)
-                                .take(size)
-                                .copied()
-                                .collect_vec()
-                        }
-                        NodeOutputType::WireOut(id, wire_id) => {
-                            let wire_out = &self.witness.node_witnesses[*id].wires_out_ref()
-                                [*wire_id as usize];
-                            let size = wire_out.len() * wire_out[0].len() / num_instances;
-                            wire_out
-                                .iter()
-                                .flatten()
-                                .skip(size * instance_id)
-                                .take(size)
-                                .copied()
-                                .collect_vec()
-                        }
-                    },
+                    // PredType::PredWire(out) => match out {
+                    //     NodeOutputType::OutputLayer(id) => {
+                    //         let output = &self.witness.node_witnesses[*id].last_layer_witness_ref();
+                    //         let size = output.len() * output[0].len() / num_instances;
+                    //         output
+                    //             .iter()
+                    //             .flatten()
+                    //             .skip(size * instance_id)
+                    //             .take(size)
+                    //             .copied()
+                    //             .collect_vec()
+                    //     }
+                    //     NodeOutputType::WireOut(id, wire_id) => {
+                    //         let wire_out = &self.witness.node_witnesses[*id].wires_out_ref()
+                    //             [*wire_id as usize];
+                    //         let size = wire_out.len() * wire_out[0].len() / num_instances;
+                    //         wire_out
+                    //             .iter()
+                    //             .flatten()
+                    //             .skip(size * instance_id)
+                    //             .take(size)
+                    //             .copied()
+                    //             .collect_vec()
+                    //     }
+                    // },
                     _ => unimplemented!(),
                 })
                 .collect_vec();
@@ -85,7 +85,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
     }
 
     /// Collect the information of `self.sources` and `self.targets`.
-    pub fn finalize(mut self) -> (CircuitGraph<F>, CircuitGraphWitness<F>) {
+    pub fn finalize(mut self) -> (CircuitGraph<F>, CircuitGraphWitness<F::BaseField>) {
         // Generate all possible graph output
         let outs = self
             .graph

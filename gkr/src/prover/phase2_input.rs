@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use ark_std::{end_timer, start_timer};
-use frontend::structs::{CellId, InType};
 use goldilocks::SmallField;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
+use simple_frontend::structs::{CellId, InType};
 use std::ops::Add;
 use transcript::Transcript;
 
@@ -21,10 +21,10 @@ use super::IOPProverPhase2InputState;
 impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
     pub(super) fn prover_init_parallel(
         layer_out_point: &'a Point<F>,
-        wires_in: &'a [Vec<Vec<F>>],
+        wires_in: &'a [Vec<Vec<F::BaseField>>],
         paste_from_in: &'a [(InType, CellId, CellId)],
         lo_out_num_vars: usize,
-        lo_in_num_vars: usize,
+        lo_in_num_vars: Option<usize>,
         hi_num_vars: usize,
     ) -> Self {
         let mut paste_from_wires_in = vec![(0, 0); wires_in.len()];
@@ -64,7 +64,11 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
     ) -> (SumcheckProof<F>, Vec<F>) {
         let timer = start_timer!(|| "Prover phase 2 input step 1");
         let lo_out_num_vars = self.lo_out_num_vars;
-        let lo_in_num_vars = self.lo_in_num_vars;
+        if self.lo_in_num_vars.is_none() {
+            return (SumcheckProof::default(), vec![]);
+        }
+        let lo_in_num_vars = self.lo_in_num_vars.unwrap();
+
         let hi_num_vars = self.hi_num_vars;
         let in_num_vars = lo_in_num_vars + hi_num_vars;
         let lo_point = &self.layer_out_point[..lo_out_num_vars];
@@ -84,7 +88,7 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
                 for new_wire_id in *l..*r {
                     let subset_wire_id = new_wire_id - l;
                     f[(s << lo_in_num_vars) ^ subset_wire_id] =
-                        wires_in[j as usize][s][subset_wire_id];
+                        F::from_base(&wires_in[j as usize][s][subset_wire_id]);
                     g[(s << lo_in_num_vars) ^ subset_wire_id] = eq_t_rt[s] * eq_y_ry[new_wire_id];
                 }
             }

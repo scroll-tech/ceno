@@ -1,3 +1,4 @@
+use ff::Field;
 use std::{iter, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
@@ -5,7 +6,7 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 
-pub(crate) fn i64_to_field<F: SmallField>(x: i64) -> F {
+pub fn i64_to_field<F: SmallField>(x: i64) -> F {
     if x >= 0 {
         F::from(x as u64)
     } else {
@@ -220,7 +221,7 @@ pub trait MultilinearExtensionFromVectors<F: SmallField> {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>>;
 }
 
-impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F>] {
+impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>> {
         let n_zeros = (1 << lo_num_vars) - self[0].len();
         let n_zero_vecs = (1 << hi_num_vars) - self.len();
@@ -232,9 +233,10 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F>] {
                 .flat_map(|instance| {
                     instance
                         .into_iter()
-                        .chain(iter::repeat(F::ZERO).take(n_zeros))
+                        .chain(iter::repeat(F::BaseField::ZERO).take(n_zeros))
                 })
-                .chain(vec![F::ZERO; n_zero_vecs])
+                .chain(vec![F::BaseField::ZERO; n_zero_vecs])
+                .map(|x| F::from_base(&x))
                 .collect_vec(),
         ))
     }
@@ -242,11 +244,11 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F>] {
 
 pub(crate) trait MatrixMLEColumnFirst<F: SmallField> {
     fn fix_row_col_first(&self, row_point_eq: &[F], col_num_vars: usize) -> Vec<F>;
-    fn fix_row_col_first_with_scaler(
+    fn fix_row_col_first_with_scalar(
         &self,
         row_point_eq: &[F],
         col_num_vars: usize,
-        scaler: &F,
+        scalar: &F,
     ) -> Vec<F>;
     fn eval_col_first(&self, row_point_eq: &[F], col_point_eq: &[F]) -> F;
 }
@@ -260,15 +262,15 @@ impl<F: SmallField> MatrixMLEColumnFirst<F> for &[usize] {
         ans
     }
 
-    fn fix_row_col_first_with_scaler(
+    fn fix_row_col_first_with_scalar(
         &self,
         row_point_eq: &[F],
         col_num_vars: usize,
-        scaler: &F,
+        scalar: &F,
     ) -> Vec<F> {
         let mut ans = vec![F::ZERO; 1 << col_num_vars];
         for (col, &non_zero_row) in self.iter().enumerate() {
-            ans[col] = row_point_eq[non_zero_row] * scaler;
+            ans[col] = row_point_eq[non_zero_row] * scalar;
         }
         ans
     }
@@ -284,11 +286,11 @@ impl<F: SmallField> MatrixMLEColumnFirst<F> for &[usize] {
 
 pub(crate) trait MatrixMLERowFirst<F: SmallField> {
     fn fix_row_row_first(&self, row_point_eq: &[F], col_num_vars: usize) -> Vec<F>;
-    fn fix_row_row_first_with_scaler(
+    fn fix_row_row_first_with_scalar(
         &self,
         row_point_eq: &[F],
         col_num_vars: usize,
-        scaler: &F,
+        scalar: &F,
     ) -> Vec<F>;
     fn eval_row_first(&self, row_point_eq: &[F], col_point_eq: &[F]) -> F;
 }
@@ -302,15 +304,15 @@ impl<F: SmallField> MatrixMLERowFirst<F> for &[usize] {
         ans
     }
 
-    fn fix_row_row_first_with_scaler(
+    fn fix_row_row_first_with_scalar(
         &self,
         row_point_eq: &[F],
         col_num_vars: usize,
-        scaler: &F,
+        scalar: &F,
     ) -> Vec<F> {
         let mut ans = vec![F::ZERO; 1 << col_num_vars];
         for (row, &non_zero_col) in self.iter().enumerate() {
-            ans[non_zero_col] = row_point_eq[row] * scaler;
+            ans[non_zero_col] = row_point_eq[row] * scalar;
         }
         ans
     }
