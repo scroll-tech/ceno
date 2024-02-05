@@ -32,8 +32,18 @@
 //!            dimensional array for the instruction circuits, i.e., indexed by the instance id,
 //!            and each entry is a Vec<F>, the values for this instance.
 //!        Note that we only need to provide one wire in for the lookup: the count of the table
-//!        entries appeared in the lookup vector. So the inner-most Vec<F> is as large as the
-//!        table.
+//!        entries appeared in the lookup vector. The lookup circuit is a tree-like circuit that
+//!        consists of two types of small circuits. Both small circuits are used for computing
+//!        addition of fractions, but on the leafs, the fractions come from a particular formula
+//!        and the inputs to the fraction addition circuit on the leaf is different from the
+//!        inputs to the circuit computing the inner layers.
+//!        We only need to provide the wire in to the leaf circuits. Suppose the table size is
+//!        N, then there are N/2 leaf circuits for adding the leaves in pair. Each circuit has
+//!        its own input, corresponding to the different instances.
+//!        Precisely, the value of [table_type][instance_id] is a vector of two values
+//!        storing how many times the 2*instance_id-th entry and the (2*instance_id+1)-th entry
+//!        in the table `table_type` is looked up in the `instance_id`-th invocation of the
+//!        lookup circuit.
 #![feature(generic_const_exprs)]
 
 use chips::LookupChipType;
