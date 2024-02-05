@@ -27,10 +27,6 @@ use instructions::{
     jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
     ret::ReturnInstruction, swap::SwapInstruction,
 };
-use mpcs::poly::multilinear::MultilinearPolynomial;
-use mpcs::PolynomialCommitmentScheme;
-use mpcs::StandardBasefold;
-use mpcs::StandardBasefoldProverParam;
 use num_traits::FromPrimitive;
 use rand::RngCore;
 use revm_interpreter::{Interpreter, Record};

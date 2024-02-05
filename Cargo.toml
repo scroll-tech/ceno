@@ -22,7 +22,7 @@ license = "MIT OR Apache-2.0"
 ark-std = { version = "0.4", features = ["print-trace"] }
 ark-poly = "0.4"
 criterion = { version = "0.5", features = ["html_reports"] }
-ff = { version = "0.13", features = ["derive"] }
+ff = "0.13"
 goldilocks = { git = "https://github.com/zhenfeizhang/Goldilocks" }
 halo2curves = "0.1.0"
 poseidon = { git = "https://github.com/zhenfeizhang/poseidon" }
