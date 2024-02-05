@@ -1,5 +1,5 @@
-use simple_frontend::structs::{CircuitBuilder, ConstantType};
 use goldilocks::Goldilocks;
+use simple_frontend::structs::{CircuitBuilder, ConstantType};
 
 enum TableType {
     Range8bit,

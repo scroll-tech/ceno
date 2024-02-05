@@ -24,7 +24,7 @@ where
     }
     fn eval_subset_eq<E: SmallField<BaseField = F>>(&self, out_eq_vec: &[E], in_eq_vec: &[E]) -> E {
         self.iter().fold(E::ZERO, |acc, gate| {
-            acc + out_eq_vec[gate.idx_out] * in_eq_vec[gate.idx_out].mul_base(&gate.constant)
+            acc + out_eq_vec[gate.idx_out] * in_eq_vec[gate.idx_out]
         })
     }
 }
