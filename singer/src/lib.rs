@@ -1,11 +1,44 @@
+//! The singer crate implements the entire workflow from EVM bytecode and input to
+//! the proof of the computation. Specifically, it implements the following procedures:
+//! 1. Generate the circuits for each instruction. Note that only these circuits are used
+//!    as templates, so each distinct circuit only needs to be constructed once. Note that
+//!    this step only executes once and the result can be reused by different EVM programs.
+//!    Also note that for each instruction, there is potentially more than one circuits
+//!    that function together. So the result of this step is a 256-sized array, each entry
+//!    for an instruction (the EVM opcode is a byte, i.e., 0 to 255), and the entry is a
+//!    vector of circuits.
+//! 2. Given the bytecode and the input to EVM, generate the inputs to the instruction
+//!    circuits and the lookup argument circuits.
+//!    2.1 For the instruction circuits, note that each instruction is potentially executed
+//!        multiple times, each time with different inputs, so this step should provide the
+//!        input values (wire in values) for all these repetitions. However, because of the
+//!        way the inputs are processed in the parallel circuit, the values are organized in
+//!        a way that all the instances of the same wire in (one circuit has multiple wire in),
+//!        are grouped together in a vector, then the different wire in are grouped together
+//!        in another level of vector. Overall, for this part, the result is a five dimensional
+//!        vector:
+//!        (1) The out-most vector is an array of size 256. Each entry is of type
+//!            Vec<CircuitWiresIn>.
+//!        (2) This vector is of size equal to the number of circuits implementing the instruction.
+//!        (3) CircuitWiresIn is a vector of size equal to the number of wire in for this circuit.
+//!        (4) The entry of CircuitWiresIn is a vector, where each entry corresponds to a single
+//!            instance, i.e., one execution, of this instruction.
+//!        (5) The entry of this vector is a Vec<F>, i.e., the values of this instance for this
+//!            wire in.
+//!    2.2 For the lookup circuit, the result is a three dimensional vector:
+//!        (1) The out-most vector consists of entries of type WirsInValue, each corresponding
+//!            to one table type, i.e., one table in the entire circuit.
+//!        (2) WirsInValue is a two dimensional array that is the same as the inner-most two
+//!            dimensional array for the instruction circuits, i.e., indexed by the instance id,
+//!            and each entry is a Vec<F>, the values for this instance.
+//!        Note that we only need to provide one wire in for the lookup: the count of the table
+//!        entries appeared in the lookup vector. So the inner-most Vec<F> is as large as the
+//!        table.
 #![feature(generic_const_exprs)]
 
 use chips::LookupChipType;
-
-use constants::OpcodeType;
-
 use chips::SingerChipBuilder;
-
+use constants::OpcodeType;
 use error::ZKVMError;
 use gkr_graph::structs::CircuitGraph;
 use gkr_graph::structs::CircuitGraphBuilder;
@@ -34,8 +67,6 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::mem;
-use strum::IntoEnumIterator;
-use transcript::Transcript;
 
 #[macro_use]
 mod macros;
@@ -50,9 +81,6 @@ pub mod utils;
 // Process sketch:
 // 1. Construct instruction circuits and circuit gadgets => circuit gadgets
 // 2. (bytecode + input) => Run revm interpreter, generate all wires in
-//      2.1 phase 0 wire in + commitment
-//      2.2 phase 1 wire in + commitment
-//      2.3 phase 2 wire in + commitment
 // 3. (circuit gadgets + wires in) => gkr graph + gkr witness
 // 4. (gkr graph + gkr witness) => (gkr proof + point)
 // 5. (commitments + point) => pcs proof
