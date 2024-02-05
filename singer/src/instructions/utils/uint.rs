@@ -162,6 +162,9 @@ fn convert_decomp<F: SmallField>(
             let tmp = circuit_builder.create_cell();
             for k in j..(j + chunk_size).min(small_len) {
                 let k = k as usize;
+                #[cfg(debug_assertions)] {
+                    println!("j {:?} small_bit_width {:?}", j, small_bit_width);
+                }
                 circuit_builder.add(
                     tmp,
                     small_values[k],
