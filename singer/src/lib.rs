@@ -44,6 +44,14 @@
 //!        storing how many times the 2*instance_id-th entry and the (2*instance_id+1)-th entry
 //!        in the table `table_type` is looked up in the `instance_id`-th invocation of the
 //!        lookup circuit.
+//!  3. Given the instruction circuits and their wires in values, construct the entire GKR graph.
+//!     This graph consists of several tree-like circuits for the lookup argument, and several
+//!     parallel circuits, each one (or more) for checking one instruction.
+//!  4. Use the GKR graph and the wires in values to generate the GKR proof. This proof reduces
+//!     the problem of proving "given these inputs, the output is 1" into the problem of proving
+//!     "given these multivariate polynomial commitments and one evaluation point, the polynomials
+//!     evaluate to these values at this point".
+//!  5. Generate a PCS proof for this statement.
 #![feature(generic_const_exprs)]
 
 use chips::LookupChipType;
