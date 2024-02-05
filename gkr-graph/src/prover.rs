@@ -66,13 +66,13 @@ impl<F: SmallField> IOPProverState<F> {
                     }
                     PredType::PredWire(out) => match out {
                         NodeOutputType::OutputLayer(id) => {
-                            output_evals[*id].push(PointAndEval::new(&proof.point, eval))
+                            output_evals[*id].push(PointAndEval::new_from_ref(&proof.point, eval))
                         }
                         NodeOutputType::WireOut(id, wire_id) => {
                             wires_out_evals[*id]
                                 .resize(*wire_id as usize + 1, PointAndEval::default());
                             wires_out_evals[*id][*wire_id as usize] =
-                                PointAndEval::new(&proof.point, eval);
+                                PointAndEval::new_from_ref(&proof.point, eval);
                         }
                     },
                     _ => unimplemented!(),

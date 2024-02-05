@@ -159,7 +159,6 @@ fn main() -> Result<(), GKRGraphError> {
     // =================
     // Proofs generation
     // =================
-
     let output_point = vec![
         prover_transcript
             .get_and_append_challenge(b"output point")
@@ -175,7 +174,7 @@ fn main() -> Result<(), GKRGraphError> {
     let proof = IOPProverState::prove(
         &graph,
         &circuit_witness,
-        &TargetEvaluations(vec![PointAndEval::new(&output_point, &output_eval)]),
+        &TargetEvaluations(vec![PointAndEval::new(output_point, output_eval)]),
         &mut prover_transcript,
     )?;
 
@@ -197,7 +196,7 @@ fn main() -> Result<(), GKRGraphError> {
     IOPVerifierState::verify(
         &graph,
         &challenge,
-        &TargetEvaluations(vec![PointAndEval::new(&output_point, &output_eval)]),
+        &TargetEvaluations(vec![PointAndEval::new(output_point, output_eval)]),
         &proof,
         &aux_info,
         &mut verifier_transcript,

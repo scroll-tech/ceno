@@ -27,7 +27,15 @@ impl<F: SmallField> Default for PointAndEval<F> {
 }
 
 impl<F: Clone> PointAndEval<F> {
-    pub fn new(point: &Point<F>, eval: &F) -> Self {
+    /// Construct a new pair of point and eval.
+    /// Caller gives up ownership
+    pub fn new(point: Point<F>, eval: F) -> Self {
+        Self { point, eval }
+    }
+
+    /// Construct a new pair of point and eval.
+    /// Performs deep copy.
+    pub fn new_from_ref(point: &Point<F>, eval: &F) -> Self {
         Self {
             point: (*point).clone(),
             eval: eval.clone(),
@@ -41,12 +49,12 @@ impl<F: Clone> PointAndEval<F> {
 pub struct IOPProverState<F: SmallField> {
     pub(crate) layer_id: LayerId,
     /// Evaluations from the next layer.
-    pub(crate) next_point_and_evals: Vec<PointAndEval<F>>,
+    pub(crate) next_layer_point_and_evals: Vec<PointAndEval<F>>,
     /// Evaluations of subsets from layers __closer__ to the output.
     /// __closer__ as in the layer that the subset elements lie in has not been processed.
     ///
     /// Hashmap is used to map from the current layer id to the that layer id, point and value.
-    pub(crate) subset_evals: HashMap<LayerId, Vec<(LayerId, PointAndEval<F>)>>,
+    pub(crate) subset_point_and_evals: HashMap<LayerId, Vec<(LayerId, PointAndEval<F>)>>,
     pub(crate) circuit_witness: CircuitWitness<F::BaseField>,
     pub(crate) layer_out_poly: Arc<DenseMultilinearExtension<F>>,
 }
@@ -55,19 +63,21 @@ pub struct IOPProverState<F: SmallField> {
 pub struct IOPVerifierState<F: SmallField> {
     pub(crate) layer_id: LayerId,
     /// Evaluations from the next layer.
-    pub(crate) next_evals: Vec<PointAndEval<F>>,
+    pub(crate) next_layer_point_and_evals: Vec<PointAndEval<F>>,
     /// Evaluations of subsets from layers closer to the output. Hashmap is used
     /// to map from the current layer id to the deeper layer id, point and
     /// value.
-    pub(crate) subset_evals: HashMap<LayerId, Vec<(LayerId, PointAndEval<F>)>>,
+    pub(crate) subset_point_and_evals: HashMap<LayerId, Vec<(LayerId, PointAndEval<F>)>>,
 }
 
 /// Phase 1 is a sumcheck protocol merging the subset evaluations from the
 /// layers closer to the circuit output to an evaluation to the output of the
 /// current layer.
 pub struct IOPProverPhase1Message<F: SmallField> {
+    // First step of copy constraints copied to later layers
     pub sumcheck_proof_1: SumcheckProof<F>,
     pub eval_value_1: Vec<F>,
+    // Second step of copy constraints copied to later layers
     pub sumcheck_proof_2: SumcheckProof<F>,
     /// Evaluation of the output of the current layer.
     pub eval_value_2: F,
@@ -182,6 +192,7 @@ pub struct CircuitWitness<F: SmallField> {
     pub(crate) layers: Vec<Vec<Vec<F>>>,
     /// 1. wires_in id, 2. instance_id, 3. wire_id.
     pub(crate) wires_in: Vec<Vec<Vec<F>>>,
+    /// 1. wires_in id, 2. instance_id, 3. wire_id.
     pub(crate) wires_out: Vec<Vec<Vec<F>>>,
     /// Challenges
     pub(crate) challenges: HashMap<ChallengeConst, Vec<F>>,
