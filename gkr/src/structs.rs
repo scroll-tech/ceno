@@ -89,6 +89,22 @@ pub struct Layer<F: SmallField> {
     pub(crate) max_previous_num_vars: usize,
 }
 
+impl<F: SmallField> Default for Layer<F> {
+    fn default() -> Self {
+        Layer::<F> {
+            add_consts: vec![],
+            adds: vec![],
+            mul2s: vec![],
+            mul3s: vec![],
+            assert_consts: vec![],
+            copy_to: HashMap::new(),
+            paste_from: HashMap::new(),
+            num_vars: 0,
+            max_previous_num_vars: 0,
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub struct Circuit<F: SmallField> {
     pub layers: Vec<Layer<F>>,
