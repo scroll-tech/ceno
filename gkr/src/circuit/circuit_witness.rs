@@ -89,37 +89,37 @@ impl<F: SmallField> CircuitWitness<F> {
             let last_layer_witness = &layer_witnesses[layer_id + 1];
             for add_const in layer.add_consts.iter() {
                 current_layer_witness[add_const.idx_out] =
-                    current_layer_witness[add_const.idx_out] + constant(add_const.constant);
+                    current_layer_witness[add_const.idx_out] + constant(add_const.scalar);
             }
 
             for add in layer.adds.iter() {
                 current_layer_witness[add.idx_out] +=
-                    last_layer_witness[add.idx_in] * constant(add.scalar);
+                    last_layer_witness[add.idx_in[0]] * constant(add.scalar);
             }
 
             for mul2 in layer.mul2s.iter() {
                 current_layer_witness[mul2.idx_out] = current_layer_witness[mul2.idx_out]
-                    + last_layer_witness[mul2.idx_in1]
-                        * last_layer_witness[mul2.idx_in2]
+                    + last_layer_witness[mul2.idx_in[0]]
+                        * last_layer_witness[mul2.idx_in[1]]
                         * constant(mul2.scalar);
             }
 
             for mul3 in layer.mul3s.iter() {
                 current_layer_witness[mul3.idx_out] = current_layer_witness[mul3.idx_out]
-                    + last_layer_witness[mul3.idx_in1]
-                        * last_layer_witness[mul3.idx_in2]
-                        * last_layer_witness[mul3.idx_in3]
+                    + last_layer_witness[mul3.idx_in[0]]
+                        * last_layer_witness[mul3.idx_in[1]]
+                        * last_layer_witness[mul3.idx_in[2]]
                         * constant(mul3.scalar);
             }
             for assert_const in layer.assert_consts.iter() {
                 assert_eq!(
                     current_layer_witness[assert_const.idx_out],
-                    constant(assert_const.constant),
+                    constant(assert_const.scalar),
                     "layer: {}, wire_id: {}, assert_const: {:?} != {:?}",
                     layer_id,
                     assert_const.idx_out,
                     current_layer_witness[assert_const.idx_out],
-                    assert_const.constant
+                    assert_const.scalar
                 );
             }
             layer_witnesses[layer_id] = current_layer_witness;
@@ -234,20 +234,20 @@ impl<F: SmallField> CircuitWitness<F> {
                 let mut expected = vec![F::ZERO; curr.len()];
                 for add_const in layer.add_consts.iter() {
                     expected[add_const.idx_out] =
-                        expected[add_const.idx_out] + self.constant(add_const.constant);
+                        expected[add_const.idx_out] + self.constant(add_const.scalar);
                 }
                 for add in layer.adds.iter() {
-                    expected[add.idx_out] += prev[add.idx_in] * self.constant(add.scalar);
+                    expected[add.idx_out] += prev[add.idx_in[0]] * self.constant(add.scalar);
                 }
                 for mul2 in layer.mul2s.iter() {
                     expected[mul2.idx_out] = expected[mul2.idx_out]
-                        + prev[mul2.idx_in1] * prev[mul2.idx_in2] * self.constant(mul2.scalar);
+                        + prev[mul2.idx_in[0]] * prev[mul2.idx_in[1]] * self.constant(mul2.scalar);
                 }
                 for mul3 in layer.mul3s.iter() {
                     expected[mul3.idx_out] = expected[mul3.idx_out]
-                        + prev[mul3.idx_in1]
-                            * prev[mul3.idx_in2]
-                            * prev[mul3.idx_in3]
+                        + prev[mul3.idx_in[0]]
+                            * prev[mul3.idx_in[1]]
+                            * prev[mul3.idx_in[2]]
                             * self.constant(mul3.scalar);
                 }
 
@@ -299,12 +299,12 @@ impl<F: SmallField> CircuitWitness<F> {
                 for assert_const in layer.assert_consts.iter() {
                     assert_eq!(
                         curr[assert_const.idx_out],
-                        self.constant(assert_const.constant),
+                        self.constant(assert_const.scalar),
                         "layer: {}, wire_id: {}, assert_const: {:?} != {:?}",
                         layer_id,
                         assert_const.idx_out,
                         curr[assert_const.idx_out],
-                        self.constant(assert_const.constant)
+                        self.constant(assert_const.scalar)
                     );
                 }
             }

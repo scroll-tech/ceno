@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use goldilocks::SmallField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, InType, LayerId};
 
 pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
@@ -156,34 +156,57 @@ pub struct Circuit<F: SmallField> {
     pub max_wires_in_num_vars: Option<usize>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct GateCIn<C> {
-    pub(crate) idx_out: CellId,
-    pub(crate) constant: C,
-}
+// #[derive(Clone, Debug, Serialize)]
+// pub struct GateCIn<C> {
+//     pub(crate) idx_out: CellId,
+//     pub(crate) constant: C,
+// }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct Gate1In<C> {
-    pub(crate) idx_in: CellId,
+// #[derive(Clone, Debug, Serialize)]
+// pub struct Gate1In<C> {
+//     pub(crate) idx_in: CellId,
+//     pub(crate) idx_out: CellId,
+//     pub(crate) scalar: C,
+// }
+
+// #[derive(Clone, Debug, Serialize)]
+// pub struct Gate2In<C> {
+//     pub(crate) idx_in1: CellId,
+//     pub(crate) idx_in2: CellId,
+//     pub(crate) idx_out: CellId,
+//     pub(crate) scalar: C,
+// }
+
+// #[derive(Clone, Debug, Serialize)]
+// pub struct Gate3In<C> {
+//     pub(crate) idx_in1: CellId,
+//     pub(crate) idx_in2: CellId,
+//     pub(crate) idx_in3: CellId,
+//     pub(crate) idx_out: CellId,
+//     pub(crate) scalar: C,
+// }
+
+pub type GateCIn<C> = Gate<C, 0>;
+pub type Gate1In<C> = Gate<C, 1>;
+pub type Gate2In<C> = Gate<C, 2>;
+pub type Gate3In<C> = Gate<C, 3>;
+
+#[derive(Clone, Debug)]
+/// Macro struct for Gate
+pub struct Gate<C, const FAN_IN: usize> {
+    pub(crate) idx_in: [CellId; FAN_IN],
     pub(crate) idx_out: CellId,
     pub(crate) scalar: C,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct Gate2In<C> {
-    pub(crate) idx_in1: CellId,
-    pub(crate) idx_in2: CellId,
-    pub(crate) idx_out: CellId,
-    pub(crate) scalar: C,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct Gate3In<C> {
-    pub(crate) idx_in1: CellId,
-    pub(crate) idx_in2: CellId,
-    pub(crate) idx_in3: CellId,
-    pub(crate) idx_out: CellId,
-    pub(crate) scalar: C,
+impl<C, const FAN_IN: usize> Serialize for Gate<C, FAN_IN> {
+    fn serialize<S>(&self, _: S) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error>
+    where
+        S: Serializer,
+    {
+        // TODO!
+        todo!()
+    }
 }
 
 #[derive(Clone, Serialize)]
