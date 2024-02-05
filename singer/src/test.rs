@@ -1,38 +1,33 @@
-use goldilocks::SmallField;
 use crate::instructions::InstCircuit;
 use core::ops::Range;
-use std::collections::BTreeMap;
 use gkr::structs::CircuitWitness;
+use goldilocks::SmallField;
+use std::collections::BTreeMap;
 
-
-pub(crate) fn test_opcode_circuit<F: SmallField> (
-                    inst_circuit: &InstCircuit<F>,
-                    phase0_idx_map: &BTreeMap<String, Range<usize>>,
-                    phase1_idx_map: &BTreeMap<String, Range<usize>>,
-                    phase0_witness_size: usize,
-                    phase1_witness_size: usize,
-                    phase0_values_map: &BTreeMap<String, Vec<F>>,
-                    phase1_values_map: &BTreeMap<String, Vec<F>>,
-                    ) {
+pub(crate) fn test_opcode_circuit<F: SmallField>(
+    inst_circuit: &InstCircuit<F>,
+    phase0_idx_map: &BTreeMap<String, Range<usize>>,
+    phase1_idx_map: &BTreeMap<String, Range<usize>>,
+    phase0_witness_size: usize,
+    phase1_witness_size: usize,
+    phase0_values_map: &BTreeMap<String, Vec<F>>,
+    phase1_values_map: &BTreeMap<String, Vec<F>>,
+) {
     // configure circuit
     let circuit = inst_circuit.circuit.as_ref();
     println!("{:?}", circuit);
-    
+
     // get indexes for circuit inputs and wire_in
     // they are divided into phase0 and phase1
     let inputs_idxes = inst_circuit.layout.phases_wire_id;
     let phase0_input_idx = inputs_idxes[0].unwrap();
     let phase1_input_idx = inputs_idxes[1].unwrap();
-    
+
     // assign witnesses to circuit
     let n_wires_in = circuit.n_wires_in;
     let mut wires_in = vec![vec![]; n_wires_in];
-    wires_in[phase0_input_idx as usize] = vec![
-        F::from(0u64); phase0_witness_size
-    ];
-    wires_in[phase1_input_idx as usize] = vec![
-        F::from(0u64); phase1_witness_size
-    ];
+    wires_in[phase0_input_idx as usize] = vec![F::from(0u64); phase0_witness_size];
+    wires_in[phase1_input_idx as usize] = vec![F::from(0u64); phase1_witness_size];
 
     for phase in 0..2 {
         let idx_map = match phase {
@@ -51,26 +46,17 @@ pub(crate) fn test_opcode_circuit<F: SmallField> (
             other => panic!("invalid phase"),
         };
         for key in idx_map.keys() {
-            let range = idx_map
-                                        .get(key)
-                                        .unwrap()
-                                        .clone()
-                                        .collect::<Vec<_>>();
-            let values = values_map
-                                            .get(key)
-                                            .unwrap();
-            for (value_idx, wire_in_idx) in range
-                                                            .into_iter()
-                                                            .enumerate() {
+            let range = idx_map.get(key).unwrap().clone().collect::<Vec<_>>();
+            let values = values_map.get(key).unwrap();
+            for (value_idx, wire_in_idx) in range.into_iter().enumerate() {
                 if value_idx < values.len() {
-                    wires_in[input_idx as usize][wire_in_idx] 
-                        = values[value_idx];
+                    wires_in[input_idx as usize][wire_in_idx] = values[value_idx];
                 }
             }
         }
     }
 
-    println!("{:?}", wires_in);    
+    println!("{:?}", wires_in);
 
     /*
     let circuit_witness = {
@@ -79,7 +65,7 @@ pub(crate) fn test_opcode_circuit<F: SmallField> (
         circuit_witness.add_instance(&circuit, &wires_in);
         circuit_witness
     };
-    
+
     println!("{:?}", circuit_witness);
     */
     /*

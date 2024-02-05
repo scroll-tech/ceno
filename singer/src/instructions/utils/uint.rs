@@ -162,7 +162,8 @@ fn convert_decomp<F: SmallField>(
             let tmp = circuit_builder.create_cell();
             for k in j..(j + chunk_size).min(small_len) {
                 let k = k as usize;
-                #[cfg(debug_assertions)] {
+                #[cfg(debug_assertions)]
+                {
                     println!("j {:?} small_bit_width {:?}", j, small_bit_width);
                 }
                 circuit_builder.add(
@@ -177,13 +178,12 @@ fn convert_decomp<F: SmallField>(
     values
 }
 
-
 #[cfg(test)]
 mod test {
     use super::UInt;
-    use goldilocks::Goldilocks;
-    use frontend::structs::CircuitBuilder;
     use crate::instructions::utils::uint::convert_decomp;
+    use frontend::structs::CircuitBuilder;
+    use goldilocks::Goldilocks;
 
     #[test]
     fn test_uint() {
@@ -195,8 +195,8 @@ mod test {
         assert_eq!(Uint256_63::N_CARRY_NO_OVERFLOW_CELLS, 4);
         assert_eq!(Uint256_63::N_RANGE_CHECK_CELLS, 24);
         assert_eq!(Uint256_63::N_RANGE_CHECK_NO_OVERFLOW_CELLS, 19);
-        let u_int = Uint256_63::try_from(vec![1,2,3,4,5]);
-        assert_eq!(u_int.unwrap().values, vec![1,2,3,4,5]);
+        let u_int = Uint256_63::try_from(vec![1, 2, 3, 4, 5]);
+        assert_eq!(u_int.unwrap().values, vec![1, 2, 3, 4, 5]);
         // TODO: implement tests for methods in UInt
         // they mostly depend on convert_decomp which will be tested separately
     }
@@ -205,21 +205,16 @@ mod test {
     fn test_convert_decomp() {
         let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
         let small_values: Vec<usize> = vec![1; 64];
-        let values = convert_decomp(&mut circuit_builder, 
-                                    &small_values,
-                                    1,
-                                    2,
-                                    true);
+        let values = convert_decomp(&mut circuit_builder, &small_values, 1, 2, true);
         let vec: Vec<usize> = (0..=31).collect();
         assert_eq!(values, vec);
-        // this test will fail if small_len * small_bit_width exceeds 
+        // this test will fail if small_len * small_bit_width exceeds
         //      the field's max bit size
         // e.g.
-        // let values = convert_decomp(&mut circuit_builder, 
+        // let values = convert_decomp(&mut circuit_builder,
         //                                 &small_values,
         //                                 2,
         //                                 2,
         //                                 true);
-
     }
 }

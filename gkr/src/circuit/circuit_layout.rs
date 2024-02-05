@@ -127,11 +127,17 @@ impl<F: SmallField> Circuit<F> {
                 let mut update_subset = |old_cell_id: CellId| {
                     let old_layer_id =
                         n_layers - 1 - circuit_builder.cells[old_cell_id].layer.unwrap();
-                    #[cfg(debug_assertions)] {
+                    #[cfg(debug_assertions)]
+                    {
                         if old_layer_id == 0 {
-                            println!("new_layer_id {:?}, old_layer_id {:?}, old_cell_id {:?}", 
-                                    new_layer_id, old_layer_id, old_cell_id);
-                            println!("cells[old_cell_id].layer {:?}", circuit_builder.cells[old_cell_id].layer.unwrap());
+                            println!(
+                                "new_layer_id {:?}, old_layer_id {:?}, old_cell_id {:?}",
+                                new_layer_id, old_layer_id, old_cell_id
+                            );
+                            println!(
+                                "cells[old_cell_id].layer {:?}",
+                                circuit_builder.cells[old_cell_id].layer.unwrap()
+                            );
                         }
                     }
                     if old_layer_id == new_layer_id {
@@ -144,7 +150,8 @@ impl<F: SmallField> Circuit<F> {
                     wire_id_assigner += 1;
                 };
                 for cell_id in layers_of_cell_id[layer_id as usize].iter() {
-                    #[cfg(debug_assertions)] {
+                    #[cfg(debug_assertions)]
+                    {
                         println!("layer_id {:?}, cell_id {:?}", layer_id, cell_id);
                     }
                     let cell = &circuit_builder.cells[*cell_id];
@@ -174,13 +181,17 @@ impl<F: SmallField> Circuit<F> {
             // layer.
             for (old_layer_id, old_wire_ids) in subsets.iter() {
                 for (old_wire_id, new_wire_id) in old_wire_ids.iter() {
-                    #[cfg(debug_assertions)] {
+                    #[cfg(debug_assertions)]
+                    {
                         println!("old_wire_id {:?}, new_wire_id {:?}, old_layer_id {:?}, new_layer_id {:?}", 
                                     old_wire_id, new_wire_id, *old_layer_id, new_layer_id);
-                        assert!(new_layer_id < *old_layer_id, 
+                        assert!(
+                            new_layer_id < *old_layer_id,
                             "layer paste_from err: need old_layer_id {:?} > new_layer_id {:?}",
-                            *old_layer_id, new_layer_id);
-                    } 
+                            *old_layer_id,
+                            new_layer_id
+                        );
+                    }
                     layers[new_layer_id as usize]
                         .paste_from
                         .entry(*old_layer_id)
