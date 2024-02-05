@@ -12,7 +12,7 @@ use transcript::Transcript;
 
 use crate::{
     prover::SumcheckState,
-    structs::{Point, SumcheckProof},
+    structs::{PointAndEval, SumcheckProof},
     utils::{fix_high_variables, MatrixMLERowFirst},
 };
 
@@ -21,8 +21,8 @@ use super::IOPProverPhase1State;
 impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
     pub(super) fn prover_init_parallel(
         layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
-        next_evals: &'a [(Point<F>, F)],
-        subset_evals: &'a [(LayerId, Point<F>, F)],
+        next_evals: &'a [PointAndEval<F>],
+        subset_evals: &'a [(LayerId, PointAndEval<F>)],
         alpha: &F,
         lo_num_vars: usize,
         hi_num_vars: usize,
@@ -66,14 +66,17 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
         let mut f1 = Vec::with_capacity(self.next_evals.len() + self.subset_evals.len());
         let mut g1 = Vec::with_capacity(self.next_evals.len() + self.subset_evals.len());
         self.next_evals.iter().zip(self.alpha_pows.iter()).for_each(
-            |((point, value), &alpha_pow)| {
-                sigma_1 += alpha_pow * value;
-                let point_lo_num_vars = point.len() - self.hi_num_vars;
+            |(point_and_eval, &alpha_pow)| {
+                sigma_1 += alpha_pow * point_and_eval.eval;
+                let point_lo_num_vars = point_and_eval.point.len() - self.hi_num_vars;
 
-                let f1_j = fix_high_variables(&self.layer_out_poly, &point[point_lo_num_vars..]);
+                let f1_j = fix_high_variables(
+                    &self.layer_out_poly,
+                    &point_and_eval.point[point_lo_num_vars..],
+                );
                 f1.push(Arc::new(f1_j));
 
-                let g1_j = build_eq_x_r_vec(&point[..point_lo_num_vars])
+                let g1_j = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars])
                     .into_iter()
                     .take(1 << self.lo_num_vars)
                     .map(|eq| alpha_pow * eq)
@@ -87,13 +90,16 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
         self.subset_evals
             .iter()
             .zip(self.alpha_pows.iter().skip(self.next_evals.len()))
-            .for_each(|((new_layer_id, point, value), alpha_pow)| {
-                sigma_1 += *alpha_pow * value;
-                let point_lo_num_vars = point.len() - self.hi_num_vars;
+            .for_each(|((new_layer_id, point_and_eval), alpha_pow)| {
+                sigma_1 += *alpha_pow * point_and_eval.eval;
+                let point_lo_num_vars = point_and_eval.point.len() - self.hi_num_vars;
                 let copy_to = copy_to(new_layer_id);
-                let lo_eq_w_p = build_eq_x_r_vec(&point[..point_lo_num_vars]);
+                let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
 
-                let f1_j = fix_high_variables(&self.layer_out_poly, &point[point_lo_num_vars..]);
+                let f1_j = fix_high_variables(
+                    &self.layer_out_poly,
+                    &point_and_eval.point[point_lo_num_vars..],
+                );
                 f1.push(Arc::new(f1_j));
 
                 assert!(copy_to.len() <= lo_eq_w_p.len());
@@ -156,9 +162,9 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
             .next_evals
             .iter()
             .zip(self.g1_values.iter())
-            .map(|((point, _), &g1_value)| {
-                let point_lo_num_vars = point.len() - self.hi_num_vars;
-                build_eq_x_r_vec(&point[point_lo_num_vars..])
+            .map(|(point_and_eval, &g1_value)| {
+                let point_lo_num_vars = point_and_eval.point.len() - self.hi_num_vars;
+                build_eq_x_r_vec(&point_and_eval.point[point_lo_num_vars..])
                     .into_iter()
                     .map(|eq| g1_value * eq)
                     .collect_vec()
@@ -167,9 +173,9 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
                 self.subset_evals
                     .iter()
                     .zip(self.g1_values.iter().skip(self.next_evals.len()))
-                    .map(|((_, point, _), &g1_value)| {
-                        let point_lo_num_vars = point.len() - self.hi_num_vars;
-                        build_eq_x_r_vec(&point[point_lo_num_vars..])
+                    .map(|((_, point_and_eval), &g1_value)| {
+                        let point_lo_num_vars = point_and_eval.point.len() - self.hi_num_vars;
+                        build_eq_x_r_vec(&point_and_eval.point[point_lo_num_vars..])
                             .into_iter()
                             .map(|eq| g1_value * eq)
                             .collect_vec()

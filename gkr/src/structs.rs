@@ -6,7 +6,34 @@ use serde::Serialize;
 use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, InType, LayerId};
 
 pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
+
+/// A point is a vector of num_var length
 pub type Point<F> = Vec<F>;
+
+/// A point and the evaluation of this point.
+#[derive(Debug, Clone)]
+pub struct PointAndEval<F> {
+    pub(crate) point: Point<F>,
+    pub(crate) eval: F,
+}
+
+impl<F: SmallField> Default for PointAndEval<F> {
+    fn default() -> Self {
+        Self {
+            point: vec![],
+            eval: F::ZERO,
+        }
+    }
+}
+
+impl<F: Clone> PointAndEval<F> {
+    pub fn new(point: &Point<F>, eval: &F) -> Self {
+        Self {
+            point: (*point).clone(),
+            eval: eval.clone(),
+        }
+    }
+}
 
 /// Represent the prover state for each layer in the IOP protocol. To support
 /// gates between non-adjacent layers, we leverage the techniques in
@@ -14,10 +41,12 @@ pub type Point<F> = Vec<F>;
 pub struct IOPProverState<F: SmallField> {
     pub(crate) layer_id: LayerId,
     /// Evaluations from the next layer.
-    pub(crate) next_evals: Vec<(Point<F>, F)>,
-    /// Evaluations of subsets from layers closer to the output. Hashmap is used
-    /// to map from the current layer id to the later layer id, point and value.
-    pub(crate) subset_evals: HashMap<LayerId, Vec<(LayerId, Point<F>, F)>>,
+    pub(crate) next_point_and_evals: Vec<PointAndEval<F>>,
+    /// Evaluations of subsets from layers __closer__ to the output.
+    /// __closer__ as in the layer that the subset elements lie in has not been processed.
+    ///
+    /// Hashmap is used to map from the current layer id to the that layer id, point and value.
+    pub(crate) subset_evals: HashMap<LayerId, Vec<(LayerId, PointAndEval<F>)>>,
     pub(crate) circuit_witness: CircuitWitness<F::BaseField>,
     pub(crate) layer_out_poly: Arc<DenseMultilinearExtension<F>>,
 }
@@ -26,11 +55,11 @@ pub struct IOPProverState<F: SmallField> {
 pub struct IOPVerifierState<F: SmallField> {
     pub(crate) layer_id: LayerId,
     /// Evaluations from the next layer.
-    pub(crate) next_evals: Vec<(Point<F>, F)>,
+    pub(crate) next_evals: Vec<PointAndEval<F>>,
     /// Evaluations of subsets from layers closer to the output. Hashmap is used
     /// to map from the current layer id to the deeper layer id, point and
     /// value.
-    pub(crate) subset_evals: HashMap<LayerId, Vec<(LayerId, Point<F>, F)>>,
+    pub(crate) subset_evals: HashMap<LayerId, Vec<(LayerId, PointAndEval<F>)>>,
 }
 
 /// Phase 1 is a sumcheck protocol merging the subset evaluations from the

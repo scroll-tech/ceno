@@ -1,4 +1,7 @@
-use gkr::{structs::IOPProverPhase2Message, utils::MultilinearExtensionFromVectors};
+use gkr::{
+    structs::{IOPProverPhase2Message, PointAndEval},
+    utils::MultilinearExtensionFromVectors,
+};
 use goldilocks::SmallField;
 use itertools::izip;
 use std::mem;
@@ -63,11 +66,13 @@ impl<F: SmallField> IOPProverState<F> {
                     }
                     PredType::PredWire(out) => match out {
                         NodeOutputType::OutputLayer(id) => {
-                            output_evals[*id].push((proof.point.clone(), *eval))
+                            output_evals[*id].push(PointAndEval::new(&proof.point, eval))
                         }
                         NodeOutputType::WireOut(id, wire_id) => {
-                            wires_out_evals[*id].resize(*wire_id as usize + 1, (vec![], F::ZERO));
-                            wires_out_evals[*id][*wire_id as usize] = (proof.point.clone(), *eval);
+                            wires_out_evals[*id]
+                                .resize(*wire_id as usize + 1, PointAndEval::default());
+                            wires_out_evals[*id][*wire_id as usize] =
+                                PointAndEval::new(&proof.point, eval);
                         }
                     },
                     _ => unimplemented!(),
