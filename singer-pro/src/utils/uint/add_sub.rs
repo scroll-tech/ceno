@@ -220,65 +220,54 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     }
 }
 
-
 #[cfg(test)]
 mod test {
-    use goldilocks::Goldilocks;
+    use super::{UInt, UIntAddSub};
     use frontend::structs::CircuitBuilder;
     use gkr::structs::{Circuit, CircuitWitness};
-    use super::{UInt, UIntAddSub};
+    use goldilocks::Goldilocks;
 
     #[test]
     fn test_add_unsafe() {
         type Uint256_8 = UInt<256, 8>;
         assert_eq!(Uint256_8::N_OPRAND_CELLS, 32);
         let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
-        
+
         // configure circuit with cells for addend_0, addend_1 and carry as wire_in
-        let (addend_0_wire_in_id, addend_0_wire_in_cells) 
-            = circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
-        let (addend_1_wire_in_id, addend_1_wire_in_cells)
-            = circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
-        let (carry_wire_in_id, carry_wire_in_cells)
-            = circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+        let (addend_0_wire_in_id, addend_0_wire_in_cells) =
+            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+        let (addend_1_wire_in_id, addend_1_wire_in_cells) =
+            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+        let (carry_wire_in_id, carry_wire_in_cells) =
+            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
         let addend_0 = Uint256_8::try_from(addend_0_wire_in_cells);
         let addend_1 = Uint256_8::try_from(addend_1_wire_in_cells);
-        let result 
-            = UIntAddSub::<Uint256_8>::add_unsafe(
-                                        &mut circuit_builder, 
-                                        &addend_0.unwrap(),
-                                        &addend_1.unwrap(),
-                                        &carry_wire_in_cells);
+        let result = UIntAddSub::<Uint256_8>::add_unsafe(
+            &mut circuit_builder,
+            &addend_0.unwrap(),
+            &addend_1.unwrap(),
+            &carry_wire_in_cells,
+        );
         assert_eq!(result.unwrap().values(), (96..128).collect::<Vec<usize>>());
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
         //println!("add unsafe circuit {:?}", circuit);
-        
+
         // generate witnesses for addend_0, addend_1 and carry
         // must pad each witness to the size of N_OPERAND_CELLS
         let n_wires_in = circuit.n_wires_in;
         let mut wires_in = vec![vec![]; n_wires_in];
-        wires_in[addend_0_wire_in_id as usize] = vec![
-            Goldilocks::from(255u64),
-            Goldilocks::from(255u64),
-        ];
-        wires_in[addend_0_wire_in_id as usize].extend(
-            vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]
-        );
-        wires_in[addend_1_wire_in_id as usize] = vec![
-            Goldilocks::from(255u64),
-            Goldilocks::from(254u64),
-        ];
-        wires_in[addend_1_wire_in_id as usize].extend(
-            vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]
-        );
-        wires_in[carry_wire_in_id as usize] = vec![
-            Goldilocks::from(1u64),
-            Goldilocks::from(1u64),
-        ];
-        wires_in[carry_wire_in_id as usize].extend(
-            vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]
-        );
+        wires_in[addend_0_wire_in_id as usize] =
+            vec![Goldilocks::from(255u64), Goldilocks::from(255u64)];
+        wires_in[addend_0_wire_in_id as usize]
+            .extend(vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]);
+        wires_in[addend_1_wire_in_id as usize] =
+            vec![Goldilocks::from(255u64), Goldilocks::from(254u64)];
+        wires_in[addend_1_wire_in_id as usize]
+            .extend(vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]);
+        wires_in[carry_wire_in_id as usize] = vec![Goldilocks::from(1u64), Goldilocks::from(1u64)];
+        wires_in[carry_wire_in_id as usize]
+            .extend(vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]);
         let circuit_witness = {
             let challenges = vec![Goldilocks::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
@@ -289,8 +278,7 @@ mod test {
         circuit_witness.check_correctness(&circuit);
 
         // check the result
-        let result_values 
-            = circuit_witness.last_layer_witness_ref();
+        let result_values = circuit_witness.last_layer_witness_ref();
         //println!("{:?}", result_values[0]);
         assert_eq!(result_values[0][0], Goldilocks::from(254u64));
         assert_eq!(result_values[0][1], Goldilocks::from(254u64));
@@ -302,52 +290,42 @@ mod test {
         type Uint256_8 = UInt<256, 8>;
         assert_eq!(Uint256_8::N_OPRAND_CELLS, 32);
         let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
-        
+
         // configure circuit with cells for minuend, subtrend and borrow as wire_in
-        let (minuend_wire_in_id, minuend_wire_in_cells) 
-            = circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
-        let (subtrend_wire_in_id, subtrend_wire_in_cells)
-            = circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
-        let (borrow_wire_in_id, borrow_wire_in_cells)
-            = circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+        let (minuend_wire_in_id, minuend_wire_in_cells) =
+            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+        let (subtrend_wire_in_id, subtrend_wire_in_cells) =
+            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+        let (borrow_wire_in_id, borrow_wire_in_cells) =
+            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
         let minuend = Uint256_8::try_from(minuend_wire_in_cells);
         let subtrend = Uint256_8::try_from(subtrend_wire_in_cells);
-        let result 
-            = UIntAddSub::<Uint256_8>::sub_unsafe(
-                                        &mut circuit_builder, 
-                                        &minuend.unwrap(),
-                                        &subtrend.unwrap(),
-                                        &borrow_wire_in_cells);
+        let result = UIntAddSub::<Uint256_8>::sub_unsafe(
+            &mut circuit_builder,
+            &minuend.unwrap(),
+            &subtrend.unwrap(),
+            &borrow_wire_in_cells,
+        );
         assert_eq!(result.unwrap().values(), (96..128).collect::<Vec<usize>>());
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
         //println!("add unsafe circuit {:?}", circuit);
-        
+
         // generate witnesses for addend_0, addend_1 and carry
         // must pad each witness to the size of N_OPERAND_CELLS
         let n_wires_in = circuit.n_wires_in;
         let mut wires_in = vec![vec![]; n_wires_in];
-        wires_in[minuend_wire_in_id as usize] = vec![
-            Goldilocks::from(1u64),
-            Goldilocks::from(1u64),
-        ];
-        wires_in[minuend_wire_in_id as usize].extend(
-            vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]
-        );
-        wires_in[subtrend_wire_in_id as usize] = vec![
-            Goldilocks::from(255u64),
-            Goldilocks::from(254u64),
-        ];
-        wires_in[subtrend_wire_in_id as usize].extend(
-            vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]
-        );
-        wires_in[borrow_wire_in_id as usize] = vec![
-            Goldilocks::from(1u64),
-            Goldilocks::from(1u64),
-        ];
-        wires_in[borrow_wire_in_id as usize].extend(
-            vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]
-        );
+        wires_in[minuend_wire_in_id as usize] =
+            vec![Goldilocks::from(1u64), Goldilocks::from(1u64)];
+        wires_in[minuend_wire_in_id as usize]
+            .extend(vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]);
+        wires_in[subtrend_wire_in_id as usize] =
+            vec![Goldilocks::from(255u64), Goldilocks::from(254u64)];
+        wires_in[subtrend_wire_in_id as usize]
+            .extend(vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]);
+        wires_in[borrow_wire_in_id as usize] = vec![Goldilocks::from(1u64), Goldilocks::from(1u64)];
+        wires_in[borrow_wire_in_id as usize]
+            .extend(vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]);
         let circuit_witness = {
             let challenges = vec![Goldilocks::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
@@ -358,8 +336,7 @@ mod test {
         circuit_witness.check_correctness(&circuit);
 
         // check the result
-        let result_values 
-            = circuit_witness.last_layer_witness_ref();
+        let result_values = circuit_witness.last_layer_witness_ref();
         //println!("{:?}", result_values[0]);
         assert_eq!(result_values[0][0], Goldilocks::from(2u64));
         assert_eq!(result_values[0][1], Goldilocks::from(2u64));

@@ -119,15 +119,14 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod test {
-    use goldilocks::Goldilocks;
-    use frontend::structs::CircuitBuilder;
-    use super::{UInt, UIntCmp, ChipHandler};
+    use super::{ChipHandler, UInt, UIntCmp};
     use crate::instructions::ChipChallenges;
+    use frontend::structs::CircuitBuilder;
+    use goldilocks::Goldilocks;
 
-    #[test]    
+    #[test]
     fn test_lt() {
         // TODO: this test yet cannot pass due to the same reason
         // as happened in add tests
@@ -136,24 +135,21 @@ mod test {
         type Uint256_63 = UInt<256, 63>;
         let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
         // create cells for operand_0, operand_1 and witness
-        let _operand_0_cells = circuit_builder
-                            .create_cells(Uint256_63::N_OPRAND_CELLS);
-        let _operand_1_cells = circuit_builder
-                            .create_cells(Uint256_63::N_OPRAND_CELLS);
-        let _witness_cells = circuit_builder
-                            .create_cells(Uint256_63::N_OPRAND_CELLS);
+        let _operand_0_cells = circuit_builder.create_cells(Uint256_63::N_OPRAND_CELLS);
+        let _operand_1_cells = circuit_builder.create_cells(Uint256_63::N_OPRAND_CELLS);
+        let _witness_cells = circuit_builder.create_cells(Uint256_63::N_OPRAND_CELLS);
         let operand_0 = Uint256_63::try_from(vec![0, 1, 2, 3, 4]);
         let operand_1 = Uint256_63::try_from(vec![5, 6, 7, 8, 9]);
         let witness: Vec<usize> = (10..35).collect();
-        let mut range_chip_handler 
-                    = ChipHandler::new::<Goldilocks>(&mut circuit_builder,
-                                                     ChipChallenges::default(),
-                                                     100);
-        let result = UIntCmp::<Uint256_63>::lt(&mut circuit_builder, 
-                                                &mut range_chip_handler,
-                                                &operand_0.unwrap(),
-                                                &operand_1.unwrap(),
-                                                &witness);
+        let mut range_chip_handler =
+            ChipHandler::new::<Goldilocks>(&mut circuit_builder, ChipChallenges::default(), 100);
+        let result = UIntCmp::<Uint256_63>::lt(
+            &mut circuit_builder,
+            &mut range_chip_handler,
+            &operand_0.unwrap(),
+            &operand_1.unwrap(),
+            &witness,
+        );
         println!("{:?}", result);
     }
 }
