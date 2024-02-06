@@ -74,7 +74,7 @@ impl<F: SmallField> CircuitWitness<F> {
                                 .copy_to
                                 .get(&(layer_id as LayerId))
                                 .unwrap()[subset_wire_id];
-                            #[cfg(feature="debug_wenqing")]
+                            #[cfg(feature = "debug_wenqing")]
                             {
                                 assert!(
                                     layer_id < *old_layer_id as usize,
