@@ -223,15 +223,15 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
 #[cfg(test)]
 mod test {
     use super::{UInt, UIntAddSub};
-    use frontend::structs::CircuitBuilder;
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::Goldilocks;
+    use simple_frontend::structs::CircuitBuilder;
 
     #[test]
     fn test_add_unsafe() {
         type Uint256_8 = UInt<256, 8>;
         assert_eq!(Uint256_8::N_OPRAND_CELLS, 32);
-        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let mut circuit_builder = CircuitBuilder::new();
 
         // configure circuit with cells for addend_0, addend_1 and carry as wire_in
         let (addend_0_wire_in_id, addend_0_wire_in_cells) =

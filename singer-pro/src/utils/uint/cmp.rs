@@ -121,10 +121,11 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::component::ChipChallenges;
+
     use super::{ChipHandler, UInt, UIntCmp};
-    use crate::instructions::ChipChallenges;
-    use frontend::structs::CircuitBuilder;
     use goldilocks::Goldilocks;
+    use simple_frontend::structs::{ChallengeId, CircuitBuilder};
 
     #[test]
     fn test_lt() {
@@ -141,8 +142,7 @@ mod test {
         let operand_0 = Uint256_63::try_from(vec![0, 1, 2, 3, 4]);
         let operand_1 = Uint256_63::try_from(vec![5, 6, 7, 8, 9]);
         let witness: Vec<usize> = (10..35).collect();
-        let mut range_chip_handler =
-            ChipHandler::new::<Goldilocks>(&mut circuit_builder, ChipChallenges::default(), 100);
+        let mut range_chip_handler = ChipHandler::new(100 as ChallengeId);
         let result = UIntCmp::<Uint256_63>::lt(
             &mut circuit_builder,
             &mut range_chip_handler,

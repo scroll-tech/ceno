@@ -176,7 +176,7 @@ fn convert_decomp<F: SmallField>(
             let tmp = circuit_builder.create_cell();
             for k in j..(j + chunk_size).min(small_len) {
                 let k = k as usize;
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "debug_wenqing")]
                 {
                     println!("j {:?} small_bit_width {:?}", j, small_bit_width);
                 }
@@ -194,10 +194,11 @@ fn convert_decomp<F: SmallField>(
 
 #[cfg(test)]
 mod test {
+    use crate::utils::uint::convert_decomp;
+
     use super::UInt;
-    use crate::instructions::utils::uint::convert_decomp;
-    use frontend::structs::CircuitBuilder;
     use goldilocks::Goldilocks;
+    use simple_frontend::structs::CircuitBuilder;
 
     #[test]
     fn test_uint() {
