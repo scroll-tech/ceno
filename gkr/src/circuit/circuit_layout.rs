@@ -140,7 +140,7 @@ impl<F: SmallField> Circuit<F> {
                 let mut update_subset = |old_cell_id: CellId| {
                     let old_layer_id =
                         n_layers - 1 - circuit_builder.cells[old_cell_id].layer.unwrap();
-                    #[cfg(feature="debug_wenqing")]
+                    #[cfg(feature = "debug_wenqing")]
                     {
                         if old_layer_id == 0 {
                             println!(
@@ -163,7 +163,7 @@ impl<F: SmallField> Circuit<F> {
                     wire_id_assigner += 1;
                 };
                 for cell_id in layers_of_cell_id[layer_id as usize].iter() {
-                    #[cfg(feature="debug_wenqing")]
+                    #[cfg(feature = "debug_wenqing")]
                     {
                         println!("layer_id {:?}, cell_id {:?}", layer_id, cell_id);
                     }
@@ -194,7 +194,7 @@ impl<F: SmallField> Circuit<F> {
             // layer.
             for (old_layer_id, old_wire_ids) in subsets.iter() {
                 for (old_wire_id, new_wire_id) in old_wire_ids.iter() {
-                    #[cfg(feature="debug_wenqing")]
+                    #[cfg(feature = "debug_wenqing")]
                     {
                         println!("old_wire_id {:?}, new_wire_id {:?}, old_layer_id {:?}, new_layer_id {:?}", 
                                     old_wire_id, new_wire_id, *old_layer_id, new_layer_id);
