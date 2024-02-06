@@ -21,3 +21,6 @@ gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
 itertools = "0.12.0"
 strum = "0.25.0"
 strum_macros = "0.25.3"
+
+[features]
+debug_wenqing = []
