@@ -40,10 +40,11 @@ fn test_gkr_circuit_IsZeroGadget_simple() {
     let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
     let (value_wire_in_id, value) = circuit_builder.create_wire_in(1);
     let (inv_wire_in_id, inv) = circuit_builder.create_wire_in(1);
-    let (is_zero, cond1, cond2) = IsZeroGadget(&mut circuit_builder, value[0], inv[0]);
+    let (_is_zero, _cond1, _cond2) = IsZeroGadget(&mut circuit_builder, value[0], inv[0]);
     //let cond_wire_out_id = circuit_builder.create_wire_out_from_cells(&[cond1, cond2]);
     //let is_zero_wire_out_id = circuit_builder.create_wire_out_from_cells(&[is_zero]);
     circuit_builder.configure();
+    circuit_builder.print_info();
     let circuit = Circuit::new(&circuit_builder);
     println!("circuit: {:?}", circuit);
 
@@ -79,31 +80,62 @@ fn test_gkr_circuit_IsZeroGadget_U256() {
     // value is decomposed into 64 cells
     // assert IsZero(value) when all 64 cells are zero
     const UINT256_4_N_OPERAND_CELLS: usize = 64;
-    const BASE: usize = 1 << 4;
+
+    // build the circuit, number of cells for value is UINT256_4_N_OPERAND_CELLS
+    // inv is the inverse of each cell's value, if value = 0 then inv = 0
     let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
     let (value_wire_in_id, value) = circuit_builder.create_wire_in(UINT256_4_N_OPERAND_CELLS);
     let (inv_wire_in_id, inv) = circuit_builder.create_wire_in(UINT256_4_N_OPERAND_CELLS);
 
-    // since we split value and inv into cells,
-    // we create all possible value[i] * inv[j] cells
-    // to prevent overflow, we need i + j <= UINT256_4_N_OPERAND_CELLS
-    //let mut value_i_inv_j: Vec<Vec<CellId>> = vec![vec![]; UINT256_4_N_OPERAND_CELLS];
-    //for i in 0..UINT256_4_N_OPERAND_CELLS {
-    //    for j in 0..UINT256_4_N_OPERAND_CELLS-i {
-    //        value_i_inv_j[i].push(circuit_builder.create_cell());
-    //        circuit_builder.mul2(
-    //            value_i_inv_j[i][j],
-    //            value[i],
-    //            inv[j],
-    //            Goldilocks::from(1),
-    //        );
-    //    }
-    //}
-    //let value_mul_inv = circuit_builder.create_cells(UINT256_4_N_OPERAND_CELLS);
-    //for idx in 0..UINT256_4_N_OPERAND_CELLS {
-    //    circuit_builder.add(
-    //        value_mul_inv[idx],
-    //        value_i_inv_j[]
-    //    )
-    //}
+    // is_zero_value = prod_{value_item} (is_zero_value_item)
+    let mut cond1: Vec<CellId> = vec![];
+    let mut cond2: Vec<CellId> = vec![];
+    let mut is_zero_prev_items = circuit_builder.create_cell();
+    circuit_builder.add_const(is_zero_prev_items, Goldilocks::from(1));
+    for (value_item, inv_item) in value.into_iter().zip(inv) {
+        let (is_zero_item, cond1_item, cond2_item) =
+            IsZeroGadget(&mut circuit_builder, value_item, inv_item);
+        cond1.push(cond1_item);
+        cond2.push(cond2_item);
+        let is_zero = circuit_builder.create_cell();
+        circuit_builder.mul2(
+            is_zero,
+            is_zero_prev_items,
+            is_zero_item,
+            Goldilocks::from(1),
+        );
+        is_zero_prev_items = is_zero;
+    }
+
+    circuit_builder.configure();
+    circuit_builder.print_info();
+
+    let circuit = Circuit::new(&circuit_builder);
+    println!("circuit: {:?}", circuit);
+
+    // assign wire in
+    let n_wires_in = circuit.n_wires_in;
+    let mut wires_in = vec![vec![]; n_wires_in];
+    wires_in[value_wire_in_id as usize] = vec![Goldilocks::from(5); UINT256_4_N_OPERAND_CELLS];
+    wires_in[inv_wire_in_id as usize] =
+        vec![Goldilocks::from(5).invert().unwrap(); UINT256_4_N_OPERAND_CELLS];
+    let circuit_witness = {
+        let challenges = vec![Goldilocks::from(2)];
+        let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
+        circuit_witness.add_instance(&circuit, &wires_in);
+        circuit_witness
+    };
+    println!("circuit witness: {:?}", circuit_witness);
+    circuit_witness.check_correctness(&circuit);
+
+    // check the result
+    let layers = circuit_witness.layers_ref();
+    println!("layers: {:?}", layers);
+    let result_values = circuit_witness.last_layer_witness_ref();
+    println!("outputs: {:?}", result_values);
+
+    // is_zero
+    assert_eq!(result_values[0][0], Goldilocks::from(0));
+
+    // TODO: take cond1 and cond2 cells and check they are zero
 }
