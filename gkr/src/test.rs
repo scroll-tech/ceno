@@ -1,5 +1,5 @@
 use crate::{
-    structs::{Circuit, CircuitWitness, IOPProverState},
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState},
     utils::MultilinearExtensionFromVectors,
 };
 use ff::Field;
@@ -7,6 +7,7 @@ use goldilocks::{Goldilocks, SmallField};
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 use std::iter;
+use std::time::Duration;
 use transcript::Transcript;
 
 // build an IsZero Gadget
@@ -97,8 +98,12 @@ fn test_gkr_circuit_IsZeroGadget_simple() {
     // add prover-verifier process
     let mut prover_transcript =
         Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+    let mut verifier_transcript =
+        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
 
-    let mut wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
+    let mut prover_wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
+    let mut verifier_wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
+    let instance_num_vars = 1_u32.ilog2() as usize;
     for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
         let lo_num_vars = wires_out[wire_out_id as usize][0]
             .len()
@@ -106,28 +111,54 @@ fn test_gkr_circuit_IsZeroGadget_simple() {
             .ilog2() as usize;
         let output_mle = wires_out[wire_out_id as usize]
             .as_slice()
-            .mle(lo_num_vars, 0);
-        let output_point = iter::repeat_with(|| {
+            .mle(lo_num_vars, instance_num_vars);
+        let prover_output_point = iter::repeat_with(|| {
             prover_transcript
                 .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
                 .elements
         })
         .take(output_mle.num_vars)
         .collect_vec();
-        let output_eval = output_mle.evaluate(&output_point);
-        wires_out_evals.push((output_point, output_eval));
+        let verifier_output_point = iter::repeat_with(|| {
+            verifier_transcript
+                .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
+                .elements
+        })
+        .take(output_mle.num_vars)
+        .collect_vec();
+        let prover_output_eval = output_mle.evaluate(&prover_output_point);
+        let verifier_output_eval = output_mle.evaluate(&verifier_output_point);
+        prover_wires_out_evals.push((prover_output_point, prover_output_eval));
+        verifier_wires_out_evals.push((verifier_output_point, verifier_output_eval));
     }
 
     let start = std::time::Instant::now();
-    let _proof = IOPProverState::prove_parallel(
+    let proof = IOPProverState::prove_parallel(
         &circuit,
         &circuit_witness,
         &[],
-        &wires_out_evals,
+        &prover_wires_out_evals,
         &mut prover_transcript,
     );
-    println!("proof time: {:?}", start.elapsed());
-    // TODO: add verifier process
+    let proof_time: Duration = start.elapsed();
+
+    let start = std::time::Instant::now();
+    let _claim = IOPVerifierState::verify_parallel(
+        &circuit,
+        &[],
+        &[],
+        &verifier_wires_out_evals,
+        &proof,
+        instance_num_vars,
+        &mut verifier_transcript,
+    )
+    .unwrap();
+    let verification_time: Duration = start.elapsed();
+
+    println!(
+        "proof time: {:?}, verification time: {:?}",
+        proof_time, verification_time
+    );
 }
 
 #[test]
@@ -218,8 +249,12 @@ fn test_gkr_circuit_IsZeroGadget_U256() {
     // add prover-verifier process
     let mut prover_transcript =
         Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+    let mut verifier_transcript =
+        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
 
-    let mut wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
+    let mut prover_wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
+    let mut verifier_wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
+    let instance_num_vars = 1_u32.ilog2() as usize;
     for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
         let lo_num_vars = wires_out[wire_out_id as usize][0]
             .len()
@@ -227,16 +262,25 @@ fn test_gkr_circuit_IsZeroGadget_U256() {
             .ilog2() as usize;
         let output_mle = wires_out[wire_out_id as usize]
             .as_slice()
-            .mle(lo_num_vars, 0);
-        let output_point = iter::repeat_with(|| {
+            .mle(lo_num_vars, instance_num_vars);
+        let prover_output_point = iter::repeat_with(|| {
             prover_transcript
                 .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
                 .elements
         })
         .take(output_mle.num_vars)
         .collect_vec();
-        let output_eval = output_mle.evaluate(&output_point);
-        wires_out_evals.push((output_point, output_eval));
+        let verifier_output_point = iter::repeat_with(|| {
+            verifier_transcript
+                .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
+                .elements
+        })
+        .take(output_mle.num_vars)
+        .collect_vec();
+        let prover_output_eval = output_mle.evaluate(&prover_output_point);
+        let verifier_output_eval = output_mle.evaluate(&verifier_output_point);
+        prover_wires_out_evals.push((prover_output_point, prover_output_eval));
+        verifier_wires_out_evals.push((verifier_output_point, verifier_output_eval));
     }
 
     let start = std::time::Instant::now();
@@ -244,9 +288,26 @@ fn test_gkr_circuit_IsZeroGadget_U256() {
         &circuit,
         &circuit_witness,
         &[],
-        &wires_out_evals,
+        &prover_wires_out_evals,
         &mut prover_transcript,
     );
-    println!("proof time: {:?}", start.elapsed());
-    // TODO: add verifier process
+    let proof_time: Duration = start.elapsed();
+
+    /*
+    // verifier panics due to mismatch of number of variables
+    let start = std::time::Instant::now();
+    let _claim = IOPVerifierState::verify_parallel(
+        &circuit,
+        &[],
+        &[],
+        &verifier_wires_out_evals,
+        &proof,
+        instance_num_vars,
+        &mut verifier_transcript,
+    ).unwrap();
+    let verification_time: Duration = start.elapsed();
+
+    println!("proof time: {:?}, verification time: {:?}", proof_time, verification_time);
+    */
+    println!("proof time: {:?}", proof_time);
 }
