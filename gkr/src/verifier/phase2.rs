@@ -27,9 +27,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
             .mul3s
             .iter()
             .map(|gate| Gate3In {
-                idx_in1: gate.idx_in1,
-                idx_in2: gate.idx_in2,
-                idx_in3: gate.idx_in3,
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
                 scalar: constant(gate.scalar),
             })
@@ -38,8 +36,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
             .mul2s
             .iter()
             .map(|gate| Gate2In {
-                idx_in1: gate.idx_in1,
-                idx_in2: gate.idx_in2,
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
                 scalar: constant(gate.scalar),
             })
@@ -57,16 +54,18 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
             .add_consts
             .iter()
             .map(|gate| GateCIn {
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                constant: constant(gate.constant),
+                scalar: constant(gate.scalar),
             })
             .collect_vec();
         let assert_consts = layer
             .assert_consts
             .iter()
             .map(|gate| GateCIn {
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                constant: constant(gate.constant),
+                scalar: constant(gate.scalar),
             })
             .collect_vec();
         let lo_out_num_vars = layer.num_vars;

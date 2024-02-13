@@ -19,7 +19,7 @@ where
 {
     fn eval<E: SmallField<BaseField = F>>(&self, out_eq_vec: &[E]) -> E {
         self.iter().fold(E::ZERO, |acc, gate| {
-            acc + out_eq_vec[gate.idx_out].mul_base(&gate.constant)
+            acc + out_eq_vec[gate.idx_out].mul_base(&gate.scalar)
         })
     }
     fn eval_subset_eq<E: SmallField<BaseField = F>>(&self, out_eq_vec: &[E], in_eq_vec: &[E]) -> E {
@@ -47,7 +47,7 @@ where
 {
     fn eval<E: SmallField<BaseField = F>>(&self, out_eq_vec: &[E], in_eq_vec: &[E]) -> E {
         self.iter().fold(E::ZERO, |acc, gate| {
-            acc + out_eq_vec[gate.idx_out] * in_eq_vec[gate.idx_in].mul_base(&gate.scalar)
+            acc + out_eq_vec[gate.idx_out] * in_eq_vec[gate.idx_in[0]].mul_base(&gate.scalar)
         })
     }
     fn fix_out_variables<E: SmallField<BaseField = F>>(
@@ -57,7 +57,7 @@ where
     ) -> Vec<E> {
         let mut ans = vec![E::ZERO; in_size];
         for gate in self.iter() {
-            ans[gate.idx_in] += out_eq_vec[gate.idx_out].mul_base(&gate.scalar);
+            ans[gate.idx_in[0]] += out_eq_vec[gate.idx_out].mul_base(&gate.scalar);
         }
         ans
     }
@@ -87,8 +87,8 @@ where
     ) -> E {
         self.iter().fold(E::ZERO, |acc, gate| {
             acc + out_eq_vec[gate.idx_out]
-                * in1_eq_vec[gate.idx_in1]
-                * in2_eq_vec[gate.idx_in2].mul_base(&gate.scalar)
+                * in1_eq_vec[gate.idx_in[0]]
+                * in2_eq_vec[gate.idx_in[1]].mul_base(&gate.scalar)
         })
     }
 }
@@ -119,9 +119,9 @@ where
     ) -> E {
         self.iter().fold(E::ZERO, |acc, gate| {
             acc + out_eq_vec[gate.idx_out]
-                * in1_eq_vec[gate.idx_in1]
-                * in2_eq_vec[gate.idx_in2]
-                * in3_eq_vec[gate.idx_in3].mul_base(&gate.scalar)
+                * in1_eq_vec[gate.idx_in[0]]
+                * in2_eq_vec[gate.idx_in[1]]
+                * in3_eq_vec[gate.idx_in[2]].mul_base(&gate.scalar)
         })
     }
 }
