@@ -7,7 +7,7 @@ use ark_std::rand::{
 };
 use ff::Field;
 use gkr::{
-    structs::{Circuit, CircuitWitness},
+    structs::{Circuit, CircuitWitness, PointAndEval},
     utils::MultilinearExtensionFromVectors,
 };
 use goldilocks::{GoldilocksExt2, SmallField};
@@ -322,7 +322,7 @@ fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
         &circuit,
         &witness,
         &[],
-        &[(output_point, output_eval)],
+        &[PointAndEval::new(output_point, output_eval)],
         &mut prover_transcript,
     );
     println!("{}: {:?}", 1 << instance_num_vars, start.elapsed());
