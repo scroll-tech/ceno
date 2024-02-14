@@ -33,3 +33,5 @@ path = "examples/wire_in_with_pad.rs"
 [[bin]]
 name = "fake_hash_lookup_par"
 path = "examples/fake_hash_lookup_par.rs"
+[dev-dependencies]
+tiny-keccak = { version = "2.0.2", features = ["keccak"] }

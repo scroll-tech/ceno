@@ -41,20 +41,7 @@ impl<F: SmallField> Circuit<F> {
             (layers_of_cell_id, wire_ids_in_layer)
         };
 
-        let mut layers = (0..n_layers)
-            .map(|i| Layer::<F> {
-                add_consts: vec![],
-                adds: vec![],
-                mul2s: vec![],
-                mul3s: vec![],
-                assert_consts: vec![],
-                copy_to: HashMap::new(),
-                paste_from: HashMap::new(),
-                num_vars: 0,
-                max_previous_num_vars: 0,
-                layer_id: i,
-            })
-            .collect_vec();
+        let mut layers = vec![Layer::default(); n_layers as usize];
 
         // ==================================
         // From the input layer to the output layer, construct the gates. If a
@@ -247,38 +234,41 @@ impl<F: SmallField> Circuit<F> {
                 let cell = &circuit_builder.cells[*cell_id];
                 if let Some(assert_const) = cell.assert_const {
                     layers[layer_id as usize].assert_consts.push(GateCIn {
+                        idx_in: [],
                         idx_out: i,
-                        constant: ConstantType::Field(assert_const),
+                        scalar: ConstantType::Field(assert_const),
                     });
                 }
                 for gate in cell.gates.iter() {
                     match gate {
                         GateType::AddC(c) => {
                             layers[layer_id as usize].add_consts.push(GateCIn {
+                                idx_in: [],
                                 idx_out: i,
-                                constant: *c,
+                                scalar: *c,
                             });
                         }
                         GateType::Add(in_0, scalar) => {
                             layers[layer_id as usize].adds.push(Gate1In {
-                                idx_in: current_wire_id(*in_0),
+                                idx_in: [current_wire_id(*in_0)],
                                 idx_out: i,
                                 scalar: *scalar,
                             });
                         }
                         GateType::Mul2(in_0, in_1, scalar) => {
                             layers[layer_id as usize].mul2s.push(Gate2In {
-                                idx_in1: current_wire_id(*in_0),
-                                idx_in2: current_wire_id(*in_1),
+                                idx_in: [current_wire_id(*in_0), current_wire_id(*in_1)],
                                 idx_out: i,
                                 scalar: *scalar,
                             });
                         }
                         GateType::Mul3(in_0, in_1, in_2, scalar) => {
                             layers[layer_id as usize].mul3s.push(Gate3In {
-                                idx_in1: current_wire_id(*in_0),
-                                idx_in2: current_wire_id(*in_1),
-                                idx_in3: current_wire_id(*in_2),
+                                idx_in: [
+                                    current_wire_id(*in_0),
+                                    current_wire_id(*in_1),
+                                    current_wire_id(*in_2),
+                                ],
                                 idx_out: i,
                                 scalar: *scalar,
                             });
@@ -339,7 +329,7 @@ impl<F: SmallField> Circuit<F> {
             layer
                 .add_consts
                 .iter()
-                .for_each(|gate| update_const(gate.constant));
+                .for_each(|gate| update_const(gate.scalar));
             layer.adds.iter().for_each(|gate| update_const(gate.scalar));
             layer
                 .mul2s
