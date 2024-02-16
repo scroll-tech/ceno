@@ -15,6 +15,5 @@ rayon.workspace = true
 serde.workspace = true
 
 
-
-multilinear_extensions = { path = "../multilinear_extensions", features = [ "parallel"] }
+multilinear_extensions = { path = "../multilinear_extensions" }
 transcript = { path = "../transcript" }

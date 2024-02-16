@@ -2,10 +2,8 @@ use std::sync::Arc;
 
 use ark_std::{end_timer, rand::RngCore, start_timer};
 use goldilocks::SmallField;
-use serde::{Deserialize, Serialize};
-
-#[cfg(feature = "parallel")]
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use serde::{Deserialize, Serialize};
 
 /// Stores a multilinear polynomial in dense evaluation form.
 #[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
@@ -78,12 +76,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
         let mut res = vec![F::ZERO; 1 << (nv - 1)];
 
         // evaluate single variable of partial point from left to right
-        #[cfg(not(feature = "parallel"))]
-        for i in 0..(1 << (nv - 1)) {
-            res[i] = data[i << 1] + (data[(i << 1) + 1] - data[i << 1]) * point;
-        }
 
-        #[cfg(feature = "parallel")]
         res.par_iter_mut().enumerate().for_each(|(i, x)| {
             *x = data[i << 1] + (data[(i << 1) + 1] - data[i << 1]) * point;
         });

@@ -11,5 +11,5 @@ serde.workspace = true
 goldilocks.workspace = true
 ff.workspace = true
 
-multilinear_extensions = { path = "../multilinear_extensions", features = [ "parallel"] }
+multilinear_extensions = { path = "../multilinear_extensions" }
 transcript = { path = "../transcript" }
