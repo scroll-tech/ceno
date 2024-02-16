@@ -13,7 +13,7 @@ use crate::{
 
 use super::{ChipHandler, RangeChipOperations};
 
-impl<F: SmallField> RangeChipOperations<F> for ChipHandler {
+impl<F: SmallField> RangeChipOperations<F> for ChipHandler<F> {
     fn range_check_stack_top(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
@@ -73,8 +73,8 @@ impl<F: SmallField> RangeChipOperations<F> for ChipHandler {
     }
 }
 
-impl ChipHandler {
-    fn small_range_check<F: SmallField>(
+impl<F: SmallField> ChipHandler<F> {
+    fn small_range_check(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
         value: MixedCell<F>,
@@ -83,7 +83,7 @@ impl ChipHandler {
         if bit_width > RANGE_CHIP_BIT_WIDTH {
             return Err(ZKVMError::CircuitError);
         }
-        let out = circuit_builder.create_ext();
+        let out = circuit_builder.create_ext_cell();
         let items = [value.mul(F::BaseField::from(1 << (RANGE_CHIP_BIT_WIDTH - bit_width)))];
         circuit_builder.rlc_mixed(&out, &items, self.challenge);
         self.records.push(out);
@@ -91,8 +91,8 @@ impl ChipHandler {
     }
 }
 
-impl ChipHandler {
-    pub(crate) fn add_pc_const<F: SmallField>(
+impl<F: SmallField> ChipHandler<F> {
+    pub(crate) fn add_pc_const(
         circuit_builder: &mut CircuitBuilder<F>,
         pc: &PCUInt,
         constant: i64,
@@ -107,7 +107,7 @@ impl ChipHandler {
         )
     }
 
-    pub(crate) fn add_ts_with_const<F: SmallField>(
+    pub(crate) fn add_ts_with_const(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
         ts: &TSUInt,
@@ -124,7 +124,7 @@ impl ChipHandler {
         )
     }
 
-    pub(crate) fn non_zero<F: SmallField>(
+    pub(crate) fn non_zero(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
         val: CellId,

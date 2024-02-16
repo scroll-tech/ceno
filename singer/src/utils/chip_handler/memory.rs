@@ -3,7 +3,7 @@ use simple_frontend::structs::{CellId, CircuitBuilder};
 
 use super::{ChipHandler, MemoryChipOperations};
 
-impl<F: SmallField> MemoryChipOperations<F> for ChipHandler {
+impl<F: SmallField> MemoryChipOperations<F> for ChipHandler<F> {
     fn mem_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
@@ -11,7 +11,7 @@ impl<F: SmallField> MemoryChipOperations<F> for ChipHandler {
         memory_ts: &[CellId],
         byte: CellId,
     ) {
-        let out = circuit_builder.create_ext();
+        let out = circuit_builder.create_ext_cell();
         let mut items = offset.to_vec();
         items.extend_from_slice(memory_ts);
         items.push(byte);
@@ -26,7 +26,7 @@ impl<F: SmallField> MemoryChipOperations<F> for ChipHandler {
         memory_ts: &[CellId],
         byte: CellId,
     ) {
-        let out = circuit_builder.create_ext();
+        let out = circuit_builder.create_ext_cell();
         let mut items = offset.to_vec();
         items.extend_from_slice(memory_ts);
         items.push(byte);

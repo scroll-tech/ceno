@@ -22,7 +22,7 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
     let (_, pc_cells) = circuit_builder.create_wire_in(PCUInt::N_OPRAND_CELLS);
     let (_, bytecode_cells) = circuit_builder.create_wire_in(1);
 
-    let rlc = circuit_builder.create_ext();
+    let rlc = circuit_builder.create_ext_cell();
     let mut items = pc_cells.clone();
     items.extend(bytecode_cells.clone());
     circuit_builder.rlc(&rlc, &items, challenges.bytecode());

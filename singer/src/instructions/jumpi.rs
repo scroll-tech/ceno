@@ -151,7 +151,7 @@ impl Instruction for JumpiInstruction {
         let pc_plus_1 = pc_plus_1.values();
         let next_pc = circuit_builder.create_cells(PCUInt::N_OPRAND_CELLS);
         for i in 0..PCUInt::N_OPRAND_CELLS {
-            circuit_builder.sel(next_pc[i], pc_plus_1[i], dest_values[i], cond_non_zero);
+            circuit_builder.select(next_pc[i], pc_plus_1[i], dest_values[i], cond_non_zero);
         }
 
         // State out
