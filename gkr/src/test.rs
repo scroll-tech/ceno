@@ -18,7 +18,7 @@ use transcript::Transcript;
 // inv - 1) = 0
 // value and inv must occupy one cell and
 // all intermediate computations are restricted by field size
-pub fn IsZeroGadget<Ext: SmallField>(
+pub fn is_zero_gadget<Ext: SmallField>(
     circuit_builder: &mut CircuitBuilder<Ext>,
     value: CellId,
     inv: CellId,
@@ -43,7 +43,7 @@ pub fn IsZeroGadget<Ext: SmallField>(
 }
 
 #[test]
-fn test_gkr_circuit_IsZeroGadget_simple() {
+fn test_gkr_circuit_is_zero_gadget_simple() {
     // input and output
     let in_value = vec![Goldilocks::from(5)];
     let in_inv = vec![Goldilocks::from(5).invert().unwrap()];
@@ -53,11 +53,12 @@ fn test_gkr_circuit_IsZeroGadget_simple() {
     let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
     let (value_wire_in_id, value) = circuit_builder.create_wire_in(1);
     let (inv_wire_in_id, inv) = circuit_builder.create_wire_in(1);
-    let (is_zero, cond1, cond2) = IsZeroGadget(&mut circuit_builder, value[0], inv[0]);
+    let (is_zero, cond1, cond2) = is_zero_gadget(&mut circuit_builder, value[0], inv[0]);
     let cond_wire_out_id = circuit_builder.create_wire_out_from_cells(&[cond1, cond2]);
     let is_zero_wire_out_id = circuit_builder.create_wire_out_from_cells(&[is_zero]);
 
     circuit_builder.configure();
+    #[cfg(debug_assertions)]
     circuit_builder.print_info();
     let circuit = Circuit::new(&circuit_builder);
     println!("circuit: {:?}", circuit);
@@ -162,7 +163,7 @@ fn test_gkr_circuit_IsZeroGadget_simple() {
 }
 
 #[test]
-fn test_gkr_circuit_IsZeroGadget_U256() {
+fn test_gkr_circuit_is_zero_gadget_u256() {
     // IsZero for U256. Each cell holds 4 bits preventing multiplication overflow.
     // value is decomposed into 64 cells
     // assert IsZero(value) when all 64 cells are zero
@@ -188,7 +189,7 @@ fn test_gkr_circuit_IsZeroGadget_U256() {
     circuit_builder.add_const(is_zero_prev_items, Goldilocks::from(1));
     for (value_item, inv_item) in value.into_iter().zip(inv) {
         let (is_zero_item, cond1_item, cond2_item) =
-            IsZeroGadget(&mut circuit_builder, value_item, inv_item);
+            is_zero_gadget(&mut circuit_builder, value_item, inv_item);
         cond1.push(cond1_item);
         cond2.push(cond2_item);
         let is_zero = circuit_builder.create_cell();
@@ -207,6 +208,8 @@ fn test_gkr_circuit_IsZeroGadget_U256() {
     let is_zero_wire_out_id = circuit_builder.create_wire_out_from_cells(&[is_zero_prev_items]);
 
     circuit_builder.configure();
+
+    #[cfg(debug_assertions)]
     circuit_builder.print_info();
 
     let circuit = Circuit::new(&circuit_builder);
