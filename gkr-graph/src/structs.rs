@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use gkr::structs::{Circuit, CircuitWitness, Point};
+use gkr::structs::{Circuit, CircuitWitness, Point, PointAndEval};
 use goldilocks::SmallField;
 use simple_frontend::structs::WireId;
 
@@ -79,4 +79,4 @@ pub struct CircuitGraphAuxInfo {
 
 /// Evaluations corresponds to the circuit targets.
 #[derive(Clone)]
-pub struct TargetEvaluations<F: SmallField>(pub Vec<(Point<F>, F)>);
+pub struct TargetEvaluations<F>(pub Vec<PointAndEval<F>>);

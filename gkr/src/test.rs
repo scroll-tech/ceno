@@ -1,5 +1,5 @@
 use crate::{
-    structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState},
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState, PointAndEval},
     utils::MultilinearExtensionFromVectors,
 };
 use ff::Field;
@@ -102,8 +102,8 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     let mut verifier_transcript =
         Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
 
-    let mut prover_wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
-    let mut verifier_wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
+    let mut prover_wires_out_evals = vec![];
+    let mut verifier_wires_out_evals = vec![];
     let instance_num_vars = 1_u32.ilog2() as usize;
     for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
         let lo_num_vars = wires_out[wire_out_id as usize][0]
@@ -129,8 +129,11 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
         .collect_vec();
         let prover_output_eval = output_mle.evaluate(&prover_output_point);
         let verifier_output_eval = output_mle.evaluate(&verifier_output_point);
-        prover_wires_out_evals.push((prover_output_point, prover_output_eval));
-        verifier_wires_out_evals.push((verifier_output_point, verifier_output_eval));
+        prover_wires_out_evals.push(PointAndEval::new(prover_output_point, prover_output_eval));
+        verifier_wires_out_evals.push(PointAndEval::new(
+            verifier_output_point,
+            verifier_output_eval,
+        ));
     }
 
     let start = std::time::Instant::now();
@@ -255,8 +258,8 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     let mut verifier_transcript =
         Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
 
-    let mut prover_wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
-    let mut verifier_wires_out_evals: Vec<(Vec<Goldilocks>, Goldilocks)> = vec![];
+    let mut prover_wires_out_evals = vec![];
+    let mut verifier_wires_out_evals = vec![];
     let instance_num_vars = 1_u32.ilog2() as usize;
     for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
         let lo_num_vars = wires_out[wire_out_id as usize][0]
@@ -282,8 +285,11 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
         .collect_vec();
         let prover_output_eval = output_mle.evaluate(&prover_output_point);
         let verifier_output_eval = output_mle.evaluate(&verifier_output_point);
-        prover_wires_out_evals.push((prover_output_point, prover_output_eval));
-        verifier_wires_out_evals.push((verifier_output_point, verifier_output_eval));
+        prover_wires_out_evals.push(PointAndEval::new(prover_output_point, prover_output_eval));
+        verifier_wires_out_evals.push(PointAndEval::new(
+            verifier_output_point,
+            verifier_output_eval,
+        ));
     }
 
     let start = std::time::Instant::now();

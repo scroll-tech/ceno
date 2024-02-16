@@ -44,7 +44,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
             }
             if let Some(layer) = self.cells[i].layer {
                 // todo: remove
-                println!("Cell: {:?}", self.cells[i]);
+                // println!("Cell: {:?}", self.cells[i]);
                 // assert!(layer > 0 || matches!(self.cells[i].cell_type, Some(CellType::In(_))));
                 max_layer_id = max_layer_id.max(layer);
             }
