@@ -5,13 +5,10 @@ members = [
     "mpcs",
     "multilinear_extensions",
     "simple-frontend",
+    "singer",
     "singer-pro",
     "sumcheck",
     "transcript",
-    "mpcs",
-    "gkr-graph",
-    "simple-frontend",
-    "singer",
 ]
 
 [workspace.package]
