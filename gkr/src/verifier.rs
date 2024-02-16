@@ -12,6 +12,7 @@ use crate::{
     structs::{
         Circuit, GKRInputClaims, Gate1In, Gate2In, Gate3In, GateCIn, IOPProof,
         IOPProverPhase1Message, IOPProverPhase2Message, IOPVerifierState, Layer, Point,
+        PointAndEval,
     },
 };
 
@@ -26,8 +27,8 @@ impl<F: SmallField> IOPVerifierState<F> {
     pub fn verify_parallel(
         circuit: &Circuit<F>,
         challenges: &[F],
-        output_evals: &[(Point<F>, F)],
-        wires_out_evals: &[(Point<F>, F)],
+        output_evals: &[PointAndEval<F>],
+        wires_out_evals: &[PointAndEval<F>],
         proof: &IOPProof<F>,
         instance_num_vars: usize,
         transcript: &mut Transcript<F>,
@@ -62,8 +63,8 @@ impl<F: SmallField> IOPVerifierState<F> {
                     )
                 }
                 None => (
-                    verifier_state.next_evals[0].0.clone(),
-                    verifier_state.next_evals[0].1,
+                    verifier_state.next_layer_point_and_evals[0].point.clone(),
+                    verifier_state.next_layer_point_and_evals[0].eval,
                 ),
             };
 
@@ -99,23 +100,23 @@ impl<F: SmallField> IOPVerifierState<F> {
 
     /// Initialize verifying state for data parallel circuits.
     fn verifier_init_parallel(
-        output_evals: &[(Point<F>, F)],
-        wires_out_evals: &[(Point<F>, F)],
+        output_evals: &[PointAndEval<F>],
+        wires_out_evals: &[PointAndEval<F>],
     ) -> Self {
-        let next_evals = output_evals.to_vec();
-        let mut subset_evals = HashMap::new();
-        subset_evals.entry(0).or_insert(
+        let next_layer_point_and_evals = output_evals.to_vec();
+        let mut subset_point_and_evals = HashMap::new();
+        subset_point_and_evals.entry(0).or_insert(
             wires_out_evals
                 .to_vec()
                 .into_iter()
                 .enumerate()
-                .map(|(i, (point, value))| (i as LayerId, point.clone(), value))
+                .map(|(i, point_and_eval)| (i as LayerId, point_and_eval))
                 .collect_vec(),
         );
         Self {
             layer_id: 0,
-            next_evals,
-            subset_evals,
+            next_layer_point_and_evals,
+            subset_point_and_evals,
         }
     }
 
@@ -129,18 +130,21 @@ impl<F: SmallField> IOPVerifierState<F> {
         transcript: &mut Transcript<F>,
     ) -> Result<(), GKRError> {
         let lo_num_vars = layer.num_vars;
-        let next_evals = &self.next_evals;
-        let subset_evals = self.subset_evals.remove(&self.layer_id).unwrap_or(vec![]);
+        let next_layer_point_and_evals = &self.next_layer_point_and_evals;
+        let subset_point_and_evals = self
+            .subset_point_and_evals
+            .remove(&self.layer_id)
+            .unwrap_or(vec![]);
 
         let alpha = transcript.get_and_append_challenge(b"combine subset evals");
 
-        if subset_evals.len() == 0 && next_evals.len() == 1 {
+        if subset_point_and_evals.len() == 0 && next_layer_point_and_evals.len() == 1 {
             return Ok(());
         }
 
         let mut verifier_phase1_state = IOPVerifierPhase1State::verifier_init_parallel(
-            &next_evals,
-            &subset_evals,
+            &next_layer_point_and_evals,
+            &subset_point_and_evals,
             &alpha.elements,
             lo_num_vars,
             hi_num_vars,
@@ -178,7 +182,7 @@ impl<F: SmallField> IOPVerifierState<F> {
         prover_msg: &IOPProverPhase2Message<F>,
         transcript: &mut Transcript<F>,
     ) -> Result<(), GKRError> {
-        self.next_evals.clear();
+        self.next_layer_point_and_evals.clear();
 
         let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
@@ -245,21 +249,26 @@ impl<F: SmallField> IOPVerifierState<F> {
             .split_at(1);
 
         for f_value in next_f_values {
-            self.next_evals
-                .push((verifier_phase2_state.sumcheck_point_1.clone(), *f_value));
+            self.next_layer_point_and_evals
+                .push(PointAndEval::new_from_ref(
+                    &verifier_phase2_state.sumcheck_point_1,
+                    f_value,
+                ));
         }
         layer
             .paste_from
             .iter()
             .zip(subset_f_values.iter())
             .for_each(|((&old_layer_id, _), &subset_value)| {
-                self.subset_evals
+                self.subset_point_and_evals
                     .entry(old_layer_id)
                     .or_insert_with(Vec::new)
                     .push((
                         self.layer_id,
-                        verifier_phase2_state.sumcheck_point_1.clone().clone(),
-                        subset_value,
+                        PointAndEval::new_from_ref(
+                            &verifier_phase2_state.sumcheck_point_1,
+                            &subset_value,
+                        ),
                     ));
             });
 
@@ -276,10 +285,11 @@ impl<F: SmallField> IOPVerifierState<F> {
             transcript,
         )?;
 
-        self.next_evals.push((
-            verifier_phase2_state.sumcheck_point_2.clone(),
-            sumcheck_eval_values[1][0],
-        ));
+        self.next_layer_point_and_evals
+            .push(PointAndEval::new_from_ref(
+                &verifier_phase2_state.sumcheck_point_2,
+                &sumcheck_eval_values[1][0],
+            ));
 
         // ============================================
         // Step 3: Third step of arithmetic constraints
@@ -293,10 +303,11 @@ impl<F: SmallField> IOPVerifierState<F> {
             (&sumcheck_proofs[2], &sumcheck_eval_values[2]),
             transcript,
         )?;
-        self.next_evals.push((
-            verifier_phase2_state.sumcheck_point_3.clone(),
-            sumcheck_eval_values[2][0],
-        ));
+        self.next_layer_point_and_evals
+            .push(PointAndEval::new_from_ref(
+                &verifier_phase2_state.sumcheck_point_3,
+                &sumcheck_eval_values[2][0],
+            ));
 
         Ok(())
     }
@@ -309,7 +320,7 @@ impl<F: SmallField> IOPVerifierState<F> {
         prover_msg: &IOPProverPhase2Message<F>,
         transcript: &mut Transcript<F>,
     ) -> Result<(), GKRError> {
-        self.next_evals.clear();
+        self.next_layer_point_and_evals.clear();
 
         let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
@@ -352,8 +363,8 @@ impl<F: SmallField> IOPVerifierState<F> {
 }
 
 struct IOPVerifierPhase1State<'a, F: SmallField> {
-    next_evals: &'a [(Point<F>, F)],
-    subset_evals: &'a [(LayerId, Point<F>, F)],
+    next_layer_point_and_evals: &'a [PointAndEval<F>],
+    subset_point_and_evals: &'a [(LayerId, PointAndEval<F>)],
     alpha_pows: Vec<F>,
     lo_num_vars: usize,
     hi_num_vars: usize,

@@ -34,9 +34,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
             .mul3s
             .iter()
             .map(|gate| Gate3In {
-                idx_in1: gate.idx_in1,
-                idx_in2: gate.idx_in2,
-                idx_in3: gate.idx_in3,
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
                 scalar: constant(&gate.scalar),
             })
@@ -45,8 +43,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
             .mul2s
             .iter()
             .map(|gate| Gate2In {
-                idx_in1: gate.idx_in1,
-                idx_in2: gate.idx_in2,
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
                 scalar: constant(&gate.scalar),
             })
@@ -64,8 +61,9 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
             .assert_consts
             .iter()
             .map(|gate| GateCIn {
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                constant: constant(&gate.constant),
+                scalar: constant(&gate.scalar),
             })
             .collect_vec();
         let lo_out_num_vars = layer.num_vars;
@@ -209,24 +207,24 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                 let mut g1 = vec![F::ZERO; 1 << in_num_vars];
                 mul3s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in1] += tensor_eq_ty_rtry
+                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += tensor_eq_ty_rtry
                             [(s << lo_out_num_vars) ^ gate.idx_out]
-                            .mul_base(&layer_in_vec[s][gate.idx_in2])
-                            .mul_base(&layer_in_vec[s][gate.idx_in3])
+                            .mul_base(&layer_in_vec[s][gate.idx_in[1]])
+                            .mul_base(&layer_in_vec[s][gate.idx_in[2]])
                             .mul_base(&gate.scalar);
                     }
                 });
                 mul2s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in1] += tensor_eq_ty_rtry
+                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += tensor_eq_ty_rtry
                             [(s << lo_out_num_vars) ^ gate.idx_out]
-                            .mul_base(&layer_in_vec[s][gate.idx_in2])
+                            .mul_base(&layer_in_vec[s][gate.idx_in[1]])
                             .mul_base(&gate.scalar);
                     }
                 });
                 adds.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in] += tensor_eq_ty_rtry
+                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += tensor_eq_ty_rtry
                             [(s << lo_out_num_vars) ^ gate.idx_out]
                             .mul_base(&gate.scalar);
                     }
@@ -342,18 +340,18 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
             let mut g2 = vec![F::ZERO; 1 << f2.num_vars];
             mul3s.iter().for_each(|gate| {
                 for s in 0..(1 << hi_num_vars) {
-                    g2[(s << lo_in_num_vars) ^ gate.idx_in2] += tensor_eq_ty_rtry
+                    g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += tensor_eq_ty_rtry
                         [(s << lo_out_num_vars) ^ gate.idx_out]
-                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in1]
-                            .mul_base(&layer_in_vec[s][gate.idx_in3])
+                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                            .mul_base(&layer_in_vec[s][gate.idx_in[2]])
                             .mul_base(&gate.scalar);
                 }
             });
             mul2s.iter().for_each(|gate| {
                 for s in 0..(1 << hi_num_vars) {
-                    g2[(s << lo_in_num_vars) ^ gate.idx_in2] += tensor_eq_ty_rtry
+                    g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += tensor_eq_ty_rtry
                         [(s << lo_out_num_vars) ^ gate.idx_out]
-                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in1]
+                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
                             .mul_base(&gate.scalar);
                 }
             });
@@ -416,10 +414,10 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
             let mut g3 = vec![F::ZERO; 1 << f3.num_vars];
             mul3s.iter().for_each(|gate| {
                 for s in 0..(1 << hi_num_vars) {
-                    g3[(s << lo_in_num_vars) ^ gate.idx_in3] += tensor_eq_ty_rtry
+                    g3[(s << lo_in_num_vars) ^ gate.idx_in[2]] += tensor_eq_ty_rtry
                         [(s << lo_out_num_vars) ^ gate.idx_out]
-                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in1]
-                        * tensor_eq_s2x2_rs2rx2[(s << lo_in_num_vars) ^ gate.idx_in2]
+                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                        * tensor_eq_s2x2_rs2rx2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
                             .mul_base(&gate.scalar);
                 }
             });

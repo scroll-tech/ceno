@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use frontend::structs::WireId;
-use gkr::structs::{Circuit, CircuitWitness, Point};
+use gkr::structs::{Circuit, CircuitWitness, Point, PointAndEval};
 use goldilocks::SmallField;
+use simple_frontend::structs::WireId;
 
-type GKRProverState<F: SmallField> = gkr::structs::IOPProverState<F>;
-type GKRVerifierState<F: SmallField> = gkr::structs::IOPVerifierState<F>;
-type GKRProof<F: SmallField> = gkr::structs::IOPProof<F>;
+type GKRProverState<F> = gkr::structs::IOPProverState<F>;
+type GKRVerifierState<F> = gkr::structs::IOPVerifierState<F>;
+type GKRProof<F> = gkr::structs::IOPProof<F>;
 
 /// Corresponds to the `output_evals` and `wires_out_evals` in gkr
 /// `prove_parallel`.
@@ -79,4 +79,4 @@ pub struct CircuitGraphAuxInfo {
 
 /// Evaluations corresponds to the circuit targets.
 #[derive(Clone)]
-pub struct TargetEvaluations<F: SmallField>(pub Vec<(Point<F>, F)>);
+pub struct TargetEvaluations<F>(pub Vec<PointAndEval<F>>);

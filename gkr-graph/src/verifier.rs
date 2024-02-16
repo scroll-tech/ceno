@@ -1,5 +1,4 @@
-use ff::FromUniformBytes;
-use gkr::structs::IOPProverPhase2Message;
+use gkr::structs::{IOPProverPhase2Message, PointAndEval};
 use goldilocks::SmallField;
 use itertools::izip;
 use std::mem;
@@ -13,7 +12,7 @@ use crate::{
     },
 };
 
-impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
+impl<F: SmallField> IOPVerifierState<F> {
     pub fn verify(
         circuit: &CircuitGraph<F>,
         challenges: &[F],
@@ -58,11 +57,13 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                     PredType::Source => {}
                     PredType::PredWire(out) => match out {
                         NodeOutputType::OutputLayer(id) => {
-                            output_evals[*id].push((proof.point.clone(), *eval))
+                            output_evals[*id].push(PointAndEval::new_from_ref(&proof.point, eval))
                         }
                         NodeOutputType::WireOut(id, wire_id) => {
-                            wires_out_evals[*id].resize(*wire_id as usize + 1, (vec![], F::ZERO));
-                            wires_out_evals[*id][*wire_id as usize] = (proof.point.clone(), *eval);
+                            wires_out_evals[*id]
+                                .resize(*wire_id as usize + 1, PointAndEval::default());
+                            wires_out_evals[*id][*wire_id as usize] =
+                                PointAndEval::new_from_ref(&proof.point, eval);
                         }
                     },
                     _ => unreachable!(),

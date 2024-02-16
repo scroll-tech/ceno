@@ -2,22 +2,59 @@ use std::{collections::HashMap, sync::Arc};
 
 use goldilocks::SmallField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, InType, LayerId};
 
 pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
+
+/// A point is a vector of num_var length
 pub type Point<F> = Vec<F>;
 
+/// A point and the evaluation of this point.
+#[derive(Debug, Clone)]
+pub struct PointAndEval<F> {
+    pub(crate) point: Point<F>,
+    pub(crate) eval: F,
+}
+
+impl<F: SmallField> Default for PointAndEval<F> {
+    fn default() -> Self {
+        Self {
+            point: vec![],
+            eval: F::ZERO,
+        }
+    }
+}
+
+impl<F: Clone> PointAndEval<F> {
+    /// Construct a new pair of point and eval.
+    /// Caller gives up ownership
+    pub fn new(point: Point<F>, eval: F) -> Self {
+        Self { point, eval }
+    }
+
+    /// Construct a new pair of point and eval.
+    /// Performs deep copy.
+    pub fn new_from_ref(point: &Point<F>, eval: &F) -> Self {
+        Self {
+            point: (*point).clone(),
+            eval: eval.clone(),
+        }
+    }
+}
+
 /// Represent the prover state for each layer in the IOP protocol. To support
-/// gates between non-adjeacent layers, we leverage the techniques in
+/// gates between non-adjacent layers, we leverage the techniques in
 /// [Virgo++](https://eprint.iacr.org/2020/1247).
 pub struct IOPProverState<F: SmallField> {
     pub(crate) layer_id: LayerId,
     /// Evaluations from the next layer.
-    pub(crate) next_evals: Vec<(Point<F>, F)>,
-    /// Evaluations of subsets from layers closer to the output. Hashmap is used
-    /// to map from the current layer id to the later layer id, point and value.
-    pub(crate) subset_evals: HashMap<LayerId, Vec<(LayerId, Point<F>, F)>>,
+    pub(crate) next_layer_point_and_evals: Vec<PointAndEval<F>>,
+    /// Evaluations of subsets from layers __closer__ to the output.
+    /// __closer__ as in the layer that the subset elements lie in has not been processed.
+    ///
+    /// Hashmap is used to map from the current layer id to the that layer id, point and value.
+    pub(crate) subset_point_and_evals: HashMap<LayerId, Vec<(LayerId, PointAndEval<F>)>>,
     pub(crate) circuit_witness: CircuitWitness<F::BaseField>,
     pub(crate) layer_out_poly: Arc<DenseMultilinearExtension<F>>,
 }
@@ -26,19 +63,21 @@ pub struct IOPProverState<F: SmallField> {
 pub struct IOPVerifierState<F: SmallField> {
     pub(crate) layer_id: LayerId,
     /// Evaluations from the next layer.
-    pub(crate) next_evals: Vec<(Point<F>, F)>,
+    pub(crate) next_layer_point_and_evals: Vec<PointAndEval<F>>,
     /// Evaluations of subsets from layers closer to the output. Hashmap is used
     /// to map from the current layer id to the deeper layer id, point and
     /// value.
-    pub(crate) subset_evals: HashMap<LayerId, Vec<(LayerId, Point<F>, F)>>,
+    pub(crate) subset_point_and_evals: HashMap<LayerId, Vec<(LayerId, PointAndEval<F>)>>,
 }
 
 /// Phase 1 is a sumcheck protocol merging the subset evaluations from the
 /// layers closer to the circuit output to an evaluation to the output of the
 /// current layer.
 pub struct IOPProverPhase1Message<F: SmallField> {
+    // First step of copy constraints copied to later layers
     pub sumcheck_proof_1: SumcheckProof<F>,
     pub eval_value_1: Vec<F>,
+    // Second step of copy constraints copied to later layers
     pub sumcheck_proof_2: SumcheckProof<F>,
     /// Evaluation of the output of the current layer.
     pub eval_value_2: F,
@@ -89,6 +128,22 @@ pub struct Layer<F: SmallField> {
     pub(crate) max_previous_num_vars: usize,
 }
 
+impl<F: SmallField> Default for Layer<F> {
+    fn default() -> Self {
+        Layer::<F> {
+            add_consts: vec![],
+            adds: vec![],
+            mul2s: vec![],
+            mul3s: vec![],
+            assert_consts: vec![],
+            copy_to: HashMap::new(),
+            paste_from: HashMap::new(),
+            num_vars: 0,
+            max_previous_num_vars: 0,
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub struct Circuit<F: SmallField> {
     pub layers: Vec<Layer<F>>,
@@ -101,34 +156,57 @@ pub struct Circuit<F: SmallField> {
     pub max_wires_in_num_vars: Option<usize>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct GateCIn<C> {
-    pub(crate) idx_out: CellId,
-    pub(crate) constant: C,
-}
+// #[derive(Clone, Debug, Serialize)]
+// pub struct GateCIn<C> {
+//     pub(crate) idx_out: CellId,
+//     pub(crate) constant: C,
+// }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct Gate1In<C> {
-    pub(crate) idx_in: CellId,
+// #[derive(Clone, Debug, Serialize)]
+// pub struct Gate1In<C> {
+//     pub(crate) idx_in: CellId,
+//     pub(crate) idx_out: CellId,
+//     pub(crate) scalar: C,
+// }
+
+// #[derive(Clone, Debug, Serialize)]
+// pub struct Gate2In<C> {
+//     pub(crate) idx_in1: CellId,
+//     pub(crate) idx_in2: CellId,
+//     pub(crate) idx_out: CellId,
+//     pub(crate) scalar: C,
+// }
+
+// #[derive(Clone, Debug, Serialize)]
+// pub struct Gate3In<C> {
+//     pub(crate) idx_in1: CellId,
+//     pub(crate) idx_in2: CellId,
+//     pub(crate) idx_in3: CellId,
+//     pub(crate) idx_out: CellId,
+//     pub(crate) scalar: C,
+// }
+
+pub type GateCIn<C> = Gate<C, 0>;
+pub type Gate1In<C> = Gate<C, 1>;
+pub type Gate2In<C> = Gate<C, 2>;
+pub type Gate3In<C> = Gate<C, 3>;
+
+#[derive(Clone, Debug)]
+/// Macro struct for Gate
+pub struct Gate<C, const FAN_IN: usize> {
+    pub(crate) idx_in: [CellId; FAN_IN],
     pub(crate) idx_out: CellId,
     pub(crate) scalar: C,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct Gate2In<C> {
-    pub(crate) idx_in1: CellId,
-    pub(crate) idx_in2: CellId,
-    pub(crate) idx_out: CellId,
-    pub(crate) scalar: C,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct Gate3In<C> {
-    pub(crate) idx_in1: CellId,
-    pub(crate) idx_in2: CellId,
-    pub(crate) idx_in3: CellId,
-    pub(crate) idx_out: CellId,
-    pub(crate) scalar: C,
+impl<C, const FAN_IN: usize> Serialize for Gate<C, FAN_IN> {
+    fn serialize<S>(&self, _: S) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error>
+    where
+        S: Serializer,
+    {
+        // TODO!
+        todo!()
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -137,6 +215,7 @@ pub struct CircuitWitness<F: SmallField> {
     pub(crate) layers: Vec<Vec<Vec<F>>>,
     /// 1. wires_in id, 2. instance_id, 3. wire_id.
     pub(crate) wires_in: Vec<Vec<Vec<F>>>,
+    /// 1. wires_in id, 2. instance_id, 3. wire_id.
     pub(crate) wires_out: Vec<Vec<Vec<F>>>,
     /// Challenges
     pub(crate) challenges: HashMap<ChallengeConst, Vec<F>>,
