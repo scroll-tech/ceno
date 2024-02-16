@@ -1,4 +1,4 @@
-use crate::instructions::InstCircuit;
+use crate::instructions::{ChipChallenges, InstCircuit};
 use core::ops::Range;
 use ff::Field;
 use gkr::structs::CircuitWitness;
@@ -11,6 +11,7 @@ pub(crate) fn test_opcode_circuit<Ext: SmallField>(
     phase0_idx_map: &BTreeMap<String, Range<CellId>>,
     phase0_witness_size: usize,
     phase0_values_map: &BTreeMap<String, Vec<Ext::BaseField>>,
+    circuit_witness_challenges: Vec<Ext>,
 ) {
     // configure circuit
     let circuit = inst_circuit.circuit.as_ref();
@@ -48,8 +49,7 @@ pub(crate) fn test_opcode_circuit<Ext: SmallField>(
 
     /*
     let circuit_witness = {
-        let challenges = vec![F::from(2), F::from(1)];
-        let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
+        let mut circuit_witness = CircuitWitness::new(&circuit, circuit_witness_challenges);
         circuit_witness.add_instance(&circuit, &wires_in);
         circuit_witness
     };

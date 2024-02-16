@@ -230,14 +230,17 @@ mod test {
         );
         phase0_values_map.insert(
             "phase0_stack_bytes".to_string(),
-            vec![Goldilocks::from(1u64)],
+            vec![], // todo
         );
+
+        let circuit_witness_challenges = vec![Goldilocks::from(2)];
 
         test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,
             phase0_witness_size,
             &phase0_values_map,
+            circuit_witness_challenges,
         );
     }
 }
