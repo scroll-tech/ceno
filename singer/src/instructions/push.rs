@@ -176,10 +176,11 @@ mod test {
     use crate::instructions::{ChipChallenges, Instruction, PushInstruction};
     use crate::test::test_opcode_circuit;
     use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
 
     impl<const N: usize> PushInstruction<N> {
         #[inline]
-        fn phase0_sizes() -> BTreeMap<String, Range<usize>> {
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
             let mut map = BTreeMap::new();
             map.insert("phase0_pc".to_string(), Self::phase0_pc());
             map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
@@ -206,11 +207,11 @@ mod test {
 
         // initialize general test inputs associated with push1
         let inst_circuit =
-            PushInstruction::<1>::construct_circuit::<Goldilocks>(challenges);
+            PushInstruction::<1>::construct_circuit::<Goldilocks>(challenges).unwrap();
 
-        println!("{:?}", inst_circuit);       
-        
-        /*let phase0_idx_map = PushInstruction::<1>::phase0_sizes();
+        println!("{:?}", inst_circuit);
+
+        let phase0_idx_map = PushInstruction::<1>::phase0_idxes_map();
         println!("{:?}", &phase0_idx_map);
         let phase0_witness_size = PushInstruction::<1>::phase0_size();
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
@@ -221,7 +222,7 @@ mod test {
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add_i_plus_1".to_string(),
-            vec![Goldilocks::from(1u64), Goldilocks::from(1u64)],
+            vec![Goldilocks::from(3u64)],
         );
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
@@ -238,6 +239,5 @@ mod test {
             phase0_witness_size,
             &phase0_values_map,
         );
-    }*/
-}
+    }
 }

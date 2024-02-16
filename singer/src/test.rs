@@ -1,19 +1,23 @@
 use crate::instructions::InstCircuit;
 use core::ops::Range;
+use ff::Field;
 use gkr::structs::CircuitWitness;
 use goldilocks::SmallField;
+use simple_frontend::structs::CellId;
 use std::collections::BTreeMap;
 
-pub(crate) fn test_opcode_circuit<F: SmallField>(
-    inst_circuit: &InstCircuit<F>,
-    phase0_idx_map: &BTreeMap<String, Range<usize>>,
+pub(crate) fn test_opcode_circuit<Ext: SmallField>(
+    inst_circuit: &InstCircuit<Ext>,
+    phase0_idx_map: &BTreeMap<String, Range<CellId>>,
     phase0_witness_size: usize,
-    phase0_values_map: &BTreeMap<String, Vec<F>>,
+    phase0_values_map: &BTreeMap<String, Vec<Ext::BaseField>>,
 ) {
     // configure circuit
     let circuit = inst_circuit.circuit.as_ref();
-    println!("{:?}", circuit);
-
+    #[cfg(feature = "test")]
+    {
+        println!("{:?}", circuit);
+    }
     // get indexes for circuit inputs and wire_in
     // only phase0
     let inputs_idxes = &inst_circuit.layout.phases_wire_id;
@@ -22,19 +26,25 @@ pub(crate) fn test_opcode_circuit<F: SmallField>(
     // assign witnesses to circuit
     let n_wires_in = circuit.n_wires_in;
     let mut wires_in = vec![vec![]; n_wires_in];
-    wires_in[phase0_input_idx as usize] = vec![F::from(0u64); phase0_witness_size];
+    wires_in[phase0_input_idx as usize] = vec![Ext::BaseField::ZERO; phase0_witness_size];
 
     for key in phase0_idx_map.keys() {
-        let range = phase0_idx_map.get(key).unwrap().clone().collect::<Vec<_>>();
+        let range = phase0_idx_map
+            .get(key)
+            .unwrap()
+            .clone()
+            .collect::<Vec<CellId>>();
         let values = phase0_values_map.get(key).unwrap();
-        for (value_idx, wire_in_idx) in range.into_iter().enumerate() {
+        for (value_idx, cell_idx) in range.into_iter().enumerate() {
             if value_idx < values.len() {
-                wires_in[phase0_input_idx as usize][wire_in_idx] = values[value_idx];
+                wires_in[phase0_input_idx as usize][cell_idx] = values[value_idx];
             }
         }
     }
-
-    println!("{:?}", wires_in);
+    #[cfg(feature = "test")]
+    {
+        println!("{:?}", wires_in);
+    }
 
     /*
     let circuit_witness = {

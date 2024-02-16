@@ -223,9 +223,9 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
 #[cfg(test)]
 mod test {
     use super::{UInt, UIntAddSub};
-    use simple_frontend::structs::CircuitBuilder;
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::Goldilocks;
+    use simple_frontend::structs::CircuitBuilder;
 
     #[test]
     fn test_add_unsafe() {
