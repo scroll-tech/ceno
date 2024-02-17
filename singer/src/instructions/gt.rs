@@ -203,3 +203,124 @@ impl Instruction for GtInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::instructions::{ChipChallenges, GtInstruction, Instruction};
+    use crate::test::test_opcode_circuit;
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
+
+    impl GtInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("phase0_pc".to_string(), Self::phase0_pc());
+            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
+            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
+            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
+            map.insert("phase0_clk".to_string(), Self::phase0_clk());
+            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
+            map.insert(
+                "phase0_stack_ts_add".to_string(),
+                Self::phase0_stack_ts_add(),
+            );
+            map.insert(
+                "phase0_old_stack_ts0".to_string(),
+                Self::phase0_old_stack_ts0(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_lt0".to_string(),
+                Self::phase0_old_stack_ts_lt0(),
+            );
+            map.insert(
+                "phase0_old_stack_ts1".to_string(),
+                Self::phase0_old_stack_ts1(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_lt1".to_string(),
+                Self::phase0_old_stack_ts_lt1(),
+            );
+            map.insert("phase0_oprand_0".to_string(), Self::phase0_oprand_0());
+            map.insert("phase0_oprand_1".to_string(), Self::phase0_oprand_1());
+            map.insert(
+                "phase0_instruction_gt".to_string(),
+                Self::phase0_instruction_gt(),
+            );
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_gt_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        // initialize general test inputs associated with push1
+        let inst_circuit = GtInstruction::construct_circuit::<Goldilocks>(challenges).unwrap();
+
+        println!("{:?}", inst_circuit);
+
+        let phase0_idx_map = GtInstruction::phase0_idxes_map();
+        println!("{:?}", &phase0_idx_map);
+        let phase0_witness_size = GtInstruction::phase0_size();
+        let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
+        phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_stack_top".to_string(),
+            vec![Goldilocks::from(100u64)],
+        );
+        phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_pc_add".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_stack_ts_add".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts0".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_lt0".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts1".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_lt1".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_oprand_0".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_oprand_1".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_instruction_gt".to_string(),
+            vec![], // todo
+        );
+
+        let circuit_witness_challenges = vec![Goldilocks::from(2)];
+
+        test_opcode_circuit(
+            &inst_circuit,
+            &phase0_idx_map,
+            phase0_witness_size,
+            &phase0_values_map,
+            circuit_witness_challenges,
+        );
+    }
+}
