@@ -1,6 +1,6 @@
 use gkr::structs::IOPProverPhase2Message;
 use goldilocks::SmallField;
-use itertools::izip;
+use itertools::{chain, izip, Itertools};
 use std::mem;
 use transcript::Transcript;
 
@@ -49,24 +49,42 @@ impl<F: SmallField> IOPVerifierState<F> {
                 sumcheck_eval_values,
             } = &proof.sumcheck_proofs.last().unwrap().1;
             izip!(sumcheck_proofs, sumcheck_eval_values).for_each(|(proof, evals)| {
-                izip!(0.., &node.preds, evals).for_each(|(_, pred, eval)| match pred {
-                    PredType::Source => {
+                izip!(&node.preds, evals).for_each(|(pred, eval)| match pred {
+                    PredType::Source(_) => {
                         // TODO: collect `(proof.point.clone(), *eval)` as `TargetEvaluations` for later PCS open?
                     }
-                    PredType::PredWire(out) | PredType::PredWireTrans(out) => match out {
-                        NodeOutputType::OutputLayer(id) => {
-                            output_evals[*id].push((proof.point.clone(), *eval))
+                    PredType::PredWire(out)
+                    | PredType::PredWireTrans(out)
+                    | PredType::PredWireDup(out) => {
+                        let point = match pred {
+                            PredType::PredWire(_) => proof.point.clone(),
+                            PredType::PredWireTrans(_) => {
+                                let mid = proof.point.len() - instance_num_vars;
+                                let (lo, hi) = proof.point.split_at(mid);
+                                chain![hi, lo].copied().collect_vec()
+                            }
+                            PredType::PredWireDup(_) => {
+                                let dedup_num_vars = proof.point.len() - instance_num_vars;
+                                proof.point[..dedup_num_vars].to_vec()
+                            }
+                            _ => unreachable!(),
+                        };
+                        match out {
+                            NodeOutputType::OutputLayer(id) => {
+                                output_evals[*id].push((point, *eval))
+                            }
+                            NodeOutputType::WireOut(id, wire_id) => {
+                                wires_out_evals[*id]
+                                    .resize(*wire_id as usize + 1, (vec![], F::ZERO));
+                                let evals = &mut wires_out_evals[*id][*wire_id as usize];
+                                assert!(
+                                    evals.0.is_empty() && evals.1.is_zero_vartime(),
+                                    "unimplemented",
+                                );
+                                *evals = (point, *eval);
+                            }
                         }
-                        NodeOutputType::WireOut(id, wire_id) => {
-                            wires_out_evals[*id].resize(*wire_id as usize + 1, (vec![], F::ZERO));
-                            let evals = &mut wires_out_evals[*id][*wire_id as usize];
-                            assert!(
-                                evals.0.is_empty() && evals.1.is_zero_vartime(),
-                                "unimplemented",
-                            );
-                            *evals = (proof.point.clone(), *eval);
-                        }
-                    },
+                    }
                 });
             });
         }
