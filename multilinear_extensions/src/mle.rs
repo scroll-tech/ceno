@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ark_std::{end_timer, rand::RngCore, start_timer};
 use goldilocks::SmallField;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Stores a multilinear polynomial in dense evaluation form.
@@ -64,24 +64,19 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
         let mut poly = self.evaluations.to_vec();
         let dim = partial_point.len();
         // evaluate single variable of partial point from left to right
-        for (i, point) in partial_point.iter().enumerate().take(dim) {
-            poly = Self::fix_one_variable_helper(&poly, nv - i, point);
+        for point in partial_point {
+            poly = Self::fix_one_variable_helper(&poly, point);
         }
 
-        Self::from_evaluations_slice(nv - dim, &poly[..(1 << (nv - dim))])
+        Self::from_evaluations_vec(nv - dim, poly)
     }
 
     /// Helper function. Fix 1 variable.
-    fn fix_one_variable_helper(data: &[F], nv: usize, point: &F) -> Vec<F> {
-        let mut res = vec![F::ZERO; 1 << (nv - 1)];
-
-        // evaluate single variable of partial point from left to right
-
-        res.par_iter_mut().enumerate().for_each(|(i, x)| {
-            *x = data[i << 1] + (data[(i << 1) + 1] - data[i << 1]) * point;
-        });
-
-        res
+    fn fix_one_variable_helper(data: &[F], point: &F) -> Vec<F> {
+        data.par_chunks(2)
+            .with_min_len(64)
+            .map(|data| *point * (data[1] - data[0]) + data[0])
+            .collect()
     }
 
     /// Generate a random evaluation of a multilinear poly

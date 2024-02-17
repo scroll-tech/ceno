@@ -392,11 +392,18 @@ pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> Arc<DenseMultilinearExtension<F>>
 /// over r, which is
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
 pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
+    build_eq_x_r_vec_scaled(r, F::ONE)
+}
+
+pub fn build_eq_x_r_vec_scaled<F: PrimeField>(r: &[F], scalar: F) -> Vec<F> {
     let num_vars = r.len();
     let lo_num_vars = num_vars.next_multiple_of(2) >> 1;
 
     let (r_lo, r_hi) = r.split_at(lo_num_vars);
-    let (lo, hi) = rayon::join(|| eq_expand_serial(r_lo), || eq_expand_serial(r_hi));
+    let (lo, hi) = rayon::join(
+        || eq_expand_serial(r_lo, F::ONE),
+        || eq_expand_serial(r_hi, scalar),
+    );
 
     let lo_mask = (1 << lo_num_vars) - 1;
     return (0..1 << num_vars)
@@ -404,9 +411,9 @@ pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
         .map(|b| lo[b & lo_mask] * hi[b >> lo_num_vars])
         .collect();
 
-    fn eq_expand_serial<F: Field>(y: &[F]) -> Vec<F> {
+    fn eq_expand_serial<F: Field>(y: &[F], scalar: F) -> Vec<F> {
         let mut out = vec![F::ZERO; 1 << y.len()];
-        out[0] = F::ONE;
+        out[0] = scalar;
         y.iter().enumerate().for_each(|(idx, y_i)| {
             let (lo, hi) = out[..2 << idx].split_at_mut(1 << idx);
             hi.iter_mut().zip(&*lo).for_each(|(hi, lo)| *hi = *lo * y_i);
