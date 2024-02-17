@@ -326,6 +326,31 @@ impl<F: SmallField> MatrixMLERowFirst<F> for &[usize] {
     }
 }
 
+pub(crate) trait SubsetIndices<F: SmallField> {
+    fn subset_eq_with_scalar(&self, eq: &[F], scalar: &F) -> Vec<F>;
+    fn subset_eq_eval(&self, eq_1: &[F]) -> F;
+    fn subset_eq2_eval(&self, eq_1: &[F], eq_2: &[F]) -> F;
+}
+
+impl<F: SmallField> SubsetIndices<F> for &[usize] {
+    fn subset_eq_with_scalar(&self, eq: &[F], scalar: &F) -> Vec<F> {
+        let mut ans = vec![F::ZERO; eq.len()];
+        for &non_zero_i in self.iter() {
+            ans[non_zero_i] = eq[non_zero_i] * scalar;
+        }
+        ans
+    }
+    fn subset_eq_eval(&self, eq_1: &[F]) -> F {
+        self.iter()
+            .fold(F::ZERO, |acc, &non_zero_i| acc + eq_1[non_zero_i])
+    }
+    fn subset_eq2_eval(&self, eq_1: &[F], eq_2: &[F]) -> F {
+        self.iter().fold(F::ZERO, |acc, &non_zero_i| {
+            acc + eq_1[non_zero_i] * eq_2[non_zero_i]
+        })
+    }
+}
+
 // test
 #[cfg(test)]
 mod test {

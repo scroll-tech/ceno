@@ -1,6 +1,8 @@
 use ff::Field;
 use goldilocks::SmallField;
-use simple_frontend::structs::{CellId, ChallengeId, CircuitBuilder, ExtCellId, MixedCell, WireId};
+use simple_frontend::structs::{
+    CellId, ChallengeId, CircuitBuilder, ExtCellId, MixedCell, WitnessId,
+};
 
 use crate::{constants::OpcodeType, error::ZKVMError};
 
@@ -137,7 +139,7 @@ impl<F: SmallField> ChipHandler<F> {
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
         constant: F::BaseField,
-    ) -> (WireId, usize) {
+    ) -> (WitnessId, usize) {
         let count = self.records.len().next_power_of_two() - self.records.len();
         for _ in 0..count {
             let out = circuit_builder.create_ext_cell();
@@ -145,7 +147,7 @@ impl<F: SmallField> ChipHandler<F> {
             self.records.push(out);
         }
         (
-            circuit_builder.create_wire_out_from_exts(&self.records),
+            circuit_builder.create_witness_out_from_exts(&self.records),
             self.records.len(),
         )
     }
@@ -155,7 +157,7 @@ impl<F: SmallField> ChipHandler<F> {
     pub(crate) fn finalize_with_repeated_last(
         &mut self,
         circuit_builder: &mut CircuitBuilder<F>,
-    ) -> (WireId, usize) {
+    ) -> (WitnessId, usize) {
         let count = self.records.len().next_power_of_two() - self.records.len();
         let last = self.records[self.records.len() - 1].clone();
         for _ in 0..count {
@@ -164,7 +166,7 @@ impl<F: SmallField> ChipHandler<F> {
             self.records.push(out);
         }
         (
-            circuit_builder.create_wire_out_from_exts(&self.records),
+            circuit_builder.create_witness_out_from_exts(&self.records),
             self.records.len(),
         )
     }

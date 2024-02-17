@@ -2,12 +2,13 @@ use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
-use simple_frontend::structs::{CellId, InType};
+use simple_frontend::structs::{CellId, ConstantType, InType};
 use transcript::Transcript;
 
 use crate::{
+    circuit::EvaluateGateCIn,
     error::GKRError,
-    structs::{Point, SumcheckProof},
+    structs::{GateCIn, Point, SumcheckProof},
     utils::{
         ceil_log2, counter_eval, eq_eval_less_or_equal_than, i64_to_field,
         segment_eval_greater_than,
@@ -18,7 +19,9 @@ use super::{IOPVerifierPhase2InputState, SumcheckState};
 
 impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
     pub(super) fn verifier_init_parallel(
-        n_wires_in: usize,
+        add_consts: &[GateCIn<ConstantType<F>>],
+        constant: impl Fn(ConstantType<F>) -> F::BaseField,
+        n_wit_in: usize,
         layer_out_point: &'a Point<F>,
         layer_out_value: F,
         paste_from_in: &'a [(InType, CellId, CellId)],
@@ -26,13 +29,21 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
         lo_in_num_vars: Option<usize>,
         hi_num_vars: usize,
     ) -> Self {
-        let mut paste_from_wires_in = vec![(0, 0); n_wires_in];
+        let add_consts = add_consts
+            .iter()
+            .map(|gate| GateCIn {
+                idx_in: gate.idx_in,
+                idx_out: gate.idx_out,
+                scalar: constant(gate.scalar),
+            })
+            .collect_vec();
+        let mut paste_from_wit_in = vec![(0, 0); n_wit_in];
         paste_from_in
             .iter()
-            .filter(|(ty, _, _)| matches!(*ty, InType::Wire(_)))
+            .filter(|(ty, _, _)| matches!(*ty, InType::Witness(_)))
             .for_each(|(ty, l, r)| {
-                if let InType::Wire(j) = *ty {
-                    paste_from_wires_in[j as usize] = (*l, *r);
+                if let InType::Witness(j) = *ty {
+                    paste_from_wit_in[j as usize] = (*l, *r);
                 }
             });
         let paste_from_counter_in = paste_from_in
@@ -58,9 +69,10 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
             })
             .collect::<Vec<_>>();
         Self {
+            add_consts,
             layer_out_point,
             layer_out_value,
-            paste_from_wires_in,
+            paste_from_wit_in,
             paste_from_counter_in,
             paste_from_const_in,
             lo_out_num_vars,
@@ -82,6 +94,8 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
         let lo_point = &self.layer_out_point[..lo_out_num_vars];
         let hi_point = &self.layer_out_point[lo_out_num_vars..];
 
+        let add_consts = &self.add_consts;
+
         let g_value_const = self
             .paste_from_const_in
             .iter()
@@ -96,10 +110,15 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
             })
             .sum::<F>();
 
-        let sigma = self.layer_out_value - g_value_const;
+        let mut sigma = self.layer_out_value - g_value_const;
+        if !add_consts.is_empty() {
+            let eq_y_ry = build_eq_x_r_vec(&lo_point);
+            sigma -= add_consts.as_slice().eval(&eq_y_ry);
+        }
+
         if self.lo_in_num_vars.is_none() {
             if sigma != F::ZERO {
-                return Err(GKRError::VerifyError);
+                return Err(GKRError::VerifyError("input phase2 step1 failed"));
             }
             return Ok(());
         }
@@ -120,22 +139,19 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
         let lo_point_sc1 = &claim_point[..lo_in_num_vars];
 
         let hi_eq_eval = eq_eval(hi_point, hi_point_sc1);
-        let g_values = if self.paste_from_wires_in.len() == 1
-            && self.paste_from_wires_in[0].0 == 0
+        let g_values = if self.paste_from_wit_in.len() == 1
+            && self.paste_from_wit_in[0].0 == 0
             && self.paste_from_counter_in.len() == 0
         {
             // There is only one wire in, and it is pasted to the first layer,
             // left aligned.
-            let paste_from_eval = eq_eval_less_or_equal_than(
-                self.paste_from_wires_in[0].1 - 1,
-                lo_point,
-                lo_point_sc1,
-            );
+            let paste_from_eval =
+                eq_eval_less_or_equal_than(self.paste_from_wit_in[0].1 - 1, lo_point, lo_point_sc1);
             vec![hi_eq_eval * paste_from_eval]
         } else {
             let eq_y_ry = build_eq_x_r_vec(lo_point);
             let eq_x1_rx1 = build_eq_x_r_vec(lo_point_sc1);
-            self.paste_from_wires_in
+            self.paste_from_wit_in
                 .iter()
                 .chain(self.paste_from_counter_in.iter())
                 .map(|(l, r)| {
@@ -174,7 +190,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
 
         end_timer!(timer);
         if claim.expected_evaluation != got_value {
-            return Err(GKRError::VerifyError);
+            return Err(GKRError::VerifyError("input phase2 step1 failed"));
         }
         Ok(())
     }

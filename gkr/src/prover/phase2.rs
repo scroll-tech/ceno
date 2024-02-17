@@ -12,8 +12,8 @@ use std::ops::Add;
 use transcript::Transcript;
 
 use crate::{
-    structs::{Gate1In, Gate2In, Gate3In, GateCIn, Layer, Point, SumcheckProof},
-    utils::{fix_high_variables, tensor_product, MultilinearExtensionFromVectors},
+    structs::{Gate1In, Gate2In, Gate3In, Layer, LayerWitness, Point, SumcheckProof},
+    utils::{tensor_product, MultilinearExtensionFromVectors},
 };
 
 use super::{IOPProverPhase2State, SumcheckState};
@@ -21,11 +21,9 @@ use super::{IOPProverPhase2State, SumcheckState};
 impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
     pub(super) fn prover_init_parallel(
         layer: &'a Layer<F>,
-        layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
         layer_out_point: &Point<F>,
-        layer_out_value: F,
         layer_in_vec: &'a [Vec<F::BaseField>],
-        paste_from_sources: &'a [Vec<Vec<F::BaseField>>],
+        paste_from_sources: &'a [LayerWitness<F::BaseField>],
         constant: impl Fn(&ConstantType<F>) -> F::BaseField,
         hi_num_vars: usize,
     ) -> Self {
@@ -57,15 +55,6 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                 scalar: constant(&gate.scalar),
             })
             .collect_vec();
-        let assert_consts = layer
-            .assert_consts
-            .iter()
-            .map(|gate| GateCIn {
-                idx_in: gate.idx_in,
-                idx_out: gate.idx_out,
-                scalar: constant(&gate.scalar),
-            })
-            .collect_vec();
         let lo_out_num_vars = layer.num_vars;
         let lo_in_num_vars = layer.max_previous_num_vars;
         let eq_y_ry = build_eq_x_r_vec(&layer_out_point[..lo_out_num_vars]);
@@ -77,13 +66,9 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
         end_timer!(timer);
 
         Self {
-            layer_out_poly,
-            layer_out_point: layer_out_point.clone(),
-            layer_out_value,
             mul3s,
             mul2s,
             adds,
-            assert_consts,
             paste_from: &layer.paste_from,
             paste_from_sources,
             lo_out_num_vars,
@@ -91,11 +76,8 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
             hi_num_vars,
             layer_in_poly,
             layer_in_vec,
-            // sumcheck_sigma: F::ZERO,
             sumcheck_point_1: vec![],
             sumcheck_point_2: vec![],
-            eq_t_rt,
-            eq_y_ry,
             tensor_eq_ty_rtry,
             eq_x1_rx1: vec![],
             eq_s1_rs1: vec![],
@@ -104,64 +86,6 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
             eq_s2_rs2: vec![],
             tensor_eq_s2x2_rs2rx2: vec![],
         }
-    }
-
-    /// Sumcheck 0: sigma = \sum_{x1} f0(x1) * g0(x1)
-    ///     sigma = layers[i](rt || ry) - assert_const(ry)
-    ///     f0(x1) = eq(ry, x1) - asserted_subset(ry, x1)
-    ///     g0(x1) = layers[i](rt || x1)
-    pub(super) fn prove_and_update_state_step0_parallel(
-        &mut self,
-        transcript: &mut Transcript<F>,
-    ) -> (SumcheckProof<F>, Vec<F>) {
-        let timer = start_timer!(|| "Prover sumcheck phase 2 step 0");
-
-        let layer_out_poly = &self.layer_out_poly;
-        let lo_out_num_vars = self.lo_out_num_vars;
-        let hi_point = &self.layer_out_point[self.lo_out_num_vars..];
-        let eq_y_ry = &self.eq_y_ry;
-        let assert_consts = &self.assert_consts;
-
-        if lo_out_num_vars == 0 {
-            end_timer!(timer);
-            return (
-                SumcheckProof {
-                    point: vec![],
-                    proofs: vec![],
-                },
-                vec![],
-            );
-        }
-
-        // f0(x1) = layers[i](rt || x1)
-        let f0 = Arc::new(fix_high_variables(&layer_out_poly, &hi_point));
-        // g0(x1) = eq(ry, x1) - asserted_subset(ry, x1)
-        let g0 = {
-            let mut g0 = eq_y_ry.clone();
-            assert_consts.iter().for_each(|gate| {
-                g0[gate.idx_out] = F::ZERO;
-            });
-            Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                lo_out_num_vars,
-                g0,
-            ))
-        };
-
-        // sumcheck: sigma = \sum_{x1} f0(x1) * g0(x1)
-        let mut virtual_poly_0 = VirtualPolynomial::new_from_mle(&f0, F::ONE);
-        virtual_poly_0.mul_by_mle(g0.clone(), F::ONE);
-        let sumcheck_proof_0 = SumcheckState::prove(&virtual_poly_0, transcript);
-        let eval_value_0 = f0.evaluate(&sumcheck_proof_0.point);
-
-        self.eq_y_ry = build_eq_x_r_vec(&sumcheck_proof_0.point);
-        self.eq_t_rt = build_eq_x_r_vec(hi_point);
-        self.tensor_eq_ty_rtry = tensor_product(&self.eq_t_rt, &self.eq_y_ry);
-        self.layer_out_point = [sumcheck_proof_0.point.clone(), hi_point.to_vec()].concat();
-        self.layer_out_value = eval_value_0;
-
-        end_timer!(timer);
-
-        (sumcheck_proof_0, vec![eval_value_0])
     }
 
     /// Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
@@ -250,7 +174,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                 .for_each(|(subset_wire_id, &new_wire_id)| {
                     for s in 0..(1 << hi_num_vars) {
                         f1_j[(s << lo_in_num_vars) ^ subset_wire_id] = F::from_base(
-                            &paste_from_sources[j as usize][s]
+                            &paste_from_sources[j as usize].instances[s]
                                 [old_wire_id(j as usize, subset_wire_id)],
                         );
                         g1_j[(s << lo_in_num_vars) ^ subset_wire_id] +=
@@ -436,4 +360,62 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
         end_timer!(timer);
         (sumcheck_proof_3, eval_values_3)
     }
+
+    // /// Sumcheck 0: sigma = \sum_{x1} f0(x1) * g0(x1)
+    // ///     sigma = layers[i](rt || ry) - assert_const(ry)
+    // ///     f0(x1) = eq(ry, x1) - asserted_subset(ry, x1)
+    // ///     g0(x1) = layers[i](rt || x1)
+    // pub(super) fn prove_and_update_state_step0_parallel(
+    //     &mut self,
+    //     transcript: &mut Transcript<F>,
+    // ) -> (SumcheckProof<F>, Vec<F>) {
+    //     let timer = start_timer!(|| "Prover sumcheck phase 2 step 0");
+
+    //     let layer_out_poly = &self.layer_out_poly;
+    //     let lo_out_num_vars = self.lo_out_num_vars;
+    //     let hi_point = &self.layer_out_point[self.lo_out_num_vars..];
+    //     let eq_y_ry = &self.eq_y_ry;
+    //     let assert_consts = &self.assert_consts;
+
+    //     if lo_out_num_vars == 0 {
+    //         end_timer!(timer);
+    //         return (
+    //             SumcheckProof {
+    //                 point: vec![],
+    //                 proofs: vec![],
+    //             },
+    //             vec![],
+    //         );
+    //     }
+
+    //     // f0(x1) = layers[i](rt || x1)
+    //     let f0 = Arc::new(fix_high_variables(&layer_out_poly, &hi_point));
+    //     // g0(x1) = eq(ry, x1) - asserted_subset(ry, x1)
+    //     let g0 = {
+    //         let mut g0 = eq_y_ry.clone();
+    //         assert_consts.iter().for_each(|gate| {
+    //             g0[gate.idx_out] = F::ZERO;
+    //         });
+    //         Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+    //             lo_out_num_vars,
+    //             g0,
+    //         ))
+    //     };
+
+    //     // sumcheck: sigma = \sum_{x1} f0(x1) * g0(x1)
+    //     let mut virtual_poly_0 = VirtualPolynomial::new_from_mle(&f0, F::ONE);
+    //     virtual_poly_0.mul_by_mle(g0.clone(), F::ONE);
+    //     let sumcheck_proof_0 = SumcheckState::prove(&virtual_poly_0, transcript);
+    //     let eval_value_0 = f0.evaluate(&sumcheck_proof_0.point);
+
+    //     self.eq_y_ry = build_eq_x_r_vec(&sumcheck_proof_0.point);
+    //     self.eq_t_rt = build_eq_x_r_vec(hi_point);
+    //     self.tensor_eq_ty_rtry = tensor_product(&self.eq_t_rt, &self.eq_y_ry);
+    //     self.layer_out_point = [sumcheck_proof_0.point.clone(), hi_point.to_vec()].concat();
+    //     self.layer_out_value = eval_value_0;
+
+    //     end_timer!(timer);
+
+    //     (sumcheck_proof_0, vec![eval_value_0])
+    // }
 }

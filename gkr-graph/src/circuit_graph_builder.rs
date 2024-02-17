@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use gkr::structs::{Circuit, CircuitWitness};
 use goldilocks::SmallField;
 use itertools::{chain, Itertools};
-use simple_frontend::structs::WireId;
+use simple_frontend::structs::WitnessId;
 
 use crate::{
     error::GKRGraphError,
@@ -32,7 +32,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         sources: Vec<Vec<Vec<F::BaseField>>>, // instances
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
-        assert_eq!(preds.len(), circuit.n_wires_in);
+        assert_eq!(preds.len(), circuit.n_witness_in);
 
         let mut witness = CircuitWitness::new(&circuit, challenges);
         let num_instances = sources.len();
@@ -70,7 +70,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
                     _ => unimplemented!(),
                 })
                 .collect_vec();
-            witness.add_instance(&circuit, &wires_in);
+            witness.add_instance(&circuit, wires_in);
         }
 
         self.graph.nodes.push(CircuitNode {
@@ -95,7 +95,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
             .flat_map(|(id, node)| {
                 chain![
                     (0..node.circuit.copy_to_wires_out.len())
-                        .map(move |wire_id| NodeOutputType::WireOut(id, wire_id as WireId)),
+                        .map(move |wire_id| NodeOutputType::WireOut(id, wire_id as WitnessId)),
                     node.circuit
                         .copy_to_wires_out
                         .is_empty()
@@ -111,7 +111,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
                 for (wire_id, pred) in node.preds.iter().enumerate() {
                     match pred {
                         PredType::Source => {
-                            sources.insert(NodeInputType::WireIn(id, wire_id as WireId));
+                            sources.insert(NodeInputType::WireIn(id, wire_id as WitnessId));
                         }
                         PredType::PredWire(out) => {
                             targets.remove(out);

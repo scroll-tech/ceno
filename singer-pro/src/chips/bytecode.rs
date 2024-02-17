@@ -20,8 +20,8 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
 ) -> Result<(PredType, PredType, usize), ZKVMError> {
     let bytecode = bytecode.concat();
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (_, pc_cells) = circuit_builder.create_wire_in(PCUInt::N_OPRAND_CELLS);
-    let (_, bytecode_cells) = circuit_builder.create_wire_in(1);
+    let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
+    let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
     let rlc = circuit_builder.create_ext_cell();
     let mut items = pc_cells.clone();

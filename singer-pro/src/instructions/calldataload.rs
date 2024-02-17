@@ -33,10 +33,10 @@ impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From witness
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
-        let (offset_id, offset) = circuit_builder.create_wire_in(UInt64::N_OPRAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (offset_id, offset) = circuit_builder.create_witness_in(UInt64::N_OPRAND_CELLS);
 
         let mut range_chip_handler = ChipHandler::new(challenges.range());
         let mut calldata_chip_handler = ChipHandler::new(challenges.calldata());
@@ -46,10 +46,10 @@ impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
         calldata_chip_handler.calldataload(&mut circuit_builder, &offset, data);
 
         // To successor instruction
-        let (data_copy_id, data_copy) = circuit_builder.create_wire_out(data.len());
+        let (data_copy_id, data_copy) = circuit_builder.create_witness_out(data.len());
         add_assign_each_cell(&mut circuit_builder, &data_copy, &data);
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_wire_out(TSUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips

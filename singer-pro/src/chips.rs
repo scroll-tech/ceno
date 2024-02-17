@@ -5,7 +5,7 @@ use gkr::structs::Circuit;
 use gkr::utils::ceil_log2;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
-use simple_frontend::structs::WireId;
+use simple_frontend::structs::WitnessId;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -52,7 +52,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
     ) -> Result<(), ZKVMError> {
         let mut build = |n_instances: usize,
                          num: usize,
-                         input_wire_id: WireId,
+                         input_wire_id: WitnessId,
                          leaf: &LeafCircuit<F>,
                          inner: &Arc<Circuit<F>>|
          -> Result<NodeOutputType, ZKVMError> {

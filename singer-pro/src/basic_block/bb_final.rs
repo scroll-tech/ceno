@@ -46,15 +46,15 @@ impl BasicBlockFinal {
         let n_stack_items = stack_top_offsets.len();
 
         // From witness
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From BB start
-        let (stack_ts_id, stack_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
-        let (stack_top_id, stack_top) = circuit_builder.create_wire_in(1);
-        let (clk_id, clk) = circuit_builder.create_wire_in(1);
+        let (stack_ts_id, stack_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (stack_top_id, stack_top) = circuit_builder.create_witness_in(1);
+        let (clk_id, clk) = circuit_builder.create_witness_in(1);
 
         // From inst pc.
-        let (next_pc_id, next_pc) = circuit_builder.create_wire_in(PCUInt::N_OPRAND_CELLS);
+        let (next_pc_id, next_pc) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
 
         let mut global_state_out_handler = ChipHandler::new(challenges.global_state());
         let mut stack_push_handler = ChipHandler::new(challenges.stack());
@@ -69,7 +69,7 @@ impl BasicBlockFinal {
             stack_ts_add_witness,
         )?;
 
-        let (memory_ts_id, memory_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
         let clk_expr = MixedCell::Cell(clk[0]);
         global_state_out_handler.state_out(
@@ -92,7 +92,7 @@ impl BasicBlockFinal {
         let stack_operand_ids = stack_top_offsets
             .iter()
             .map(|offset| {
-                let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_wire_in(1);
+                let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_witness_in(1);
                 stack_push_handler.stack_push(
                     &mut circuit_builder,
                     stack_top_expr.add(i64_to_base_field::<F>(*offset)),

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{NodeOutputType, PredType};
 use goldilocks::SmallField;
-use simple_frontend::structs::{ChallengeId, WireId};
+use simple_frontend::structs::{ChallengeId, WitnessId};
 use strum_macros::EnumIter;
 
 use crate::constants::OpcodeType;
@@ -23,10 +23,10 @@ pub struct InstLayout {
 
     pub(crate) to_succ_inst: ToSuccInst,
     pub(crate) to_chip_ids: ToChipsWires,
-    pub(crate) to_bb_final: Option<WireId>,
+    pub(crate) to_bb_final: Option<WitnessId>,
 
-    pub(crate) to_acc_ooo: Option<WireId>,
-    pub(crate) to_acc_dup: Option<WireId>,
+    pub(crate) to_acc_ooo: Option<WitnessId>,
+    pub(crate) to_acc_dup: Option<WitnessId>,
 }
 
 impl InstLayout {
@@ -87,7 +87,7 @@ pub struct BBFinalLayout {
     pub(crate) from_witness: FromWitness,
     pub(crate) from_bb_start: FromBBStart,
     pub(crate) from_pred_inst: FromPredInst,
-    pub(crate) next_pc_id: Option<WireId>,
+    pub(crate) next_pc_id: Option<WitnessId>,
 
     pub(crate) to_chip_ids: ToChipsWires,
 }
@@ -127,8 +127,8 @@ pub struct AccessoryCircuit<F: SmallField> {
 #[derive(Clone, Debug)]
 pub struct AccessoryLayout {
     pub(crate) from_witness: FromWitness,
-    pub(crate) from_pred_ooo: Option<WireId>,
-    pub(crate) from_pred_dup: Option<WireId>,
+    pub(crate) from_pred_ooo: Option<WitnessId>,
+    pub(crate) from_pred_dup: Option<WitnessId>,
     pub(crate) to_chip_ids: ToChipsWires,
 }
 
@@ -154,38 +154,38 @@ impl AccessoryLayout {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FromWitness {
-    pub(crate) phase_ids: Vec<WireId>,
+    pub(crate) phase_ids: Vec<WitnessId>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct FromBBStart {
-    pub(crate) stack_top_id: WireId,
-    pub(crate) stack_ts_id: WireId,
-    pub(crate) clk_id: WireId,
+    pub(crate) stack_top_id: WitnessId,
+    pub(crate) stack_ts_id: WitnessId,
+    pub(crate) clk_id: WitnessId,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FromPredInst {
-    pub(crate) memory_ts_id: WireId,
-    pub(crate) stack_operand_ids: Vec<WireId>,
+    pub(crate) memory_ts_id: WitnessId,
+    pub(crate) stack_operand_ids: Vec<WitnessId>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FromPublicIO {
-    pub(crate) public_output_id: WireId,
+    pub(crate) public_output_id: WitnessId,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ToSuccInst {
-    pub(crate) next_memory_ts_id: WireId,
-    pub(crate) stack_result_ids: Vec<WireId>,
+    pub(crate) next_memory_ts_id: WitnessId,
+    pub(crate) stack_result_ids: Vec<WitnessId>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ToBBFinal {
-    pub(crate) stack_ts_id: WireId,
-    pub(crate) stack_top_id: WireId,
-    pub(crate) clk_id: WireId,
+    pub(crate) stack_ts_id: WitnessId,
+    pub(crate) stack_top_id: WitnessId,
+    pub(crate) clk_id: WitnessId,
 }
 
 #[derive(Clone, Copy, Debug, EnumIter)]
@@ -202,7 +202,7 @@ pub(crate) enum ChipType {
 }
 
 /// The wire id and the number of checks in a single instance.
-pub(crate) type ToChipsWires = Vec<Option<(WireId, usize)>>;
+pub(crate) type ToChipsWires = Vec<Option<(WitnessId, usize)>>;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ChipChallenges {

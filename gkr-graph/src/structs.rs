@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gkr::structs::{Circuit, CircuitWitness, Point, PointAndEval};
 use goldilocks::SmallField;
-use simple_frontend::structs::WireId;
+use simple_frontend::structs::WitnessId;
 
 type GKRProverState<F> = gkr::structs::IOPProverState<F>;
 type GKRVerifierState<F> = gkr::structs::IOPVerifierState<F>;
@@ -28,13 +28,13 @@ pub struct IOPVerifierState<F: SmallField> {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum NodeInputType {
-    WireIn(usize, WireId),
+    WireIn(usize, WitnessId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NodeOutputType {
     OutputLayer(usize),
-    WireOut(usize, WireId),
+    WireOut(usize, WitnessId),
 }
 
 /// The predecessor of a node can be a source or a wire. If it is a wire, it can

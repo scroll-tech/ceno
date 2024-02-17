@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use itertools::Itertools;
-use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId};
+use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId, OutType};
 
 use transcript::Transcript;
 
@@ -17,6 +17,7 @@ use crate::{
 };
 
 mod phase1;
+mod phase1_output;
 mod phase2;
 mod phase2_input;
 
@@ -27,18 +28,15 @@ impl<F: SmallField> IOPVerifierState<F> {
     pub fn verify_parallel(
         circuit: &Circuit<F>,
         challenges: &[F],
-        output_evals: &[PointAndEval<F>],
-        wires_out_evals: &[PointAndEval<F>],
+        wires_out_evals: Vec<PointAndEval<F>>,
         proof: &IOPProof<F>,
         instance_num_vars: usize,
         transcript: &mut Transcript<F>,
     ) -> Result<GKRInputClaims<F>, GKRError> {
         let timer = start_timer!(|| "Verification");
-        assert_eq!(wires_out_evals.len(), circuit.copy_to_wires_out.len());
-
         let challenges = circuit.generate_basefield_challenges(challenges);
 
-        let mut verifier_state = Self::verifier_init_parallel(output_evals, wires_out_evals);
+        let mut verifier_state = Self::verifier_init_parallel(wires_out_evals);
         for layer_id in 0..circuit.layers.len() as LayerId {
             let timer = start_timer!(|| format!("Verify layer {}", layer_id));
             verifier_state.layer_id = layer_id;
@@ -47,12 +45,22 @@ impl<F: SmallField> IOPVerifierState<F> {
             let (phase1_msg, phase2_msg) = &proof.sumcheck_proofs[layer_id as usize];
             let (layer_out_point, layer_out_value) = match phase1_msg {
                 Some(phase1_msg) => {
-                    verifier_state.verify_and_update_state_phase1_parallel(
-                        layer,
-                        &phase1_msg,
-                        instance_num_vars,
-                        transcript,
-                    )?;
+                    if layer_id == 0 {
+                        verifier_state.verify_and_update_state_phase1_output_parallel(
+                            layer,
+                            &circuit.copy_to_out,
+                            &phase1_msg,
+                            instance_num_vars,
+                            transcript,
+                        )?
+                    } else {
+                        verifier_state.verify_and_update_state_phase1_parallel(
+                            layer,
+                            &phase1_msg,
+                            instance_num_vars,
+                            transcript,
+                        )?
+                    }
                     (
                         [
                             phase1_msg.sumcheck_proof_1.point.clone(),
@@ -71,6 +79,7 @@ impl<F: SmallField> IOPVerifierState<F> {
             if circuit.is_input_layer(layer_id) {
                 verifier_state.verify_and_update_state_phase2_input_parallel(
                     circuit,
+                    &challenges,
                     &layer_out_point,
                     &layer_out_value,
                     &phase2_msg,
@@ -99,11 +108,7 @@ impl<F: SmallField> IOPVerifierState<F> {
     }
 
     /// Initialize verifying state for data parallel circuits.
-    fn verifier_init_parallel(
-        output_evals: &[PointAndEval<F>],
-        wires_out_evals: &[PointAndEval<F>],
-    ) -> Self {
-        let next_layer_point_and_evals = output_evals.to_vec();
+    fn verifier_init_parallel(wires_out_evals: Vec<PointAndEval<F>>) -> Self {
         let mut subset_point_and_evals = HashMap::new();
         subset_point_and_evals.entry(0).or_insert(
             wires_out_evals
@@ -115,8 +120,9 @@ impl<F: SmallField> IOPVerifierState<F> {
         );
         Self {
             layer_id: 0,
-            next_layer_point_and_evals,
             subset_point_and_evals,
+            wit_out_point_and_evals: wires_out_evals,
+            next_layer_point_and_evals: vec![],
         }
     }
 
@@ -171,6 +177,48 @@ impl<F: SmallField> IOPVerifierState<F> {
         )
     }
 
+    /// Verify the items in the i-th layer are copied to deeper layers for data
+    /// parallel circuits.
+    fn verify_and_update_state_phase1_output_parallel(
+        &mut self,
+        layer: &Layer<F>,
+        copy_to_out: &[(OutType, Vec<CellId>)],
+        prover_msg: &IOPProverPhase1Message<F>,
+        hi_num_vars: usize,
+        transcript: &mut Transcript<F>,
+    ) -> Result<(), GKRError> {
+        let lo_num_vars = layer.num_vars;
+        let alpha = transcript.get_and_append_challenge(b"combine subset evals");
+
+        let mut verifier_phase1_state = IOPVerifierPhase1OutputState::verifier_init_parallel(
+            &self.wit_out_point_and_evals,
+            &alpha.elements,
+            copy_to_out.len(),
+            lo_num_vars,
+            hi_num_vars,
+        );
+
+        // =============================================================
+        // Step 1: First step of copy constraints copied to later layers
+        // =============================================================
+
+        // TODO: Double check the correctness.
+        verifier_phase1_state.verify_and_update_state_step1_parallel(
+            (&prover_msg.sumcheck_proof_1, &prover_msg.eval_value_1),
+            copy_to_out,
+            transcript,
+        )?;
+
+        // ==============================================================
+        // Step 2: Second step of copy constraints copied to later layers
+        // ==============================================================
+
+        verifier_phase1_state.verify_and_update_state_step2_parallel(
+            (&prover_msg.sumcheck_proof_2, prover_msg.eval_value_2),
+            transcript,
+        )
+    }
+
     /// Verify the computation in the current layer for data parallel circuits.
     /// The number of terms depends on the gate.
     fn verify_and_update_state_phase2_parallel(
@@ -202,31 +250,10 @@ impl<F: SmallField> IOPVerifierState<F> {
             hi_out_num_vars,
         );
 
-        // =============================
-        // Step 0: Assertion constraints
-        // =============================
-
-        // sigma = layers[i](rt || ry) - assert_const(ry)
-        let (sumcheck_proofs, sumcheck_eval_values) = {
-            if !layer.assert_consts.is_empty() {
-                verifier_phase2_state.verify_and_update_state_step0_parallel(
-                    (
-                        &prover_msg.sumcheck_proofs[0],
-                        &prover_msg.sumcheck_eval_values[0],
-                    ),
-                    transcript,
-                )?;
-                (
-                    &prover_msg.sumcheck_proofs[1..],
-                    &prover_msg.sumcheck_eval_values[1..],
-                )
-            } else {
-                (
-                    &prover_msg.sumcheck_proofs[..],
-                    &prover_msg.sumcheck_eval_values[..],
-                )
-            }
-        };
+        let (sumcheck_proofs, sumcheck_eval_values) = (
+            &prover_msg.sumcheck_proofs[..],
+            &prover_msg.sumcheck_eval_values[..],
+        );
 
         // ================================================
         // Step 1: First step of arithmetic constraints and
@@ -315,6 +342,7 @@ impl<F: SmallField> IOPVerifierState<F> {
     fn verify_and_update_state_phase2_input_parallel(
         &mut self,
         circuit: &Circuit<F>,
+        challenges: &HashMap<ChallengeConst, Vec<F::BaseField>>,
         layer_out_point: &Point<F>,
         layer_out_value: &F,
         prover_msg: &IOPProverPhase2Message<F>,
@@ -328,7 +356,15 @@ impl<F: SmallField> IOPVerifierState<F> {
         let hi_out_num_vars = layer_out_point.len() - lo_out_num_vars;
 
         let verifier_phase2_state = IOPVerifierPhase2InputState::verifier_init_parallel(
-            circuit.n_wires_in,
+            &layer.add_consts,
+            |constant: ConstantType<F>| -> F::BaseField {
+                match constant {
+                    ConstantType::Challenge(c, j) => challenges[&c][j],
+                    ConstantType::ChallengeScaled(c, j, scalar) => challenges[&c][j] * scalar,
+                    ConstantType::Field(c) => c,
+                }
+            },
+            circuit.n_witness_in,
             layer_out_point,
             *layer_out_value,
             &circuit.paste_from_in,
@@ -337,12 +373,7 @@ impl<F: SmallField> IOPVerifierState<F> {
             hi_out_num_vars,
         );
 
-        if !layer.assert_consts.is_empty()
-            || !layer.add_consts.is_empty()
-            || !layer.adds.is_empty()
-            || !layer.mul2s.is_empty()
-            || !layer.mul3s.is_empty()
-        {
+        if !layer.adds.is_empty() || !layer.mul2s.is_empty() || !layer.mul3s.is_empty() {
             return Err(GKRError::InvalidCircuit);
         }
 
@@ -368,7 +399,17 @@ struct IOPVerifierPhase1State<'a, F: SmallField> {
     alpha_pows: Vec<F>,
     lo_num_vars: usize,
     hi_num_vars: usize,
-    f1_values: Vec<F>,
+    g1_values: Vec<F>,
+
+    sumcheck_sigma: F,
+}
+
+struct IOPVerifierPhase1OutputState<'a, F: SmallField> {
+    output_points: Vec<Point<F>>,
+    subset_point_and_evals: &'a [PointAndEval<F>],
+    alpha_pows: Vec<F>,
+    lo_num_vars: usize,
+    hi_num_vars: usize,
     g1_values: Vec<F>,
 
     sumcheck_sigma: F,
@@ -382,7 +423,6 @@ struct IOPVerifierPhase2State<'a, F: SmallField> {
     mul2s: Vec<Gate2In<F::BaseField>>,
     adds: Vec<Gate1In<F::BaseField>>,
     add_consts: Vec<GateCIn<F::BaseField>>,
-    assert_consts: Vec<GateCIn<F::BaseField>>,
     paste_from: &'a HashMap<LayerId, Vec<CellId>>,
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
@@ -399,9 +439,10 @@ struct IOPVerifierPhase2State<'a, F: SmallField> {
 }
 
 struct IOPVerifierPhase2InputState<'a, F: SmallField> {
+    add_consts: Vec<GateCIn<F::BaseField>>,
     layer_out_point: &'a Point<F>,
     layer_out_value: F,
-    paste_from_wires_in: Vec<(CellId, CellId)>,
+    paste_from_wit_in: Vec<(CellId, CellId)>,
     paste_from_counter_in: Vec<(CellId, CellId)>,
     paste_from_const_in: Vec<(F, CellId, CellId)>,
     lo_out_num_vars: usize,

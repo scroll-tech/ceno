@@ -19,8 +19,8 @@ pub(crate) fn construct_calldata_table<F: SmallField>(
     real_challenges: &[F],
 ) -> Result<(PredType, PredType, usize), ZKVMError> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (_, id_cells) = circuit_builder.create_wire_in(1);
-    let (_, calldata_cells) = circuit_builder.create_wire_in(StackUInt::N_OPRAND_CELLS);
+    let (_, id_cells) = circuit_builder.create_witness_in(1);
+    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
     let rlc = circuit_builder.create_ext_cell();
     let mut items = id_cells.clone();

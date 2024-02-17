@@ -59,15 +59,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
                 scalar: constant(gate.scalar),
             })
             .collect_vec();
-        let assert_consts = layer
-            .assert_consts
-            .iter()
-            .map(|gate| GateCIn {
-                idx_in: gate.idx_in,
-                idx_out: gate.idx_out,
-                scalar: constant(gate.scalar),
-            })
-            .collect_vec();
+
         let lo_out_num_vars = layer.num_vars;
         let lo_in_num_vars = layer.max_previous_num_vars;
         let eq_y_ry = build_eq_x_r_vec(&layer_out_point[..lo_out_num_vars]);
@@ -79,7 +71,6 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
             mul2s,
             adds,
             add_consts,
-            assert_consts,
             paste_from: &layer.paste_from,
             lo_out_num_vars,
             lo_in_num_vars,
@@ -92,64 +83,6 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
             eq_x1_rx1: vec![],
             eq_x2_rx2: vec![],
         }
-    }
-
-    pub(super) fn verify_and_update_state_step0_parallel(
-        &mut self,
-        prover_msg: (&SumcheckProof<F>, &[F]),
-        transcript: &mut Transcript<F>,
-    ) -> Result<(), GKRError> {
-        let timer = start_timer!(|| "Verifier sumcheck phase 2 step 0");
-        let lo_out_num_vars = self.lo_out_num_vars;
-        let layer_out_point = &self.layer_out_point;
-        let layer_out_value = self.layer_out_value;
-
-        let assert_consts = &self.assert_consts;
-
-        let lo_point = &layer_out_point[..lo_out_num_vars];
-        let hi_point = &layer_out_point[lo_out_num_vars..];
-        let eq_y_ry = &self.eq_y_ry;
-
-        if lo_out_num_vars == 0 {
-            end_timer!(timer);
-            if layer_out_value != self.assert_consts.as_slice().eval(&self.eq_y_ry) {
-                return Err(GKRError::VerifyError);
-            }
-            return Ok(());
-        }
-
-        // sigma = layers[i](rt || ry) - assert_const(ry)
-        let sigma_0 = layer_out_value - assert_consts.as_slice().eval(&eq_y_ry);
-        // Sumcheck 0: sigma = \sum_{x1} f0(x1) * g0(x1)
-        //     f0(x1) = layers[i](rt || x1)
-        //     g0(x1) = eq(ry, x1) - asserted_subset(ry, x1)
-        let claim_0 = SumcheckState::verify(
-            sigma_0,
-            prover_msg.0,
-            &VPAuxInfo {
-                max_degree: 2,
-                num_variables: lo_out_num_vars,
-                phantom: std::marker::PhantomData,
-            },
-            transcript,
-        );
-        let claim0_point = claim_0.point.iter().map(|x| x.elements).collect_vec();
-        let eq_x_rx = build_eq_x_r_vec(&claim0_point);
-        let f0_value = prover_msg.1[0];
-        let g0_value = eq_eval(&lo_point, &claim0_point)
-            - assert_consts.as_slice().eval_subset_eq(&eq_y_ry, &eq_x_rx);
-
-        end_timer!(timer);
-        if claim_0.expected_evaluation != f0_value * g0_value {
-            return Err(GKRError::VerifyError);
-        }
-
-        self.eq_y_ry = build_eq_x_r_vec(&claim0_point);
-        self.layer_out_point = [claim0_point, hi_point.to_vec()].concat();
-        self.layer_out_value = f0_value;
-        self.sumcheck_sigma = g0_value;
-
-        Ok(())
     }
 
     pub(super) fn verify_and_update_state_step1_parallel(
@@ -215,7 +148,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
             .fold(F::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
         if claim_1.expected_evaluation != got_value_1 {
             end_timer!(timer);
-            return Err(GKRError::VerifyError);
+            return Err(GKRError::VerifyError("phase2 step1 failed"));
         }
 
         self.eq_x1_rx1 = build_eq_x_r_vec(&claim1_point[..lo_in_num_vars]);
@@ -268,7 +201,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
 
         if claim_2.expected_evaluation != got_value_2 {
             end_timer!(timer);
-            return Err(GKRError::VerifyError);
+            return Err(GKRError::VerifyError("phase2 step2 failed"));
         }
 
         self.eq_x2_rx2 = build_eq_x_r_vec(&claim2_point[..lo_in_num_vars]);
@@ -328,9 +261,67 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
         let got_value_3 = f3_value * g3_value;
         end_timer!(timer);
         if claim_3.expected_evaluation != got_value_3 {
-            return Err(GKRError::VerifyError);
+            return Err(GKRError::VerifyError("phase2 step3 failed"));
         }
         self.sumcheck_point_3 = claim3_point.clone();
         Ok(())
     }
+
+    // pub(super) fn verify_and_update_state_step0_parallel(
+    //     &mut self,
+    //     prover_msg: (&SumcheckProof<F>, &[F]),
+    //     transcript: &mut Transcript<F>,
+    // ) -> Result<(), GKRError> {
+    //     let timer = start_timer!(|| "Verifier sumcheck phase 2 step 0");
+    //     let lo_out_num_vars = self.lo_out_num_vars;
+    //     let layer_out_point = &self.layer_out_point;
+    //     let layer_out_value = self.layer_out_value;
+
+    //     let assert_consts = &self.assert_consts;
+
+    //     let lo_point = &layer_out_point[..lo_out_num_vars];
+    //     let hi_point = &layer_out_point[lo_out_num_vars..];
+    //     let eq_y_ry = &self.eq_y_ry;
+
+    //     if lo_out_num_vars == 0 {
+    //         end_timer!(timer);
+    //         if layer_out_value != self.assert_consts.as_slice().eval(&self.eq_y_ry) {
+    //             return Err(GKRError::VerifyError);
+    //         }
+    //         return Ok(());
+    //     }
+
+    //     // sigma = layers[i](rt || ry) - assert_const(ry)
+    //     let sigma_0 = layer_out_value - assert_consts.as_slice().eval(&eq_y_ry);
+    //     // Sumcheck 0: sigma = \sum_{x1} f0(x1) * g0(x1)
+    //     //     f0(x1) = layers[i](rt || x1)
+    //     //     g0(x1) = eq(ry, x1) - asserted_subset(ry, x1)
+    //     let claim_0 = SumcheckState::verify(
+    //         sigma_0,
+    //         prover_msg.0,
+    //         &VPAuxInfo {
+    //             max_degree: 2,
+    //             num_variables: lo_out_num_vars,
+    //             phantom: std::marker::PhantomData,
+    //         },
+    //         transcript,
+    //     );
+    //     let claim0_point = claim_0.point.iter().map(|x| x.elements).collect_vec();
+    //     let eq_x_rx = build_eq_x_r_vec(&claim0_point);
+    //     let f0_value = prover_msg.1[0];
+    //     let g0_value = eq_eval(&lo_point, &claim0_point)
+    //         - assert_consts.as_slice().eval_subset_eq(&eq_y_ry, &eq_x_rx);
+
+    //     end_timer!(timer);
+    //     if claim_0.expected_evaluation != f0_value * g0_value {
+    //         return Err(GKRError::VerifyError);
+    //     }
+
+    //     self.eq_y_ry = build_eq_x_r_vec(&claim0_point);
+    //     self.layer_out_point = [claim0_point, hi_point.to_vec()].concat();
+    //     self.layer_out_value = f0_value;
+    //     self.sumcheck_sigma = g0_value;
+
+    //     Ok(())
+    // }
 }

@@ -50,7 +50,7 @@ impl BasicBlockStart {
 
         // From witness
         let (phase0_wire_id, phase0) =
-            circuit_builder.create_wire_in(Self::phase0_size(n_stack_items));
+            circuit_builder.create_witness_in(Self::phase0_size(n_stack_items));
 
         let mut global_state_in_handler = ChipHandler::new(challenges.global_state());
         let mut stack_pop_handler = ChipHandler::new(challenges.stack());
@@ -102,23 +102,23 @@ impl BasicBlockStart {
         let mut stack_result_ids = Vec::with_capacity(n_stack_items);
         for i in 0..n_stack_items {
             let (stack_operand_id, stack_operand) =
-                circuit_builder.create_wire_out(StackUInt::N_OPRAND_CELLS);
+                circuit_builder.create_witness_out(StackUInt::N_OPRAND_CELLS);
             let old_stack = &phase0[Self::phase0_old_stack_values(i)];
             for j in 0..StackUInt::N_OPRAND_CELLS {
                 circuit_builder.add(stack_operand[j], old_stack[j], F::BaseField::ONE);
             }
             stack_result_ids.push(stack_operand_id);
         }
-        let (out_memory_ts_id, out_memory_ts) = circuit_builder.create_wire_out(memory_ts.len());
+        let (out_memory_ts_id, out_memory_ts) = circuit_builder.create_witness_out(memory_ts.len());
         add_assign_each_cell(&mut circuit_builder, &out_memory_ts, &memory_ts);
 
         // To BB final
         let (out_stack_ts_id, out_stack_ts) =
-            circuit_builder.create_wire_out(TSUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &out_stack_ts, stack_ts.values());
-        let (out_stack_top_id, out_stack_top) = circuit_builder.create_wire_out(1);
+        let (out_stack_top_id, out_stack_top) = circuit_builder.create_witness_out(1);
         circuit_builder.add(out_stack_top[0], stack_top, F::BaseField::ONE);
-        let (out_clk_id, out_clk) = circuit_builder.create_wire_out(1);
+        let (out_clk_id, out_clk) = circuit_builder.create_witness_out(1);
         circuit_builder.add(out_clk[0], clk, F::BaseField::ONE);
 
         // To chips

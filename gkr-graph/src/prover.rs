@@ -54,7 +54,7 @@ impl<F: SmallField> IOPProverState<F> {
                 izip!(0.., &node.preds, evals).for_each(|(wire_id, pred, eval)| match pred {
                     PredType::Source => {
                         assert_eq!(
-                            witness.wires_in_ref()[wire_id]
+                            witness.witness_in_ref()[wire_id]
                                 .as_slice()
                                 .mle(
                                     node.circuit.max_wires_in_num_vars.unwrap(),

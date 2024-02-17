@@ -1,3 +1,5 @@
+#![feature(associated_const_equality)]
+
 mod circuit;
 pub mod error;
 mod prover;

@@ -1,18 +1,76 @@
 use core::fmt;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
-use ark_std::iterable::Iterable;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::{
-    CellId, CellType, ChallengeConst, CircuitBuilder, ConstantType, GateType, InType, LayerId,
-    OutType,
+    CellId, CellType, ChallengeConst, CircuitBuilder, ConstantType, InType, LayerId,
 };
 
 use crate::{
     structs::{Circuit, Gate1In, Gate2In, Gate3In, GateCIn, Layer},
     utils::{ceil_log2, MatrixMLEColumnFirst, MatrixMLERowFirst},
 };
+
+struct LayerSubsets {
+    subsets: BTreeMap<(u32, usize), usize>,
+    layer_id: LayerId,
+    wire_id_assigner: CellId,
+}
+
+impl LayerSubsets {
+    fn new(layer_id: LayerId, layer_size: usize) -> Self {
+        Self {
+            subsets: BTreeMap::new(),
+            layer_id,
+            wire_id_assigner: layer_size,
+        }
+    }
+
+    /// Compute the new `wire_id` after copy the cell from the old layer to the
+    /// new layer. If old layer == new layer, return the old wire_id.
+    fn update_wire_id(&mut self, old_layer_id: LayerId, old_wire_id: CellId) -> CellId {
+        if old_layer_id == self.layer_id {
+            return old_wire_id;
+        }
+        if !self.subsets.contains_key(&(old_layer_id, old_wire_id)) {
+            self.subsets
+                .insert((old_layer_id, old_wire_id), self.wire_id_assigner);
+            self.wire_id_assigner += 1;
+        }
+        self.subsets[&(old_layer_id, old_wire_id)]
+    }
+
+    /// Compute `paste_from` matrix and `max_previous_num_vars` for
+    /// `self.layer_id`, as well as `copy_to` for old layers.
+    fn update_layer_info<Ext: SmallField>(&self, layers: &mut Vec<Layer<Ext>>) {
+        let mut paste_from = HashMap::new();
+        for ((old_layer_id, old_wire_id), new_wire_id) in self.subsets.iter() {
+            paste_from
+                .entry(*old_layer_id)
+                .or_insert(vec![])
+                .push(*new_wire_id);
+            layers[*old_layer_id as usize]
+                .copy_to
+                .entry(self.layer_id)
+                .or_insert(vec![])
+                .push(*old_wire_id);
+        }
+        layers[self.layer_id as usize].paste_from = paste_from;
+
+        layers[self.layer_id as usize].num_vars = ceil_log2(self.wire_id_assigner) as usize;
+        layers[self.layer_id as usize].max_previous_num_vars = layers[self.layer_id as usize]
+            .max_previous_num_vars
+            .max(ceil_log2(
+                layers[self.layer_id as usize]
+                    .paste_from
+                    .iter()
+                    .map(|(_, old_wire_ids)| old_wire_ids.len())
+                    .max()
+                    .unwrap_or(1),
+            ));
+    }
+}
 
 impl<F: SmallField> Circuit<F> {
     /// Generate the circuit from circuit builder.
@@ -29,15 +87,12 @@ impl<F: SmallField> Circuit<F> {
             let mut layers_of_cell_id = vec![vec![]; n_layers as usize];
             let mut wire_ids_in_layer = vec![0; circuit_builder.cells.len()];
             for i in 0..circuit_builder.cells.len() {
+                // If layer isn't assigned, then the cell is not in the circuit.
                 if let Some(layer) = circuit_builder.cells[i].layer {
                     wire_ids_in_layer[i] = layers_of_cell_id[layer as usize].len();
                     layers_of_cell_id[layer as usize].push(i);
-                } else {
-                    panic!("The layer of the cell is not specified.");
                 }
             }
-            // The layers are numbered from the output to the inputs.
-            layers_of_cell_id.reverse();
             (layers_of_cell_id, wire_ids_in_layer)
         };
 
@@ -50,25 +105,18 @@ impl<F: SmallField> Circuit<F> {
         // ==================================
 
         // Input layer if pasted from wires_in and constant.
-        let (in_cell_ids, out_cell_ids) = {
-            let mut in_cell_ids = HashMap::new();
-            let mut out_cell_ids = vec![vec![]; circuit_builder.n_wires_out() as usize];
-            for (id, cell) in circuit_builder.cells.iter().enumerate() {
-                if let Some(cell_type) = cell.cell_type {
-                    match cell_type {
-                        CellType::In(in_type) => {
-                            in_cell_ids.entry(in_type).or_insert(vec![]).push(id);
-                        }
-                        CellType::Out(OutType::Wire(wire_id)) => {
-                            out_cell_ids[wire_id as usize].push(id);
-                        }
-                    }
+        let in_cell_ids = {
+            let mut in_cell_ids = BTreeMap::new();
+            for (cell_id, cell) in circuit_builder.cells.iter().enumerate() {
+                if let Some(CellType::In(in_type)) = cell.cell_type {
+                    in_cell_ids.entry(in_type).or_insert(vec![]).push(cell_id);
                 }
             }
-            (in_cell_ids, out_cell_ids)
+            in_cell_ids
         };
 
-        let mut input_paste_from_in = Vec::with_capacity(in_cell_ids.len());
+        let mut input_paste_from = Vec::with_capacity(in_cell_ids.len());
+        let mut max_in_wit_num_vars: Option<usize> = None;
         for (ty, in_cell_ids) in in_cell_ids.iter() {
             #[cfg(feature = "debug")]
             in_cell_ids.iter().enumerate().map(|(i, cell_id)| {
@@ -79,231 +127,101 @@ impl<F: SmallField> Circuit<F> {
                     i == 0 || wire_ids_in_layer[*cell_id] == wire_ids_in_layer[wire_in[i - 1]] + 1
                 );
             });
-            input_paste_from_in.push((
+            input_paste_from.push((
                 *ty,
                 wire_ids_in_layer[in_cell_ids[0]],
                 wire_ids_in_layer[in_cell_ids[in_cell_ids.len() - 1]] + 1,
             ));
-        }
-
-        // TODO: This is to avoid incorrect use of input paste_from. To be refined.
-        for (ty, left, right) in input_paste_from_in.iter() {
-            if let InType::Wire(id) = *ty {
-                layers[n_layers as usize - 1]
-                    .paste_from
-                    .insert(id as LayerId, (*left..*right).collect_vec());
+            if !matches!(*ty, InType::Constant(_)) {
+                max_in_wit_num_vars = max_in_wit_num_vars
+                    .map_or(Some(ceil_log2(in_cell_ids.len())), |x| {
+                        Some(x.max(ceil_log2(in_cell_ids.len())))
+                    });
             }
         }
 
-        let max_wires_in_num_vars = {
-            let mut max_wires_in_num_vars = None;
-            let max_wires_in_size = in_cell_ids
-                .iter()
-                .map(|(ty, vec)| {
-                    if let InType::Constant(_) = *ty {
-                        0
-                    } else {
-                        vec.len()
-                    }
-                })
-                .max()
-                .unwrap();
-            if max_wires_in_size > 0 {
-                max_wires_in_num_vars = Some(ceil_log2(max_wires_in_size) as usize);
-            }
-            max_wires_in_num_vars
-        };
-
-        // Compute gates and copy constraints of the other layers.
+        layers[n_layers as usize - 1].layer_id = n_layers - 1;
         for layer_id in (0..n_layers - 1).rev() {
-            // current_subsets: old_layer_id -> (old_wire_id, new_wire_id)
+            layers[layer_id as usize].layer_id = layer_id;
+            // current_subsets: (old_layer_id, old_wire_id) -> new_wire_id
             // It only stores the wires not in the current layer.
             let new_layer_id = layer_id + 1;
-            let subsets = {
-                let mut subsets = HashMap::new();
-                let mut wire_id_assigner = layers_of_cell_id[new_layer_id as usize]
+            let mut subsets = LayerSubsets::new(
+                new_layer_id,
+                layers_of_cell_id[new_layer_id as usize]
                     .len()
-                    .next_power_of_two();
-                let mut update_subset = |old_cell_id: CellId| {
-                    let old_layer_id =
-                        n_layers - 1 - circuit_builder.cells[old_cell_id].layer.unwrap();
-                    #[cfg(feature = "debug_wenqing")]
-                    {
-                        if old_layer_id == 0 {
-                            println!(
-                                "new_layer_id {:?}, old_layer_id {:?}, old_cell_id {:?}",
-                                new_layer_id, old_layer_id, old_cell_id
-                            );
-                            println!(
-                                "cells[old_cell_id].layer {:?}",
-                                circuit_builder.cells[old_cell_id].layer.unwrap()
-                            );
-                        }
-                    }
-                    if old_layer_id == new_layer_id {
-                        return;
-                    }
-                    subsets
-                        .entry(old_layer_id)
-                        .or_insert(HashMap::new())
-                        .insert(wire_ids_in_layer[old_cell_id], wire_id_assigner);
-                    wire_id_assigner += 1;
-                };
-                for cell_id in layers_of_cell_id[layer_id as usize].iter() {
-                    #[cfg(feature = "debug_wenqing")]
-                    {
-                        println!("layer_id {:?}, cell_id {:?}", layer_id, cell_id);
-                    }
-                    let cell = &circuit_builder.cells[*cell_id];
-                    for gate in cell.gates.iter() {
-                        match gate {
-                            GateType::Add(in_0, _) => {
-                                update_subset(*in_0);
-                            }
-                            GateType::Mul2(in_0, in_1, _) => {
-                                update_subset(*in_0);
-                                update_subset(*in_1);
-                            }
-                            GateType::Mul3(in_0, in_1, in_2, _) => {
-                                update_subset(*in_0);
-                                update_subset(*in_1);
-                                update_subset(*in_2);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                layers[new_layer_id as usize].num_vars = ceil_log2(wire_id_assigner) as usize;
-                subsets
-            };
+                    .next_power_of_two(),
+            );
 
-            // Copy subsets from previous layers and put them into the current
-            // layer.
-            for (old_layer_id, old_wire_ids) in subsets.iter() {
-                for (old_wire_id, new_wire_id) in old_wire_ids.iter() {
-                    #[cfg(feature = "debug_wenqing")]
-                    {
-                        println!("old_wire_id {:?}, new_wire_id {:?}, old_layer_id {:?}, new_layer_id {:?}", 
-                                    old_wire_id, new_wire_id, *old_layer_id, new_layer_id);
-                        assert!(
-                            new_layer_id < *old_layer_id,
-                            "layer paste_from err: need old_layer_id {:?} > new_layer_id {:?}",
-                            *old_layer_id,
-                            new_layer_id
-                        );
-                    }
-                    layers[new_layer_id as usize]
-                        .paste_from
-                        .entry(*old_layer_id)
-                        .or_insert(vec![])
-                        .push(*new_wire_id);
-                    layers[*old_layer_id as usize]
-                        .copy_to
-                        .entry(new_layer_id)
-                        .or_insert(vec![])
-                        .push(*old_wire_id);
-                }
-            }
-            layers[new_layer_id as usize].max_previous_num_vars = layers[new_layer_id as usize]
-                .max_previous_num_vars
-                .max(ceil_log2(
-                    layers[new_layer_id as usize]
-                        .paste_from
-                        .iter()
-                        .map(|(_, old_wire_ids)| old_wire_ids.len())
-                        .max()
-                        .unwrap_or(1),
-                ));
-            layers[layer_id as usize].max_previous_num_vars =
-                layers[new_layer_id as usize].num_vars;
-
-            // Compute gates with new wire ids accordingly.
-            let current_wire_id = |old_cell_id: CellId| -> CellId {
-                let old_layer_id = n_layers - 1 - circuit_builder.cells[old_cell_id].layer.unwrap();
-                let old_wire_id = wire_ids_in_layer[old_cell_id];
-                if old_layer_id == new_layer_id {
-                    return old_wire_id;
-                }
-                *subsets
-                    .get(&old_layer_id)
-                    .unwrap()
-                    .get(&old_wire_id)
-                    .unwrap()
-            };
             for (i, cell_id) in layers_of_cell_id[layer_id as usize].iter().enumerate() {
                 let cell = &circuit_builder.cells[*cell_id];
-                if let Some(assert_const) = cell.assert_const {
-                    layers[layer_id as usize].assert_consts.push(GateCIn {
-                        idx_in: [],
-                        idx_out: i,
-                        scalar: ConstantType::Field(assert_const),
-                    });
-                }
                 for gate in cell.gates.iter() {
-                    match gate {
-                        GateType::AddC(c) => {
-                            layers[layer_id as usize].add_consts.push(GateCIn {
-                                idx_in: [],
-                                idx_out: i,
-                                scalar: *c,
-                            });
-                        }
-                        GateType::Add(in_0, scalar) => {
-                            layers[layer_id as usize].adds.push(Gate1In {
-                                idx_in: [current_wire_id(*in_0)],
-                                idx_out: i,
-                                scalar: *scalar,
-                            });
-                        }
-                        GateType::Mul2(in_0, in_1, scalar) => {
-                            layers[layer_id as usize].mul2s.push(Gate2In {
-                                idx_in: [current_wire_id(*in_0), current_wire_id(*in_1)],
-                                idx_out: i,
-                                scalar: *scalar,
-                            });
-                        }
-                        GateType::Mul3(in_0, in_1, in_2, scalar) => {
-                            layers[layer_id as usize].mul3s.push(Gate3In {
-                                idx_in: [
-                                    current_wire_id(*in_0),
-                                    current_wire_id(*in_1),
-                                    current_wire_id(*in_2),
-                                ],
-                                idx_out: i,
-                                scalar: *scalar,
-                            });
-                        }
+                    let idx_in = gate
+                        .idx_in
+                        .iter()
+                        .map(|&cell_id| {
+                            let old_layer_id = circuit_builder.cells[cell_id].layer.unwrap();
+                            let old_wire_id = wire_ids_in_layer[cell_id];
+                            subsets.update_wire_id(old_layer_id, old_wire_id)
+                        })
+                        .collect_vec();
+                    match idx_in.len() {
+                        0 => layers[layer_id as usize].add_consts.push(GateCIn {
+                            idx_in: [],
+                            idx_out: i,
+                            scalar: gate.scalar,
+                        }),
+                        1 => layers[layer_id as usize].adds.push(Gate1In {
+                            idx_in: idx_in.try_into().unwrap(),
+                            idx_out: i,
+                            scalar: gate.scalar,
+                        }),
+                        2 => layers[layer_id as usize].mul2s.push(Gate2In {
+                            idx_in: idx_in.try_into().unwrap(),
+                            idx_out: i,
+                            scalar: gate.scalar,
+                        }),
+                        3 => layers[layer_id as usize].mul3s.push(Gate3In {
+                            idx_in: idx_in.try_into().unwrap(),
+                            idx_out: i,
+                            scalar: gate.scalar,
+                        }),
+                        _ => unreachable!(),
                     }
                 }
             }
+
+            subsets.update_layer_info(&mut layers);
+            // Initialize the next layer `max_previous_num_vars` equals that of the `self.layer_id`.
+            layers[layer_id as usize].max_previous_num_vars =
+                layers[new_layer_id as usize].num_vars;
         }
 
-        // Compute the copy_to from the output layer to the wires_out.
-        layers[0].num_vars = ceil_log2(layers_of_cell_id[0].len()) as usize;
-
-        let output_copy_to = out_cell_ids
-            .iter()
-            .map(|cell_ids| {
-                cell_ids
-                    .iter()
-                    .map(|cell_id| wire_ids_in_layer[*cell_id])
-                    .collect_vec()
-            })
-            .collect_vec();
-
-        // TODO: This is to avoid incorrect use of output copy_to. To be refined.
-        for (id, wire_out) in output_copy_to.iter().enumerate() {
-            layers[0]
-                .copy_to
-                .insert(id as LayerId, wire_out.iter().map(|x| *x).collect_vec());
+        // Compute the copy_to from the output layer to the wires_out. Notice
+        // that we don't pad the original output layer elements to the power of
+        // two.
+        let mut output_subsets = LayerSubsets::new(0, layers_of_cell_id[0].len());
+        let mut output_copy_to = HashMap::new();
+        for (cell_id, cell) in circuit_builder.cells.iter().enumerate() {
+            if let Some(CellType::Out(out)) = cell.cell_type {
+                let old_layer_id = cell.layer.unwrap();
+                let old_wire_id = wire_ids_in_layer[cell_id];
+                output_copy_to
+                    .entry(out)
+                    .or_insert(vec![])
+                    .push(output_subsets.update_wire_id(old_layer_id, old_wire_id));
+            }
         }
+        let output_copy_to = output_copy_to.into_iter().collect_vec();
+        output_subsets.update_layer_info(&mut layers);
 
         Self {
             layers,
-            copy_to_wires_out: output_copy_to,
-            n_wires_in: circuit_builder.n_wires_in(),
-            paste_from_in: input_paste_from_in,
-            max_wires_in_num_vars,
+            n_witness_in: circuit_builder.n_witness_in(),
+            n_witness_out: circuit_builder.n_witness_out(),
+            copy_to_out: output_copy_to,
+            paste_from_in: input_paste_from,
+            max_wires_in_num_vars: max_in_wit_num_vars,
         }
     }
 
@@ -443,6 +361,10 @@ impl<F: SmallField> fmt::Debug for Layer<F> {
         writeln!(f, "  layer_id: {}", self.layer_id)?;
         writeln!(f, "  num_vars: {}", self.num_vars)?;
         writeln!(f, "  max_previous_num_vars: {}", self.max_previous_num_vars)?;
+        writeln!(f, "  add_consts: ")?;
+        for add_const in self.add_consts.iter() {
+            writeln!(f, "    {:?}", add_const)?;
+        }
         writeln!(f, "  adds: ")?;
         for add in self.adds.iter() {
             writeln!(f, "    {:?}", add)?;
@@ -455,10 +377,6 @@ impl<F: SmallField> fmt::Debug for Layer<F> {
         for mul3 in self.mul3s.iter() {
             writeln!(f, "    {:?}", mul3)?;
         }
-        writeln!(f, "  assert_consts: ")?;
-        for assert_const in self.assert_consts.iter() {
-            writeln!(f, "    {:?}", assert_const)?;
-        }
         writeln!(f, "  copy_to: {:?}", self.copy_to)?;
         writeln!(f, "  paste_from: {:?}", self.paste_from)?;
         writeln!(f, "}}")
@@ -468,12 +386,11 @@ impl<F: SmallField> fmt::Debug for Layer<F> {
 impl<F: SmallField> fmt::Debug for Circuit<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Circuit {{")?;
-        writeln!(f, "  output_copy_to: {:?}", self.copy_to_wires_out)?;
         writeln!(f, "  layers: ")?;
         for layer in self.layers.iter() {
             writeln!(f, "    {:?}", layer)?;
         }
-        writeln!(f, "  n_wires_in: {}", self.n_wires_in)?;
+        writeln!(f, "  n_wires_in: {}", self.n_witness_in)?;
         writeln!(f, "  paste_from_in: {:?}", self.paste_from_in)?;
         writeln!(
             f,
@@ -481,5 +398,334 @@ impl<F: SmallField> fmt::Debug for Circuit<F> {
             self.max_wires_in_num_vars
         )?;
         writeln!(f, "}}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use ff::Field;
+    use goldilocks::{Goldilocks, GoldilocksExt2};
+    use simple_frontend::structs::{
+        ChallengeConst, ChallengeId, CircuitBuilder, ConstantType, InType, OutType,
+    };
+
+    use crate::structs::{Circuit, Gate};
+
+    #[test]
+    fn test_copy_and_paste() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        // Layer 3
+        let (_, input) = circuit_builder.create_witness_in(4);
+
+        // Layer 2
+        let mul_01 = circuit_builder.create_cell();
+        circuit_builder.mul2(mul_01, input[0], input[1], Goldilocks::ONE);
+
+        // Layer 1
+        let mul_012 = circuit_builder.create_cell();
+        circuit_builder.mul2(mul_012, mul_01, input[2], Goldilocks::ONE);
+
+        // Layer 0
+        let (_, mul_001123) = circuit_builder.create_witness_out(1);
+        circuit_builder.mul3(mul_001123[0], mul_01, mul_012, input[3], Goldilocks::ONE);
+
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+
+        assert_eq!(circuit.layers.len(), 4);
+        assert_eq!(circuit.layers[3].num_vars, 2);
+        assert_eq!(circuit.layers[2].num_vars, 1);
+        assert_eq!(circuit.layers[1].num_vars, 2);
+        assert_eq!(circuit.layers[0].num_vars, 0);
+
+        // layers[3][2] is copied to layers[2][1], layers[3][3] is copied to layers[1][2]
+        // layers[2][0] is copied to layers[1][1]
+
+        let mut expected_paste_from_2 = HashMap::new();
+        expected_paste_from_2.insert(3, vec![1]);
+        assert_eq!(circuit.layers[2].paste_from, expected_paste_from_2);
+
+        let mut expected_paste_from_1 = HashMap::new();
+        expected_paste_from_1.insert(2, vec![1]);
+        expected_paste_from_1.insert(3, vec![2]);
+        assert_eq!(circuit.layers[1].paste_from, expected_paste_from_1);
+
+        let mut expected_copy_to_3 = HashMap::new();
+        expected_copy_to_3.insert(2, vec![2]);
+        expected_copy_to_3.insert(1, vec![3]);
+        assert_eq!(circuit.layers[3].copy_to, expected_copy_to_3);
+
+        let mut expected_copy_to_2 = HashMap::new();
+        expected_copy_to_2.insert(1, vec![0]);
+        assert_eq!(circuit.layers[2].copy_to, expected_copy_to_2);
+    }
+
+    #[test]
+    fn test_paste_from_wit_in() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+
+        // Layer 2
+        let (leaf_id, leaves) = circuit_builder.create_witness_in(6);
+        // Unused input elements should also be in the circuit.
+        let (dummy_id, _) = circuit_builder.create_witness_in(3);
+        let _ = circuit_builder.create_counter_in(1);
+        let _ = circuit_builder.create_constant_in(2, 1);
+
+        // Layer 1
+        let (_, inners) = circuit_builder.create_witness_out(2);
+        circuit_builder.mul2(inners[0], leaves[0], leaves[1], Goldilocks::ONE);
+        circuit_builder.mul2(inners[1], leaves[2], leaves[3], Goldilocks::ONE);
+
+        // Layer 0
+        let (_, root) = circuit_builder.create_witness_out(1);
+        circuit_builder.mul2(root[0], inners[0], inners[1], Goldilocks::ONE);
+
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+
+        assert_eq!(circuit.layers.len(), 3);
+        assert_eq!(circuit.layers[2].num_vars, 4);
+        assert_eq!(circuit.layers[1].num_vars, 1);
+        // Layers[1][0] -> Layers[0][1], Layers[1][1] -> Layers[0][2]
+        assert_eq!(circuit.layers[0].num_vars, 2);
+
+        let mut expected_paste_from_in = Vec::new();
+        expected_paste_from_in.push((InType::Witness(leaf_id), 0usize, 6usize));
+        expected_paste_from_in.push((InType::Witness(dummy_id), 6, 9));
+        expected_paste_from_in.push((InType::Counter(1), 9, 11));
+        expected_paste_from_in.push((InType::Constant(1), 11, 13));
+        assert_eq!(
+            circuit.paste_from_in.iter().collect::<HashSet<_>>(),
+            expected_paste_from_in.iter().collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn test_copy_to_wit_out() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        // Layer 2
+        let (_, leaves) = circuit_builder.create_witness_in(4);
+
+        // Layer 1
+        let (inner_id, inners) = circuit_builder.create_witness_out(2);
+        circuit_builder.mul2(inners[0], leaves[0], leaves[1], Goldilocks::ONE);
+        circuit_builder.mul2(inners[1], leaves[2], leaves[3], Goldilocks::ONE);
+
+        // Layer 0
+        let root = circuit_builder.create_cell();
+        circuit_builder.mul2(root, inners[0], inners[1], Goldilocks::ONE);
+        circuit_builder.assert_const(root, 1);
+
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+
+        assert_eq!(circuit.layers.len(), 3);
+        assert_eq!(circuit.layers[2].num_vars, 2);
+        assert_eq!(circuit.layers[1].num_vars, 1);
+        assert_eq!(circuit.layers[0].num_vars, 2);
+        // Layers[1][0] -> Layers[0][1], Layers[1][1] -> Layers[0][2]
+        let mut expected_copy_to_1 = HashMap::new();
+        expected_copy_to_1.insert(0, vec![0, 1]);
+        let mut expected_paste_from_0 = HashMap::new();
+        expected_paste_from_0.insert(1, vec![1, 2]);
+
+        assert_eq!(circuit.layers[1].copy_to, expected_copy_to_1);
+        assert_eq!(circuit.layers[0].paste_from, expected_paste_from_0);
+
+        let mut expected_copy_to_out = HashMap::new();
+        expected_copy_to_out.insert(OutType::Witness(inner_id), vec![1, 2]);
+        expected_copy_to_out.insert(OutType::AssertConst(1), vec![0]);
+        let circuit_copy_to_out = circuit
+            .copy_to_out
+            .into_iter()
+            .collect::<HashMap<OutType, Vec<_>>>();
+
+        assert_eq!(circuit_copy_to_out, expected_copy_to_out);
+    }
+
+    #[test]
+    fn test_rlc_circuit() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        // Layer 2
+        let (_, leaves) = circuit_builder.create_witness_in(4);
+
+        // Layer 1
+        let inners = circuit_builder.create_ext_cells(2);
+        circuit_builder.rlc(&inners[0], &[leaves[0], leaves[1]], 0 as ChallengeId);
+        circuit_builder.rlc(&inners[1], &[leaves[2], leaves[3]], 1 as ChallengeId);
+
+        // Layer 0
+        let (_, roots) = circuit_builder.create_ext_witness_out(1);
+        circuit_builder.mul2_ext(&roots[0], &inners[0], &inners[1], Goldilocks::ONE);
+
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+
+        let expected_layer2_add_consts = vec![
+            Gate {
+                idx_in: [],
+                idx_out: 0,
+                scalar: ConstantType::<GoldilocksExt2>::Challenge(
+                    ChallengeConst {
+                        challenge: 0,
+                        exp: 2,
+                    },
+                    0,
+                ),
+            },
+            Gate {
+                idx_in: [],
+                idx_out: 1,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 0,
+                        exp: 2,
+                    },
+                    1,
+                ),
+            },
+            Gate {
+                idx_in: [],
+                idx_out: 2,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 1,
+                        exp: 2,
+                    },
+                    0,
+                ),
+            },
+            Gate {
+                idx_in: [],
+                idx_out: 3,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 1,
+                        exp: 2,
+                    },
+                    1,
+                ),
+            },
+        ];
+
+        let expected_layer2_adds = vec![
+            Gate {
+                idx_in: [0],
+                idx_out: 0,
+                scalar: ConstantType::<GoldilocksExt2>::Challenge(
+                    ChallengeConst {
+                        challenge: 0,
+                        exp: 0,
+                    },
+                    0,
+                ),
+            },
+            Gate {
+                idx_in: [1],
+                idx_out: 0,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 0,
+                        exp: 1,
+                    },
+                    0,
+                ),
+            },
+            Gate {
+                idx_in: [0],
+                idx_out: 1,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 0,
+                        exp: 0,
+                    },
+                    1,
+                ),
+            },
+            Gate {
+                idx_in: [1],
+                idx_out: 1,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 0,
+                        exp: 1,
+                    },
+                    1,
+                ),
+            },
+            Gate {
+                idx_in: [2],
+                idx_out: 2,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 1,
+                        exp: 0,
+                    },
+                    0,
+                ),
+            },
+            Gate {
+                idx_in: [3],
+                idx_out: 2,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 1,
+                        exp: 1,
+                    },
+                    0,
+                ),
+            },
+            Gate {
+                idx_in: [2],
+                idx_out: 3,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 1,
+                        exp: 0,
+                    },
+                    1,
+                ),
+            },
+            Gate {
+                idx_in: [3],
+                idx_out: 3,
+                scalar: ConstantType::Challenge(
+                    ChallengeConst {
+                        challenge: 1,
+                        exp: 1,
+                    },
+                    1,
+                ),
+            },
+        ];
+
+        let expected_layer1_mul2s = vec![
+            Gate {
+                idx_in: [0, 2],
+                idx_out: 0,
+                scalar: ConstantType::<GoldilocksExt2>::Field(Goldilocks::ONE),
+            },
+            Gate {
+                idx_in: [0, 3],
+                idx_out: 1,
+                scalar: ConstantType::Field(Goldilocks::ONE),
+            },
+            Gate {
+                idx_in: [1, 2],
+                idx_out: 2,
+                scalar: ConstantType::Field(Goldilocks::ONE),
+            },
+            Gate {
+                idx_in: [1, 3],
+                idx_out: 3,
+                scalar: ConstantType::Field(Goldilocks::ONE),
+            },
+        ];
+
+        assert_eq!(circuit.layers[2].add_consts, expected_layer2_add_consts);
+        assert_eq!(circuit.layers[2].adds, expected_layer2_adds);
+        assert_eq!(circuit.layers[1].mul2s, expected_layer1_mul2s);
     }
 }

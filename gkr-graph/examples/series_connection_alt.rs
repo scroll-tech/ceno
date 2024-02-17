@@ -18,8 +18,8 @@ use transcript::Transcript;
 fn construct_input<F: SmallField>(challenge: usize) -> Arc<Circuit<F>> {
     let input_size = 5;
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (_, inputs) = circuit_builder.create_wire_in(input_size);
-    let (_, lookup_inputs) = circuit_builder.create_wire_out(input_size);
+    let (_, inputs) = circuit_builder.create_witness_in(input_size);
+    let (_, lookup_inputs) = circuit_builder.create_witness_out(input_size);
 
     for (i, input) in inputs.iter().enumerate() {
         // denominator = (input + challenge)
@@ -38,7 +38,7 @@ fn construct_input<F: SmallField>(challenge: usize) -> Arc<Circuit<F>> {
 
 fn construct_pad_with_const<F: SmallField>(constant: i64) -> Arc<Circuit<F>> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (_, _) = circuit_builder.create_wire_in(5);
+    let (_, _) = circuit_builder.create_witness_in(5);
     let _ = circuit_builder.create_constant_in(3, constant);
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))
@@ -46,7 +46,7 @@ fn construct_pad_with_const<F: SmallField>(constant: i64) -> Arc<Circuit<F>> {
 
 fn construct_inv_sum<F: SmallField>() -> Arc<Circuit<F>> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (_, input) = circuit_builder.create_wire_in(2);
+    let (_, input) = circuit_builder.create_witness_in(2);
     let output = circuit_builder.create_cells(2);
     circuit_builder.mul2(output[0], input[0], input[1], F::BaseField::ONE);
     circuit_builder.add(output[1], input[0], F::BaseField::ONE);
@@ -58,7 +58,7 @@ fn construct_inv_sum<F: SmallField>() -> Arc<Circuit<F>> {
 fn construct_frac_sum<F: SmallField>() -> Arc<Circuit<F>> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     // (den1, num1, den2, num2)
-    let (_, input) = circuit_builder.create_wire_in(4);
+    let (_, input) = circuit_builder.create_witness_in(4);
     let output = circuit_builder.create_cells(2);
     circuit_builder.mul2(output[0], input[0], input[2], F::BaseField::ONE);
     circuit_builder.mul2(output[1], input[0], input[3], F::BaseField::ONE);

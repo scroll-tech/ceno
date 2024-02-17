@@ -44,9 +44,9 @@ impl BasicBlockReturn {
         let n_stack_items = stack_top_offsets.len();
 
         // From BB Start
-        let (stack_ts_id, stack_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
-        let (stack_top_id, stack_top) = circuit_builder.create_wire_in(1);
-        let (clk_id, _) = circuit_builder.create_wire_in(1);
+        let (stack_ts_id, stack_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (stack_top_id, stack_top) = circuit_builder.create_witness_in(1);
+        let (clk_id, _) = circuit_builder.create_witness_in(1);
 
         let mut stack_push_handler = ChipHandler::new(challenges.stack());
         let mut range_chip_handler = ChipHandler::new(challenges.range());
@@ -60,11 +60,11 @@ impl BasicBlockReturn {
         range_chip_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // From predesessor instruction
-        let (memory_ts_id, _) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
+        let (memory_ts_id, _) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
         let stack_operand_ids = stack_top_offsets
             .iter()
             .map(|offset| {
-                let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_wire_in(1);
+                let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_witness_in(1);
                 stack_push_handler.stack_push(
                     &mut circuit_builder,
                     stack_top_expr.add(i64_to_base_field::<F>(*offset)),
@@ -119,7 +119,7 @@ impl BBReturnRestMemLoad {
         challenges: ChipChallenges,
     ) -> Result<AccessoryCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut memory_load_handler = ChipHandler::new(challenges.mem());
 
         // Load from memory
@@ -162,7 +162,7 @@ impl BBReturnRestMemStore {
         challenges: ChipChallenges,
     ) -> Result<AccessoryCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut memory_store_handler = ChipHandler::new(challenges.mem());
 
         // Load from memory
@@ -207,7 +207,7 @@ impl BBReturnRestStackPop {
         challenges: ChipChallenges,
     ) -> Result<AccessoryCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut stack_pop_handler = ChipHandler::new(challenges.stack());
 
         // Pop from stack

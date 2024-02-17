@@ -119,12 +119,13 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::<F>::new();
         // From witness
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
-        let (offset_id, offset) = circuit_builder.create_wire_in(StackUInt::N_OPRAND_CELLS);
-        let (mem_value_id, mem_values) = circuit_builder.create_wire_in(StackUInt::N_OPRAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
+        let (mem_value_id, mem_values) =
+            circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
         let mut range_chip_handler = ChipHandler::new(challenges.range());
 
@@ -137,7 +138,8 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
             &phase0[Self::phase0_memory_ts_add()],
         )?;
         // To successor instruction
-        let next_memory_ts_id = circuit_builder.create_wire_out_from_cells(next_memory_ts.values());
+        let next_memory_ts_id =
+            circuit_builder.create_witness_out_from_cells(next_memory_ts.values());
 
         // Pop mem_bytes from stack
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
@@ -155,7 +157,7 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
 
         // To accessory circuits.
         let (to_acc_dup_id, to_acc_dup) =
-            circuit_builder.create_wire_out(MstoreAccessory::pred_dup_size());
+            circuit_builder.create_witness_out(MstoreAccessory::pred_dup_size());
         add_assign_each_cell(
             &mut circuit_builder,
             &to_acc_dup[MstoreAccessory::pred_dup_memory_ts()],
@@ -168,7 +170,7 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
         );
 
         let (to_acc_ooo_id, to_acc_ooo) = circuit_builder
-            .create_wire_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
+            .create_witness_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
         add_assign_each_cell(&mut circuit_builder, &to_acc_ooo, mem_bytes);
 
         circuit_builder.configure();
@@ -226,11 +228,11 @@ impl MstoreAccessory {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From predesessor circuit.
-        let (pred_dup_wire_id, pred_dup) = circuit_builder.create_wire_in(Self::pred_dup_size());
-        let (pred_ooo_wire_id, pred_ooo) = circuit_builder.create_wire_in(Self::pred_ooo_size());
+        let (pred_dup_wire_id, pred_dup) = circuit_builder.create_witness_in(Self::pred_dup_size());
+        let (pred_ooo_wire_id, pred_ooo) = circuit_builder.create_witness_in(Self::pred_ooo_size());
 
         // From witness.
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut range_chip_handler = ChipHandler::new(challenges.range());
         let mut memory_load_handler = ChipHandler::new(challenges.mem());

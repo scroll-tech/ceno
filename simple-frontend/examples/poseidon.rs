@@ -431,8 +431,8 @@ fn poseidon_ex<F: SmallField>(
 fn main() {
     let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
     let n_inputs = 4;
-    let (_, poseidon_ex_initial_state) = circuit_builder.create_wire_in(1);
-    let (_, poseidon_ex_inputs) = circuit_builder.create_wire_in(n_inputs);
+    let (_, poseidon_ex_initial_state) = circuit_builder.create_witness_in(1);
+    let (_, poseidon_ex_inputs) = circuit_builder.create_witness_in(n_inputs);
     let poseidon_ex_out = poseidon_ex(
         &mut circuit_builder,
         1,

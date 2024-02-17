@@ -86,14 +86,14 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From public io
-        let (public_io_id, public_io) = circuit_builder.create_wire_in(Self::public_io_size());
+        let (public_io_id, public_io) = circuit_builder.create_witness_in(Self::public_io_size());
 
         // From witness
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
-        let (offset_id, offset) = circuit_builder.create_wire_in(StackUInt::N_OPRAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
         let mut range_chip_handler = ChipHandler::new(challenges.range());
         let mut memory_load_handler = ChipHandler::new(challenges.mem());
@@ -124,7 +124,7 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
 
         // To successor instruction
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_wire_out(TSUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, memory_ts.values());
 
         let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);

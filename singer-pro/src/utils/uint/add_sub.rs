@@ -235,11 +235,11 @@ mod test {
 
         // configure circuit with cells for addend_0, addend_1 and carry as wire_in
         let (addend_0_wire_in_id, addend_0_wire_in_cells) =
-            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+            circuit_builder.create_witness_in(Uint256_8::N_OPRAND_CELLS);
         let (addend_1_wire_in_id, addend_1_wire_in_cells) =
-            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+            circuit_builder.create_witness_in(Uint256_8::N_OPRAND_CELLS);
         let (carry_wire_in_id, carry_wire_in_cells) =
-            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+            circuit_builder.create_witness_in(Uint256_8::N_OPRAND_CELLS);
         let addend_0 = Uint256_8::try_from(addend_0_wire_in_cells);
         let addend_1 = Uint256_8::try_from(addend_1_wire_in_cells);
         let result = UIntAddSub::<Uint256_8>::add_unsafe(
@@ -255,7 +255,7 @@ mod test {
 
         // generate witnesses for addend_0, addend_1 and carry
         // must pad each witness to the size of N_OPERAND_CELLS
-        let n_wires_in = circuit.n_wires_in;
+        let n_wires_in = circuit.n_witness_in;
         let mut wires_in = vec![vec![]; n_wires_in];
         wires_in[addend_0_wire_in_id as usize] =
             vec![Goldilocks::from(255u64), Goldilocks::from(255u64)];
@@ -293,11 +293,11 @@ mod test {
 
         // configure circuit with cells for minuend, subtrend and borrow as wire_in
         let (minuend_wire_in_id, minuend_wire_in_cells) =
-            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+            circuit_builder.create_witness_in(Uint256_8::N_OPRAND_CELLS);
         let (subtrend_wire_in_id, subtrend_wire_in_cells) =
-            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+            circuit_builder.create_witness_in(Uint256_8::N_OPRAND_CELLS);
         let (borrow_wire_in_id, borrow_wire_in_cells) =
-            circuit_builder.create_wire_in(Uint256_8::N_OPRAND_CELLS);
+            circuit_builder.create_witness_in(Uint256_8::N_OPRAND_CELLS);
         let minuend = Uint256_8::try_from(minuend_wire_in_cells);
         let subtrend = Uint256_8::try_from(subtrend_wire_in_cells);
         let result = UIntAddSub::<Uint256_8>::sub_unsafe(
@@ -313,7 +313,7 @@ mod test {
 
         // generate witnesses for addend_0, addend_1 and carry
         // must pad each witness to the size of N_OPERAND_CELLS
-        let n_wires_in = circuit.n_wires_in;
+        let n_wires_in = circuit.n_witness_in;
         let mut wires_in = vec![vec![]; n_wires_in];
         wires_in[minuend_wire_in_id as usize] =
             vec![Goldilocks::from(1u64), Goldilocks::from(1u64)];

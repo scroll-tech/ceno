@@ -12,7 +12,7 @@ use transcript::Transcript;
 
 use crate::{
     prover::SumcheckState,
-    structs::{Point, SumcheckProof},
+    structs::{LayerWitness, Point, SumcheckProof},
     utils::ceil_log2,
 };
 
@@ -21,19 +21,20 @@ use super::IOPProverPhase2InputState;
 impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
     pub(super) fn prover_init_parallel(
         layer_out_point: &'a Point<F>,
-        wires_in: &'a [Vec<Vec<F::BaseField>>],
+        wits_in: &'a [LayerWitness<F::BaseField>],
         paste_from_in: &'a [(InType, CellId, CellId)],
         lo_out_num_vars: usize,
         lo_in_num_vars: Option<usize>,
         hi_num_vars: usize,
     ) -> Self {
-        let mut paste_from_wires_in = vec![(0, 0); wires_in.len()];
+        let timer = start_timer!(|| "Prover init input phase 2");
+        let mut paste_from_wit_in = vec![(0, 0); wits_in.len()];
         paste_from_in
             .iter()
-            .filter(|(ty, _, _)| matches!(*ty, InType::Wire(_)))
+            .filter(|(ty, _, _)| matches!(*ty, InType::Witness(_)))
             .for_each(|(ty, l, r)| {
-                if let InType::Wire(j) = *ty {
-                    paste_from_wires_in[j as usize] = (*l, *r);
+                if let InType::Witness(j) = *ty {
+                    paste_from_wit_in[j as usize] = (*l, *r);
                 }
             });
         let paste_from_counter_in = paste_from_in
@@ -47,11 +48,12 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
                 }
             })
             .collect::<Vec<_>>();
+        end_timer!(timer);
         Self {
             layer_out_point,
-            paste_from_wires_in,
+            paste_from_wit_in,
             paste_from_counter_in,
-            wires_in,
+            wits_in,
             lo_out_num_vars,
             lo_in_num_vars,
             hi_num_vars,
@@ -62,7 +64,7 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
         &self,
         transcript: &mut Transcript<F>,
     ) -> (SumcheckProof<F>, Vec<F>) {
-        let timer = start_timer!(|| "Prover phase 2 input step 1");
+        let timer = start_timer!(|| "Prover input phase 2 step 1");
         let lo_out_num_vars = self.lo_out_num_vars;
         if self.lo_in_num_vars.is_none() {
             return (SumcheckProof::default(), vec![]);
@@ -79,16 +81,16 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
 
         let mut f_vec = vec![];
         let mut g_vec = vec![];
-        let paste_from_wires_in = &self.paste_from_wires_in;
-        let wires_in = self.wires_in;
-        for (j, (l, r)) in paste_from_wires_in.iter().enumerate() {
+        let paste_from_wit_in = &self.paste_from_wit_in;
+        let wits_in = self.wits_in;
+        for (j, (l, r)) in paste_from_wit_in.iter().enumerate() {
             let mut f = vec![F::ZERO; 1 << in_num_vars];
             let mut g = vec![F::ZERO; 1 << in_num_vars];
             for s in 0..(1 << hi_num_vars) {
                 for new_wire_id in *l..*r {
                     let subset_wire_id = new_wire_id - l;
                     f[(s << lo_in_num_vars) ^ subset_wire_id] =
-                        F::from_base(&wires_in[j as usize][s][subset_wire_id]);
+                        F::from_base(&wits_in[j as usize].instances[s][subset_wire_id]);
                     g[(s << lo_in_num_vars) ^ subset_wire_id] = eq_t_rt[s] * eq_y_ry[new_wire_id];
                 }
             }
@@ -136,7 +138,7 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
         let eval_point = sumcheck_proof.point.clone();
         let eval_values_f = f_vec
             .iter()
-            .take(wires_in.len())
+            .take(wits_in.len())
             .map(|f| f.evaluate(&eval_point))
             .collect();
         end_timer!(timer);
