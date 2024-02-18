@@ -303,11 +303,11 @@ mod test {
             vec![], // todo
         );
         phase0_values_map.insert(
-            "phase0_stack_ts_cond".to_string(),
+            "phase0_old_stack_ts_cond".to_string(),
             vec![], // todo
         );
         phase0_values_map.insert(
-            "phase0_stack_ts_cond_lt".to_string(),
+            "phase0_old_stack_ts_cond_lt".to_string(),
             vec![], // todo
         );
         phase0_values_map.insert(
@@ -332,11 +332,6 @@ mod test {
         );
         phase0_values_map.insert(
             "phase0_pc_plus_1_opcode".to_string(),
-            vec![], // todo
-        );
-
-        phase0_values_map.insert(
-            "phase0_pc_add".to_string(),
             vec![], // todo
         );
 

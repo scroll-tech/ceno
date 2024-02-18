@@ -204,7 +204,10 @@ mod test {
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert("phase0_stack_top".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_stack_top".to_string(),
+            vec![Goldilocks::from(100u64)],
+        );
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),
