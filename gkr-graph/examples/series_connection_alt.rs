@@ -164,13 +164,6 @@ fn main() -> Result<(), GKRGraphError> {
             .get_and_append_challenge(b"output point")
             .elements,
     ];
-    let output_eval = circuit_witness
-        .node_witnesses
-        .last()
-        .unwrap()
-        .last_layer_witness_ref()
-        .mle(1, 0)
-        .evaluate(&output_point);
     let proof = IOPProverState::prove(
         &graph,
         &circuit_witness,
