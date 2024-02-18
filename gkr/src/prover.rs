@@ -191,7 +191,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             &self.layer_out_poly,
             &wit_out_point_and_evals,
             &alpha,
-            circuit.copy_to_out.len(),
+            circuit.copy_to_wits_out.len() + 1,
             lo_num_vars,
             hi_num_vars,
         );
@@ -201,7 +201,11 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         // =============================================================
 
         let (sumcheck_proof_1, eval_value_1) = prover_phase1_state
-            .prove_and_update_state_step1_parallel(&circuit.copy_to_out, transcript);
+            .prove_and_update_state_step1_parallel(
+                &circuit.copy_to_wits_out,
+                &circuit.assert_consts,
+                transcript,
+            );
 
         // ==============================================================
         // Step 2: Second step of copy constraints copied to later layers
@@ -374,7 +378,8 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         let prover_phase2_state = IOPProverPhase2InputState::prover_init_parallel(
             &layer_out_point,
             self.circuit_witness.witness_in_ref(),
-            &circuit.paste_from_in,
+            &circuit.paste_from_wits_in,
+            &circuit.paste_from_counter_in,
             layer.num_vars,
             circuit.max_wires_in_num_vars,
             hi_num_vars,
@@ -452,8 +457,8 @@ struct IOPProverPhase2State<'a, F: SmallField> {
 
 struct IOPProverPhase2InputState<'a, F: SmallField> {
     layer_out_point: &'a Point<F>,
-    paste_from_wit_in: Vec<(CellId, CellId)>,
-    paste_from_counter_in: Vec<(CellId, CellId)>,
+    paste_from_wits_in: &'a [(CellId, CellId)],
+    paste_from_counter_in: &'a [(usize, (CellId, CellId))],
     wits_in: &'a [LayerWitness<F::BaseField>],
     lo_out_num_vars: usize,
     lo_in_num_vars: Option<usize>,

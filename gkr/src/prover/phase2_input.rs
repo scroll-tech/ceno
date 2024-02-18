@@ -6,14 +6,13 @@ use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use simple_frontend::structs::{CellId, InType};
+use simple_frontend::structs::CellId;
 use std::ops::Add;
 use transcript::Transcript;
 
 use crate::{
     prover::SumcheckState,
     structs::{LayerWitness, Point, SumcheckProof},
-    utils::ceil_log2,
 };
 
 use super::IOPProverPhase2InputState;
@@ -22,36 +21,15 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
     pub(super) fn prover_init_parallel(
         layer_out_point: &'a Point<F>,
         wits_in: &'a [LayerWitness<F::BaseField>],
-        paste_from_in: &'a [(InType, CellId, CellId)],
+        paste_from_wits_in: &'a [(CellId, CellId)],
+        paste_from_counter_in: &'a [(usize, (CellId, CellId))],
         lo_out_num_vars: usize,
         lo_in_num_vars: Option<usize>,
         hi_num_vars: usize,
     ) -> Self {
-        let timer = start_timer!(|| "Prover init input phase 2");
-        let mut paste_from_wit_in = vec![(0, 0); wits_in.len()];
-        paste_from_in
-            .iter()
-            .filter(|(ty, _, _)| matches!(*ty, InType::Witness(_)))
-            .for_each(|(ty, l, r)| {
-                if let InType::Witness(j) = *ty {
-                    paste_from_wit_in[j as usize] = (*l, *r);
-                }
-            });
-        let paste_from_counter_in = paste_from_in
-            .iter()
-            .filter(|(ty, _, _)| matches!(*ty, InType::Counter(_)))
-            .map(|(ty, l, r)| {
-                if let InType::Counter(_) = *ty {
-                    (*l, *r)
-                } else {
-                    unreachable!()
-                }
-            })
-            .collect::<Vec<_>>();
-        end_timer!(timer);
         Self {
             layer_out_point,
-            paste_from_wit_in,
+            paste_from_wits_in,
             paste_from_counter_in,
             wits_in,
             lo_out_num_vars,
@@ -81,7 +59,7 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
 
         let mut f_vec = vec![];
         let mut g_vec = vec![];
-        let paste_from_wit_in = &self.paste_from_wit_in;
+        let paste_from_wit_in = &self.paste_from_wits_in;
         let wits_in = self.wits_in;
         for (j, (l, r)) in paste_from_wit_in.iter().enumerate() {
             let mut f = vec![F::ZERO; 1 << in_num_vars];
@@ -105,10 +83,9 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
         }
 
         let paste_from_counter_in = &self.paste_from_counter_in;
-        for (l, r) in paste_from_counter_in.iter() {
+        for (num_vars, (l, r)) in paste_from_counter_in.iter() {
             let mut f = vec![F::ZERO; 1 << in_num_vars];
             let mut g = vec![F::ZERO; 1 << in_num_vars];
-            let num_vars = ceil_log2(*r - *l);
             for s in 0..(1 << hi_num_vars) {
                 for new_wire_id in *l..*r {
                     let subset_wire_id = new_wire_id - l;

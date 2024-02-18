@@ -1,14 +1,15 @@
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
-use simple_frontend::structs::{CellId, OutType};
+use simple_frontend::structs::{CellId, ConstantType};
 use transcript::Transcript;
 
 use crate::{
+    circuit::EvaluateGateCIn,
     error::GKRError,
-    structs::{PointAndEval, SumcheckProof},
-    utils::{i64_to_field, MatrixMLERowFirst, SubsetIndices},
+    structs::{GateCIn, PointAndEval, SumcheckProof},
+    utils::MatrixMLERowFirst,
 };
 
 use super::{IOPVerifierPhase1OutputState, SumcheckState};
@@ -44,13 +45,13 @@ impl<'a, F: SmallField> IOPVerifierPhase1OutputState<'a, F> {
     pub(super) fn verify_and_update_state_step1_parallel(
         &mut self,
         prover_msg: (&SumcheckProof<F>, &[F]),
-        copy_to_out: &[(OutType, Vec<CellId>)],
+        copy_to_wits_out: &[Vec<CellId>],
+        assert_consts: &[GateCIn<ConstantType<F>>],
         transcript: &mut Transcript<F>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 1 step 1");
         let lo_num_vars = self.lo_num_vars;
 
-        let alpha_pows = &self.alpha_pows;
         let assert_point = (0..self.lo_num_vars + self.hi_num_vars)
             .map(|_| {
                 transcript
@@ -61,23 +62,31 @@ impl<'a, F: SmallField> IOPVerifierPhase1OutputState<'a, F> {
 
         let assert_eq_yj_ryj = build_eq_x_r_vec(&assert_point[..self.lo_num_vars]);
 
-        // sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
-        let sigma_1 = copy_to_out.iter().zip(self.alpha_pows.iter()).fold(
-            F::ZERO,
-            |acc, ((out, copy_to), alpha_pow)| {
-                let eval = match *out {
-                    OutType::Witness(id) => self.subset_point_and_evals[id as usize].eval,
-                    OutType::AssertConst(constant) => {
-                        i64_to_field::<F>(constant)
-                            * copy_to.as_slice().subset_eq_eval(&assert_eq_yj_ryj)
+        let assert_consts = assert_consts
+            .iter()
+            .map(|gate| {
+                if let ConstantType::Field(constant) = gate.scalar {
+                    GateCIn {
+                        idx_in: [],
+                        idx_out: gate.idx_out,
+                        scalar: constant,
                     }
-                };
-                acc + eval * alpha_pow
-            },
-        );
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect_vec();
+
+        let mut sigma_1 = izip!(self.subset_point_and_evals.iter(), self.alpha_pows.iter())
+            .fold(F::ZERO, |acc, (point_and_eval, alpha_pow)| {
+                acc + point_and_eval.eval * alpha_pow
+            });
+        sigma_1 +=
+            assert_consts.as_slice().eval(&assert_eq_yj_ryj) * self.alpha_pows.last().unwrap();
         // Sumcheck 1: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
-        //     f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
-        //     g1^{(j)}(y) = \alpha^j copy_to[j](ry_j, y)
+        //     f1^{(j)}(y) = layers[i](rt_j || y)
+        //     g1^{(j)}(y) = \alpha^j copy_to_wits_out[j](ry_j, y)
+        //                     or \alpha^j assert_subset_eq[j](ry, y)
         let claim_1 = SumcheckState::verify(
             sigma_1,
             &prover_msg.0,
@@ -90,26 +99,26 @@ impl<'a, F: SmallField> IOPVerifierPhase1OutputState<'a, F> {
         );
         let claim1_point = claim_1.point.iter().map(|x| x.elements).collect_vec();
         let eq_y_ry = build_eq_x_r_vec(&claim1_point);
-        self.g1_values = copy_to_out
-            .iter()
-            .zip(alpha_pows.iter())
-            .map(|((out, copy_to), &alpha_pow)| match *out {
-                OutType::Witness(id) => {
-                    let point_and_eval = &self.subset_point_and_evals[id as usize];
-                    let point_lo_num_vars = point_and_eval.point.len() - self.hi_num_vars;
-                    self.output_points.push(point_and_eval.point.clone());
-                    let eq_yj_ryj = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
-                    copy_to.as_slice().eval_row_first(&eq_yj_ryj, &eq_y_ry) * alpha_pow
-                }
-                OutType::AssertConst(_) => {
-                    self.output_points.push(assert_point.clone());
-                    copy_to
-                        .as_slice()
-                        .subset_eq2_eval(&assert_eq_yj_ryj, &eq_y_ry)
-                        * alpha_pow
-                }
-            })
-            .collect_vec();
+        self.g1_values = izip!(
+            copy_to_wits_out.iter(),
+            self.subset_point_and_evals.iter(),
+            self.alpha_pows.iter()
+        )
+        .map(|(copy_to, point_and_eval, alpha_pow)| {
+            let point_lo_num_vars = point_and_eval.point.len() - self.hi_num_vars;
+            self.output_points.push(point_and_eval.point.clone());
+            let eq_yj_ryj = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
+            copy_to.as_slice().eval_row_first(&eq_yj_ryj, &eq_y_ry) * alpha_pow
+        })
+        .collect_vec();
+
+        self.output_points.push(assert_point.clone());
+        self.g1_values.push(
+            assert_consts
+                .as_slice()
+                .eval_subset_eq(&assert_eq_yj_ryj, &eq_y_ry)
+                * self.alpha_pows.last().unwrap(),
+        );
 
         let f1_values = prover_msg.1.to_vec();
         let got_value_1 = f1_values

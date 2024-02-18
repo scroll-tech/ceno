@@ -4,12 +4,12 @@ use std::collections::{BTreeMap, HashMap};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::{
-    CellId, CellType, ChallengeConst, CircuitBuilder, ConstantType, InType, LayerId,
+    CellId, CellType, ChallengeConst, CircuitBuilder, ConstantType, InType, LayerId, OutType,
 };
 
 use crate::{
     structs::{Circuit, Gate1In, Gate2In, Gate3In, GateCIn, Layer},
-    utils::{ceil_log2, MatrixMLEColumnFirst, MatrixMLERowFirst},
+    utils::{ceil_log2, i64_to_field, MatrixMLEColumnFirst, MatrixMLERowFirst},
 };
 
 struct LayerSubsets {
@@ -115,7 +115,9 @@ impl<F: SmallField> Circuit<F> {
             in_cell_ids
         };
 
-        let mut input_paste_from = Vec::with_capacity(in_cell_ids.len());
+        let mut input_paste_from_wits_in = vec![(0, 0); circuit_builder.n_witness_in()];
+        let mut input_paste_from_counter_in = Vec::new();
+        let mut input_paste_from_consts_in = Vec::new();
         let mut max_in_wit_num_vars: Option<usize> = None;
         for (ty, in_cell_ids) in in_cell_ids.iter() {
             #[cfg(feature = "debug")]
@@ -127,16 +129,28 @@ impl<F: SmallField> Circuit<F> {
                     i == 0 || wire_ids_in_layer[*cell_id] == wire_ids_in_layer[wire_in[i - 1]] + 1
                 );
             });
-            input_paste_from.push((
-                *ty,
+            let segment = (
                 wire_ids_in_layer[in_cell_ids[0]],
                 wire_ids_in_layer[in_cell_ids[in_cell_ids.len() - 1]] + 1,
-            ));
-            if !matches!(*ty, InType::Constant(_)) {
-                max_in_wit_num_vars = max_in_wit_num_vars
-                    .map_or(Some(ceil_log2(in_cell_ids.len())), |x| {
-                        Some(x.max(ceil_log2(in_cell_ids.len())))
-                    });
+            );
+            match ty {
+                InType::Witness(wit_id) => {
+                    input_paste_from_wits_in[*wit_id as usize] = segment;
+                    max_in_wit_num_vars = max_in_wit_num_vars
+                        .map_or(Some(ceil_log2(in_cell_ids.len())), |x| {
+                            Some(x.max(ceil_log2(in_cell_ids.len())))
+                        });
+                }
+                InType::Counter(num_vars) => {
+                    input_paste_from_counter_in.push((*num_vars, segment));
+                    max_in_wit_num_vars = max_in_wit_num_vars
+                        .map_or(Some(ceil_log2(in_cell_ids.len())), |x| {
+                            Some(x.max(ceil_log2(in_cell_ids.len())))
+                        });
+                }
+                InType::Constant(constant) => {
+                    input_paste_from_consts_in.push((*constant, segment));
+                }
             }
         }
 
@@ -201,26 +215,39 @@ impl<F: SmallField> Circuit<F> {
         // that we don't pad the original output layer elements to the power of
         // two.
         let mut output_subsets = LayerSubsets::new(0, layers_of_cell_id[0].len());
-        let mut output_copy_to = HashMap::new();
+        let mut output_copy_to_wits_out = vec![vec![]; circuit_builder.n_witness_out()];
+        let mut output_assert_const = vec![];
         for (cell_id, cell) in circuit_builder.cells.iter().enumerate() {
             if let Some(CellType::Out(out)) = cell.cell_type {
                 let old_layer_id = cell.layer.unwrap();
                 let old_wire_id = wire_ids_in_layer[cell_id];
-                output_copy_to
-                    .entry(out)
-                    .or_insert(vec![])
-                    .push(output_subsets.update_wire_id(old_layer_id, old_wire_id));
+                match out {
+                    OutType::Witness(wit_id) => {
+                        output_copy_to_wits_out[wit_id as usize]
+                            .push(output_subsets.update_wire_id(old_layer_id, old_wire_id));
+                    }
+                    OutType::AssertConst(constant) => {
+                        output_assert_const.push(GateCIn {
+                            idx_in: [],
+                            idx_out: output_subsets.update_wire_id(old_layer_id, old_wire_id),
+                            scalar: ConstantType::Field(i64_to_field(constant)),
+                        });
+                    }
+                }
             }
         }
-        let output_copy_to = output_copy_to.into_iter().collect_vec();
+        let output_copy_to = output_copy_to_wits_out.into_iter().collect_vec();
         output_subsets.update_layer_info(&mut layers);
 
         Self {
             layers,
             n_witness_in: circuit_builder.n_witness_in(),
             n_witness_out: circuit_builder.n_witness_out(),
-            copy_to_out: output_copy_to,
-            paste_from_in: input_paste_from,
+            paste_from_wits_in: input_paste_from_wits_in,
+            paste_from_counter_in: input_paste_from_counter_in,
+            paste_from_consts_in: input_paste_from_consts_in,
+            copy_to_wits_out: output_copy_to,
+            assert_consts: output_assert_const,
             max_wires_in_num_vars: max_in_wit_num_vars,
         }
     }
@@ -391,7 +418,15 @@ impl<F: SmallField> fmt::Debug for Circuit<F> {
             writeln!(f, "    {:?}", layer)?;
         }
         writeln!(f, "  n_wires_in: {}", self.n_witness_in)?;
-        writeln!(f, "  paste_from_in: {:?}", self.paste_from_in)?;
+        writeln!(f, "  paste_from_wits_in: {:?}", self.paste_from_wits_in)?;
+        writeln!(
+            f,
+            "  paste_from_counter_in: {:?}",
+            self.paste_from_counter_in
+        )?;
+        writeln!(f, "  paste_from_consts_in: {:?}", self.paste_from_consts_in)?;
+        writeln!(f, "  copy_to_wits_out: {:?}", self.copy_to_wits_out)?;
+        writeln!(f, "  assert_const: {:?}", self.assert_consts)?;
         writeln!(
             f,
             "  max_wires_in_num_vars: {:?}",
@@ -403,15 +438,13 @@ impl<F: SmallField> fmt::Debug for Circuit<F> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use simple_frontend::structs::{
-        ChallengeConst, ChallengeId, CircuitBuilder, ConstantType, InType, OutType,
-    };
+    use simple_frontend::structs::{ChallengeConst, ChallengeId, CircuitBuilder, ConstantType};
 
-    use crate::structs::{Circuit, Gate};
+    use crate::structs::{Circuit, Gate, GateCIn};
 
     #[test]
     fn test_copy_and_paste() {
@@ -491,15 +524,19 @@ mod tests {
         // Layers[1][0] -> Layers[0][1], Layers[1][1] -> Layers[0][2]
         assert_eq!(circuit.layers[0].num_vars, 2);
 
-        let mut expected_paste_from_in = Vec::new();
-        expected_paste_from_in.push((InType::Witness(leaf_id), 0usize, 6usize));
-        expected_paste_from_in.push((InType::Witness(dummy_id), 6, 9));
-        expected_paste_from_in.push((InType::Counter(1), 9, 11));
-        expected_paste_from_in.push((InType::Constant(1), 11, 13));
+        let mut expected_paste_from_wits_in = vec![(0, 0); 2];
+        expected_paste_from_wits_in[leaf_id as usize] = (0usize, 6usize);
+        expected_paste_from_wits_in[dummy_id as usize] = (6, 9);
+        let mut expected_paste_from_counter_in = vec![];
+        expected_paste_from_counter_in.push((1, (9, 11)));
+        let mut expected_paste_from_consts_in = vec![];
+        expected_paste_from_consts_in.push((1, (11, 13)));
+        assert_eq!(circuit.paste_from_wits_in, expected_paste_from_wits_in);
         assert_eq!(
-            circuit.paste_from_in.iter().collect::<HashSet<_>>(),
-            expected_paste_from_in.iter().collect::<HashSet<_>>()
+            circuit.paste_from_counter_in,
+            expected_paste_from_counter_in
         );
+        assert_eq!(circuit.paste_from_consts_in, expected_paste_from_consts_in);
     }
 
     #[test]
@@ -509,7 +546,7 @@ mod tests {
         let (_, leaves) = circuit_builder.create_witness_in(4);
 
         // Layer 1
-        let (inner_id, inners) = circuit_builder.create_witness_out(2);
+        let (_inner_id, inners) = circuit_builder.create_witness_out(2);
         circuit_builder.mul2(inners[0], leaves[0], leaves[1], Goldilocks::ONE);
         circuit_builder.mul2(inners[1], leaves[2], leaves[3], Goldilocks::ONE);
 
@@ -534,15 +571,16 @@ mod tests {
         assert_eq!(circuit.layers[1].copy_to, expected_copy_to_1);
         assert_eq!(circuit.layers[0].paste_from, expected_paste_from_0);
 
-        let mut expected_copy_to_out = HashMap::new();
-        expected_copy_to_out.insert(OutType::Witness(inner_id), vec![1, 2]);
-        expected_copy_to_out.insert(OutType::AssertConst(1), vec![0]);
-        let circuit_copy_to_out = circuit
-            .copy_to_out
-            .into_iter()
-            .collect::<HashMap<OutType, Vec<_>>>();
+        let expected_copy_to_wits_out = vec![vec![1, 2]];
+        let mut expected_assert_const = vec![];
+        expected_assert_const.push(GateCIn {
+            idx_in: [],
+            idx_out: 0,
+            scalar: ConstantType::Field(Goldilocks::ONE),
+        });
 
-        assert_eq!(circuit_copy_to_out, expected_copy_to_out);
+        assert_eq!(circuit.copy_to_wits_out, expected_copy_to_wits_out);
+        assert_eq!(circuit.assert_consts, expected_assert_const);
     }
 
     #[test]

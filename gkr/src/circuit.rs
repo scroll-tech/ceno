@@ -9,7 +9,7 @@ pub trait EvaluateGateCIn<F>
 where
     F: SmallField,
 {
-    fn eval<E: SmallField<BaseField = F>>(&self, out: &[E]) -> E;
+    fn eval<E: SmallField<BaseField = F>>(&self, out_eq_vec: &[E]) -> E;
     fn eval_subset_eq<E: SmallField<BaseField = F>>(&self, out_eq_vec: &[E], in_eq_vec: &[E]) -> E;
 }
 

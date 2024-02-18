@@ -2,18 +2,18 @@ use std::{ops::Add, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use simple_frontend::structs::{CellId, OutType};
+use simple_frontend::structs::{CellId, ConstantType};
 use transcript::Transcript;
 
 use crate::{
     prover::SumcheckState,
-    structs::{PointAndEval, SumcheckProof},
-    utils::{fix_high_variables, MatrixMLERowFirst, SubsetIndices},
+    structs::{GateCIn, PointAndEval, SumcheckProof},
+    utils::{fix_high_variables, MatrixMLERowFirst},
 };
 
 use super::IOPProverPhase1OutputState;
@@ -51,13 +51,14 @@ impl<'a, F: SmallField> IOPProverPhase1OutputState<'a, F> {
 
     /// Sumcheck 1: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
     ///     sigma = \sum_j( \alpha^j * wit_out_eval[j](rt_j || ry_j) )
-    ///             + \sum_j( \alpha^{wit_out_eval[j].len() + j} * assert_const(rt || ry) )
+    ///             + \alpha^{wit_out_eval[j].len()} * assert_const(rt || ry) )
     ///     f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
     ///     g1^{(j)}(y) = \alpha^j copy_to[j](ry_j, y)
     ///                     or \alpha^j subset_eq[j](ry, y)
     pub(super) fn prove_and_update_state_step1_parallel(
         &mut self,
-        copy_to_out: &[(OutType, Vec<CellId>)],
+        copy_to_wits_out: &[Vec<CellId>],
+        assert_consts: &[GateCIn<ConstantType<F>>],
         transcript: &mut Transcript<F>,
     ) -> (SumcheckProof<F>, Vec<F>) {
         let timer = start_timer!(|| "Prover sumcheck output phase 1 step 1");
@@ -78,43 +79,50 @@ impl<'a, F: SmallField> IOPProverPhase1OutputState<'a, F> {
         let total_length = self.subset_point_and_evals.len() + 1;
         let mut f1 = Vec::with_capacity(total_length);
         let mut g1 = Vec::with_capacity(total_length);
-        copy_to_out
-            .iter()
-            .zip(self.alpha_pows.iter())
-            .for_each(|((out, copy_to), alpha_pow)| {
-                let (point, point_lo_num_vars, g1_j) = match *out {
-                    OutType::Witness(id) => {
-                        let point_and_eval = &self.subset_point_and_evals[id as usize];
-                        let point_lo_num_vars = point_and_eval.point.len() - self.hi_num_vars;
-                        let lo_eq_w_p =
-                            build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
-                        assert!(copy_to.len() <= lo_eq_w_p.len());
-                        let g1_j = copy_to.as_slice().fix_row_row_first_with_scalar(
-                            &lo_eq_w_p,
-                            self.lo_num_vars,
-                            alpha_pow,
-                        );
-                        (&point_and_eval.point, point_lo_num_vars, g1_j)
-                    }
-                    OutType::AssertConst(_) => {
-                        let lo_eq_w_p = build_eq_x_r_vec(&assert_point[..self.lo_num_vars]);
-                        let g1_j = copy_to
-                            .as_slice()
-                            .subset_eq_with_scalar(&lo_eq_w_p, alpha_pow);
-                        (&assert_point, self.lo_num_vars, g1_j)
-                    }
-                };
+        izip!(
+            copy_to_wits_out.iter(),
+            self.subset_point_and_evals.iter(),
+            self.alpha_pows.iter()
+        )
+        .for_each(|(copy_to, point_and_eval, alpha_pow)| {
+            let point_lo_num_vars = point_and_eval.point.len() - self.hi_num_vars;
+            let point = &point_and_eval.point;
+            let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
+            assert!(copy_to.len() <= lo_eq_w_p.len());
 
-                g1.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                    self.lo_num_vars,
-                    g1_j,
-                )));
+            let f1_j = fix_high_variables(&self.layer_out_poly, &point[point_lo_num_vars..]);
+            f1.push(Arc::new(f1_j));
 
-                let f1_j = fix_high_variables(&self.layer_out_poly, &point[point_lo_num_vars..]);
-                f1.push(Arc::new(f1_j));
+            let g1_j = copy_to.as_slice().fix_row_row_first_with_scalar(
+                &lo_eq_w_p,
+                self.lo_num_vars,
+                alpha_pow,
+            );
 
-                self.output_points.push(point.clone());
-            });
+            g1.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+                self.lo_num_vars,
+                g1_j,
+            )));
+
+            self.output_points.push(point.clone());
+        });
+
+        let f1_j = fix_high_variables(&self.layer_out_poly, &assert_point[self.lo_num_vars..]);
+        f1.push(Arc::new(f1_j));
+
+        let alpha_pow = self.alpha_pows.last().unwrap();
+        let lo_eq_w_p = build_eq_x_r_vec(&assert_point[..self.lo_num_vars]);
+        let mut g_last = vec![F::ZERO; 1 << self.lo_num_vars];
+        assert_consts.iter().for_each(|gate| {
+            g_last[gate.idx_out as usize] = lo_eq_w_p[gate.idx_out as usize] * alpha_pow;
+        });
+
+        g1.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            self.lo_num_vars,
+            g_last,
+        )));
+
+        self.output_points.push(assert_point.clone());
 
         // sumcheck: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
         let mut virtual_poly_1 = VirtualPolynomial::new(self.lo_num_vars);

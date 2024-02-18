@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use itertools::Itertools;
-use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId, OutType};
+use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId};
 
 use transcript::Transcript;
 
@@ -48,7 +48,8 @@ impl<F: SmallField> IOPVerifierState<F> {
                     if layer_id == 0 {
                         verifier_state.verify_and_update_state_phase1_output_parallel(
                             layer,
-                            &circuit.copy_to_out,
+                            &circuit.copy_to_wits_out,
+                            &circuit.assert_consts,
                             &phase1_msg,
                             instance_num_vars,
                             transcript,
@@ -182,7 +183,8 @@ impl<F: SmallField> IOPVerifierState<F> {
     fn verify_and_update_state_phase1_output_parallel(
         &mut self,
         layer: &Layer<F>,
-        copy_to_out: &[(OutType, Vec<CellId>)],
+        copy_to_wits_out: &[Vec<CellId>],
+        assert_consts: &[GateCIn<ConstantType<F>>],
         prover_msg: &IOPProverPhase1Message<F>,
         hi_num_vars: usize,
         transcript: &mut Transcript<F>,
@@ -193,7 +195,7 @@ impl<F: SmallField> IOPVerifierState<F> {
         let mut verifier_phase1_state = IOPVerifierPhase1OutputState::verifier_init_parallel(
             &self.wit_out_point_and_evals,
             &alpha.elements,
-            copy_to_out.len(),
+            copy_to_wits_out.len() + 1,
             lo_num_vars,
             hi_num_vars,
         );
@@ -205,7 +207,8 @@ impl<F: SmallField> IOPVerifierState<F> {
         // TODO: Double check the correctness.
         verifier_phase1_state.verify_and_update_state_step1_parallel(
             (&prover_msg.sumcheck_proof_1, &prover_msg.eval_value_1),
-            copy_to_out,
+            copy_to_wits_out,
+            assert_consts,
             transcript,
         )?;
 
@@ -364,10 +367,11 @@ impl<F: SmallField> IOPVerifierState<F> {
                     ConstantType::Field(c) => c,
                 }
             },
-            circuit.n_witness_in,
             layer_out_point,
             *layer_out_value,
-            &circuit.paste_from_in,
+            &circuit.paste_from_wits_in,
+            &circuit.paste_from_consts_in,
+            &circuit.paste_from_counter_in,
             layer.num_vars,
             lo_in_num_vars,
             hi_out_num_vars,
@@ -442,9 +446,9 @@ struct IOPVerifierPhase2InputState<'a, F: SmallField> {
     add_consts: Vec<GateCIn<F::BaseField>>,
     layer_out_point: &'a Point<F>,
     layer_out_value: F,
-    paste_from_wit_in: Vec<(CellId, CellId)>,
-    paste_from_counter_in: Vec<(CellId, CellId)>,
-    paste_from_const_in: Vec<(F, CellId, CellId)>,
+    paste_from_wits_in: &'a [(CellId, CellId)],
+    paste_from_counter_in: &'a [(usize, (CellId, CellId))],
+    paste_from_consts_in: &'a [(i64, (CellId, CellId))],
     lo_out_num_vars: usize,
     lo_in_num_vars: Option<usize>,
     hi_num_vars: usize,

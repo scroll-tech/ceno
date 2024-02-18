@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use goldilocks::SmallField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::{Serialize, Serializer};
-use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, InType, LayerId, OutType};
+use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId};
 
 pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
 
@@ -13,8 +13,8 @@ pub type Point<F> = Vec<F>;
 /// A point and the evaluation of this point.
 #[derive(Debug, Clone)]
 pub struct PointAndEval<F> {
-    pub(crate) point: Point<F>,
-    pub(crate) eval: F,
+    pub point: Point<F>,
+    pub eval: F,
 }
 
 impl<F: SmallField> Default for PointAndEval<F> {
@@ -152,10 +152,15 @@ pub struct Circuit<F: SmallField> {
 
     pub n_witness_in: usize,
     pub n_witness_out: usize,
-    /// The left endpoint in the input layer copied from each input witness.
-    pub paste_from_in: Vec<(InType, CellId, CellId)>,
+    /// The endpoints in the input layer copied from each input witness.
+    pub paste_from_wits_in: Vec<(CellId, CellId)>,
+    /// The endpoints in the input layer copied from counter.
+    pub paste_from_counter_in: Vec<(usize, (CellId, CellId))>,
+    /// The endpoints in the output layer copied to each output witness.
+    pub paste_from_consts_in: Vec<(i64, (CellId, CellId))>,
     /// The wires copied to the output witness
-    pub copy_to_out: Vec<(OutType, Vec<CellId>)>,
+    pub copy_to_wits_out: Vec<Vec<CellId>>,
+    pub assert_consts: Vec<GateCIn<ConstantType<F>>>,
     pub max_wires_in_num_vars: Option<usize>,
 }
 

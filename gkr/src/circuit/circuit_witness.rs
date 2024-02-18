@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use simple_frontend::structs::{ChallengeConst, ConstantType, InType, LayerId, OutType};
+use simple_frontend::structs::{ChallengeConst, ConstantType, LayerId};
 
 use crate::{
     structs::{Circuit, CircuitWitness, LayerWitness},
@@ -49,17 +49,21 @@ impl<F: SmallField> CircuitWitness<F> {
             let mut layer_wit =
                 vec![vec![F::ZERO; circuit.layers[n_layers - 1].size()]; n_instances];
             for instance_id in 0..n_instances {
-                for (ty, l, r) in circuit.paste_from_in.iter() {
+                for (wit_id, (l, r)) in circuit.paste_from_wits_in.iter().enumerate() {
                     for i in *l..*r {
-                        layer_wit[instance_id][i] = match *ty {
-                            InType::Counter(num_vars) => {
-                                F::from(((instance_id << num_vars) ^ (i - *l)) as u64)
-                            }
-                            InType::Constant(c) => i64_to_field(c),
-                            InType::Witness(id) => {
-                                wits_in[id as usize].instances[instance_id][i - *l]
-                            }
-                        }
+                        layer_wit[instance_id][i] =
+                            wits_in[wit_id as usize].instances[instance_id][i - *l];
+                    }
+                }
+                for (constant, (l, r)) in circuit.paste_from_consts_in.iter() {
+                    for i in *l..*r {
+                        layer_wit[instance_id][i] = i64_to_field(*constant);
+                    }
+                }
+                for (num_vars, (l, r)) in circuit.paste_from_counter_in.iter() {
+                    for i in *l..*r {
+                        layer_wit[instance_id][i] =
+                            F::from(((instance_id << num_vars) ^ (i - *l)) as u64);
                     }
                 }
             }
@@ -137,19 +141,22 @@ impl<F: SmallField> CircuitWitness<F> {
             circuit.n_witness_out
         ];
         for instance_id in 0..n_instances {
-            circuit.copy_to_out.iter().for_each(|(out, old_wire_ids)| {
-                if let OutType::Witness(id) = out {
-                    wits_out[*id as usize].instances[instance_id] = old_wire_ids
+            circuit
+                .copy_to_wits_out
+                .iter()
+                .enumerate()
+                .for_each(|(wit_id, old_wire_ids)| {
+                    let mut wit_out = old_wire_ids
                         .iter()
                         .map(|old_wire_id| layer_wits[0].instances[instance_id][*old_wire_id])
                         .collect_vec();
-                } else if let OutType::AssertConst(constant) = out {
-                    old_wire_ids.iter().for_each(|old_wire_id| {
-                        assert_eq!(
-                            layer_wits[0].instances[instance_id][*old_wire_id],
-                            i64_to_field(*constant)
-                        );
-                    });
+                    let length = wit_out.len().next_power_of_two();
+                    wit_out.resize(length, F::ZERO);
+                    wits_out[wit_id].instances[instance_id] = wit_out;
+                });
+            circuit.assert_consts.iter().for_each(|gate| {
+                if let ConstantType::Field(constant) = gate.scalar {
+                    assert_eq!(layer_wits[0].instances[instance_id][gate.idx_out], constant);
                 }
             });
         }
@@ -220,46 +227,46 @@ impl<F: SmallField> CircuitWitness<F> {
         let input_layer_wits = self.layers.last().unwrap();
         let wits_in = self.witness_in_ref();
         for copy_id in 0..self.n_instances {
-            for (in_type, l, r) in circuit.paste_from_in.iter() {
+            for (wit_id, (l, r)) in circuit.paste_from_wits_in.iter().enumerate() {
                 for (subset_wire_id, new_wire_id) in (*l..*r).enumerate() {
-                    match in_type {
-                        InType::Witness(id) => {
-                            assert_eq!(
-                                input_layer_wits.instances[copy_id][new_wire_id],
-                                wits_in[*id as usize].instances[copy_id][subset_wire_id],
-                                "input layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
-                                circuit.layers.len() - 1,
-                                copy_id,
-                                new_wire_id,
-                                input_layer_wits.instances[copy_id][new_wire_id],
-                                wits_in[*id as usize].instances[copy_id][subset_wire_id]
-                            );
-                        }
-                        InType::Counter(num_vars) => {
-                            assert_eq!(
-                                input_layer_wits.instances[copy_id][new_wire_id],
-                                i64_to_field(((copy_id << num_vars) ^ subset_wire_id) as i64),
-                                "input layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
-                                circuit.layers.len() - 1,
-                                copy_id,
-                                new_wire_id,
-                                input_layer_wits.instances[copy_id][new_wire_id],
-                                (copy_id << num_vars) ^ subset_wire_id
-                            );
-                        }
-                        InType::Constant(constant) => {
-                            assert_eq!(
-                                input_layer_wits.instances[copy_id][new_wire_id],
-                                i64_to_field(*constant),
-                                "input layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
-                                circuit.layers.len() - 1,
-                                copy_id,
-                                new_wire_id,
-                                input_layer_wits.instances[copy_id][new_wire_id],
-                                constant
-                            );
-                        }
-                    }
+                    assert_eq!(
+                        input_layer_wits.instances[copy_id][new_wire_id],
+                        wits_in[wit_id].instances[copy_id][subset_wire_id],
+                        "input layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
+                        circuit.layers.len() - 1,
+                        copy_id,
+                        new_wire_id,
+                        input_layer_wits.instances[copy_id][new_wire_id],
+                        wits_in[wit_id].instances[copy_id][subset_wire_id]
+                    );
+                }
+            }
+            for (constant, (l, r)) in circuit.paste_from_consts_in.iter() {
+                for (_subset_wire_id, new_wire_id) in (*l..*r).enumerate() {
+                    assert_eq!(
+                        input_layer_wits.instances[copy_id][new_wire_id],
+                        i64_to_field(*constant),
+                        "input layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
+                        circuit.layers.len() - 1,
+                        copy_id,
+                        new_wire_id,
+                        input_layer_wits.instances[copy_id][new_wire_id],
+                        constant
+                    );
+                }
+            }
+            for (num_vars, (l, r)) in circuit.paste_from_counter_in.iter() {
+                for (subset_wire_id, new_wire_id) in (*l..*r).enumerate() {
+                    assert_eq!(
+                        input_layer_wits.instances[copy_id][new_wire_id],
+                        i64_to_field(((copy_id << num_vars) ^ subset_wire_id) as i64),
+                        "input layer: {}, copy_id: {}, wire_id: {}, got != expected: {:?} != {:?}",
+                        circuit.layers.len() - 1,
+                        copy_id,
+                        new_wire_id,
+                        input_layer_wits.instances[copy_id][new_wire_id],
+                        (copy_id << num_vars) ^ subset_wire_id
+                    );
                 }
             }
         }
@@ -350,25 +357,23 @@ impl<F: SmallField> CircuitWitness<F> {
 
         let output_layer_witness = &self.layers[0];
         let wits_out = self.witness_out_ref();
-        for (out_type, old_wire_ids) in circuit.copy_to_out.iter() {
-            match out_type {
-                OutType::Witness(id) => {
-                    for copy_id in 0..self.n_instances {
-                        for (new_wire_id, old_wire_id) in old_wire_ids.iter().enumerate() {
-                            assert_eq!(
-                                output_layer_witness.instances[copy_id][*old_wire_id],
-                                wits_out[*id as usize].instances[copy_id][new_wire_id]
-                            );
-                        }
-                    }
+        for (wit_id, old_wire_ids) in circuit.copy_to_wits_out.iter().enumerate() {
+            for copy_id in 0..self.n_instances {
+                for (new_wire_id, old_wire_id) in old_wire_ids.iter().enumerate() {
+                    assert_eq!(
+                        output_layer_witness.instances[copy_id][*old_wire_id],
+                        wits_out[wit_id].instances[copy_id][new_wire_id]
+                    );
                 }
-                OutType::AssertConst(constant) => {
-                    let constant = i64_to_field::<F>(*constant);
-                    for wit in self.layers[0].instances.iter() {
-                        for wire_id in old_wire_ids.iter() {
-                            assert_eq!(wit[*wire_id], constant);
-                        }
-                    }
+            }
+        }
+        for gate in circuit.assert_consts.iter() {
+            if let ConstantType::Field(constant) = gate.scalar {
+                for copy_id in 0..self.n_instances {
+                    assert_eq!(
+                        output_layer_witness.instances[copy_id][gate.idx_out],
+                        constant
+                    );
                 }
             }
         }

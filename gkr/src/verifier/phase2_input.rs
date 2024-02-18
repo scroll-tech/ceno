@@ -2,17 +2,14 @@ use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
-use simple_frontend::structs::{CellId, ConstantType, InType};
+use simple_frontend::structs::{CellId, ConstantType};
 use transcript::Transcript;
 
 use crate::{
     circuit::EvaluateGateCIn,
     error::GKRError,
     structs::{GateCIn, Point, SumcheckProof},
-    utils::{
-        ceil_log2, counter_eval, eq_eval_less_or_equal_than, i64_to_field,
-        segment_eval_greater_than,
-    },
+    utils::{counter_eval, eq_eval_less_or_equal_than, i64_to_field, segment_eval_greater_than},
 };
 
 use super::{IOPVerifierPhase2InputState, SumcheckState};
@@ -21,10 +18,11 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
     pub(super) fn verifier_init_parallel(
         add_consts: &[GateCIn<ConstantType<F>>],
         constant: impl Fn(ConstantType<F>) -> F::BaseField,
-        n_wit_in: usize,
         layer_out_point: &'a Point<F>,
         layer_out_value: F,
-        paste_from_in: &'a [(InType, CellId, CellId)],
+        paste_from_wits_in: &'a [(CellId, CellId)],
+        paste_from_consts_in: &'a [(i64, (CellId, CellId))],
+        paste_from_counter_in: &'a [(usize, (CellId, CellId))],
         lo_out_num_vars: usize,
         lo_in_num_vars: Option<usize>,
         hi_num_vars: usize,
@@ -37,44 +35,13 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
                 scalar: constant(gate.scalar),
             })
             .collect_vec();
-        let mut paste_from_wit_in = vec![(0, 0); n_wit_in];
-        paste_from_in
-            .iter()
-            .filter(|(ty, _, _)| matches!(*ty, InType::Witness(_)))
-            .for_each(|(ty, l, r)| {
-                if let InType::Witness(j) = *ty {
-                    paste_from_wit_in[j as usize] = (*l, *r);
-                }
-            });
-        let paste_from_counter_in = paste_from_in
-            .iter()
-            .filter(|(ty, _, _)| matches!(*ty, InType::Counter(_)))
-            .map(|(ty, l, r)| {
-                if let InType::Counter(_) = *ty {
-                    (*l, *r)
-                } else {
-                    unreachable!()
-                }
-            })
-            .collect::<Vec<_>>();
-        let paste_from_const_in = paste_from_in
-            .iter()
-            .filter(|(ty, _, _)| matches!(*ty, InType::Constant(_)))
-            .map(|(ty, l, r)| {
-                if let InType::Constant(c) = *ty {
-                    (i64_to_field(c), *l, *r)
-                } else {
-                    unreachable!()
-                }
-            })
-            .collect::<Vec<_>>();
         Self {
             add_consts,
             layer_out_point,
             layer_out_value,
-            paste_from_wit_in,
+            paste_from_wits_in,
             paste_from_counter_in,
-            paste_from_const_in,
+            paste_from_consts_in,
             lo_out_num_vars,
             lo_in_num_vars,
             hi_num_vars,
@@ -97,16 +64,17 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
         let add_consts = &self.add_consts;
 
         let g_value_const = self
-            .paste_from_const_in
+            .paste_from_consts_in
             .iter()
-            .map(|(c, l, r)| {
+            .map(|(c, (l, r))| {
+                let c = i64_to_field::<F::BaseField>(*c);
                 let segment_greater_than_l_1 = if *l == 0 {
                     F::ONE
                 } else {
                     segment_eval_greater_than(l - 1, lo_point)
                 };
                 let segment_greater_than_r_1 = segment_eval_greater_than(r - 1, lo_point);
-                (*c) * (segment_greater_than_l_1 - segment_greater_than_r_1)
+                (segment_greater_than_l_1 - segment_greater_than_r_1).mul_base(&c)
             })
             .sum::<F>();
 
@@ -139,21 +107,30 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
         let lo_point_sc1 = &claim_point[..lo_in_num_vars];
 
         let hi_eq_eval = eq_eval(hi_point, hi_point_sc1);
-        let g_values = if self.paste_from_wit_in.len() == 1
-            && self.paste_from_wit_in[0].0 == 0
+        let g_values = if self.paste_from_wits_in.len() == 1
+            && self.paste_from_wits_in[0].0 == 0
             && self.paste_from_counter_in.len() == 0
         {
             // There is only one wire in, and it is pasted to the first layer,
             // left aligned.
-            let paste_from_eval =
-                eq_eval_less_or_equal_than(self.paste_from_wit_in[0].1 - 1, lo_point, lo_point_sc1);
+            let paste_from_eval = eq_eval_less_or_equal_than(
+                self.paste_from_wits_in[0].1 - 1,
+                lo_point,
+                lo_point_sc1,
+            );
             vec![hi_eq_eval * paste_from_eval]
         } else {
             let eq_y_ry = build_eq_x_r_vec(lo_point);
             let eq_x1_rx1 = build_eq_x_r_vec(lo_point_sc1);
-            self.paste_from_wit_in
+            self.paste_from_wits_in
                 .iter()
-                .chain(self.paste_from_counter_in.iter())
+                .chain(
+                    self.paste_from_counter_in
+                        .iter()
+                        .map(|(_, (l, r))| (*l, *r))
+                        .collect_vec()
+                        .iter(),
+                )
                 .map(|(l, r)| {
                     (*l..*r)
                         .map(|i| hi_eq_eval * eq_y_ry[i] * eq_x1_rx1[i - l])
@@ -165,16 +142,15 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
         let f_counter_values = self
             .paste_from_counter_in
             .iter()
-            .map(|(l, r)| {
-                let num_vars = ceil_log2(*r - *l);
+            .map(|(num_vars, _)| {
                 let point = lo_point_sc1
                     .iter()
                     .cloned()
-                    .take(num_vars)
+                    .take(*num_vars)
                     .chain(hi_point_sc1.iter().cloned())
                     .collect_vec();
                 counter_eval(num_vars + hi_num_vars, &point)
-                    * lo_point_sc1[num_vars..]
+                    * lo_point_sc1[*num_vars..]
                         .iter()
                         .map(|x| F::ONE - *x)
                         .product::<F>()
