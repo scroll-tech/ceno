@@ -175,45 +175,22 @@ impl<const N: usize> Instruction for PushInstruction<N> {
         })
     }
 
-    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        match index {
-            0 => {
-                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
-                copy_pc_from_record!(wire_values, record);
-                copy_stack_ts_from_record!(wire_values, record);
-                copy_stack_top_from_record!(wire_values, record);
-                copy_clock_from_record!(wire_values, record);
-                for offset in 1..=N {
-                    copy_pc_add_from_record!(
-                        wire_values,
-                        record,
-                        phase0_pc_add_i_plus_1,
-                        offset as u64
-                    );
-                }
-                copy_stack_ts_add_from_record!(wire_values, record);
-                wire_values[Self::phase0_stack_bytes()].copy_from_slice(
-                    (0..N)
-                        .map(|index| F::from(record.operands[index].as_limbs()[0]))
-                        .collect_vec()
-                        .as_slice(),
-                );
-                Some(wire_values)
-            }
-            1 => {
-                // TODO: Not finished yet. Waiting for redesign of phase 1.
-                let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
-                copy_memory_ts_from_record!(wire_values, record);
-                Some(wire_values)
-            }
-            _ => None,
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        for offset in 1..=N {
+            copy_pc_add_from_record!(wire_values, record, phase0_pc_add_i_plus_1, offset as u64);
         }
-    }
-    fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &CircuitWiresIn<F>,
-        _challenges: &Vec<F>,
-    ) -> CircuitWiresIn<F> {
-        // TODO: Not finished yet. Waiting for redesign of phase 1.
-        pre_wires_in.clone()
+        copy_stack_ts_add_from_record!(wire_values, record);
+        wire_values[Self::phase0_stack_bytes()].copy_from_slice(
+            (0..N)
+                .map(|index| F::from(record.operands[index].as_limbs()[0]))
+                .collect_vec()
+                .as_slice(),
+        );
+        vec![vec![wire_values]]
     }
 }

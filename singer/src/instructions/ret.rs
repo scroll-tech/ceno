@@ -299,34 +299,20 @@ impl Instruction for ReturnInstruction {
         })
     }
 
-    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        match index {
-            0 => {
-                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
-                copy_pc_from_record!(wire_values, record);
-                copy_stack_ts_from_record!(wire_values, record);
-                copy_memory_ts_from_record!(wire_values, record);
-                copy_stack_top_from_record!(wire_values, record);
-                copy_clock_from_record!(wire_values, record);
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_memory_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
 
-                // copy_stack_ts_lt_from_record!(wire_values, record, 0);
-                // copy_stack_ts_lt_from_record!(wire_values, record, 1);
-                copy_operand_from_record!(wire_values, record, phase0_offset, 0);
-                copy_operand_from_record!(wire_values, record, phase0_mem_length, 0);
+        // copy_stack_ts_lt_from_record!(wire_values, record, 0);
+        // copy_stack_ts_lt_from_record!(wire_values, record, 1);
+        copy_operand_from_record!(wire_values, record, phase0_offset, 0);
+        copy_operand_from_record!(wire_values, record, phase0_mem_length, 0);
 
-                Some(wire_values)
-            }
-            _ => None,
-        }
-    }
-
-    fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &CircuitWiresIn<F>,
-        _challenges: &Vec<F>,
-    ) -> CircuitWiresIn<F> {
-        // Currently the memory timestamp only takes one element, so no need to do anything
-        // and no need to use the challenges.
-        pre_wires_in.clone()
+        vec![vec![wire_values]]
     }
 }
 
@@ -405,66 +391,50 @@ impl Instruction for ReturnPublicOutLoad {
         })
     }
 
-    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        match index {
-            0 => {
-                let mut pred_wire_values = vec![F::ZERO; Self::pred_size()];
-                let len = record.operands[1].as_limbs()[0] as usize;
-                // pred_wire_values[Self::pred_memory_ts()].copy_from_slice(
-                //     (0..len)
-                //         .map(|index| F::from(record.operands_timestamps[index]))
-                //         .collect_vec()
-                //         .as_slice(),
-                // );
-                copy_operand_from_record!(pred_wire_values, record, pred_offset, 0);
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut pred_wire_values = vec![F::ZERO; Self::pred_size()];
+        let len = record.operands[1].as_limbs()[0] as usize;
+        // pred_wire_values[Self::pred_memory_ts()].copy_from_slice(
+        //     (0..len)
+        //         .map(|index| F::from(record.operands_timestamps[index]))
+        //         .collect_vec()
+        //         .as_slice(),
+        // );
+        copy_operand_from_record!(pred_wire_values, record, pred_offset, 0);
 
-                let mut public_io_values = vec![F::ZERO; Self::public_io_size()];
-                // TODO: figure out what is public_io_byte and fix?
-                public_io_values[Self::public_io_byte()]
-                    .copy_from_slice(&[F::from(record.operands[2].as_limbs()[0])]);
+        let mut public_io_values = vec![F::ZERO; Self::public_io_size()];
+        // TODO: figure out what is public_io_byte and fix?
+        public_io_values[Self::public_io_byte()]
+            .copy_from_slice(&[F::from(record.operands[2].as_limbs()[0])]);
 
-                let mut phase0_wire_values = vec![F::ZERO; Self::phase0_size()];
-                // copy_memory_ts_lt_from_record!(
-                //     phase0_wire_values,
-                //     record,
-                //     phase0_old_memory_ts,
-                //     phase0_old_memory_ts_lt,
-                //     0,
-                //     1
-                // );
-                // TODO: how to obtain delta here?
-                let delta = U256::from(0);
-                copy_range_values_from_u256!(
-                    phase0_wire_values,
-                    phase0_offset_add,
-                    record.operands[0] + delta
-                );
-                copy_carry_values_from_addends!(
-                    phase0_wire_values,
-                    phase0_offset_add,
-                    record.operands[0],
-                    delta
-                );
+        let mut phase0_wire_values = vec![F::ZERO; Self::phase0_size()];
+        // copy_memory_ts_lt_from_record!(
+        //     phase0_wire_values,
+        //     record,
+        //     phase0_old_memory_ts,
+        //     phase0_old_memory_ts_lt,
+        //     0,
+        //     1
+        // );
+        // TODO: how to obtain delta here?
+        let delta = U256::from(0);
+        copy_range_values_from_u256!(
+            phase0_wire_values,
+            phase0_offset_add,
+            record.operands[0] + delta
+        );
+        copy_carry_values_from_addends!(
+            phase0_wire_values,
+            phase0_offset_add,
+            record.operands[0],
+            delta
+        );
 
-                Some(
-                    pred_wire_values
-                        .into_iter()
-                        .chain(public_io_values.into_iter())
-                        .chain(phase0_wire_values.into_iter())
-                        .collect(),
-                )
-            }
-            _ => None,
-        }
-    }
-
-    fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &CircuitWiresIn<F>,
-        _challenges: &Vec<F>,
-    ) -> CircuitWiresIn<F> {
-        // Currently the memory timestamp only takes one element, so no need to do anything
-        // and no need to use the challenges.
-        pre_wires_in.clone()
+        vec![
+            vec![pred_wire_values],
+            vec![public_io_values],
+            vec![phase0_wire_values],
+        ]
     }
 }
 
@@ -524,14 +494,8 @@ impl Instruction for ReturnRestMemLoad {
         })
     }
 
-    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
         todo!()
-    }
-    fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &CircuitWiresIn<F>,
-        challenges: &Vec<F>,
-    ) -> CircuitWiresIn<F> {
-        todo!();
     }
 }
 
@@ -583,14 +547,8 @@ impl Instruction for ReturnRestMemStore {
         })
     }
 
-    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
         todo!()
-    }
-    fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &CircuitWiresIn<F>,
-        challenges: &Vec<F>,
-    ) -> CircuitWiresIn<F> {
-        todo!();
     }
 }
 
@@ -652,13 +610,7 @@ impl Instruction for ReturnRestStackPop {
         })
     }
 
-    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
         todo!()
-    }
-    fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &CircuitWiresIn<F>,
-        challenges: &Vec<F>,
-    ) -> CircuitWiresIn<F> {
-        todo!();
     }
 }

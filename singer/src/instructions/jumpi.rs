@@ -223,54 +223,32 @@ impl Instruction for JumpiInstruction {
         })
     }
 
-    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        match index {
-            0 => {
-                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
-                copy_pc_from_record!(wire_values, record);
-                copy_stack_ts_from_record!(wire_values, record);
-                copy_stack_top_from_record!(wire_values, record);
-                copy_clock_from_record!(wire_values, record);
-                copy_stack_ts_lt_from_record!(
-                    wire_values,
-                    record,
-                    phase0_old_stack_ts_dest,
-                    phase0_old_stack_ts_dest_lt,
-                    0
-                );
-                copy_stack_ts_lt_from_record!(
-                    wire_values,
-                    record,
-                    phase0_old_stack_ts_cond,
-                    phase0_old_stack_ts_cond_lt,
-                    1
-                );
-                copy_operand_from_record!(wire_values, record, phase0_cond_values, 0);
-                // TODO: cond values inv and cond_nonzero_or_inv
-                copy_pc_add_from_record!(wire_values, record);
-                // Although the pc_plus_1_opcode is not strictly speaking an operand,
-                // it is passed from the interpreter in the operands array.
-                copy_operand_single_cell_from_record!(
-                    wire_values,
-                    record,
-                    phase0_pc_plus_1_opcode,
-                    2
-                );
-                Some(wire_values)
-            }
-            1 => {
-                let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
-                copy_memory_ts_from_record!(wire_values, record);
-                Some(wire_values)
-            }
-            _ => None,
-        }
-    }
-
-    fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &CircuitWiresIn<F>,
-        _challenges: &Vec<F>,
-    ) -> CircuitWiresIn<F> {
-        pre_wires_in.clone()
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_stack_ts_lt_from_record!(
+            wire_values,
+            record,
+            phase0_old_stack_ts_dest,
+            phase0_old_stack_ts_dest_lt,
+            0
+        );
+        copy_stack_ts_lt_from_record!(
+            wire_values,
+            record,
+            phase0_old_stack_ts_cond,
+            phase0_old_stack_ts_cond_lt,
+            1
+        );
+        copy_operand_from_record!(wire_values, record, phase0_cond_values, 0);
+        // TODO: cond values inv and cond_nonzero_or_inv
+        copy_pc_add_from_record!(wire_values, record);
+        // Although the pc_plus_1_opcode is not strictly speaking an operand,
+        // it is passed from the interpreter in the operands array.
+        copy_operand_single_cell_from_record!(wire_values, record, phase0_pc_plus_1_opcode, 2);
+        vec![vec![wire_values]]
     }
 }

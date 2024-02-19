@@ -208,48 +208,30 @@ impl Instruction for GtInstruction {
         })
     }
 
-    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        match index {
-            0 => {
-                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
-                copy_pc_from_record!(wire_values, record);
-                copy_stack_ts_from_record!(wire_values, record);
-                copy_stack_top_from_record!(wire_values, record);
-                copy_clock_from_record!(wire_values, record);
-                copy_pc_add_from_record!(wire_values, record);
-                copy_stack_ts_add_from_record!(wire_values, record);
-                copy_stack_ts_lt_from_record!(wire_values, record, 0);
-                copy_stack_ts_lt_from_record!(wire_values, record, 1);
-                copy_operand_from_record!(wire_values, record, phase0_oprand_0, 0);
-                copy_operand_from_record!(wire_values, record, phase0_oprand_1, 1);
-                copy_range_values_from_u256!(
-                    wire_values,
-                    phase0_instruction_gt,
-                    U256::MAX - record.operands[0] + record.operands[1] + U256::from(1)
-                );
-                copy_borrow_values_from_oprands!(
-                    wire_values,
-                    phase0_instruction_gt,
-                    record.operands[1],
-                    record.operands[0]
-                );
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_pc_add_from_record!(wire_values, record);
+        copy_stack_ts_add_from_record!(wire_values, record);
+        copy_stack_ts_lt_from_record!(wire_values, record, 0);
+        copy_stack_ts_lt_from_record!(wire_values, record, 1);
+        copy_operand_from_record!(wire_values, record, phase0_oprand_0, 0);
+        copy_operand_from_record!(wire_values, record, phase0_oprand_1, 1);
+        copy_range_values_from_u256!(
+            wire_values,
+            phase0_instruction_gt,
+            U256::MAX - record.operands[0] + record.operands[1] + U256::from(1)
+        );
+        copy_borrow_values_from_oprands!(
+            wire_values,
+            phase0_instruction_gt,
+            record.operands[1],
+            record.operands[0]
+        );
 
-                Some(wire_values)
-            }
-            1 => {
-                let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
-                copy_memory_ts_from_record!(wire_values, record);
-                Some(wire_values)
-            }
-            _ => None,
-        }
-    }
-    fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &CircuitWiresIn<F>,
-        _challenges: &Vec<F>,
-    ) -> CircuitWiresIn<F> {
-        // Currently the memory timestamp only takes one element, so no need to do anything
-        // and no need to use the challenges.
-        pre_wires_in.clone()
+        vec![vec![wire_values]]
     }
 }

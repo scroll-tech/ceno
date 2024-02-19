@@ -118,31 +118,13 @@ impl Instruction for JumpdestInstruction {
         })
     }
 
-    fn generate_pre_wires_in<F: SmallField>(record: &Record, index: usize) -> Option<Vec<F>> {
-        match index {
-            0 => {
-                let mut wire_values = vec![F::ZERO; Self::phase0_size()];
-                copy_pc_from_record!(wire_values, record);
-                copy_stack_top_from_record!(wire_values, record);
-                copy_clock_from_record!(wire_values, record);
-                copy_pc_add_from_record!(wire_values, record);
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_pc_add_from_record!(wire_values, record);
 
-                Some(wire_values)
-            }
-            1 => {
-                let mut wire_values = vec![F::ZERO; TSUInt::N_OPRAND_CELLS];
-                copy_memory_ts_from_record!(wire_values, record);
-                Some(wire_values)
-            }
-            _ => None,
-        }
-    }
-    fn complete_wires_in<F: SmallField>(
-        pre_wires_in: &CircuitWiresIn<F>,
-        _challenges: &Vec<F>,
-    ) -> CircuitWiresIn<F> {
-        // Currently the memory timestamp only takes one element, so no need to do anything
-        // and no need to use the challenges.
-        pre_wires_in.clone()
+        vec![vec![wire_values]]
     }
 }
