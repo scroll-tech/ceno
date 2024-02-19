@@ -202,7 +202,7 @@ mod test {
         let phase0_witness_size = PopInstruction::phase0_size();
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(2u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_stack_top".to_string(),
@@ -211,19 +211,32 @@ mod test {
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),
-            vec![], // todo
+            vec![], // carry is 0, may test carry using larger values in PCUInt
         );
         phase0_values_map.insert(
             "phase0_old_stack_ts".to_string(),
-            vec![], // todo
+            vec![Goldilocks::from(1u64)],
         );
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt".to_string(),
-            vec![], // todo
+            vec![
+                Goldilocks::from(254u64),
+                -Goldilocks::from(1u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(1u64),
+            ],
         );
         phase0_values_map.insert(
             "phase0_stack_values".to_string(),
-            vec![], // todo
+            vec![
+                Goldilocks::from(7u64),
+                Goldilocks::from(6u64),
+                Goldilocks::from(5u64),
+                Goldilocks::from(4u64),
+                Goldilocks::from(3u64),
+                Goldilocks::from(2u64),
+                Goldilocks::from(1u64),
+            ],
         );
 
         let circuit_witness_challenges = vec![Goldilocks::from(2)];

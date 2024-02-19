@@ -327,7 +327,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
 
     // TODO: This seems expensive. Is there a better way to covert poly into its ext fields?
     pub fn to_ext_field<Ext: SmallField<BaseField = F> + Hash>(&self) -> VirtualPolynomial<Ext> {
-        let timer = start_timer!(||"convert VP to ext field");
+        let timer = start_timer!(|| "convert VP to ext field");
         let aux_info = self.aux_info.to_ext_field();
         let products = self
             .products
@@ -347,7 +347,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
                 Arc::as_ptr(&mle_ext_field);
             flattened_ml_extensions.push(mle_ext_field);
             hm.insert(mle_ext_field_ptr, *index);
-        }  
+        }
         end_timer!(timer);
         VirtualPolynomial {
             aux_info,
