@@ -273,6 +273,7 @@ mod test {
         util::transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},
         Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
     };
+    use ff::FromUniformBytes;
     use goldilocks::SmallField;
     use itertools::{chain, Itertools};
     use rand::prelude::*;
@@ -555,7 +556,7 @@ mod test {
 
     pub(super) fn test_with_gkr<F, Pcs, T>()
     where
-        F: SmallField,
+        F: SmallField + FromUniformBytes<64>,
         F::BaseField: Into<F>,
         Pcs: NoninteractivePCS<F, F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
         for<'a> &'a Pcs::CommitmentWithData: Into<Pcs::Commitment>,
