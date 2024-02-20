@@ -346,11 +346,11 @@ register_witness!(
         mem_bytes => 1
     },
     phase0 {
-        old_memory_ts => EVM_STACK_BYTE_WIDTH * TSUInt::N_OPRAND_CELLS,
-        old_memory_ts_lt => EVM_STACK_BYTE_WIDTH * UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_memory_ts => TSUInt::N_OPRAND_CELLS,
+        old_memory_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
         offset_add_delta => UIntAddSub::<StackUInt>::N_WITNESS_CELLS,
-        prev_mem_bytes => EVM_STACK_BYTE_WIDTH
+        prev_mem_bytes => 1
     }
 );
 
