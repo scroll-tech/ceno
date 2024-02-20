@@ -71,10 +71,11 @@ fn return_inner<H: Host, F: SmallField>(
     // zero gas cost
     // gas!(interpreter, gas::ZERO);
     pop!(interpreter, offset, len);
+    let mut timestamps: Vec<u64> = vec![offset.1, len.1];
+    let mut output_timestamps: Vec<u64> = vec![];
     let len = as_usize_or_fail!(interpreter, len.0);
     // important: offset must be ignored if len is zeros
     let mut output = Bytes::default();
-    let mut timestamps: Vec<u64> = Vec::new();
     if len != 0 {
         let offset = as_usize_or_fail!(interpreter, offset.0);
         shared_memory_resize!(interpreter, offset, len);
@@ -85,7 +86,7 @@ fn return_inner<H: Host, F: SmallField>(
             .0
             .to_vec()
             .into();
-        timestamps = interpreter
+        output_timestamps = interpreter
             .shared_memory
             .slice(offset, len)
             .1
@@ -94,6 +95,7 @@ fn return_inner<H: Host, F: SmallField>(
     }
     let mut operands = vec![U256::from(offset.0), U256::from(len)];
     operands.extend(output.iter().map(|b| U256::from(*b)));
+    timestamps.extend(output_timestamps);
     host.record(&interpreter.generate_record(&operands, &timestamps));
     interpreter.instruction_result = instruction_result;
     interpreter.next_action = Some(crate::InterpreterAction::Return {

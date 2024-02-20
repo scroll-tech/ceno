@@ -306,9 +306,9 @@ impl Instruction for ReturnInstruction {
         copy_memory_ts_from_record!(wire_values, record);
         copy_stack_top_from_record!(wire_values, record);
         copy_clock_from_record!(wire_values, record);
+        copy_operand_timestamp_from_record!(wire_values, record, phase0_old_stack_ts0, 0, 0);
+        copy_operand_timestamp_from_record!(wire_values, record, phase0_old_stack_ts1, 0, 1);
 
-        // copy_stack_ts_lt_from_record!(wire_values, record, 0);
-        // copy_stack_ts_lt_from_record!(wire_values, record, 1);
         copy_operand_from_record!(wire_values, record, phase0_offset, 0);
         copy_operand_from_record!(wire_values, record, phase0_mem_length, 0);
 
@@ -392,49 +392,27 @@ impl Instruction for ReturnPublicOutLoad {
     }
 
     fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
-        let mut pred_wire_values = vec![F::ZERO; Self::pred_size()];
+        let offset = record.operands[0];
         let len = record.operands[1].as_limbs()[0] as usize;
-        // pred_wire_values[Self::pred_memory_ts()].copy_from_slice(
-        //     (0..len)
-        //         .map(|index| F::from(record.operands_timestamps[index]))
-        //         .collect_vec()
-        //         .as_slice(),
-        // );
-        copy_operand_from_record!(pred_wire_values, record, pred_offset, 0);
 
-        let mut public_io_values = vec![F::ZERO; Self::public_io_size()];
-        // TODO: figure out what is public_io_byte and fix?
-        public_io_values[Self::public_io_byte()]
-            .copy_from_slice(&[F::from(record.operands[2].as_limbs()[0])]);
+        let mut public_io_values = vec![vec![F::ZERO; Self::public_io_size()]; len];
+        let mut phase0_wire_values = vec![vec![F::ZERO; Self::phase0_size()]; len];
+        for i in 0..len {
+            public_io_values[i][..]
+                .copy_from_slice(&[F::from(record.operands[i + 2].as_limbs()[0])]);
+            phase0_wire_values[i][..]
+                .copy_from_slice(&[F::from(record.operands_timestamps[i + 2])]);
+            let delta = U256::from(i);
+            copy_range_values_from_u256!(phase0_wire_values[i], phase0_offset_add, offset + delta);
+            copy_carry_values_from_addends!(
+                phase0_wire_values[i],
+                phase0_offset_add,
+                offset,
+                delta
+            );
+        }
 
-        let mut phase0_wire_values = vec![F::ZERO; Self::phase0_size()];
-        // copy_memory_ts_lt_from_record!(
-        //     phase0_wire_values,
-        //     record,
-        //     phase0_old_memory_ts,
-        //     phase0_old_memory_ts_lt,
-        //     0,
-        //     1
-        // );
-        // TODO: how to obtain delta here?
-        let delta = U256::from(0);
-        copy_range_values_from_u256!(
-            phase0_wire_values,
-            phase0_offset_add,
-            record.operands[0] + delta
-        );
-        copy_carry_values_from_addends!(
-            phase0_wire_values,
-            phase0_offset_add,
-            record.operands[0],
-            delta
-        );
-
-        vec![
-            vec![pred_wire_values],
-            vec![public_io_values],
-            vec![phase0_wire_values],
-        ]
+        vec![Vec::new(), public_io_values, phase0_wire_values]
     }
 }
 
