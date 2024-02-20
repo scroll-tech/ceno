@@ -57,7 +57,7 @@ impl InstructionGraph for MstoreInstruction {
         let inst_circuit = &inst_circuits[0];
         let n_wires_in = inst_circuit.circuit.n_wires_in;
         let inst_node_id = graph_builder.add_node_with_witness(
-            stringify!(ReturnInstruction),
+            stringify!(MstoreInstruction),
             &inst_circuit.circuit,
             vec![PredType::Source; n_wires_in],
             real_challenges.to_vec(),
