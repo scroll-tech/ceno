@@ -237,7 +237,7 @@ macro_rules! copy_memory_ts_add_from_record {
 
 macro_rules! copy_stack_ts_lt_from_record {
     ($wire_values: expr, $record: expr, $stack_ts: tt, $stack_ts_lt: tt, $index: expr) => {
-        copy_operand_timestamp_from_record!($wire_values, $record, $stack_ts, $index);
+        copy_operand_timestamp_from_record!($wire_values, $record, $stack_ts, 0, $index);
 
         $wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::$stack_ts_lt().start)]
             .copy_from_slice(&UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
@@ -284,25 +284,26 @@ macro_rules! copy_stack_ts_lt_from_record {
 }
 
 macro_rules! copy_memory_ts_lt_from_record {
-    ($wire_values: expr, $record: expr, $memory_ts: tt, $memory_ts_lt: tt, $timestamps_offset: expr, $num_mem_bytes: expr) => {
-        for index in 0..$num_mem_bytes {
-            copy_operand_timestamp_from_record!($wire_values, $record, $memory_ts, index);
-            $wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(
-                Self::$memory_ts_lt().start + index * TSUInt::N_CARRY_NO_OVERFLOW_CELLS,
-            )]
+    ($wire_values: expr, $record: expr, $memory_ts: tt, $memory_ts_lt: tt, $timestamps_offset: expr, $index: expr) => {
+        copy_operand_timestamp_from_record!(
+            $wire_values,
+            $record,
+            $memory_ts,
+            0,
+            $index + $timestamps_offset
+        );
+        $wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::$memory_ts_lt().start)]
             .copy_from_slice(&UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
-                $record.operands_timestamps[index + $timestamps_offset],
+                $record.operands_timestamps[$index + $timestamps_offset],
                 $record.memory_timestamp,
             ));
 
-            $wire_values[UIntAddSub::<TSUInt>::range_values_no_overflow_range(
-                Self::$memory_ts_lt().start + index * TSUInt::N_RANGE_CHECK_NO_OVERFLOW_CELLS,
-            )]
-            .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
-                $record.operands_timestamps[index + $timestamps_offset] + (1 << TSUInt::BIT_SIZE)
-                    - $record.memory_timestamp,
-            ));
-        }
+        $wire_values
+            [UIntAddSub::<TSUInt>::range_values_no_overflow_range(Self::$memory_ts_lt().start)]
+        .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
+            $record.operands_timestamps[$index + $timestamps_offset] + (1 << TSUInt::BIT_SIZE)
+                - $record.memory_timestamp,
+        ));
     };
 
     ($wire_values: expr, $record: expr, $timestamps_offset: expr) => {
@@ -340,10 +341,12 @@ macro_rules! copy_operand_u64_from_record {
 }
 
 macro_rules! copy_operand_timestamp_from_record {
-    ($wire_values: expr, $record: expr, $dst_slice: tt, $index: expr) => {
-        $wire_values[Self::$dst_slice()].copy_from_slice(&TSUInt::uint_to_field_elems(
-            $record.operands_timestamps[$index],
-        ));
+    ($wire_values: expr, $record: expr, $dst_slice: tt, $dst_offset: expr, $index: expr) => {
+        $wire_values[Self::$dst_slice()]
+            [$dst_offset * TSUInt::N_OPRAND_CELLS..($dst_offset + 1) * TSUInt::N_OPRAND_CELLS]
+            .copy_from_slice(&TSUInt::uint_to_field_elems(
+                $record.operands_timestamps[$index],
+            ));
     };
 }
 

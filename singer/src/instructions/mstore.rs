@@ -3,6 +3,7 @@ use gkr::structs::Circuit;
 use gkr_graph::structs::{NodeOutputType, PredType};
 use goldilocks::SmallField;
 
+use itertools::Itertools;
 use revm_interpreter::Record;
 use revm_primitives::U256;
 
@@ -92,7 +93,7 @@ impl InstructionGraph for MstoreInstruction {
             mstore_acc_node_id,
             &mstore_acc_circuit.layout.chip_check_wire_id,
             real_challenges,
-            real_n_instances * 32,
+            real_n_instances * EVM_STACK_BYTE_WIDTH,
         )?;
         Ok(None)
     }
@@ -440,6 +441,38 @@ impl Instruction for MstoreAccessory {
     }
 
     fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
-        todo!()
+        let old_memory_value = record.operands[2];
+        let old_value_bytes: [u8; EVM_STACK_BYTE_WIDTH] = old_memory_value.to_le_bytes();
+        // This circuit will be repeated EVM_STACK_BYTE_WIDTH times for every mstore. So prepare these
+        // number of wires in values.
+        let mut wire_values = vec![vec![F::ZERO; Self::phase0_size()]; EVM_STACK_BYTE_WIDTH];
+        for i in 0..EVM_STACK_BYTE_WIDTH {
+            copy_memory_ts_lt_from_record!(
+                wire_values[i],
+                record,
+                phase0_old_memory_ts,
+                phase0_old_memory_ts_lt,
+                2, // The operand_timestamps passed from the interepreter stores two timestamps for the stack operands,
+                // so the memory timestamps start from position 2
+                i
+            );
+            copy_range_values_from_u256!(
+                wire_values[i],
+                phase0_offset_add_delta,
+                record.operands[0] + U256::from(i)
+            );
+            copy_carry_values_from_addends!(
+                wire_values[i],
+                phase0_offset_add_delta,
+                record.operands[0],
+                U256::from(i)
+            );
+            wire_values[i][Self::phase0_prev_mem_bytes().start] =
+                F::from(old_value_bytes[i] as u64);
+        }
+
+        // The first two empty vectors are for the first two wires in that are passed from the previous
+        // circuit. We don't need to prepare their values here, so leave them empty.
+        vec![Vec::new(), Vec::new(), wire_values]
     }
 }
