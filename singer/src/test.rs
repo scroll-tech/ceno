@@ -5,6 +5,22 @@ use gkr::structs::CircuitWitness;
 use goldilocks::SmallField;
 use simple_frontend::structs::CellId;
 use std::collections::BTreeMap;
+use crate::utils::uint::UInt;
+
+trait UIntParams {
+    const BITS: usize;
+    const CELL_BIT_WIDTH: usize;
+}
+
+impl<const M: usize, const C: usize> UIntParams for UInt<M, C> {
+    const BITS: usize = M;
+    const CELL_BIT_WIDTH: usize = C;
+}
+
+pub(crate) fn get_uint_params<T: UIntParams>() -> (usize, usize) {
+    (T::BITS, T::CELL_BIT_WIDTH)
+}
+
 
 pub(crate) fn test_opcode_circuit<Ext: SmallField>(
     inst_circuit: &InstCircuit<Ext>,

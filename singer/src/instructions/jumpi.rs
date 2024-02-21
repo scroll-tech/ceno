@@ -224,7 +224,8 @@ mod test {
     use std::collections::BTreeMap;
 
     use crate::instructions::{ChipChallenges, Instruction, JumpiInstruction};
-    use crate::test::test_opcode_circuit;
+    use crate::test::{test_opcode_circuit, get_uint_params};
+    use crate::utils::uint::TSUInt;
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
 
@@ -274,7 +275,7 @@ mod test {
     }
 
     #[test]
-    fn test_jumpdest_construct_circuit() {
+    fn test_jumpi_construct_circuit() {
         let challenges = ChipChallenges::default();
 
         // initialize general test inputs associated with push1
