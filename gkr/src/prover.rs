@@ -35,8 +35,13 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         // TODO: Currently haven't support non-power-of-two number of instances.
         assert!(circuit_witness.n_instances == 1 << circuit_witness.instance_num_vars());
 
-        let mut prover_state =
-            Self::prover_init_parallel(circuit.layers.len(), output_evals, wires_out_evals);
+        let mut prover_state = Self::prover_init_parallel(
+            circuit.layers.len(),
+            output_evals,
+            wires_out_evals,
+            transcript,
+            circuit.layers[0].num_vars + circuit_witness.instance_num_vars(),
+        );
 
         let sumcheck_proofs = (0..circuit.layers.len() as LayerId)
             .map(|layer_id| {
@@ -131,6 +136,8 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         n_layers: usize,
         output_evals: Vec<PointAndEval<F>>,
         wires_out_evals: Vec<PointAndEval<F>>,
+        transcript: &mut Transcript<F>,
+        output_wit_num_vars: usize,
     ) -> Self {
         let mut subset_point_and_evals = vec![vec![]; n_layers];
         let to_next_step_point = if !output_evals.is_empty() {
@@ -138,7 +145,13 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         } else {
             wires_out_evals.last().unwrap().point.clone()
         };
-        let assert_point = to_next_step_point.clone();
+        let assert_point = (0..output_wit_num_vars)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"assert_point")
+                    .elements
+            })
+            .collect_vec();
         let to_next_phase_point_and_evals = output_evals;
         subset_point_and_evals[0] = wires_out_evals.into_iter().map(|p| (0, p)).collect();
         Self {

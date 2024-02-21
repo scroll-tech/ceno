@@ -1,4 +1,4 @@
-use gkr::structs::{GKRInputClaims, PointAndEval};
+use gkr::structs::PointAndEval;
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use std::mem;

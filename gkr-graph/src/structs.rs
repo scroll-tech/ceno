@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 pub(crate) type GKRProverState<F> = gkr::structs::IOPProverState<F>;
 pub(crate) type GKRVerifierState<F> = gkr::structs::IOPVerifierState<F>;
-pub(crate) type GKRStepMessage<F> = gkr::structs::IOPProverStepMessage<F>;
 pub(crate) type GKRProof<F> = gkr::structs::IOPProof<F>;
 
 /// Corresponds to the `output_evals` and `wires_out_evals` in gkr

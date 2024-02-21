@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use ark_std::Zero;
 use gkr::structs::{Circuit, CircuitWitness, LayerWitness};
 use goldilocks::SmallField;
-use itertools::{chain, Itertools};
+use itertools::{chain, izip, Itertools};
 use simple_frontend::structs::WitnessId;
 
 use crate::{
@@ -22,8 +22,10 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         }
     }
 
-    /// Add a new node indicating the predecessors. Return the index of the new
-    /// node.
+    /// Add a new node indicating the predecessors and generate the witness.
+    /// Return the index of the new node. sources has the same number as the
+    /// input witnesses. If some witness is not source, then the corresponding
+    /// entry in sources is default.
     pub fn add_node_with_witness(
         &mut self,
         label: &'static str,
@@ -37,16 +39,15 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
 
         assert_eq!(preds.len(), circuit.n_witness_in);
         assert!(num_instances.is_power_of_two());
+        assert_eq!(sources.len(), circuit.n_witness_in);
         assert!(!sources
             .iter()
-            .any(|source| source.instances.len() != num_instances));
+            .any(|source| source.instances.len() != 0 || source.instances.len() != num_instances));
 
-        let mut source_iter = sources.iter();
         let mut witness = CircuitWitness::new(circuit, challenges);
-        let wits_in = preds
-            .iter()
-            .map(|pred| match pred {
-                PredType::Source => source_iter.next().unwrap().clone(),
+        let wits_in = izip!(preds.iter(), sources.into_iter())
+            .map(|(pred, source)| match pred {
+                PredType::Source => source,
                 PredType::PredWire(out) | PredType::PredWireDup(out) => {
                     let (id, out) = &match out {
                         NodeOutputType::OutputLayer(id) => (
@@ -106,6 +107,26 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
             preds,
         });
         self.witness.node_witnesses.push(witness);
+
+        Ok(id)
+    }
+
+    /// Add a new node indicating the predecessors. Return the index of the new
+    /// node.
+    pub fn add_node(
+        &mut self,
+        label: &'static str,
+        circuit: &Arc<Circuit<F>>,
+        preds: Vec<PredType>,
+    ) -> Result<usize, GKRGraphError> {
+        let id = self.graph.nodes.len();
+
+        self.graph.nodes.push(CircuitNode {
+            id,
+            label,
+            circuit: circuit.clone(),
+            preds,
+        });
 
         Ok(id)
     }

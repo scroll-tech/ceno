@@ -1,7 +1,4 @@
-use gkr::{
-    structs::{GKRInputClaims, PointAndEval},
-    utils::MultilinearExtensionFromVectors,
-};
+use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use std::mem;

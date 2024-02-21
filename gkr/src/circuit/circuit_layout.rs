@@ -244,7 +244,11 @@ impl<F: SmallField> Circuit<F> {
             let mut curr_sc_steps = vec![];
             let layer = &layers[layer_id as usize];
             if layer.layer_id == 0 {
-                if circuit_builder.n_witness_out() > 1 || !output_assert_const.is_empty() {
+                let seg = (0..1 << layer.num_vars).collect_vec();
+                if circuit_builder.n_witness_out() > 1
+                    || circuit_builder.n_witness_out() == 1 && output_copy_to[0] != seg
+                    || !output_assert_const.is_empty()
+                {
                     curr_sc_steps.extend([
                         SumcheckStepType::OutputPhase1Step1,
                         SumcheckStepType::OutputPhase1Step2,
@@ -260,6 +264,8 @@ impl<F: SmallField> Circuit<F> {
 
             if layer.layer_id == n_layers - 1 {
                 if input_paste_from_wits_in.len() > 1
+                    || input_paste_from_wits_in.len() == 1
+                        && input_paste_from_wits_in[0] != (0, 1 << layer.num_vars)
                     || !input_paste_from_counter_in.is_empty()
                     || !input_paste_from_consts_in.is_empty()
                 {
@@ -467,7 +473,7 @@ impl<F: SmallField> fmt::Debug for Circuit<F> {
         for layer in self.layers.iter() {
             writeln!(f, "    {:?}", layer)?;
         }
-        writeln!(f, "  n_wires_in: {}", self.n_witness_in)?;
+        writeln!(f, "  n_witness_in: {}", self.n_witness_in)?;
         writeln!(f, "  paste_from_wits_in: {:?}", self.paste_from_wits_in)?;
         writeln!(
             f,

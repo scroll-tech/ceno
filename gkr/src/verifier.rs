@@ -1,5 +1,6 @@
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
+use itertools::Itertools;
 use simple_frontend::structs::{ChallengeConst, LayerId};
 use std::collections::HashMap;
 use transcript::Transcript;
@@ -39,6 +40,8 @@ impl<F: SmallField> IOPVerifierState<F> {
             output_evals,
             wires_out_evals,
             instance_num_vars,
+            transcript,
+            circuit.layers[0].num_vars + instance_num_vars,
         );
 
         let mut step_proof_iter = proof.sumcheck_proofs.into_iter();
@@ -103,6 +106,8 @@ impl<F: SmallField> IOPVerifierState<F> {
         output_evals: Vec<PointAndEval<F>>,
         wires_out_evals: Vec<PointAndEval<F>>,
         instance_num_vars: usize,
+        transcript: &mut Transcript<F>,
+        output_wit_num_vars: usize,
     ) -> Self {
         let mut subset_point_and_evals = vec![vec![]; n_layers];
         let to_next_step_point_and_eval = if !output_evals.is_empty() {
@@ -110,7 +115,13 @@ impl<F: SmallField> IOPVerifierState<F> {
         } else {
             wires_out_evals.last().unwrap().clone()
         };
-        let assert_point = to_next_step_point_and_eval.point.clone();
+        let assert_point = (0..output_wit_num_vars)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"assert_point")
+                    .elements
+            })
+            .collect_vec();
         let to_next_phase_point_and_evals = output_evals;
         subset_point_and_evals[0] = wires_out_evals.into_iter().map(|p| (0, p)).collect();
         Self {

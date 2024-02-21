@@ -167,7 +167,7 @@ impl<F: SmallField> IOPVerifierState<F> {
 
         self.to_next_phase_point_and_evals
             .push(PointAndEval::new_from_ref(&claim2_point, &f2_value));
-        self.to_next_step_point_and_eval = PointAndEval::new(claim2_point, F::ZERO);
+        self.to_next_step_point_and_eval = PointAndEval::new(claim2_point, g2_value);
         Ok(())
     }
 
