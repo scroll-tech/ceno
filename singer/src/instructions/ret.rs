@@ -57,31 +57,32 @@ impl InstructionGraph for ReturnInstruction {
         inst_circuits: &[InstCircuit<F>],
         mut sources: Vec<CircuitWiresIn<F::BaseField>>,
         real_challenges: &[F],
-        real_n_instances: usize,
+        _: usize,
         params: SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
         // Add the instruction circuit to the graph.
         let inst_circuit = &inst_circuits[0];
-        let n_wires_in = inst_circuit.circuit.n_wires_in;
+        let n_witness_in = inst_circuit.circuit.n_witness_in;
         let inst_node_id = graph_builder.add_node_with_witness(
             stringify!(ReturnInstruction),
             &inst_circuit.circuit,
-            vec![PredType::Source; n_wires_in],
+            vec![PredType::Source; n_witness_in],
             real_challenges.to_vec(),
             mem::take(&mut sources[0]),
+            1,
         )?;
         chip_builder.construct_chip_checks(
             graph_builder,
             inst_node_id,
             &inst_circuit.layout.chip_check_wire_id,
             real_challenges,
-            real_n_instances,
+            1,
         )?;
 
         // Add the public output load circuit to the graph.
         let pub_out_load_circuit = &inst_circuits[1];
-        let n_wires_in = pub_out_load_circuit.circuit.n_wires_in;
-        let mut preds = vec![PredType::Source; n_wires_in];
+        let n_witness_in = pub_out_load_circuit.circuit.n_witness_in;
+        let mut preds = vec![PredType::Source; n_witness_in];
         preds[pub_out_load_circuit.layout.pred_dup_wire_id.unwrap() as usize] =
             PredType::PredWireDup(NodeOutputType::WireOut(
                 inst_node_id,
@@ -93,6 +94,7 @@ impl InstructionGraph for ReturnInstruction {
             preds,
             real_challenges.to_vec(),
             mem::take(&mut sources[1]),
+            params.n_public_output_bytes,
         )?;
         chip_builder.construct_chip_checks(
             graph_builder,
@@ -104,13 +106,14 @@ impl InstructionGraph for ReturnInstruction {
 
         // Add the rest memory load circuit to the graph.
         let rest_mem_load_circuit = &inst_circuits[2];
-        let n_wires_in = rest_mem_load_circuit.circuit.n_wires_in;
+        let n_witness_in = rest_mem_load_circuit.circuit.n_witness_in;
         let rest_mem_load_node_id = graph_builder.add_node_with_witness(
             stringify!(ReturnRestMemLoad),
             &rest_mem_load_circuit.circuit,
-            vec![PredType::Source; n_wires_in],
+            vec![PredType::Source; n_witness_in],
             real_challenges.to_vec(),
             mem::take(&mut sources[2]),
+            params.n_mem_finalize,
         )?;
         chip_builder.construct_chip_checks(
             graph_builder,
@@ -122,13 +125,14 @@ impl InstructionGraph for ReturnInstruction {
 
         // Add the rest memory store circuit to the graph.
         let rest_mem_store_circuit = &inst_circuits[3];
-        let n_wires_in = rest_mem_store_circuit.circuit.n_wires_in;
+        let n_witness_in = rest_mem_store_circuit.circuit.n_witness_in;
         let rest_mem_store_node_id = graph_builder.add_node_with_witness(
             stringify!(ReturnRestMemStore),
             &rest_mem_store_circuit.circuit,
-            vec![PredType::Source; n_wires_in],
+            vec![PredType::Source; n_witness_in],
             real_challenges.to_vec(),
             mem::take(&mut sources[3]),
+            params.n_mem_initialize,
         )?;
         chip_builder.construct_chip_checks(
             graph_builder,
@@ -140,13 +144,14 @@ impl InstructionGraph for ReturnInstruction {
 
         // Add the rest stack pop circuit to the graph.
         let rest_stack_pop_circuit = &inst_circuits[4];
-        let n_wires_in = rest_stack_pop_circuit.circuit.n_wires_in;
+        let n_witness_in = rest_stack_pop_circuit.circuit.n_witness_in;
         let rest_stack_pop_node_id = graph_builder.add_node_with_witness(
             stringify!(ReturnRestStackPop),
             &rest_stack_pop_circuit.circuit,
-            vec![PredType::Source; n_wires_in],
+            vec![PredType::Source; n_witness_in],
             real_challenges.to_vec(),
             mem::take(&mut sources[4]),
+            params.n_stack_finalize,
         )?;
         chip_builder.construct_chip_checks(
             graph_builder,
@@ -189,7 +194,7 @@ impl Instruction for ReturnInstruction {
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut global_state_in_handler = ChipHandler::new(challenges.global_state());
         let mut bytecode_chip_handler = ChipHandler::new(challenges.bytecode());
         let mut stack_pop_handler = ChipHandler::new(challenges.stack());
@@ -265,16 +270,17 @@ impl Instruction for ReturnInstruction {
         ];
 
         // Copy length to the target wire.
-        let (target_wire_id, target) = circuit_builder.create_wire_out(StackUInt::N_OPRAND_CELLS);
+        let (target_wire_id, target) =
+            circuit_builder.create_witness_out(StackUInt::N_OPRAND_CELLS);
         let length = length.values();
         for i in 1..length.len() {
-            circuit_builder.assert_const(length[i], F::BaseField::ZERO);
+            circuit_builder.assert_const(length[i], 0);
         }
         circuit_builder.add(target[0], length[0], F::BaseField::ONE);
 
         // Copy offset to wires of public output load circuit.
         let (pub_out_wire_id, pub_out) =
-            circuit_builder.create_wire_out(ReturnPublicOutLoad::pred_size());
+            circuit_builder.create_witness_out(ReturnPublicOutLoad::pred_size());
         let pub_out_offset = &pub_out[ReturnPublicOutLoad::pred_offset()];
         let offset = offset.values();
         add_assign_each_cell(&mut circuit_builder, pub_out_offset, offset);
@@ -312,8 +318,8 @@ impl Instruction for ReturnPublicOutLoad {
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (pred_wire_id, pred) = circuit_builder.create_wire_in(Self::pred_size());
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (pred_wire_id, pred) = circuit_builder.create_witness_in(Self::pred_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut range_chip_handler = ChipHandler::new(challenges.range());
         let mut memory_load_handler = ChipHandler::new(challenges.mem());
 
@@ -382,7 +388,7 @@ impl Instruction for ReturnRestMemLoad {
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut range_chip_handler = ChipHandler::new(challenges.range());
         let mut memory_load_handler = ChipHandler::new(challenges.mem());
 
@@ -438,7 +444,7 @@ impl Instruction for ReturnRestMemStore {
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut memory_store_handler = ChipHandler::new(challenges.mem());
 
         // Load from memory
@@ -489,7 +495,7 @@ impl Instruction for ReturnRestStackPop {
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut range_chip_handler = ChipHandler::new(challenges.range());
         let mut stack_pop_handler = ChipHandler::new(challenges.stack());
 

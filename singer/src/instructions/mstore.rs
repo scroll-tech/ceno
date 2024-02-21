@@ -48,13 +48,14 @@ impl InstructionGraph for MstoreInstruction {
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
         // Add the instruction circuit to the graph.
         let inst_circuit = &inst_circuits[0];
-        let n_wires_in = inst_circuit.circuit.n_wires_in;
+        let n_witness_in = inst_circuit.circuit.n_witness_in;
         let inst_node_id = graph_builder.add_node_with_witness(
             stringify!(ReturnInstruction),
             &inst_circuit.circuit,
-            vec![PredType::Source; n_wires_in],
+            vec![PredType::Source; n_witness_in],
             real_challenges.to_vec(),
             mem::take(&mut sources[0]),
+            real_n_instances,
         )?;
         chip_builder.construct_chip_checks(
             graph_builder,
@@ -65,8 +66,8 @@ impl InstructionGraph for MstoreInstruction {
         )?;
 
         let mstore_acc_circuit = &inst_circuits[1];
-        let n_wires_in = mstore_acc_circuit.circuit.n_wires_in;
-        let mut preds = vec![PredType::Source; n_wires_in];
+        let n_witness_in = mstore_acc_circuit.circuit.n_witness_in;
+        let mut preds = vec![PredType::Source; n_witness_in];
         // The order is consistent with the order of creating wires in.
         preds[mstore_acc_circuit.layout.pred_dup_wire_id.unwrap() as usize] = PredType::PredWireDup(
             NodeOutputType::WireOut(inst_node_id, inst_circuit.layout.succ_dup_wires_id[0]),
@@ -80,13 +81,14 @@ impl InstructionGraph for MstoreInstruction {
             preds,
             real_challenges.to_vec(),
             mem::take(&mut sources[1]),
+            real_n_instances * EVM_STACK_BYTE_WIDTH,
         )?;
         chip_builder.construct_chip_checks(
             graph_builder,
             mstore_acc_node_id,
             &mstore_acc_circuit.layout.chip_check_wire_id,
             real_challenges,
-            real_n_instances * 32,
+            real_n_instances * EVM_STACK_BYTE_WIDTH,
         )?;
         Ok(None)
     }
@@ -122,7 +124,7 @@ impl Instruction for MstoreInstruction {
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut global_state_in_handler = ChipHandler::new(challenges.global_state());
         let mut global_state_out_handler = ChipHandler::new(challenges.global_state());
         let mut bytecode_chip_handler = ChipHandler::new(challenges.bytecode());
@@ -218,7 +220,7 @@ impl Instruction for MstoreInstruction {
 
         // To accessory
         let (to_acc_dup_id, to_acc_dup) =
-            circuit_builder.create_wire_out(MstoreAccessory::pred_dup_size());
+            circuit_builder.create_witness_out(MstoreAccessory::pred_dup_size());
         add_assign_each_cell(
             &mut circuit_builder,
             &to_acc_dup[MstoreAccessory::pred_dup_memory_ts()],
@@ -231,7 +233,7 @@ impl Instruction for MstoreInstruction {
         );
 
         let (to_acc_ooo_id, to_acc_ooo) = circuit_builder
-            .create_wire_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
+            .create_witness_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
         add_assign_each_cell(&mut circuit_builder, &to_acc_ooo, mem_bytes);
 
         let global_state_in_id = global_state_in_handler
@@ -283,11 +285,11 @@ register_witness!(
         mem_bytes => 1
     },
     phase0 {
-        old_memory_ts => EVM_STACK_BYTE_WIDTH * TSUInt::N_OPRAND_CELLS,
-        old_memory_ts_lt => EVM_STACK_BYTE_WIDTH * UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_memory_ts => TSUInt::N_OPRAND_CELLS,
+        old_memory_ts_lt =>  UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
         offset_add_delta => UIntAddSub::<StackUInt>::N_WITNESS_CELLS,
-        prev_mem_bytes => EVM_STACK_BYTE_WIDTH
+        prev_mem_bytes => 1
     }
 );
 
@@ -298,11 +300,11 @@ impl Instruction for MstoreAccessory {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From predesessor circuit.
-        let (pred_dup_wire_id, pred_dup) = circuit_builder.create_wire_in(Self::pred_dup_size());
-        let (pred_ooo_wire_id, pred_ooo) = circuit_builder.create_wire_in(Self::pred_ooo_size());
+        let (pred_dup_wire_id, pred_dup) = circuit_builder.create_witness_in(Self::pred_dup_size());
+        let (pred_ooo_wire_id, pred_ooo) = circuit_builder.create_witness_in(Self::pred_ooo_size());
 
         // From witness.
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut range_chip_handler = ChipHandler::new(challenges.range());
         let mut memory_load_handler = ChipHandler::new(challenges.mem());

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
-use simple_frontend::structs::{CircuitBuilder, MixedCell, WireId};
+use simple_frontend::structs::{CircuitBuilder, MixedCell, WitnessId};
 
 use super::ChipCircuitGadgets;
 
@@ -15,23 +15,23 @@ pub(crate) struct PrefixSelectorCircuit<F: SmallField> {
 #[derive(Clone, Debug)]
 pub(crate) struct LeafFracSumCircuit<F: SmallField> {
     pub(crate) circuit: Arc<Circuit<F>>,
-    pub(crate) input_den_id: WireId,
-    pub(crate) input_num_id: WireId,
-    pub(crate) cond_id: WireId,
+    pub(crate) input_den_id: WitnessId,
+    pub(crate) input_num_id: WitnessId,
+    pub(crate) cond_id: WitnessId,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct LeafFracSumNoSelectorCircuit<F: SmallField> {
     pub(crate) circuit: Arc<Circuit<F>>,
-    pub(crate) input_den_id: WireId,
-    pub(crate) input_num_id: WireId,
+    pub(crate) input_den_id: WitnessId,
+    pub(crate) input_num_id: WitnessId,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct LeafCircuit<F: SmallField> {
     pub(crate) circuit: Arc<Circuit<F>>,
-    pub(crate) input_id: WireId,
-    pub(crate) cond_id: WireId,
+    pub(crate) input_id: WitnessId,
+    pub(crate) cond_id: WitnessId,
 }
 
 impl<F: SmallField> ChipCircuitGadgets<F> {
@@ -68,9 +68,9 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
     /// output layer: the denominator and the numerator.
     pub(crate) fn construct_inv_sum() -> LeafCircuit<F> {
         let mut circuit_builder = CircuitBuilder::<F>::new();
-        let (input_id, input) = circuit_builder.create_ext_wire_in(2);
-        let (cond_id, cond) = circuit_builder.create_wire_in(2);
-        let (_, output) = circuit_builder.create_ext_wire_out(2);
+        let (input_id, input) = circuit_builder.create_ext_witness_in(2);
+        let (cond_id, cond) = circuit_builder.create_witness_in(2);
+        let (_, output) = circuit_builder.create_ext_witness_out(2);
         // selector denominator 1 or input[0] or input[0] * input[1]
         let den_mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&den_mul, &input[0], &input[1], F::BaseField::ONE);
@@ -106,10 +106,10 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
     /// output layer: the denominator and the numerator.
     pub(crate) fn construct_frac_sum_leaf() -> LeafFracSumCircuit<F> {
         let mut circuit_builder = CircuitBuilder::<F>::new();
-        let (input_den_id, input_den) = circuit_builder.create_ext_wire_in(2);
-        let (input_num_id, input_num) = circuit_builder.create_wire_in(2);
-        let (cond_id, cond) = circuit_builder.create_wire_in(2);
-        let (_, output) = circuit_builder.create_ext_wire_out(2);
+        let (input_den_id, input_den) = circuit_builder.create_ext_witness_in(2);
+        let (input_num_id, input_num) = circuit_builder.create_witness_in(2);
+        let (cond_id, cond) = circuit_builder.create_witness_in(2);
+        let (_, output) = circuit_builder.create_ext_witness_out(2);
         // selector denominator, 1 or input_den[0] or input_den[0] * input_den[1]
         let den_mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&den_mul, &input_den[0], &input_den[1], F::BaseField::ONE);
@@ -152,9 +152,9 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
     /// output layer: the denominator and the numerator.
     pub(crate) fn construct_frac_sum_leaf_no_selector() -> LeafFracSumNoSelectorCircuit<F> {
         let mut circuit_builder = CircuitBuilder::<F>::new();
-        let (input_den_id, input_den) = circuit_builder.create_ext_wire_in(2);
-        let (input_num_id, input_num) = circuit_builder.create_wire_in(2);
-        let (_, output) = circuit_builder.create_ext_wire_out(2);
+        let (input_den_id, input_den) = circuit_builder.create_ext_witness_in(2);
+        let (input_num_id, input_num) = circuit_builder.create_witness_in(2);
+        let (_, output) = circuit_builder.create_ext_witness_out(2);
         // denominator
         circuit_builder.mul2_ext(
             &output[0], // output_den
@@ -193,8 +193,8 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
     /// Wire out 1: the numerator.
     pub(crate) fn construct_frac_sum_inner() -> Arc<Circuit<F>> {
         let mut circuit_builder = CircuitBuilder::<F>::new();
-        let (_, input) = circuit_builder.create_ext_wire_in(4);
-        let (_, output) = circuit_builder.create_ext_wire_out(2);
+        let (_, input) = circuit_builder.create_ext_witness_in(4);
+        let (_, output) = circuit_builder.create_ext_witness_out(2);
         // denominator
         circuit_builder.mul2_ext(
             &output[0], // output_den
@@ -224,9 +224,9 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
     /// Construct a circuit to compute the product of two extension field elements.
     pub(crate) fn construct_product_leaf() -> LeafCircuit<F> {
         let mut circuit_builder = CircuitBuilder::<F>::new();
-        let (input_id, input) = circuit_builder.create_ext_wire_in(2);
-        let (cond_id, sel) = circuit_builder.create_wire_in(2);
-        let (_, output) = circuit_builder.create_ext_wire_out(1);
+        let (input_id, input) = circuit_builder.create_ext_witness_in(2);
+        let (cond_id, sel) = circuit_builder.create_witness_in(2);
+        let (_, output) = circuit_builder.create_ext_witness_out(1);
         // selector elements, 1 or input[0] or input[0] * input[1]
         let mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&mul, &input[0], &input[1], F::BaseField::ONE);
@@ -250,8 +250,8 @@ impl<F: SmallField> ChipCircuitGadgets<F> {
     /// Construct a circuit to compute the product of two extension field elements.
     pub(crate) fn construct_product_inner() -> Arc<Circuit<F>> {
         let mut circuit_builder = CircuitBuilder::<F>::new();
-        let (_, input) = circuit_builder.create_ext_wire_in(2);
-        let (_, output) = circuit_builder.create_ext_wire_out(1);
+        let (_, input) = circuit_builder.create_ext_witness_in(2);
+        let (_, output) = circuit_builder.create_ext_witness_out(1);
         circuit_builder.mul2_ext(&output[0], &input[0], &input[1], F::BaseField::ONE);
 
         Arc::new(Circuit::new(&circuit_builder))

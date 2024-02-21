@@ -3,6 +3,7 @@
 use chips::LookupChipType;
 use chips::SingerChipBuilder;
 use error::ZKVMError;
+use gkr::structs::LayerWitness;
 use gkr_graph::structs::CircuitGraph;
 use gkr_graph::structs::CircuitGraphBuilder;
 use gkr_graph::structs::CircuitGraphWitness;
@@ -214,7 +215,7 @@ pub struct SingerWiresOutID {
 }
 
 // Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
-pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
+pub(crate) type CircuitWiresIn<F> = Vec<LayerWitness<F>>;
 
 #[derive(Clone, Debug, Default)]
 pub struct InstWiresIn<F: SmallField> {

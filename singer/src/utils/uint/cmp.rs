@@ -68,7 +68,7 @@ where
             oprand_1,
             witness,
         )?;
-        circuit_builder.assert_const(borrow, F::BaseField::ONE);
+        circuit_builder.assert_const(borrow, 1);
         Ok(())
     }
 
@@ -97,7 +97,7 @@ where
                 MixedCell::Constant(F::BaseField::ZERO),
                 borrow,
             );
-            circuit_builder.assert_const(s, F::BaseField::ZERO);
+            circuit_builder.assert_const(s, 0);
         }
         Ok(())
     }
@@ -113,8 +113,41 @@ where
         for i in 0..diff.len() {
             circuit_builder.add(diff[i], opr_0[i], F::BaseField::ONE);
             circuit_builder.add(diff[i], opr_1[i], -F::BaseField::ONE);
-            circuit_builder.assert_const(diff[i], F::BaseField::ZERO);
+            circuit_builder.assert_const(diff[i], 0);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{ChipHandler, UInt, UIntCmp};
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::{ChallengeId, CircuitBuilder};
+
+    #[test]
+    fn test_lt() {
+        // TODO: this test yet cannot pass due to the same reason
+        // as happened in add tests
+        // this test fails at singer/src/instructions/utils/uint.rs:168:49:
+        // attempt to shift left with overflow
+        type Uint256_63 = UInt<256, 63>;
+        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        // create cells for operand_0, operand_1 and witness
+        let _operand_0_cells = circuit_builder.create_cells(Uint256_63::N_OPRAND_CELLS);
+        let _operand_1_cells = circuit_builder.create_cells(Uint256_63::N_OPRAND_CELLS);
+        let _witness_cells = circuit_builder.create_cells(Uint256_63::N_OPRAND_CELLS);
+        let operand_0 = Uint256_63::try_from(vec![0, 1, 2, 3, 4]);
+        let operand_1 = Uint256_63::try_from(vec![5, 6, 7, 8, 9]);
+        let witness: Vec<usize> = (10..35).collect();
+        let mut range_chip_handler = ChipHandler::new(100 as ChallengeId);
+        let result = UIntCmp::<Uint256_63>::lt(
+            &mut circuit_builder,
+            &mut range_chip_handler,
+            &operand_0.unwrap(),
+            &operand_1.unwrap(),
+            &witness,
+        );
+        println!("{:?}", result);
     }
 }

@@ -3,7 +3,7 @@ use std::{mem, sync::Arc};
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
-use simple_frontend::structs::{ChallengeId, WireId};
+use simple_frontend::structs::{ChallengeId, WitnessId};
 
 use strum_macros::EnumIter;
 
@@ -172,18 +172,18 @@ pub struct InstCircuit<F: SmallField> {
 #[derive(Clone, Debug, Default)]
 pub struct InstCircuitLayout {
     // Will be connected to the chips.
-    pub(crate) chip_check_wire_id: [Option<(WireId, usize)>; 9],
+    pub(crate) chip_check_wire_id: [Option<(WitnessId, usize)>; 9],
     // Target. Especially for return the size of public output.
-    pub(crate) target_wire_id: Option<WireId>,
+    pub(crate) target_wire_id: Option<WitnessId>,
     // Will be connected to the accessory circuits.
-    pub(crate) succ_dup_wires_id: Vec<WireId>,
-    pub(crate) succ_ooo_wires_id: Vec<WireId>,
+    pub(crate) succ_dup_wires_id: Vec<WitnessId>,
+    pub(crate) succ_ooo_wires_id: Vec<WitnessId>,
 
     // Wires in index
-    pub(crate) phases_wire_id: Vec<WireId>,
+    pub(crate) phases_wire_id: Vec<WitnessId>,
     // wire id fetched from pred circuit.
-    pub(crate) pred_dup_wire_id: Option<WireId>,
-    pub(crate) pred_ooo_wire_id: Option<WireId>,
+    pub(crate) pred_dup_wire_id: Option<WitnessId>,
+    pub(crate) pred_ooo_wire_id: Option<WitnessId>,
 }
 
 pub(crate) trait Instruction {
@@ -225,6 +225,7 @@ pub(crate) trait InstructionGraph {
             vec![PredType::Source; inst_wires_in.len()],
             real_challenges.to_vec(),
             inst_wires_in,
+            real_n_instances.next_power_of_two(),
         )?;
 
         chip_builder.construct_chip_checks(

@@ -94,7 +94,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             let diff = circuit_builder.create_cell();
             circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
             circuit_builder.add(diff, other.values[i], -F::BaseField::ONE);
-            circuit_builder.assert_const(diff, F::BaseField::ZERO);
+            circuit_builder.assert_const(diff, 0);
         }
     }
 
@@ -113,13 +113,13 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             let diff = circuit_builder.create_cell();
             circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
             circuit_builder.add(diff, values[i], -F::BaseField::ONE);
-            circuit_builder.assert_const(diff, F::BaseField::ZERO);
+            circuit_builder.assert_const(diff, 0);
         }
         for i in length..values.len() {
-            circuit_builder.assert_const(values[i], F::BaseField::ZERO);
+            circuit_builder.assert_const(values[i], 0);
         }
         for i in length..self.values.len() {
-            circuit_builder.assert_const(self.values[i], F::BaseField::ZERO);
+            circuit_builder.assert_const(self.values[i], 0);
         }
     }
 
@@ -186,4 +186,46 @@ fn convert_decomp<F: SmallField>(
         })
         .collect_vec();
     values
+}
+
+#[cfg(test)]
+mod test {
+    use crate::utils::uint::convert_decomp;
+
+    use super::UInt;
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CircuitBuilder;
+
+    #[test]
+    fn test_uint() {
+        // M = 256 is the number of bits for unsigned integer
+        // C = 63 is the cell bit width
+        type Uint256_63 = UInt<256, 63>;
+        assert_eq!(Uint256_63::N_OPRAND_CELLS, 5);
+        assert_eq!(Uint256_63::N_CARRY_CELLS, 5);
+        assert_eq!(Uint256_63::N_CARRY_NO_OVERFLOW_CELLS, 4);
+        assert_eq!(Uint256_63::N_RANGE_CHECK_CELLS, 24);
+        assert_eq!(Uint256_63::N_RANGE_CHECK_NO_OVERFLOW_CELLS, 19);
+        let u_int = Uint256_63::try_from(vec![1, 2, 3, 4, 5]);
+        assert_eq!(u_int.unwrap().values, vec![1, 2, 3, 4, 5]);
+        // TODO: implement tests for methods in UInt
+        // they mostly depend on convert_decomp which will be tested separately
+    }
+
+    #[test]
+    fn test_convert_decomp() {
+        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let small_values: Vec<usize> = vec![1; 64];
+        let values = convert_decomp(&mut circuit_builder, &small_values, 1, 2, true);
+        let vec: Vec<usize> = (0..=31).collect();
+        assert_eq!(values, vec);
+        // this test will fail if small_len * small_bit_width exceeds
+        //      the field's max bit size
+        // e.g.
+        // let values = convert_decomp(&mut circuit_builder,
+        //                                 &small_values,
+        //                                 2,
+        //                                 2,
+        //                                 true);
+    }
 }

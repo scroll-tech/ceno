@@ -1,9 +1,12 @@
 use std::{mem, sync::Arc};
 
-use gkr::{structs::Circuit, utils::ceil_log2};
+use gkr::{
+    structs::{Circuit, LayerWitness},
+    utils::ceil_log2,
+};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
-use simple_frontend::structs::WireId;
+use simple_frontend::structs::WitnessId;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -49,13 +52,13 @@ impl<F: SmallField> SingerChipBuilder<F> {
         &mut self,
         graph_builder: &mut CircuitGraphBuilder<F>,
         node_id: usize,
-        to_chip_ids: &[Option<(WireId, usize)>],
+        to_chip_ids: &[Option<(WitnessId, usize)>],
         real_challenges: &[F],
         n_instances: usize,
     ) -> Result<(), ZKVMError> {
         let mut build = |n_instances: usize,
                          num: usize,
-                         input_wire_id: WireId,
+                         input_wire_id: WitnessId,
                          leaf: &LeafCircuit<F>,
                          inner: &Arc<Circuit<F>>|
          -> Result<NodeOutputType, ZKVMError> {
@@ -66,6 +69,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
                 vec![],
                 real_challenges.to_vec(),
                 vec![],
+                n_instances.next_power_of_two(),
             )?;
             let mut preds = vec![PredType::Source; 2];
             preds[leaf.input_id as usize] =
@@ -147,8 +151,8 @@ impl<F: SmallField> SingerChipBuilder<F> {
             let mut preds = vec![PredType::Source; 3];
             preds[leaf.input_den_id as usize] = table_pred;
             preds[leaf.cond_id as usize] = selector_pred;
-            let mut sources = vec![vec![]; 3];
-            sources[leaf.input_num_id as usize] =
+            let mut sources = vec![LayerWitness::default(); 3];
+            sources[leaf.input_num_id as usize].instances =
                 mem::take(&mut table_count_witness[table_type as usize]);
             (preds, sources)
         };
@@ -191,8 +195,8 @@ impl<F: SmallField> SingerChipBuilder<F> {
         let mut preds_no_selector = |table_type, table_pred| {
             let mut preds = vec![PredType::Source; 2];
             preds[leaf.input_den_id as usize] = table_pred;
-            let mut sources = vec![vec![]; 3];
-            sources[leaf.input_num_id as usize] =
+            let mut sources = vec![LayerWitness::default(); 3];
+            sources[leaf.input_num_id as usize].instances =
                 mem::take(&mut table_count_witness[table_type as usize]);
             (preds, sources)
         };
@@ -239,12 +243,12 @@ fn build_tree_circuits<F: SmallField>(
     first_pred: Vec<PredType>,
     leaf: &Arc<Circuit<F>>,
     inner: &Arc<Circuit<F>>,
-    first_source: Vec<Vec<Vec<F::BaseField>>>,
+    first_source: Vec<LayerWitness<F::BaseField>>,
     real_challenges: &[F],
     instance_num_vars: usize,
 ) -> Result<NodeOutputType, ZKVMError> {
     let (last_pred, _) =
-        (0..instance_num_vars).fold(Ok((first_pred, first_source)), |prev, i| {
+        (0..=instance_num_vars).fold(Ok((first_pred, first_source)), |prev, i| {
             let circuit = if i == 0 { leaf } else { inner };
             match prev {
                 Ok((pred, source)) => graph_builder
@@ -254,11 +258,12 @@ fn build_tree_circuits<F: SmallField>(
                         pred,
                         real_challenges.to_vec(),
                         source,
+                        1 << (instance_num_vars - i),
                     )
                     .map(|id| {
                         (
                             vec![PredType::PredWire(NodeOutputType::OutputLayer(id))],
-                            vec![vec![]],
+                            vec![LayerWitness { instances: vec![] }],
                         )
                     }),
                 Err(err) => Err(err),
@@ -266,7 +271,6 @@ fn build_tree_circuits<F: SmallField>(
         })?;
     match last_pred[0] {
         PredType::PredWire(out) => Ok(out),
-        PredType::PredWireTrans(out) => Ok(out),
         _ => unreachable!(),
     }
 }

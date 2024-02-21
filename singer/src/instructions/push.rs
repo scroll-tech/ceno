@@ -53,7 +53,7 @@ impl<const N: usize> Instruction for PushInstruction<N> {
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut global_state_in_handler = ChipHandler::new(challenges.global_state());
         let mut global_state_out_handler = ChipHandler::new(challenges.global_state());
         let mut bytecode_chip_handler = ChipHandler::new(challenges.bytecode());
