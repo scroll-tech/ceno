@@ -271,18 +271,18 @@ mod test {
         let circuit_witness = {
             let challenges = vec![Goldilocks::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
-            circuit_witness.add_instance(&circuit, &wires_in);
+            circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness
         };
         //println!("{:?}", circuit_witness);
         circuit_witness.check_correctness(&circuit);
 
         // check the result
-        let result_values = circuit_witness.last_layer_witness_ref();
+        let result_values = circuit_witness.output_layer_witness_ref();
         //println!("{:?}", result_values[0]);
-        assert_eq!(result_values[0][0], Goldilocks::from(254u64));
-        assert_eq!(result_values[0][1], Goldilocks::from(254u64));
-        assert_eq!(result_values[0][2], Goldilocks::from(1u64));
+        assert_eq!(result_values.instances[0][0], Goldilocks::from(254u64));
+        assert_eq!(result_values.instances[0][1], Goldilocks::from(254u64));
+        assert_eq!(result_values.instances[0][2], Goldilocks::from(1u64));
     }
 
     #[test]
@@ -329,17 +329,17 @@ mod test {
         let circuit_witness = {
             let challenges = vec![Goldilocks::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
-            circuit_witness.add_instance(&circuit, &wires_in);
+            circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness
         };
         //println!("{:?}", circuit_witness);
         circuit_witness.check_correctness(&circuit);
 
         // check the result
-        let result_values = circuit_witness.last_layer_witness_ref();
+        let result_values = circuit_witness.output_layer_witness_ref();
         //println!("{:?}", result_values[0]);
-        assert_eq!(result_values[0][0], Goldilocks::from(2u64));
-        assert_eq!(result_values[0][1], Goldilocks::from(2u64));
-        assert_eq!(result_values[0][2], -Goldilocks::from(1u64));
+        assert_eq!(result_values.instances[0][0], Goldilocks::from(2u64));
+        assert_eq!(result_values.instances[0][1], Goldilocks::from(2u64));
+        assert_eq!(result_values.instances[0][2], -Goldilocks::from(1u64));
     }
 }

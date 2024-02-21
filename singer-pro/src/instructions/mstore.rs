@@ -1,13 +1,12 @@
 use ff::Field;
-use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use paste::paste;
-use std::{mem, sync::Arc};
-use strum::IntoEnumIterator;
-
 use gkr::structs::Circuit;
+use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
+use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
+use std::{mem, sync::Arc};
+use strum::IntoEnumIterator;
 
 use crate::{
     chips::SingerChipBuilder,
@@ -22,7 +21,7 @@ use crate::{
         chip_handler::{ChipHandler, MemoryChipOperations, RangeChipOperations},
         uint::{StackUInt, TSUInt, UIntAddSub, UIntCmp},
     },
-    CircuitWiresInValues, SingerParams,
+    CircuitWitnessIn, SingerParams,
 };
 
 use super::{Instruction, InstructionGraph};
@@ -47,7 +46,7 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
         inst_circuit: &InstCircuit<F>,
         acc_circuits: &[AccessoryCircuit<F>],
         preds: Vec<PredType>,
-        mut sources: Vec<CircuitWiresInValues<F::BaseField>>,
+        mut sources: Vec<CircuitWitnessIn<F::BaseField>>,
         real_challenges: &[F],
         real_n_instances: usize,
         _: SingerParams,
@@ -59,6 +58,7 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
             preds,
             real_challenges.to_vec(),
             mem::take(&mut sources[0]),
+            real_n_instances,
         )?;
         let stack = inst_circuit
             .layout
@@ -93,6 +93,7 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
             preds,
             real_challenges.to_vec(),
             mem::take(&mut sources[1]),
+            real_n_instances * EVM_STACK_BYTE_WIDTH,
         )?;
 
         chip_builder.construct_chip_checks(

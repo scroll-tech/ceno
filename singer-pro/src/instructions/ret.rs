@@ -1,11 +1,10 @@
 use ff::Field;
-use std::{mem, sync::Arc};
-
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
+use std::{mem, sync::Arc};
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -18,9 +17,9 @@ use crate::{
     utils::{
         add_assign_each_cell,
         chip_handler::{ChipHandler, MemoryChipOperations},
-        uint::{StackUInt, TSUInt, UIntAddSub, UIntCmp},
+        uint::{StackUInt, TSUInt, UIntAddSub},
     },
-    CircuitWiresInValues, SingerParams,
+    CircuitWitnessIn, SingerParams,
 };
 
 use super::{Instruction, InstructionGraph};
@@ -37,13 +36,13 @@ impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
         inst_circuit: &InstCircuit<F>,
         _: &[AccessoryCircuit<F>],
         preds: Vec<PredType>,
-        mut sources: Vec<CircuitWiresInValues<F::BaseField>>,
+        mut sources: Vec<CircuitWitnessIn<F::BaseField>>,
         real_challenges: &[F],
         _: usize,
         params: SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
         let public_output_size =
-            preds[inst_circuit.layout.from_pred_inst.stack_operand_ids[1] as usize];
+            preds[inst_circuit.layout.from_pred_inst.stack_operand_ids[1] as usize].clone();
 
         // Add the instruction circuit to the graph.
         let node_id = graph_builder.add_node_with_witness(
@@ -52,6 +51,7 @@ impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
             preds,
             real_challenges.to_vec(),
             mem::take(&mut sources[0]),
+            1,
         )?;
 
         chip_builder.construct_chip_checks(

@@ -7,6 +7,7 @@ use chips::SingerChipBuilder;
 use component::ChipChallenges;
 use component::ChipType;
 use error::ZKVMError;
+use gkr::structs::LayerWitness;
 use gkr_graph::structs::CircuitGraph;
 use gkr_graph::structs::CircuitGraphBuilder;
 use gkr_graph::structs::CircuitGraphWitness;
@@ -137,7 +138,7 @@ pub struct SingerParams {
 #[derive(Clone, Debug, Default)]
 pub struct SingerWiresIn<F: SmallField> {
     basic_blocks: Vec<BasicBlockWiresIn<F>>,
-    table_count_witnesses: Vec<WirsInValues<F>>,
+    table_count_witnesses: Vec<LayerWitness<F>>,
 }
 
 #[derive(Clone, Debug)]
@@ -156,15 +157,13 @@ pub struct SingerWiresOutID {
     public_output_size: Option<NodeOutputType>,
 }
 
-pub(crate) type WirsInValues<F> = Vec<Vec<F>>;
-// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
-pub(crate) type CircuitWiresInValues<F> = Vec<WirsInValues<F>>;
+pub(crate) type CircuitWitnessIn<F> = Vec<LayerWitness<F>>;
 
 #[derive(Clone, Debug, Default)]
 pub struct BasicBlockWiresIn<F: SmallField> {
     real_n_instance: usize,
-    bb_start: CircuitWiresInValues<F>,
-    opcodes: Vec<Vec<CircuitWiresInValues<F>>>,
-    bb_final: CircuitWiresInValues<F>,
-    bb_accs: Vec<CircuitWiresInValues<F>>,
+    bb_start: CircuitWitnessIn<F>,
+    opcodes: Vec<Vec<CircuitWitnessIn<F>>>,
+    bb_final: CircuitWitnessIn<F>,
+    bb_accs: Vec<CircuitWitnessIn<F>>,
 }

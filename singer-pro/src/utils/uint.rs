@@ -94,7 +94,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             let diff = circuit_builder.create_cell();
             circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
             circuit_builder.add(diff, other.values[i], -F::BaseField::ONE);
-            circuit_builder.assert_const(diff, F::BaseField::ZERO);
+            circuit_builder.assert_const(diff, 0);
         }
     }
 
@@ -113,13 +113,13 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             let diff = circuit_builder.create_cell();
             circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
             circuit_builder.add(diff, values[i], -F::BaseField::ONE);
-            circuit_builder.assert_const(diff, F::BaseField::ZERO);
+            circuit_builder.assert_const(diff, 0);
         }
         for i in length..values.len() {
-            circuit_builder.assert_const(values[i], F::BaseField::ZERO);
+            circuit_builder.assert_const(values[i], 0);
         }
         for i in length..self.values.len() {
-            circuit_builder.assert_const(self.values[i], F::BaseField::ZERO);
+            circuit_builder.assert_const(self.values[i], 0);
         }
     }
 

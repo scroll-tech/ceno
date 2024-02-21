@@ -138,7 +138,7 @@ impl<F: SmallField> ChipHandler<F> {
         // If val != 0, then prod = 1. => assert!( val (prod - 1) = 0 )
         circuit_builder.mul2(statement, val, prod, F::BaseField::ONE);
         circuit_builder.add(statement, val, -F::BaseField::ONE);
-        circuit_builder.assert_const(statement, F::BaseField::ZERO);
+        circuit_builder.assert_const(statement, 0);
         Ok(prod)
     }
 }

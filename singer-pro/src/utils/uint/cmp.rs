@@ -68,7 +68,7 @@ where
             oprand_1,
             witness,
         )?;
-        circuit_builder.assert_const(borrow, F::BaseField::ONE);
+        circuit_builder.assert_const(borrow, 1);
         Ok(())
     }
 
@@ -97,7 +97,7 @@ where
                 MixedCell::Constant(F::BaseField::ZERO),
                 borrow,
             );
-            circuit_builder.assert_const(s, F::BaseField::ZERO);
+            circuit_builder.assert_const(s, 0);
         }
         Ok(())
     }
@@ -113,7 +113,7 @@ where
         for i in 0..diff.len() {
             circuit_builder.add(diff[i], opr_0[i], F::BaseField::ONE);
             circuit_builder.add(diff[i], opr_1[i], -F::BaseField::ONE);
-            circuit_builder.assert_const(diff[i], F::BaseField::ZERO);
+            circuit_builder.assert_const(diff[i], 0);
         }
         Ok(())
     }
@@ -121,8 +121,6 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::component::ChipChallenges;
-
     use super::{ChipHandler, UInt, UIntCmp};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::{ChallengeId, CircuitBuilder};

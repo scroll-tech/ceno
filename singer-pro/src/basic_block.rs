@@ -189,6 +189,7 @@ impl<F: SmallField> BasicBlock<F> {
         let bb_start_circuit = &self.bb_start_circuit;
         let bb_final_circuit = &self.bb_final_circuit;
         let bb_acc_circuits = &self.bb_acc_circuits;
+        let real_n_instances = bb_wires_in.real_n_instance;
 
         let bb_start_node_id = graph_builder.add_node_with_witness(
             "BB start",
@@ -196,11 +197,11 @@ impl<F: SmallField> BasicBlock<F> {
             vec![PredType::Source; bb_start_circuit.circuit.n_witness_in],
             real_challenges.to_vec(),
             mem::take(&mut bb_wires_in.bb_start),
+            real_n_instances,
         )?;
 
         // The instances wire in values are padded to the power of two, but we
         // need the real number of instances here.
-        let real_n_instances = bb_wires_in.real_n_instance;
         chip_builder.construct_chip_checks(
             graph_builder,
             bb_start_node_id,
@@ -277,6 +278,7 @@ impl<F: SmallField> BasicBlock<F> {
             preds,
             real_challenges.to_vec(),
             mem::take(&mut bb_wires_in.bb_final),
+            real_n_instances,
         )?;
         chip_builder.construct_chip_checks(
             graph_builder,
@@ -302,6 +304,7 @@ impl<F: SmallField> BasicBlock<F> {
                 vec![PredType::Source; acc.circuit.n_witness_in],
                 real_challenges.to_vec(),
                 mem::take(acc_wires_in),
+                real_n_instances,
             )?;
             chip_builder.construct_chip_checks(
                 graph_builder,

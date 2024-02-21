@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use gkr::{structs::Circuit, utils::ceil_log2};
+use gkr::{
+    structs::{Circuit, LayerWitness},
+    utils::ceil_log2,
+};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -37,6 +40,7 @@ pub(crate) fn construct_calldata_table<F: SmallField>(
         vec![],
         real_challenges.to_vec(),
         vec![],
+        program_input.len().next_power_of_two(),
     )?;
 
     let calldata = program_input
@@ -44,19 +48,23 @@ pub(crate) fn construct_calldata_table<F: SmallField>(
         .map(|x| F::BaseField::from(*x as u64))
         .collect_vec();
     let wires_in = vec![
-        (0..calldata.len())
-            .map(|x| vec![F::BaseField::from(x as u64)])
-            .collect_vec(),
-        (0..calldata.len())
-            .step_by(StackUInt::N_OPRAND_CELLS)
-            .map(|i| {
-                calldata[i..(i + StackUInt::N_OPRAND_CELLS).min(calldata.len())]
-                    .iter()
-                    .cloned()
-                    .rev()
-                    .collect_vec()
-            })
-            .collect_vec(),
+        LayerWitness {
+            instances: (0..calldata.len())
+                .map(|x| vec![F::BaseField::from(x as u64)])
+                .collect_vec(),
+        },
+        LayerWitness {
+            instances: (0..calldata.len())
+                .step_by(StackUInt::N_OPRAND_CELLS)
+                .map(|i| {
+                    calldata[i..(i + StackUInt::N_OPRAND_CELLS).min(calldata.len())]
+                        .iter()
+                        .cloned()
+                        .rev()
+                        .collect_vec()
+                })
+                .collect_vec(),
+        },
     ];
 
     let table_node_id = builder.add_node_with_witness(
@@ -65,6 +73,7 @@ pub(crate) fn construct_calldata_table<F: SmallField>(
         vec![PredType::Source; 2],
         real_challenges.to_vec(),
         wires_in,
+        program_input.len().next_power_of_two(),
     )?;
 
     Ok((

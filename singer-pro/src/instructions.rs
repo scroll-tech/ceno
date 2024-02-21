@@ -8,7 +8,7 @@ use crate::{
     chips::SingerChipBuilder,
     component::{AccessoryCircuit, ChipChallenges, InstCircuit},
     error::ZKVMError,
-    CircuitWiresInValues, SingerParams,
+    CircuitWitnessIn, SingerParams,
 };
 
 use self::{
@@ -69,7 +69,7 @@ pub(crate) fn insts_graph_method<F: SmallField>(
     inst_circuit: &InstCircuit<F>,
     acc_circuits: &[AccessoryCircuit<F>],
     preds: Vec<PredType>,
-    sources: Vec<CircuitWiresInValues<F::BaseField>>,
+    sources: Vec<CircuitWitnessIn<F::BaseField>>,
     real_challenges: &[F],
     real_n_instances: usize,
     params: SingerParams,
@@ -121,7 +121,7 @@ pub(crate) trait InstructionGraph<F: SmallField> {
         inst_circuit: &InstCircuit<F>,
         acc_circuits: &[AccessoryCircuit<F>],
         preds: Vec<PredType>,
-        mut sources: Vec<CircuitWiresInValues<F::BaseField>>,
+        mut sources: Vec<CircuitWitnessIn<F::BaseField>>,
         real_challenges: &[F],
         real_n_instances: usize,
         params: SingerParams,
@@ -132,6 +132,7 @@ pub(crate) trait InstructionGraph<F: SmallField> {
             preds,
             real_challenges.to_vec(),
             mem::take(&mut sources[0]),
+            real_n_instances.next_power_of_two(),
         )?;
         let stack = inst_circuit
             .layout
