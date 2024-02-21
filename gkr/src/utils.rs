@@ -219,10 +219,31 @@ pub fn tensor_product<F: SmallField>(a: &[F], b: &[F]) -> Vec<F> {
 
 pub trait MultilinearExtensionFromVectors<F: SmallField> {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>>;
+    fn original_mle(&self) -> Arc<DenseMultilinearExtension<F>>;
 }
 
 impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>> {
+        let n_zeros = (1 << lo_num_vars) - self[0].len();
+        let n_zero_vecs = (1 << hi_num_vars) - self.len();
+        let vecs = self.to_vec();
+
+        Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            lo_num_vars + hi_num_vars,
+            vecs.into_iter()
+                .flat_map(|instance| {
+                    instance
+                        .into_iter()
+                        .chain(iter::repeat(F::BaseField::ZERO).take(n_zeros))
+                })
+                .chain(vec![F::BaseField::ZERO; n_zero_vecs])
+                .map(|x| F::from_base(&x))
+                .collect_vec(),
+        ))
+    }
+    fn original_mle(&self) -> Arc<DenseMultilinearExtension<F>> {
+        let lo_num_vars = ceil_log2(self[0].len());
+        let hi_num_vars = ceil_log2(self.len());
         let n_zeros = (1 << lo_num_vars) - self[0].len();
         let n_zero_vecs = (1 << hi_num_vars) - self.len();
         let vecs = self.to_vec();

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 pub(crate) type GKRProverState<F> = gkr::structs::IOPProverState<F>;
 pub(crate) type GKRVerifierState<F> = gkr::structs::IOPVerifierState<F>;
+pub(crate) type GKRStepMessage<F> = gkr::structs::IOPProverStepMessage<F>;
 pub(crate) type GKRProof<F> = gkr::structs::IOPProof<F>;
 
 /// Corresponds to the `output_evals` and `wires_out_evals` in gkr
@@ -32,12 +33,14 @@ pub(crate) enum NodeInputType {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NodeOutputType {
+    OutputLayer(usize),
     WireOut(usize, WitnessId),
 }
 
 /// The predecessor of a node can be a source or a wire. If it is a wire, it can
 /// be one wire_out instance connected to one wire_in instance, or one wire_out
 /// connected to multiple wire_in instances.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PredType {
     Source,
     PredWire(NodeOutputType),

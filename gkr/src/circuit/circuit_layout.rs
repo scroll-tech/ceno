@@ -8,7 +8,7 @@ use simple_frontend::structs::{
 };
 
 use crate::{
-    structs::{Circuit, Gate1In, Gate2In, Gate3In, GateCIn, Layer},
+    structs::{Circuit, Gate1In, Gate2In, Gate3In, GateCIn, Layer, SumcheckStepType},
     utils::{ceil_log2, i64_to_field, MatrixMLEColumnFirst, MatrixMLERowFirst},
 };
 
@@ -239,6 +239,52 @@ impl<F: SmallField> Circuit<F> {
         let output_copy_to = output_copy_to_wits_out.into_iter().collect_vec();
         output_subsets.update_layer_info(&mut layers);
 
+        // Update sumcheck steps
+        (0..n_layers).for_each(|layer_id| {
+            let mut curr_sc_steps = vec![];
+            let layer = &layers[layer_id as usize];
+            if layer.layer_id == 0 {
+                if circuit_builder.n_witness_out() > 1 || !output_assert_const.is_empty() {
+                    curr_sc_steps.extend([
+                        SumcheckStepType::OutputPhase1Step1,
+                        SumcheckStepType::OutputPhase1Step2,
+                    ]);
+                }
+            } else {
+                let last_layer = &layers[(layer_id - 1) as usize];
+                if !last_layer.is_linear() || !layer.copy_to.is_empty() {
+                    curr_sc_steps
+                        .extend([SumcheckStepType::Phase1Step1, SumcheckStepType::Phase1Step2]);
+                }
+            }
+
+            if layer.layer_id == n_layers - 1 {
+                if input_paste_from_wits_in.len() > 1
+                    || !input_paste_from_counter_in.is_empty()
+                    || !input_paste_from_consts_in.is_empty()
+                {
+                    curr_sc_steps.push(SumcheckStepType::InputPhase2Step1);
+                }
+            } else {
+                if layer.is_linear() {
+                    curr_sc_steps.push(SumcheckStepType::LinearPhase2Step1);
+                } else {
+                    curr_sc_steps.push(SumcheckStepType::Phase2Step1);
+                    if !layer.mul2s.is_empty() || !layer.mul3s.is_empty() {
+                        if layer.mul3s.is_empty() {
+                            curr_sc_steps.push(SumcheckStepType::Phase2Step2NoStep3);
+                        } else {
+                            curr_sc_steps.push(SumcheckStepType::Phase2Step2);
+                        }
+                    }
+                    if !layer.mul3s.is_empty() {
+                        curr_sc_steps.push(SumcheckStepType::Phase2Step3);
+                    }
+                }
+            }
+            layers[layer_id as usize].sumcheck_steps = curr_sc_steps;
+        });
+
         Self {
             layers,
             n_witness_in: circuit_builder.n_witness_in(),
@@ -248,7 +294,7 @@ impl<F: SmallField> Circuit<F> {
             paste_from_consts_in: input_paste_from_consts_in,
             copy_to_wits_out: output_copy_to,
             assert_consts: output_assert_const,
-            max_wires_in_num_vars: max_in_wit_num_vars,
+            max_wit_in_num_vars: max_in_wit_num_vars,
         }
     }
 
@@ -291,7 +337,7 @@ impl<F: SmallField> Circuit<F> {
             .collect()
     }
 
-    pub fn last_layer_ref(&self) -> &Layer<F> {
+    pub fn output_layer_ref(&self) -> &Layer<F> {
         self.layers.first().unwrap()
     }
 
@@ -300,11 +346,11 @@ impl<F: SmallField> Circuit<F> {
     }
 
     pub fn output_num_vars(&self) -> usize {
-        self.last_layer_ref().num_vars
+        self.output_layer_ref().num_vars
     }
 
     pub fn output_size(&self) -> usize {
-        1 << self.last_layer_ref().num_vars
+        1 << self.output_layer_ref().num_vars
     }
 
     pub fn is_input_layer(&self, layer_id: LayerId) -> bool {
@@ -317,6 +363,10 @@ impl<F: SmallField> Circuit<F> {
 }
 
 impl<F: SmallField> Layer<F> {
+    pub fn is_linear(&self) -> bool {
+        self.mul2s.is_empty() && self.mul3s.is_empty()
+    }
+
     pub fn size(&self) -> usize {
         1 << self.num_vars
     }
@@ -427,11 +477,7 @@ impl<F: SmallField> fmt::Debug for Circuit<F> {
         writeln!(f, "  paste_from_consts_in: {:?}", self.paste_from_consts_in)?;
         writeln!(f, "  copy_to_wits_out: {:?}", self.copy_to_wits_out)?;
         writeln!(f, "  assert_const: {:?}", self.assert_consts)?;
-        writeln!(
-            f,
-            "  max_wires_in_num_vars: {:?}",
-            self.max_wires_in_num_vars
-        )?;
+        writeln!(f, "  max_wires_in_num_vars: {:?}", self.max_wit_in_num_vars)?;
         writeln!(f, "}}")
     }
 }
@@ -444,7 +490,7 @@ mod tests {
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use simple_frontend::structs::{ChallengeConst, ChallengeId, CircuitBuilder, ConstantType};
 
-    use crate::structs::{Circuit, Gate, GateCIn};
+    use crate::structs::{Circuit, Gate, GateCIn, SumcheckStepType};
 
     #[test]
     fn test_copy_and_paste() {
@@ -765,5 +811,100 @@ mod tests {
         assert_eq!(circuit.layers[2].add_consts, expected_layer2_add_consts);
         assert_eq!(circuit.layers[2].adds, expected_layer2_adds);
         assert_eq!(circuit.layers[1].mul2s, expected_layer1_mul2s);
+    }
+
+    #[test]
+    fn test_selector_sumcheck_steps() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let _ = circuit_builder.create_constant_in(6, 1);
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+        assert_eq!(circuit.layers.len(), 1);
+        assert_eq!(
+            circuit.layers[0].sumcheck_steps,
+            vec![SumcheckStepType::InputPhase2Step1]
+        );
+    }
+
+    #[test]
+    fn test_lookup_inner_sumcheck_steps() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+
+        // Layer 2
+        let (_, input) = circuit_builder.create_ext_witness_in(4);
+        // Layer 0
+        let output = circuit_builder.create_ext_cells(2);
+        // denominator
+        circuit_builder.mul2_ext(
+            &output[0], // output_den
+            &input[0],  // input_den[0]
+            &input[2],  // input_den[1]
+            Goldilocks::ONE,
+        );
+
+        // numerator
+        circuit_builder.mul2_ext(
+            &output[1], // output_num
+            &input[0],  // input_den[0]
+            &input[3],  // input_num[1]
+            Goldilocks::ONE,
+        );
+        circuit_builder.mul2_ext(
+            &output[1], // output_num
+            &input[2],  // input_den[1]
+            &input[1],  // input_num[0]
+            Goldilocks::ONE,
+        );
+
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+
+        assert_eq!(circuit.layers.len(), 3);
+        // Single input witness, therefore no input phase 2 steps.
+        assert_eq!(
+            circuit.layers[2].sumcheck_steps,
+            vec![SumcheckStepType::Phase1Step1, SumcheckStepType::Phase1Step2,]
+        );
+        // There are only one incoming evals since the last layer is linear, and
+        // no subset evals. Therefore, there are no phase1 steps.
+        assert_eq!(
+            circuit.layers[1].sumcheck_steps,
+            vec![
+                SumcheckStepType::Phase2Step1,
+                SumcheckStepType::Phase2Step2,
+                SumcheckStepType::Phase2Step3
+            ]
+        );
+        // Output layer, single output witness, therefore no output phase 1 steps.
+        assert_eq!(
+            circuit.layers[0].sumcheck_steps,
+            vec![SumcheckStepType::LinearPhase2Step1]
+        );
+    }
+
+    #[test]
+    fn test_product_sumcheck_steps() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let (_, input) = circuit_builder.create_witness_in(2);
+        let (_, output) = circuit_builder.create_witness_out(1);
+        circuit_builder.mul2(output[0], input[0], input[1], Goldilocks::ONE);
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+
+        assert_eq!(circuit.layers.len(), 2);
+        // Single input witness, therefore no input phase 2 steps.
+        assert_eq!(
+            circuit.layers[1].sumcheck_steps,
+            vec![SumcheckStepType::Phase1Step1, SumcheckStepType::Phase1Step2]
+        );
+        // Output layer, single output witness, therefore no output phase 1 steps.
+        assert_eq!(
+            circuit.layers[0].sumcheck_steps,
+            vec![
+                SumcheckStepType::Phase2Step1,
+                SumcheckStepType::Phase2Step2,
+                SumcheckStepType::Phase2Step3
+            ]
+        );
     }
 }

@@ -74,34 +74,24 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
 
         let mut queue = VecDeque::new();
         let mut visited = vec![false; self.cells.len()];
-        let mut layers = vec![0 as i64; self.cells.len()];
-        for (cell_id, cell) in self.cells.iter().enumerate() {
-            if degrees[cell_id] == 0 && matches!(cell.cell_type, Some(CellType::Out(_))) {
+        let mut layers = vec![0 as LayerId; self.cells.len()];
+        for cell_id in 0..self.cells.len() {
+            if degrees[cell_id] == 0 {
                 queue.push_front(cell_id);
                 visited[cell_id] = true;
                 layers[cell_id] = 0;
             }
-
-            // If a cell has degree 0 and it's not an output, we should remove it.
-            if degrees[cell_id] == 0 && !matches!(cell.cell_type, Some(CellType::Out(_))) {
-                queue.push_front(cell_id);
-                visited[cell_id] = true;
-                layers[cell_id] = -0xffffffffffff;
-            }
         }
 
         // Assign layers to all cells:
-        let mut max_layer_id = -0xffffffffffff;
+        let mut max_layer_id = 0;
         while !queue.is_empty() {
             let curr = queue.pop_back().unwrap();
             let cell = &mut self.cells[curr];
 
             let curr_layer = layers[curr];
             max_layer_id = max_layer_id.max(curr_layer);
-
-            if curr_layer >= 0 {
-                cell.layer = Some(curr_layer as LayerId);
-            }
+            cell.layer = Some(curr_layer);
 
             for gate in cell.gates.iter() {
                 for input in gate.idx_in.iter() {
@@ -114,11 +104,6 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
                 }
             }
         }
-
-        if max_layer_id < 0 {
-            panic!("The circuit is empty");
-        }
-        let max_layer_id = max_layer_id as LayerId;
 
         // Force input cells to be in the input layer.
         for cell_id in 0..self.cells.len() {
@@ -209,27 +194,6 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_dummy_cells() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
-        let (_, leaves) = circuit_builder.create_witness_in(3);
-
-        let inners = circuit_builder.create_cells(1);
-        circuit_builder.mul3(inners[0], leaves[0], leaves[1], leaves[2], Goldilocks::ONE);
-        circuit_builder.create_witness_out_from_cells(&inners);
-
-        let dummy_cell = circuit_builder.create_cell();
-        circuit_builder.add(dummy_cell, inners[0], Goldilocks::ONE);
-
-        circuit_builder.configure();
-
-        assert_eq!(circuit_builder.cells.len(), 5);
-        let layers = vec![1, 1, 1, 0];
-        for cell_id in 0..4 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
-        }
-    }
-
-    #[test]
     fn test_assert_cells() {
         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let (_, leaves) = circuit_builder.create_witness_in(4);
@@ -240,15 +204,17 @@ mod tests {
         circuit_builder.assert_const(inners[0], 1);
         circuit_builder.assert_const(inners[1], 1);
 
-        let dummy_cell = circuit_builder.create_cell();
-        circuit_builder.mul2(dummy_cell, inners[0], inners[1], Goldilocks::ONE);
-
         circuit_builder.configure();
 
-        assert_eq!(circuit_builder.cells.len(), 7);
+        assert_eq!(circuit_builder.cells.len(), 6);
         let layers = vec![1, 1, 1, 1, 0, 0];
         for cell_id in 0..6 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+            assert_eq!(
+                circuit_builder.cells[cell_id].layer,
+                Some(layers[cell_id]),
+                "cell_id: {}",
+                cell_id
+            );
         }
     }
 

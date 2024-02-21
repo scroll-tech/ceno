@@ -321,9 +321,10 @@ fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
     let output_eval = output_mle.evaluate(&output_point);
 
     let start = std::time::Instant::now();
-    let proof = gkr::structs::IOPProverState::prove_parallel(
+    let (proof, _) = gkr::structs::IOPProverState::prove_parallel(
         &circuit,
         &witness,
+        vec![],
         vec![PointAndEval::new(output_point, output_eval)],
         &mut prover_transcript,
     );
@@ -340,8 +341,9 @@ fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
     let _claim = gkr::structs::IOPVerifierState::verify_parallel(
         &circuit,
         &[],
+        vec![],
         vec![PointAndEval::new(output_point, output_eval)],
-        &proof,
+        proof,
         instance_num_vars,
         &mut verifer_transcript,
     )

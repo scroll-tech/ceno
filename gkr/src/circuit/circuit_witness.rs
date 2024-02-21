@@ -10,6 +10,8 @@ use crate::{
     utils::{ceil_log2, i64_to_field, MultilinearExtensionFromVectors},
 };
 
+use super::EvaluateConstant;
+
 impl<F: SmallField> CircuitWitness<F> {
     /// Initialize the structure of the circuit witness.
     pub fn new<E>(circuit: &Circuit<E>, challenges: Vec<E>) -> Self
@@ -31,12 +33,12 @@ impl<F: SmallField> CircuitWitness<F> {
         circuit: &Circuit<E>,
         wits_in: &[LayerWitness<F>],
         challenges: &HashMap<ChallengeConst, Vec<F>>,
+        n_instances: usize,
     ) -> (Vec<LayerWitness<F>>, Vec<LayerWitness<F>>)
     where
         E: SmallField<BaseField = F>,
     {
         let n_layers = circuit.layers.len();
-        let n_instances = wits_in[0].instances.len();
         let mut layer_wits = vec![
             LayerWitness {
                 instances: vec![vec![]; n_instances]
@@ -95,37 +97,27 @@ impl<F: SmallField> CircuitWitness<F> {
                             );
                         });
 
-                    let constant = |constant: ConstantType<E>| -> F {
-                        match constant {
-                            ConstantType::Challenge(c, j) => challenges[&c][j],
-                            ConstantType::ChallengeScaled(c, j, scalar) => {
-                                challenges[&c][j] * scalar
-                            }
-                            ConstantType::Field(c) => c,
-                        }
-                    };
-
                     let last_layer_wit = &layer_wits[layer_id + 1].instances[instance_id];
                     for add_const in layer.add_consts.iter() {
-                        current_layer_wit[add_const.idx_out] += constant(add_const.scalar);
+                        current_layer_wit[add_const.idx_out] += add_const.scalar.eval(&challenges);
                     }
 
                     for add in layer.adds.iter() {
                         current_layer_wit[add.idx_out] +=
-                            last_layer_wit[add.idx_in[0]] * constant(add.scalar);
+                            last_layer_wit[add.idx_in[0]] * add.scalar.eval(&challenges);
                     }
 
                     for mul2 in layer.mul2s.iter() {
                         current_layer_wit[mul2.idx_out] += last_layer_wit[mul2.idx_in[0]]
                             * last_layer_wit[mul2.idx_in[1]]
-                            * constant(mul2.scalar);
+                            * mul2.scalar.eval(&challenges);
                     }
 
                     for mul3 in layer.mul3s.iter() {
                         current_layer_wit[mul3.idx_out] += last_layer_wit[mul3.idx_in[0]]
                             * last_layer_wit[mul3.idx_in[1]]
                             * last_layer_wit[mul3.idx_in[2]]
-                            * constant(mul3.scalar);
+                            * mul3.scalar.eval(&challenges);
                     }
                 },
             );
@@ -163,17 +155,6 @@ impl<F: SmallField> CircuitWitness<F> {
         (layer_wits, wits_out)
     }
 
-    pub fn constant<E>(&self, constant: ConstantType<E>) -> F
-    where
-        E: SmallField<BaseField = F>,
-    {
-        match constant {
-            ConstantType::Challenge(c, j) => self.challenges[&c][j],
-            ConstantType::ChallengeScaled(c, j, scalar) => self.challenges[&c][j] * scalar,
-            ConstantType::Field(c) => c,
-        }
-    }
-
     pub fn add_instance<E>(&mut self, circuit: &Circuit<E>, wits_in: Vec<Vec<F>>)
     where
         E: SmallField<BaseField = F>,
@@ -184,18 +165,25 @@ impl<F: SmallField> CircuitWitness<F> {
                 instances: vec![wit_in],
             })
             .collect_vec();
-        self.add_instances(circuit, wits_in);
+        self.add_instances(circuit, wits_in, 1);
     }
 
-    pub fn add_instances<E>(&mut self, circuit: &Circuit<E>, wits_in: Vec<LayerWitness<F>>)
-    where
+    pub fn add_instances<E>(
+        &mut self,
+        circuit: &Circuit<E>,
+        wits_in: Vec<LayerWitness<F>>,
+        n_instances: usize,
+    ) where
         E: SmallField<BaseField = F>,
     {
         assert_eq!(wits_in.len(), circuit.n_witness_in);
-        let n_instances = wits_in[0].instances.len();
+        assert!(n_instances.is_power_of_two());
+        assert!(!wits_in
+            .iter()
+            .any(|wit_in| wit_in.instances.len() != n_instances));
 
         let (new_layer_wits, new_wits_out) =
-            CircuitWitness::new_instances(circuit, &wits_in, &self.challenges);
+            CircuitWitness::new_instances(circuit, &wits_in, &self.challenges, n_instances);
 
         // Merge self and circuit_witness.
         for (layer_wit, new_layer_wit) in self.layers.iter_mut().zip(new_layer_wits.into_iter()) {
@@ -288,20 +276,22 @@ impl<F: SmallField> CircuitWitness<F> {
             {
                 let mut expected = vec![F::ZERO; curr.len()];
                 for add_const in layer.add_consts.iter() {
-                    expected[add_const.idx_out] += self.constant(add_const.scalar);
+                    expected[add_const.idx_out] += add_const.scalar.eval(&self.challenges);
                 }
                 for add in layer.adds.iter() {
-                    expected[add.idx_out] += prev[add.idx_in[0]] * self.constant(add.scalar);
+                    expected[add.idx_out] +=
+                        prev[add.idx_in[0]] * add.scalar.eval(&self.challenges);
                 }
                 for mul2 in layer.mul2s.iter() {
-                    expected[mul2.idx_out] +=
-                        prev[mul2.idx_in[0]] * prev[mul2.idx_in[1]] * self.constant(mul2.scalar);
+                    expected[mul2.idx_out] += prev[mul2.idx_in[0]]
+                        * prev[mul2.idx_in[1]]
+                        * mul2.scalar.eval(&self.challenges);
                 }
                 for mul3 in layer.mul3s.iter() {
                     expected[mul3.idx_out] += prev[mul3.idx_in[0]]
                         * prev[mul3.idx_in[1]]
                         * prev[mul3.idx_in[2]]
-                        * self.constant(mul3.scalar);
+                        * mul3.scalar.eval(&self.challenges);
                 }
 
                 let mut expected_max_previous_size = prev.len();
@@ -381,7 +371,7 @@ impl<F: SmallField> CircuitWitness<F> {
 }
 
 impl<F: SmallField> CircuitWitness<F> {
-    pub fn last_layer_witness_ref(&self) -> &LayerWitness<F> {
+    pub fn output_layer_witness_ref(&self) -> &LayerWitness<F> {
         self.layers.first().unwrap()
     }
 
@@ -924,12 +914,12 @@ mod test {
     }
 
     #[test]
-    fn test_add_instance() {
+    fn test_add_instances() {
         let circuit = copy_and_paste_circuit::<GoldilocksExt2>();
         let (wits_in, expect_circuit_wits) = copy_and_paste_witness::<GoldilocksExt2>();
 
         let mut circuit_wits = CircuitWitness::new(&circuit, vec![]);
-        circuit_wits.add_instances(&circuit, wits_in);
+        circuit_wits.add_instances(&circuit, wits_in, 1);
 
         assert_eq!(circuit_wits, expect_circuit_wits);
 
@@ -937,7 +927,7 @@ mod test {
         let (wits_in, expect_circuit_wits) = paste_from_wit_in_witness::<GoldilocksExt2>();
 
         let mut circuit_wits = CircuitWitness::new(&circuit, vec![]);
-        circuit_wits.add_instances(&circuit, wits_in);
+        circuit_wits.add_instances(&circuit, wits_in, 1);
 
         assert_eq!(circuit_wits, expect_circuit_wits);
 
@@ -945,13 +935,13 @@ mod test {
         let (wits_in, expect_circuit_wits) = copy_to_wit_out_witness::<GoldilocksExt2>();
 
         let mut circuit_wits = CircuitWitness::new(&circuit, vec![]);
-        circuit_wits.add_instances(&circuit, wits_in);
+        circuit_wits.add_instances(&circuit, wits_in, 1);
 
         assert_eq!(circuit_wits, expect_circuit_wits);
 
         let (wits_in, expect_circuit_wits) = copy_to_wit_out_witness_2::<GoldilocksExt2>();
         let mut circuit_wits = CircuitWitness::new(&circuit, vec![]);
-        circuit_wits.add_instances(&circuit, wits_in);
+        circuit_wits.add_instances(&circuit, wits_in, 1);
 
         assert_eq!(circuit_wits, expect_circuit_wits);
     }
@@ -969,7 +959,7 @@ mod test {
         let circuit = rlc_circuit::<GoldilocksExt2>();
         let (wits_in, expect_circuit_wits, challenges) = rlc_witness::<GoldilocksExt2>();
         let mut circuit_wits = CircuitWitness::new(&circuit, challenges);
-        circuit_wits.add_instances(&circuit, wits_in);
+        circuit_wits.add_instances(&circuit, wits_in, 1);
 
         assert_eq!(circuit_wits, expect_circuit_wits);
     }

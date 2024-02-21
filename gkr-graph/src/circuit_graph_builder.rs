@@ -1,8 +1,9 @@
 use std::{collections::BTreeSet, sync::Arc};
 
+use ark_std::Zero;
 use gkr::structs::{Circuit, CircuitWitness, LayerWitness};
 use goldilocks::SmallField;
-use itertools::Itertools;
+use itertools::{chain, Itertools};
 use simple_frontend::structs::WitnessId;
 
 use crate::{
@@ -30,9 +31,9 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         preds: Vec<PredType>,
         challenges: Vec<F>,
         sources: Vec<LayerWitness<F::BaseField>>,
+        num_instances: usize,
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
-        let num_instances = sources[0].instances.len();
 
         assert_eq!(preds.len(), circuit.n_witness_in);
         assert!(num_instances.is_power_of_two());
@@ -47,13 +48,20 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
             .map(|pred| match pred {
                 PredType::Source => source_iter.next().unwrap().clone(),
                 PredType::PredWire(out) | PredType::PredWireDup(out) => {
-                    let out = &match out {
-                        NodeOutputType::WireOut(id, wit_id) => {
+                    let (id, out) = &match out {
+                        NodeOutputType::OutputLayer(id) => (
+                            *id,
+                            &self.witness.node_witnesses[*id]
+                                .output_layer_witness_ref()
+                                .instances,
+                        ),
+                        NodeOutputType::WireOut(id, wit_id) => (
+                            *id,
                             &self.witness.node_witnesses[*id].witness_out_ref()[*wit_id as usize]
-                        }
-                    }
-                    .instances;
-                    let old_num_instances = out.len();
+                                .instances,
+                        ),
+                    };
+                    let old_num_instances = self.witness.node_witnesses[*id].n_instances();
                     let new_instances = match pred {
                         PredType::PredWire(_) => {
                             let new_size = (old_num_instances * out[0].len()) / num_instances;
@@ -89,7 +97,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
                 }
             })
             .collect_vec();
-        witness.add_instances(circuit, wits_in);
+        witness.add_instances(circuit, wits_in, num_instances);
 
         self.graph.nodes.push(CircuitNode {
             id,
@@ -111,8 +119,14 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
             .iter()
             .enumerate()
             .flat_map(|(id, node)| {
-                (0..node.circuit.n_witness_out)
-                    .map(move |wit_id| NodeOutputType::WireOut(id, wit_id as WitnessId))
+                chain![
+                    (0..node.circuit.n_witness_out)
+                        .map(move |wire_id| NodeOutputType::WireOut(id, wire_id as WitnessId)),
+                    node.circuit
+                        .n_witness_out
+                        .is_zero()
+                        .then_some(NodeOutputType::OutputLayer(id))
+                ]
             })
             .collect::<BTreeSet<_>>();
         // Collect all assigned source into `sources`,
