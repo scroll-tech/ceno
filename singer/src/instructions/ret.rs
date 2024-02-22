@@ -400,7 +400,7 @@ impl Instruction for ReturnPublicOutLoad {
         for i in 0..len {
             public_io_values[i][..]
                 .copy_from_slice(&[F::from(record.operands[i + 2].as_limbs()[0])]);
-            phase0_wire_values[i][..]
+            phase0_wire_values[i][Self::phase0_old_memory_ts()]
                 .copy_from_slice(&[F::from(record.operands_timestamps[i + 2])]);
             let delta = U256::from(i);
             copy_range_values_from_u256!(phase0_wire_values[i], phase0_offset_add, offset + delta);
