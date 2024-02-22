@@ -210,7 +210,7 @@ mod test {
 
     use crate::instructions::{AddInstruction, ChipChallenges, Instruction};
     use crate::test::{get_uint_params, test_opcode_circuit};
-    use crate::utils::uint::TSUInt;
+    use crate::utils::uint::{StackUInt, TSUInt};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
 
@@ -312,17 +312,12 @@ mod test {
                 Goldilocks::from(1u64),
             ],
         );
-        phase0_values_map.insert(
-            "phase0_addend_0".to_string(),
-            vec![Goldilocks::from(1u64), Goldilocks::from(2u64)],
-        );
-        phase0_values_map.insert(
-            "phase0_addend_1".to_string(),
-            vec![Goldilocks::from(3u64), Goldilocks::from(4u64)],
-        );
+        let m: u64 = 1 << get_uint_params::<StackUInt>().1 - 1;
+        phase0_values_map.insert("phase0_addend_0".to_string(), vec![Goldilocks::from(m)]);
+        phase0_values_map.insert("phase0_addend_1".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_instruction_add".to_string(),
-            vec![], // carry is 0, may test carry using VALUE_BIT_WIDTH (todo)
+            vec![Goldilocks::from(1u64)],
         );
 
         let circuit_witness_challenges = vec![Goldilocks::from(2)];
