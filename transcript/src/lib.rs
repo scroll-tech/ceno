@@ -39,7 +39,7 @@ impl<F: SmallField> Transcript<F> {
         self.sponge_hasher.update(&msg_f);
     }
 
-    // Append the field elemetn to the transcript.
+    // Append the field element to the transcript.
     pub fn append_field_element(&mut self, element: &F) {
         self.sponge_hasher.update(element.to_limbs().as_ref());
     }
