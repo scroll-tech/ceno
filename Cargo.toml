@@ -5,6 +5,7 @@ members = [
     "mpcs",
     "multilinear_extensions",
     "simple-frontend",
+    "singer",
     "singer-pro",
     "sumcheck",
     "transcript",
