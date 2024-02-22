@@ -1,11 +1,11 @@
 use crate::instructions::{ChipChallenges, InstCircuit};
+use crate::utils::uint::UInt;
 use core::ops::Range;
 use ff::Field;
 use gkr::structs::CircuitWitness;
 use goldilocks::SmallField;
 use simple_frontend::structs::CellId;
 use std::collections::BTreeMap;
-use crate::utils::uint::UInt;
 
 trait UIntParams {
     const BITS: usize;
@@ -20,7 +20,6 @@ impl<const M: usize, const C: usize> UIntParams for UInt<M, C> {
 pub(crate) fn get_uint_params<T: UIntParams>() -> (usize, usize) {
     (T::BITS, T::CELL_BIT_WIDTH)
 }
-
 
 pub(crate) fn test_opcode_circuit<Ext: SmallField>(
     inst_circuit: &InstCircuit<Ext>,

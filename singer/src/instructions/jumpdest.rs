@@ -166,7 +166,7 @@ mod test {
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),
-            vec![], // todo
+            vec![], // carry is 0, may test carry using larger values in PCUInt
         );
 
         let circuit_witness_challenges = vec![Goldilocks::from(2)];

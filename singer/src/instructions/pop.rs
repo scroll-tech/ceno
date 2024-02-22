@@ -157,7 +157,7 @@ mod test {
     use std::collections::BTreeMap;
 
     use crate::instructions::{ChipChallenges, Instruction, PopInstruction};
-    use crate::test::{test_opcode_circuit, get_uint_params};
+    use crate::test::{get_uint_params, test_opcode_circuit};
     use crate::utils::uint::TSUInt;
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;

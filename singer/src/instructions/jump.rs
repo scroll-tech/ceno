@@ -156,7 +156,7 @@ mod test {
     use std::collections::BTreeMap;
 
     use crate::instructions::{ChipChallenges, Instruction, JumpInstruction};
-    use crate::test::{test_opcode_circuit, get_uint_params};
+    use crate::test::{get_uint_params, test_opcode_circuit};
     use crate::utils::uint::TSUInt;
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
@@ -207,8 +207,7 @@ mod test {
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_next_pc".to_string(),
-            vec![Goldilocks::from(127u64), 
-                 Goldilocks::from(125u64)],
+            vec![Goldilocks::from(127u64), Goldilocks::from(125u64)],
         );
         phase0_values_map.insert(
             "phase0_old_stack_ts".to_string(),
@@ -217,12 +216,12 @@ mod test {
         let m: u64 = 1 << get_uint_params::<TSUInt>().1 - 1;
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt".to_string(),
-            vec![                
+            vec![
                 Goldilocks::from(m),
                 -Goldilocks::from(1u64),
                 Goldilocks::from(0u64),
                 Goldilocks::from(1u64),
-            ], 
+            ],
         );
 
         let circuit_witness_challenges = vec![Goldilocks::from(2)];

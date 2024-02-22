@@ -209,7 +209,8 @@ mod test {
     use std::collections::BTreeMap;
 
     use crate::instructions::{AddInstruction, ChipChallenges, Instruction};
-    use crate::test::test_opcode_circuit;
+    use crate::test::{get_uint_params, test_opcode_circuit};
+    use crate::utils::uint::TSUInt;
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
 
@@ -268,7 +269,7 @@ mod test {
         let phase0_witness_size = AddInstruction::phase0_size();
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(3u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_stack_top".to_string(),
@@ -277,39 +278,51 @@ mod test {
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),
-            vec![], // todo
+            vec![], // carry is 0, may test carry using larger values in PCUInt
         );
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
-            vec![], // todo
+            vec![], // carry is 0, may test carry using larger values in TSUInt
         );
         phase0_values_map.insert(
             "phase0_old_stack_ts0".to_string(),
-            vec![], // todo
+            vec![Goldilocks::from(2u64)],
         );
+        let m: u64 = 1 << get_uint_params::<TSUInt>().1 - 1;
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt0".to_string(),
-            vec![], // todo
+            vec![
+                Goldilocks::from(m),
+                -Goldilocks::from(1u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(1u64),
+            ],
         );
         phase0_values_map.insert(
             "phase0_old_stack_ts1".to_string(),
-            vec![], // todo
+            vec![Goldilocks::from(1u64)],
         );
+        let m: u64 = 1 << get_uint_params::<TSUInt>().1 - 2;
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt1".to_string(),
-            vec![], // todo
+            vec![
+                Goldilocks::from(m),
+                -Goldilocks::from(1u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(1u64),
+            ],
         );
         phase0_values_map.insert(
             "phase0_addend_0".to_string(),
-            vec![], // todo
+            vec![Goldilocks::from(1u64), Goldilocks::from(2u64)],
         );
         phase0_values_map.insert(
             "phase0_addend_1".to_string(),
-            vec![], // todo
+            vec![Goldilocks::from(3u64), Goldilocks::from(4u64)],
         );
         phase0_values_map.insert(
             "phase0_instruction_add".to_string(),
-            vec![], // todo
+            vec![], // carry is 0, may test carry using VALUE_BIT_WIDTH (todo)
         );
 
         let circuit_witness_challenges = vec![Goldilocks::from(2)];
