@@ -611,6 +611,18 @@ impl Instruction for ReturnRestStackPop {
     }
 
     fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
-        todo!()
+        let mut wire_values = Vec::new();
+        for i in 0..record.ret_info.rest_stack.len() {
+            let (timestamp, value) = record.ret_info.rest_stack[i];
+            let mut wire_value = vec![F::ZERO; Self::phase0_size()];
+            // All memory addresses are initialized with zero when first
+            // accessed.
+            wire_value[Self::phase0_old_stack_ts()]
+                .copy_from_slice(TSUInt::uint_to_field_elems(timestamp).as_slice());
+            wire_value[Self::phase0_stack_values()]
+                .copy_from_slice(StackUInt::u256_to_field_elems(value).as_slice());
+            wire_values.push(wire_value);
+        }
+        vec![wire_values]
     }
 }

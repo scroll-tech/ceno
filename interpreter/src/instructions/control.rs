@@ -123,6 +123,13 @@ fn return_inner<H: Host, F: SmallField>(
         });
     record.ret_info.rest_memory_loads = rest_memory_loads;
     record.ret_info.rest_memory_store = rest_memory_store;
+    record.ret_info.rest_stack = interpreter
+        .stack
+        .data()
+        .iter()
+        .zip(interpreter.stack.timestamps().iter())
+        .map(|(v, t)| (*t, *v))
+        .collect();
     host.record(&record);
 
     interpreter.instruction_result = instruction_result;

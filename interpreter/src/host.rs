@@ -54,6 +54,8 @@ pub struct ReturnInfo {
     pub rest_memory_loads: Vec<(u64, u64, u8)>,
     /// Addresses and initial values of the memory that are ever accessed
     pub rest_memory_store: Vec<(u64, u8)>,
+    /// Timestamps and values of the final stack
+    pub rest_stack: Vec<(u64, U256)>,
 }
 
 impl ReturnInfo {
@@ -61,6 +63,7 @@ impl ReturnInfo {
         Self {
             rest_memory_loads: vec![],
             rest_memory_store: vec![],
+            rest_stack: vec![],
         }
     }
 }
