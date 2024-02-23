@@ -55,8 +55,8 @@ impl<F: SmallField> IOPVerifierState<F> {
                     )?;
                     (
                         [
-                            phase1_msg.sumcheck_proof_1.point.clone(),
-                            phase1_msg.sumcheck_proof_2.point.clone(),
+                            phase1_msg.sumcheck_proof_1.point.as_slice(),
+                            phase1_msg.sumcheck_proof_2.point.as_slice(),
                         ]
                         .concat(),
                         phase1_msg.eval_value_2,

@@ -225,7 +225,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
                 &self.layer_out_point[lo_out_num_vars..],
                 &claim1_point[lo_in_num_vars..],
             ) * adds.as_slice().eval(&eq_y_ry, &self.eq_x1_rx1);
-        self.sumcheck_point_1 = claim1_point.clone();
+        self.sumcheck_point_1 = claim1_point;
 
         end_timer!(timer);
         Ok(())
@@ -279,7 +279,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
                 &self.sumcheck_point_1[lo_in_num_vars..],
                 &claim2_point[lo_in_num_vars..],
             ) * mul2s.as_slice().eval(&eq_y_ry, &eq_x1_rx1, &self.eq_x2_rx2);
-        self.sumcheck_point_2 = claim2_point.clone();
+        self.sumcheck_point_2 = claim2_point;
         end_timer!(timer);
         Ok(())
     }
@@ -330,7 +330,7 @@ impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
         if claim_3.expected_evaluation != got_value_3 {
             return Err(GKRError::VerifyError);
         }
-        self.sumcheck_point_3 = claim3_point.clone();
+        self.sumcheck_point_3 = claim3_point;
         Ok(())
     }
 }

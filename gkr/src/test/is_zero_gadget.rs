@@ -246,7 +246,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     );
 
     // cond1 and cond2
-    for cond_item in cond_wire_out_ref[0].clone().into_iter() {
+    for &cond_item in cond_wire_out_ref[0].iter() {
         assert_eq!(cond_item, Goldilocks::from(0));
     }
     // is_zero

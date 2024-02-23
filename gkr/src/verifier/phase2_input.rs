@@ -153,9 +153,9 @@ impl<'a, F: SmallField> IOPVerifierPhase2InputState<'a, F> {
                 let num_vars = ceil_log2(*r - *l);
                 let point = lo_point_sc1
                     .iter()
-                    .cloned()
                     .take(num_vars)
-                    .chain(hi_point_sc1.iter().cloned())
+                    .chain(hi_point_sc1.iter())
+                    .cloned()
                     .collect_vec();
                 counter_eval(num_vars + hi_num_vars, &point)
                     * lo_point_sc1[num_vars..]

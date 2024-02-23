@@ -156,7 +156,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
         self.eq_y_ry = build_eq_x_r_vec(&sumcheck_proof_0.point);
         self.eq_t_rt = build_eq_x_r_vec(hi_point);
         self.tensor_eq_ty_rtry = tensor_product(&self.eq_t_rt, &self.eq_y_ry);
-        self.layer_out_point = [sumcheck_proof_0.point.clone(), hi_point.to_vec()].concat();
+        self.layer_out_point = [sumcheck_proof_0.point.as_slice(), hi_point].concat();
         self.layer_out_value = eval_value_0;
 
         end_timer!(timer);
@@ -277,7 +277,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
 
         let sumcheck_proof_1 = SumcheckState::prove(&virtual_poly_1, transcript);
         // assert_eq!(sumcheck_proof_1.extract_sum(), sigma_1);
-        let eval_point_1 = sumcheck_proof_1.point.clone();
+        let eval_point_1 = &sumcheck_proof_1.point;
         let eval_values_f1 = f1_vec
             .iter()
             .map(|f1_j| f1_j.evaluate(&eval_point_1))
@@ -365,7 +365,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
         virtual_poly_2.mul_by_mle(g2.clone(), F::ONE);
         let sumcheck_proof_2 = SumcheckState::prove(&virtual_poly_2, transcript);
         // assert_eq!(sumcheck_proof_2.extract_sum(), self.sumcheck_sigma);
-        let eval_point_2 = sumcheck_proof_2.point.clone();
+        let eval_point_2 = &sumcheck_proof_2.point;
         let eval_value_f2 = f2.evaluate(&eval_point_2);
         let eval_value_g2 = g2.evaluate(&eval_point_2);
 
@@ -431,8 +431,8 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
         virtual_poly_3.mul_by_mle(g3.clone(), F::ONE);
         let sumcheck_proof_3 = SumcheckState::prove(&virtual_poly_3, transcript);
         // assert_eq!(sumcheck_proof_3.extract_sum(), self.sumcheck_sigma);
-        let eval_point_3 = sumcheck_proof_3.point.clone();
-        let eval_values_3 = vec![f3.evaluate(&eval_point_3)];
+        let eval_point_3 = &sumcheck_proof_3.point;
+        let eval_values_3 = vec![f3.evaluate(eval_point_3)];
         end_timer!(timer);
         (sumcheck_proof_3, eval_values_3)
     }

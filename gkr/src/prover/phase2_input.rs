@@ -133,11 +133,10 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
         }
 
         let sumcheck_proof = SumcheckState::prove(&virtual_poly, transcript);
-        let eval_point = sumcheck_proof.point.clone();
         let eval_values_f = f_vec
             .iter()
             .take(wires_in.len())
-            .map(|f| f.evaluate(&eval_point))
+            .map(|f| f.evaluate(&sumcheck_proof.point))
             .collect();
         end_timer!(timer);
 
