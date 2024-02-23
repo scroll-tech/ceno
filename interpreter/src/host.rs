@@ -52,12 +52,15 @@ pub struct ReturnInfo {
     /// Address, timestamp, and value of the memory content at the ret
     /// instruction, except those output by the ret instruction.
     pub rest_memory_loads: Vec<(u64, u64, u8)>,
+    /// Addresses and initial values of the memory that are ever accessed
+    pub rest_memory_store: Vec<(u64, u8)>,
 }
 
 impl ReturnInfo {
     pub fn new() -> Self {
         Self {
             rest_memory_loads: vec![],
+            rest_memory_store: vec![],
         }
     }
 }

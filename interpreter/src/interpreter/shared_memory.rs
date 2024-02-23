@@ -23,6 +23,9 @@ pub struct SharedMemory {
     checkpoints: Vec<usize>,
     /// Invariant: equals `self.checkpoints.last()`
     last_checkpoint: usize,
+    /// A boolean array indicating if a memory position has been
+    /// accessed by a mstore instruction (not just padded here)
+    accessed: Vec<bool>,
     /// Memory limit. See [`CfgEnv`](revm_primitives::CfgEnv).
     #[cfg(feature = "memory_limit")]
     memory_limit: u64,
@@ -36,6 +39,7 @@ pub const EMPTY_SHARED_MEMORY: SharedMemory = SharedMemory {
     timestamps: Vec::new(),
     checkpoints: Vec::new(),
     last_checkpoint: 0,
+    accessed: Vec::new(),
     #[cfg(feature = "memory_limit")]
     memory_limit: u64::MAX,
 };
@@ -74,6 +78,7 @@ impl SharedMemory {
         Self {
             buffer: Vec::with_capacity(capacity),
             timestamps: Vec::with_capacity(capacity),
+            accessed: Vec::with_capacity(capacity),
             checkpoints: Vec::with_capacity(32),
             last_checkpoint: 0,
             #[cfg(feature = "memory_limit")]
@@ -106,6 +111,7 @@ impl SharedMemory {
     #[inline]
     pub fn new_context(&mut self) {
         self.timestamps.resize(self.buffer.len(), 0);
+        self.accessed.resize(self.buffer.len(), false);
         let new_checkpoint = self.buffer.len();
         self.checkpoints.push(new_checkpoint);
         self.last_checkpoint = new_checkpoint;
@@ -120,6 +126,7 @@ impl SharedMemory {
             unsafe {
                 self.buffer.set_len(old_checkpoint);
                 self.timestamps.set_len(old_checkpoint);
+                self.accessed.set_len(old_checkpoint);
             }
         }
     }
@@ -141,6 +148,7 @@ impl SharedMemory {
     pub fn resize(&mut self, new_size: usize) {
         self.buffer.resize(self.last_checkpoint + new_size, 0);
         self.timestamps.resize(self.last_checkpoint + new_size, 0);
+        self.accessed.resize(self.last_checkpoint + new_size, false);
     }
 
     /// Returns a byte slice of the memory region at the given offset.
@@ -190,6 +198,7 @@ impl SharedMemory {
                 iter::repeat(ts).take(size),
             )
             .collect();
+        self.accessed[last_checkpoint + offset..last_checkpoint + offset + size].fill(true);
         (data, timestamps)
     }
 
@@ -379,7 +388,7 @@ impl SharedMemory {
 
     /// Returns a reference to the memory of the current context, the active memory.
     #[inline]
-    pub fn context_memory(&self) -> (&[u8], &[u64]) {
+    pub fn context_memory(&self) -> (&[u8], &[u64], &[bool]) {
         // SAFETY: access bounded by buffer length
         unsafe {
             let slice = self
@@ -388,7 +397,10 @@ impl SharedMemory {
             let timestamps = self
                 .timestamps
                 .get_unchecked(self.last_checkpoint..self.buffer.len());
-            (slice, timestamps)
+            let accessed = self
+                .accessed
+                .get_unchecked(self.last_checkpoint..self.buffer.len());
+            (slice, timestamps, accessed)
         }
     }
 

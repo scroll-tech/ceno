@@ -101,24 +101,28 @@ fn return_inner<H: Host, F: SmallField>(
     // that are not output from the ret instruction, their values and
     // timestamps.
     let mut rest_memory_loads = Vec::<(u64, u64, u8)>::new();
+    let mut rest_memory_store = Vec::<(u64, u8)>::new();
     // Get the current context memory. This assumes that the context has never
     // been changed throughout the execution (for simplicity, for now).
-    // TODO: This is convenient but inefficient, as potentially many addresses
-    // are never accessed. A more efficient way would be recording exactly
-    // which addresses have been accessed by mstore instruction.
     let memory = interpreter.shared_memory.context_memory();
     memory
         .0
         .iter()
         .zip(memory.1.iter())
+        .zip(memory.2.iter())
         .enumerate()
-        .for_each(|(i, (v, t))| {
+        .for_each(|(i, ((v, t), accessed))| {
             let start = offset.0.as_limbs()[0] as usize;
-            if i < start || i >= start + len {
+            if *accessed && (i < start || i >= start + len) {
                 rest_memory_loads.push((i as u64, *t, *v));
+            }
+            if *accessed {
+                // All memory addresses are initialize with zero
+                rest_memory_store.push((i as u64, 0));
             }
         });
     record.ret_info.rest_memory_loads = rest_memory_loads;
+    record.ret_info.rest_memory_store = rest_memory_store;
     host.record(&record);
 
     interpreter.instruction_result = instruction_result;

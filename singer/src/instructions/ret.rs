@@ -537,7 +537,18 @@ impl Instruction for ReturnRestMemStore {
     }
 
     fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
-        todo!()
+        let mut wire_values = Vec::new();
+        for i in 0..record.ret_info.rest_memory_store.len() {
+            let (offset, value) = record.ret_info.rest_memory_store[i];
+            let mut wire_value = vec![F::ZERO; Self::phase0_size()];
+            // All memory addresses are initialized with zero when first
+            // accessed.
+            wire_value[Self::phase0_mem_byte()].copy_from_slice(&[F::from(value as u64)]);
+            wire_value[Self::phase0_offset()]
+                .copy_from_slice(StackUInt::uint_to_field_elems(offset).as_slice());
+            wire_values.push(wire_value);
+        }
+        vec![wire_values]
     }
 }
 
