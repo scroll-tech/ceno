@@ -184,3 +184,114 @@ impl<const N: usize> Instruction for DupInstruction<N> {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::instructions::{ChipChallenges, DupInstruction, Instruction};
+    use crate::test::{get_uint_params, test_opcode_circuit};
+    use crate::utils::uint::TSUInt;
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
+
+    impl<const N: usize> DupInstruction<N> {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("phase0_pc".to_string(), Self::phase0_pc());
+            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
+            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
+            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
+            map.insert("phase0_clk".to_string(), Self::phase0_clk());
+            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
+            map.insert(
+                "phase0_stack_ts_add".to_string(),
+                Self::phase0_stack_ts_add(),
+            );
+            map.insert(
+                "phase0_stack_values".to_string(),
+                Self::phase0_stack_values(),
+            );
+            map.insert(
+                "phase0_old_stack_ts".to_string(),
+                Self::phase0_old_stack_ts(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_lt".to_string(),
+                Self::phase0_old_stack_ts_lt(),
+            );
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_dup1_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        // initialize general test inputs associated with push1
+        let inst_circuit =
+            DupInstruction::<1>::construct_circuit::<Goldilocks>(challenges).unwrap();
+
+        println!("{:?}", inst_circuit);
+
+        let phase0_idx_map = DupInstruction::<1>::phase0_idxes_map();
+        println!("{:?}", &phase0_idx_map);
+        let phase0_witness_size = DupInstruction::<1>::phase0_size();
+        let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
+        phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(2u64)]);
+        phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_stack_top".to_string(),
+            vec![Goldilocks::from(100u64)],
+        );
+        phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_pc_add".to_string(),
+            vec![], // carry is 0, may test carry using larger values in PCUInt
+        );
+        phase0_values_map.insert(
+            "phase0_stack_ts_add".to_string(),
+            vec![], // carry is 0, may test carry using larger values in TSUInt
+        );
+        phase0_values_map.insert(
+            "phase0_stack_values".to_string(),
+            vec![
+                Goldilocks::from(7u64),
+                Goldilocks::from(6u64),
+                Goldilocks::from(5u64),
+                Goldilocks::from(4u64),
+                Goldilocks::from(3u64),
+                Goldilocks::from(2u64),
+                Goldilocks::from(1u64),
+            ],
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts".to_string(),
+            vec![Goldilocks::from(1u64)],
+        );
+        let m: u64 = 1 << get_uint_params::<TSUInt>().1 - 1;
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_lt".to_string(),
+            vec![
+                Goldilocks::from(m),
+                -Goldilocks::from(1u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(1u64),
+            ],
+        );
+
+        let circuit_witness_challenges = vec![Goldilocks::from(2)];
+
+        test_opcode_circuit(
+            &inst_circuit,
+            &phase0_idx_map,
+            phase0_witness_size,
+            &phase0_values_map,
+            circuit_witness_challenges,
+        );
+    }
+}

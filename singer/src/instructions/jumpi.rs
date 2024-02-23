@@ -217,3 +217,133 @@ impl Instruction for JumpiInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::instructions::{ChipChallenges, Instruction, JumpiInstruction};
+    use crate::test::{get_uint_params, test_opcode_circuit};
+    use crate::utils::uint::TSUInt;
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
+
+    impl JumpiInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("phase0_pc".to_string(), Self::phase0_pc());
+            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
+            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
+            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
+            map.insert("phase0_clk".to_string(), Self::phase0_clk());
+            map.insert(
+                "phase0_old_stack_ts_dest".to_string(),
+                Self::phase0_old_stack_ts_dest(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_dest_lt".to_string(),
+                Self::phase0_old_stack_ts_dest_lt(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_cond".to_string(),
+                Self::phase0_old_stack_ts_cond(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_cond_lt".to_string(),
+                Self::phase0_old_stack_ts_cond_lt(),
+            );
+            map.insert("phase0_dest_values".to_string(), Self::phase0_dest_values());
+            map.insert("phase0_cond_values".to_string(), Self::phase0_cond_values());
+            map.insert(
+                "phase0_cond_values_inv".to_string(),
+                Self::phase0_cond_values_inv(),
+            );
+            map.insert(
+                "phase0_cond_non_zero_or_inv".to_string(),
+                Self::phase0_cond_non_zero_or_inv(),
+            );
+            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
+            map.insert(
+                "phase0_pc_plus_1_opcode".to_string(),
+                Self::phase0_pc_plus_1_opcode(),
+            );
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_jumpi_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        // initialize general test inputs associated with push1
+        let inst_circuit = JumpiInstruction::construct_circuit::<Goldilocks>(challenges).unwrap();
+
+        println!("{:?}", inst_circuit);
+
+        let phase0_idx_map = JumpiInstruction::phase0_idxes_map();
+        println!("{:?}", &phase0_idx_map);
+        let phase0_witness_size = JumpiInstruction::phase0_size();
+        let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
+        phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_stack_top".to_string(),
+            vec![Goldilocks::from(100u64)],
+        );
+        phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_dest".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_dest_lt".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_cond".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_cond_lt".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_dest_values".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_cond_values".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_cond_values_inv".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_cond_non_zero_or_inv".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_pc_add".to_string(),
+            vec![], // todo
+        );
+        phase0_values_map.insert(
+            "phase0_pc_plus_1_opcode".to_string(),
+            vec![], // todo
+        );
+
+        let circuit_witness_challenges = vec![Goldilocks::from(2)];
+
+        test_opcode_circuit(
+            &inst_circuit,
+            &phase0_idx_map,
+            phase0_witness_size,
+            &phase0_values_map,
+            circuit_witness_challenges,
+        );
+    }
+}
