@@ -473,7 +473,18 @@ impl Instruction for ReturnRestMemLoad {
     }
 
     fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
-        todo!()
+        let mut wire_values = Vec::new();
+        for i in 0..record.ret_info.rest_memory_loads.len() {
+            let (offset, timestamp, value) = record.ret_info.rest_memory_loads[i];
+            let mut wire_value = vec![F::ZERO; Self::phase0_size()];
+            wire_value[Self::phase0_mem_byte()].copy_from_slice(&[F::from(value as u64)]);
+            wire_value[Self::phase0_offset()]
+                .copy_from_slice(StackUInt::uint_to_field_elems(offset).as_slice());
+            wire_value[Self::phase0_old_memory_ts()]
+                .copy_from_slice(TSUInt::uint_to_field_elems(timestamp).as_slice());
+            wire_values.push(wire_value);
+        }
+        vec![wire_values]
     }
 }
 

@@ -1,5 +1,4 @@
 use goldilocks::SmallField;
-use itertools::Itertools;
 use revm_primitives::Bytes;
 
 use crate::{
@@ -96,7 +95,32 @@ fn return_inner<H: Host, F: SmallField>(
     let mut operands = vec![U256::from(offset.0), U256::from(len)];
     operands.extend(output.iter().map(|b| U256::from(*b)));
     timestamps.extend(output_timestamps);
-    host.record(&interpreter.generate_record(&operands, &timestamps));
+    let mut record = interpreter.generate_record(&operands, &timestamps);
+    // Prepare the information for the part specifically for ret instruction
+    // First, for the RestMemLoad, need to record all the memory addresses
+    // that are not output from the ret instruction, their values and
+    // timestamps.
+    let mut rest_memory_loads = Vec::<(u64, u64, u8)>::new();
+    // Get the current context memory. This assumes that the context has never
+    // been changed throughout the execution (for simplicity, for now).
+    // TODO: This is convenient but inefficient, as potentially many addresses
+    // are never accessed. A more efficient way would be recording exactly
+    // which addresses have been accessed by mstore instruction.
+    let memory = interpreter.shared_memory.context_memory();
+    memory
+        .0
+        .iter()
+        .zip(memory.1.iter())
+        .enumerate()
+        .for_each(|(i, (v, t))| {
+            let start = offset.0.as_limbs()[0] as usize;
+            if i < start || i >= start + len {
+                rest_memory_loads.push((i as u64, *t, *v));
+            }
+        });
+    record.ret_info.rest_memory_loads = rest_memory_loads;
+    host.record(&record);
+
     interpreter.instruction_result = instruction_result;
     interpreter.next_action = Some(crate::InterpreterAction::Return {
         result: InterpreterResult {

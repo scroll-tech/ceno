@@ -46,7 +46,7 @@ impl fmt::Debug for SharedMemory {
             .field("current_len", &self.len())
             .field(
                 "context_memory",
-                &crate::primitives::hex::encode(self.context_memory()),
+                &crate::primitives::hex::encode(self.context_memory().0),
             )
             .finish_non_exhaustive()
     }
@@ -199,7 +199,7 @@ impl SharedMemory {
     ///
     /// Panics on out of bounds.
     #[inline]
-    pub fn get_byte(&mut self, offset: usize) -> (u8, u64) {
+    pub fn get_byte(&self, offset: usize) -> (u8, u64) {
         let ret = self.slice(offset, 1);
         (ret.0[0], ret.1[0])
     }
@@ -379,11 +379,16 @@ impl SharedMemory {
 
     /// Returns a reference to the memory of the current context, the active memory.
     #[inline]
-    pub fn context_memory(&self) -> &[u8] {
+    pub fn context_memory(&self) -> (&[u8], &[u64]) {
         // SAFETY: access bounded by buffer length
         unsafe {
-            self.buffer
-                .get_unchecked(self.last_checkpoint..self.buffer.len())
+            let slice = self
+                .buffer
+                .get_unchecked(self.last_checkpoint..self.buffer.len());
+            let timestamps = self
+                .timestamps
+                .get_unchecked(self.last_checkpoint..self.buffer.len());
+            (slice, timestamps)
         }
     }
 

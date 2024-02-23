@@ -28,6 +28,7 @@ impl PreRecord {
             operands,
             operands_timestamps,
             stack_top: self.stack_top,
+            ret_info: ReturnInfo::new(),
         }
     }
 }
@@ -42,6 +43,23 @@ pub struct Record {
     pub operands: Vec<U256>,
     pub operands_timestamps: Vec<u64>,
     pub stack_top: u64,
+    pub ret_info: ReturnInfo,
+}
+
+/// The information collected specifically for the return instruction
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReturnInfo {
+    /// Address, timestamp, and value of the memory content at the ret
+    /// instruction, except those output by the ret instruction.
+    pub rest_memory_loads: Vec<(u64, u64, u8)>,
+}
+
+impl ReturnInfo {
+    pub fn new() -> Self {
+        Self {
+            rest_memory_loads: vec![],
+        }
+    }
 }
 
 /// EVM context host.
