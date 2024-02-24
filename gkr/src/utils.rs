@@ -157,7 +157,7 @@ pub fn counter_eval<F: SmallField>(num_vars: usize, x: &[F]) -> F {
 /// Reduce the number of variables of `self` by fixing the
 /// `partial_point.len()` variables at `partial_point`.
 pub fn fix_high_variables<F: SmallField>(
-    poly: &Arc<DenseMultilinearExtension<F>>,
+    poly: &DenseMultilinearExtension<F>,
     partial_point: &[F],
 ) -> DenseMultilinearExtension<F> {
     // TODO: return error.
@@ -236,15 +236,15 @@ pub fn tensor_product<F: SmallField>(a: &[F], b: &[F]) -> Vec<F> {
 }
 
 pub trait MultilinearExtensionFromVectors<F: SmallField> {
-    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>>;
+    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> DenseMultilinearExtension<F>;
 }
 
 impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] {
-    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>> {
+    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> DenseMultilinearExtension<F> {
         let n_zeros = (1 << lo_num_vars) - self[0].len();
         let n_zero_vecs = (1 << hi_num_vars) - self.len();
 
-        Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+        DenseMultilinearExtension::from_evaluations_vec(
             lo_num_vars + hi_num_vars,
             self.par_iter()
                 .flat_map(|instance| {
@@ -256,7 +256,7 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] 
                 .chain(vec![F::BaseField::ZERO; n_zero_vecs])
                 .map(|x| F::from_base(&x))
                 .collect(),
-        ))
+        )
     }
 }
 

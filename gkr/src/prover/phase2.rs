@@ -1,4 +1,4 @@
-use std::{iter, sync::Arc};
+use std::iter;
 
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
@@ -21,7 +21,7 @@ use super::{IOPProverPhase2State, SumcheckState};
 impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
     pub(super) fn prover_init_parallel(
         layer: &'a Layer<F>,
-        layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
+        layer_out_poly: &'a DenseMultilinearExtension<F>,
         layer_out_point: &Point<F>,
         layer_out_value: F,
         layer_in_vec: &'a [Vec<F::BaseField>],
@@ -134,17 +134,14 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
         }
 
         // f0(x1) = layers[i](rt || x1)
-        let f0 = Arc::new(fix_high_variables(&layer_out_poly, &hi_point));
+        let f0 = fix_high_variables(&layer_out_poly, &hi_point);
         // g0(x1) = eq(ry, x1) - asserted_subset(ry, x1)
         let g0 = {
             let mut g0 = eq_y_ry.clone();
             assert_consts.iter().for_each(|gate| {
                 g0[gate.idx_out] = F::ZERO;
             });
-            Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                lo_out_num_vars,
-                g0,
-            ))
+            DenseMultilinearExtension::from_evaluations_vec(lo_out_num_vars, g0)
         };
 
         // sumcheck: sigma = \sum_{x1} f0(x1) * g0(x1)
@@ -229,10 +226,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                             .mul_base(&gate.scalar);
                     }
                 });
-                Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                    in_num_vars,
-                    g1,
-                ))
+                DenseMultilinearExtension::from_evaluations_vec(in_num_vars, g1)
             };
             (vec![f1], vec![g1])
         };
@@ -257,14 +251,14 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                             tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ new_wire_id];
                     }
                 });
-            f1_vec.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            f1_vec.push(DenseMultilinearExtension::from_evaluations_vec(
                 in_num_vars,
                 f1_j,
-            )));
-            g1_vec.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            ));
+            g1_vec.push(DenseMultilinearExtension::from_evaluations_vec(
                 in_num_vars,
                 g1_j,
-            )));
+            ));
         });
 
         // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
@@ -355,10 +349,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                             .mul_base(&gate.scalar);
                 }
             });
-            Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                f2.num_vars,
-                g2,
-            ))
+            DenseMultilinearExtension::from_evaluations_vec(f2.num_vars, g2)
         };
         // sumcheck: sigma = \sum_{s2 || x2} f2(s2 || x2) * g2(s2 || x2)
         let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(&f2, F::ONE);
@@ -421,10 +412,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
                             .mul_base(&gate.scalar);
                 }
             });
-            Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                f3.num_vars,
-                g3,
-            ))
+            DenseMultilinearExtension::from_evaluations_vec(f3.num_vars, g3)
         };
         // sumcheck: sigma = \sum_{s3 || x3} f3(s3 || x3) * g3(s3 || x3)
         let mut virtual_poly_3 = VirtualPolynomial::new_from_mle(&f3, F::ONE);

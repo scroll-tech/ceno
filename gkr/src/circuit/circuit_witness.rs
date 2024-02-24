@@ -343,7 +343,7 @@ impl<F: SmallField> CircuitWitness<F> {
         &self,
         layer_id: LayerId,
         single_num_vars: usize,
-    ) -> Arc<DenseMultilinearExtension<E>>
+    ) -> DenseMultilinearExtension<E>
     where
         E: SmallField<BaseField = F>,
     {

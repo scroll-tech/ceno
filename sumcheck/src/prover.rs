@@ -130,8 +130,9 @@ impl<F: SmallField> IOPProverState<F> {
 
             self.poly
                 .flattened_ml_extensions
-                .par_iter_mut()
-                .for_each(|mle| *mle = Arc::new(mle.fix_variables(&[r.elements])));
+                .iter()
+                .map(|x| x.borrow_mut().fix_variables_in_place(&[r.elements]));
+            // .for_each(|mle| mle.fix_variables_in_place(&[r.elements]));
         } else if self.round > 0 {
             panic!("verifier message is empty");
         }
@@ -159,7 +160,8 @@ impl<F: SmallField> IOPProverState<F> {
                         buf.iter_mut()
                             .zip(products.iter())
                             .for_each(|((eval, step), f)| {
-                                let table = &self.poly.flattened_ml_extensions[*f].evaluations;
+                                let table =
+                                    &self.poly.flattened_ml_extensions[*f].borrow().evaluations;
                                 *eval = table[b << 1];
                                 *step = table[(b << 1) + 1] - table[b << 1];
                             });

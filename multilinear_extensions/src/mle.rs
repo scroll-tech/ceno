@@ -1,22 +1,68 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    ops::Deref,
+    sync::{Arc, Mutex},
+};
 
 use ark_std::{end_timer, rand::RngCore, start_timer};
 use goldilocks::SmallField;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-pub type DenseMultilinearExtensionRef<F> = Rc<RefCell<DenseMultilinearExtension<F>>>;
+// pub type DenseMultilinearExtensionRef<F> = Arc<Mutex<DenseMultilinearExtension<F>>>;
 
 /// Stores a multilinear polynomial in dense evaluation form.
-#[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug)]
 pub struct DenseMultilinearExtension<F> {
     /// The evaluation over {0,1}^`num_vars`
-    pub evaluations: Vec<F>,
+    pub evaluations: Arc<Mutex<Vec<F>>>,
     /// Number of variables
     pub num_vars: usize,
 }
 
+impl<F: SmallField> Serialize for DenseMultilinearExtension<F> {
+    fn serialize<S>(&self, _: S) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error>
+    where
+        S: Serializer,
+    {
+        todo!()
+    }
+}
+
+impl<'de, F: SmallField> Deserialize<'de> for DenseMultilinearExtension<F> {
+    fn deserialize<D>(_: D) -> Result<Self, <D as Deserializer<'de>>::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        todo!()
+    }
+}
+
+impl<F: PartialEq> PartialEq for DenseMultilinearExtension<F> {
+    fn eq(&self, rhs: &DenseMultilinearExtension<F>) -> bool {
+        self.num_vars == rhs.num_vars
+            && self.evaluations.lock().unwrap().deref() == rhs.evaluations.lock().unwrap().deref()
+    }
+}
+
 impl<F: SmallField> DenseMultilinearExtension<F> {
+    /// Deep clone a DenseMultilinearExtension. Note that the normal `clone` only clones a reference to the memory.
+    pub fn deep_clone(&self) -> Self {
+        Self {
+            evaluations: Arc::new(Mutex::new(self.evaluation_vec())),
+            num_vars: self.num_vars,
+        }
+    }
+
+    /// Deep clone the evaluation table
+    pub fn evaluation_vec(&self) -> Vec<F> {
+        self.evaluations.lock().unwrap().clone()
+    }
+
+    /// Evaluation length
+    pub fn evaluation_length(&self) -> usize {
+        self.evaluations.lock().unwrap().len()
+    }
+
     /// Construct a new polynomial from a list of evaluations where the index
     /// represents a point in {0,1}^`num_vars` in little endian form. For
     /// example, `0b1011` represents `P(1,1,0,1)`
@@ -38,7 +84,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
 
         Self {
             num_vars,
-            evaluations,
+            evaluations: Arc::new(Mutex::new(evaluations)),
         }
     }
 
@@ -52,7 +98,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
             "MLE size does not match the point"
         );
 
-        let mut evals = self.evaluations.clone();
+        let mut evals = self.evaluation_vec();
         let mut num_vars = self.num_vars;
         fix_variables_in_place(&mut evals, &mut num_vars, point);
         evals[0]
@@ -67,7 +113,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
             "invalid size of partial point"
         );
         let nv = self.num_vars;
-        let mut poly = self.evaluations.to_vec();
+        let mut poly = self.evaluation_vec();
         let dim = partial_point.len();
         // evaluate single variable of partial point from left to right
         for point in partial_point {
@@ -77,18 +123,44 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
         Self::from_evaluations_vec(nv - dim, poly)
     }
 
-    /// Reduce the number of variables of `self` by fixing the
-    /// `partial_point.len()` variables at `partial_point`.
-    pub fn fix_variables_in_place(&mut self, partial_point: &[F]) {
-        fix_variables_in_place(&mut self.evaluations, &mut self.num_vars, partial_point)
-    }
-
     /// Helper function. Fix 1 variable.
     fn fix_one_variable_helper(data: &[F], point: &F) -> Vec<F> {
         data.par_chunks(2)
             .with_min_len(64)
             .map(|data| *point * (data[1] - data[0]) + data[0])
             .collect()
+    }
+
+    /// Reduce the number of variables of `self` by fixing the
+    /// `partial_point.len()` variables at `partial_point`.
+    pub fn fix_variables_in_place(&mut self, partial_point: &[F]) {
+        // TODO: return error.
+        assert!(
+            partial_point.len() <= self.num_vars,
+            "invalid size of partial point"
+        );
+        // evaluate single variable of partial point from left to right
+        for point in partial_point {
+            self.fix_one_variable_in_place_helper(point);
+        }
+    }
+
+    /// Helper function. Fix 1 variable.
+    fn fix_one_variable_in_place_helper(&mut self, point: &F) {
+        let new_length = 1 << (self.num_vars - 1);
+        let mut slice = self.evaluations.lock().unwrap();
+
+        slice
+            .par_chunks_mut(2)
+            .with_min_len(64)
+            .for_each(|data| data[0] = *point * (data[1] - data[0]) + data[0]);
+
+        for i in 1..new_length {
+            slice[i] = slice[i * 2]
+        }
+
+        slice.resize(new_length, F::default());
+        self.num_vars -= 1;
     }
 
     /// Generate a random evaluation of a multilinear poly
@@ -105,7 +177,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
         nv: usize,
         degree: usize,
         mut rng: &mut impl RngCore,
-    ) -> (Vec<DenseMultilinearExtensionRef<F>>, F) {
+    ) -> (Vec<DenseMultilinearExtension<F>>, F) {
         let start = start_timer!(|| "sample random mle list");
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
@@ -126,11 +198,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
 
         let list = multiplicands
             .into_iter()
-            .map(|x| {
-                Rc::new(RefCell::new(
-                    DenseMultilinearExtension::from_evaluations_vec(nv, x),
-                ))
-            })
+            .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x))
             .collect();
 
         end_timer!(start);
@@ -142,7 +210,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
         nv: usize,
         degree: usize,
         mut rng: impl RngCore,
-    ) -> Vec<DenseMultilinearExtensionRef<F>> {
+    ) -> Vec<DenseMultilinearExtension<F>> {
         let start = start_timer!(|| "sample random zero mle list");
 
         let mut multiplicands = Vec::with_capacity(degree);
@@ -158,11 +226,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
 
         let list = multiplicands
             .into_iter()
-            .map(|x| {
-                Rc::new(RefCell::new(
-                    DenseMultilinearExtension::from_evaluations_vec(nv, x),
-                ))
-            })
+            .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x))
             .collect();
 
         end_timer!(start);
@@ -170,10 +234,13 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
     }
 
     pub fn to_ext_field<Ext: SmallField<BaseField = F>>(&self) -> DenseMultilinearExtension<Ext> {
-        DenseMultilinearExtension {
-            evaluations: self.evaluations.iter().map(|f| Ext::from_base(f)).collect(),
-            num_vars: self.num_vars,
-        }
+        DenseMultilinearExtension::<Ext>::from_evaluations_vec(
+            self.num_vars,
+            self.evaluation_vec()
+                .iter()
+                .map(|f| Ext::from_base(f))
+                .collect(),
+        )
     }
 }
 

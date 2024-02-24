@@ -1,4 +1,4 @@
-use std::{ops::Add, sync::Arc};
+use std::ops::Add;
 
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
@@ -22,7 +22,7 @@ use super::IOPProverPhase1State;
 impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
     /// Initialize the prover. Building the powers of alpha.
     pub(super) fn prover_init_parallel(
-        layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
+        layer_out_poly: &'a DenseMultilinearExtension<F>,
         next_layer_point_and_evals: &'a [PointAndEval<F>],
         subset_point_and_evals: &'a [(LayerId, PointAndEval<F>)],
         alpha: &F,
@@ -84,11 +84,8 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
                 (
                     alpha_pow * point_and_eval.eval,
                     (
-                        Arc::new(f1_j),
-                        Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                            self.lo_num_vars,
-                            g1_j,
-                        )),
+                        f1_j,
+                        DenseMultilinearExtension::from_evaluations_vec(self.lo_num_vars, g1_j),
                     ),
                 )
             })
@@ -115,11 +112,11 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
                         (
                             *alpha_pow * point_and_eval.eval,
                             (
-                                Arc::new(f1_j),
-                                Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+                                f1_j,
+                                DenseMultilinearExtension::from_evaluations_vec(
                                     self.lo_num_vars,
                                     g1_j,
-                                )),
+                                ),
                             ),
                         )
                     }),
@@ -172,7 +169,7 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
         //         acc + f1_value_j * g1_value_j
         //     });
         // f2(t) = layers[i](t || ry)
-        let f2 = Arc::new(self.layer_out_poly.fix_variables(&self.sumcheck_point_1));
+        let f2 = self.layer_out_poly.fix_variables(&self.sumcheck_point_1);
         // g2^{(j)}(t) = \alpha^j copy_to[j](ry_j, ry) eq(rt_j, t)
         let g2 = self
             .next_layer_point_and_evals
@@ -207,10 +204,7 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
                     .map(|(a, b)| a + b)
                     .collect_vec()
             });
-        let g2 = Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-            self.hi_num_vars,
-            g2,
-        ));
+        let g2 = DenseMultilinearExtension::from_evaluations_vec(self.hi_num_vars, g2);
         // sumcheck: sigma = \sum_t( \sum_j( g2^{(j)}(t) ) ) * f2(t)
         let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(&f2, F::ONE);
         virtual_poly_2.mul_by_mle(g2, F::ONE);

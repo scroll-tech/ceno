@@ -105,7 +105,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             subset_point_and_evals,
             circuit_witness: circuit_witness.clone(),
             // Default
-            layer_out_poly: Arc::default(),
+            layer_out_poly: DenseMultilinearExtension::default(),
         }
     }
 
@@ -374,7 +374,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
 }
 
 struct IOPProverPhase1State<'a, F: SmallField> {
-    layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
+    layer_out_poly: &'a DenseMultilinearExtension<F>,
     next_layer_point_and_evals: &'a [PointAndEval<F>],
     subset_point_and_evals: &'a [(LayerId, PointAndEval<F>)],
     alpha_pows: Vec<F>,
@@ -386,10 +386,10 @@ struct IOPProverPhase1State<'a, F: SmallField> {
 }
 
 struct IOPProverPhase2State<'a, F: SmallField> {
-    layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
+    layer_out_poly: &'a DenseMultilinearExtension<F>,
     layer_out_point: Point<F>,
     layer_out_value: F,
-    layer_in_poly: Arc<DenseMultilinearExtension<F>>,
+    layer_in_poly: DenseMultilinearExtension<F>,
     layer_in_vec: &'a [Vec<F::BaseField>],
     mul3s: Vec<Gate3In<F::BaseField>>,
     mul2s: Vec<Gate2In<F::BaseField>>,

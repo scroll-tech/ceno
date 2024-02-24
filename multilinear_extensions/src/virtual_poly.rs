@@ -1,8 +1,6 @@
-use std::cell::RefCell;
 use std::cmp::max;
 use std::hash::Hash;
-use std::ops::{Add, Deref};
-use std::rc::Rc;
+use std::ops::Add;
 use std::{collections::HashMap, marker::PhantomData};
 
 use ark_std::rand::Rng;
@@ -12,7 +10,7 @@ use goldilocks::SmallField;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::mle::{DenseMultilinearExtension, DenseMultilinearExtensionRef};
+use crate::mle::DenseMultilinearExtension;
 use crate::util::bit_decompose;
 
 #[rustfmt::skip]
@@ -50,7 +48,7 @@ pub struct VirtualPolynomial<F> {
     pub products: Vec<(F, Vec<usize>)>,
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
-    pub flattened_ml_extensions: Vec<DenseMultilinearExtensionRef<F>>,
+    pub flattened_ml_extensions: Vec<DenseMultilinearExtension<F>>,
     /// Pointers to the above poly extensions
     raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<F>, usize>,
 }
@@ -117,13 +115,10 @@ impl<F: SmallField> VirtualPolynomial<F> {
             raw_pointers_lookup_table: HashMap::new(),
         }
     }
+
     /// Creates an new virtual polynomial from a MLE and its coefficient.
-    pub fn new_from_mle_ref(mle: &DenseMultilinearExtensionRef<F>, coefficient: F) -> Self {
-        Self::new_from_mle(mle.borrow().clone(), coefficient)
-    }
-    /// Creates an new virtual polynomial from a MLE and its coefficient.
-    pub fn new_from_mle(mle: DenseMultilinearExtension<F>, coefficient: F) -> Self {
-        let mle_ptr: *const DenseMultilinearExtension<F> = &mle;
+    pub fn new_from_mle(mle: &DenseMultilinearExtension<F>, coefficient: F) -> Self {
+        let mle_ptr: *const DenseMultilinearExtension<F> = mle;
         let mut hm = HashMap::new();
         hm.insert(mle_ptr, 0);
 
@@ -136,7 +131,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             },
             // here `0` points to the first polynomial of `flattened_ml_extensions`
             products: vec![(coefficient, vec![0])],
-            flattened_ml_extensions: vec![Rc::new(RefCell::new(mle))],
+            flattened_ml_extensions: vec![mle.clone()],
             raw_pointers_lookup_table: hm,
         }
     }
@@ -149,7 +144,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
     /// `coefficient`.
     pub fn add_mle_list(
         &mut self,
-        mle_list: impl IntoIterator<Item = DenseMultilinearExtensionRef<F>>,
+        mle_list: impl IntoIterator<Item = DenseMultilinearExtension<F>>,
         coefficient: F,
     ) {
         let mle_list = mle_list.into_iter().collect::<Vec<_>>();
@@ -161,14 +156,12 @@ impl<F: SmallField> VirtualPolynomial<F> {
 
         for mle in mle_list {
             assert_eq!(
-                mle.borrow().num_vars,
-                self.aux_info.num_variables,
+                mle.num_vars, self.aux_info.num_variables,
                 "product has a multiplicand with wrong number of variables {} vs {}",
-                mle.borrow().num_vars,
-                self.aux_info.num_variables
+                mle.num_vars, self.aux_info.num_variables
             );
 
-            let mle_ptr: *const DenseMultilinearExtension<F> = mle.borrow().deref();
+            let mle_ptr: *const DenseMultilinearExtension<F> = &mle;
             if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
                 indexed_product.push(*index)
             } else {
@@ -185,18 +178,16 @@ impl<F: SmallField> VirtualPolynomial<F> {
     /// - add the MLE to the MLE list;
     /// - multiple each product by MLE and its coefficient.
     /// Returns an error if the MLE has a different `num_vars` from self.
-    pub fn mul_by_mle(&mut self, mle: DenseMultilinearExtensionRef<F>, coefficient: F) {
+    pub fn mul_by_mle(&mut self, mle: DenseMultilinearExtension<F>, coefficient: F) {
         let start = start_timer!(|| "mul by mle");
 
         assert_eq!(
-            mle.borrow().num_vars,
-            self.aux_info.num_variables,
+            mle.num_vars, self.aux_info.num_variables,
             "product has a multiplicand with wrong number of variables {} vs {}",
-            mle.borrow().num_vars,
-            self.aux_info.num_variables
+            mle.num_vars, self.aux_info.num_variables
         );
 
-        let mle_ptr: *const DenseMultilinearExtension<F> = mle.borrow().deref();
+        let mle_ptr: *const DenseMultilinearExtension<F> = &mle;
 
         // check if this mle already exists in the virtual polynomial
         let mle_index = match self.raw_pointers_lookup_table.get(&mle_ptr) {
@@ -237,7 +228,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
         let evals: Vec<F> = self
             .flattened_ml_extensions
             .iter()
-            .map(|x| x.borrow().evaluate(point))
+            .map(|x| x.evaluate(point))
             .collect();
 
         let res = self
@@ -347,13 +338,13 @@ impl<F: SmallField> VirtualPolynomial<F> {
         let mut flattened_ml_extensions = vec![];
         let mut hm = HashMap::new();
         for mle in self.flattened_ml_extensions.iter() {
-            let mle_ptr: *const DenseMultilinearExtension<F> = mle.borrow().deref();
+            let mle_ptr: *const DenseMultilinearExtension<F> = mle;
             let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
 
-            let mle_ext_field = mle.borrow().deref().to_ext_field();
+            let mle_ext_field = mle.to_ext_field();
             let mle_ext_field = mle_ext_field;
             let mle_ext_field_ptr: *const DenseMultilinearExtension<Ext> = &mle_ext_field;
-            flattened_ml_extensions.push(Rc::new(RefCell::new(mle_ext_field)));
+            flattened_ml_extensions.push(mle_ext_field);
             hm.insert(mle_ext_field_ptr, *index);
         }
         end_timer!(timer);
@@ -386,12 +377,11 @@ pub fn eq_eval<F: PrimeField>(x: &[F], y: &[F]) -> F {
 ///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 /// over r, which is
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> DenseMultilinearExtensionRef<F> {
+pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> DenseMultilinearExtension<F> {
     let evals = build_eq_x_r_vec(r);
-    Rc::new(RefCell::new(
-        DenseMultilinearExtension::from_evaluations_vec(r.len(), evals),
-    ))
+    DenseMultilinearExtension::from_evaluations_vec(r.len(), evals)
 }
+
 /// This function build the eq(x, r) polynomial for any given r, and output the
 /// evaluation of eq(x, r) in its vector form.
 ///

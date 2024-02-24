@@ -56,7 +56,7 @@ pub struct IOPProverState<F: SmallField> {
     /// Hashmap is used to map from the current layer id to the that layer id, point and value.
     pub(crate) subset_point_and_evals: HashMap<LayerId, Vec<(LayerId, PointAndEval<F>)>>,
     pub(crate) circuit_witness: CircuitWitness<F::BaseField>,
-    pub(crate) layer_out_poly: Arc<DenseMultilinearExtension<F>>,
+    pub(crate) layer_out_poly: DenseMultilinearExtension<F>,
 }
 
 /// Represent the verifier state for each layer in the IOP protocol.

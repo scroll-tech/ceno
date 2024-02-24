@@ -1,5 +1,3 @@
-use std::{cell::RefCell, rc::Rc};
-
 use ark_std::test_rng;
 use ff::Field;
 use goldilocks::{Goldilocks as F, SmallField};
@@ -15,7 +13,7 @@ fn test_fix_variables() {
     let mut rng = test_rng();
     for nv in 2..10 {
         let mut mle = DenseMultilinearExtension::<F>::random(nv, &mut rng);
-        let mle2 = mle.clone();
+        let mle2 = mle.deep_clone();
         let point = (0..nv).map(|_| F::random(&mut rng)).collect::<Vec<_>>();
         mle.fix_variables_in_place(&point);
         let eval = mle2.fix_variables(&point);
@@ -53,7 +51,7 @@ fn test_virtual_polynomial_mul_by_mle() {
             let (b, _b_sum) = DenseMultilinearExtension::<F>::random_mle_list(nv, 1, &mut rng);
             let b_mle = b[0].clone();
             let coeff = F::random(&mut rng);
-            let b_vp = VirtualPolynomial::new_from_mle_ref(&b_mle, coeff);
+            let b_vp = VirtualPolynomial::new_from_mle(&b_mle, coeff);
 
             let mut c = a.clone();
 
@@ -84,7 +82,7 @@ fn test_eq_xr() {
 //      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 // over r, which is
 //      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-fn build_eq_x_r_for_test<F: SmallField>(r: &[F]) -> Rc<RefCell<DenseMultilinearExtension<F>>> {
+fn build_eq_x_r_for_test<F: SmallField>(r: &[F]) -> DenseMultilinearExtension<F> {
     // we build eq(x,r) from its evaluations
     // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
     // for example, with num_vars = 4, x is a binary vector of 4, then
@@ -112,7 +110,6 @@ fn build_eq_x_r_for_test<F: SmallField>(r: &[F]) -> Rc<RefCell<DenseMultilinearE
         }
         eval.push(current_eval);
     }
-    Rc::new(RefCell::new(
-        DenseMultilinearExtension::from_evaluations_vec(num_var, eval),
-    ))
+
+    DenseMultilinearExtension::from_evaluations_vec(num_var, eval)
 }

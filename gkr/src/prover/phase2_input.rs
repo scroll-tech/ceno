@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use multilinear_extensions::{
@@ -92,14 +90,14 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
                     g[(s << lo_in_num_vars) ^ subset_wire_id] = eq_t_rt[s] * eq_y_ry[new_wire_id];
                 }
             }
-            f_vec.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            f_vec.push(DenseMultilinearExtension::from_evaluations_vec(
                 in_num_vars,
                 f,
-            )));
-            g_vec.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            ));
+            g_vec.push(DenseMultilinearExtension::from_evaluations_vec(
                 in_num_vars,
                 g,
-            )));
+            ));
         }
 
         let paste_from_counter_in = &self.paste_from_counter_in;
@@ -115,14 +113,14 @@ impl<'a, F: SmallField> IOPProverPhase2InputState<'a, F> {
                     g[(s << lo_in_num_vars) ^ subset_wire_id] = eq_t_rt[s] * eq_y_ry[new_wire_id];
                 }
             }
-            f_vec.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            f_vec.push(DenseMultilinearExtension::from_evaluations_vec(
                 in_num_vars,
                 f,
-            )));
-            g_vec.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+            ));
+            g_vec.push(DenseMultilinearExtension::from_evaluations_vec(
                 in_num_vars,
                 g,
-            )));
+            ));
         }
 
         let mut virtual_poly = VirtualPolynomial::new(in_num_vars);

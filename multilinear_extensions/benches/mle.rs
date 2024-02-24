@@ -101,7 +101,7 @@ fn bench_fix_points(c: &mut Criterion) {
         let id = BenchmarkId::new("fix variable in place", y.len());
         c.bench_with_input(id, &y, |b, y| {
             b.iter(|| {
-                let mut mle2 = mle.clone();
+                let mut mle2 = mle.deep_clone();
                 mle2.fix_variables_in_place(black_box(y));
             })
         });
@@ -109,7 +109,7 @@ fn bench_fix_points(c: &mut Criterion) {
         let id = BenchmarkId::new("fix variable", y.len());
         c.bench_with_input(id, &y, |b, y| {
             b.iter(|| {
-                let mle2 = mle.clone();
+                let mle2 = mle.deep_clone();
                 mle2.fix_variables(black_box(y))
             })
         });
