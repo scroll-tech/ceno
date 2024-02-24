@@ -3,9 +3,13 @@ use std::sync::Arc;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
-use simple_frontend::structs::CircuitBuilder;
+use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::{
+    constants::RANGE_CHIP_BIT_WIDTH,
+    structs::{ChipChallenges, ROMType},
+};
 
-use crate::{constants::RANGE_CHIP_BIT_WIDTH, error::ZKVMError, instructions::ChipChallenges};
+use crate::error::ZKVMError;
 
 /// Add range table circuit to the circuit graph. Return node id and lookup
 /// instance log size.
@@ -17,8 +21,12 @@ pub(crate) fn construct_range_table<F: SmallField>(
 ) -> Result<(PredType, usize), ZKVMError> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let cells = circuit_builder.create_counter_in(0);
+    let items = [
+        MixedCell::Constant(F::BaseField::from(ROMType::Range as u64)),
+        MixedCell::Cell(cells[0]),
+    ];
     let rlc = circuit_builder.create_ext_cell();
-    circuit_builder.rlc(&rlc, &[cells[0]], challenges.range());
+    circuit_builder.rlc_mixed(&rlc, &items, challenges.range());
     circuit_builder.configure();
     let range_circuit = Arc::new(Circuit::new(&circuit_builder));
 

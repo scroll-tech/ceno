@@ -3,10 +3,11 @@ use std::{collections::HashMap, mem};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
+use singer_utils::structs::ChipChallenges;
 
 use crate::{
     chips::SingerChipBuilder,
-    component::{AccessoryCircuit, ChipChallenges, InstCircuit},
+    component::{AccessoryCircuit, InstCircuit},
     error::ZKVMError,
     CircuitWitnessIn, SingerParams,
 };

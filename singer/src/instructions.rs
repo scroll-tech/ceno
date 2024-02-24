@@ -3,8 +3,9 @@ use std::{mem, sync::Arc};
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
-use simple_frontend::structs::{ChallengeId, WitnessId};
+use simple_frontend::structs::WitnessId;
 
+use singer_utils::structs::ChipChallenges;
 use strum_macros::EnumIter;
 
 use crate::{chips::SingerChipBuilder, error::ZKVMError, CircuitWiresIn, SingerParams};
@@ -103,64 +104,11 @@ pub(crate) fn construct_inst_circuit_graph<F: SmallField>(
     )
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct ChipChallenges {
-    // Challenges for multiple-tuple chip records
-    record_rlc: ChallengeId,
-    // Challenges for multiple-cell values
-    record_item_rlc: ChallengeId,
-}
-
-impl Default for ChipChallenges {
-    fn default() -> Self {
-        Self {
-            record_rlc: 2,
-            record_item_rlc: 1,
-        }
-    }
-}
-
-impl ChipChallenges {
-    pub fn new(record_rlc: ChallengeId, record_item_rlc: ChallengeId) -> Self {
-        Self {
-            record_rlc,
-            record_item_rlc,
-        }
-    }
-    pub fn bytecode(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn stack(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn global_state(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn mem(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn range(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn calldata(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn record_item_rlc(&self) -> ChallengeId {
-        self.record_item_rlc
-    }
-}
-
 #[derive(Clone, Copy, Debug, EnumIter)]
 pub(crate) enum InstOutputType {
-    GlobalStateIn,
-    GlobalStateOut,
-    BytecodeChip,
-    StackPop,
-    StackPush,
-    RangeChip,
-    MemoryLoad,
-    MemoryStore,
-    CalldataChip,
+    RAMLoad,
+    RAMStore,
+    ROMInput,
 }
 
 #[derive(Clone, Debug)]
@@ -172,7 +120,7 @@ pub struct InstCircuit<F: SmallField> {
 #[derive(Clone, Debug, Default)]
 pub struct InstCircuitLayout {
     // Will be connected to the chips.
-    pub(crate) chip_check_wire_id: [Option<(WitnessId, usize)>; 9],
+    pub(crate) chip_check_wire_id: [Option<(WitnessId, usize)>; 3],
     // Target. Especially for return the size of public output.
     pub(crate) target_wire_id: Option<WitnessId>,
     // Will be connected to the accessory circuits.

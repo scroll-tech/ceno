@@ -1,9 +1,9 @@
-pub(crate) const STACK_TOP_BIT_WIDTH: usize = 10;
+pub const STACK_TOP_BIT_WIDTH: usize = 10;
 
-pub(crate) const RANGE_CHIP_BIT_WIDTH: usize = 16;
-pub(crate) const VALUE_BIT_WIDTH: usize = 32;
-pub(crate) const EVM_STACK_BIT_WIDTH: usize = 256;
-pub(crate) const EVM_STACK_BYTE_WIDTH: usize = EVM_STACK_BIT_WIDTH / 8;
+pub const RANGE_CHIP_BIT_WIDTH: usize = 16;
+pub const VALUE_BIT_WIDTH: usize = 32;
+pub const EVM_STACK_BIT_WIDTH: usize = 256;
+pub const EVM_STACK_BYTE_WIDTH: usize = EVM_STACK_BIT_WIDTH / 8;
 
 // opcode bytecode
 pub enum OpcodeType {

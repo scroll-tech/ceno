@@ -7,14 +7,11 @@ use gkr::{
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use simple_frontend::structs::WitnessId;
+use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::ChipChallenges};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-use crate::{
-    constants::RANGE_CHIP_BIT_WIDTH,
-    error::ZKVMError,
-    instructions::{ChipChallenges, InstOutputType},
-};
+use crate::{error::ZKVMError, instructions::InstOutputType};
 
 use self::{
     bytecode::construct_bytecode_table,
@@ -89,14 +86,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
         };
 
         // Set equality argument
-        for output_type in [
-            InstOutputType::GlobalStateIn,
-            InstOutputType::GlobalStateOut,
-            InstOutputType::StackPop,
-            InstOutputType::StackPush,
-            InstOutputType::MemoryLoad,
-            InstOutputType::MemoryStore,
-        ] {
+        for output_type in [InstOutputType::RAMLoad, InstOutputType::RAMStore] {
             if let Some((id, num)) = to_chip_ids[output_type as usize] {
                 let out = build(
                     n_instances,
@@ -110,11 +100,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
         }
 
         // Lookup argument
-        for output_type in [
-            InstOutputType::BytecodeChip,
-            InstOutputType::CalldataChip,
-            InstOutputType::RangeChip,
-        ] {
+        for output_type in [InstOutputType::ROMInput] {
             if let Some((id, num)) = to_chip_ids[output_type as usize] {
                 let out = build(
                     n_instances,

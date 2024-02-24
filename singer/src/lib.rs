@@ -1,26 +1,20 @@
 #![feature(generic_const_exprs)]
 
-use chips::LookupChipType;
 use chips::SingerChipBuilder;
 use error::ZKVMError;
 use gkr::structs::LayerWitness;
-use gkr_graph::structs::CircuitGraph;
-use gkr_graph::structs::CircuitGraphBuilder;
-use gkr_graph::structs::CircuitGraphWitness;
-use gkr_graph::structs::NodeOutputType;
+use gkr_graph::structs::{CircuitGraph, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType};
 use goldilocks::SmallField;
-use instructions::construct_inst_circuit_graph;
-use instructions::construct_instruction_circuits;
-use instructions::ChipChallenges;
-use instructions::InstCircuit;
-use instructions::InstOutputType;
+use instructions::{
+    construct_inst_circuit_graph, construct_instruction_circuits, InstCircuit, InstOutputType,
+};
+use singer_utils::structs::ChipChallenges;
 use std::mem;
 
 #[macro_use]
 mod macros;
 
 pub mod chips;
-pub mod constants;
 pub mod error;
 pub mod instructions;
 pub mod scheme;
@@ -137,24 +131,10 @@ impl<F: SmallField> SingerGraphBuilder<F> {
         let mut output_wires_id = chip_builder.output_wires_id;
 
         let singer_wire_out_id = SingerWiresOutID {
-            global_state_in: mem::take(
-                &mut output_wires_id[InstOutputType::GlobalStateIn as usize],
-            ),
-            global_state_out: mem::take(
-                &mut output_wires_id[InstOutputType::GlobalStateOut as usize],
-            ),
-            bytecode_chip_input: mem::take(
-                &mut output_wires_id[InstOutputType::BytecodeChip as usize],
-            ),
-            bytecode_chip_table: table_out_node_id[LookupChipType::BytecodeChip as usize],
-            stack_push: mem::take(&mut output_wires_id[InstOutputType::StackPush as usize]),
-            stack_pop: mem::take(&mut output_wires_id[InstOutputType::StackPop as usize]),
-            range_chip_input: mem::take(&mut output_wires_id[InstOutputType::RangeChip as usize]),
-            range_chip_table: table_out_node_id[LookupChipType::RangeChip as usize],
-            calldata_chip_input: mem::take(
-                &mut output_wires_id[InstOutputType::CalldataChip as usize],
-            ),
-            calldata_chip_table: table_out_node_id[LookupChipType::CalldataChip as usize],
+            ram_load: mem::take(&mut output_wires_id[InstOutputType::RAMLoad as usize]),
+            ram_store: mem::take(&mut output_wires_id[InstOutputType::RAMStore as usize]),
+            rom_input: mem::take(&mut output_wires_id[InstOutputType::ROMInput as usize]),
+
             public_output_size: public_output_size,
         };
 
@@ -200,16 +180,9 @@ pub struct SingerParams {
 }
 #[derive(Clone, Debug)]
 pub struct SingerWiresOutID {
-    global_state_in: Vec<NodeOutputType>,
-    global_state_out: Vec<NodeOutputType>,
-    bytecode_chip_input: Vec<NodeOutputType>,
-    bytecode_chip_table: NodeOutputType,
-    stack_push: Vec<NodeOutputType>,
-    stack_pop: Vec<NodeOutputType>,
-    range_chip_input: Vec<NodeOutputType>,
-    range_chip_table: NodeOutputType,
-    calldata_chip_input: Vec<NodeOutputType>,
-    calldata_chip_table: NodeOutputType,
+    ram_load: Vec<NodeOutputType>,
+    ram_store: Vec<NodeOutputType>,
+    rom_input: Vec<NodeOutputType>,
 
     public_output_size: Option<NodeOutputType>,
 }

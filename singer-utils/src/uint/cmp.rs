@@ -2,42 +2,36 @@ use ff::Field;
 use goldilocks::SmallField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
-use crate::{
-    error::ZKVMError,
-    utils::chip_handler::{ChipHandler, RangeChipOperations},
-};
+use crate::{chip_handler::RangeChipOperations, error::UtilError, structs::UInt};
 
-use super::{UInt, UIntAddSub, UIntCmp};
+use super::{UIntAddSub, UIntCmp};
 
-impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>>
-where
-    [(); (M + C - 1) / C]:,
-{
-    pub(crate) const N_NO_OVERFLOW_WITNESS_CELLS: usize =
+impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
+    pub const N_NO_OVERFLOW_WITNESS_CELLS: usize =
         UIntAddSub::<UInt<M, C>>::N_NO_OVERFLOW_WITNESS_CELLS;
 
-    pub(crate) const N_WITNESS_CELLS: usize = UIntAddSub::<UInt<M, C>>::N_WITNESS_CELLS;
+    pub const N_WITNESS_CELLS: usize = UIntAddSub::<UInt<M, C>>::N_WITNESS_CELLS;
 
-    pub(crate) fn extract_range_values(witness: &[CellId]) -> &[CellId] {
+    pub fn extract_range_values(witness: &[CellId]) -> &[CellId] {
         &witness[..UInt::<M, C>::N_RANGE_CHECK_CELLS]
     }
 
-    pub(crate) fn extract_borrow(witness: &[CellId]) -> &[CellId] {
+    pub fn extract_borrow(witness: &[CellId]) -> &[CellId] {
         &UIntAddSub::<UInt<M, C>>::extract_carry(witness)
     }
 
-    pub(crate) fn extract_unsafe_borrow(witness: &[CellId]) -> &[CellId] {
+    pub fn extract_unsafe_borrow(witness: &[CellId]) -> &[CellId] {
         &UIntAddSub::<UInt<M, C>>::extract_unsafe_carry(witness)
     }
 
     /// Greater than implemented by little-endian subtraction.
-    pub(crate) fn lt<F: SmallField>(
-        circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler<F>,
+    pub fn lt<Ext: SmallField, H: RangeChipOperations<Ext>>(
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        range_chip_handler: &mut H,
         oprand_0: &UInt<M, C>,
         oprand_1: &UInt<M, C>,
         witness: &[CellId],
-    ) -> Result<(CellId, UInt<M, C>), ZKVMError> {
+    ) -> Result<(CellId, UInt<M, C>), UtilError> {
         let borrow = Self::extract_borrow(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_diff =
@@ -54,13 +48,13 @@ where
         }
     }
 
-    pub(crate) fn assert_lt<F: SmallField>(
-        circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler<F>,
+    pub fn assert_lt<Ext: SmallField, H: RangeChipOperations<Ext>>(
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        range_chip_handler: &mut H,
         oprand_0: &UInt<M, C>,
         oprand_1: &UInt<M, C>,
         witness: &[CellId],
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), UtilError> {
         let (borrow, _) = Self::lt(
             circuit_builder,
             range_chip_handler,
@@ -73,13 +67,13 @@ where
     }
 
     /// Greater or equal than implemented by little-endian subtraction.
-    pub(crate) fn assert_leq<F: SmallField>(
-        circuit_builder: &mut CircuitBuilder<F>,
-        range_chip_handler: &mut ChipHandler<F>,
+    pub fn assert_leq<Ext: SmallField, H: RangeChipOperations<Ext>>(
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        range_chip_handler: &mut H,
         oprand_0: &UInt<M, C>,
         oprand_1: &UInt<M, C>,
         witness: &[CellId],
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), UtilError> {
         let (borrow, diff) = Self::lt(
             circuit_builder,
             range_chip_handler,
@@ -94,7 +88,7 @@ where
             circuit_builder.sel_mixed(
                 s,
                 (*d).into(),
-                MixedCell::Constant(F::BaseField::ZERO),
+                MixedCell::Constant(Ext::BaseField::ZERO),
                 borrow,
             );
             circuit_builder.assert_const(s, 0);
@@ -102,17 +96,17 @@ where
         Ok(())
     }
 
-    pub fn assert_eq<F: SmallField>(
-        circuit_builder: &mut CircuitBuilder<F>,
+    pub fn assert_eq<Ext: SmallField>(
+        circuit_builder: &mut CircuitBuilder<Ext>,
         oprand_0: &UInt<M, C>,
         oprand_1: &UInt<M, C>,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), UtilError> {
         let diff = circuit_builder.create_cells(oprand_0.values().len());
         let opr_0 = oprand_0.values();
         let opr_1 = oprand_1.values();
         for i in 0..diff.len() {
-            circuit_builder.add(diff[i], opr_0[i], F::BaseField::ONE);
-            circuit_builder.add(diff[i], opr_1[i], -F::BaseField::ONE);
+            circuit_builder.add(diff[i], opr_0[i], Ext::BaseField::ONE);
+            circuit_builder.add(diff[i], opr_1[i], -Ext::BaseField::ONE);
             circuit_builder.assert_const(diff[i], 0);
         }
         Ok(())
@@ -121,9 +115,11 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{ChipHandler, UInt, UIntCmp};
+    use crate::structs::{ChipChallenges, ROMHandler};
+
+    use super::{UInt, UIntCmp};
     use goldilocks::Goldilocks;
-    use simple_frontend::structs::{ChallengeId, CircuitBuilder};
+    use simple_frontend::structs::CircuitBuilder;
 
     #[test]
     fn test_lt() {
@@ -140,7 +136,7 @@ mod test {
         let operand_0 = Uint256_63::try_from(vec![0, 1, 2, 3, 4]);
         let operand_1 = Uint256_63::try_from(vec![5, 6, 7, 8, 9]);
         let witness: Vec<usize> = (10..35).collect();
-        let mut range_chip_handler = ChipHandler::new(100 as ChallengeId);
+        let mut range_chip_handler = ROMHandler::new(&ChipChallenges::default());
         let result = UIntCmp::<Uint256_63>::lt(
             &mut circuit_builder,
             &mut range_chip_handler,

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use ark_std::iterable::Iterable;
 use gkr::{
     structs::{Circuit, LayerWitness},
     utils::ceil_log2,
@@ -7,9 +8,10 @@ use gkr::{
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
-use simple_frontend::structs::CircuitBuilder;
+use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::structs::{ChipChallenges, PCUInt, ROMType};
 
-use crate::{error::ZKVMError, instructions::ChipChallenges, utils::uint::PCUInt};
+use crate::error::ZKVMError;
 
 use super::ChipCircuitGadgets;
 
@@ -26,9 +28,17 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
     let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
     let rlc = circuit_builder.create_ext_cell();
-    let mut items = pc_cells.clone();
-    items.extend(bytecode_cells.clone());
-    circuit_builder.rlc(&rlc, &items, challenges.bytecode());
+    let mut items = vec![MixedCell::Constant(F::BaseField::from(
+        ROMType::Bytecode as u64,
+    ))];
+    items.extend(pc_cells.iter().map(|x| MixedCell::Cell(*x)).collect_vec());
+    items.extend(
+        bytecode_cells
+            .iter()
+            .map(|x| MixedCell::Cell(*x))
+            .collect_vec(),
+    );
+    circuit_builder.rlc_mixed(&rlc, &items, challenges.bytecode());
 
     circuit_builder.configure();
     let bytecode_circuit = Arc::new(Circuit::new(&circuit_builder));

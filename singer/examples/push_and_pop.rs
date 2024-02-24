@@ -1,8 +1,6 @@
 use goldilocks::Goldilocks;
-use singer::{
-    chips::SingerChipBuilder, instructions::ChipChallenges, SingerCircuitBuilder,
-    SingerGraphBuilder,
-};
+use singer::{chips::SingerChipBuilder, SingerCircuitBuilder, SingerGraphBuilder};
+use singer_utils::structs::ChipChallenges;
 
 fn main() {
     let chip_challenges = ChipChallenges::default();

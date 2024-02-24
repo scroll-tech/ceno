@@ -1,22 +1,16 @@
-use std::sync::Arc;
-use strum::IntoEnumIterator;
-
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
 use simple_frontend::structs::CircuitBuilder;
-
-use crate::{
-    component::{
-        ChipChallenges, ChipType, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst,
-    },
-    error::ZKVMError,
-    utils::{
-        add_assign_each_cell,
-        uint::{StackUInt, TSUInt},
-    },
-};
+use singer_utils::structs::{ChipChallenges, StackUInt, TSUInt};
+use std::sync::Arc;
+use strum::IntoEnumIterator;
 
 use super::{Instruction, InstructionGraph};
+use crate::{
+    component::{ChipType, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
+    error::ZKVMError,
+    utils::add_assign_each_cell,
+};
 
 pub struct JumpInstruction;
 

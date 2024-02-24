@@ -4,21 +4,18 @@ use gkr_graph::structs::{NodeOutputType, PredType};
 use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::{
+    chip_handler::{
+        BytecodeChipOperations, GlobalStateChipOperations, MemoryChipOperations, OAMOperations,
+        ROMOperations, RangeChipOperations, StackChipOperations,
+    },
+    constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
+    structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::{UIntAddSub, UIntCmp},
+};
 use std::{mem, sync::Arc};
 
-use crate::{
-    constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
-    error::ZKVMError,
-    utils::{
-        add_assign_each_cell,
-        chip_handler::{
-            BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, MemoryChipOperations,
-            RangeChipOperations, StackChipOperations,
-        },
-        uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
-    },
-    CircuitWiresIn, SingerParams,
-};
+use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
@@ -125,11 +122,8 @@ impl Instruction for MstoreInstruction {
     ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut global_state_in_handler = ChipHandler::new(challenges.global_state());
-        let mut global_state_out_handler = ChipHandler::new(challenges.global_state());
-        let mut bytecode_chip_handler = ChipHandler::new(challenges.bytecode());
-        let mut stack_pop_handler = ChipHandler::new(challenges.stack());
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
+        let mut ram_handler = RAMHandler::new(&challenges);
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -139,7 +133,7 @@ impl Instruction for MstoreInstruction {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        global_state_in_handler.state_in(
+        ram_handler.state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -148,19 +142,15 @@ impl Instruction for MstoreInstruction {
             clk,
         );
 
-        let next_pc = ChipHandler::add_pc_const(
-            &mut circuit_builder,
-            &pc,
-            1,
-            &phase0[Self::phase0_pc_add()],
-        )?;
-        let next_memory_ts = range_chip_handler.add_ts_with_const(
+        let next_pc =
+            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        let next_memory_ts = rom_handler.add_ts_with_const(
             &mut circuit_builder,
             &memory_ts,
             1,
             &phase0[Self::phase0_memory_ts_add()],
         )?;
-        global_state_out_handler.state_out(
+        ram_handler.state_out(
             &mut circuit_builder,
             next_pc.values(),
             stack_ts.values(),
@@ -169,7 +159,7 @@ impl Instruction for MstoreInstruction {
             clk_expr.add(F::BaseField::ONE),
         );
 
-        range_chip_handler.range_check_stack_top(
+        rom_handler.range_check_stack_top(
             &mut circuit_builder,
             stack_top_expr.sub(F::BaseField::from(2)),
         )?;
@@ -179,12 +169,12 @@ impl Instruction for MstoreInstruction {
         let old_stack_ts_offset = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_offset()])?;
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
-            &mut range_chip_handler,
+            &mut rom_handler,
             &old_stack_ts_offset,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_offset()],
         )?;
-        stack_pop_handler.stack_pop(
+        ram_handler.stack_pop(
             &mut circuit_builder,
             stack_top_expr.sub(F::BaseField::ONE),
             old_stack_ts_offset.values(),
@@ -193,18 +183,18 @@ impl Instruction for MstoreInstruction {
 
         // Pop mem_bytes from stack
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
-        range_chip_handler.range_check_bytes(&mut circuit_builder, mem_bytes)?;
+        rom_handler.range_check_bytes(&mut circuit_builder, mem_bytes)?;
 
         let mem_value = StackUInt::from_bytes_big_endien(&mut circuit_builder, &mem_bytes)?;
         let old_stack_ts_value = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_value()])?;
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
-            &mut range_chip_handler,
+            &mut rom_handler,
             &old_stack_ts_value,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_value()],
         )?;
-        stack_pop_handler.stack_pop(
+        ram_handler.stack_pop(
             &mut circuit_builder,
             stack_top_expr.sub(F::BaseField::from(2)),
             old_stack_ts_value.values(),
@@ -212,11 +202,7 @@ impl Instruction for MstoreInstruction {
         );
 
         // Bytecode check for (pc, mstore)
-        bytecode_chip_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            pc.values(),
-            Self::OPCODE,
-        );
+        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
 
         // To accessory
         let (to_acc_dup_id, to_acc_dup) =
@@ -236,29 +222,11 @@ impl Instruction for MstoreInstruction {
             .create_witness_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
         add_assign_each_cell(&mut circuit_builder, &to_acc_ooo, mem_bytes);
 
-        let global_state_in_id = global_state_in_handler
-            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let global_state_out_id = global_state_out_handler
-            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let bytecode_chip_id =
-            bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let stack_pop_id =
-            stack_pop_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-
+        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
-        let outputs_wire_id = [
-            Some(global_state_in_id),
-            Some(global_state_out_id),
-            Some(bytecode_chip_id),
-            Some(stack_pop_id),
-            None,
-            Some(range_chip_id),
-            None,
-            None,
-            None,
-        ];
+        let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
@@ -306,9 +274,8 @@ impl Instruction for MstoreAccessory {
         // From witness.
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
-        let mut memory_load_handler = ChipHandler::new(challenges.mem());
-        let mut memory_store_handler = ChipHandler::new(challenges.mem());
+        let mut ram_handler = RAMHandler::new(&challenges);
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         // Compute offset, offset + 1, ..., offset + EVM_STACK_BYTE_WIDTH - 1.
         // Load previous memory bytes.
@@ -320,14 +287,14 @@ impl Instruction for MstoreAccessory {
         let delta = circuit_builder.create_counter_in(0)[0];
         let offset_plus_delta = UIntAddSub::<StackUInt>::add_small(
             &mut circuit_builder,
-            &mut range_chip_handler,
+            &mut rom_handler,
             &offset,
             delta,
             offset_add_delta,
         )?;
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
-            &mut range_chip_handler,
+            &mut rom_handler,
             &old_memory_ts,
             &memory_ts,
             old_memory_ts_lt,
@@ -335,37 +302,20 @@ impl Instruction for MstoreAccessory {
 
         let mem_byte = pred_ooo[Self::pred_ooo_mem_bytes().start];
         let prev_mem_byte = phase0[Self::phase0_prev_mem_bytes().start];
-        memory_load_handler.mem_load(
+        ram_handler.mem_store(
             &mut circuit_builder,
             offset_plus_delta.values(),
             old_memory_ts.values(),
-            prev_mem_byte,
-        );
-        memory_store_handler.mem_store(
-            &mut circuit_builder,
-            offset_plus_delta.values(),
             memory_ts.values(),
+            prev_mem_byte,
             mem_byte,
         );
 
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let memory_load_id =
-            memory_load_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let memory_store_id =
-            memory_store_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let outputs_wire_id = [
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(range_chip_id),
-            Some(memory_load_id),
-            Some(memory_store_id),
-            None,
-        ];
-
+        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
+
+        let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),

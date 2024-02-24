@@ -2,9 +2,7 @@
 #![feature(const_trait_impl)]
 
 use basic_block::SingerBasicBlockBuilder;
-use chips::LookupChipType;
 use chips::SingerChipBuilder;
-use component::ChipChallenges;
 use component::ChipType;
 use error::ZKVMError;
 use gkr::structs::LayerWitness;
@@ -13,6 +11,7 @@ use gkr_graph::structs::CircuitGraphBuilder;
 use gkr_graph::structs::CircuitGraphWitness;
 use gkr_graph::structs::NodeOutputType;
 use goldilocks::SmallField;
+use singer_utils::structs::ChipChallenges;
 use std::mem;
 
 #[macro_use]
@@ -21,7 +20,6 @@ mod macros;
 pub mod basic_block;
 pub mod chips;
 pub mod component;
-pub mod constants;
 pub mod error;
 pub mod instructions;
 pub mod scheme;
@@ -101,16 +99,10 @@ impl<F: SmallField> SingerGraphBuilder<F> {
         let mut output_wires_id = self.chip_builder.output_wires_id;
 
         let singer_wire_out_id = SingerWiresOutID {
-            global_state_in: mem::take(&mut output_wires_id[ChipType::GlobalStateIn as usize]),
-            global_state_out: mem::take(&mut output_wires_id[ChipType::GlobalStateOut as usize]),
-            bytecode_chip_input: mem::take(&mut output_wires_id[ChipType::BytecodeChip as usize]),
-            bytecode_chip_table: table_out_node_id[LookupChipType::BytecodeChip as usize],
-            stack_push: mem::take(&mut output_wires_id[ChipType::StackPush as usize]),
-            stack_pop: mem::take(&mut output_wires_id[ChipType::StackPop as usize]),
-            range_chip_input: mem::take(&mut output_wires_id[ChipType::RangeChip as usize]),
-            range_chip_table: table_out_node_id[LookupChipType::RangeChip as usize],
-            calldata_chip_input: mem::take(&mut output_wires_id[ChipType::CalldataChip as usize]),
-            calldata_chip_table: table_out_node_id[LookupChipType::CalldataChip as usize],
+            ram_load: mem::take(&mut output_wires_id[ChipType::RAMLoad as usize]),
+            ram_store: mem::take(&mut output_wires_id[ChipType::RAMStore as usize]),
+            rom_input: mem::take(&mut output_wires_id[ChipType::ROMInput as usize]),
+
             public_output_size: self.public_output_size,
         };
 
@@ -143,16 +135,9 @@ pub struct SingerWiresIn<F: SmallField> {
 
 #[derive(Clone, Debug)]
 pub struct SingerWiresOutID {
-    global_state_in: Vec<NodeOutputType>,
-    global_state_out: Vec<NodeOutputType>,
-    bytecode_chip_input: Vec<NodeOutputType>,
-    bytecode_chip_table: NodeOutputType,
-    stack_push: Vec<NodeOutputType>,
-    stack_pop: Vec<NodeOutputType>,
-    range_chip_input: Vec<NodeOutputType>,
-    range_chip_table: NodeOutputType,
-    calldata_chip_input: Vec<NodeOutputType>,
-    calldata_chip_table: NodeOutputType,
+    ram_load: Vec<NodeOutputType>,
+    ram_store: Vec<NodeOutputType>,
+    rom_input: Vec<NodeOutputType>,
 
     public_output_size: Option<NodeOutputType>,
 }

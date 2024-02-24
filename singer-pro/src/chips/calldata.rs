@@ -7,9 +7,10 @@ use gkr::{
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
-use simple_frontend::structs::CircuitBuilder;
+use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::structs::{ChipChallenges, ROMType, StackUInt};
 
-use crate::{component::ChipChallenges, utils::uint::StackUInt, ZKVMError};
+use crate::error::ZKVMError;
 
 use super::ChipCircuitGadgets;
 
@@ -26,9 +27,17 @@ pub(crate) fn construct_calldata_table<F: SmallField>(
     let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
     let rlc = circuit_builder.create_ext_cell();
-    let mut items = id_cells.clone();
-    items.extend(calldata_cells.clone());
-    circuit_builder.rlc(&rlc, &items, challenges.calldata());
+    let mut items = vec![MixedCell::Constant(F::BaseField::from(
+        ROMType::Calldata as u64,
+    ))];
+    items.extend(id_cells.iter().map(|x| MixedCell::Cell(*x)).collect_vec());
+    items.extend(
+        calldata_cells
+            .iter()
+            .map(|x| MixedCell::Cell(*x))
+            .collect_vec(),
+    );
+    circuit_builder.rlc_mixed(&rlc, &items, challenges.calldata());
 
     circuit_builder.configure();
     let calldata_circuit = Arc::new(Circuit::new(&circuit_builder));

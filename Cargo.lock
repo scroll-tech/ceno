@@ -591,6 +591,7 @@ dependencies = [
  "rayon",
  "serde",
  "simple-frontend",
+ "singer-utils",
  "strum",
  "strum_macros",
  "transcript",
@@ -610,9 +611,22 @@ dependencies = [
  "rayon",
  "serde",
  "simple-frontend",
+ "singer-utils",
  "strum",
  "strum_macros",
  "transcript",
+]
+
+[[package]]
+name = "singer-utils"
+version = "0.1.0"
+dependencies = [
+ "ff",
+ "gkr",
+ "gkr-graph",
+ "goldilocks",
+ "itertools 0.12.1",
+ "simple-frontend",
 ]
 
 [[package]]

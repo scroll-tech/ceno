@@ -1,21 +1,20 @@
-use std::mem;
-use std::sync::Arc;
-
 use gkr::structs::{Circuit, LayerWitness};
 use gkr::utils::ceil_log2;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use simple_frontend::structs::WitnessId;
+use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
+use singer_utils::structs::ChipChallenges;
+use std::mem;
+use std::sync::Arc;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-use crate::chips::bytecode::construct_bytecode_table;
-use crate::chips::calldata::construct_calldata_table;
 use crate::component::{ChipType, ToChipsWires};
-use crate::constants::RANGE_CHIP_BIT_WIDTH;
 use crate::error::ZKVMError;
-use crate::ChipChallenges;
 
+use self::bytecode::construct_bytecode_table;
+use self::calldata::construct_calldata_table;
 use self::circuit_gadgets::{LeafCircuit, LeafFracSumCircuit, LeafFracSumNoSelectorCircuit};
 use self::range::construct_range_table;
 
@@ -84,14 +83,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
         };
 
         // Set equality argument
-        for output_type in [
-            ChipType::GlobalStateIn,
-            ChipType::GlobalStateOut,
-            ChipType::StackPop,
-            ChipType::StackPush,
-            ChipType::MemoryLoad,
-            ChipType::MemoryStore,
-        ] {
+        for output_type in [ChipType::RAMLoad, ChipType::RAMStore] {
             if let Some((id, num)) = to_chip_ids[output_type as usize] {
                 let out = build(
                     n_instances,
@@ -105,11 +97,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
         }
 
         // Lookup argument
-        for output_type in [
-            ChipType::BytecodeChip,
-            ChipType::CalldataChip,
-            ChipType::RangeChip,
-        ] {
+        for output_type in [ChipType::ROMInput] {
             if let Some((id, num)) = to_chip_ids[output_type as usize] {
                 let out = build(
                     n_instances,

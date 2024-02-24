@@ -3,12 +3,12 @@ use std::{collections::HashSet, mem};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
+use singer_utils::{constants::OpcodeType, structs::ChipChallenges};
 
 use crate::{
     basic_block::bb_ret::{BBReturnRestMemLoad, BBReturnRestMemStore},
     chips::SingerChipBuilder,
-    component::{AccessoryCircuit, BBFinalCircuit, BBStartCircuit, ChipChallenges},
-    constants::OpcodeType,
+    component::{AccessoryCircuit, BBFinalCircuit, BBStartCircuit},
     error::ZKVMError,
     instructions::{insts_graph_method, SingerInstCircuitBuilder},
     BasicBlockWiresIn, SingerParams,

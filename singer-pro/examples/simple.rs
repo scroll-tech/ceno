@@ -1,9 +1,9 @@
-use gkr_graph::structs::CircuitGraphBuilder;
 use goldilocks::GoldilocksExt2;
 use singer_pro::{
-    basic_block::SingerBasicBlockBuilder, chips::SingerChipBuilder, component::ChipChallenges,
-    instructions::SingerInstCircuitBuilder, SingerGraphBuilder, SingerWitness,
+    basic_block::SingerBasicBlockBuilder, chips::SingerChipBuilder,
+    instructions::SingerInstCircuitBuilder, SingerGraphBuilder,
 };
+use singer_utils::structs::ChipChallenges;
 
 fn main() {
     let challenges = ChipChallenges::default();
