@@ -74,15 +74,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point`.
     pub fn fix_variables_in_place(&mut self, partial_point: &[F]) {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars,
-            "invalid size of partial point"
-        );
-        // evaluate single variable of partial point from left to right
-        for point in partial_point {
-            self.fix_one_variable_in_place_helper(point);
-        }
+        fix_variables_in_place(&mut self.evaluations, &mut self.num_vars, partial_point)
     }
 
     /// Helper function. Fix 1 variable.
@@ -91,21 +83,6 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
             .with_min_len(64)
             .map(|data| *point * (data[1] - data[0]) + data[0])
             .collect()
-    }
-
-    /// Helper function. Fix 1 variable.
-    fn fix_one_variable_in_place_helper(&mut self, point: &F) {
-        let new_length = 1 << (self.num_vars - 1);
-        self.evaluations
-            .par_chunks_mut(2)
-            .with_min_len(64)
-            .for_each(|data| data[0] = *point * (data[1] - data[0]) + data[0]);
-
-        for i in 1..new_length {
-            self.evaluations[i] = self.evaluations[i * 2]
-        }
-        self.num_vars -= 1;
-        self.evaluations.resize(new_length, F::default());
     }
 
     /// Generate a random evaluation of a multilinear poly
@@ -184,4 +161,40 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
             num_vars: self.num_vars,
         }
     }
+}
+
+pub fn fix_variables_in_place<F: SmallField>(
+    slice: &mut Vec<F>,
+    num_vars: &mut usize,
+    partial_point: &[F],
+) {
+    // TODO: return error.
+    assert!(
+        partial_point.len() <= *num_vars,
+        "invalid size of partial point"
+    );
+    // evaluate single variable of partial point from left to right
+    for point in partial_point {
+        fix_one_variable_in_place_helper(slice, num_vars, point);
+    }
+}
+
+/// Helper function. Fix 1 variable.
+fn fix_one_variable_in_place_helper<F: SmallField>(
+    slice: &mut Vec<F>,
+    num_vars: &mut usize,
+    point: &F,
+) {
+    let new_length = 1 << (*num_vars - 1);
+    slice
+        .par_chunks_mut(2)
+        .with_min_len(64)
+        .for_each(|data| data[0] = *point * (data[1] - data[0]) + data[0]);
+
+    for i in 1..new_length {
+        slice[i] = slice[i * 2]
+    }
+
+    slice.resize(new_length, F::default());
+    *num_vars -= 1;
 }

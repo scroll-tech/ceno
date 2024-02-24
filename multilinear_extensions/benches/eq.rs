@@ -96,8 +96,8 @@ fn bench_fix_points(c: &mut Criterion) {
 
     for nv in RANGE {
         let mle = DenseMultilinearExtension::<GoldilocksExt2>::random(nv, &mut rng);
-        let y = &y[..nv];
 
+        let y = &y[..nv];
         let id = BenchmarkId::new("fix variable in place", y.len());
         c.bench_with_input(id, &y, |b, y| {
             b.iter(|| {

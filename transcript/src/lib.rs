@@ -2,8 +2,6 @@
 //! Transcript APIs are placeholders; the actual logic is to be implemented later.
 #![feature(generic_arg_infer)]
 
-mod hasher;
-
 use goldilocks::SmallField;
 use poseidon::Poseidon;
 

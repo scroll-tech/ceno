@@ -1,7 +1,9 @@
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use multilinear_extensions::virtual_poly::VPAuxInfo;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use transcript::{Challenge, Transcript};
 
 use crate::{
