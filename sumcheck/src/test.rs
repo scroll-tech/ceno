@@ -26,7 +26,7 @@ fn test_sumcheck<F: SmallField>(
         &mut rng,
     );
     let proof = IOPProverState::<F>::prove_base_poly(&poly, &mut transcript);
-    let poly_info = poly.aux_info.clone();
+    let poly_info = &poly.aux_info;
     let poly_ext = poly.to_ext_field();
 
     let mut transcript = Transcript::new(b"test");
@@ -61,7 +61,7 @@ fn test_sumcheck_internal<F: SmallField>(
         num_products,
         &mut rng,
     );
-    let poly_info = poly.aux_info.clone();
+    let poly_info = &poly.aux_info;
     let mut prover_state = IOPProverState::prover_init(&poly);
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
     let mut challenge = None;

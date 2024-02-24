@@ -1,7 +1,7 @@
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use multilinear_extensions::virtual_poly::VPAuxInfo;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use transcript::{Challenge, Transcript};
 
 use crate::{
@@ -125,9 +125,8 @@ impl<F: SmallField> IOPVerifierState<F> {
 
         let mut expected_vec = self
             .polynomials_received
-            .clone()
-            .into_par_iter()
-            .zip(self.challenges.clone().into_par_iter())
+            .par_iter()
+            .zip(self.challenges.par_iter())
             .map(|(evaluations, challenge)| {
                 if evaluations.len() != self.max_degree + 1 {
                     panic!(

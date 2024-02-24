@@ -11,6 +11,19 @@ use crate::{
 };
 
 #[test]
+fn test_fix_variables() {
+    let mut rng = test_rng();
+    for nv in 2..10 {
+        let mut mle = DenseMultilinearExtension::<F>::random(nv, &mut rng);
+        let mle2 = mle.clone();
+        let point = (0..nv).map(|_| F::random(&mut rng)).collect::<Vec<_>>();
+        mle.fix_variables_in_place(&point);
+        let eval = mle2.fix_variables(&point);
+        assert_eq!(mle, eval)
+    }
+}
+
+#[test]
 fn test_virtual_polynomial_additions() {
     let mut rng = test_rng();
     for nv in 2..5 {

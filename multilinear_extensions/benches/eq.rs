@@ -2,6 +2,7 @@ use ark_std::test_rng;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ff::Field;
 use goldilocks::GoldilocksExt2;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 use rayon::prelude::*;
 use std::ops::Range;
 
@@ -62,7 +63,7 @@ fn eq_old<F: Field>(r: &[F]) -> Vec<F> {
     }
 }
 
-fn criterion_benchmark(c: &mut Criterion) {
+fn bench_eq(c: &mut Criterion) {
     const RANGE: Range<usize> = 16..23;
 
     let mut rng = test_rng();
@@ -85,5 +86,35 @@ fn criterion_benchmark(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, criterion_benchmark);
+fn bench_fix_points(c: &mut Criterion) {
+    const RANGE: Range<usize> = 16..23;
+
+    let mut rng = test_rng();
+    let y = std::iter::repeat_with(|| GoldilocksExt2::random(&mut rng))
+        .take(RANGE.end)
+        .collect::<Vec<_>>();
+
+    for nv in RANGE {
+        let mle = DenseMultilinearExtension::<GoldilocksExt2>::random(nv, &mut rng);
+        let y = &y[..nv];
+
+        let id = BenchmarkId::new("fix variable in place", y.len());
+        c.bench_with_input(id, &y, |b, y| {
+            b.iter(|| {
+                let mut mle2 = mle.clone();
+                mle2.fix_variables_in_place(black_box(y));
+            })
+        });
+
+        let id = BenchmarkId::new("fix variable", y.len());
+        c.bench_with_input(id, &y, |b, y| {
+            b.iter(|| {
+                let mle2 = mle.clone();
+                mle2.fix_variables(black_box(y))
+            })
+        });
+    }
+}
+
+criterion_group!(benches, bench_fix_points, bench_eq,);
 criterion_main!(benches);
