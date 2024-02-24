@@ -14,7 +14,6 @@ use crate::{
     constants::RANGE_CHIP_BIT_WIDTH,
     error::ZKVMError,
     instructions::{ChipChallenges, InstOutputType},
-    WirsInValues,
 };
 
 use self::{
@@ -139,7 +138,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
         graph_builder: &mut CircuitGraphBuilder<F>,
         bytecode: &[u8],
         program_input: &[u8],
-        mut table_count_witness: Vec<WirsInValues<F::BaseField>>,
+        mut table_count_witness: Vec<LayerWitness<F::BaseField>>,
         challenges: &ChipChallenges,
         real_challenges: &[F],
     ) -> Result<Vec<NodeOutputType>, ZKVMError> {
@@ -153,7 +152,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
             preds[leaf.cond_id as usize] = selector_pred;
             let mut sources = vec![LayerWitness::default(); 3];
             sources[leaf.input_num_id as usize].instances =
-                mem::take(&mut table_count_witness[table_type as usize]);
+                mem::take(&mut table_count_witness[table_type as usize].instances);
             (preds, sources)
         };
 
@@ -197,7 +196,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
             preds[leaf.input_den_id as usize] = table_pred;
             let mut sources = vec![LayerWitness::default(); 3];
             sources[leaf.input_num_id as usize].instances =
-                mem::take(&mut table_count_witness[table_type as usize]);
+                mem::take(&mut table_count_witness[table_type as usize].instances);
             (preds, sources)
         };
         let (input_pred, instance_num_vars) = construct_range_table(

@@ -174,7 +174,7 @@ pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 #[derive(Clone, Debug, Default)]
 pub struct SingerWiresIn<F: SmallField> {
     instructions: Vec<InstWiresIn<F>>,
-    table_count: Vec<WirsInValues<F>>,
+    table_count: Vec<LayerWitness<F>>,
 }
 
 impl<F: SmallField> SingerWiresIn<F> {
@@ -223,7 +223,3 @@ pub struct InstWiresIn<F: SmallField> {
     pub real_n_instances: usize,
     pub wires_in: Vec<CircuitWiresIn<F>>,
 }
-
-pub(crate) type WirsInValues<F> = Vec<Vec<F>>;
-// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
-pub(crate) type CircuitWiresInValues<F> = Vec<WirsInValues<F>>;
