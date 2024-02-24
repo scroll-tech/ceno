@@ -73,8 +73,8 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
         circuit_witness
     };
     println!("circuit witness: {:?}", circuit_witness);
-    // use of check_correctness will panic
-    //circuit_witness.check_correctness(&circuit);
+
+    circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
@@ -102,7 +102,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
 
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];
-    let instance_num_vars = 1_u32.ilog2() as usize;
+    let instance_num_vars = 1_u32.next_power_of_two().ilog2() as usize;
     for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
         let lo_num_vars = wits_out[wire_out_id as usize].instances[0]
             .len()
@@ -229,8 +229,8 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
         circuit_witness
     };
     println!("circuit witness: {:?}", circuit_witness);
-    // use of check_correctness will panic
-    //circuit_witness.check_correctness(&circuit);
+
+    circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
@@ -253,13 +253,13 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
 
     // add prover-verifier process
     let mut prover_transcript =
-        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_u256");
     let mut verifier_transcript =
-        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_u256");
 
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];
-    let instance_num_vars = 1_u32.ilog2() as usize;
+    let instance_num_vars = 1_u32.next_power_of_two().ilog2() as usize;
     for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
         let lo_num_vars = wits_out[wire_out_id as usize].instances[0]
             .len()
@@ -271,14 +271,14 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
             .mle(lo_num_vars, instance_num_vars);
         let prover_output_point = iter::repeat_with(|| {
             prover_transcript
-                .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
+                .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_u256")
                 .elements
         })
         .take(output_mle.num_vars)
         .collect_vec();
         let verifier_output_point = iter::repeat_with(|| {
             verifier_transcript
-                .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
+                .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_u256")
                 .elements
         })
         .take(output_mle.num_vars)
@@ -293,7 +293,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     }
 
     let start = std::time::Instant::now();
-    let _proof = IOPProverState::prove_parallel(
+    let (_proof, _) = IOPProverState::prove_parallel(
         &circuit,
         &circuit_witness,
         vec![],
@@ -302,21 +302,24 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     );
     let proof_time: Duration = start.elapsed();
 
+    // verifier will panic here
     /*
-    // verifier panics due to mismatch of number of variables
     let start = std::time::Instant::now();
     let _claim = IOPVerifierState::verify_parallel(
         &circuit,
         &[],
-        &[],
-        &verifier_wires_out_evals,
-        &proof,
+        vec![],
+        verifier_wires_out_evals,
+        proof,
         instance_num_vars,
         &mut verifier_transcript,
-    ).unwrap();
+    )
+    .unwrap();
     let verification_time: Duration = start.elapsed();
 
-    println!("proof time: {:?}, verification time: {:?}", proof_time, verification_time);
-    */
-    println!("proof time: {:?}", proof_time);
+    println!(
+        "proof time: {:?}, verification time: {:?}",
+        proof_time, verification_time
+    ); */
+    println!("proof time: {:?}", proof_time,);
 }
