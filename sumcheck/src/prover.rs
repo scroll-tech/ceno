@@ -83,7 +83,7 @@ impl<F: SmallField> IOPProverState<F> {
         Self {
             challenges: Vec::with_capacity(polynomial.aux_info.num_variables),
             round: 0,
-            poly: polynomial.clone(),
+            poly: polynomial.deep_clone(),
             extrapolation_aux: (1..polynomial.aux_info.max_degree)
                 .map(|degree| {
                     let points = (0..1 + degree as u64).map(F::from).collect::<Vec<_>>();
@@ -130,9 +130,8 @@ impl<F: SmallField> IOPProverState<F> {
 
             self.poly
                 .flattened_ml_extensions
-                .iter()
-                .map(|x| x.borrow_mut().fix_variables_in_place(&[r.elements]));
-            // .for_each(|mle| mle.fix_variables_in_place(&[r.elements]));
+                .par_iter_mut()
+                .for_each(|x| x.fix_variables_in_place(&[r.elements]));
         } else if self.round > 0 {
             panic!("verifier message is empty");
         }
@@ -160,8 +159,10 @@ impl<F: SmallField> IOPProverState<F> {
                         buf.iter_mut()
                             .zip(products.iter())
                             .for_each(|((eval, step), f)| {
-                                let table =
-                                    &self.poly.flattened_ml_extensions[*f].borrow().evaluations;
+                                let table = &self.poly.flattened_ml_extensions[*f]
+                                    .evaluations
+                                    .lock()
+                                    .unwrap();
                                 *eval = table[b << 1];
                                 *step = table[(b << 1) + 1] - table[b << 1];
                             });

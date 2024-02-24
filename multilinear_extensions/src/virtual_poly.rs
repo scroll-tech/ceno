@@ -102,6 +102,20 @@ impl<F: SmallField> Add for &VirtualPolynomial<F> {
 
 // TODO: convert this into a trait
 impl<F: SmallField> VirtualPolynomial<F> {
+    /// Deep clone a Virtual polynomial.
+    pub fn deep_clone(&self) -> Self {
+        Self {
+            aux_info: self.aux_info.clone(),
+            products: self.products.clone(),
+            flattened_ml_extensions: self
+                .flattened_ml_extensions
+                .iter()
+                .map(|x| x.deep_clone())
+                .collect(),
+            raw_pointers_lookup_table: self.raw_pointers_lookup_table.clone(),
+        }
+    }
+
     /// Creates an empty virtual polynomial with `num_variables`.
     pub fn new(num_variables: usize) -> Self {
         VirtualPolynomial {
