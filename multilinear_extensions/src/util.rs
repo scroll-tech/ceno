@@ -8,3 +8,12 @@ pub fn bit_decompose(input: u64, num_var: usize) -> Vec<bool> {
     }
     res
 }
+
+pub(crate) fn index_of<T: PartialEq>(slice: &[T], target: &T) -> Option<usize> {
+    for (index, item) in slice.iter().enumerate() {
+        if target == item {
+            return Some(index);
+        }
+    }
+    None
+}

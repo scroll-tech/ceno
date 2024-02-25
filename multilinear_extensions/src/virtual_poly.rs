@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::mle::DenseMultilinearExtension;
-use crate::util::bit_decompose;
+use crate::util::{bit_decompose, index_of};
 
 #[rustfmt::skip]
 /// A virtual polynomial is a sum of products of multilinear polynomials;
@@ -49,8 +49,8 @@ pub struct VirtualPolynomial<F> {
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
     pub flattened_ml_extensions: Vec<DenseMultilinearExtension<F>>,
-    /// Pointers to the above poly extensions
-    raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<F>, usize>,
+    /// Stores the indices the MLEs exist in the vp.
+    pub mle_index: Vec<usize>
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,9 +110,9 @@ impl<F: SmallField> VirtualPolynomial<F> {
             flattened_ml_extensions: self
                 .flattened_ml_extensions
                 .iter()
-                .map(|x| x.deep_clone())
+                .map(|mle| mle.deep_clone())
                 .collect(),
-            raw_pointers_lookup_table: self.raw_pointers_lookup_table.clone(),
+            mle_index: self.mle_index.clone(),
         }
     }
 
@@ -126,7 +126,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             },
             products: Vec::new(),
             flattened_ml_extensions: Vec::new(),
-            raw_pointers_lookup_table: HashMap::new(),
+            mle_index: Vec::new(),
         }
     }
 
@@ -146,7 +146,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             // here `0` points to the first polynomial of `flattened_ml_extensions`
             products: vec![(coefficient, vec![0])],
             flattened_ml_extensions: vec![mle.clone()],
-            raw_pointers_lookup_table: hm,
+            mle_index: vec![0],
         }
     }
 
@@ -175,14 +175,14 @@ impl<F: SmallField> VirtualPolynomial<F> {
                 mle.num_vars, self.aux_info.num_variables
             );
 
-            let mle_ptr: *const DenseMultilinearExtension<F> = &mle;
-            if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
-                indexed_product.push(*index)
-            } else {
-                let curr_index = self.flattened_ml_extensions.len();
-                self.flattened_ml_extensions.push(mle.clone());
-                self.raw_pointers_lookup_table.insert(mle_ptr, curr_index);
-                indexed_product.push(curr_index);
+            match index_of(self.flattened_ml_extensions.as_ref(), &mle) {
+                Some(index) => indexed_product.push(index),
+                None => {
+                    let curr_index = self.flattened_ml_extensions.len();
+                    self.flattened_ml_extensions.push(mle.clone());
+                    self.mle_index.push(curr_index);
+                    indexed_product.push(curr_index);
+                }
             }
         }
         self.products.push((coefficient, indexed_product));
@@ -201,16 +201,13 @@ impl<F: SmallField> VirtualPolynomial<F> {
             mle.num_vars, self.aux_info.num_variables
         );
 
-        let mle_ptr: *const DenseMultilinearExtension<F> = &mle;
-
-        // check if this mle already exists in the virtual polynomial
-        let mle_index = match self.raw_pointers_lookup_table.get(&mle_ptr) {
-            Some(&p) => p,
+        let mle_index = match index_of(self.flattened_ml_extensions.as_ref(), &mle) {
+            Some(index) => index,
             None => {
-                self.raw_pointers_lookup_table
-                    .insert(mle_ptr, self.flattened_ml_extensions.len());
-                self.flattened_ml_extensions.push(mle);
-                self.flattened_ml_extensions.len() - 1
+                let curr_index = self.flattened_ml_extensions.len();
+                self.flattened_ml_extensions.push(mle.clone());
+                self.mle_index.push(curr_index);
+                curr_index
             }
         };
 
@@ -242,7 +239,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
         let evals: Vec<F> = self
             .flattened_ml_extensions
             .iter()
-            .map(|x| x.evaluate(point))
+            .map(|mle| mle.evaluate(point))
             .collect();
 
         let res = self
@@ -350,23 +347,16 @@ impl<F: SmallField> VirtualPolynomial<F> {
             .collect();
 
         let mut flattened_ml_extensions = vec![];
-        let mut hm = HashMap::new();
         for mle in self.flattened_ml_extensions.iter() {
-            let mle_ptr: *const DenseMultilinearExtension<F> = mle;
-            let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
-
             let mle_ext_field = mle.to_ext_field();
-            let mle_ext_field = mle_ext_field;
-            let mle_ext_field_ptr: *const DenseMultilinearExtension<Ext> = &mle_ext_field;
             flattened_ml_extensions.push(mle_ext_field);
-            hm.insert(mle_ext_field_ptr, *index);
         }
         end_timer!(timer);
         VirtualPolynomial {
             aux_info,
             products,
             flattened_ml_extensions,
-            raw_pointers_lookup_table: hm,
+            mle_index: self.mle_index.clone(),
         }
     }
 }

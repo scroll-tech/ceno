@@ -61,6 +61,9 @@ fn test_virtual_polynomial_mul_by_mle() {
                 a.evaluate(base.as_ref()) * b_vp.evaluate(base.as_ref()),
                 c.evaluate(base.as_ref())
             );
+            println!("{:?}", a);
+            println!("{:?}", b_vp);
+            println!("{:?}", c);
         }
     }
 }
