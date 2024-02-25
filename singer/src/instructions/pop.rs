@@ -19,7 +19,7 @@ use crate::error::ZKVMError;
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 pub struct PopInstruction;
 
-impl InstructionGraph for PopInstruction {
+impl<F: SmallField> InstructionGraph<F> for PopInstruction {
     type InstType = Self;
 }
 
@@ -44,10 +44,8 @@ impl PopInstruction {
     const OPCODE: OpcodeType = OpcodeType::POP;
 }
 
-impl Instruction for PopInstruction {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for PopInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);

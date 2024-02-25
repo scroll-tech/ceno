@@ -6,14 +6,14 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{BytecodeChipOperations, ROMOperations},
+    chips::IntoEnumIterator,
     constants::OpcodeType,
-    structs::{ChipChallenges, PCUInt, ROMHandler, StackUInt, TSUInt},
+    structs::{ChipChallenges, InstOutChipType, PCUInt, ROMHandler, StackUInt, TSUInt},
 };
 use std::sync::Arc;
-use strum::IntoEnumIterator;
 
 use crate::{
-    component::{ChipType, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
+    component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
     error::ZKVMError,
     utils::add_assign_each_cell,
 };
@@ -93,10 +93,10 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
         let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::RAMLoad as usize] = None;
-        to_chip_ids[ChipType::RAMStore as usize] = None;
-        to_chip_ids[ChipType::ROMInput as usize] = rom_id;
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::RAMLoad as usize] = None;
+        to_chip_ids[InstOutChipType::RAMStore as usize] = None;
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         circuit_builder.configure();
 

@@ -20,7 +20,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct JumpInstruction;
 
-impl InstructionGraph for JumpInstruction {
+impl<F: SmallField> InstructionGraph<F> for JumpInstruction {
     type InstType = Self;
 }
 
@@ -44,10 +44,8 @@ impl JumpInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMP;
 }
 
-impl Instruction for JumpInstruction {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for JumpInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);

@@ -2,15 +2,16 @@ use std::{collections::HashSet, mem};
 
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
-use itertools::Itertools;
-use singer_utils::{constants::OpcodeType, structs::ChipChallenges};
+use itertools::{izip, Itertools};
+use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType, structs::ChipChallenges};
 
 use crate::{
     basic_block::bb_ret::{BBReturnRestMemLoad, BBReturnRestMemStore},
-    chips::SingerChipBuilder,
     component::{AccessoryCircuit, BBFinalCircuit, BBStartCircuit},
     error::ZKVMError,
-    instructions::{insts_graph_method, SingerInstCircuitBuilder},
+    instructions::{
+        construct_inst_graph, construct_inst_graph_and_witness, SingerInstCircuitBuilder,
+    },
     BasicBlockWiresIn, SingerParams,
 };
 
@@ -35,7 +36,7 @@ pub struct SingerBasicBlockBuilder<F: SmallField> {
 impl<F: SmallField> SingerBasicBlockBuilder<F> {
     pub fn new(
         inst_builder: SingerInstCircuitBuilder<F>,
-        bytecode: Vec<Vec<u8>>,
+        bytecode: &[Vec<u8>],
         challenges: ChipChallenges,
     ) -> Result<Self, ZKVMError> {
         let mut basic_blocks = Vec::new();
@@ -51,21 +52,40 @@ impl<F: SmallField> SingerBasicBlockBuilder<F> {
         })
     }
 
-    pub fn construct_gkr_graph(
+    pub fn construct_graph_and_witness(
         &self,
         graph_builder: &mut CircuitGraphBuilder<F>,
         chip_builder: &mut SingerChipBuilder<F>,
         mut bbs_wires_in: Vec<BasicBlockWiresIn<F::BaseField>>,
         real_challenges: &[F],
-        params: SingerParams,
+        params: &SingerParams,
     ) -> Result<(), ZKVMError> {
         for (bb, bb_wires_in) in self.basic_blocks.iter().zip(bbs_wires_in.iter_mut()) {
-            bb.construct_gkr_graph(
+            bb.construct_graph_and_witness(
                 graph_builder,
                 chip_builder,
                 &self.inst_builder,
                 mem::take(bb_wires_in),
                 real_challenges,
+                params,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn construct_graph(
+        &self,
+        graph_builder: &mut CircuitGraphBuilder<F>,
+        chip_builder: &mut SingerChipBuilder<F>,
+        real_n_instances: &[usize],
+        params: &SingerParams,
+    ) -> Result<(), ZKVMError> {
+        for (bb, real_n_instances) in izip!(self.basic_blocks.iter(), real_n_instances.iter()) {
+            bb.construct_graph(
+                graph_builder,
+                chip_builder,
+                &self.inst_builder,
+                *real_n_instances,
                 params,
             )?;
         }
@@ -100,7 +120,7 @@ pub struct BasicBlock<F: SmallField> {
 
 impl<F: SmallField> BasicBlock<F> {
     pub(crate) fn new(
-        bytecode: Vec<u8>,
+        bytecode: &[u8],
         pc_start: u64,
         challenges: ChipChallenges,
     ) -> Result<Self, ZKVMError> {
@@ -169,7 +189,7 @@ impl<F: SmallField> BasicBlock<F> {
             };
 
         Ok(BasicBlock {
-            bytecode,
+            bytecode: bytecode.to_vec(),
             info,
             bb_start_circuit,
             bb_final_circuit,
@@ -177,14 +197,14 @@ impl<F: SmallField> BasicBlock<F> {
         })
     }
 
-    pub(crate) fn construct_gkr_graph(
+    pub(crate) fn construct_graph_and_witness(
         &self,
         graph_builder: &mut CircuitGraphBuilder<F>,
         chip_builder: &mut SingerChipBuilder<F>,
         inst_builder: &SingerInstCircuitBuilder<F>,
         mut bb_wires_in: BasicBlockWiresIn<F::BaseField>,
         real_challenges: &[F],
-        params: SingerParams,
+        params: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
         let bb_start_circuit = &self.bb_start_circuit;
         let bb_final_circuit = &self.bb_final_circuit;
@@ -202,7 +222,7 @@ impl<F: SmallField> BasicBlock<F> {
 
         // The instances wire in values are padded to the power of two, but we
         // need the real number of instances here.
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             bb_start_node_id,
             &bb_start_circuit.layout.to_chip_ids,
@@ -232,7 +252,7 @@ impl<F: SmallField> BasicBlock<F> {
                 stack,
                 memory_ts,
             );
-            let (node_id, stack, po) = insts_graph_method(
+            let (node_id, stack, po) = construct_inst_graph_and_witness(
                 opcode,
                 graph_builder,
                 chip_builder,
@@ -280,7 +300,7 @@ impl<F: SmallField> BasicBlock<F> {
             mem::take(&mut bb_wires_in.bb_final),
             real_n_instances,
         )?;
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             bb_final_node_id,
             &bb_final_circuit.layout.to_chip_ids,
@@ -306,11 +326,127 @@ impl<F: SmallField> BasicBlock<F> {
                 mem::take(acc_wires_in),
                 real_n_instances,
             )?;
-            chip_builder.construct_chip_checks(
+            chip_builder.construct_chip_check_graph_and_witness(
                 graph_builder,
                 acc_node_id,
                 &acc.layout.to_chip_ids,
                 real_challenges,
+                real_n_instances,
+            )?;
+        }
+        Ok(public_output_size)
+    }
+
+    pub(crate) fn construct_graph(
+        &self,
+        graph_builder: &mut CircuitGraphBuilder<F>,
+        chip_builder: &mut SingerChipBuilder<F>,
+        inst_builder: &SingerInstCircuitBuilder<F>,
+        real_n_instances: usize,
+        params: &SingerParams,
+    ) -> Result<Option<NodeOutputType>, ZKVMError> {
+        let bb_start_circuit = &self.bb_start_circuit;
+        let bb_final_circuit = &self.bb_final_circuit;
+        let bb_acc_circuits = &self.bb_acc_circuits;
+
+        let bb_start_node_id = graph_builder.add_node(
+            "BB start",
+            &bb_start_circuit.circuit,
+            vec![PredType::Source; bb_start_circuit.circuit.n_witness_in],
+        )?;
+
+        // The instances wire in values are padded to the power of two, but we
+        // need the real number of instances here.
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            bb_start_node_id,
+            &bb_start_circuit.layout.to_chip_ids,
+            real_n_instances,
+        )?;
+
+        let mut to_succ = &bb_start_circuit.layout.to_succ_inst;
+        let mut local_stack =
+            BasicBlockStack::initialize(self.info.clone(), bb_start_node_id, to_succ);
+        let mut pred_node_id = bb_start_node_id;
+
+        // The return instruction will return the size of the public output. We
+        // should leak this to the verifier.
+        let mut public_output_size = None;
+
+        for opcode in self.bytecode.iter() {
+            let (inst_circuit, acc_circuits) = &inst_builder.insts_circuits.get(&opcode).unwrap();
+
+            let mode = StackOpMode::from(*opcode);
+            let stack = local_stack.pop_node_outputs(mode);
+            let memory_ts = NodeOutputType::WireOut(pred_node_id, to_succ.next_memory_ts_id);
+            let preds = inst_circuit.layout.input(
+                inst_circuit.circuit.n_witness_in,
+                *opcode,
+                stack,
+                memory_ts,
+            );
+            let (node_id, stack, po) = construct_inst_graph(
+                *opcode,
+                graph_builder,
+                chip_builder,
+                inst_circuit,
+                acc_circuits,
+                preds,
+                real_n_instances,
+                params,
+            )?;
+            if let Some(po) = po {
+                public_output_size = Some(po);
+            }
+            pred_node_id = node_id[0];
+            to_succ = &inst_circuit.layout.to_succ_inst;
+            local_stack.push_node_outputs(stack, mode);
+        }
+
+        let stack = local_stack.finalize();
+        let stack_ts = NodeOutputType::WireOut(
+            bb_start_node_id,
+            bb_start_circuit.layout.to_bb_final.stack_ts_id,
+        );
+        let memory_ts = NodeOutputType::WireOut(pred_node_id, to_succ.next_memory_ts_id);
+        let stack_top = NodeOutputType::WireOut(
+            bb_start_node_id,
+            bb_start_circuit.layout.to_bb_final.stack_top_id,
+        );
+        let clk =
+            NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.clk_id);
+        let preds = bb_final_circuit.layout.input(
+            bb_final_circuit.circuit.n_witness_in,
+            stack,
+            stack_ts,
+            memory_ts,
+            stack_top,
+            clk,
+        );
+        let bb_final_node_id =
+            graph_builder.add_node("BB final", &bb_final_circuit.circuit, preds)?;
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            bb_final_node_id,
+            &bb_final_circuit.layout.to_chip_ids,
+            real_n_instances,
+        )?;
+
+        let real_n_instances_bb_accs = vec![
+            params.n_mem_finalize,
+            params.n_mem_initialize,
+            params.n_stack_finalize,
+        ];
+        for (acc, real_n_instances) in bb_acc_circuits.iter().zip(real_n_instances_bb_accs) {
+            let acc_node_id = graph_builder.add_node(
+                "BB acc",
+                &acc.circuit,
+                vec![PredType::Source; acc.circuit.n_witness_in],
+            )?;
+            chip_builder.construct_chip_check_graph(
+                graph_builder,
+                acc_node_id,
+                &acc.layout.to_chip_ids,
                 real_n_instances,
             )?;
         }

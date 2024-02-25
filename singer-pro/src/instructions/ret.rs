@@ -5,17 +5,17 @@ use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{OAMOperations, ROMOperations},
-    structs::{ChipChallenges, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    chips::IntoEnumIterator,
+    chips::SingerChipBuilder,
+    structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::UIntAddSub,
 };
 use std::{mem, sync::Arc};
-use strum::IntoEnumIterator;
 
 use crate::{
-    chips::SingerChipBuilder,
     component::{
-        AccessoryCircuit, ChipType, FromPredInst, FromPublicIO, FromWitness, InstCircuit,
-        InstLayout, ToSuccInst,
+        AccessoryCircuit, FromPredInst, FromPublicIO, FromWitness, InstCircuit, InstLayout,
+        ToSuccInst,
     },
     error::ZKVMError,
     utils::add_assign_each_cell,
@@ -30,7 +30,7 @@ pub struct ReturnInstruction;
 impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
     type InstType = Self;
 
-    fn construct_circuit_graph(
+    fn construct_graph_and_witness(
         graph_builder: &mut CircuitGraphBuilder<F>,
         chip_builder: &mut SingerChipBuilder<F>,
         inst_circuit: &InstCircuit<F>,
@@ -39,7 +39,7 @@ impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
         mut sources: Vec<CircuitWitnessIn<F::BaseField>>,
         real_challenges: &[F],
         _: usize,
-        params: SingerParams,
+        params: &SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
         let public_output_size =
             preds[inst_circuit.layout.from_pred_inst.stack_operand_ids[1] as usize].clone();
@@ -54,7 +54,7 @@ impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
             1,
         )?;
 
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             node_id,
             &inst_circuit.layout.to_chip_ids,
@@ -131,10 +131,10 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::RAMLoad as usize] = ram_load_id;
-        to_chip_ids[ChipType::RAMStore as usize] = ram_store_id;
-        to_chip_ids[ChipType::ROMInput as usize] = rom_id;
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::RAMLoad as usize] = ram_load_id;
+        to_chip_ids[InstOutChipType::RAMStore as usize] = ram_store_id;
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),

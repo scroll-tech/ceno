@@ -19,7 +19,7 @@ use crate::error::ZKVMError;
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 pub struct SwapInstruction<const N: usize>;
 
-impl<const N: usize> InstructionGraph for SwapInstruction<N> {
+impl<F: SmallField, const N: usize> InstructionGraph<F> for SwapInstruction<N> {
     type InstType = Self;
 }
 
@@ -53,10 +53,8 @@ impl<const N: usize> SwapInstruction<N> {
     };
 }
 
-impl<const N: usize> Instruction for SwapInstruction<N> {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);

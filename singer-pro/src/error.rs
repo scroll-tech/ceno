@@ -6,6 +6,7 @@ pub enum ZKVMError {
     CircuitError,
     GKRGraphError(GKRGraphError),
     VerifyError,
+    UtilError(UtilError),
 }
 
 impl From<GKRGraphError> for ZKVMError {
@@ -16,9 +17,6 @@ impl From<GKRGraphError> for ZKVMError {
 
 impl From<UtilError> for ZKVMError {
     fn from(error: UtilError) -> Self {
-        match error {
-            UtilError::ChipError => Self::CircuitError,
-            UtilError::UIntError => Self::CircuitError,
-        }
+        Self::UtilError(error)
     }
 }

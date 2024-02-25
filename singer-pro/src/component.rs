@@ -4,13 +4,14 @@ use goldilocks::SmallField;
 use simple_frontend::structs::WitnessId;
 use singer_utils::constants::OpcodeType;
 use std::sync::Arc;
-use strum_macros::EnumIter;
 
 #[derive(Clone, Debug)]
 pub struct InstCircuit<F: SmallField> {
     pub(crate) circuit: Arc<Circuit<F>>,
     pub(crate) layout: InstLayout,
 }
+
+pub(crate) type ToChipsWires = Vec<Option<(WitnessId, usize)>>;
 
 #[derive(Clone, Debug, Default)]
 pub struct InstLayout {
@@ -185,13 +186,3 @@ pub(crate) struct ToBBFinal {
     pub(crate) stack_top_id: WitnessId,
     pub(crate) clk_id: WitnessId,
 }
-
-#[derive(Clone, Copy, Debug, EnumIter)]
-pub(crate) enum ChipType {
-    RAMLoad,
-    RAMStore,
-    ROMInput,
-}
-
-/// The wire id and the number of checks in a single instance.
-pub(crate) type ToChipsWires = Vec<Option<(WitnessId, usize)>>;

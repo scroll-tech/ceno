@@ -4,14 +4,14 @@ use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::ROMOperations,
-    structs::{ChipChallenges, ROMHandler, StackUInt, TSUInt},
+    chips::IntoEnumIterator,
+    structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt},
     uint::UIntAddSub,
 };
 use std::sync::Arc;
-use strum::IntoEnumIterator;
 
 use crate::{
-    component::{ChipType, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
+    component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
     error::ZKVMError,
     utils::add_assign_each_cell,
 };
@@ -66,8 +66,8 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
         let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::ROMInput as usize] = rom_id;
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),

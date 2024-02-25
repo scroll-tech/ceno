@@ -18,7 +18,7 @@ use crate::error::ZKVMError;
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
-impl InstructionGraph for CalldataloadInstruction {
+impl<F: SmallField> InstructionGraph<F> for CalldataloadInstruction {
     type InstType = Self;
 }
 
@@ -48,10 +48,8 @@ impl CalldataloadInstruction {
     const OPCODE: OpcodeType = OpcodeType::CALLDATALOAD;
 }
 
-impl Instruction for CalldataloadInstruction {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);

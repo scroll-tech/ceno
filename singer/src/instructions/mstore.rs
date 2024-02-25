@@ -1,6 +1,6 @@
 use ff::Field;
 use gkr::structs::Circuit;
-use gkr_graph::structs::{NodeOutputType, PredType};
+use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
@@ -9,6 +9,7 @@ use singer_utils::{
         BytecodeChipOperations, GlobalStateChipOperations, MemoryChipOperations, OAMOperations,
         ROMOperations, RangeChipOperations, StackChipOperations,
     },
+    chips::SingerChipBuilder,
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::{UIntAddSub, UIntCmp},
@@ -21,27 +22,25 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct MstoreInstruction;
 
-impl InstructionGraph for MstoreInstruction {
+impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
     type InstType = Self;
 
-    fn construct_circuits<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<Vec<InstCircuit<F>>, ZKVMError> {
+    fn construct_circuits(challenges: ChipChallenges) -> Result<Vec<InstCircuit<F>>, ZKVMError> {
         let circuits = vec![
-            MstoreInstruction::construct_circuit::<F>(challenges)?,
-            MstoreAccessory::construct_circuit::<F>(challenges)?,
+            MstoreInstruction::construct_circuit(challenges)?,
+            MstoreAccessory::construct_circuit(challenges)?,
         ];
         Ok(circuits)
     }
 
-    fn construct_circuit_graph<F: SmallField>(
-        graph_builder: &mut gkr_graph::structs::CircuitGraphBuilder<F>,
-        chip_builder: &mut crate::chips::SingerChipBuilder<F>,
+    fn construct_graph_and_witness(
+        graph_builder: &mut CircuitGraphBuilder<F>,
+        chip_builder: &mut SingerChipBuilder<F>,
         inst_circuits: &[InstCircuit<F>],
         mut sources: Vec<CircuitWiresIn<F::BaseField>>,
         real_challenges: &[F],
         real_n_instances: usize,
-        _: SingerParams,
+        _: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
         // Add the instruction circuit to the graph.
         let inst_circuit = &inst_circuits[0];
@@ -54,7 +53,7 @@ impl InstructionGraph for MstoreInstruction {
             mem::take(&mut sources[0]),
             real_n_instances,
         )?;
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             inst_node_id,
             &inst_circuit.layout.chip_check_wire_id,
@@ -80,11 +79,57 @@ impl InstructionGraph for MstoreInstruction {
             mem::take(&mut sources[1]),
             real_n_instances * EVM_STACK_BYTE_WIDTH,
         )?;
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             mstore_acc_node_id,
             &mstore_acc_circuit.layout.chip_check_wire_id,
             real_challenges,
+            real_n_instances * EVM_STACK_BYTE_WIDTH,
+        )?;
+        Ok(None)
+    }
+
+    fn construct_graph(
+        graph_builder: &mut CircuitGraphBuilder<F>,
+        chip_builder: &mut SingerChipBuilder<F>,
+        inst_circuits: &[InstCircuit<F>],
+        real_n_instances: usize,
+        _: &SingerParams,
+    ) -> Result<Option<NodeOutputType>, ZKVMError> {
+        // Add the instruction circuit to the graph.
+        let inst_circuit = &inst_circuits[0];
+        let n_witness_in = inst_circuit.circuit.n_witness_in;
+        let inst_node_id = graph_builder.add_node(
+            stringify!(ReturnInstruction),
+            &inst_circuit.circuit,
+            vec![PredType::Source; n_witness_in],
+        )?;
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            inst_node_id,
+            &inst_circuit.layout.chip_check_wire_id,
+            real_n_instances,
+        )?;
+
+        let mstore_acc_circuit = &inst_circuits[1];
+        let n_witness_in = mstore_acc_circuit.circuit.n_witness_in;
+        let mut preds = vec![PredType::Source; n_witness_in];
+        // The order is consistent with the order of creating wires in.
+        preds[mstore_acc_circuit.layout.pred_dup_wire_id.unwrap() as usize] = PredType::PredWireDup(
+            NodeOutputType::WireOut(inst_node_id, inst_circuit.layout.succ_dup_wires_id[0]),
+        );
+        preds[mstore_acc_circuit.layout.pred_ooo_wire_id.unwrap() as usize] = PredType::PredWire(
+            NodeOutputType::WireOut(inst_node_id, inst_circuit.layout.succ_ooo_wires_id[0]),
+        );
+        let mstore_acc_node_id = graph_builder.add_node(
+            stringify!(MstoreAccessory),
+            &mstore_acc_circuit.circuit,
+            preds,
+        )?;
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            mstore_acc_node_id,
+            &mstore_acc_circuit.layout.chip_check_wire_id,
             real_n_instances * EVM_STACK_BYTE_WIDTH,
         )?;
         Ok(None)
@@ -116,10 +161,8 @@ impl MstoreInstruction {
     const OPCODE: OpcodeType = OpcodeType::MSTORE;
 }
 
-impl Instruction for MstoreInstruction {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for MstoreInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -261,10 +304,8 @@ register_witness!(
     }
 );
 
-impl Instruction for MstoreAccessory {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for MstoreAccessory {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From predesessor circuit.

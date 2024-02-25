@@ -21,7 +21,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct JumpiInstruction;
 
-impl InstructionGraph for JumpiInstruction {
+impl<F: SmallField> InstructionGraph<F> for JumpiInstruction {
     type InstType = Self;
 }
 
@@ -53,10 +53,8 @@ impl JumpiInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMPI;
 }
 
-impl Instruction for JumpiInstruction {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for JumpiInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);

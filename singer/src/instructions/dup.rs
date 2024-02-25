@@ -20,7 +20,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct DupInstruction<const N: usize>;
 
-impl<const N: usize> InstructionGraph for DupInstruction<N> {
+impl<F: SmallField, const N: usize> InstructionGraph<F> for DupInstruction<N> {
     type InstType = Self;
 }
 
@@ -50,10 +50,8 @@ impl<const N: usize> DupInstruction<N> {
     };
 }
 
-impl<const N: usize> Instruction for DupInstruction<N> {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField, const N: usize> Instruction<F> for DupInstruction<N> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);

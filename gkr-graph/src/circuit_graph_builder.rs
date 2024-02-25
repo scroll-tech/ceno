@@ -40,9 +40,18 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         assert_eq!(preds.len(), circuit.n_witness_in);
         assert!(num_instances.is_power_of_two());
         assert_eq!(sources.len(), circuit.n_witness_in);
-        assert!(!sources
-            .iter()
-            .any(|source| source.instances.len() != 0 || source.instances.len() != num_instances));
+        assert!(
+            !sources.iter().any(
+                |source| source.instances.len() != 0 && source.instances.len() != num_instances
+            ),
+            "node_id: {}, num_instances: {}, sources_num_instances: {:?}",
+            id,
+            num_instances,
+            sources
+                .iter()
+                .map(|source| source.instances.len())
+                .collect_vec()
+        );
 
         let mut witness = CircuitWitness::new(circuit, challenges);
         let wits_in = izip!(preds.iter(), sources.into_iter())
@@ -132,7 +141,9 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
     }
 
     /// Collect the information of `self.sources` and `self.targets`.
-    pub fn finalize(mut self) -> (CircuitGraph<F>, CircuitGraphWitness<F::BaseField>) {
+    pub fn finalize_graph_and_witness(
+        mut self,
+    ) -> (CircuitGraph<F>, CircuitGraphWitness<F::BaseField>) {
         // Generate all possible graph output
         let outs = self
             .graph
@@ -176,5 +187,71 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         self.graph.targets = targets.into_iter().collect();
 
         (self.graph, self.witness)
+    }
+
+    pub fn finalize_graph(self) -> CircuitGraph<F> {
+        let (graph, _) = self.finalize_graph_and_witness();
+        graph
+    }
+
+    /// Collect the information of `self.sources` and `self.targets`.
+    pub fn finalize_graph_and_witness_with_targets(
+        mut self,
+        targets: &[NodeOutputType],
+    ) -> (CircuitGraph<F>, CircuitGraphWitness<F::BaseField>) {
+        // Generate all possible graph output
+        let outs = self
+            .graph
+            .nodes
+            .iter()
+            .enumerate()
+            .flat_map(|(id, node)| {
+                chain![
+                    (0..node.circuit.n_witness_out)
+                        .map(move |wire_id| NodeOutputType::WireOut(id, wire_id as WitnessId)),
+                    node.circuit
+                        .n_witness_out
+                        .is_zero()
+                        .then_some(NodeOutputType::OutputLayer(id))
+                ]
+            })
+            .collect::<BTreeSet<_>>();
+        // Collect all assigned source into `sources`,
+        // and remove assigned `PredWire*` from possible outs
+        let (sources, expected_target) = self.graph.nodes.iter().enumerate().fold(
+            (BTreeSet::new(), outs),
+            |(mut sources, mut targets), (id, node)| {
+                for (wire_id, pred) in node.preds.iter().enumerate() {
+                    match pred {
+                        PredType::Source => {
+                            sources.insert(NodeInputType::WireIn(id, wire_id as WitnessId));
+                        }
+                        PredType::PredWire(out) => {
+                            targets.remove(out);
+                        }
+                        PredType::PredWireDup(out) => {
+                            targets.remove(out);
+                        }
+                    }
+                }
+
+                (sources, targets)
+            },
+        );
+
+        assert_eq!(
+            expected_target,
+            targets.iter().cloned().collect::<BTreeSet<_>>()
+        );
+
+        self.graph.sources = sources.into_iter().collect();
+        self.graph.targets = targets.to_vec();
+
+        (self.graph, self.witness)
+    }
+
+    pub fn finalize_graph_with_targets(self, targets: &[NodeOutputType]) -> CircuitGraph<F> {
+        let (graph, _) = self.finalize_graph_and_witness_with_targets(targets);
+        graph
     }
 }

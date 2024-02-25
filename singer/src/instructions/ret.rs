@@ -1,6 +1,6 @@
 use ff::Field;
 use gkr::structs::Circuit;
-use gkr_graph::structs::{NodeOutputType, PredType};
+use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
@@ -9,6 +9,7 @@ use singer_utils::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
         RangeChipOperations, StackChipOperations,
     },
+    chips::SingerChipBuilder,
     constants::OpcodeType,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::UIntAddSub,
@@ -32,30 +33,28 @@ pub struct ReturnRestMemLoad;
 /// only touches the used addresses.
 pub struct ReturnRestMemStore;
 
-impl InstructionGraph for ReturnInstruction {
+impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
     type InstType = Self;
 
-    fn construct_circuits<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<Vec<InstCircuit<F>>, ZKVMError> {
+    fn construct_circuits(challenges: ChipChallenges) -> Result<Vec<InstCircuit<F>>, ZKVMError> {
         let circuits = vec![
-            ReturnInstruction::construct_circuit::<F>(challenges)?,
-            ReturnPublicOutLoad::construct_circuit::<F>(challenges)?,
-            ReturnRestMemLoad::construct_circuit::<F>(challenges)?,
-            ReturnRestMemStore::construct_circuit::<F>(challenges)?,
-            ReturnRestStackPop::construct_circuit::<F>(challenges)?,
+            ReturnInstruction::construct_circuit(challenges)?,
+            ReturnPublicOutLoad::construct_circuit(challenges)?,
+            ReturnRestMemLoad::construct_circuit(challenges)?,
+            ReturnRestMemStore::construct_circuit(challenges)?,
+            ReturnRestStackPop::construct_circuit(challenges)?,
         ];
         Ok(circuits)
     }
 
-    fn construct_circuit_graph<F: SmallField>(
-        graph_builder: &mut gkr_graph::structs::CircuitGraphBuilder<F>,
-        chip_builder: &mut crate::chips::SingerChipBuilder<F>,
+    fn construct_graph_and_witness(
+        graph_builder: &mut CircuitGraphBuilder<F>,
+        chip_builder: &mut SingerChipBuilder<F>,
         inst_circuits: &[InstCircuit<F>],
         mut sources: Vec<CircuitWiresIn<F::BaseField>>,
         real_challenges: &[F],
         _: usize,
-        params: SingerParams,
+        params: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
         // Add the instruction circuit to the graph.
         let inst_circuit = &inst_circuits[0];
@@ -68,7 +67,7 @@ impl InstructionGraph for ReturnInstruction {
             mem::take(&mut sources[0]),
             1,
         )?;
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             inst_node_id,
             &inst_circuit.layout.chip_check_wire_id,
@@ -93,7 +92,7 @@ impl InstructionGraph for ReturnInstruction {
             mem::take(&mut sources[1]),
             params.n_public_output_bytes,
         )?;
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             pub_out_load_node_id,
             &pub_out_load_circuit.layout.chip_check_wire_id,
@@ -112,7 +111,7 @@ impl InstructionGraph for ReturnInstruction {
             mem::take(&mut sources[2]),
             params.n_mem_finalize,
         )?;
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             rest_mem_load_node_id,
             &rest_mem_load_circuit.layout.chip_check_wire_id,
@@ -131,7 +130,7 @@ impl InstructionGraph for ReturnInstruction {
             mem::take(&mut sources[3]),
             params.n_mem_initialize,
         )?;
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             rest_mem_store_node_id,
             &rest_mem_store_circuit.layout.chip_check_wire_id,
@@ -150,11 +149,105 @@ impl InstructionGraph for ReturnInstruction {
             mem::take(&mut sources[4]),
             params.n_stack_finalize,
         )?;
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             rest_stack_pop_node_id,
             &rest_stack_pop_circuit.layout.chip_check_wire_id,
             real_challenges,
+            params.n_stack_finalize,
+        )?;
+
+        Ok(inst_circuit
+            .layout
+            .target_wire_id
+            .map(|target_wire_id| NodeOutputType::WireOut(inst_node_id, target_wire_id)))
+    }
+
+    fn construct_graph(
+        graph_builder: &mut CircuitGraphBuilder<F>,
+        chip_builder: &mut SingerChipBuilder<F>,
+        inst_circuits: &[InstCircuit<F>],
+        _real_n_instances: usize,
+        params: &SingerParams,
+    ) -> Result<Option<NodeOutputType>, ZKVMError> {
+        // Add the instruction circuit to the graph.
+        let inst_circuit = &inst_circuits[0];
+        let n_witness_in = inst_circuit.circuit.n_witness_in;
+        let inst_node_id = graph_builder.add_node(
+            stringify!(ReturnInstruction),
+            &inst_circuit.circuit,
+            vec![PredType::Source; n_witness_in],
+        )?;
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            inst_node_id,
+            &inst_circuit.layout.chip_check_wire_id,
+            1,
+        )?;
+
+        // Add the public output load circuit to the graph.
+        let pub_out_load_circuit = &inst_circuits[1];
+        let n_witness_in = pub_out_load_circuit.circuit.n_witness_in;
+        let mut preds = vec![PredType::Source; n_witness_in];
+        preds[pub_out_load_circuit.layout.pred_dup_wire_id.unwrap() as usize] =
+            PredType::PredWireDup(NodeOutputType::WireOut(
+                inst_node_id,
+                inst_circuit.layout.succ_dup_wires_id[0],
+            ));
+        let pub_out_load_node_id = graph_builder.add_node(
+            stringify!(ReturnPublicOutLoad),
+            &pub_out_load_circuit.circuit,
+            preds,
+        )?;
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            pub_out_load_node_id,
+            &pub_out_load_circuit.layout.chip_check_wire_id,
+            params.n_public_output_bytes,
+        )?;
+
+        // Add the rest memory load circuit to the graph.
+        let rest_mem_load_circuit = &inst_circuits[2];
+        let n_witness_in = rest_mem_load_circuit.circuit.n_witness_in;
+        let rest_mem_load_node_id = graph_builder.add_node(
+            stringify!(ReturnRestMemLoad),
+            &rest_mem_load_circuit.circuit,
+            vec![PredType::Source; n_witness_in],
+        )?;
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            rest_mem_load_node_id,
+            &rest_mem_load_circuit.layout.chip_check_wire_id,
+            params.n_mem_finalize,
+        )?;
+
+        // Add the rest memory store circuit to the graph.
+        let rest_mem_store_circuit = &inst_circuits[3];
+        let n_witness_in = rest_mem_store_circuit.circuit.n_witness_in;
+        let rest_mem_store_node_id = graph_builder.add_node(
+            stringify!(ReturnRestMemStore),
+            &rest_mem_store_circuit.circuit,
+            vec![PredType::Source; n_witness_in],
+        )?;
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            rest_mem_store_node_id,
+            &rest_mem_store_circuit.layout.chip_check_wire_id,
+            params.n_mem_initialize,
+        )?;
+
+        // Add the rest stack pop circuit to the graph.
+        let rest_stack_pop_circuit = &inst_circuits[4];
+        let n_witness_in = rest_stack_pop_circuit.circuit.n_witness_in;
+        let rest_stack_pop_node_id = graph_builder.add_node(
+            stringify!(ReturnRestStackPop),
+            &rest_stack_pop_circuit.circuit,
+            vec![PredType::Source; n_witness_in],
+        )?;
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            rest_stack_pop_node_id,
+            &rest_stack_pop_circuit.layout.chip_check_wire_id,
             params.n_stack_finalize,
         )?;
 
@@ -186,10 +279,8 @@ impl ReturnInstruction {
     const OPCODE: OpcodeType = OpcodeType::RETURN;
 }
 
-impl Instruction for ReturnInstruction {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for ReturnInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -289,10 +380,8 @@ register_witness!(
     }
 );
 
-impl Instruction for ReturnPublicOutLoad {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for ReturnPublicOutLoad {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (pred_wire_id, pred) = circuit_builder.create_witness_in(Self::pred_size());
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -348,10 +437,8 @@ register_witness!(
     }
 );
 
-impl Instruction for ReturnRestMemLoad {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for ReturnRestMemLoad {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -391,10 +478,8 @@ register_witness!(
     }
 );
 
-impl Instruction for ReturnRestMemStore {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for ReturnRestMemStore {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -431,10 +516,8 @@ register_witness!(
     }
 );
 
-impl Instruction for ReturnRestStackPop {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for ReturnRestStackPop {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);

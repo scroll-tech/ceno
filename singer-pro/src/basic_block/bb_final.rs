@@ -9,14 +9,14 @@ use singer_utils::{
         GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
         StackChipOperations,
     },
-    structs::{ChipChallenges, PCUInt, RAMHandler, ROMHandler, TSUInt},
+    chips::IntoEnumIterator,
+    structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, TSUInt},
     uint::UIntAddSub,
 };
 use std::sync::Arc;
-use strum::IntoEnumIterator;
 
 use crate::{
-    component::{BBFinalCircuit, BBFinalLayout, ChipType, FromBBStart, FromPredInst, FromWitness},
+    component::{BBFinalCircuit, BBFinalLayout, FromBBStart, FromPredInst, FromWitness},
     error::ZKVMError,
     utils::i64_to_base_field,
 };
@@ -106,10 +106,10 @@ impl BasicBlockFinal {
         let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::RAMLoad as usize] = ram_load_id;
-        to_chip_ids[ChipType::RAMStore as usize] = ram_store_id;
-        to_chip_ids[ChipType::ROMInput as usize] = rom_id;
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::RAMLoad as usize] = ram_load_id;
+        to_chip_ids[InstOutChipType::RAMStore as usize] = ram_store_id;
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         circuit_builder.configure();
 

@@ -4,6 +4,7 @@ use singer_utils::error::UtilError;
 #[derive(Debug)]
 pub enum ZKVMError {
     CircuitError,
+    UtilError(UtilError),
     GKRGraphError(GKRGraphError),
     VerifyError,
 }
@@ -16,9 +17,6 @@ impl From<GKRGraphError> for ZKVMError {
 
 impl From<UtilError> for ZKVMError {
     fn from(error: UtilError) -> Self {
-        match error {
-            UtilError::ChipError => Self::CircuitError,
-            UtilError::UIntError => Self::CircuitError,
-        }
+        Self::UtilError(error)
     }
 }

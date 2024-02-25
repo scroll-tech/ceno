@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use ark_std::iterable::Iterable;
 use gkr::{
     structs::{Circuit, LayerWitness},
     utils::ceil_log2,
@@ -9,20 +8,22 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::structs::{ChipChallenges, PCUInt, ROMType};
 
-use crate::error::ZKVMError;
+use crate::{
+    error::UtilError,
+    structs::{ChipChallenges, PCUInt, ROMType},
+};
 
 use super::ChipCircuitGadgets;
 
-/// Add bytecode table circuit to the circuit graph. Return node id and lookup
-/// instance log size.
-pub(crate) fn construct_bytecode_table<F: SmallField>(
+/// Add bytecode table circuit and witness to the circuit graph. Return node id
+/// and lookup instance log size.
+pub(crate) fn construct_bytecode_table_and_witness<F: SmallField>(
     builder: &mut CircuitGraphBuilder<F>,
     bytecode: &[u8],
     challenges: &ChipChallenges,
     real_challenges: &[F],
-) -> Result<(PredType, PredType, usize), ZKVMError> {
+) -> Result<(PredType, PredType, usize), UtilError> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
     let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
@@ -81,5 +82,49 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),
         PredType::PredWire(NodeOutputType::OutputLayer(selector_node_id)),
         ceil_log2(bytecode.len()) - 1,
+    ))
+}
+
+/// Add bytecode table circuit to the circuit graph. Return node id and lookup
+/// instance log size.
+pub(crate) fn construct_bytecode_table<F: SmallField>(
+    builder: &mut CircuitGraphBuilder<F>,
+    bytecode_len: usize,
+    challenges: &ChipChallenges,
+) -> Result<(PredType, PredType, usize), UtilError> {
+    let mut circuit_builder = CircuitBuilder::<F>::new();
+    let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
+    let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
+
+    let rlc = circuit_builder.create_ext_cell();
+    let mut items = vec![MixedCell::Constant(F::BaseField::from(
+        ROMType::Bytecode as u64,
+    ))];
+    items.extend(pc_cells.iter().map(|x| MixedCell::Cell(*x)).collect_vec());
+    items.extend(
+        bytecode_cells
+            .iter()
+            .map(|x| MixedCell::Cell(*x))
+            .collect_vec(),
+    );
+    circuit_builder.rlc_mixed(&rlc, &items, challenges.bytecode());
+
+    circuit_builder.configure();
+    let bytecode_circuit = Arc::new(Circuit::new(&circuit_builder));
+    let selector = ChipCircuitGadgets::construct_prefix_selector(bytecode_len, 1);
+
+    let selector_node_id =
+        builder.add_node("bytecode selector circuit", &selector.circuit, vec![])?;
+
+    let table_node_id = builder.add_node(
+        "bytecode table circuit",
+        &bytecode_circuit,
+        vec![PredType::Source; 2],
+    )?;
+
+    Ok((
+        PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),
+        PredType::PredWire(NodeOutputType::OutputLayer(selector_node_id)),
+        ceil_log2(bytecode_len) - 1,
     ))
 }
