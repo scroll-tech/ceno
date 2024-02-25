@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
-use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
+use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use rayon::{
     iter::IntoParallelRefMutIterator,
-    prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    prelude::{IntoParallelIterator, ParallelIterator},
 };
 use transcript::{Challenge, Transcript};
 
@@ -131,7 +131,7 @@ impl<F: SmallField> IOPProverState<F> {
             self.poly
                 .flattened_ml_extensions
                 .par_iter_mut()
-                .for_each(|mle| *mle = Arc::new(mle.fix_variables(&[r.elements])));
+                .for_each(|mle| Arc::make_mut(mle).fix_variables_in_place(&[r.elements]));
         } else if self.round > 0 {
             panic!("verifier message is empty");
         }

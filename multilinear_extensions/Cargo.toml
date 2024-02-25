@@ -17,5 +17,5 @@ serde.workspace = true
 criterion.workspace = true
 
 [[bench]]
-name = "eq"
+name = "mle"
 harness = false
