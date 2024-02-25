@@ -14,7 +14,7 @@ use transcript::Transcript;
 use crate::{
     prover::SumcheckState,
     structs::{PointAndEval, SumcheckProof},
-    utils::MatrixMLERowFirst,
+    utils::{fix_high_variables, MatrixMLERowFirst},
 };
 
 use super::IOPProverPhase1State;
@@ -73,9 +73,10 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
             .map(|(point_and_eval, &alpha_pow)| {
                 let point_lo_num_vars = point_and_eval.point.len() - self.hi_num_vars;
 
-                let f1_j = self
-                    .layer_out_poly
-                    .fix_high_variables(&point_and_eval.point[point_lo_num_vars..]);
+                let f1_j = fix_high_variables(
+                    self.layer_out_poly,
+                    &point_and_eval.point[point_lo_num_vars..],
+                );
 
                 let mut g1_j =
                     build_eq_x_r_vec_scaled(&point_and_eval.point[..point_lo_num_vars], alpha_pow);
@@ -100,9 +101,10 @@ impl<'a, F: SmallField> IOPProverPhase1State<'a, F> {
                             *alpha_pow,
                         );
 
-                        let f1_j = self
-                            .layer_out_poly
-                            .fix_high_variables(&point_and_eval.point[point_lo_num_vars..]);
+                        let f1_j = fix_high_variables(
+                            self.layer_out_poly,
+                            &point_and_eval.point[point_lo_num_vars..],
+                        );
 
                         assert!(copy_to.len() <= lo_eq_w_p.len());
                         let g1_j = copy_to.fix_row_row_first(&lo_eq_w_p, self.lo_num_vars);

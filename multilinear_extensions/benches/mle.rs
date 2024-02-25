@@ -137,8 +137,7 @@ fn bench_fix_points(c: &mut Criterion) {
         c.bench_function(&id, |b| {
             b.iter(|| {
                 black_box({
-                    let mle2 = mle.deep_clone();
-                    let _ = mle2.evaluation_vec();
+                    let _ = mle.evaluation_vec();
                 })
             })
         });
