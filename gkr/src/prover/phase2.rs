@@ -13,7 +13,7 @@ use transcript::Transcript;
 
 use crate::{
     structs::{Gate1In, Gate2In, Gate3In, GateCIn, Layer, Point, SumcheckProof},
-    utils::{fix_high_variables, tensor_product, MultilinearExtensionFromVectors},
+    utils::{tensor_product, MultilinearExtensionFromVectors},
 };
 
 use super::{IOPProverPhase2State, SumcheckState};
@@ -134,7 +134,7 @@ impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
         }
 
         // f0(x1) = layers[i](rt || x1)
-        let f0 = fix_high_variables(&layer_out_poly, &hi_point);
+        let f0 = layer_out_poly.fix_high_variables(&hi_point);
         // g0(x1) = eq(ry, x1) - asserted_subset(ry, x1)
         let g0 = {
             let mut g0 = eq_y_ry.clone();

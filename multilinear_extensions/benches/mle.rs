@@ -96,21 +96,69 @@ fn bench_fix_points(c: &mut Criterion) {
 
     for nv in RANGE {
         let mle = DenseMultilinearExtension::<GoldilocksExt2>::random(nv, &mut rng);
-
         let y = &y[..nv];
-        let id = BenchmarkId::new("fix variable in place", y.len());
+
+        let id = BenchmarkId::new("fix low variable", y.len());
         c.bench_with_input(id, &y, |b, y| {
             b.iter(|| {
-                let mut mle2 = mle.deep_clone();
-                mle2.fix_variables_in_place(black_box(y));
+                black_box({
+                    let mle2 = mle.deep_clone();
+                    mle2.fix_variables(y)
+                })
             })
         });
 
-        let id = BenchmarkId::new("fix variable", y.len());
+        let id = BenchmarkId::new("fix low variable in place", y.len());
         c.bench_with_input(id, &y, |b, y| {
             b.iter(|| {
-                let mle2 = mle.deep_clone();
-                mle2.fix_variables(black_box(y))
+                black_box({
+                    let mut mle2 = mle.deep_clone();
+                    mle2.fix_variables_in_place(y);
+                })
+            });
+        });
+
+        let id = BenchmarkId::new("fix high variable", y.len());
+        c.bench_with_input(id, &y, |b, y| {
+            b.iter(|| {
+                black_box({
+                    let mle2 = mle.deep_clone();
+                    mle2.fix_high_variables(y)
+                })
+            })
+        });
+
+        let id = format!("dim {} mutex lock", nv);
+        c.bench_function(&id, |b| {
+            b.iter(|| black_box(drop(mle.evaluations.lock().unwrap())))
+        });
+
+        let id = format!("dim {} valuation vec", nv);
+        c.bench_function(&id, |b| {
+            b.iter(|| {
+                black_box({
+                    let mle2 = mle.deep_clone();
+                    let _ = mle2.evaluation_vec();
+                })
+            })
+        });
+
+        let id = format!("dim {} valuation length", nv);
+        c.bench_function(&id, |b| {
+            b.iter(|| {
+                black_box({
+                    let mle2 = mle.deep_clone();
+                    let _ = mle2.evaluation_length();
+                })
+            })
+        });
+
+        let id = format!("dim {} deep clone", nv);
+        c.bench_function(&id, |b| {
+            b.iter(|| {
+                black_box({
+                    let _ = mle.deep_clone();
+                })
             })
         });
     }

@@ -54,6 +54,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
     }
 
     /// Deep clone the evaluation table
+    #[inline]
     pub fn evaluation_vec(&self) -> Vec<F> {
         self.evaluations.lock().unwrap().clone()
     }
@@ -155,7 +156,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
             slice[i] = slice[i * 2]
         }
 
-        slice.resize(new_length, F::default());
+        slice.truncate(new_length);
         self.num_vars -= 1;
     }
 
@@ -288,7 +289,7 @@ fn fix_one_low_variable_in_place_helper<F: SmallField>(
         slice[i] = slice[i * 2]
     }
 
-    slice.resize(new_length, F::default());
+    slice.truncate(new_length);
     *num_vars -= 1;
 }
 
