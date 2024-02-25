@@ -100,35 +100,31 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
 
         let mut evals = self.evaluation_vec();
         let mut num_vars = self.num_vars;
-        fix_variables_in_place(&mut evals, &mut num_vars, point);
+        fix_low_variables_in_place(&mut evals, &mut num_vars, point);
         evals[0]
     }
 
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point`.
+    /// Starts from low variables by default.
     pub fn fix_variables(&self, partial_point: &[F]) -> DenseMultilinearExtension<F> {
+        self.fix_low_variables(partial_point)
+    }
+
+    /// Reduce the number of variables of `self` by fixing the
+    /// `partial_point.len()` variables at `partial_point`.
+    pub fn fix_low_variables(&self, partial_point: &[F]) -> DenseMultilinearExtension<F> {
         // TODO: return error.
         assert!(
             partial_point.len() <= self.num_vars,
             "invalid size of partial point"
         );
-        let nv = self.num_vars;
+        let mut nv = self.num_vars;
         let mut poly = self.evaluation_vec();
-        let dim = partial_point.len();
+
         // evaluate single variable of partial point from left to right
-        for point in partial_point {
-            poly = Self::fix_one_variable_helper(&poly, point);
-        }
-
-        Self::from_evaluations_vec(nv - dim, poly)
-    }
-
-    /// Helper function. Fix 1 variable.
-    fn fix_one_variable_helper(data: &[F], point: &F) -> Vec<F> {
-        data.par_chunks(2)
-            .with_min_len(64)
-            .map(|data| *point * (data[1] - data[0]) + data[0])
-            .collect()
+        fix_low_variables_in_place(&mut poly, &mut nv, partial_point);
+        Self::from_evaluations_vec(nv, poly)
     }
 
     /// Reduce the number of variables of `self` by fixing the
@@ -161,6 +157,22 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
 
         slice.resize(new_length, F::default());
         self.num_vars -= 1;
+    }
+
+    /// Reduce the number of variables of `self` by fixing the
+    /// `partial_point.len()` variables at `partial_point`.
+    pub fn fix_high_variables(&self, partial_point: &[F]) -> DenseMultilinearExtension<F> {
+        // TODO: return error.
+        assert!(
+            partial_point.len() <= self.num_vars,
+            "invalid size of partial point"
+        );
+        let mut nv = self.num_vars;
+        let mut poly = self.evaluation_vec();
+        // evaluate single variable of partial point from left to right
+        fix_high_variables_in_place(&mut poly, &mut nv, partial_point);
+
+        Self::from_evaluations_vec(nv, poly)
     }
 
     /// Generate a random evaluation of a multilinear poly
@@ -244,7 +256,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
     }
 }
 
-pub fn fix_variables_in_place<F: SmallField>(
+pub fn fix_low_variables_in_place<F: SmallField>(
     slice: &mut Vec<F>,
     num_vars: &mut usize,
     partial_point: &[F],
@@ -256,12 +268,12 @@ pub fn fix_variables_in_place<F: SmallField>(
     );
     // evaluate single variable of partial point from left to right
     for point in partial_point {
-        fix_one_variable_in_place_helper(slice, num_vars, point);
+        fix_one_low_variable_in_place_helper(slice, num_vars, point);
     }
 }
 
 /// Helper function. Fix 1 variable.
-fn fix_one_variable_in_place_helper<F: SmallField>(
+fn fix_one_low_variable_in_place_helper<F: SmallField>(
     slice: &mut Vec<F>,
     num_vars: &mut usize,
     point: &F,
@@ -277,5 +289,38 @@ fn fix_one_variable_in_place_helper<F: SmallField>(
     }
 
     slice.resize(new_length, F::default());
+    *num_vars -= 1;
+}
+
+pub fn fix_high_variables_in_place<F: SmallField>(
+    slice: &mut Vec<F>,
+    num_vars: &mut usize,
+    partial_point: &[F],
+) {
+    // TODO: return error.
+    assert!(
+        partial_point.len() <= *num_vars,
+        "invalid size of partial point"
+    );
+    // evaluate single variable of partial point from left to right
+    for point in partial_point.iter().rev() {
+        fix_one_high_variable_in_place_helper(slice, num_vars, point);
+    }
+}
+
+/// Helper function. Fix 1 variable.
+fn fix_one_high_variable_in_place_helper<F: SmallField>(
+    slice: &mut Vec<F>,
+    num_vars: &mut usize,
+    point: &F,
+) {
+    let new_length = 1 << (*num_vars - 1);
+    let buf = slice.split_off(new_length);
+
+    slice
+        .par_iter_mut()
+        .zip_eq(buf.par_iter())
+        .for_each(|(a, b)| *a = *point * (*b - *a) + *a);
+
     *num_vars -= 1;
 }

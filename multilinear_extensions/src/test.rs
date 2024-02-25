@@ -9,7 +9,38 @@ use crate::{
 };
 
 #[test]
-fn test_fix_variables() {
+fn test_fix_high_variables() {
+    let poly = DenseMultilinearExtension::from_evaluations_vec(
+        3,
+        vec![
+            F::from(13),
+            F::from(97),
+            F::from(11),
+            F::from(101),
+            F::from(7),
+            F::from(103),
+            F::from(5),
+            F::from(107),
+        ],
+    );
+
+    let partial_point = vec![F::from(3), F::from(5)];
+
+    let expected1 = DenseMultilinearExtension::from_evaluations_vec(
+        2,
+        vec![-F::from(17), F::from(127), -F::from(19), F::from(131)],
+    );
+    let got1 = poly.fix_high_variables(&partial_point[1..]);
+    assert_eq!(got1, expected1);
+
+    let expected2 =
+        DenseMultilinearExtension::from_evaluations_vec(1, vec![-F::from(23), F::from(139)]);
+    let got2 = poly.fix_high_variables(&partial_point);
+    assert_eq!(got2, expected2);
+}
+
+#[test]
+fn test_fix_low_variables() {
     let mut rng = test_rng();
     for nv in 2..10 {
         let mut mle = DenseMultilinearExtension::<F>::random(nv, &mut rng);

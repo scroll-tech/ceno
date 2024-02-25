@@ -166,6 +166,8 @@ pub fn fix_high_variables<F: SmallField>(
         "invalid size of partial point"
     );
 
+    let mut evaluations = poly.evaluations.lock().unwrap();
+
     let nv = poly.num_vars;
     let poly = partial_point
         .iter()
