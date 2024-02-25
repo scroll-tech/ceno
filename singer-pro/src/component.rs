@@ -169,6 +169,7 @@ pub(crate) struct FromPredInst {
     pub(crate) stack_operand_ids: Vec<WitnessId>,
 }
 
+/// From public output. This is used in the return instruction.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FromPublicIO {
     pub(crate) public_output_id: WitnessId,

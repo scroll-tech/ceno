@@ -7,10 +7,9 @@ use gkr_graph::structs::{
 };
 use goldilocks::SmallField;
 use instructions::{
-    construct_inst_graph, construct_inst_graph_and_witness, construct_instruction_circuits,
-    InstCircuit, InstOutputType, SingerCircuitBuilder,
+    construct_inst_graph, construct_inst_graph_and_witness, InstOutputType, SingerCircuitBuilder,
 };
-use singer_utils::{chips::SingerChipBuilder, structs::ChipChallenges};
+use singer_utils::chips::SingerChipBuilder;
 use std::mem;
 
 pub mod error;
@@ -111,7 +110,7 @@ impl<F: SmallField> SingerGraphBuilder<F> {
             rom_input: mem::take(&mut output_wires_id[InstOutputType::ROMInput as usize]),
             rom_table: table_out_node_id,
 
-            public_output_size: public_output_size,
+            public_output_size,
         };
 
         let (graph, graph_witness) =
@@ -183,20 +182,6 @@ pub struct SingerWitness<F: SmallField>(pub CircuitGraphWitness<F>);
 pub struct SingerWiresIn<F: SmallField> {
     pub instructions: Vec<InstWiresIn<F>>,
     pub table_count: Vec<LayerWitness<F>>,
-}
-
-impl<F: SmallField> SingerWiresIn<F> {
-    pub fn new() -> Self {
-        let mut opcodes = Vec::with_capacity(256);
-        for opcode in 0..=255 {
-            opcodes.push(InstWiresIn::default());
-        }
-        let table_count = Vec::new();
-        Self {
-            instructions: opcodes,
-            table_count,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Default)]

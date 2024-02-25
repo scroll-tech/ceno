@@ -277,8 +277,8 @@ impl<F: SmallField> BasicBlock<F> {
                 real_n_instances,
                 params,
             )?;
-            if let Some(po) = po {
-                public_output_size = Some(po);
+            if po.is_some() {
+                public_output_size = po;
             }
             pred_node_id = node_id[0];
             to_succ = &inst_circuit.layout.to_succ_inst;

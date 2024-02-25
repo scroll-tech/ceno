@@ -97,7 +97,14 @@ impl<F: SmallField> SingerGraphBuilder<F> {
             real_challenges,
         )?;
 
-        let mut output_wires_id = self.chip_builder.output_wires_id;
+        let SingerGraphBuilder {
+            graph_builder,
+            chip_builder,
+            public_output_size,
+            bb_builder: _,
+        } = self;
+
+        let mut output_wires_id = chip_builder.output_wires_id;
 
         let singer_wire_out_id = SingerWiresOutID {
             ram_load: mem::take(&mut output_wires_id[InstOutChipType::RAMLoad as usize]),
@@ -105,10 +112,11 @@ impl<F: SmallField> SingerGraphBuilder<F> {
             rom_input: mem::take(&mut output_wires_id[InstOutChipType::ROMInput as usize]),
             rom_table: table_out_node_id,
 
-            public_output_size: self.public_output_size,
+            public_output_size,
         };
 
-        let (graph, graph_witness) = self.graph_builder.finalize_graph_and_witness();
+        let (graph, graph_witness) =
+            graph_builder.finalize_graph_and_witness_with_targets(&singer_wire_out_id.to_vec());
         Ok((
             SingerCircuit(graph),
             SingerWitness(graph_witness),
@@ -138,7 +146,14 @@ impl<F: SmallField> SingerGraphBuilder<F> {
             &self.bb_builder.challenges,
         )?;
 
-        let mut output_wires_id = self.chip_builder.output_wires_id;
+        let SingerGraphBuilder {
+            graph_builder,
+            chip_builder,
+            public_output_size,
+            bb_builder: _,
+        } = self;
+
+        let mut output_wires_id = chip_builder.output_wires_id;
 
         let singer_wire_out_id = SingerWiresOutID {
             ram_load: mem::take(&mut output_wires_id[InstOutChipType::RAMLoad as usize]),
@@ -146,13 +161,11 @@ impl<F: SmallField> SingerGraphBuilder<F> {
             rom_input: mem::take(&mut output_wires_id[InstOutChipType::ROMInput as usize]),
             rom_table: table_out_node_id,
 
-            public_output_size: self.public_output_size,
+            public_output_size,
         };
-        let targets = singer_wire_out_id.to_vec();
 
-        Ok(SingerCircuit(
-            self.graph_builder.finalize_graph_with_targets(&targets),
-        ))
+        let graph = graph_builder.finalize_graph_with_targets(&singer_wire_out_id.to_vec());
+        Ok(SingerCircuit(graph))
     }
 }
 
