@@ -41,6 +41,29 @@ pub mod mstore;
 // system
 pub mod calldataload;
 
+#[derive(Clone, Debug)]
+pub struct SingerCircuitBuilder<F: SmallField> {
+    /// Opcode circuits
+    pub(crate) insts_circuits: [Vec<InstCircuit<F>>; 256],
+    pub(crate) challenges: ChipChallenges,
+}
+
+impl<F: SmallField> SingerCircuitBuilder<F> {
+    pub fn new(challenges: ChipChallenges) -> Result<Self, ZKVMError> {
+        let mut insts_circuits = Vec::with_capacity(256);
+        for opcode in 0..=255 {
+            insts_circuits.push(construct_instruction_circuits(opcode, challenges)?);
+        }
+        let insts_circuits: [Vec<InstCircuit<F>>; 256] = insts_circuits
+            .try_into()
+            .map_err(|_| ZKVMError::CircuitError)?;
+        Ok(Self {
+            insts_circuits,
+            challenges,
+        })
+    }
+}
+
 /// Construct instruction circuits and its extensions.
 pub(crate) fn construct_instruction_circuits<F: SmallField>(
     opcode: u8,

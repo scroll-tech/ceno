@@ -34,7 +34,7 @@ pub(crate) mod utils;
 // 5. (commitments + point) => pcs proof
 
 /// Circuit graph builder for Singer pro. `output_wires_id` is indexed by
-/// ChipType, corresponding to the product of summation of the chip check
+/// InstOutChipType, corresponding to the product of summation of the chip check
 /// records. `public_output_size` is the wire id stores the size of public
 /// output.
 pub struct SingerGraphBuilder<F: SmallField> {
@@ -42,7 +42,6 @@ pub struct SingerGraphBuilder<F: SmallField> {
     bb_builder: SingerBasicBlockBuilder<F>,
     chip_builder: SingerChipBuilder<F>,
     public_output_size: Option<NodeOutputType>,
-    challenges: ChipChallenges,
 }
 
 impl<F: SmallField> SingerGraphBuilder<F> {
@@ -55,7 +54,6 @@ impl<F: SmallField> SingerGraphBuilder<F> {
             graph_builder: CircuitGraphBuilder::new(),
             bb_builder: SingerBasicBlockBuilder::new(inst_circuit_builder, bytecode, challenges)?,
             chip_builder: SingerChipBuilder::new(),
-            challenges,
             public_output_size: None,
         })
     }
@@ -77,19 +75,25 @@ impl<F: SmallField> SingerGraphBuilder<F> {
         let basic_blocks = self.bb_builder.basic_block_bytecode();
         // Construct tables for lookup arguments, including bytecode, range and
         // calldata
-        self.bb_builder.construct_graph_and_witness(
+        let pub_out_id = self.bb_builder.construct_graph_and_witness(
             &mut self.graph_builder,
             &mut self.chip_builder,
             singer_wires_in.basic_blocks,
             real_challenges,
             params,
         )?;
+        if pub_out_id.is_some() {
+            self.public_output_size = pub_out_id;
+        }
+
+        // Construct tables for lookup arguments, including bytecode, range and
+        // calldata.
         let table_out_node_id = self.chip_builder.construct_lookup_table_graph_and_witness(
             &mut self.graph_builder,
             &basic_blocks.iter().cloned().flatten().collect_vec(),
             program_input,
             singer_wires_in.table_count_witnesses,
-            &self.challenges,
+            &self.bb_builder.challenges,
             real_challenges,
         )?;
 
@@ -118,17 +122,20 @@ impl<F: SmallField> SingerGraphBuilder<F> {
     ) -> Result<SingerCircuit<F>, ZKVMError> {
         // Construct tables for lookup arguments, including bytecode, range and
         // calldata
-        self.bb_builder.construct_graph(
+        let pub_out_id = self.bb_builder.construct_graph(
             &mut self.graph_builder,
             &mut self.chip_builder,
             &aux_info.real_n_instances,
             &aux_info.singer_params,
         )?;
+        if pub_out_id.is_some() {
+            self.public_output_size = pub_out_id;
+        }
         let table_out_node_id = self.chip_builder.construct_lookup_table_graph(
             &mut self.graph_builder,
             aux_info.bytecode_len,
             aux_info.program_input_len,
-            &self.challenges,
+            &self.bb_builder.challenges,
         )?;
 
         let mut output_wires_id = self.chip_builder.output_wires_id;

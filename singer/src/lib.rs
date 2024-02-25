@@ -8,7 +8,7 @@ use gkr_graph::structs::{
 use goldilocks::SmallField;
 use instructions::{
     construct_inst_graph, construct_inst_graph_and_witness, construct_instruction_circuits,
-    InstCircuit, InstOutputType,
+    InstCircuit, InstOutputType, SingerCircuitBuilder,
 };
 use singer_utils::{chips::SingerChipBuilder, structs::ChipChallenges};
 use std::mem;
@@ -27,29 +27,6 @@ pub mod utils;
 // 3. (circuit gadgets + wires in) => gkr graph + gkr witness
 // 4. (gkr graph + gkr witness) => (gkr proof + point)
 // 5. (commitments + point) => pcs proof
-
-#[derive(Clone, Debug)]
-pub struct SingerCircuitBuilder<F: SmallField> {
-    /// Opcode circuits
-    insts_circuits: [Vec<InstCircuit<F>>; 256],
-    challenges: ChipChallenges,
-}
-
-impl<F: SmallField> SingerCircuitBuilder<F> {
-    pub fn new(challenges: ChipChallenges) -> Result<Self, ZKVMError> {
-        let mut insts_circuits = Vec::with_capacity(256);
-        for opcode in 0..=255 {
-            insts_circuits.push(construct_instruction_circuits(opcode, challenges)?);
-        }
-        let insts_circuits: [Vec<InstCircuit<F>>; 256] = insts_circuits
-            .try_into()
-            .map_err(|_| ZKVMError::CircuitError)?;
-        Ok(Self {
-            insts_circuits,
-            challenges,
-        })
-    }
-}
 
 /// Circuit graph builder for Singer. `output_wires_id` is indexed by
 /// InstOutputType, corresponding to the product of summation of the chip check

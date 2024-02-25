@@ -1,8 +1,9 @@
 use goldilocks::Goldilocks;
 use itertools::Itertools;
 use singer::{
+    instructions::SingerCircuitBuilder,
     scheme::{prover::prove, verifier::verify},
-    SingerAuxInfo, SingerCircuitBuilder, SingerGraphBuilder, SingerParams, SingerWiresIn,
+    SingerAuxInfo, SingerGraphBuilder, SingerParams, SingerWiresIn,
 };
 use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;
