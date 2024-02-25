@@ -169,7 +169,11 @@ mod test {
             vec![], // carry is 0, may test carry using larger values in PCUInt
         );
 
-        let circuit_witness_challenges = vec![Goldilocks::from(2)];
+        let circuit_witness_challenges = vec![
+            Goldilocks::from(2),
+            Goldilocks::from(2),
+            Goldilocks::from(2),
+        ];
 
         test_opcode_circuit(
             &inst_circuit,

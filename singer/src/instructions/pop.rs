@@ -156,8 +156,9 @@ mod test {
     use core::ops::Range;
     use std::collections::BTreeMap;
 
+    use crate::constants::RANGE_CHIP_BIT_WIDTH;
     use crate::instructions::{ChipChallenges, Instruction, PopInstruction};
-    use crate::test::{get_uint_params, test_opcode_circuit};
+    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
     use crate::utils::uint::TSUInt;
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
@@ -218,14 +219,16 @@ mod test {
             "phase0_old_stack_ts".to_string(),
             vec![Goldilocks::from(1u64)],
         );
-        let m: u64 = 1 << get_uint_params::<TSUInt>().1 - 1;
+        let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
+        let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt".to_string(),
             vec![
-                Goldilocks::from(m),
-                -Goldilocks::from(1u64),
-                Goldilocks::from(0u64),
-                Goldilocks::from(1u64),
+                Goldilocks::from(range_values[0]),
+                Goldilocks::from(range_values[1]),
+                Goldilocks::from(range_values[2]),
+                Goldilocks::from(range_values[3]),
+                Goldilocks::from(1u64), // current length has no cells for borrow
             ],
         );
         phase0_values_map.insert(

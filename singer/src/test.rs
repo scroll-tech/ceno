@@ -24,6 +24,16 @@ pub(crate) fn get_uint_params<T: UIntParams>() -> (usize, usize) {
     (T::BITS, T::CELL_BIT_WIDTH)
 }
 
+pub(crate) fn u2vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
+    let mut x = x;
+    let mut ret = [0; W];
+    for i in 0..ret.len() {
+        ret[i] = x & ((1 << C) - 1);
+        x >>= C;
+    }
+    ret
+}
+
 pub(crate) fn test_opcode_circuit<Ext: SmallField>(
     inst_circuit: &InstCircuit<Ext>,
     phase0_idx_map: &BTreeMap<String, Range<CellId>>,
@@ -65,17 +75,15 @@ pub(crate) fn test_opcode_circuit<Ext: SmallField>(
         println!("{:?}", witness_in);
     }
 
-    /*let circuit_witness = {
+    let circuit_witness = {
         let mut circuit_witness = CircuitWitness::new(&circuit, circuit_witness_challenges);
         circuit_witness.add_instance(&circuit, witness_in);
         circuit_witness
     };
     println!("{:?}", circuit_witness);
-    */
-    /*
+
     //#[cfg(feature = "debug")]
     circuit_witness.check_correctness(&circuit);
-    */
 
     /*let instance_num_vars = circuit_witness.instance_num_vars();
     let (proof, output_num_vars, output_eval) = {

@@ -236,7 +236,11 @@ mod test {
             vec![Goldilocks::from(7u64)],
         );
 
-        let circuit_witness_challenges = vec![Goldilocks::from(2)];
+        let circuit_witness_challenges = vec![
+            Goldilocks::from(2),
+            Goldilocks::from(2),
+            Goldilocks::from(2),
+        ];
 
         test_opcode_circuit(
             &inst_circuit,
