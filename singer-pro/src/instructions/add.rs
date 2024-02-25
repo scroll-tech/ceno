@@ -5,6 +5,7 @@ use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::ROMOperations,
     chips::IntoEnumIterator,
+    register_witness,
     structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt},
     uint::UIntAddSub,
 };

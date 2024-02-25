@@ -10,6 +10,7 @@ use singer_utils::{
         StackChipOperations,
     },
     chips::IntoEnumIterator,
+    register_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, TSUInt},
     uint::UIntAddSub,
 };

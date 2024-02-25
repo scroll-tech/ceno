@@ -5,6 +5,7 @@ use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{CalldataChipOperations, ROMOperations},
     chips::IntoEnumIterator,
+    register_witness,
     structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt, UInt64},
 };
 use std::sync::Arc;

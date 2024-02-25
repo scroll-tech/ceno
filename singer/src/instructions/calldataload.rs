@@ -9,6 +9,7 @@ use singer_utils::{
         ROMOperations, RangeChipOperations, StackChipOperations,
     },
     constants::OpcodeType,
+    register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt, UInt64},
     uint::{UIntAddSub, UIntCmp},
 };

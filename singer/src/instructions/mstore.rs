@@ -11,6 +11,7 @@ use singer_utils::{
     },
     chips::SingerChipBuilder,
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
+    register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::{UIntAddSub, UIntCmp},
 };

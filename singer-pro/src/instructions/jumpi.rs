@@ -8,6 +8,7 @@ use singer_utils::{
     chip_handler::{BytecodeChipOperations, ROMOperations},
     chips::IntoEnumIterator,
     constants::OpcodeType,
+    register_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, ROMHandler, StackUInt, TSUInt},
 };
 use std::sync::Arc;

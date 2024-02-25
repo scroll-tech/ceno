@@ -8,6 +8,7 @@ use singer_utils::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
     },
     constants::OpcodeType,
+    register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
     uint::UIntAddSub,
 };

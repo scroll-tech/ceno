@@ -9,6 +9,7 @@ use singer_utils::{
         StackChipOperations,
     },
     chips::IntoEnumIterator,
+    register_witness_multi,
     structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::UIntCmp,
 };

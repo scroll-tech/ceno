@@ -4,21 +4,17 @@
 use basic_block::SingerBasicBlockBuilder;
 use error::ZKVMError;
 use gkr::structs::LayerWitness;
-use gkr_graph::structs::CircuitGraph;
-use gkr_graph::structs::CircuitGraphAuxInfo;
-use gkr_graph::structs::CircuitGraphBuilder;
-use gkr_graph::structs::CircuitGraphWitness;
-use gkr_graph::structs::NodeOutputType;
+use gkr_graph::structs::{
+    CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
+};
 use goldilocks::SmallField;
 use instructions::SingerInstCircuitBuilder;
 use itertools::Itertools;
-use singer_utils::chips::SingerChipBuilder;
-use singer_utils::structs::ChipChallenges;
-use singer_utils::structs::InstOutChipType;
+use singer_utils::{
+    chips::SingerChipBuilder,
+    structs::{ChipChallenges, InstOutChipType},
+};
 use std::mem;
-
-#[macro_use]
-mod macros;
 
 pub mod basic_block;
 pub mod component;

@@ -6,3 +6,6 @@ pub mod constants;
 pub mod error;
 pub mod structs;
 pub mod uint;
+
+#[macro_use]
+pub mod macros;

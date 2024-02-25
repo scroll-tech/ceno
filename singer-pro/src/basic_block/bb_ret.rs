@@ -6,6 +6,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{OAMOperations, ROMOperations, RangeChipOperations, StackChipOperations},
     chips::IntoEnumIterator,
+    register_witness,
     structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
 };
 use std::sync::Arc;

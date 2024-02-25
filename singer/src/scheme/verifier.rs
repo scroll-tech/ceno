@@ -1,5 +1,5 @@
 use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
-use gkr_graph::structs::{CircuitGraphAuxInfo, TargetEvaluations};
+use gkr_graph::structs::TargetEvaluations;
 use goldilocks::SmallField;
 use itertools::{chain, Itertools};
 use transcript::Transcript;

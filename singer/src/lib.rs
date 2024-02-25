@@ -13,9 +13,6 @@ use instructions::{
 use singer_utils::{chips::SingerChipBuilder, structs::ChipChallenges};
 use std::mem;
 
-#[macro_use]
-mod macros;
-
 pub mod error;
 pub mod instructions;
 pub mod scheme;

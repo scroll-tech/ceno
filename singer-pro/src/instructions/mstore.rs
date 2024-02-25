@@ -6,9 +6,9 @@ use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{MemoryChipOperations, ROMOperations, RangeChipOperations},
-    chips::IntoEnumIterator,
-    chips::SingerChipBuilder,
+    chips::{IntoEnumIterator, SingerChipBuilder},
     constants::EVM_STACK_BYTE_WIDTH,
+    register_witness,
     structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::{UIntAddSub, UIntCmp},
 };

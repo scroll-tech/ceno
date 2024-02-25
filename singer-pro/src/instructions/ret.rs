@@ -5,8 +5,8 @@ use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{OAMOperations, ROMOperations},
-    chips::IntoEnumIterator,
-    chips::SingerChipBuilder,
+    chips::{IntoEnumIterator, SingerChipBuilder},
+    register_witness,
     structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::UIntAddSub,
 };
