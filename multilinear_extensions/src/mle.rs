@@ -5,6 +5,8 @@ use goldilocks::SmallField;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::util::eval_helper;
+
 /// Stores a multilinear polynomial in dense evaluation form.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct DenseMultilinearExtension<F> {
@@ -231,7 +233,7 @@ fn fix_one_low_variable_in_place_helper<F: SmallField>(
     slice
         .par_chunks_mut(2)
         .with_min_len(64)
-        .for_each(|data| data[0] = *point * (data[1] - data[0]) + data[0]);
+        .for_each(|data| data[0] = eval_helper(&data[0], &data[1], point));
 
     for i in 1..new_length {
         slice[i] = slice[i * 2]

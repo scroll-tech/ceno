@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::ops::Add;
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
@@ -50,7 +51,7 @@ pub struct VirtualPolynomial<F> {
     /// to.
     pub flattened_ml_extensions: Vec<Arc<DenseMultilinearExtension<F>>>,
     /// Pointers to the above poly extensions
-    raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<F>, usize>,
+    raw_pointers_lookup_table: BTreeMap<*const DenseMultilinearExtension<F>, usize>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,15 +113,15 @@ impl<F: SmallField> VirtualPolynomial<F> {
             },
             products: Vec::new(),
             flattened_ml_extensions: Vec::new(),
-            raw_pointers_lookup_table: HashMap::new(),
+            raw_pointers_lookup_table: BTreeMap::new(),
         }
     }
 
     /// Creates an new virtual polynomial from a MLE and its coefficient.
     pub fn new_from_mle(mle: &Arc<DenseMultilinearExtension<F>>, coefficient: F) -> Self {
         let mle_ptr: *const DenseMultilinearExtension<F> = Arc::as_ptr(mle);
-        let mut hm = HashMap::new();
-        hm.insert(mle_ptr, 0);
+        let mut btmap = BTreeMap::new();
+        btmap.insert(mle_ptr, 0);
 
         VirtualPolynomial {
             aux_info: VPAuxInfo {
@@ -132,7 +133,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             // here `0` points to the first polynomial of `flattened_ml_extensions`
             products: vec![(coefficient, vec![0])],
             flattened_ml_extensions: vec![mle.clone()],
-            raw_pointers_lookup_table: hm,
+            raw_pointers_lookup_table: btmap,
         }
     }
 
@@ -336,7 +337,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             .collect();
 
         let mut flattened_ml_extensions = vec![];
-        let mut hm = HashMap::new();
+        let mut btmap = BTreeMap::new();
         for mle in self.flattened_ml_extensions.iter() {
             let mle_ptr: *const DenseMultilinearExtension<F> = Arc::as_ptr(mle);
             let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
@@ -346,14 +347,14 @@ impl<F: SmallField> VirtualPolynomial<F> {
             let mle_ext_field_ptr: *const DenseMultilinearExtension<Ext> =
                 Arc::as_ptr(&mle_ext_field);
             flattened_ml_extensions.push(mle_ext_field);
-            hm.insert(mle_ext_field_ptr, *index);
+            btmap.insert(mle_ext_field_ptr, *index);
         }
         end_timer!(timer);
         VirtualPolynomial {
             aux_info,
             products,
             flattened_ml_extensions,
-            raw_pointers_lookup_table: hm,
+            raw_pointers_lookup_table: btmap,
         }
     }
 }

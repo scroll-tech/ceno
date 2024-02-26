@@ -2,7 +2,7 @@ use ark_std::test_rng;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ff::Field;
 use goldilocks::GoldilocksExt2;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::{mle::DenseMultilinearExtension, util::eval_helper};
 use rayon::prelude::*;
 use std::ops::Range;
 
@@ -99,23 +99,13 @@ fn bench_fix_points(c: &mut Criterion) {
         let y = &y[..nv];
 
         let id = BenchmarkId::new("fix low variable", y.len());
-        c.bench_with_input(id, &y, |b, y| {
-            b.iter(|| {
-                black_box({
-                    mle.fix_variables(y)
-                })
-            })
-        });
+        c.bench_with_input(id, &y, |b, y| b.iter(|| black_box(mle.fix_variables(y))));
 
         let id = BenchmarkId::new("fix high variable", y.len());
         c.bench_with_input(id, &y, |b, y| {
-            b.iter(|| {
-                black_box({
-                    mle.fix_high_variables(y)
-                })
-            })
+            b.iter(|| black_box(mle.fix_high_variables(y)))
         });
-        
+
         let id = BenchmarkId::new("fix low variable in place", y.len());
         c.bench_with_input(id, &y, |b, y| {
             b.iter(|| {
@@ -125,10 +115,49 @@ fn bench_fix_points(c: &mut Criterion) {
                 })
             });
         });
-
-
     }
 }
 
-criterion_group!(benches, bench_fix_points, bench_eq,);
+fn bench_avx2(c: &mut Criterion) {
+    const REPEAT: usize = 100;
+
+    let mut rng = test_rng();
+    let x = (0..100)
+        .map(|_| GoldilocksExt2::random(&mut rng))
+        .collect::<Vec<_>>();
+    let y = (0..100)
+        .map(|_| GoldilocksExt2::random(&mut rng))
+        .collect::<Vec<_>>();
+    let z = (0..100)
+        .map(|_| GoldilocksExt2::random(&mut rng))
+        .collect::<Vec<_>>();
+
+    let id = "eval non-avx2";
+    c.bench_function(id, |b| {
+        b.iter(|| {
+            black_box(
+                x.iter()
+                    .zip(y.iter().zip(z.iter()))
+                    .for_each(|(xi, (yi, zi))| {
+                        let _ = *zi * (*yi - *xi) + xi;
+                    }),
+            )
+        })
+    });
+
+    let id = "eval avx2";
+    c.bench_function(id, |b| {
+        b.iter(|| {
+            black_box(
+                x.iter()
+                    .zip(y.iter().zip(z.iter()))
+                    .for_each(|(xi, (yi, zi))| {
+                        let _ = eval_helper(xi, yi, zi);
+                    }),
+            )
+        })
+    });
+}
+
+criterion_group!(benches, bench_avx2, bench_fix_points, bench_eq,);
 criterion_main!(benches);

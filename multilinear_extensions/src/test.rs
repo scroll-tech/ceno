@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ark_std::test_rng;
 use ff::Field;
-use goldilocks::{Goldilocks as F, SmallField};
+use goldilocks::{GoldilocksExt2 as F, SmallField};
 
 use crate::{
     mle::DenseMultilinearExtension,
