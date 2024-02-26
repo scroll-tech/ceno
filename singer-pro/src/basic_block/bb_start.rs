@@ -9,7 +9,7 @@ use singer_utils::{
         StackChipOperations,
     },
     chips::IntoEnumIterator,
-    register_witness_multi,
+    register_multi_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::UIntCmp,
 };
@@ -25,7 +25,7 @@ use super::BasicBlockInfo;
 
 pub(crate) struct BasicBlockStart;
 
-register_witness_multi!(BasicBlockStart, phase0(n_stack_items) {
+register_multi_witness!(BasicBlockStart, phase0(n_stack_items) {
     // State in related
     pc => PCUInt::N_OPRAND_CELLS,
     stack_ts => TSUInt::N_OPRAND_CELLS,

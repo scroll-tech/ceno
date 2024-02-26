@@ -43,12 +43,12 @@ macro_rules! register_witness {
 }
 
 #[macro_export]
-macro_rules! register_witness_multi {
+macro_rules! register_multi_witness {
     ($struct_name:ident, $($wire_name:ident($($wire_param:ident)*) { $($slice_name:ident$(($num:expr))? => $length:expr),* }),*) => {
         paste! {
             impl $struct_name {
                 $(
-                    register_witness_multi!(@internal $wire_name($($wire_param)*), 0usize; $($slice_name$(($num))? => $length),*);
+                    register_multi_witness!(@internal $wire_name($($wire_param)*), 0usize; $($slice_name$(($num))? => $length),*);
                 )*
             }
         }
@@ -58,7 +58,7 @@ macro_rules! register_witness_multi {
         paste! {
             impl<const N: usize> $struct_name<N> {
                 $(
-                    register_witness_multi!(@internal $wire_name($($wire_param)*), 0usize; $($slice_name$(($num))? => $length),*);
+                    register_multi_witness!(@internal $wire_name($($wire_param)*), 0usize; $($slice_name$(($num))? => $length),*);
                 )*
             }
         }
@@ -70,7 +70,7 @@ macro_rules! register_witness_multi {
             fn [<$wire_name _ $name>](idx: usize$(, $wire_param: usize)*) -> std::ops::Range<usize> {
                 $offset + $length * (idx - 1)..$offset + $length * idx
             }
-            register_witness_multi!(@internal $wire_name($($wire_param)*), $offset + $length * $num; $($rest$(($rest_num))? => $rest_length),*);
+            register_multi_witness!(@internal $wire_name($($wire_param)*), $offset + $length * $num; $($rest$(($rest_num))? => $rest_length),*);
         }
     };
 
@@ -80,7 +80,7 @@ macro_rules! register_witness_multi {
             fn [<$wire_name _ $name>]($($wire_param: usize)*) -> std::ops::Range<usize> {
                 $offset..$offset + $length
             }
-            register_witness_multi!(@internal $wire_name($($wire_param)*), $offset + $length; $($rest$(($rest_num))? => $rest_length),*);
+            register_multi_witness!(@internal $wire_name($($wire_param)*), $offset + $length; $($rest$(($rest_num))? => $rest_length),*);
         }
     };
 
