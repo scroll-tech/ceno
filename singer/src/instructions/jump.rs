@@ -192,10 +192,14 @@ mod test {
         // initialize general test inputs associated with push1
         let inst_circuit = JumpInstruction::construct_circuit::<Goldilocks>(challenges).unwrap();
 
+        #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);
 
         let phase0_idx_map = JumpInstruction::phase0_idxes_map();
+
+        #[cfg(feature = "test-dbg")]
         println!("{:?}", &phase0_idx_map);
+
         let phase0_witness_size = JumpInstruction::phase0_size();
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);

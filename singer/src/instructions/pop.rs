@@ -197,10 +197,14 @@ mod test {
         // initialize general test inputs associated with push1
         let inst_circuit = PopInstruction::construct_circuit::<Goldilocks>(challenges).unwrap();
 
+        #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);
 
         let phase0_idx_map = PopInstruction::phase0_idxes_map();
+
+        #[cfg(feature = "test-dbg")]
         println!("{:?}", &phase0_idx_map);
+
         let phase0_witness_size = PopInstruction::phase0_size();
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
@@ -241,6 +245,7 @@ mod test {
                 Goldilocks::from(3u64),
                 Goldilocks::from(2u64),
                 Goldilocks::from(1u64),
+                Goldilocks::from(0u64),
             ],
         );
 
