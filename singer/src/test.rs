@@ -43,10 +43,9 @@ pub(crate) fn test_opcode_circuit<Ext: SmallField>(
 ) {
     // configure circuit
     let circuit = inst_circuit.circuit.as_ref();
-    #[cfg(feature = "test")]
-    {
-        println!("{:?}", circuit);
-    }
+    #[cfg(feature = "test-dbg")]
+    println!("{:?}", circuit);
+
     // get indexes for circuit inputs and wire_in
     // only phase0
     let inputs_idxes = &inst_circuit.layout.phases_wire_id;
@@ -70,19 +69,19 @@ pub(crate) fn test_opcode_circuit<Ext: SmallField>(
             }
         }
     }
-    #[cfg(feature = "test")]
-    {
-        println!("{:?}", witness_in);
-    }
+
+    #[cfg(feature = "test-dbg")]
+    println!("{:?}", witness_in);
 
     let circuit_witness = {
         let mut circuit_witness = CircuitWitness::new(&circuit, circuit_witness_challenges);
         circuit_witness.add_instance(&circuit, witness_in);
         circuit_witness
     };
+
+    #[cfg(feature = "test-dbg")]
     println!("{:?}", circuit_witness);
 
-    //#[cfg(feature = "debug")]
     circuit_witness.check_correctness(&circuit);
 
     /*let instance_num_vars = circuit_witness.instance_num_vars();

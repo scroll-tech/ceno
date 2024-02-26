@@ -179,7 +179,7 @@ fn convert_decomp<F: SmallField>(
                 circuit_builder.add(
                     tmp,
                     small_values[k],
-                    F::BaseField::from((1 as u64) << j * small_bit_width),
+                    F::BaseField::from((1 as u64) << k * small_bit_width),
                 );
             }
             tmp
