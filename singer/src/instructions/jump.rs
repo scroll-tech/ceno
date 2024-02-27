@@ -37,7 +37,7 @@ register_witness!(
         next_pc => PCUInt::N_OPRAND_CELLS,
 
         old_stack_ts => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS
+        old_stack_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS
     }
 );
 

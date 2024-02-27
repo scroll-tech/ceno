@@ -37,9 +37,9 @@ register_witness!(
         stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
         old_stack_ts_1 => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt_1 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_lt_1 => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
         old_stack_ts_n_plus_1 => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt_n_plus_1 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_lt_n_plus_1 => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
         stack_values_1 => StackUInt::N_OPRAND_CELLS,
         stack_values_n_plus_1 => StackUInt::N_OPRAND_CELLS
     }
