@@ -194,18 +194,21 @@ mod test {
     fn test_pop_construct_circuit() {
         let challenges = ChipChallenges::default();
 
+        let phase0_idx_map = PopInstruction::phase0_idxes_map();
+        let phase0_witness_size = PopInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("POP {:?}", &phase0_idx_map);
+            println!("POP witness_size = {:?}", phase0_witness_size);
+        }
+
         // initialize general test inputs associated with push1
         let inst_circuit = PopInstruction::construct_circuit::<Goldilocks>(challenges).unwrap();
 
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);
 
-        let phase0_idx_map = PopInstruction::phase0_idxes_map();
-
-        #[cfg(feature = "test-dbg")]
-        println!("{:?}", &phase0_idx_map);
-
-        let phase0_witness_size = PopInstruction::phase0_size();
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(2u64)]);

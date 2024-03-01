@@ -232,6 +232,15 @@ mod test {
     fn test_dup1_construct_circuit() {
         let challenges = ChipChallenges::default();
 
+        let phase0_idx_map = DupInstruction::<1>::phase0_idxes_map();
+        let phase0_witness_size = DupInstruction::<1>::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("DUP: {:?}", &phase0_idx_map);
+            println!("DUP witness_size = {:?}", phase0_witness_size);
+        }
+
         // initialize general test inputs associated with push1
         let inst_circuit =
             DupInstruction::<1>::construct_circuit::<Goldilocks>(challenges).unwrap();
@@ -239,12 +248,6 @@ mod test {
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);
 
-        let phase0_idx_map = DupInstruction::<1>::phase0_idxes_map();
-
-        #[cfg(feature = "test-dbg")]
-        println!("{:?}", &phase0_idx_map);
-
-        let phase0_witness_size = DupInstruction::<1>::phase0_size();
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(2u64)]);
