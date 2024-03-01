@@ -379,3 +379,68 @@ impl Instruction for MstoreAccessory {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::constants::RANGE_CHIP_BIT_WIDTH;
+    use crate::instructions::{ChipChallenges, Instruction, MstoreInstruction};
+    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
+    use crate::utils::uint::{StackUInt, TSUInt};
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
+
+    impl MstoreInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+
+            map.insert("phase0_pc".to_string(), Self::phase0_pc());
+            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
+            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
+            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
+            map.insert("phase0_clk".to_string(), Self::phase0_clk());
+            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
+            map.insert(
+                "phase0_memory_ts_add".to_string(),
+                Self::phase0_memory_ts_add(),
+            );
+            map.insert("phase0_offset".to_string(), Self::phase0_offset());
+            map.insert("phase0_mem_bytes".to_string(), Self::phase0_mem_bytes());
+            map.insert(
+                "phase0_old_stack_ts_offset".to_string(),
+                Self::phase0_old_stack_ts_offset(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_lt_offset".to_string(),
+                Self::phase0_old_stack_ts_lt_offset(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_value".to_string(),
+                Self::phase0_old_stack_ts_value(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_lt_value".to_string(),
+                Self::phase0_old_stack_ts_lt_value(),
+            );
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_mstore_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = MstoreInstruction::phase0_idxes_map();
+        let phase0_witness_size = MstoreInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("MSTORE: {:?}", &phase0_idx_map);
+            println!("MSTORE witness_size: {:?}", phase0_witness_size);
+        }
+    }
+}

@@ -14,6 +14,7 @@ use crate::{
 use self::{
     add::AddInstruction, calldataload::CalldataloadInstruction, gt::GtInstruction,
     jump::JumpInstruction, jumpi::JumpiInstruction, mstore::MstoreInstruction,
+    ret::ReturnInstruction,
 };
 
 // arithmetic

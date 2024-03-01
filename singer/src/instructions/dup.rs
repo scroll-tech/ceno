@@ -237,8 +237,8 @@ mod test {
 
         #[cfg(feature = "witness-count")]
         {
-            println!("DUP: {:?}", &phase0_idx_map);
-            println!("DUP witness_size = {:?}", phase0_witness_size);
+            println!("DUP1: {:?}", &phase0_idx_map);
+            println!("DUP1 witness_size = {:?}", phase0_witness_size);
         }
 
         // initialize general test inputs associated with push1

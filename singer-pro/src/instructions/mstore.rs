@@ -302,3 +302,43 @@ impl MstoreAccessory {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::constants::RANGE_CHIP_BIT_WIDTH;
+    use crate::instructions::{ChipChallenges, Instruction, MstoreInstruction};
+    use crate::utils::uint::{StackUInt, TSUInt};
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
+
+    impl MstoreInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert(
+                "phase0_memory_ts_add".to_string(),
+                Self::phase0_memory_ts_add(),
+            );
+            map.insert("phase0_memory_bytes".to_string(), Self::phase0_mem_bytes());
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_mstore_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = MstoreInstruction::phase0_idxes_map();
+        let phase0_witness_size = MstoreInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("MSTORE: {:?}", &phase0_idx_map);
+            println!("MSTORE witness_size: {:?}", phase0_witness_size);
+        }
+    }
+}

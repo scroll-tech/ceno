@@ -65,3 +65,25 @@ impl<F: SmallField> Instruction<F> for JumpInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::constants::RANGE_CHIP_BIT_WIDTH;
+    use crate::instructions::{ChipChallenges, Instruction, JumpInstruction};
+    use crate::utils::uint::{StackUInt, TSUInt};
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
+
+    #[test]
+    fn test_jump_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("JUMP: witness_in size {:?}", 0);
+        }
+    }
+}

@@ -100,3 +100,42 @@ impl<F: SmallField> Instruction<F> for GtInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::constants::RANGE_CHIP_BIT_WIDTH;
+    use crate::instructions::{ChipChallenges, GtInstruction, Instruction};
+    use crate::utils::uint::{StackUInt, TSUInt};
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
+
+    impl GtInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert(
+                "phase0_instruction_gt".to_string(),
+                Self::phase0_instruction_gt(),
+            );
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_gt_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = GtInstruction::phase0_idxes_map();
+        let phase0_witness_size = GtInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("GT: {:?}", &phase0_idx_map);
+            println!("GT witness_size: {:?}", phase0_witness_size);
+        }
+    }
+}
