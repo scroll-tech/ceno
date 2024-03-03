@@ -43,6 +43,7 @@ pub(crate) fn test_opcode_circuit<Ext: SmallField>(
 ) {
     // configure circuit
     let circuit = inst_circuit.circuit.as_ref();
+    
     #[cfg(feature = "test-dbg")]
     println!("{:?}", circuit);
 
