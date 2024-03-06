@@ -132,8 +132,6 @@ mod test {
         // as happened in add tests
         // this test fails at singer/src/instructions/utils/uint.rs:168:49:
         // attempt to shift left with overflow
-        // besides, a circuit error happens at line 83 of chiphandler/range.rs
-        // since VALUE_BIT_WIDTH = 16 and RANGE_CHIP_BIT_WIDTH = 32
         type Uint256_8 = UInt<256, 8>;
         assert_eq!(Uint256_8::N_OPRAND_CELLS, 32);
         // build the circuit for lt
