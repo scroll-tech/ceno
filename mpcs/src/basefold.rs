@@ -21,13 +21,13 @@ use crate::{
     util::num_of_bytes,
 };
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
-use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
 use ctr;
 use ff::BatchInverter;
 use generic_array::GenericArray;
 use goldilocks::SmallField;
 use std::{ops::Deref, time::Instant};
+use crate::{start_timer, end_timer};
 
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -42,6 +42,8 @@ use rayon::prelude::{
 };
 use std::{borrow::Cow, marker::PhantomData, slice};
 type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
+
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BasefoldParams<F: SmallField, Rng: RngCore> {
     log_rate: usize,
@@ -2650,6 +2652,7 @@ fn batch_verifier_query_phase<
         hasher,
     );
 
+    #[allow(unused)]
     let final_timer = start_timer!(|| "Final checks");
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
 

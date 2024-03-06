@@ -404,7 +404,7 @@ dependencies = [
  "ff",
  "frontend",
  "goldilocks",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "multilinear_extensions",
  "serde",
  "serde_json",
@@ -421,7 +421,7 @@ dependencies = [
  "frontend",
  "gkr",
  "goldilocks",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "multilinear_extensions",
  "sumcheck",
  "transcript",
@@ -434,7 +434,7 @@ source = "git+https://github.com/zhenfeizhang/Goldilocks#a74c883715b1f837cce9ff0
 dependencies = [
  "ff",
  "halo2curves 0.1.0",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "rand_core",
  "serde",
  "subtle",
@@ -536,9 +536,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]
@@ -614,7 +614,7 @@ dependencies = [
  "gkr",
  "goldilocks",
  "halo2curves 0.3.3",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "multilinear_extensions",
  "num-bigint 0.4.4",
  "num-integer",
@@ -757,9 +757,9 @@ checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 
 [[package]]
 name = "plonky2"
-version = "0.1.4"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31c7acc7871fdaf000d3533116eab95d89ada3dfb82b7bb0231da981323c27d6"
+checksum = "b25deb9a4b9c2014c2f99cd36078f30e453d188d0ca8dd4c5ffd1d494b661ac1"
 dependencies = [
  "ahash",
  "anyhow",
@@ -775,16 +775,16 @@ dependencies = [
  "rand",
  "rand_chacha",
  "serde",
- "serde_json",
  "static_assertions",
  "unroll",
+ "web-time",
 ]
 
 [[package]]
 name = "plonky2_field"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d33a655ab5d274f763c292fe7e14577f25e40d9d8607b70ef10b39f8619e60b4"
+checksum = "465a741ba134485af571152aab5086457a470aa8893391186cf78dd389694440"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
@@ -798,18 +798,18 @@ dependencies = [
 
 [[package]]
 name = "plonky2_maybe_rayon"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "194db0cbdd974e92d897cd92b74adb3968dc1b967315eb280357c49a7637994e"
+checksum = "92ff44a90aaca13e10e7ddf8fab815ba1b404c3f7c3ca82aaf11c46beabaa923"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "plonky2_util"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5696e2e2a6bb5c48a6e33fb0dd4d20d0a9472784b709964f337f224e99bd6d06"
+checksum = "b16136f5f3019c1e83035af76cccddd56d789a5e2933306270185c3f99f12259"
 
 [[package]]
 name = "poseidon"
@@ -1158,6 +1158,16 @@ name = "wasm-bindgen-shared"
 version = "0.2.90"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d91413b1c31d7539ba5ef2451af3f0b833a005eb27a631cec32bc0635a8602b"
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "windows-sys"

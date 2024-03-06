@@ -2,6 +2,7 @@
 pub use enabled::{end_timer, start_timer, start_unit_timer};
 
 #[cfg(not(feature = "timer"))]
+#[allow(unused)]
 pub use disabled::{end_timer, start_timer, start_unit_timer};
 
 #[cfg(feature = "timer")]

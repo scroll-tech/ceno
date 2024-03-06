@@ -9,8 +9,48 @@ use ff::PrimeField;
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-pub use timer::{end_timer, start_timer, start_unit_timer};
+pub use timer::start_unit_timer;
 pub mod merkle_tree;
+
+#[cfg(feature = "print-trace")]
+use ark_std::{end_timer as ark_end_timer, start_timer as ark_start_timer};
+#[cfg(feature = "print-trace")]
+#[macro_export]
+macro_rules! start_timer {
+    ($msg: expr) => {
+        ark_start_timer!($msg)
+    };
+}
+
+#[cfg(not(feature = "print-trace"))]
+#[macro_export]
+macro_rules! start_timer {
+    ($msg: expr) => {
+        {$msg}
+    };
+}
+
+#[cfg(feature = "print-trace")]
+#[macro_export]
+macro_rules! end_timer {
+    ($time: expr) => {
+        #![feature(print-trace)]
+        ark_end_timer!($time);
+    };
+
+    ($time:expr, $msg:expr) => {
+        #![feature(print-trace)]
+        ark_end_timer!($time, $msg);
+    }
+}
+
+#[cfg(not(feature = "print-trace"))]
+#[macro_export]
+macro_rules! end_timer {
+    ($time: expr) => {
+        let _ = $time;
+    };
+}
 
 pub fn log2_strict(n: usize) -> usize {
     let res = n.trailing_zeros();

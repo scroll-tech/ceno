@@ -21,6 +21,8 @@ pub type Commitment<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::Co
 
 pub type CommitmentChunk<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::CommitmentChunk;
 
+
+
 pub trait PolynomialCommitmentScheme<F: SmallField, PF: SmallField>: Clone + Debug {
     type Param: Clone + Debug + Serialize + DeserializeOwned;
     type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
@@ -350,17 +352,15 @@ mod test {
             + TranscriptWrite<Pcs::CommitmentChunk, F>
             + InMemoryTranscript<F>,
     {
-        for num_vars in 10..15 {
+        for num_vars in 10..25 {
             println!("k {:?}", num_vars);
             // Setup
             let (pp, vp) = {
                 let rng = ChaCha8Rng::from_seed([0u8; 32]);
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, &rng).unwrap();
-                println!("before trim");
                 Pcs::trim(&param).unwrap()
             };
-            println!("after trim");
             // Commit and open
             let proof = {
                 let mut transcript = T::new();
@@ -368,9 +368,11 @@ mod test {
                 let now = Instant::now();
 
                 let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
+                println!("commit time {:?}", now.elapsed());
                 let point = transcript.squeeze_challenges(num_vars);
                 let eval = poly.evaluate(point.as_slice());
                 transcript.write_field_element(&eval).unwrap();
+                let now = Instant::now();
                 Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
                 println!("proof time {:?}", now.elapsed());
 
@@ -379,13 +381,17 @@ mod test {
             // Verify
             let result = {
                 let mut transcript = T::from_proof(proof.as_slice());
-                Pcs::verify(
+                let now = Instant::now();
+                let result = Pcs::verify(
                     &vp,
                     &Pcs::read_commitment(&vp, &mut transcript).unwrap(),
                     &transcript.squeeze_challenges(num_vars),
                     &transcript.read_field_element().unwrap(),
                     &mut transcript,
-                )
+                );
+                println!("verify time {:?}", now.elapsed());
+
+                result
             };
             assert_eq!(result, Ok(()));
         }
@@ -407,9 +413,9 @@ mod test {
             + TranscriptWrite<Pcs::CommitmentChunk, F>
             + InMemoryTranscript<F>,
     {
-        for num_vars in 10..15 {
+        for num_vars in 10..25 {
             println!("k {:?}", num_vars);
-            let batch_size = 8;
+            let batch_size = 2;
             let num_points = batch_size >> 1;
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
             // Setup
@@ -469,7 +475,8 @@ mod test {
 
                 let evals2 = transcript.read_field_elements(evals.len()).unwrap();
 
-                Pcs::batch_verify(
+                let now = Instant::now();
+                let result = Pcs::batch_verify(
                     &vp,
                     comms,
                     &points,
@@ -480,7 +487,9 @@ mod test {
                         .map(|((poly, point), eval)| Evaluation::new(poly, point, eval))
                         .collect_vec(),
                     &mut transcript,
-                )
+                );
+                println!("batch verify {:?}", now.elapsed());
+                result
             };
 
             assert_eq!(result, Ok(()));

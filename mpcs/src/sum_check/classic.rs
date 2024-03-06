@@ -1,12 +1,11 @@
 use crate::{
+    start_timer, end_timer,
     poly::multilinear::MultilinearPolynomial,
     sum_check::{SumCheck, VirtualPolynomial},
     util::{
         arithmetic::BooleanHypercube,
-        end_timer,
         expression::{Expression, Rotation},
         parallel::par_map_collect,
-        start_timer,
         transcript::{FieldTranscriptRead, FieldTranscriptWrite},
     },
     Error,
@@ -214,7 +213,7 @@ where
         sum: F,
         transcript: &mut impl FieldTranscriptWrite<F>,
     ) -> Result<(Vec<F>, Vec<F>), Error> {
-        let _timer = start_timer(|| {
+        let _timer = start_timer!(|| {
             let degree = virtual_poly.expression.degree();
             format!("sum_check_prove-{num_vars}-{degree}")
         });
@@ -230,9 +229,9 @@ where
         let aux = P::RoundMessage::auxiliary(state.degree);
 
         for round in 0..num_vars {
-            let timer = start_timer(|| format!("sum_check_prove_round-{round}"));
+            let timer = start_timer!(|| format!("sum_check_prove_round-{round}"));
             let msg = prover.prove_round(&state);
-            end_timer(timer);
+            end_timer!(timer);
             msg.write(transcript)?;
 
             if cfg!(feature = "sanity-check") {
@@ -245,9 +244,9 @@ where
             let challenge = transcript.squeeze_challenge();
             challenges.push(challenge);
 
-            let timer = start_timer(|| format!("sum_check_next_round-{round}"));
+            let timer = start_timer!(|| format!("sum_check_next_round-{round}"));
             state.next_round(msg.evaluate(&aux, &challenge), &challenge);
-            end_timer(timer);
+            end_timer!(timer);
         }
 
         Ok((challenges, state.into_evals()))

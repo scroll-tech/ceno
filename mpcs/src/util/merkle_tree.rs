@@ -1,4 +1,4 @@
-use ark_std::{end_timer, start_timer};
+use crate::{start_timer, end_timer};
 use goldilocks::SmallField;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
