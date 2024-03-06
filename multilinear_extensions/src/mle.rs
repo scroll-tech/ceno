@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ark_std::{end_timer, rand::RngCore, start_timer};
-use ff::Field;
+use goldilocks::SmallField;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "parallel")]
@@ -16,7 +16,7 @@ pub struct DenseMultilinearExtension<F> {
     pub num_vars: usize,
 }
 
-impl<F: Field> DenseMultilinearExtension<F> {
+impl<F: SmallField> DenseMultilinearExtension<F> {
     /// Construct a new polynomial from a list of evaluations where the index
     /// represents a point in {0,1}^`num_vars` in little endian form. For
     /// example, `0b1011` represents `P(1,1,0,1)`
@@ -117,7 +117,7 @@ impl<F: Field> DenseMultilinearExtension<F> {
             let mut product = F::ONE;
 
             for e in multiplicands.iter_mut() {
-                let val = F::random(&mut rng);
+                let val = F::sample_base(&mut rng);
                 e.push(val);
                 product *= val;
             }
@@ -159,5 +159,12 @@ impl<F: Field> DenseMultilinearExtension<F> {
 
         end_timer!(start);
         list
+    }
+
+    pub fn to_ext_field<Ext: SmallField<BaseField = F>>(&self) -> DenseMultilinearExtension<Ext> {
+        DenseMultilinearExtension {
+            evaluations: self.evaluations.iter().map(|f| Ext::from_base(f)).collect(),
+            num_vars: self.num_vars,
+        }
     }
 }

@@ -1,5 +1,4 @@
 use ark_std::{end_timer, start_timer};
-use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use multilinear_extensions::virtual_poly::VPAuxInfo;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -10,7 +9,7 @@ use crate::{
     util::interpolate_uni_poly,
 };
 
-impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
+impl<F: SmallField> IOPVerifierState<F> {
     pub fn verify(
         claimed_sum: F,
         proof: &IOPProof<F>,
@@ -138,7 +137,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPVerifierState<F> {
                     );
                 }
                 // fixme: move to extension field
-                interpolate_uni_poly::<F>(&evaluations, challenge.elements[0])
+                interpolate_uni_poly::<F>(&evaluations, challenge.elements)
             })
             .collect::<Vec<_>>();
 

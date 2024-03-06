@@ -6,11 +6,12 @@ use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
+use simple_frontend::structs::{CellId, LayerId};
 use transcript::Transcript;
 
 use crate::structs::{
     Circuit, CircuitWitness, Gate1In, Gate2In, Gate3In, GateCIn, IOPProof, IOPProverPhase1Message,
-    IOPProverPhase2Message, IOPProverState, Point,
+    IOPProverPhase2Message, IOPProverState, Point, PointAndEval,
 };
 
 mod phase1;
@@ -26,9 +27,9 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     /// Prove process for data parallel circuits.
     pub fn prove_parallel(
         circuit: &Circuit<F>,
-        circuit_witness: &CircuitWitness<F>,
-        output_evals: &[(Point<F>, F)],
-        wires_out_evals: &[(Point<F>, F)],
+        circuit_witness: &CircuitWitness<F::BaseField>,
+        output_evals: &[PointAndEval<F>],
+        wires_out_evals: &[PointAndEval<F>],
         transcript: &mut Transcript<F>,
     ) -> IOPProof<F> {
         let timer = start_timer!(|| "Proving");
@@ -39,7 +40,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         let mut prover_state =
             Self::prover_init_parallel(circuit_witness, output_evals, wires_out_evals);
 
-        let sumcheck_proofs = (0..circuit.layers.len())
+        let sumcheck_proofs = (0..circuit.layers.len() as LayerId)
             .map(|layer_id| {
                 let timer = start_timer!(|| format!("Prove layer {}", layer_id));
                 prover_state.layer_id = layer_id;
@@ -55,8 +56,8 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
                         phase1_msg.eval_value_2,
                     ),
                     None => (
-                        prover_state.next_evals[0].clone().0,
-                        prover_state.next_evals[0].1,
+                        prover_state.next_layer_point_and_evals[0].point.clone(),
+                        prover_state.next_layer_point_and_evals[0].eval,
                     ),
                 };
 
@@ -84,24 +85,24 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
 
     /// Initialize proving state for data parallel circuits.
     fn prover_init_parallel(
-        circuit_witness: &CircuitWitness<F>,
-        output_evals: &[(Point<F>, F)],
-        wires_out_evals: &[(Point<F>, F)],
+        circuit_witness: &CircuitWitness<F::BaseField>,
+        output_evals: &[PointAndEval<F>],
+        wires_out_evals: &[PointAndEval<F>],
     ) -> Self {
-        let next_evals = output_evals.to_vec();
-        let mut subset_evals = HashMap::new();
-        subset_evals.entry(0usize).or_insert(
+        let next_layer_point_and_evals = output_evals.to_vec();
+        let mut subset_point_and_evals = HashMap::new();
+        subset_point_and_evals.entry(0 as LayerId).or_insert(
             wires_out_evals
                 .to_vec()
                 .into_iter()
                 .enumerate()
-                .map(|(i, (point, value))| (i, point, value))
+                .map(|(i, point_and_eval)| (i as LayerId, point_and_eval))
                 .collect_vec(),
         );
         Self {
             layer_id: 0,
-            next_evals,
-            subset_evals,
+            next_layer_point_and_evals,
+            subset_point_and_evals,
             circuit_witness: circuit_witness.clone(),
             // Default
             layer_out_poly: Arc::default(),
@@ -116,28 +117,31 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         circuit: &Circuit<F>,
         transcript: &mut Transcript<F>,
     ) -> Option<IOPProverPhase1Message<F>> {
-        let layer = &circuit.layers[self.layer_id];
+        let layer = &circuit.layers[self.layer_id as usize];
         let lo_num_vars = layer.num_vars;
         let hi_num_vars = self.circuit_witness.instance_num_vars();
         self.layer_out_poly = self
             .circuit_witness
             .layer_poly(self.layer_id, layer.num_vars);
-        let next_evals = &self.next_evals;
-        let subset_evals = self.subset_evals.remove(&self.layer_id).unwrap_or(vec![]);
+        let next_layer_point_and_evals = &self.next_layer_point_and_evals;
+        let subset_point_and_evals = self
+            .subset_point_and_evals
+            .remove(&self.layer_id)
+            .unwrap_or(vec![]);
 
-        if subset_evals.len() == 0 && next_evals.len() == 1 {
+        if subset_point_and_evals.len() == 0 && next_layer_point_and_evals.len() == 1 {
             return None;
         }
 
         // TODO: Double check the correctness.
         let alpha = transcript
             .get_and_append_challenge(b"combine subset evals")
-            .elements[0];
+            .elements;
 
         let mut prover_phase1_state = IOPProverPhase1State::prover_init_parallel(
             &self.layer_out_poly,
-            &next_evals,
-            &subset_evals,
+            &next_layer_point_and_evals,
+            &subset_point_and_evals,
             &alpha,
             lo_num_vars,
             hi_num_vars,
@@ -188,9 +192,9 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         layer_out_value: &F,
         transcript: &mut Transcript<F>,
     ) -> IOPProverPhase2Message<F> {
-        self.next_evals.clear();
+        self.next_layer_point_and_evals.clear();
 
-        let layer = &circuit.layers[self.layer_id];
+        let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let hi_num_vars = self.circuit_witness.instance_num_vars();
 
@@ -201,9 +205,9 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             &self.layer_out_poly,
             &layer_out_point,
             *layer_out_value,
-            &self.circuit_witness.layers[self.layer_id + 1],
+            &self.circuit_witness.layers[self.layer_id as usize + 1],
             self.circuit_witness.layers_ref(),
-            |c| self.circuit_witness.constant(c),
+            |c| self.circuit_witness.constant(*c),
             hi_num_vars,
         );
 
@@ -249,18 +253,20 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             .split_at(1);
 
         for f_value in next_f_values {
-            self.next_evals
-                .push((sumcheck_proof_1.point.clone(), *f_value));
+            self.next_layer_point_and_evals
+                .push(PointAndEval::new_from_ref(&sumcheck_proof_1.point, f_value));
         }
         layer.paste_from.iter().zip(subset_f_values).for_each(
             |((&old_layer_id, _), &subset_value)| {
-                self.subset_evals
+                self.subset_point_and_evals
                     .entry(old_layer_id)
                     .or_insert_with(Vec::new)
                     .push((
                         self.layer_id,
-                        prover_phase2_state.sumcheck_point_1.clone(),
-                        subset_value,
+                        PointAndEval::new_from_ref(
+                            &prover_phase2_state.sumcheck_point_1,
+                            &subset_value,
+                        ),
                     ));
             },
         );
@@ -282,8 +288,11 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         let (sumcheck_proof_2, eval_values_2) =
             prover_phase2_state.prove_and_update_state_step2_parallel(transcript);
 
-        self.next_evals
-            .push((sumcheck_proof_2.point.clone(), eval_values_2[0]));
+        self.next_layer_point_and_evals
+            .push(PointAndEval::new_from_ref(
+                &sumcheck_proof_2.point,
+                &eval_values_2[0],
+            ));
 
         sumcheck_proofs.push(sumcheck_proof_2);
         sumcheck_eval_values.push(eval_values_2);
@@ -302,8 +311,11 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         let (sumcheck_proof_3, eval_values_3) =
             prover_phase2_state.prove_and_update_state_step3_parallel(transcript);
 
-        self.next_evals
-            .push((sumcheck_proof_3.point.clone(), eval_values_3[0]));
+        self.next_layer_point_and_evals
+            .push(PointAndEval::new_from_ref(
+                &sumcheck_proof_3.point,
+                &eval_values_3[0],
+            ));
 
         sumcheck_proofs.push(sumcheck_proof_3);
         sumcheck_eval_values.push(eval_values_3);
@@ -321,9 +333,9 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         layer_out_point: &Point<F>,
         transcript: &mut Transcript<F>,
     ) -> IOPProverPhase2Message<F> {
-        self.next_evals.clear();
+        self.next_layer_point_and_evals.clear();
 
-        let layer = &circuit.layers[self.layer_id];
+        let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let hi_num_vars = self.circuit_witness.instance_num_vars();
         assert!(lo_out_num_vars + hi_num_vars == layer_out_point.len());
@@ -331,7 +343,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         let prover_phase2_state = IOPProverPhase2InputState::prover_init_parallel(
             &layer_out_point,
             self.circuit_witness.wires_in_ref(),
-            &circuit.paste_from_wires_in,
+            &circuit.paste_from_in,
             layer.num_vars,
             circuit.max_wires_in_num_vars,
             hi_num_vars,
@@ -361,10 +373,10 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     // TODO: Define special protocols of special layers for optimization.
 }
 
-struct IOPProverPhase1State<'a, F> {
+struct IOPProverPhase1State<'a, F: SmallField> {
     layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
-    next_evals: &'a [(Point<F>, F)],
-    subset_evals: &'a [(usize, Point<F>, F)],
+    next_layer_point_and_evals: &'a [PointAndEval<F>],
+    subset_point_and_evals: &'a [(LayerId, PointAndEval<F>)],
     alpha_pows: Vec<F>,
     lo_num_vars: usize,
     hi_num_vars: usize,
@@ -378,13 +390,13 @@ struct IOPProverPhase2State<'a, F: SmallField> {
     layer_out_point: Point<F>,
     layer_out_value: F,
     layer_in_poly: Arc<DenseMultilinearExtension<F>>,
-    layer_in_vec: &'a [Vec<F>],
-    mul3s: Vec<Gate3In<F>>,
-    mul2s: Vec<Gate2In<F>>,
-    adds: Vec<Gate1In<F>>,
-    assert_consts: Vec<GateCIn<F>>,
-    paste_from: &'a HashMap<usize, Vec<usize>>,
-    paste_from_sources: &'a [Vec<Vec<F>>],
+    layer_in_vec: &'a [Vec<F::BaseField>],
+    mul3s: Vec<Gate3In<F::BaseField>>,
+    mul2s: Vec<Gate2In<F::BaseField>>,
+    adds: Vec<Gate1In<F::BaseField>>,
+    assert_consts: Vec<GateCIn<F::BaseField>>,
+    paste_from: &'a HashMap<LayerId, Vec<CellId>>,
+    paste_from_sources: &'a [Vec<Vec<F::BaseField>>],
     lo_out_num_vars: usize,
     lo_in_num_vars: usize,
     hi_num_vars: usize,
@@ -408,9 +420,10 @@ struct IOPProverPhase2State<'a, F: SmallField> {
 
 struct IOPProverPhase2InputState<'a, F: SmallField> {
     layer_out_point: &'a Point<F>,
-    paste_from_wires_in: &'a [(usize, usize)],
-    wires_in: &'a [Vec<Vec<F>>],
+    paste_from_wires_in: Vec<(CellId, CellId)>,
+    paste_from_counter_in: Vec<(CellId, CellId)>,
+    wires_in: &'a [Vec<Vec<F::BaseField>>],
     lo_out_num_vars: usize,
-    lo_in_num_vars: usize,
+    lo_in_num_vars: Option<usize>,
     hi_num_vars: usize,
 }

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use ark_std::{end_timer, start_timer};
-use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -12,7 +11,18 @@ use crate::{
     util::{barycentric_weights, extrapolate},
 };
 
-impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
+impl<F: SmallField> IOPProverState<F> {
+    /// Identical to `prove` function. With the exception that the input poly is
+    /// over the base field rather than the extension field
+    pub fn prove_base_poly(
+        poly: &VirtualPolynomial<F::BaseField>,
+        transcript: &mut Transcript<F>,
+    ) -> IOPProof<F> {
+        let ploy_ext = poly.to_ext_field::<F>();
+        Self::prove(&ploy_ext, transcript)
+    }
+
+    /// Given a virtual polynomial, generate an IOP proof.
     pub fn prove(poly: &VirtualPolynomial<F>, transcript: &mut Transcript<F>) -> IOPProof<F> {
         if poly.aux_info.num_variables == 0 {
             return IOPProof {
@@ -25,7 +35,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         transcript.append_message(&poly.aux_info.num_variables.to_le_bytes());
         transcript.append_message(&poly.aux_info.max_degree.to_le_bytes());
 
-        let mut prover_state = Self::prover_init(poly);
+        let mut prover_state = Self::prover_init(&poly);
         let mut challenge = None;
         let mut prover_msgs = Vec::with_capacity(poly.aux_info.num_variables);
         for _ in 0..poly.aux_info.num_variables {
@@ -51,7 +61,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             point: prover_state
                 .challenges
                 .iter()
-                .map(|challenge| challenge.elements[0])
+                .map(|challenge| challenge.elements)
                 .collect(),
             proofs: prover_msgs,
         }
@@ -130,7 +140,7 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
             #[cfg(not(feature = "parallel"))]
             flattened_ml_extensions
                 .iter_mut()
-                .for_each(|mle| *mle = mle.fix_variables(&[r.elements[0]]));
+                .for_each(|mle| *mle = mle.fix_variables(&[r.elements]));
         } else if self.round > 0 {
             panic!("verifier message is empty");
         }

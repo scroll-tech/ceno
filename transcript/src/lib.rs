@@ -1,9 +1,9 @@
 //! This repo is not properly implemented
 //! Transcript APIs are placeholders; the actual logic is to be implemented later.
+#![feature(generic_arg_infer)]
 
 mod hasher;
 
-use ff::{FromUniformBytes, PrimeField};
 use goldilocks::SmallField;
 use poseidon::Poseidon;
 
@@ -12,21 +12,21 @@ pub const INPUT_WIDTH: usize = 12;
 pub const OUTPUT_WIDTH: usize = 4;
 
 #[derive(Clone)]
-pub struct Transcript<F: PrimeField> {
-    sponge_hasher: Poseidon<F, 12, 11>,
+pub struct Transcript<F: SmallField> {
+    sponge_hasher: Poseidon<F::BaseField, 12, 11>,
 }
 
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Challenge<F> {
-    pub elements: [F; OUTPUT_WIDTH],
+    pub elements: F,
 }
 
-impl<F: SmallField + FromUniformBytes<64>> Transcript<F> {
+impl<F: SmallField> Transcript<F> {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
         // FIXME: change me the the right parameter
-        let mut hasher = Poseidon::new(8, 22);
-        let label_f = F::bytes_to_field_elements(label);
+        let mut hasher = Poseidon::<F::BaseField, _, _>::new(8, 22);
+        let label_f = F::BaseField::bytes_to_field_elements(label);
         hasher.update(label_f.as_slice());
         Self {
             sponge_hasher: hasher,
@@ -35,18 +35,19 @@ impl<F: SmallField + FromUniformBytes<64>> Transcript<F> {
 
     // Append the message to the transcript.
     pub fn append_message(&mut self, msg: &[u8]) {
-        let msg_f = F::bytes_to_field_elements(msg);
+        let msg_f = F::BaseField::bytes_to_field_elements(msg);
         self.sponge_hasher.update(&msg_f);
     }
 
     // Append the field elemetn to the transcript.
     pub fn append_field_element(&mut self, element: &F) {
-        self.sponge_hasher.update(&[*element]);
+        self.sponge_hasher.update(element.to_limbs().as_ref());
     }
 
     // Append the challenge to the transcript.
     pub fn append_challenge(&mut self, challenge: Challenge<F>) {
-        self.sponge_hasher.update(challenge.elements.as_slice())
+        self.sponge_hasher
+            .update(challenge.elements.to_limbs().as_ref())
     }
 
     // // Append the message to the transcript.
@@ -67,11 +68,9 @@ impl<F: SmallField + FromUniformBytes<64>> Transcript<F> {
         self.append_message(label);
 
         let challenge = Challenge {
-            elements: self.sponge_hasher.squeeze_vec()[0..OUTPUT_WIDTH]
-                .try_into()
-                .unwrap(),
+            elements: F::from_limbs(self.sponge_hasher.squeeze_vec().as_ref()),
         };
-        println!("challenge: {:?}", challenge);
+        // println!("challenge: {:?}", challenge);
 
         challenge
     }

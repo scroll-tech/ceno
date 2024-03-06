@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use ark_std::test_rng;
-use ff::{Field, PrimeField};
-use goldilocks::Goldilocks as F;
+use ff::Field;
+use goldilocks::{Goldilocks as F, SmallField};
 
 use crate::{
     mle::DenseMultilinearExtension,
@@ -71,7 +71,7 @@ fn test_eq_xr() {
 //      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 // over r, which is
 //      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-fn build_eq_x_r_for_test<F: PrimeField>(r: &[F]) -> Arc<DenseMultilinearExtension<F>> {
+fn build_eq_x_r_for_test<F: SmallField>(r: &[F]) -> Arc<DenseMultilinearExtension<F>> {
     // we build eq(x,r) from its evaluations
     // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
     // for example, with num_vars = 4, x is a binary vector of 4, then

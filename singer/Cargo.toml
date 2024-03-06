@@ -1,0 +1,24 @@
+[package]
+name = "singer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ark-std.workspace = true
+ff.workspace = true
+goldilocks.workspace = true
+rayon.workspace = true
+serde.workspace = true
+
+gkr = { path = "../gkr" }
+transcript = { path = "../transcript" }
+mpcs = { path = "../mpcs" }
+gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
+itertools = "0.12.0"
+strum = "0.25.0"
+strum_macros = "0.25.3"
+simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
+paste = "1.0.14"

@@ -7,13 +7,11 @@ license.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ff.workspace = true
 ark-std.workspace = true
+ff.workspace = true
+goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
-
-[dev-dependencies]
-goldilocks.workspace = true
 
 [features]
 parallel = [ ]

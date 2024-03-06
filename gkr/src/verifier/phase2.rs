@@ -1,9 +1,8 @@
 use ark_std::{end_timer, start_timer};
-use ff::FromUniformBytes;
-use frontend::structs::ConstantType;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
+use simple_frontend::structs::ConstantType;
 use transcript::Transcript;
 
 use crate::{
@@ -15,12 +14,12 @@ use crate::{
 
 use super::{IOPVerifierPhase2State, SumcheckState};
 
-impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
+impl<'a, F: SmallField> IOPVerifierPhase2State<'a, F> {
     pub(super) fn verifier_init_parallel(
         layer: &'a Layer<F>,
         layer_out_point: &Point<F>,
         layer_out_value: &F,
-        constant: impl Fn(&ConstantType<F>) -> F,
+        constant: impl Fn(ConstantType<F>) -> F::BaseField,
         hi_num_vars: usize,
     ) -> Self {
         let timer = start_timer!(|| "Verifier init phase 2");
@@ -28,21 +27,18 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             .mul3s
             .iter()
             .map(|gate| Gate3In {
-                idx_in1: gate.idx_in1,
-                idx_in2: gate.idx_in2,
-                idx_in3: gate.idx_in3,
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                scaler: constant(&gate.scaler),
+                scalar: constant(gate.scalar),
             })
             .collect_vec();
         let mul2s = layer
             .mul2s
             .iter()
             .map(|gate| Gate2In {
-                idx_in1: gate.idx_in1,
-                idx_in2: gate.idx_in2,
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                scaler: constant(&gate.scaler),
+                scalar: constant(gate.scalar),
             })
             .collect_vec();
         let adds = layer
@@ -51,23 +47,25 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             .map(|gate| Gate1In {
                 idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                scaler: constant(&gate.scaler),
+                scalar: constant(gate.scalar),
             })
             .collect_vec();
         let add_consts = layer
             .add_consts
             .iter()
             .map(|gate| GateCIn {
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                constant: constant(&gate.constant),
+                scalar: constant(gate.scalar),
             })
             .collect_vec();
         let assert_consts = layer
             .assert_consts
             .iter()
             .map(|gate| GateCIn {
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                constant: constant(&gate.constant),
+                scalar: constant(gate.scalar),
             })
             .collect_vec();
         let lo_out_num_vars = layer.num_vars;
@@ -135,7 +133,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             },
             transcript,
         );
-        let claim0_point = claim_0.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim0_point = claim_0.point.iter().map(|x| x.elements).collect_vec();
         let eq_x_rx = build_eq_x_r_vec(&claim0_point);
         let f0_value = prover_msg.1[0];
         let g0_value = eq_eval(&lo_point, &claim0_point)
@@ -192,7 +190,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             },
             transcript,
         );
-        let claim1_point = claim_1.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim1_point = claim_1.point.iter().map(|x| x.elements).collect_vec();
         let hi_point_sc1 = &claim1_point[lo_in_num_vars..];
         let lo_point_sc1 = &claim1_point[..lo_in_num_vars];
 
@@ -263,7 +261,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             },
             transcript,
         );
-        let claim2_point = claim_2.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim2_point = claim_2.point.iter().map(|x| x.elements).collect_vec();
         let f2_value = prover_msg.1[0];
         let g2_value = prover_msg.1[1];
         let got_value_2 = f2_value * g2_value;
@@ -315,7 +313,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase2State<'a, F> {
             },
             transcript,
         );
-        let claim3_point = claim_3.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim3_point = claim_3.point.iter().map(|x| x.elements).collect_vec();
         let lo_point_sc3 = &claim3_point[..lo_in_num_vars];
         let eq_x3_rx3 = build_eq_x_r_vec(lo_point_sc3);
         let f3_value = prover_msg.1[0];

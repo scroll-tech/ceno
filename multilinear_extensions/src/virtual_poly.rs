@@ -1,10 +1,12 @@
 use std::cmp::max;
+use std::hash::Hash;
 use std::ops::Add;
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use ark_std::rand::Rng;
 use ark_std::{end_timer, start_timer};
 use ff::PrimeField;
+use goldilocks::SmallField;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
@@ -69,7 +71,17 @@ impl<F: PrimeField> AsRef<[u8]> for VPAuxInfo<F> {
     }
 }
 
-impl<F: PrimeField> Add for &VirtualPolynomial<F> {
+impl<F> VPAuxInfo<F> {
+    pub fn to_ext_field<Ext: SmallField<BaseField = F>>(&self) -> VPAuxInfo<Ext> {
+        VPAuxInfo::<Ext> {
+            max_degree: self.max_degree,
+            num_variables: self.num_variables,
+            phantom: PhantomData::default(),
+        }
+    }
+}
+
+impl<F: SmallField> Add for &VirtualPolynomial<F> {
     type Output = VirtualPolynomial<F>;
     fn add(self, other: &VirtualPolynomial<F>) -> Self::Output {
         let start = start_timer!(|| "virtual poly add");
@@ -89,7 +101,7 @@ impl<F: PrimeField> Add for &VirtualPolynomial<F> {
 }
 
 // TODO: convert this into a trait
-impl<F: PrimeField> VirtualPolynomial<F> {
+impl<F: SmallField> VirtualPolynomial<F> {
     /// Creates an empty virtual polynomial with `num_variables`.
     pub fn new(num_variables: usize) -> Self {
         VirtualPolynomial {
@@ -312,6 +324,38 @@ impl<F: PrimeField> VirtualPolynomial<F> {
         }
         println!()
     }
+
+    // TODO: This seems expensive. Is there a better way to covert poly into its ext fields?
+    pub fn to_ext_field<Ext: SmallField<BaseField = F> + Hash>(&self) -> VirtualPolynomial<Ext> {
+        let timer = start_timer!(|| "convert VP to ext field");
+        let aux_info = self.aux_info.to_ext_field();
+        let products = self
+            .products
+            .iter()
+            .map(|(f, v)| (Ext::from_base(f), v.clone()))
+            .collect();
+
+        let mut flattened_ml_extensions = vec![];
+        let mut hm = HashMap::new();
+        for mle in self.flattened_ml_extensions.iter() {
+            let mle_ptr: *const DenseMultilinearExtension<F> = Arc::as_ptr(mle);
+            let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
+
+            let mle_ext_field = mle.as_ref().to_ext_field();
+            let mle_ext_field = Arc::new(mle_ext_field);
+            let mle_ext_field_ptr: *const DenseMultilinearExtension<Ext> =
+                Arc::as_ptr(&mle_ext_field);
+            flattened_ml_extensions.push(mle_ext_field);
+            hm.insert(mle_ext_field_ptr, *index);
+        }
+        end_timer!(timer);
+        VirtualPolynomial {
+            aux_info,
+            products,
+            flattened_ml_extensions,
+            raw_pointers_lookup_table: hm,
+        }
+    }
 }
 
 /// Evaluate eq polynomial.
@@ -334,7 +378,7 @@ pub fn eq_eval<F: PrimeField>(x: &[F], y: &[F]) -> F {
 ///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 /// over r, which is
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-pub fn build_eq_x_r<F: PrimeField>(r: &[F]) -> Arc<DenseMultilinearExtension<F>> {
+pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> Arc<DenseMultilinearExtension<F>> {
     let evals = build_eq_x_r_vec(r);
     let mle = DenseMultilinearExtension::from_evaluations_vec(r.len(), evals);
 

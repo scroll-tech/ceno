@@ -1,54 +1,82 @@
 use std::sync::Arc;
 
-use gkr::structs::{Circuit, CircuitWitness};
+use gkr::structs::{Circuit, CircuitWitness, Point, PointAndEval};
 use goldilocks::SmallField;
+use simple_frontend::structs::WireId;
 
-type GKRProverState<F: SmallField> = gkr::structs::IOPProverState<F>;
-type GKRVerifierState<F: SmallField> = gkr::structs::IOPVerifierState<F>;
-type GKRProof<F: SmallField> = gkr::structs::IOPProof<F>;
+type GKRProverState<F> = gkr::structs::IOPProverState<F>;
+type GKRVerifierState<F> = gkr::structs::IOPVerifierState<F>;
+type GKRProof<F> = gkr::structs::IOPProof<F>;
 
-pub type NodeIndex = usize;
-pub type WireInIndex = usize;
-pub type WireOutIndex = usize;
-pub type NodeWireIn = (NodeIndex, WireInIndex);
-pub type NodeWireOut = (NodeIndex, Option<WireOutIndex>);
-
+/// Corresponds to the `output_evals` and `wires_out_evals` in gkr
+/// `prove_parallel`.
 pub struct IOPProverState<F: SmallField> {
-    marker: std::marker::PhantomData<F>,
+    output_evals: Vec<Option<(Point<F>, F)>>,
+    wire_out_evals: Vec<Vec<Option<(Point<F>, F)>>>,
+
+    graph: CircuitGraph<F>,
+    witness: CircuitGraphWitness<F>,
 }
 
 pub struct IOPProof<F: SmallField> {
-    gkr_proofs: Vec<GKRProof<F>>,
+    pub(crate) gkr_proofs: Vec<GKRProof<F>>,
 }
 
 pub struct IOPVerifierState<F: SmallField> {
     marker: std::marker::PhantomData<F>,
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum NodeInputType {
+    WireIn(usize, WireId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NodeOutputType {
+    OutputLayer(usize),
+    WireOut(usize, WireId),
+}
+
+/// The predecessor of a node can be a source or a wire. If it is a wire, it can
+/// be one wire_out instance connected to one wire_in instance, or one wire_out
+/// connected to multiple wire_in instances.
+#[derive(Clone, Copy, Debug)]
+pub enum PredType {
+    Source,
+    PredWire(NodeOutputType),
+    PredWireDup(NodeOutputType),
+    PredWireTrans(NodeOutputType),
+}
+
 pub struct CircuitNode<F: SmallField> {
-    id: NodeIndex,
-    circuit: Arc<Circuit<F>>,
-    // Each wire_in comes from a wire_out of a node
-    predecessors: Vec<NodeWireOut>,
-    // Each wire_out goes to a wire_in of multiple nodes
-    successors: Vec<Vec<NodeWireIn>>,
+    pub(crate) id: usize,
+    pub(crate) label: &'static str,
+    pub(crate) circuit: Arc<Circuit<F>>,
+    // Where does each wire in come from.
+    pub(crate) preds: Vec<PredType>,
 }
 
+#[derive(Default)]
 pub struct CircuitGraph<F: SmallField> {
-    nodes: Vec<CircuitNode<F>>,
-    target_wires: Vec<NodeWireOut>,
-    source_wires: Vec<NodeWireIn>,
+    pub(crate) nodes: Vec<CircuitNode<F>>,
+    pub(crate) targets: Vec<NodeOutputType>,
+    pub(crate) sources: Vec<NodeInputType>,
 }
 
+#[derive(Default)]
 pub struct CircuitGraphWitness<F: SmallField> {
-    node_witnesses: Vec<CircuitWitness<F>>,
-    circuit_aux_info: CircuitGraphAuxInfo,
+    pub node_witnesses: Vec<CircuitWitness<F>>,
 }
 
-pub struct CircuitGraphAuxInfo {}
-
-pub(crate) type Point<F> = Vec<F>;
-
-pub struct TargetEvaluations<F: SmallField> {
-    marker: std::marker::PhantomData<F>,
+pub struct CircuitGraphBuilder<F: SmallField> {
+    pub(crate) graph: CircuitGraph<F>,
+    pub(crate) witness: CircuitGraphWitness<F::BaseField>,
 }
+
+pub struct CircuitGraphAuxInfo {
+    pub instance_num_vars: Vec<usize>,
+}
+
+/// Evaluations corresponds to the circuit targets.
+#[derive(Clone)]
+pub struct TargetEvaluations<F>(pub Vec<PointAndEval<F>>);

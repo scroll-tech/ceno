@@ -1,14 +1,13 @@
 use std::{iter, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
-use ff::FromUniformBytes;
-use frontend::structs::ConstantType;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
+use simple_frontend::structs::{CellId, ConstantType};
 use std::ops::Add;
 use transcript::Transcript;
 
@@ -19,15 +18,15 @@ use crate::{
 
 use super::{IOPProverPhase2State, SumcheckState};
 
-impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
+impl<'a, F: SmallField> IOPProverPhase2State<'a, F> {
     pub(super) fn prover_init_parallel(
         layer: &'a Layer<F>,
         layer_out_poly: &'a Arc<DenseMultilinearExtension<F>>,
         layer_out_point: &Point<F>,
         layer_out_value: F,
-        layer_in_vec: &'a [Vec<F>],
-        paste_from_sources: &'a [Vec<Vec<F>>],
-        constant: impl Fn(&ConstantType<F>) -> F,
+        layer_in_vec: &'a [Vec<F::BaseField>],
+        paste_from_sources: &'a [Vec<Vec<F::BaseField>>],
+        constant: impl Fn(&ConstantType<F>) -> F::BaseField,
         hi_num_vars: usize,
     ) -> Self {
         let timer = start_timer!(|| "Prover init phase 2");
@@ -35,21 +34,18 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
             .mul3s
             .iter()
             .map(|gate| Gate3In {
-                idx_in1: gate.idx_in1,
-                idx_in2: gate.idx_in2,
-                idx_in3: gate.idx_in3,
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                scaler: constant(&gate.scaler),
+                scalar: constant(&gate.scalar),
             })
             .collect_vec();
         let mul2s = layer
             .mul2s
             .iter()
             .map(|gate| Gate2In {
-                idx_in1: gate.idx_in1,
-                idx_in2: gate.idx_in2,
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                scaler: constant(&gate.scaler),
+                scalar: constant(&gate.scalar),
             })
             .collect_vec();
         let adds = layer
@@ -58,15 +54,16 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
             .map(|gate| Gate1In {
                 idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                scaler: constant(&gate.scaler),
+                scalar: constant(&gate.scalar),
             })
             .collect_vec();
         let assert_consts = layer
             .assert_consts
             .iter()
             .map(|gate| GateCIn {
+                idx_in: gate.idx_in,
                 idx_out: gate.idx_out,
-                constant: constant(&gate.constant),
+                scalar: constant(&gate.scalar),
             })
             .collect_vec();
         let lo_out_num_vars = layer.num_vars;
@@ -179,7 +176,7 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
     ///     g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
     pub(super) fn prove_and_update_state_step1_parallel(
         &mut self,
-        old_wire_id: impl Fn(usize, usize) -> usize,
+        old_wire_id: impl Fn(CellId, CellId) -> CellId,
         transcript: &mut Transcript<F>,
     ) -> (SumcheckProof<F>, Vec<F>) {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 1");
@@ -210,25 +207,26 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
                 let mut g1 = vec![F::ZERO; 1 << in_num_vars];
                 mul3s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in1] += tensor_eq_ty_rtry
+                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += tensor_eq_ty_rtry
                             [(s << lo_out_num_vars) ^ gate.idx_out]
-                            * gate.scaler
-                            * layer_in_vec[s][gate.idx_in2]
-                            * layer_in_vec[s][gate.idx_in3];
+                            .mul_base(&layer_in_vec[s][gate.idx_in[1]])
+                            .mul_base(&layer_in_vec[s][gate.idx_in[2]])
+                            .mul_base(&gate.scalar);
                     }
                 });
                 mul2s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in1] += tensor_eq_ty_rtry
+                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += tensor_eq_ty_rtry
                             [(s << lo_out_num_vars) ^ gate.idx_out]
-                            * gate.scaler
-                            * layer_in_vec[s][gate.idx_in2];
+                            .mul_base(&layer_in_vec[s][gate.idx_in[1]])
+                            .mul_base(&gate.scalar);
                     }
                 });
                 adds.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in] +=
-                            tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out] * gate.scaler;
+                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += tensor_eq_ty_rtry
+                            [(s << lo_out_num_vars) ^ gate.idx_out]
+                            .mul_base(&gate.scalar);
                     }
                 });
                 Arc::new(DenseMultilinearExtension::from_evaluations_vec(
@@ -251,8 +249,10 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
                 .enumerate()
                 .for_each(|(subset_wire_id, &new_wire_id)| {
                     for s in 0..(1 << hi_num_vars) {
-                        f1_j[(s << lo_in_num_vars) ^ subset_wire_id] =
-                            paste_from_sources[j][s][old_wire_id(j, subset_wire_id)];
+                        f1_j[(s << lo_in_num_vars) ^ subset_wire_id] = F::from_base(
+                            &paste_from_sources[j as usize][s]
+                                [old_wire_id(j as usize, subset_wire_id)],
+                        );
                         g1_j[(s << lo_in_num_vars) ^ subset_wire_id] +=
                             tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ new_wire_id];
                     }
@@ -340,19 +340,19 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
             let mut g2 = vec![F::ZERO; 1 << f2.num_vars];
             mul3s.iter().for_each(|gate| {
                 for s in 0..(1 << hi_num_vars) {
-                    g2[(s << lo_in_num_vars) ^ gate.idx_in2] += tensor_eq_ty_rtry
+                    g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += tensor_eq_ty_rtry
                         [(s << lo_out_num_vars) ^ gate.idx_out]
-                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in1]
-                        * gate.scaler
-                        * layer_in_vec[s][gate.idx_in3];
+                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                            .mul_base(&layer_in_vec[s][gate.idx_in[2]])
+                            .mul_base(&gate.scalar);
                 }
             });
             mul2s.iter().for_each(|gate| {
                 for s in 0..(1 << hi_num_vars) {
-                    g2[(s << lo_in_num_vars) ^ gate.idx_in2] += tensor_eq_ty_rtry
+                    g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += tensor_eq_ty_rtry
                         [(s << lo_out_num_vars) ^ gate.idx_out]
-                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in1]
-                        * gate.scaler;
+                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                            .mul_base(&gate.scalar);
                 }
             });
             Arc::new(DenseMultilinearExtension::from_evaluations_vec(
@@ -414,11 +414,11 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPProverPhase2State<'a, F> {
             let mut g3 = vec![F::ZERO; 1 << f3.num_vars];
             mul3s.iter().for_each(|gate| {
                 for s in 0..(1 << hi_num_vars) {
-                    g3[(s << lo_in_num_vars) ^ gate.idx_in3] += tensor_eq_ty_rtry
+                    g3[(s << lo_in_num_vars) ^ gate.idx_in[2]] += tensor_eq_ty_rtry
                         [(s << lo_out_num_vars) ^ gate.idx_out]
-                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in1]
-                        * tensor_eq_s2x2_rs2rx2[(s << lo_in_num_vars) ^ gate.idx_in2]
-                        * gate.scaler;
+                        * tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                        * tensor_eq_s2x2_rs2rx2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
+                            .mul_base(&gate.scalar);
                 }
             });
             Arc::new(DenseMultilinearExtension::from_evaluations_vec(

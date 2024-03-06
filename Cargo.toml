@@ -1,12 +1,16 @@
 [workspace]
 members = [
-    "frontend",
     "gkr",
+    "gkr-graph",
+    "mpcs",
     "multilinear_extensions",
-    "poseidon",
+    "simple-frontend",
+    "singer",
+    "singer-pro",
     "sumcheck",
     "transcript",
-    "mpcs", "gkr-graph",
+    "mpcs",
+    "gkr-graph",
 ]
 
 [workspace.package]
@@ -15,6 +19,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+# ark-std = { version = "0.4" }
 ark-std = { version = "0.4", features = ["print-trace"] }
 ark-poly = "0.4"
 criterion = { version = "0.5", features = ["html_reports"] }

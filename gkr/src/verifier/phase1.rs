@@ -1,38 +1,39 @@
 use ark_std::{end_timer, start_timer};
-use ff::FromUniformBytes;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
+use simple_frontend::structs::{CellId, LayerId};
 use transcript::Transcript;
 
 use crate::{
     error::GKRError,
-    structs::{Point, SumcheckProof},
+    structs::{PointAndEval, SumcheckProof},
     utils::MatrixMLERowFirst,
 };
 
 use super::{IOPVerifierPhase1State, SumcheckState};
 
-impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
+impl<'a, F: SmallField> IOPVerifierPhase1State<'a, F> {
     pub(super) fn verifier_init_parallel(
-        next_evals: &'a [(Point<F>, F)],
-        subset_evals: &'a [(usize, Point<F>, F)],
+        next_layer_point_and_evals: &'a [PointAndEval<F>],
+        subset_point_and_evals: &'a [(LayerId, PointAndEval<F>)],
         alpha: &F,
         lo_num_vars: usize,
         hi_num_vars: usize,
     ) -> Self {
         let timer = start_timer!(|| "Verifier init phase 1");
         let alpha_pows = {
-            let mut alpha_pows = vec![F::ONE; next_evals.len() + subset_evals.len()];
-            for i in 0..subset_evals.len().saturating_sub(1) {
+            let mut alpha_pows =
+                vec![F::ONE; next_layer_point_and_evals.len() + subset_point_and_evals.len()];
+            for i in 0..subset_point_and_evals.len().saturating_sub(1) {
                 alpha_pows[i + 1] = alpha_pows[i] * alpha;
             }
             alpha_pows
         };
         end_timer!(timer);
         Self {
-            next_evals,
-            subset_evals,
+            next_layer_point_and_evals,
+            subset_point_and_evals,
             alpha_pows,
             lo_num_vars,
             hi_num_vars,
@@ -45,30 +46,30 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
     pub(super) fn verify_and_update_state_step1_parallel(
         &mut self,
         prover_msg: (&SumcheckProof<F>, &[F]),
-        copy_to: impl Fn(&usize) -> &'a [usize],
+        copy_to: impl Fn(&LayerId) -> &'a [CellId],
         transcript: &mut Transcript<F>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 1 step 1");
         let lo_num_vars = self.lo_num_vars;
         let hi_num_vars = self.hi_num_vars;
-        let next_evals = &self.next_evals;
-        let subset_evals = &self.subset_evals;
+        let next_layer_point_and_evals = &self.next_layer_point_and_evals;
+        let subset_point_and_evals = &self.subset_point_and_evals;
 
         let alpha_pows = &self.alpha_pows;
 
         // sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
         let sigma_1 = {
-            let tmp = next_evals
+            let tmp = next_layer_point_and_evals
                 .iter()
                 .zip(alpha_pows.iter())
-                .fold(F::ZERO, |acc, ((_, value), &alpha_pow)| {
-                    acc + alpha_pow * value
+                .fold(F::ZERO, |acc, (point_and_eval, &alpha_pow)| {
+                    acc + alpha_pow * point_and_eval.eval
                 });
-            subset_evals
+            subset_point_and_evals
                 .iter()
-                .zip(alpha_pows.iter().skip(next_evals.len()))
-                .fold(tmp, |acc, ((_, _, value), &alpha_pow)| {
-                    acc + alpha_pow * value
+                .zip(alpha_pows.iter().skip(next_layer_point_and_evals.len()))
+                .fold(tmp, |acc, ((_, point_and_eval), &alpha_pow)| {
+                    acc + alpha_pow * point_and_eval.eval
                 })
         };
         // Sumcheck 1: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
@@ -84,22 +85,23 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
             },
             transcript,
         );
-        let claim1_point = claim_1.point.iter().map(|x| x.elements[0]).collect_vec();
+        let claim1_point = claim_1.point.iter().map(|x| x.elements).collect_vec();
         let eq_y_ry = build_eq_x_r_vec(&claim1_point);
-        self.g1_values = next_evals
+        self.g1_values = next_layer_point_and_evals
             .iter()
             .zip(alpha_pows.iter())
-            .map(|((point, _), &alpha_pow)| {
-                let point_lo_num_vars = point.len() - hi_num_vars;
-                alpha_pow * eq_eval(&point[..point_lo_num_vars], &claim1_point)
+            .map(|(point_and_eval, &alpha_pow)| {
+                let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                alpha_pow * eq_eval(&point_and_eval.point[..point_lo_num_vars], &claim1_point)
             })
             .chain(
-                subset_evals
+                subset_point_and_evals
                     .iter()
-                    .zip(alpha_pows.iter().skip(next_evals.len()))
-                    .map(|((new_layer_id, point, _), &alpha_pow)| {
-                        let point_lo_num_vars = point.len() - hi_num_vars;
-                        let eq_yj_ryj = build_eq_x_r_vec(&point[..point_lo_num_vars]);
+                    .zip(alpha_pows.iter().skip(next_layer_point_and_evals.len()))
+                    .map(|((new_layer_id, point_and_eval), &alpha_pow)| {
+                        let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                        let eq_yj_ryj =
+                            build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
                         copy_to(new_layer_id).eval_row_first(&eq_yj_ryj, &eq_y_ry) * alpha_pow
                     }),
             )
@@ -129,8 +131,8 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 1 step 2");
         let hi_num_vars = self.hi_num_vars;
-        let next_evals = &self.next_evals;
-        let subset_evals = &self.subset_evals;
+        let next_layer_point_and_evals = &self.next_layer_point_and_evals;
+        let subset_point_and_evals = &self.subset_point_and_evals;
 
         let alpha_pows = &self.alpha_pows;
         let g1_values = &self.g1_values;
@@ -150,23 +152,27 @@ impl<'a, F: SmallField + FromUniformBytes<64>> IOPVerifierPhase1State<'a, F> {
             },
             transcript,
         );
-        let claim2_point = claim_2.point.iter().map(|x| x.elements[0]).collect_vec();
-        let g2_values = next_evals
+        let claim2_point = claim_2.point.iter().map(|x| x.elements).collect_vec();
+        let g2_values = next_layer_point_and_evals
             .iter()
             .zip(g1_values.iter())
             .zip(alpha_pows.iter())
-            .map(|(((point, _), g1_value), &alpha_pow)| {
-                let point_lo_num_vars = point.len() - hi_num_vars;
-                alpha_pow * g1_value * eq_eval(&point[point_lo_num_vars..], &claim2_point)
+            .map(|((point_and_eval, g1_value), &alpha_pow)| {
+                let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                alpha_pow
+                    * g1_value
+                    * eq_eval(&point_and_eval.point[point_lo_num_vars..], &claim2_point)
             })
             .chain(
-                subset_evals
+                subset_point_and_evals
                     .iter()
-                    .zip(g1_values.iter().skip(next_evals.len()))
-                    .zip(alpha_pows.iter().skip(next_evals.len()))
-                    .map(|(((_, point, _), g1_value), &alpha_pow)| {
-                        let point_lo_num_vars = point.len() - hi_num_vars;
-                        alpha_pow * g1_value * eq_eval(&point[point_lo_num_vars..], &claim2_point)
+                    .zip(g1_values.iter().skip(next_layer_point_and_evals.len()))
+                    .zip(alpha_pows.iter().skip(next_layer_point_and_evals.len()))
+                    .map(|(((_, point_and_eval), g1_value), &alpha_pow)| {
+                        let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                        alpha_pow
+                            * g1_value
+                            * eq_eval(&point_and_eval.point[point_lo_num_vars..], &claim2_point)
                     }),
             )
             .collect_vec();
