@@ -25,9 +25,9 @@ macro_rules! start_timer {
 #[cfg(not(feature = "print-trace"))]
 #[macro_export]
 macro_rules! start_timer {
-    ($msg: expr) => {
-        {$msg}
-    };
+    ($msg: expr) => {{
+        $msg
+    }};
 }
 
 #[cfg(feature = "print-trace")]
@@ -41,7 +41,7 @@ macro_rules! end_timer {
     ($time:expr, $msg:expr) => {
         #![feature(print-trace)]
         ark_end_timer!($time, $msg);
-    }
+    };
 }
 
 #[cfg(not(feature = "print-trace"))]

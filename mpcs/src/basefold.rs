@@ -2,6 +2,7 @@ use crate::util::hash::{new_hasher, Hasher};
 use crate::util::merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree};
 use crate::util::{field_to_usize, u32_to_field};
 use crate::NoninteractivePCS;
+use crate::{end_timer, start_timer};
 use crate::{
     poly::{multilinear::MultilinearPolynomial, Polynomial},
     util::{
@@ -27,7 +28,6 @@ use ff::BatchInverter;
 use generic_array::GenericArray;
 use goldilocks::SmallField;
 use std::{ops::Deref, time::Instant};
-use crate::{start_timer, end_timer};
 
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -42,7 +42,6 @@ use rayon::prelude::{
 };
 use std::{borrow::Cow, marker::PhantomData, slice};
 type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BasefoldParams<F: SmallField, Rng: RngCore> {
