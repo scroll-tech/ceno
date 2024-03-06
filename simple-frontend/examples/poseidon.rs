@@ -1,10 +1,6 @@
 //! Poseidon hash function. This is modified from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom.
 
-<<<<<<< HEAD:frontend/examples/poseidon.rs
-use frontend::structs::{CircuitBuilder, ConstantType};
-=======
 use ff::Field;
->>>>>>> origin/singer-dev5:simple-frontend/examples/poseidon.rs
 use goldilocks::{Goldilocks, SmallField};
 use mock_constant::{poseidon_c, poseidon_m, poseidon_p, poseidon_s};
 use simple_frontend::structs::{CellId, CircuitBuilder};
@@ -27,21 +23,13 @@ const N_ROUNDS_P: [usize; 16] = [
 //     out <== in4*in;
 // }
 
-<<<<<<< HEAD:frontend/examples/poseidon.rs
-fn sigma<F: SmallField>(circuit_builder: &mut CircuitBuilder<F>, in_: usize) -> usize {
-=======
 fn sigma<F: SmallField>(circuit_builder: &mut CircuitBuilder<F>, in_: CellId) -> CellId {
->>>>>>> origin/singer-dev5:simple-frontend/examples/poseidon.rs
     let in2 = circuit_builder.create_cell();
     let in4 = circuit_builder.create_cell();
 
     let out = circuit_builder.create_cell();
 
-<<<<<<< HEAD:frontend/examples/poseidon.rs
-    let one = ConstantType::Field(F::ONE);
-=======
     let one = F::BaseField::ONE;
->>>>>>> origin/singer-dev5:simple-frontend/examples/poseidon.rs
     circuit_builder.mul2(in2, in_, in_, one);
     circuit_builder.mul2(in4, in2, in2, one);
     circuit_builder.mul2(out, in4, in_, one);
@@ -63,21 +51,14 @@ fn ark<F: SmallField>(
     in_: &[CellId],
     c: &[F::BaseField],
     r: usize,
-<<<<<<< HEAD:frontend/examples/poseidon.rs
-) -> Vec<usize> {
-    let out = circuit_builder.create_cells(in_.len());
-
-    let one = ConstantType::Field(F::ONE);
-=======
 ) -> Vec<CellId> {
     let out = circuit_builder.create_cells(in_.len());
 
     let one = F::BaseField::ONE;
->>>>>>> origin/singer-dev5:simple-frontend/examples/poseidon.rs
 
     for i in 0..in_.len() {
         circuit_builder.add(out[i], in_[i], one);
-        circuit_builder.add_const(out[i], ConstantType::Field(c[i + r]));
+        circuit_builder.add_const(out[i], c[i + r]);
     }
 
     out
@@ -106,7 +87,7 @@ fn mix<F: SmallField>(
 
     for i in 0..in_.len() {
         for j in 0..in_.len() {
-            circuit_builder.add(out[i], in_[j], ConstantType::Field(m[j][i]));
+            circuit_builder.add(out[i], in_[j], m[j][i]);
         }
     }
 
@@ -133,7 +114,7 @@ fn mix_last<F: SmallField>(
     let out = circuit_builder.create_cell();
 
     for j in 0..in_.len() {
-        circuit_builder.add(out, in_[j], ConstantType::Field(m[j][s]));
+        circuit_builder.add(out, in_[j], m[j][s]);
     }
 
     out
@@ -158,30 +139,18 @@ fn mix_s<F: SmallField>(
     in_: &[CellId],
     s: &[F::BaseField],
     r: usize,
-<<<<<<< HEAD:frontend/examples/poseidon.rs
-) -> Vec<usize> {
-    let t = in_.len();
-    let out = circuit_builder.create_cells(t);
-
-    let one = ConstantType::Field(F::ONE);
-=======
 ) -> Vec<CellId> {
     let t = in_.len();
     let out = circuit_builder.create_cells(t);
 
     let one = F::BaseField::ONE;
->>>>>>> origin/singer-dev5:simple-frontend/examples/poseidon.rs
 
     for i in 0..in_.len() {
-        circuit_builder.add(out[0], in_[i], ConstantType::Field(s[(t * 2 - 1) * r + i]));
+        circuit_builder.add(out[0], in_[i], s[(t * 2 - 1) * r + i]);
     }
 
     for i in 1..t {
-        circuit_builder.add(
-            out[i],
-            in_[0],
-            ConstantType::Field(s[(t * 2 - 1) * r + t + i - 1]),
-        );
+        circuit_builder.add(out[i], in_[0], s[(t * 2 - 1) * r + t + i - 1]);
         circuit_builder.add(out[i], in_[i], one);
     }
 
@@ -360,11 +329,7 @@ fn poseidon_ex<F: SmallField>(
     //         }
     //     }
 
-<<<<<<< HEAD:frontend/examples/poseidon.rs
-    let one = ConstantType::Field(F::ONE);
-=======
     let one = F::BaseField::ONE;
->>>>>>> origin/singer-dev5:simple-frontend/examples/poseidon.rs
     for r in 0..n_rounds_p {
         sigma_p_in[r] = if r == 0 {
             mix_out[n_rounds_f / 2 - 1][0]
@@ -377,12 +342,7 @@ fn poseidon_ex<F: SmallField>(
             mix_s_in[r].push(if j == 0 {
                 let cell = circuit_builder.create_cell();
                 circuit_builder.add(cell, sigma_p_out[r], one);
-<<<<<<< HEAD:frontend/examples/poseidon.rs
-                circuit_builder
-                    .add_const(cell, ConstantType::Field(c[(n_rounds_f / 2 + 1) * t + r]));
-=======
                 circuit_builder.add_const(cell, c[(n_rounds_f / 2 + 1) * t + r]);
->>>>>>> origin/singer-dev5:simple-frontend/examples/poseidon.rs
                 cell
             } else {
                 if r == 0 {
@@ -476,19 +436,12 @@ fn main() {
     let poseidon_ex_out = poseidon_ex(
         &mut circuit_builder,
         1,
-<<<<<<< HEAD:frontend/examples/poseidon.rs
-        &poseidon_ex_inputs,
-=======
         poseidon_ex_inputs.as_slice(),
->>>>>>> origin/singer-dev5:simple-frontend/examples/poseidon.rs
         poseidon_ex_initial_state[0],
     );
     println!("The output is located at cell {:?}", poseidon_ex_out[0]);
     circuit_builder.configure();
-<<<<<<< HEAD:frontend/examples/poseidon.rs
-=======
     #[cfg(debug_assertions)]
->>>>>>> origin/singer-dev5:simple-frontend/examples/poseidon.rs
     circuit_builder.print_info();
 }
 

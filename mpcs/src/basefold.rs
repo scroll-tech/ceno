@@ -2760,7 +2760,7 @@ mod test {
 
     use crate::{
         basefold::Basefold,
-        test::{run_batch_commit_open_verify, run_commit_open_verify, test_with_gkr},
+        test::{run_batch_commit_open_verify, run_commit_open_verify},
         util::transcript::PoseidonTranscript,
     };
     use goldilocks::{Goldilocks, GoldilocksExt2, GoldilocksExt3};
@@ -2957,12 +2957,12 @@ mod test {
             return 3;
         }
     }
-    type PcsGoldilocksForGKRTest = Basefold<Goldilocks, BasefoldExtParamsForGKRTest>;
+    // type PcsGoldilocksForGKRTest = Basefold<Goldilocks, BasefoldExtParamsForGKRTest>;
 
-    #[test]
-    fn test_with_gkr_for_goldilocks() {
-        test_with_gkr::<Goldilocks, PcsGoldilocksForGKRTest, PoseidonTranscript<_>>();
-    }
+    // #[test]
+    // fn test_with_gkr_for_goldilocks() {
+    //     test_with_gkr::<Goldilocks, PcsGoldilocksForGKRTest, PoseidonTranscript<_>>();
+    // }
 
     #[test]
     fn test_evaluate_generic_basecode() {

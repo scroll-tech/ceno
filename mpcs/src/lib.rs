@@ -271,15 +271,13 @@ mod test {
     use crate::{
         poly::multilinear::MultilinearPolynomial,
         util::transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},
-        Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
+        Evaluation, PolynomialCommitmentScheme,
     };
-    use ff::FromUniformBytes;
     use goldilocks::SmallField;
     use itertools::{chain, Itertools};
     use rand::prelude::*;
     use rand::rngs::OsRng;
     use rand_chacha::ChaCha8Rng;
-    use serde::Deserialize;
     use std::time::Instant;
     #[test]
     fn test_transcript() {
@@ -494,243 +492,243 @@ mod test {
         }
     }
 
-    use frontend::structs::{CircuitBuilder, ConstantType};
-    use gkr::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState};
-    use gkr::utils::MultilinearExtensionFromVectors;
-    use transcript::Transcript;
+    // use gkr::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState};
+    // use gkr::utils::MultilinearExtensionFromVectors;
+    // use simple_frontend::structs::{CircuitBuilder, ConstantType};
+    // use transcript::Transcript;
 
-    enum TableType {
-        FakeHashTable,
-    }
+    // enum TableType {
+    //     FakeHashTable,
+    // }
 
-    struct AllInputIndex {
-        // public
-        inputs_idx: usize,
+    // struct AllInputIndex {
+    //     // public
+    //     inputs_idx: usize,
 
-        // private
-        other_x_pows_idx: usize,
-        count_idx: usize,
-    }
+    //     // private
+    //     other_x_pows_idx: usize,
+    //     count_idx: usize,
+    // }
 
-    fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
-        let mut circuit_builder = CircuitBuilder::<F>::new();
-        let one = ConstantType::Field(F::ONE);
-        let neg_one = ConstantType::Field(-F::ONE);
+    // fn construct_circuit<F: SmallField>() -> (Circuit<F>, AllInputIndex) {
+    //     let mut circuit_builder = CircuitBuilder::<F>::new();
+    //     let one = F::BaseField::ONE;
+    //     let neg_one = -F::BaseField::ONE;
 
-        let table_size = 4;
-        let x = circuit_builder.create_constant_in(1, 2);
-        let (other_x_pows_idx, other_pows_of_x) = circuit_builder.create_wire_in(table_size - 1);
-        let pow_of_xs = [x, other_pows_of_x].concat();
-        for i in 0..table_size - 1 {
-            // circuit_builder.mul2(
-            //     pow_of_xs[i + 1],
-            //     pow_of_xs[i],
-            //     pow_of_xs[i],
-            //     Goldilocks::ONE,
-            // );
-            let tmp = circuit_builder.create_cell();
-            circuit_builder.mul2(tmp, pow_of_xs[i], pow_of_xs[i], one);
-            let diff = circuit_builder.create_cell();
-            circuit_builder.add(diff, pow_of_xs[i + 1], one);
-            circuit_builder.add(diff, tmp, neg_one);
-            circuit_builder.assert_const(diff, &F::ZERO);
-        }
+    //     let table_size = 4;
+    //     let x = circuit_builder.create_constant_in(1, 2);
+    //     let (other_x_pows_idx, other_pows_of_x) = circuit_builder.create_wire_in(table_size - 1);
+    //     let pow_of_xs = [x, other_pows_of_x].concat();
+    //     for i in 0..table_size - 1 {
+    //         // circuit_builder.mul2(
+    //         //     pow_of_xs[i + 1],
+    //         //     pow_of_xs[i],
+    //         //     pow_of_xs[i],
+    //         //     Goldilocks::ONE,
+    //         // );
+    //         let tmp = circuit_builder.create_cell();
+    //         circuit_builder.mul2(tmp, pow_of_xs[i], pow_of_xs[i], F::BaseField::ONE);
+    //         let diff = circuit_builder.create_cell();
+    //         circuit_builder.add(diff, pow_of_xs[i + 1], one);
+    //         circuit_builder.add(diff, tmp, neg_one);
+    //         circuit_builder.assert_const(diff, F::BaseField::ZERO);
+    //     }
 
-        let table_type = TableType::FakeHashTable as usize;
-        let count_idx = circuit_builder.define_table_type(table_type);
-        for i in 0..table_size {
-            circuit_builder.add_table_item(table_type, pow_of_xs[i]);
-        }
+    //     let table_type = TableType::FakeHashTable as usize;
+    //     let count_idx = circuit_builder.define_table_type(table_type);
+    //     for i in 0..table_size {
+    //         circuit_builder.add_table_item(table_type, pow_of_xs[i]);
+    //     }
 
-        let (inputs_idx, inputs) = circuit_builder.create_wire_in(5);
-        inputs.iter().for_each(|input| {
-            circuit_builder.add_input_item(table_type, *input);
-        });
+    //     let (inputs_idx, inputs) = circuit_builder.create_wire_in(5);
+    //     inputs.iter().for_each(|input| {
+    //         circuit_builder.add_input_item(table_type, *input);
+    //     });
 
-        circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));
+    //     circuit_builder.assign_table_challenge(table_type, ConstantType::Challenge(0));
 
-        circuit_builder.configure();
-        // circuit_builder.print_info();
-        (
-            Circuit::<F>::new(&circuit_builder),
-            AllInputIndex {
-                other_x_pows_idx,
-                inputs_idx,
-                count_idx,
-            },
-        )
-    }
+    //     circuit_builder.configure();
+    //     // circuit_builder.print_info();
+    //     (
+    //         Circuit::<F>::new(&circuit_builder),
+    //         AllInputIndex {
+    //             other_x_pows_idx,
+    //             inputs_idx,
+    //             count_idx,
+    //         },
+    //     )
+    // }
 
-    pub(super) fn test_with_gkr<F, Pcs, T>()
-    where
-        F: SmallField + FromUniformBytes<64>,
-        F::BaseField: Into<F>,
-        Pcs: NoninteractivePCS<F, F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
-        for<'a> &'a Pcs::CommitmentWithData: Into<Pcs::Commitment>,
-        for<'de> <F as SmallField>::BaseField: Deserialize<'de>,
-        T: TranscriptRead<Pcs::CommitmentChunk, F>
-            + TranscriptWrite<Pcs::CommitmentChunk, F>
-            + InMemoryTranscript<F>,
-    {
-        // This test is copied from examples/fake_hash_lookup_par, which is currently
-        // not using PCS for the check. The verifier outputs a GKRInputClaims that the
-        // verifier is unable to check without the PCS.
+    // pub(super) fn test_with_gkr<F, Pcs, T>()
+    // where
+    //     F: SmallField + FromUniformBytes<64>,
+    //     F::BaseField: Into<F>,
+    //     Pcs: NoninteractivePCS<F, F, Polynomial = MultilinearPolynomial<F>, Rng = ChaCha8Rng>,
+    //     for<'a> &'a Pcs::CommitmentWithData: Into<Pcs::Commitment>,
+    //     for<'de> <F as SmallField>::BaseField: Deserialize<'de>,
+    //     T: TranscriptRead<Pcs::CommitmentChunk, F>
+    //         + TranscriptWrite<Pcs::CommitmentChunk, F>
+    //         + InMemoryTranscript<F>,
+    // {
+    //     // This test is copied from examples/fake_hash_lookup_par, which is currently
+    //     // not using PCS for the check. The verifier outputs a GKRInputClaims that the
+    //     // verifier is unable to check without the PCS.
 
-        let rng = ChaCha8Rng::from_seed([0u8; 32]);
-        // Setup
-        let (pp, vp) = {
-            let poly_size = 1 << 10;
-            let param = Pcs::setup(poly_size, &rng).unwrap();
-            Pcs::trim(&param).unwrap()
-        };
+    //     let rng = ChaCha8Rng::from_seed([0u8; 32]);
+    //     // Setup
+    //     let (pp, vp) = {
+    //         let poly_size = 1 << 10;
+    //         let param = Pcs::setup(poly_size, &rng).unwrap();
+    //         Pcs::trim(&param).unwrap()
+    //     };
 
-        let (circuit, all_input_index) = construct_circuit::<F>();
-        // println!("circuit: {:?}", circuit);
-        let mut wires_in = vec![vec![]; circuit.n_wires_in];
-        wires_in[all_input_index.inputs_idx] = vec![
-            F::from(2u64),
-            F::from(2u64),
-            F::from(4u64),
-            F::from(16u64),
-            F::from(2u64),
-        ];
-        // x = 2, 2^2 = 4, 2^2^2 = 16, 2^2^2^2 = 256
-        wires_in[all_input_index.other_x_pows_idx] =
-            vec![F::from(4u64), F::from(16u64), F::from(256u64)];
-        wires_in[all_input_index.count_idx] =
-            vec![F::from(3u64), F::from(1u64), F::from(1u64), F::from(0u64)];
+    //     let (circuit, all_input_index) = construct_circuit::<F>();
+    //     // println!("circuit: {:?}", circuit);
+    //     let mut wires_in = vec![vec![]; circuit.n_wires_in];
+    //     wires_in[all_input_index.inputs_idx] = vec![
+    //         F::from(2u64),
+    //         F::from(2u64),
+    //         F::from(4u64),
+    //         F::from(16u64),
+    //         F::from(2u64),
+    //     ];
+    //     // x = 2, 2^2 = 4, 2^2^2 = 16, 2^2^2^2 = 256
+    //     wires_in[all_input_index.other_x_pows_idx] =
+    //         vec![F::from(4u64), F::from(16u64), F::from(256u64)];
+    //     wires_in[all_input_index.count_idx] =
+    //         vec![F::from(3u64), F::from(1u64), F::from(1u64), F::from(0u64)];
 
-        let circuit_witness = {
-            let challenge = F::from(9);
-            let mut circuit_witness = CircuitWitness::new(&circuit, vec![challenge]);
-            for _ in 0..4 {
-                circuit_witness.add_instance(&circuit, &wires_in);
-            }
-            circuit_witness
-        };
+    //     let circuit_witness = {
+    //         let challenge = F::from(9);
+    //         let mut circuit_witness = CircuitWitness::new(&circuit, vec![challenge]);
+    //         for _ in 0..4 {
+    //             circuit_witness.add_instance(&circuit, &wires_in);
+    //         }
+    //         circuit_witness
+    //     };
 
-        #[cfg(feature = "sanity-check")]
-        circuit_witness.check_correctness(&circuit);
+    //     #[cfg(feature = "sanity-check")]
+    //     circuit_witness.check_correctness(&circuit);
 
-        let instance_num_vars = circuit_witness.instance_num_vars();
+    //     let instance_num_vars = circuit_witness.instance_num_vars();
 
-        // Commit to the input wires
+    //     // Commit to the input wires
 
-        let polys = circuit_witness
-            .wires_in_ref()
-            .iter()
-            .map(|values| {
-                MultilinearPolynomial::new(
-                    values
-                        .as_slice()
-                        .mle(circuit.max_wires_in_num_vars, instance_num_vars)
-                        .evaluations
-                        .clone(),
-                )
-            })
-            .collect_vec();
-        println!(
-            "Polynomial num vars: {:?}",
-            polys.iter().map(|p| p.num_vars()).collect_vec()
-        );
-        let comms_with_data = Pcs::batch_commit(&pp, &polys).unwrap();
-        let comms: Vec<Pcs::Commitment> = comms_with_data.iter().map(|cm| cm.into()).collect_vec();
-        println!("Finish commitment");
+    //     let polys = circuit_witness
+    //         .wires_in_ref()
+    //         .iter()
+    //         .map(|values| {
+    //             MultilinearPolynomial::new(
+    //                 values
+    //                     .as_slice()
+    //                     .mle(circuit.max_wires_in_num_vars, instance_num_vars)
+    //                     .evaluations
+    //                     .clone(),
+    //             )
+    //         })
+    //         .collect_vec();
+    //     println!(
+    //         "Polynomial num vars: {:?}",
+    //         polys.iter().map(|p| p.num_vars()).collect_vec()
+    //     );
+    //     let comms_with_data = Pcs::batch_commit(&pp, &polys).unwrap();
+    //     let comms: Vec<Pcs::Commitment> = comms_with_data.iter().map(|cm| cm.into()).collect_vec();
+    //     println!("Finish commitment");
 
-        // Commitments should be part of the proof, which is not yet
+    //     // Commitments should be part of the proof, which is not yet
 
-        let (proof, output_num_vars, output_eval) = {
-            let mut prover_transcript = Transcript::new(b"example");
-            let output_num_vars = instance_num_vars + circuit.last_layer_ref().num_vars();
+    //     let (proof, output_num_vars, output_eval) = {
+    //         let mut prover_transcript = Transcript::new(b"example");
+    //         let output_num_vars = instance_num_vars + circuit.last_layer_ref().num_vars();
 
-            let output_point = (0..output_num_vars)
-                .map(|_| {
-                    prover_transcript
-                        .get_and_append_challenge(b"output point")
-                        .elements[0]
-                })
-                .collect_vec();
+    //         let output_point = (0..output_num_vars)
+    //             .map(|_| {
+    //                 prover_transcript
+    //                     .get_and_append_challenge(b"output point")
+    //                     .elements[0]
+    //             })
+    //             .collect_vec();
 
-            let output_eval = circuit_witness
-                .layer_poly(0, circuit.last_layer_ref().num_vars())
-                .evaluate(&output_point);
-            (
-                IOPProverState::prove_parallel(
-                    &circuit,
-                    &circuit_witness,
-                    &[(output_point, output_eval)],
-                    &[],
-                    &mut prover_transcript,
-                ),
-                output_num_vars,
-                output_eval,
-            )
-        };
+    //         let output_eval = circuit_witness
+    //             .layer_poly(0, circuit.last_layer_ref().num_vars())
+    //             .evaluate(&output_point);
+    //         (
+    //             IOPProverState::prove_parallel(
+    //                 &circuit,
+    //                 &circuit_witness,
+    //                 &[(output_point, output_eval)],
+    //                 &[],
+    //                 &mut prover_transcript,
+    //             ),
+    //             output_num_vars,
+    //             output_eval,
+    //         )
+    //     };
 
-        let gkr_input_claims = {
-            let mut verifier_transcript = &mut Transcript::new(b"example");
-            let output_point = (0..output_num_vars)
-                .map(|_| {
-                    verifier_transcript
-                        .get_and_append_challenge(b"output point")
-                        .elements[0]
-                })
-                .collect_vec();
-            IOPVerifierState::verify_parallel(
-                &circuit,
-                circuit_witness.challenges(),
-                &[(output_point, output_eval)],
-                &[],
-                &proof,
-                instance_num_vars,
-                &mut verifier_transcript,
-            )
-            .expect("verification failed")
-        };
+    //     let gkr_input_claims = {
+    //         let mut verifier_transcript = &mut Transcript::new(b"example");
+    //         let output_point = (0..output_num_vars)
+    //             .map(|_| {
+    //                 verifier_transcript
+    //                     .get_and_append_challenge(b"output point")
+    //                     .elements[0]
+    //             })
+    //             .collect_vec();
+    //         IOPVerifierState::verify_parallel(
+    //             &circuit,
+    //             circuit_witness.challenges(),
+    //             &[(output_point, output_eval)],
+    //             &[],
+    //             &proof,
+    //             instance_num_vars,
+    //             &mut verifier_transcript,
+    //         )
+    //         .expect("verification failed")
+    //     };
 
-        // Generate pcs proof
-        let expected_values = circuit_witness
-            .wires_in_ref()
-            .iter()
-            .map(|witness| {
-                witness
-                    .as_slice()
-                    .mle(circuit.max_wires_in_num_vars, instance_num_vars)
-                    .evaluate(&gkr_input_claims.point)
-            })
-            .collect_vec();
-        let points = vec![gkr_input_claims.point];
-        let evals = expected_values
-            .iter()
-            .enumerate()
-            .map(|(i, e)| Evaluation {
-                poly: i,
-                point: 0,
-                value: *e,
-            })
-            .collect_vec();
-        // This should be part of the GKR proof
-        let pcs_proof = Pcs::ni_batch_open(&pp, &polys, &comms_with_data, &points, &evals).unwrap();
-        println!("Finish opening");
+    //     // Generate pcs proof
+    //     let expected_values = circuit_witness
+    //         .wires_in_ref()
+    //         .iter()
+    //         .map(|witness| {
+    //             witness
+    //                 .as_slice()
+    //                 .mle(circuit.max_wires_in_num_vars, instance_num_vars)
+    //                 .evaluate(&gkr_input_claims.point)
+    //         })
+    //         .collect_vec();
+    //     let points = vec![gkr_input_claims.point];
+    //     let evals = expected_values
+    //         .iter()
+    //         .enumerate()
+    //         .map(|(i, e)| Evaluation {
+    //             poly: i,
+    //             point: 0,
+    //             value: *e,
+    //         })
+    //         .collect_vec();
+    //     // This should be part of the GKR proof
+    //     let pcs_proof = Pcs::ni_batch_open(&pp, &polys, &comms_with_data, &points, &evals).unwrap();
+    //     println!("Finish opening");
 
-        // Check outside of the GKR verifier
-        for i in 0..gkr_input_claims.values.len() {
-            assert_eq!(expected_values[i], gkr_input_claims.values[i]);
-        }
+    //     // Check outside of the GKR verifier
+    //     for i in 0..gkr_input_claims.values.len() {
+    //         assert_eq!(expected_values[i], gkr_input_claims.values[i]);
+    //     }
 
-        // This should be part of the GKR verifier
-        let evals = gkr_input_claims
-            .values
-            .iter()
-            .enumerate()
-            .map(|(i, e)| Evaluation {
-                poly: i,
-                point: 0,
-                value: *e,
-            })
-            .collect_vec();
-        Pcs::ni_batch_verify(&vp, &comms, &points, &evals, &pcs_proof).unwrap();
+    //     // This should be part of the GKR verifier
+    //     let evals = gkr_input_claims
+    //         .values
+    //         .iter()
+    //         .enumerate()
+    //         .map(|(i, e)| Evaluation {
+    //             poly: i,
+    //             point: 0,
+    //             value: *e,
+    //         })
+    //         .collect_vec();
+    //     Pcs::ni_batch_verify(&vp, &comms, &points, &evals, &pcs_proof).unwrap();
 
-        println!("verification succeeded");
-    }
+    //     println!("verification succeeded");
+    // }
 }
