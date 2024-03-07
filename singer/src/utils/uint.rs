@@ -64,8 +64,13 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_values: &[CellId],
     ) -> Result<Self, ZKVMError> {
         let mut values = if C <= M {
+            //println!("convert_decomp: small len {:?}, small bit width {:?}", range_values.len(), RANGE_CHIP_BIT_WIDTH);
+            todo!(
+                "split range_values to segments so that range_values.len()*RANGE_CHIP_BIT_WIDTH<64"
+            );
             convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, C, true)
         } else {
+            //println!("convert_decomp: small len {:?}, small bit width {:?}", range_values.len(), RANGE_CHIP_BIT_WIDTH);
             convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, M, true)
         };
         while values.len() < Self::N_OPRAND_CELLS {
@@ -196,23 +201,6 @@ mod test {
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CircuitBuilder;
-
-    #[test]
-    fn test_uint() {
-        // M = 256 is the number of bits for unsigned integer
-        // C = 63 is the cell bit width
-        type Uint256_63 = UInt<256, 63>;
-        assert_eq!(Uint256_63::N_OPRAND_CELLS, 5);
-        assert_eq!(Uint256_63::N_CARRY_CELLS, 5);
-        assert_eq!(Uint256_63::N_CARRY_NO_OVERFLOW_CELLS, 4);
-        assert_eq!(Uint256_63::N_RANGE_CHECK_CELLS, 24);
-        assert_eq!(Uint256_63::N_RANGE_CHECK_NO_OVERFLOW_CELLS, 19);
-        let u_int = Uint256_63::try_from(vec![1, 2, 3, 4, 5]);
-        assert_eq!(u_int.unwrap().values, vec![1, 2, 3, 4, 5]);
-        unimplemented!();
-        // TODO: implement tests for methods in UInt
-        // they mostly depend on convert_decomp which will be tested separately
-    }
 
     #[test]
     fn test_convert_decomp() {

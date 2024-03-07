@@ -20,6 +20,12 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         UInt::<M, C>::N_RANGE_CHECK_CELLS + UInt::<M, C>::N_CARRY_CELLS;
 
     pub(crate) fn extract_range_values(witness: &[CellId]) -> &[CellId] {
+        //println!(
+        //    "UInt::<{:?}, {:?}>::N_RANGE_CHECK_CELLS={:?}",
+        //    M,
+        //    C,
+        //    UInt::<M, C>::N_RANGE_CHECK_CELLS
+        //);
         &witness[..UInt::<M, C>::N_RANGE_CHECK_CELLS]
     }
 
@@ -77,6 +83,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry)?;
+        //println!("add range values: {:?}", range_values);
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 

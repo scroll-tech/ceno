@@ -128,10 +128,6 @@ mod test {
 
     #[test]
     fn test_lt() {
-        // TODO: this test yet cannot pass due to the same reason
-        // as happened in add tests
-        // this test fails at singer/src/instructions/utils/uint.rs:168:49:
-        // attempt to shift left with overflow
         type Uint256_8 = UInt<256, 8>;
         assert_eq!(Uint256_8::N_OPRAND_CELLS, 32);
         // build the circuit for lt
@@ -144,7 +140,7 @@ mod test {
             .create_witness_in(Uint256_8::N_RANGE_CHECK_CELLS + Uint256_8::N_CARRY_CELLS);
         let operand_0 = Uint256_8::try_from(operand_0_wire_in_cells);
         let operand_1 = Uint256_8::try_from(operand_1_wire_in_cells);
-        let mut range_chip_handler = ChipHandler::<Goldilocks>::new(100 as ChallengeId);
+        let mut range_chip_handler = ChipHandler::<Goldilocks>::new(0 as ChallengeId);
         let result = UIntCmp::<Uint256_8>::lt(
             &mut circuit_builder,
             &mut range_chip_handler,
