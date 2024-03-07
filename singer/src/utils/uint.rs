@@ -2,6 +2,7 @@ use ff::Field;
 use itertools::Itertools;
 use std::marker::PhantomData;
 
+use ff::PrimeField;
 use gkr::utils::ceil_log2;
 use goldilocks::SmallField;
 use simple_frontend::structs::{CellId, CircuitBuilder};
@@ -40,7 +41,9 @@ impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
 impl<const M: usize, const C: usize> TryFrom<Vec<usize>> for UInt<M, C> {
     type Error = ZKVMError;
     fn try_from(values: Vec<usize>) -> Result<Self, Self::Error> {
+        println!("values try_from {:?}", values);
         let values = values.as_slice().try_into()?;
+        println!("values into {:?}", values);
         Ok(values)
     }
 }
@@ -64,18 +67,33 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_values: &[CellId],
     ) -> Result<Self, ZKVMError> {
         let mut values = if C <= M {
+            let field_bits = <F as PrimeField>::NUM_BITS as usize;
+            let range_values_chunk_size = field_bits / RANGE_CHIP_BIT_WIDTH;
+            let collect_convert_decomp: Vec<_> = range_values
+                .chunks(range_values_chunk_size)
+                .flat_map(|range_values_chunk| {
+                    convert_decomp(
+                        circuit_builder,
+                        range_values_chunk,
+                        RANGE_CHIP_BIT_WIDTH,
+                        C,
+                        true,
+                    )
+                })
+                .collect();
+            //println!("{:?}", collect_convert_decomp);
+            collect_convert_decomp
             //println!("convert_decomp: small len {:?}, small bit width {:?}", range_values.len(), RANGE_CHIP_BIT_WIDTH);
-            todo!(
-                "split range_values to segments so that range_values.len()*RANGE_CHIP_BIT_WIDTH<64"
-            );
-            convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, C, true)
+            //convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, C, true)
         } else {
             //println!("convert_decomp: small len {:?}, small bit width {:?}", range_values.len(), RANGE_CHIP_BIT_WIDTH);
             convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, M, true)
         };
+        //println!("values {:?}", values);
         while values.len() < Self::N_OPRAND_CELLS {
             values.push(circuit_builder.create_cell());
         }
+        //println!("from_range_values result {:?}", Self::try_from(values.clone()));
         Self::try_from(values)
     }
 

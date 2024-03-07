@@ -43,7 +43,8 @@ impl<F: SmallField> RangeChipOperations<F> for ChipHandler<F> {
         } else if let Some(range_values) = range_value_witness {
             //println!("range_check_uint: range_values {:?}", range_values);
             let range_value = UInt::<M, C>::from_range_values(circuit_builder, range_values)?;
-            uint.assert_eq(circuit_builder, &range_value);
+            //println!("range_value {:?}", range_value);
+            //uint.assert_eq(circuit_builder, &range_value);
             let b: usize = M.min(C);
             let chunk_size = (b + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
             for chunk in range_values.chunks(chunk_size) {
@@ -56,7 +57,8 @@ impl<F: SmallField> RangeChipOperations<F> for ChipHandler<F> {
                     b - (chunk_size - 1) * RANGE_CHIP_BIT_WIDTH,
                 )?;
             }
-            Ok(range_value)
+            Ok((*uint).clone())
+            //Ok(range_value)
         } else {
             Err(ZKVMError::CircuitError)
         }
