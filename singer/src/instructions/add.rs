@@ -107,10 +107,11 @@ impl Instruction for AddInstruction {
         // Execution result = addend0 + addend1, with carry.
         let addend_0 = (&phase0[Self::phase0_addend_0()]).try_into()?;
         let addend_1 = (&phase0[Self::phase0_addend_1()]).try_into()?;
-        //println!(
-        //    "addInstCircuit:phase0_instruction_add: {:?}",
-        //    Self::phase0_instruction_add()
-        //);
+        #[cfg(feature = "dbg-add-opcode")]
+        println!(
+            "addInstCircuit::phase0_instruction_add: {:?}",
+            Self::phase0_instruction_add()
+        );
         let result = UIntAddSub::<StackUInt>::add(
             &mut circuit_builder,
             &mut range_chip_handler,

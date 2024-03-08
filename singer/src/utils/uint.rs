@@ -41,9 +41,11 @@ impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
 impl<const M: usize, const C: usize> TryFrom<Vec<usize>> for UInt<M, C> {
     type Error = ZKVMError;
     fn try_from(values: Vec<usize>) -> Result<Self, Self::Error> {
-        //println!("values try_from {:?}", values);
+        #[cfg(feature = "dbg-add-opcode")]
+        println!("try_from::values try_from {:?}", values);
         let values = values.as_slice().try_into()?;
-        //println!("values into {:?}", values);
+        #[cfg(feature = "dbg-add-opcode")]
+        println!("try_from::values into {:?}", values);
         Ok(values)
     }
 }
@@ -81,19 +83,48 @@ impl<const M: usize, const C: usize> UInt<M, C> {
                     )
                 })
                 .collect();
-            println!("collect_convert_decomp {:?}", collect_convert_decomp);
+            #[cfg(feature = "dbg-add-opcode")]
+            println!(
+                "from_range_values::collect_convert_decomp {:?}",
+                collect_convert_decomp
+            );
             collect_convert_decomp
             //println!("convert_decomp: small len {:?}, small bit width {:?}", range_values.len(), RANGE_CHIP_BIT_WIDTH);
             //convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, C, true)
         } else {
+            let range_values_chunk_size =
+                <F as PrimeField>::NUM_BITS as usize / RANGE_CHIP_BIT_WIDTH;
+            let collect_convert_decomp: Vec<_> = range_values
+                .chunks(range_values_chunk_size)
+                .flat_map(|range_values_chunk| {
+                    convert_decomp(
+                        circuit_builder,
+                        range_values_chunk,
+                        RANGE_CHIP_BIT_WIDTH,
+                        M,
+                        true,
+                    )
+                })
+                .collect();
+            #[cfg(feature = "dbg-add-opcode")]
+            println!(
+                "from_range_values::collect_convert_decomp {:?}",
+                collect_convert_decomp
+            );
+            collect_convert_decomp
             //println!("convert_decomp: small len {:?}, small bit width {:?}", range_values.len(), RANGE_CHIP_BIT_WIDTH);
-            convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, M, true)
+            //convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, M, true)
         };
-        //println!("values {:?}", values);
+        #[cfg(feature = "dbg-add-opcode")]
+        println!("from_range_values::values {:?}", values);
         while values.len() < Self::N_OPRAND_CELLS {
             values.push(circuit_builder.create_cell());
         }
-        //println!("from_range_values result {:?}", Self::try_from(values.clone()));
+        #[cfg(feature = "dbg-add-opcode")]
+        println!(
+            "from_range_values::result {:?}",
+            Self::try_from(values.clone())
+        );
         Self::try_from(values)
     }
 
