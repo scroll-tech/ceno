@@ -1,19 +1,22 @@
-use paste::paste;
-use std::sync::Arc;
-use strum::IntoEnumIterator;
-
-use simple_frontend::structs::CircuitBuilder;
-
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
+use paste::paste;
+use simple_frontend::structs::CircuitBuilder;
+use singer_utils::{
+    chip_handler::{CalldataChipOperations, ROMOperations},
+    chips::IntoEnumIterator,
+    register_witness,
+    structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt, UInt64},
+};
+use std::sync::Arc;
 
-use crate::component::{ChipType, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst};
-use crate::error::ZKVMError;
-use crate::utils::add_assign_each_cell;
-use crate::utils::chip_handler::{CalldataChip, ChipHandler};
-use crate::utils::uint::{StackUInt, TSUInt, UInt64};
+use crate::{
+    component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
+    error::ZKVMError,
+    utils::add_assign_each_cell,
+};
 
-use super::{ChipChallenges, Instruction, InstructionGraph};
+use super::{Instruction, InstructionGraph};
 
 impl<F: SmallField> InstructionGraph<F> for CalldataloadInstruction {
     type InstType = Self;
@@ -33,33 +36,30 @@ impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From witness
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
-        let (offset_id, offset) = circuit_builder.create_wire_in(UInt64::N_OPRAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (offset_id, offset) = circuit_builder.create_witness_in(UInt64::N_OPRAND_CELLS);
 
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
-        let mut calldata_chip_handler = ChipHandler::new(challenges.calldata());
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         // CallDataLoad check (offset, data)
         let data = &phase0[Self::phase0_data()];
-        calldata_chip_handler.calldataload(&mut circuit_builder, &offset, data);
+        rom_handler.calldataload(&mut circuit_builder, &offset, data);
 
         // To successor instruction
-        let (data_copy_id, data_copy) = circuit_builder.create_wire_out(data.len());
+        let (data_copy_id, data_copy) = circuit_builder.create_witness_out(data.len());
         add_assign_each_cell(&mut circuit_builder, &data_copy, &data);
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_wire_out(TSUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let call_data_id = calldata_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::RangeChip as usize] = Some(range_chip_id);
-        to_chip_ids[ChipType::CalldataChip as usize] = Some(call_data_id);
-
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
+
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),

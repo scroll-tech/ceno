@@ -14,7 +14,7 @@ pub struct IOPProof<F> {
 }
 impl<F: PrimeField> IOPProof<F> {
     #[allow(dead_code)]
-    pub(crate) fn extract_sum(&self) -> F {
+    pub fn extract_sum(&self) -> F {
         let res = self.proofs[0].evaluations[0] + self.proofs[0].evaluations[1];
 
         res

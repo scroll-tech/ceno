@@ -7,6 +7,7 @@ members = [
     "simple-frontend",
     "singer",
     "singer-pro",
+    "singer-utils",
     "sumcheck",
     "transcript",
     "mpcs",
@@ -19,8 +20,8 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-# ark-std = { version = "0.4" }
-ark-std = { version = "0.4", features = ["print-trace"] }
+ark-std = { version = "0.4" }
+# ark-std = { version = "0.4", features = ["print-trace"] }
 ark-poly = "0.4"
 criterion = { version = "0.5", features = ["html_reports"] }
 ff = { version = "0.13", features = ["derive"] }

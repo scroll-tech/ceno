@@ -127,7 +127,7 @@ fn keccak256_circuit<F: SmallField>() -> Circuit<F> {
     let cb = &mut CircuitBuilder::new();
 
     let [mut state, input] = [25 * 64, 17 * 64].map(|n| {
-        cb.create_wire_in(n)
+        cb.create_witness_in(n)
             .1
             .chunks(64)
             .map(|word| Word(word.to_vec().try_into().unwrap()))
@@ -242,7 +242,7 @@ fn keccak256_circuit<F: SmallField>() -> Circuit<F> {
     //        will be different, so it's duplicating cells to avoid that as a temporary solution.
     // cb.create_wire_out_from_cells(&state.iter().flat_map(|word| word.0).collect_vec());
 
-    let (_, out) = cb.create_wire_out(256);
+    let (_, out) = cb.create_witness_out(256);
     izip!(&out, state.iter().flat_map(|word| &word.0))
         .for_each(|(out, state)| cb.add(*out, *state, F::BaseField::ONE));
 
@@ -255,36 +255,38 @@ fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
 
     // Sanity-check
     {
-        let all_zero = [
+        let all_zero = vec![
             vec![F::BaseField::ZERO; 25 * 64],
             vec![F::BaseField::ZERO; 17 * 64],
         ];
-        let all_one = [
+        let all_one = vec![
             vec![F::BaseField::ONE; 25 * 64],
             vec![F::BaseField::ZERO; 17 * 64],
         ];
         let mut witness = CircuitWitness::new(&circuit, Vec::new());
-        witness.add_instance(&circuit, &all_zero);
-        witness.add_instance(&circuit, &all_one);
+        witness.add_instance(&circuit, all_zero);
+        witness.add_instance(&circuit, all_one);
 
-        izip!(&witness.wires_out_ref()[0], [[0; 25], [u64::MAX; 25]]).for_each(
-            |(wire_out, state)| {
-                let output = wire_out[..256]
-                    .chunks_exact(64)
-                    .map(|bits| {
-                        bits.iter().fold(0, |acc, bit| {
-                            (acc << 1) + (*bit == F::BaseField::ONE) as u64
-                        })
+        izip!(
+            &witness.witness_out_ref()[0].instances,
+            [[0; 25], [u64::MAX; 25]]
+        )
+        .for_each(|(wire_out, state)| {
+            let output = wire_out[..256]
+                .chunks_exact(64)
+                .map(|bits| {
+                    bits.iter().fold(0, |acc, bit| {
+                        (acc << 1) + (*bit == F::BaseField::ONE) as u64
                     })
-                    .collect_vec();
-                let expected = {
-                    let mut state = state;
-                    tiny_keccak::keccakf(&mut state);
-                    state[0..4].to_vec()
-                };
-                assert_eq!(output, expected)
-            },
-        );
+                })
+                .collect_vec();
+            let expected = {
+                let mut state = state;
+                tiny_keccak::keccakf(&mut state);
+                state[0..4].to_vec()
+            };
+            assert_eq!(output, expected)
+        });
     }
 
     let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
@@ -296,14 +298,15 @@ fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
                 .map(F::BaseField::from)
                 .collect_vec()
         });
-        witness.add_instance(&circuit, &[rand_state, rand_input]);
+        witness.add_instance(&circuit, vec![rand_state, rand_input]);
     }
 
-    let lo_num_vars = witness.wires_out_ref()[0][0]
+    let lo_num_vars = witness.witness_out_ref()[0].instances[0]
         .len()
         .next_power_of_two()
         .ilog2() as usize;
-    let output_mle = witness.wires_out_ref()[0]
+    let output_mle = witness.witness_out_ref()[0]
+        .instances
         .as_slice()
         .mle(lo_num_vars, instance_num_vars);
 
@@ -318,33 +321,33 @@ fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
     let output_eval = output_mle.evaluate(&output_point);
 
     let start = std::time::Instant::now();
-    let _proof = gkr::structs::IOPProverState::prove_parallel(
+    let (proof, _) = gkr::structs::IOPProverState::prove_parallel(
         &circuit,
         &witness,
-        &[],
-        &[PointAndEval::new(output_point, output_eval)],
+        vec![],
+        vec![PointAndEval::new(output_point, output_eval)],
         &mut prover_transcript,
     );
     println!("{}: {:?}", 1 << instance_num_vars, start.elapsed());
 
-    // let mut verifer_transcript = Transcript::<F>::new(b"test");
-    // let output_point = iter::repeat_with(|| {
-    //     verifer_transcript
-    //         .get_and_append_challenge(b"output point")
-    //         .elements
-    // })
-    // .take(output_mle.num_vars)
-    // .collect_vec();
-    // let _claim = gkr::structs::IOPVerifierState::verify_parallel(
-    //     &circuit,
-    //     &[],
-    //     &[],
-    //     &[(output_point, output_eval)],
-    //     &proof,
-    //     instance_num_vars,
-    //     &mut verifer_transcript,
-    // )
-    // .unwrap();
+    let mut verifer_transcript = Transcript::<F>::new(b"test");
+    let output_point = iter::repeat_with(|| {
+        verifer_transcript
+            .get_and_append_challenge(b"output point")
+            .elements
+    })
+    .take(output_mle.num_vars)
+    .collect_vec();
+    let _claim = gkr::structs::IOPVerifierState::verify_parallel(
+        &circuit,
+        &[],
+        vec![],
+        vec![PointAndEval::new(output_point, output_eval)],
+        proof,
+        instance_num_vars,
+        &mut verifer_transcript,
+    )
+    .unwrap();
 }
 
 fn main() {

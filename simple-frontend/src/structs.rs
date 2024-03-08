@@ -9,7 +9,7 @@ use std::{hash::Hash, marker::PhantomData};
 // This works better/simpler than struct-wrapping
 pub type ChallengeId = u8;
 pub type TableType = u16;
-pub type WireId = u16;
+pub type WitnessId = u16;
 pub type LayerId = u32;
 pub type CellId = usize;
 
@@ -19,7 +19,7 @@ pub struct ChallengeConst {
     pub exp: u64,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub enum ConstantType<Ext: SmallField> {
     Field(Ext::BaseField),
     /// ChallengeConst is an extension field element represents a power of ChallengeId.
@@ -31,11 +31,9 @@ pub enum ConstantType<Ext: SmallField> {
 /// Represent a gate in the circuit. The inner variables denote the input
 /// indices and scalar.
 #[derive(Clone, Debug)]
-pub enum GateType<Ext: SmallField> {
-    AddC(ConstantType<Ext>),
-    Add(CellId, ConstantType<Ext>),
-    Mul2(CellId, CellId, ConstantType<Ext>),
-    Mul3(CellId, CellId, CellId, ConstantType<Ext>),
+pub struct GateType<Ext: SmallField> {
+    pub idx_in: Vec<CellId>,
+    pub scalar: ConstantType<Ext>,
 }
 
 /// Store wire structure of the circuit.
@@ -45,8 +43,6 @@ pub struct Cell<Ext: SmallField> {
     pub layer: Option<LayerId>,
     /// The value of the cell is the sum of all gates.
     pub gates: Vec<GateType<Ext>>,
-    /// The value of the cell should equal to a constant.
-    pub assert_const: Option<Ext::BaseField>,
     /// The type of the cell, e.g., public input, witness, challenge, etc.
     pub cell_type: Option<CellType>,
 }
@@ -58,22 +54,23 @@ pub struct ExtCellId<Ext: SmallField> {
     pub phantom: PhantomData<Ext>,
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize, Ord, PartialOrd)]
 pub enum InType {
-    /// Constant keeps the same for all instances.
-    Constant(i64),
+    Witness(WitnessId),
     /// Constant(num_vars) acts like a counter (0, 1, 2, ...) through all
     /// instances. Each instance holds 1 << num_vars of them.
     Counter(usize),
-    Wire(WireId),
+    /// Constant keeps the same for all instances.
+    Constant(i64),
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize, Ord, PartialOrd)]
 pub enum OutType {
-    Wire(WireId),
+    Witness(WitnessId),
+    AssertConst(i64),
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize, Ord, PartialOrd)]
 pub enum CellType {
     In(InType),
     Out(OutType),
@@ -130,6 +127,6 @@ pub struct CircuitBuilder<Ext: SmallField> {
     /// Number of layers in the circuit.
     pub n_layers: Option<u32>,
 
-    pub(crate) n_wires_in: usize,
-    pub(crate) n_wires_out: usize,
+    pub(crate) n_witness_in: usize,
+    pub(crate) n_witness_out: usize,
 }

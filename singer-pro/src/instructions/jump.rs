@@ -1,22 +1,18 @@
-use std::sync::Arc;
-use strum::IntoEnumIterator;
-
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
 use simple_frontend::structs::CircuitBuilder;
-
-use crate::{
-    component::{
-        ChipChallenges, ChipType, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst,
-    },
-    error::ZKVMError,
-    utils::{
-        add_assign_each_cell,
-        uint::{StackUInt, TSUInt},
-    },
+use singer_utils::{
+    chips::IntoEnumIterator,
+    structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
+use std::sync::Arc;
 
 use super::{Instruction, InstructionGraph};
+use crate::{
+    component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
+    error::ZKVMError,
+    utils::add_assign_each_cell,
+};
 
 pub struct JumpInstruction;
 
@@ -28,20 +24,20 @@ impl<F: SmallField> Instruction<F> for JumpInstruction {
     fn construct_circuit(_: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
-        let (next_pc_id, next_pc) = circuit_builder.create_wire_in(StackUInt::N_OPRAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (next_pc_id, next_pc) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
         // To BB final
-        let (next_pc_copy_id, next_pc_copy) = circuit_builder.create_wire_out(next_pc.len());
+        let (next_pc_copy_id, next_pc_copy) = circuit_builder.create_witness_out(next_pc.len());
         add_assign_each_cell(&mut circuit_builder, &next_pc_copy, &next_pc);
 
         // To Succesor instruction
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_wire_out(TSUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips
-        let to_chip_ids = vec![None; ChipType::iter().count()];
+        let to_chip_ids = vec![None; InstOutChipType::iter().count()];
         circuit_builder.configure();
 
         Ok(InstCircuit {

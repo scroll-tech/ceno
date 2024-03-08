@@ -1,21 +1,20 @@
-use paste::paste;
-use std::sync::Arc;
-use strum::IntoEnumIterator;
-
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
+use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
+use singer_utils::{
+    chip_handler::ROMOperations,
+    chips::IntoEnumIterator,
+    register_witness,
+    structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt},
+    uint::UIntCmp,
+};
+use std::sync::Arc;
 
 use crate::{
-    component::{
-        ChipChallenges, ChipType, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst,
-    },
+    component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
     error::ZKVMError,
-    utils::{
-        add_assign_each_cell,
-        chip_handler::ChipHandler,
-        uint::{StackUInt, TSUInt, UIntCmp},
-    },
+    utils::add_assign_each_cell,
 };
 
 use super::{Instruction, InstructionGraph};
@@ -37,21 +36,23 @@ impl<F: SmallField> Instruction<F> for GtInstruction {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From witness
-        let (phase0_wire_id, phase0) = circuit_builder.create_wire_in(Self::phase0_size());
+        let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_wire_in(TSUInt::N_OPRAND_CELLS);
-        let (operand_0_id, operand_0) = circuit_builder.create_wire_in(StackUInt::N_OPRAND_CELLS);
-        let (operand_1_id, operand_1) = circuit_builder.create_wire_in(StackUInt::N_OPRAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (operand_0_id, operand_0) =
+            circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
+        let (operand_1_id, operand_1) =
+            circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         // Execution operand_1 > operand_0.
         let operand_0 = operand_0.try_into()?;
         let operand_1 = operand_1.try_into()?;
         let (result, _) = UIntCmp::<StackUInt>::lt(
             &mut circuit_builder,
-            &mut range_chip_handler,
+            &mut rom_handler,
             &operand_0,
             &operand_1,
             &phase0[Self::phase0_instruction_gt()],
@@ -62,17 +63,17 @@ impl<F: SmallField> Instruction<F> for GtInstruction {
         ]
         .concat();
         // To successor instruction
-        let stack_result_id = circuit_builder.create_wire_out_from_cells(&result);
+        let stack_result_id = circuit_builder.create_witness_out_from_cells(&result);
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_wire_out(TSUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::RangeChip as usize] = Some(range_chip_id);
-
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
+
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),

@@ -1,5 +1,5 @@
 #[derive(Debug)]
 pub enum GKRError {
     InvalidCircuit,
-    VerifyError,
+    VerifyError(&'static str),
 }

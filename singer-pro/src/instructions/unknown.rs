@@ -1,9 +1,7 @@
 use goldilocks::SmallField;
+use singer_utils::structs::ChipChallenges;
 
-use crate::{
-    component::{ChipChallenges, InstCircuit},
-    error::ZKVMError,
-};
+use crate::{component::InstCircuit, error::ZKVMError};
 
 use super::{Instruction, InstructionGraph};
 

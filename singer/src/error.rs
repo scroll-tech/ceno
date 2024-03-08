@@ -1,12 +1,22 @@
+use gkr_graph::error::GKRGraphError;
+use singer_utils::error::UtilError;
+
 #[derive(Debug)]
 pub enum ZKVMError {
     CircuitError,
-    GKRGraphError(gkr_graph::error::GKRGraphError),
+    UtilError(UtilError),
+    GKRGraphError(GKRGraphError),
     VerifyError,
 }
 
-impl From<gkr_graph::error::GKRGraphError> for ZKVMError {
-    fn from(error: gkr_graph::error::GKRGraphError) -> Self {
+impl From<GKRGraphError> for ZKVMError {
+    fn from(error: GKRGraphError) -> Self {
         Self::GKRGraphError(error)
+    }
+}
+
+impl From<UtilError> for ZKVMError {
+    fn from(error: UtilError) -> Self {
+        Self::UtilError(error)
     }
 }
