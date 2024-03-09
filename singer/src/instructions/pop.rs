@@ -36,7 +36,7 @@ register_witness!(
         pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
 
         old_stack_ts => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
         stack_values => StackUInt::N_OPRAND_CELLS
     }
 );
@@ -148,5 +148,122 @@ impl Instruction for PopInstruction {
                 ..Default::default()
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::constants::RANGE_CHIP_BIT_WIDTH;
+    use crate::instructions::{ChipChallenges, Instruction, PopInstruction};
+    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
+    use crate::utils::uint::TSUInt;
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
+
+    impl PopInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("phase0_pc".to_string(), Self::phase0_pc());
+            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
+            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
+            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
+            map.insert("phase0_clk".to_string(), Self::phase0_clk());
+            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
+            map.insert(
+                "phase0_old_stack_ts".to_string(),
+                Self::phase0_old_stack_ts(),
+            );
+            map.insert(
+                "phase0_old_stack_ts_lt".to_string(),
+                Self::phase0_old_stack_ts_lt(),
+            );
+            map.insert(
+                "phase0_stack_values".to_string(),
+                Self::phase0_stack_values(),
+            );
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_pop_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = PopInstruction::phase0_idxes_map();
+        let phase0_witness_size = PopInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("POP {:?}", &phase0_idx_map);
+            println!("POP witness_size = {:?}", phase0_witness_size);
+        }
+
+        // initialize general test inputs associated with push1
+        let inst_circuit = PopInstruction::construct_circuit::<Goldilocks>(challenges).unwrap();
+
+        #[cfg(feature = "test-dbg")]
+        println!("{:?}", inst_circuit);
+
+        let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
+        phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(2u64)]);
+        phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_stack_top".to_string(),
+            vec![Goldilocks::from(100u64)],
+        );
+        phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_pc_add".to_string(),
+            vec![], // carry is 0, may test carry using larger values in PCUInt
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts".to_string(),
+            vec![Goldilocks::from(1u64)],
+        );
+        let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
+        let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_lt".to_string(),
+            vec![
+                Goldilocks::from(range_values[0]),
+                Goldilocks::from(range_values[1]),
+                Goldilocks::from(range_values[2]),
+                Goldilocks::from(range_values[3]),
+                Goldilocks::from(1u64), // current length has no cells for borrow
+            ],
+        );
+        phase0_values_map.insert(
+            "phase0_stack_values".to_string(),
+            vec![
+                Goldilocks::from(7u64),
+                Goldilocks::from(6u64),
+                Goldilocks::from(5u64),
+                Goldilocks::from(4u64),
+                Goldilocks::from(3u64),
+                Goldilocks::from(2u64),
+                Goldilocks::from(1u64),
+                Goldilocks::from(0u64),
+            ],
+        );
+
+        let circuit_witness_challenges = vec![
+            Goldilocks::from(2),
+            Goldilocks::from(2),
+            Goldilocks::from(2),
+        ];
+
+        test_opcode_circuit(
+            &inst_circuit,
+            &phase0_idx_map,
+            phase0_witness_size,
+            &phase0_values_map,
+            circuit_witness_challenges,
+        );
     }
 }

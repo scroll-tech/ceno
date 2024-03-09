@@ -179,7 +179,7 @@ fn convert_decomp<F: SmallField>(
                 circuit_builder.add(
                     tmp,
                     small_values[k],
-                    F::BaseField::from((1 as u64) << j * small_bit_width),
+                    F::BaseField::from((1 as u64) << k * small_bit_width),
                 );
             }
             tmp
@@ -193,39 +193,48 @@ mod test {
     use crate::utils::uint::convert_decomp;
 
     use super::UInt;
+    use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CircuitBuilder;
 
     #[test]
-    fn test_uint() {
-        // M = 256 is the number of bits for unsigned integer
-        // C = 63 is the cell bit width
-        type Uint256_63 = UInt<256, 63>;
-        assert_eq!(Uint256_63::N_OPRAND_CELLS, 5);
-        assert_eq!(Uint256_63::N_CARRY_CELLS, 5);
-        assert_eq!(Uint256_63::N_CARRY_NO_OVERFLOW_CELLS, 4);
-        assert_eq!(Uint256_63::N_RANGE_CHECK_CELLS, 24);
-        assert_eq!(Uint256_63::N_RANGE_CHECK_NO_OVERFLOW_CELLS, 19);
-        let u_int = Uint256_63::try_from(vec![1, 2, 3, 4, 5]);
-        assert_eq!(u_int.unwrap().values, vec![1, 2, 3, 4, 5]);
-        // TODO: implement tests for methods in UInt
-        // they mostly depend on convert_decomp which will be tested separately
-    }
-
-    #[test]
     fn test_convert_decomp() {
+        // use of convert_decomp must ensure that
+        //      small_len * small_bit_width does not exceed
+        //      the field's max bit size (64 for Goldlilocks)
         let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
-        let small_values: Vec<usize> = vec![1; 64];
-        let values = convert_decomp(&mut circuit_builder, &small_values, 1, 2, true);
-        let vec: Vec<usize> = (0..=31).collect();
-        assert_eq!(values, vec);
-        // this test will fail if small_len * small_bit_width exceeds
-        //      the field's max bit size
-        // e.g.
-        // let values = convert_decomp(&mut circuit_builder,
-        //                                 &small_values,
-        //                                 2,
-        //                                 2,
-        //                                 true);
+        let big_bit_width = 3;
+        let small_bit_width = 2;
+        let (small_values_wire_in_id, small_values) = circuit_builder.create_witness_in(31);
+        let values = convert_decomp(
+            &mut circuit_builder,
+            &small_values,
+            small_bit_width,
+            big_bit_width,
+            true,
+        );
+        assert_eq!(values.len(), 16);
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+        let n_witness_in = circuit.n_witness_in;
+        let mut wires_in = vec![vec![]; n_witness_in];
+        wires_in[small_values_wire_in_id as usize] =
+            vec![Goldilocks::from(1u64), Goldilocks::from(1u64)];
+        wires_in[small_values_wire_in_id as usize].extend(vec![Goldilocks::from(0u64); 29]);
+        let circuit_witness = {
+            let challenges = vec![Goldilocks::from(2)];
+            let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
+            circuit_witness.add_instance(&circuit, wires_in);
+            circuit_witness
+        };
+        #[cfg(feature = "test-dbg")]
+        println!("{:?}", circuit_witness);
+        circuit_witness.check_correctness(&circuit);
+        // check the result
+        let result_values = circuit_witness.output_layer_witness_ref();
+        assert_eq!(result_values.instances[0][0], Goldilocks::from(5u64));
+        for i in 1..16 {
+            assert_eq!(result_values.instances[0][i], Goldilocks::from(0u64));
+        }
     }
 }

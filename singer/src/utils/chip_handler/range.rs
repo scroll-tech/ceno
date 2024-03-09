@@ -36,7 +36,7 @@ impl<F: SmallField> RangeChipOperations<F> for ChipHandler<F> {
         let n_cell = (M + C - 1) / C;
         if C <= RANGE_CHIP_BIT_WIDTH {
             for value in uint.values().iter().take(n_cell - 1) {
-                self.small_range_check(circuit_builder, (*value).into(), VALUE_BIT_WIDTH)?;
+                self.small_range_check(circuit_builder, (*value).into(), C)?;
             }
             self.small_range_check(circuit_builder, uint.values()[n_cell - 1].into(), M % C)?;
             Ok((*uint).clone())
