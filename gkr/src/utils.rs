@@ -3,9 +3,9 @@ use std::{borrow::Cow, iter, sync::Arc};
 use ark_std::{end_timer, start_timer};
 use ff::Field;
 use goldilocks::SmallField;
+use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use rayon::prelude::*;
-use itertools::Itertools;
 
 pub fn i64_to_field<F: SmallField>(x: i64) -> F {
     if x >= 0 {
