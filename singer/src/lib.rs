@@ -15,6 +15,7 @@ use std::mem;
 pub mod error;
 pub mod instructions;
 pub mod scheme;
+pub mod test;
 pub mod utils;
 
 // Process sketch:
