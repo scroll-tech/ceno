@@ -20,6 +20,14 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         UInt::<M, C>::N_RANGE_CHECK_CELLS + UInt::<M, C>::N_CARRY_CELLS;
 
     pub(crate) fn extract_range_values(witness: &[CellId]) -> &[CellId] {
+        #[cfg(feature = "dbg-add-opcode")]
+        println!(
+            "extract_range_values::UInt::<{:?}, {:?}>::N_RANGE_CHECK_CELLS={:?}, N_OPRAND_CELLS={:?}",
+            M,
+            C,
+            UInt::<M, C>::N_RANGE_CHECK_CELLS,
+            UInt::<M, C>::N_OPRAND_CELLS
+        );
         &witness[..UInt::<M, C>::N_RANGE_CHECK_CELLS]
     }
 
@@ -77,6 +85,12 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry)?;
+        #[cfg(feature = "dbg-add-opcode")]
+        {
+            println!("add::range_values: {:?}", range_values);
+            println!("add::range_values len {:?}", range_values.len());
+            println!("add::computed result {:?}", computed_result);
+        }
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 

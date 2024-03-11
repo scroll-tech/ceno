@@ -24,6 +24,7 @@ pub mod constants;
 pub mod error;
 pub mod instructions;
 pub mod scheme;
+#[cfg(test)]
 pub mod test;
 pub mod utils;
 

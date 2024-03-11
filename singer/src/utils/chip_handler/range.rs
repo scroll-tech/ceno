@@ -41,7 +41,17 @@ impl<F: SmallField> RangeChipOperations<F> for ChipHandler<F> {
             self.small_range_check(circuit_builder, uint.values()[n_cell - 1].into(), M % C)?;
             Ok((*uint).clone())
         } else if let Some(range_values) = range_value_witness {
+            #[cfg(feature = "dbg-add-opcode")]
+            println!(
+                "range_check_uint::before from_range_values: range_values {:?}",
+                range_values
+            );
             let range_value = UInt::<M, C>::from_range_values(circuit_builder, range_values)?;
+            #[cfg(feature = "dbg-add-opcode")]
+            println!(
+                "range_check_uint::after from_range_values: range_value {:?}",
+                range_value
+            );
             uint.assert_eq(circuit_builder, &range_value);
             let b: usize = M.min(C);
             let chunk_size = (b + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;

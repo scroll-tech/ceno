@@ -1,4 +1,4 @@
-use ff::Field;
+use ff::{Field, PrimeField};
 use itertools::Itertools;
 use std::marker::PhantomData;
 
@@ -40,7 +40,11 @@ impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
 impl<const M: usize, const C: usize> TryFrom<Vec<usize>> for UInt<M, C> {
     type Error = ZKVMError;
     fn try_from(values: Vec<usize>) -> Result<Self, Self::Error> {
+        #[cfg(feature = "dbg-add-opcode")]
+        println!("try_from::values try_from {:?}", values);
         let values = values.as_slice().try_into()?;
+        #[cfg(feature = "dbg-add-opcode")]
+        println!("try_from::values into {:?}", values);
         Ok(values)
     }
 }
@@ -51,9 +55,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     const N_CARRY_CELLS: usize = Self::N_OPRAND_CELLS;
     const N_CARRY_NO_OVERFLOW_CELLS: usize = Self::N_OPRAND_CELLS - 1;
     pub(crate) const N_RANGE_CHECK_CELLS: usize =
-        Self::N_OPRAND_CELLS * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
+        Self::N_OPRAND_CELLS * ((C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH);
     pub(crate) const N_RANGE_CHECK_NO_OVERFLOW_CELLS: usize =
-        (Self::N_OPRAND_CELLS - 1) * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
+        (Self::N_OPRAND_CELLS - 1) * ((C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH);
 
     pub(crate) fn values(&self) -> &[CellId] {
         &self.values
@@ -64,9 +68,49 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_values: &[CellId],
     ) -> Result<Self, ZKVMError> {
         let mut values = if C <= M {
-            convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, C, true)
+            let range_values_chunk_size =
+                <F as PrimeField>::NUM_BITS as usize / RANGE_CHIP_BIT_WIDTH;
+            let collect_convert_decomp: Vec<_> = range_values
+                .chunks(range_values_chunk_size)
+                .flat_map(|range_values_chunk| {
+                    convert_decomp(
+                        circuit_builder,
+                        range_values_chunk,
+                        RANGE_CHIP_BIT_WIDTH,
+                        C,
+                        true,
+                    )
+                })
+                .collect();
+            #[cfg(feature = "dbg-add-opcode")]
+            println!(
+                "from_range_values::collect_convert_decomp {:?}",
+                collect_convert_decomp
+            );
+            collect_convert_decomp
+            //convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, C, true)
         } else {
-            convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, M, true)
+            let range_values_chunk_size =
+                <F as PrimeField>::NUM_BITS as usize / RANGE_CHIP_BIT_WIDTH;
+            let collect_convert_decomp: Vec<_> = range_values
+                .chunks(range_values_chunk_size)
+                .flat_map(|range_values_chunk| {
+                    convert_decomp(
+                        circuit_builder,
+                        range_values_chunk,
+                        RANGE_CHIP_BIT_WIDTH,
+                        M,
+                        true,
+                    )
+                })
+                .collect();
+            #[cfg(feature = "dbg-add-opcode")]
+            println!(
+                "from_range_values::collect_convert_decomp {:?}",
+                collect_convert_decomp
+            );
+            collect_convert_decomp
+            //convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, M, true)
         };
         while values.len() < Self::N_OPRAND_CELLS {
             values.push(circuit_builder.create_cell());
