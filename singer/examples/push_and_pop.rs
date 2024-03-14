@@ -1,5 +1,7 @@
+use ark_std::rand::SeedableRng;
 use goldilocks::Goldilocks;
 use itertools::Itertools;
+use mpcs::{Basefold, BasefoldDefaultParams, BasefoldParams, PolynomialCommitmentScheme};
 use singer::{
     instructions::SingerCircuitBuilder,
     scheme::{prover::prove, verifier::verify},
@@ -7,6 +9,7 @@ use singer::{
 };
 use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;
+use rand_chacha::ChaCha8Rng;
 
 fn main() {
     let chip_challenges = ChipChallenges::default();
@@ -40,8 +43,15 @@ fn main() {
             )
             .expect("construct failed");
 
+        let (pp, vp) = {
+            let rng = ChaCha8Rng::from_seed([0u8; 32]);
+            let poly_size = 1 << 15; // Temporarily set to 15. Modify it to appropriate size later.
+            let param: BasefoldParams<Goldilocks, ChaCha8Rng> = <Basefold::<Goldilocks, BasefoldDefaultParams> as PolynomialCommitmentScheme<Goldilocks, Goldilocks>>::setup(poly_size, &rng).unwrap();
+            <Basefold::<Goldilocks, BasefoldDefaultParams> as PolynomialCommitmentScheme<Goldilocks, Goldilocks>>::trim(&param).unwrap()
+        };
+
         let (proof, graph_aux_info) =
-            prove(&circuit, &witness, &wires_out_id, &mut prover_transcript).expect("prove failed");
+            prove(&pp, &circuit, &witness, &wires_out_id, &mut prover_transcript).expect("prove failed");
         let aux_info = SingerAuxInfo {
             graph_aux_info,
             real_n_instances,

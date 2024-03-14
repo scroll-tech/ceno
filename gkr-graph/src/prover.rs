@@ -1,4 +1,4 @@
-use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
+use gkr::{structs::{GKRInputClaims, PointAndEval}, utils::MultilinearExtensionFromVectors};
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use std::mem;
@@ -18,7 +18,7 @@ impl<F: SmallField> IOPProverState<F> {
         circuit_witness: &CircuitGraphWitness<F::BaseField>,
         target_evals: &TargetEvaluations<F>,
         transcript: &mut Transcript<F>,
-    ) -> Result<IOPProof<F>, GKRGraphError> {
+    ) -> Result<(IOPProof<F>, Vec<GKRInputClaims<F>>), GKRGraphError> {
         assert_eq!(target_evals.0.len(), circuit.targets.len());
 
         let mut output_evals = vec![vec![]; circuit.nodes.len()];
@@ -32,6 +32,8 @@ impl<F: SmallField> IOPProverState<F> {
             NodeOutputType::WireOut(id, _) => wit_out_evals[*id].push(eval.clone()),
         });
 
+        let mut input_claims = vec![];
+
         let gkr_proofs = izip!(&circuit.nodes, &circuit_witness.node_witnesses)
             .rev()
             .map(|(node, witness)| {
@@ -42,6 +44,8 @@ impl<F: SmallField> IOPProverState<F> {
                     mem::take(&mut wit_out_evals[node.id]),
                     transcript,
                 );
+
+                input_claims.push(input_claim.clone());
 
                 izip!(&node.preds, input_claim.point_and_evals)
                     .enumerate()
@@ -104,6 +108,6 @@ impl<F: SmallField> IOPProverState<F> {
             })
             .collect();
 
-        Ok(IOPProof { gkr_proofs })
+        Ok((IOPProof { gkr_proofs }, input_claims))
     }
 }

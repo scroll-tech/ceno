@@ -76,7 +76,7 @@ pub fn prove<F: SmallField>(
     };
 
     let target_evals = vm_circuit.0.target_evals(&vm_witness.0, &point);
-    let gkr_phase_proof =
+    let (gkr_phase_proof, _) =
         GKRGraphProverState::prove(&vm_circuit.0, &vm_witness.0, &target_evals, transcript)?;
     Ok((
         SingerProof {

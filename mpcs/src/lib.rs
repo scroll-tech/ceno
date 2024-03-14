@@ -227,7 +227,7 @@ pub enum Error {
 use poly::multilinear::MultilinearPolynomial;
 
 mod basefold;
-pub use basefold::{Basefold, BasefoldCommitmentWithData, BasefoldExtParams, BasefoldParams};
+pub use basefold::{Basefold, BasefoldCommitmentWithData, BasefoldExtParams, BasefoldParams, BasefoldDefaultParams};
 
 fn validate_input<'a, F: Field>(
     function: &str,

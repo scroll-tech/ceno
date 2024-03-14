@@ -200,6 +200,23 @@ pub trait BasefoldExtParams: Debug {
 }
 
 #[derive(Debug)]
+pub struct BasefoldDefaultParams;
+
+impl BasefoldExtParams for BasefoldDefaultParams {
+    fn get_reps() -> usize {
+        return 260;
+    }
+
+    fn get_rate() -> usize {
+        return 3;
+    }
+
+    fn get_basecode() -> usize {
+        return 7;
+    }
+}
+
+#[derive(Debug)]
 pub struct Basefold<F: SmallField, V: BasefoldExtParams>(PhantomData<(F, V)>);
 
 impl<F: SmallField, V: BasefoldExtParams> Clone for Basefold<F, V> {

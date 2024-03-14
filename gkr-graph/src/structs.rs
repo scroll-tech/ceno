@@ -50,11 +50,31 @@ pub struct CircuitNode<F: SmallField> {
     pub(crate) preds: Vec<PredType>,
 }
 
+impl<F: SmallField> CircuitNode<F> {
+    pub fn preds(&self) -> &Vec<PredType> {
+        &self.preds
+    }
+}
+
 #[derive(Default)]
 pub struct CircuitGraph<F: SmallField> {
     pub(crate) nodes: Vec<CircuitNode<F>>,
     pub(crate) targets: Vec<NodeOutputType>,
     pub(crate) sources: Vec<NodeInputType>,
+}
+
+impl<F: SmallField> CircuitGraph<F> {
+    pub fn nodes(&self) -> &Vec<CircuitNode<F>> {
+        &self.nodes
+    }
+
+    pub fn sources(&self) -> Vec<(usize, WitnessId)> {
+        self.sources.iter()
+            .map(|input_type| match input_type {
+                NodeInputType::WireIn(instance_id, wire_id) => (*instance_id, *wire_id),
+            })
+            .collect()
+    }
 }
 
 #[derive(Default)]

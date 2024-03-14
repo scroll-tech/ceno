@@ -237,7 +237,7 @@ fn main() -> Result<(), GKRGraphError> {
         .as_slice()
         .original_mle()
         .evaluate(&output_point);
-    let proof = IOPProverState::prove(
+    let (proof, _) = IOPProverState::prove(
         &prover_graph,
         &circuit_witness,
         &TargetEvaluations(vec![PointAndEval::new(output_point, output_eval)]),

@@ -988,6 +988,7 @@ dependencies = [
  "mpcs",
  "multilinear_extensions",
  "paste",
+ "rand_chacha",
  "rayon",
  "serde",
  "simple-frontend",

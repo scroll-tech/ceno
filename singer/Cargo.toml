@@ -24,3 +24,4 @@ simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 paste = "1.0.14"
 singer-utils = { version = "0.1.0", path = "../singer-utils" }
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
+rand_chacha = { version = "0.3.1", features = ["serde1"] }
