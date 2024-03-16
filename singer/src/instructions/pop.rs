@@ -258,7 +258,7 @@ mod test {
             Goldilocks::from(2),
         ];
 
-        test_opcode_circuit(
+        let circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,
             phase0_witness_size,

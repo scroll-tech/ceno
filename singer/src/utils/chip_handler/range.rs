@@ -52,6 +52,7 @@ impl<F: SmallField> RangeChipOperations<F> for ChipHandler<F> {
                 "range_check_uint::after from_range_values: range_value {:?}",
                 range_value
             );
+            // TODO: seems this assertion always pass, need a test for this module
             uint.assert_eq(circuit_builder, &range_value);
             let b: usize = M.min(C);
             let chunk_size = (b + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
