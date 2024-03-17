@@ -329,7 +329,7 @@ mod test {
                 Goldilocks::from(1u64), // borrow
             ],
         );
-        let m: u64 = (1 << get_uint_params::<StackUInt>().1) - 5;
+        let m: u64 = (1 << get_uint_params::<StackUInt>().1) - 1;
         phase0_values_map.insert("phase0_addend_0".to_string(), vec![Goldilocks::from(m)]);
         phase0_values_map.insert("phase0_addend_1".to_string(), vec![Goldilocks::from(1u64)]);
         let range_values = u2vec::<{ StackUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
@@ -337,7 +337,7 @@ mod test {
         for i in 0..16 {
             wit_phase0_instruction_add.push(Goldilocks::from(range_values[i]))
         }
-        wit_phase0_instruction_add.push(Goldilocks::from(0u64)); // carry is 0, TODO: test and dbg non-trivial carry case
+        wit_phase0_instruction_add.push(Goldilocks::from(1u64)); // carry is [1, 0, ...]
         phase0_values_map.insert(
             "phase0_instruction_add".to_string(),
             wit_phase0_instruction_add,
@@ -362,11 +362,11 @@ mod test {
         );
 
         // check the correctness of add operation
-        // stack_push = 98 (stack_top) + c * 3 (stack_ts) + c^2 * (m + 1) + c^10
+        // stack_push = 98 (stack_top) + c * 3 (stack_ts) + c^3 * 1 + c^10
         let (add_stack_push_wire_id, _) = inst_circuit.layout.chip_check_wire_id[4].unwrap();
         let add_stack_push =
             &circuit_witness.witness_out_ref()[add_stack_push_wire_id as usize].instances[0];
-        let add_stack_push_value: u64 = 98 + c * 3 + c * c * (m + 1) + c.pow(10_u32);
+        let add_stack_push_value: u64 = 98 + c * 3 + c * c * c + c.pow(10_u32);
         assert_eq!(*add_stack_push, [Goldilocks::from(add_stack_push_value)]);
     }
 }
