@@ -295,7 +295,13 @@ mod test {
         );
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
-            vec![], // carry is 0, may test carry using larger values in TSUInt
+            vec![
+                Goldilocks::from(4u64), // first TSUInt::N_RANGE_CHECK_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+                // no place for carry
+            ],
         );
         phase0_values_map.insert(
             "phase0_old_stack_ts0".to_string(),
