@@ -178,25 +178,14 @@ fn convert_decomp<F: SmallField>(
         .step_by(chunk_size)
         .map(|j| {
             let tmp = circuit_builder.create_cell();
-            if j + chunk_size <= small_len {
-                for k in 0..chunk_size {
-                    let k = k as usize;
-                    circuit_builder.add(
-                        tmp,
-                        small_values[j + k],
-                        F::BaseField::from((1 as u64) << k * small_bit_width),
-                    );
-                }
-            } else {
-                for k in 0..small_len - j {
-                    let k = k as usize;
-                    circuit_builder.add(
-                        tmp,
-                        small_values[j + k],
-                        F::BaseField::from((1 as u64) << k * small_bit_width),
-                    );
-                }
-            };
+            for k in j..(j + chunk_size).min(small_len) {
+                let k = k as usize;
+                circuit_builder.add(
+                    tmp,
+                    small_values[k],
+                    F::BaseField::from((1 as u64) << (k - j) * small_bit_width),
+                );
+            }
             tmp
         })
         .collect_vec();
