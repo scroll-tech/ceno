@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+
 use ff::Field;
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
@@ -13,7 +16,6 @@ use singer_utils::{
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
     uint::UIntCmp,
 };
-use std::sync::Arc;
 
 use crate::error::ZKVMError;
 
@@ -125,12 +127,13 @@ mod test {
     use core::ops::Range;
     use std::collections::BTreeMap;
 
-    use crate::constants::RANGE_CHIP_BIT_WIDTH;
     use crate::instructions::{ChipChallenges, Instruction, JumpInstruction};
     use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use crate::utils::uint::TSUInt;
+
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
+    use singer_utils::structs::TSUInt;
+    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
 
     impl JumpInstruction {
         #[inline]
@@ -169,7 +172,7 @@ mod test {
         }
 
         // initialize general test inputs associated with push1
-        let inst_circuit = JumpInstruction::construct_circuit::<Goldilocks>(challenges).unwrap();
+        let inst_circuit = JumpInstruction::construct_circuit(challenges).unwrap();
 
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);

@@ -16,7 +16,7 @@ pub mod error;
 pub mod instructions;
 pub mod scheme;
 pub mod test;
-pub mod utils;
+mod utils;
 
 // Process sketch:
 // 1. Construct instruction circuits and circuit gadgets => circuit gadgets
