@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-
 use ff::Field;
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
@@ -132,8 +131,8 @@ mod test {
 
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
-    use singer_utils::structs::TSUInt;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
+    use singer_utils::structs::TSUInt;
 
     impl JumpInstruction {
         #[inline]

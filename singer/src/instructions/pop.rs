@@ -130,8 +130,8 @@ mod test {
     use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
-    use singer_utils::structs::TSUInt;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
+    use singer_utils::structs::TSUInt;
 
     impl PopInstruction {
         #[inline]

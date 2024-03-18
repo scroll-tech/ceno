@@ -1,4 +1,3 @@
-
 use core::ops::Range;
 use ff::Field;
 use gkr::structs::CircuitWitness;
@@ -7,9 +6,10 @@ use gkr::utils::MultilinearExtensionFromVectors;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::CellId;
-use std::collections::BTreeMap;use singer_utils::structs::UInt;
+use singer_utils::structs::UInt;
+use std::collections::BTreeMap;
 
-use crate::instructions::{ InstCircuit};
+use crate::instructions::InstCircuit;
 
 pub(crate) trait UIntParams {
     const BITS: usize;

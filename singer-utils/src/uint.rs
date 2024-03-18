@@ -173,8 +173,6 @@ fn convert_decomp<F: SmallField>(
 mod test {
     use crate::uint::convert_decomp;
 
-    use super::UInt;
-
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CircuitBuilder;

@@ -122,7 +122,6 @@ mod test {
     use simple_frontend::structs::CircuitBuilder;
 
     use gkr::structs::{Circuit, CircuitWitness};
-    use simple_frontend::structs::{ChallengeId,};
 
     #[test]
     fn test_lt() {
@@ -175,7 +174,7 @@ mod test {
         wires_in[witness_wire_in_id as usize]
             .extend(vec![Goldilocks::from(1u64); Uint256_8::N_CARRY_CELLS]);
         let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2)];
+            let challenges = vec![Goldilocks::from(2), Goldilocks::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
             circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness
