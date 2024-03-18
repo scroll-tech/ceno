@@ -11,7 +11,7 @@ use gkr_graph::{
     },
 };
 use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
-use simple_frontend::structs::{ChallengeId, CircuitBuilder, MixedCell, WitnessId};
+use simple_frontend::structs::{ChallengeId, CircuitBuilder, MixedCell};
 use std::sync::Arc;
 use transcript::Transcript;
 
@@ -28,46 +28,17 @@ fn construct_input<F: SmallField>(input_size: usize, challenge: ChallengeId) -> 
     Arc::new(Circuit::new(&circuit_builder))
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct PrefixSelectorCircuit<F: SmallField> {
-    pub(crate) circuit: Arc<Circuit<F>>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct LeafFracSumCircuit<F: SmallField> {
-    pub(crate) circuit: Arc<Circuit<F>>,
-    pub(crate) input_den_id: WitnessId,
-    pub(crate) input_num_id: WitnessId,
-    pub(crate) cond_id: WitnessId,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct LeafFracSumNoSelectorCircuit<F: SmallField> {
-    pub(crate) circuit: Arc<Circuit<F>>,
-    pub(crate) input_den_id: WitnessId,
-    pub(crate) input_num_id: WitnessId,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct LeafCircuit<F: SmallField> {
-    pub(crate) circuit: Arc<Circuit<F>>,
-    pub(crate) input_id: WitnessId,
-    pub(crate) cond_id: WitnessId,
-}
-
 /// Construct a selector for n_instances and each instance contains `num`
 /// items. `num` must be a power of 2.
 pub(crate) fn construct_prefix_selector<F: SmallField>(
     n_instances: usize,
     num: usize,
-) -> PrefixSelectorCircuit<F> {
+) -> Arc<Circuit<F>> {
     assert_eq!(num, num.next_power_of_two());
     let mut circuit_builder = CircuitBuilder::<F>::new();
     let _ = circuit_builder.create_constant_in(n_instances * num, 1);
     circuit_builder.configure();
-    PrefixSelectorCircuit {
-        circuit: Arc::new(Circuit::new(&circuit_builder)),
-    }
+    Arc::new(Circuit::new(&circuit_builder))
 }
 
 /// Construct a circuit to compute the inverse sum of two extension field
@@ -75,10 +46,10 @@ pub(crate) fn construct_prefix_selector<F: SmallField>(
 /// Wire in 0: 2 extension field elements.
 /// Wire in 1: 2-bit selector.
 /// output layer: the denominator and the numerator.
-pub(crate) fn construct_inv_sum<F: SmallField>() -> LeafCircuit<F> {
+pub(crate) fn construct_inv_sum<F: SmallField>() -> Arc<Circuit<F>> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
-    let (input_id, input) = circuit_builder.create_ext_witness_in(2);
-    let (cond_id, cond) = circuit_builder.create_witness_in(2);
+    let (_input_id, input) = circuit_builder.create_ext_witness_in(2);
+    let (_cond_id, cond) = circuit_builder.create_witness_in(2);
     let (_, output) = circuit_builder.create_ext_witness_out(2);
     // selector denominator 1 or input[0] or input[0] * input[1]
     let den_mul = circuit_builder.create_ext_cell();
@@ -99,11 +70,7 @@ pub(crate) fn construct_inv_sum<F: SmallField>() -> LeafCircuit<F> {
     circuit_builder.sel_mixed_and_ext(&output[1], &cond[0].into(), &den_add, cond[1]);
 
     circuit_builder.configure();
-    LeafCircuit {
-        circuit: Arc::new(Circuit::new(&circuit_builder)),
-        input_id,
-        cond_id,
-    }
+    Arc::new(Circuit::new(&circuit_builder))
 }
 
 /// Construct a circuit to compute the sum of two fractions. The
@@ -169,7 +136,8 @@ fn main() -> Result<(), GKRGraphError> {
     // Graph construction
     // ==================
 
-    let mut graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
+    let mut prover_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
+    let mut verifier_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
     let mut prover_transcript = Transcript::<GoldilocksExt2>::new(b"test");
     let challenge = vec![
         prover_transcript
@@ -177,50 +145,61 @@ fn main() -> Result<(), GKRGraphError> {
             .elements,
     ];
 
-    let input = {
-        graph_builder.add_node_with_witness(
-            "input",
-            &input_circuit,
-            vec![PredType::Source],
-            challenge,
-            // input_circuit_wires_in.clone()
-            vec![LayerWitness {
-                instances: vec![input_circuit_wires_in.clone()],
-            }],
-            1,
-        )?
+    let mut add_node_and_witness = |label: &'static str,
+                                    circuit: &Arc<Circuit<_>>,
+                                    preds: Vec<PredType>,
+                                    challenges: Vec<_>,
+                                    sources: Vec<LayerWitness<_>>,
+                                    num_instances: usize|
+     -> Result<usize, GKRGraphError> {
+        let prover_node_id = prover_graph_builder.add_node_with_witness(
+            label,
+            circuit,
+            preds.clone(),
+            challenges,
+            sources,
+            num_instances,
+        )?;
+        let verifier_node_id = verifier_graph_builder.add_node(label, circuit, preds)?;
+        assert_eq!(prover_node_id, verifier_node_id);
+        Ok(prover_node_id)
     };
-    let selector = graph_builder.add_node_with_witness(
-        "selector",
-        &prefix_selector.circuit,
-        vec![],
-        vec![],
-        vec![],
+
+    let input = add_node_and_witness(
+        "input",
+        &input_circuit,
+        vec![PredType::Source],
+        challenge,
+        // input_circuit_wires_in.clone()
+        vec![LayerWitness {
+            instances: vec![input_circuit_wires_in.clone()],
+        }],
         1,
     )?;
+    let selector = add_node_and_witness("selector", &prefix_selector, vec![], vec![], vec![], 1)?;
 
     let mut round_input_size = input_size.next_power_of_two();
-    let inv_sum = graph_builder.add_node_with_witness(
+    let inv_sum = add_node_and_witness(
         "inv_sum",
-        &inv_sum_circuit.circuit,
+        &inv_sum_circuit,
         vec![
             PredType::PredWire(NodeOutputType::WireOut(input, 0)),
             PredType::PredWire(NodeOutputType::OutputLayer(selector)),
         ],
         vec![],
-        vec![],
+        vec![LayerWitness::default(); 2],
         round_input_size >> 1,
     )?;
     round_input_size >>= 1;
     let mut frac_sum_input = NodeOutputType::WireOut(inv_sum, 0);
     while round_input_size > 1 {
         frac_sum_input = NodeOutputType::WireOut(
-            graph_builder.add_node_with_witness(
+            add_node_and_witness(
                 "frac_sum",
                 &frac_sum_circuit,
                 vec![PredType::PredWire(frac_sum_input)],
                 vec![],
-                vec![],
+                vec![LayerWitness::default(); 1],
                 round_input_size >> 1,
             )?,
             0,
@@ -228,7 +207,8 @@ fn main() -> Result<(), GKRGraphError> {
         round_input_size >>= 1;
     }
 
-    let (graph, circuit_witness) = graph_builder.finalize();
+    let (prover_graph, circuit_witness) = prover_graph_builder.finalize_graph_and_witness();
+    let verifier_graph = verifier_graph_builder.finalize_graph();
     let aux_info = CircuitGraphAuxInfo {
         instance_num_vars: circuit_witness
             .node_witnesses
@@ -258,7 +238,7 @@ fn main() -> Result<(), GKRGraphError> {
         .original_mle()
         .evaluate(&output_point);
     let proof = IOPProverState::prove(
-        &graph,
+        &prover_graph,
         &circuit_witness,
         &TargetEvaluations(vec![PointAndEval::new(output_point, output_eval)]),
         &mut prover_transcript,
@@ -283,7 +263,7 @@ fn main() -> Result<(), GKRGraphError> {
     ];
 
     IOPVerifierState::verify(
-        &graph,
+        &verifier_graph,
         &challenge,
         &TargetEvaluations(vec![PointAndEval::new(output_point, output_eval)]),
         proof,

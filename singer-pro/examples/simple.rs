@@ -1,33 +1,66 @@
-use gkr_graph::structs::CircuitGraphBuilder;
-use goldilocks::GoldilocksExt2;
+use goldilocks::Goldilocks;
+use itertools::Itertools;
 use singer_pro::{
-    basic_block::SingerBasicBlockBuilder, chips::SingerChipBuilder, component::ChipChallenges,
-    instructions::SingerInstCircuitBuilder, SingerGraphBuilder, SingerWitness,
+    instructions::SingerInstCircuitBuilder,
+    scheme::{prover::prove, verifier::verify},
+    SingerAuxInfo, SingerGraphBuilder, SingerParams, SingerWiresIn,
 };
+use singer_utils::structs::ChipChallenges;
+use transcript::Transcript;
 
 fn main() {
-    let challenges = ChipChallenges::default();
-    let circuit_builder = SingerInstCircuitBuilder::<GoldilocksExt2>::new(challenges)
-        .expect("failed to create circuit builder");
-    let chip_builder = SingerChipBuilder::new(challenges);
+    let chip_challenges = ChipChallenges::default();
+    let circuit_builder = SingerInstCircuitBuilder::<Goldilocks>::new(chip_challenges)
+        .expect("circuit builder failed");
 
-    let bytecode = vec![vec![0x60, 0x01, 0x50]];
-    let bb_builder = SingerBasicBlockBuilder::new(circuit_builder, bytecode, challenges)
-        .expect("failed to create basic block builder");
-    let singer_builder = SingerGraphBuilder::new(bb_builder, chip_builder, challenges)
-        .expect("failed to create graph builder");
+    let bytecode = vec![vec![0x60 as u8, 0x01, 0x50]];
+    let singer_builder =
+        SingerGraphBuilder::<Goldilocks>::new(circuit_builder.clone(), &bytecode, chip_challenges)
+            .expect("graph builder failed");
 
-    // 1. Commit witness.
+    let mut prover_transcript = Transcript::new(b"Singer pro");
 
-    // 2. Construct circuit graph.
-    // let (circuit, witness, wires_out_id) = singer_builder.construct(
-    //     &circuit_builder,
-    //     singer_wires_in,
-    //     program_input,
-    //     real_challenges,
-    // );
+    // TODO: Generate the following items.
+    let singer_wires_in = SingerWiresIn::default();
+    let real_challenges = vec![];
+    let singer_params = SingerParams::default();
 
-    // 3. Prove.
+    let (proof, singer_aux_info) = {
+        let real_n_instances = singer_wires_in
+            .basic_blocks
+            .iter()
+            .map(|x| x.real_n_instance)
+            .collect_vec();
+        let (circuit, witness, wires_out_id) = singer_builder
+            .construct_graph_and_witness(singer_wires_in, &[], &real_challenges, &singer_params)
+            .expect("construct failed");
+
+        let (proof, graph_aux_info) =
+            prove(&circuit, &witness, &wires_out_id, &mut prover_transcript).expect("prove failed");
+        let aux_info = SingerAuxInfo {
+            graph_aux_info,
+            real_n_instances,
+            singer_params,
+            bytecode_len: bytecode.len(),
+            ..Default::default()
+        };
+        (proof, aux_info)
+    };
 
     // 4. Verify.
+    let mut verifier_transcript = Transcript::new(b"Singer pro");
+    let singer_builder =
+        SingerGraphBuilder::<Goldilocks>::new(circuit_builder, &bytecode, chip_challenges)
+            .expect("graph builder failed");
+    let circuit = singer_builder
+        .construct_graph(&singer_aux_info)
+        .expect("construct failed");
+    verify(
+        &circuit,
+        proof,
+        &singer_aux_info,
+        &real_challenges,
+        &mut verifier_transcript,
+    )
+    .expect("verify failed");
 }

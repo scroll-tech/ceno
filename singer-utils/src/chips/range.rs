@@ -6,6 +6,7 @@ use goldilocks::SmallField;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 
 use crate::{
+    constants::RANGE_CHIP_BIT_WIDTH,
     error::UtilError,
     structs::{ChipChallenges, ROMType},
 };
@@ -14,7 +15,7 @@ use crate::{
 /// lookup instance log size.
 pub(crate) fn construct_range_table_and_witness<F: SmallField>(
     builder: &mut CircuitGraphBuilder<F>,
-    bit_width: usize,
+    bit_with: usize,
     challenges: &ChipChallenges,
     real_challenges: &[F],
 ) -> Result<(PredType, usize), UtilError> {
@@ -35,11 +36,11 @@ pub(crate) fn construct_range_table_and_witness<F: SmallField>(
         vec![],
         real_challenges.to_vec(),
         vec![],
-        1 << bit_width,
+        1 << RANGE_CHIP_BIT_WIDTH,
     )?;
     Ok((
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),
-        bit_width - 1,
+        bit_with - 1,
     ))
 }
 
@@ -47,7 +48,7 @@ pub(crate) fn construct_range_table_and_witness<F: SmallField>(
 /// instance log size.
 pub(crate) fn construct_range_table<F: SmallField>(
     builder: &mut CircuitGraphBuilder<F>,
-    bit_width: usize,
+    bit_with: usize,
     challenges: &ChipChallenges,
 ) -> Result<(PredType, usize), UtilError> {
     let mut circuit_builder = CircuitBuilder::<F>::new();
@@ -64,6 +65,6 @@ pub(crate) fn construct_range_table<F: SmallField>(
     let table_node_id = builder.add_node("range table circuit", &range_circuit, vec![])?;
     Ok((
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),
-        bit_width - 1,
+        bit_with - 1,
     ))
 }

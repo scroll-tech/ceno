@@ -5,9 +5,9 @@ use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use ark_std::rand::Rng;
 use ark_std::{end_timer, start_timer};
-use ff::{Field, PrimeField};
+use ff::PrimeField;
 use goldilocks::SmallField;
-use rayon::prelude::*;
+use rayon::prelude::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
 use crate::mle::DenseMultilinearExtension;
@@ -392,33 +392,63 @@ pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> Arc<DenseMultilinearExtension<F>>
 /// over r, which is
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
 pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
-    build_eq_x_r_vec_scaled(r, F::ONE)
+    // we build eq(x,r) from its evaluations
+    // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
+    // for example, with num_vars = 4, x is a binary vector of 4, then
+    //  0 0 0 0 -> (1-r0)   * (1-r1)    * (1-r2)    * (1-r3)
+    //  1 0 0 0 -> r0       * (1-r1)    * (1-r2)    * (1-r3)
+    //  0 1 0 0 -> (1-r0)   * r1        * (1-r2)    * (1-r3)
+    //  1 1 0 0 -> r0       * r1        * (1-r2)    * (1-r3)
+    //  ....
+    //  1 1 1 1 -> r0       * r1        * r2        * r3
+    // we will need 2^num_var evaluations
+
+    let mut eval = Vec::new();
+    build_eq_x_r_helper(r, &mut eval);
+
+    eval
 }
 
-pub fn build_eq_x_r_vec_scaled<F: PrimeField>(r: &[F], scalar: F) -> Vec<F> {
-    let num_vars = r.len();
-    let lo_num_vars = num_vars.next_multiple_of(2) >> 1;
+/// A helper function to build eq(x, r) recursively.
+/// This function takes `r.len()` steps, and for each step it requires a maximum
+/// `r.len()-1` multiplications.
+fn build_eq_x_r_helper<F: PrimeField>(r: &[F], buf: &mut Vec<F>) {
+    // assert!(!r.is_empty(), "r length is 0");
+    if r.is_empty() {
+        buf.resize(1, F::ZERO);
+        buf[0] = F::ONE;
+        return;
+    }
 
-    let (r_lo, r_hi) = r.split_at(lo_num_vars);
-    let (lo, hi) = rayon::join(
-        || eq_expand_serial(r_lo, F::ONE),
-        || eq_expand_serial(r_hi, scalar),
-    );
+    if r.len() == 1 {
+        // initializing the buffer with [1-r_0, r_0]
+        buf.push(F::ONE - r[0]);
+        buf.push(r[0]);
+    } else {
+        build_eq_x_r_helper(&r[1..], buf);
 
-    let lo_mask = (1 << lo_num_vars) - 1;
-    return (0..1 << num_vars)
-        .into_par_iter()
-        .map(|b| lo[b & lo_mask] * hi[b >> lo_num_vars])
-        .collect();
+        // suppose at the previous step we received [b_1, ..., b_k]
+        // for the current step we will need
+        // if x_0 = 0:   (1-r0) * [b_1, ..., b_k]
+        // if x_0 = 1:   r0 * [b_1, ..., b_k]
+        // let mut res = vec![];
+        // for &b_i in buf.iter() {
+        //     let tmp = r[0] * b_i;
+        //     res.push(b_i - tmp);
+        //     res.push(tmp);
+        // }
+        // *buf = res;
 
-    fn eq_expand_serial<F: Field>(y: &[F], scalar: F) -> Vec<F> {
-        let mut out = vec![F::ZERO; 1 << y.len()];
-        out[0] = scalar;
-        y.iter().enumerate().for_each(|(idx, y_i)| {
-            let (lo, hi) = out[..2 << idx].split_at_mut(1 << idx);
-            hi.iter_mut().zip(&*lo).for_each(|(hi, lo)| *hi = *lo * y_i);
-            lo.iter_mut().zip(&*hi).for_each(|(lo, hi)| *lo -= hi);
+        let mut res = vec![F::ZERO; buf.len() << 1];
+        res.par_iter_mut().enumerate().for_each(|(i, val)| {
+            let bi = buf[i >> 1];
+            let tmp = r[0] * bi;
+            if i & 1 == 0 {
+                *val = bi - tmp;
+            } else {
+                *val = tmp;
+            }
         });
-        out
+        *buf = res;
     }
 }

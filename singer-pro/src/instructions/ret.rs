@@ -1,24 +1,24 @@
-use ff::Field;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
+use singer_utils::{
+    chip_handler::{OAMOperations, ROMOperations},
+    chips::{IntoEnumIterator, SingerChipBuilder},
+    register_witness,
+    structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::UIntAddSub,
+};
 use std::{mem, sync::Arc};
-use strum::IntoEnumIterator;
 
 use crate::{
-    chips::SingerChipBuilder,
     component::{
-        AccessoryCircuit, ChipChallenges, ChipType, FromPredInst, FromPublicIO, FromWitness,
-        InstCircuit, InstLayout, ToSuccInst,
+        AccessoryCircuit, FromPredInst, FromPublicIO, FromWitness, InstCircuit, InstLayout,
+        ToSuccInst,
     },
     error::ZKVMError,
-    utils::{
-        add_assign_each_cell,
-        chip_handler::{ChipHandler, MemoryChipOperations},
-        uint::{StackUInt, TSUInt, UIntAddSub},
-    },
+    utils::add_assign_each_cell,
     CircuitWitnessIn, SingerParams,
 };
 
@@ -30,7 +30,7 @@ pub struct ReturnInstruction;
 impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
     type InstType = Self;
 
-    fn construct_circuit_graph(
+    fn construct_graph_and_witness(
         graph_builder: &mut CircuitGraphBuilder<F>,
         chip_builder: &mut SingerChipBuilder<F>,
         inst_circuit: &InstCircuit<F>,
@@ -39,7 +39,7 @@ impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
         mut sources: Vec<CircuitWitnessIn<F::BaseField>>,
         real_challenges: &[F],
         _: usize,
-        params: SingerParams,
+        params: &SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
         let public_output_size =
             preds[inst_circuit.layout.from_pred_inst.stack_operand_ids[1] as usize].clone();
@@ -54,7 +54,7 @@ impl<F: SmallField> InstructionGraph<F> for ReturnInstruction {
             1,
         )?;
 
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             node_id,
             &inst_circuit.layout.to_chip_ids,
@@ -95,8 +95,8 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
         let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
-        let mut memory_load_handler = ChipHandler::new(challenges.mem());
+        let mut rom_handler = ROMHandler::new(&challenges);
+        let mut ram_handler = RAMHandler::new(&challenges);
 
         // Compute offset + counter
         let delta = circuit_builder.create_counter_in(0)[0];
@@ -104,7 +104,7 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         let offset_add_delta = &phase0[Self::phase0_offset_add()];
         let offset_plus_delta = UIntAddSub::<StackUInt>::add_small(
             &mut circuit_builder,
-            &mut range_chip_handler,
+            &mut rom_handler,
             &offset,
             delta,
             offset_add_delta,
@@ -115,11 +115,11 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         let memory_ts = TSUInt::try_from(memory_ts.as_slice())?;
         let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()])?;
 
-        memory_load_handler.mem_load(
+        ram_handler.oam_load(
             &mut circuit_builder,
             offset_plus_delta.values(),
             old_memory_ts.values(),
-            mem_byte,
+            &[mem_byte],
         );
 
         // To successor instruction
@@ -127,14 +127,14 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
             circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, memory_ts.values());
 
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let memory_load_id =
-            memory_load_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
+        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::RangeChip as usize] = Some(range_chip_id);
-        to_chip_ids[ChipType::MemoryLoad as usize] = Some(memory_load_id);
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::RAMLoad as usize] = ram_load_id;
+        to_chip_ids[InstOutChipType::RAMStore as usize] = ram_store_id;
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),

@@ -22,3 +22,5 @@ strum = "0.25.0"
 strum_macros = "0.25.3"
 simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 paste = "1.0.14"
+singer-utils = { version = "0.1.0", path = "../singer-utils" }
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }

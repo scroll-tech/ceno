@@ -1,22 +1,18 @@
-use std::sync::Arc;
-use strum::IntoEnumIterator;
-
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
 use simple_frontend::structs::CircuitBuilder;
-
-use crate::{
-    component::{
-        ChipChallenges, ChipType, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst,
-    },
-    error::ZKVMError,
-    utils::{
-        add_assign_each_cell,
-        uint::{StackUInt, TSUInt},
-    },
+use singer_utils::{
+    chips::IntoEnumIterator,
+    structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
+use std::sync::Arc;
 
 use super::{Instruction, InstructionGraph};
+use crate::{
+    component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
+    error::ZKVMError,
+    utils::add_assign_each_cell,
+};
 
 pub struct JumpInstruction;
 
@@ -41,7 +37,7 @@ impl<F: SmallField> Instruction<F> for JumpInstruction {
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips
-        let to_chip_ids = vec![None; ChipType::iter().count()];
+        let to_chip_ids = vec![None; InstOutChipType::iter().count()];
         circuit_builder.configure();
 
         Ok(InstCircuit {

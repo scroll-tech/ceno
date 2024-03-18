@@ -4,22 +4,22 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::{
+    chip_handler::{
+        GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
+        StackChipOperations,
+    },
+    chips::IntoEnumIterator,
+    register_witness,
+    structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, TSUInt},
+    uint::UIntAddSub,
+};
 use std::sync::Arc;
-use strum::IntoEnumIterator;
 
 use crate::{
-    component::{
-        BBFinalCircuit, BBFinalLayout, ChipChallenges, ChipType, FromBBStart, FromPredInst,
-        FromWitness,
-    },
+    component::{BBFinalCircuit, BBFinalLayout, FromBBStart, FromPredInst, FromWitness},
     error::ZKVMError,
-    utils::{
-        chip_handler::{
-            ChipHandler, GlobalStateChipOperations, RangeChipOperations, StackChipOperations,
-        },
-        i64_to_base_field,
-        uint::{PCUInt, TSUInt, UIntAddSub},
-    },
+    utils::i64_to_base_field,
 };
 
 use super::BasicBlockInfo;
@@ -56,13 +56,12 @@ impl BasicBlockFinal {
         // From inst pc.
         let (next_pc_id, next_pc) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
 
-        let mut global_state_out_handler = ChipHandler::new(challenges.global_state());
-        let mut stack_push_handler = ChipHandler::new(challenges.stack());
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
+        let mut ram_handler = RAMHandler::new(&challenges);
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         let stack_ts = TSUInt::try_from(stack_ts)?;
         let stack_ts_add_witness = &phase0[Self::phase0_stack_ts_add()];
-        let next_stack_ts = range_chip_handler.add_ts_with_const(
+        let next_stack_ts = rom_handler.add_ts_with_const(
             &mut circuit_builder,
             &stack_ts,
             1,
@@ -72,7 +71,7 @@ impl BasicBlockFinal {
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
         let clk_expr = MixedCell::Cell(clk[0]);
-        global_state_out_handler.state_out(
+        ram_handler.state_out(
             &mut circuit_builder,
             &next_pc,
             next_stack_ts.values(),
@@ -83,17 +82,17 @@ impl BasicBlockFinal {
 
         // Check the of stack_top + offset.
         let stack_top_l = stack_top_expr.add(i64_to_base_field::<F>(stack_top_offsets[0]));
-        range_chip_handler.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
+        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
         let stack_top_r =
             stack_top_expr.add(i64_to_base_field::<F>(stack_top_offsets[n_stack_items - 1]));
-        range_chip_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
+        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // From predesessor instruction
         let stack_operand_ids = stack_top_offsets
             .iter()
             .map(|offset| {
                 let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_witness_in(1);
-                stack_push_handler.stack_push(
+                ram_handler.stack_push(
                     &mut circuit_builder,
                     stack_top_expr.add(i64_to_base_field::<F>(*offset)),
                     stack_ts.values(),
@@ -104,15 +103,14 @@ impl BasicBlockFinal {
             .collect_vec();
 
         // To chips
-        let global_state_out_id = global_state_out_handler
-            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let stack_push_id =
-            stack_push_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::GlobalStateOut as usize] = Some(global_state_out_id);
-        to_chip_ids[ChipType::StackPush as usize] = Some(stack_push_id);
-        to_chip_ids[ChipType::RangeChip as usize] = Some(range_chip_id);
+        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        circuit_builder.configure();
+
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::RAMLoad as usize] = ram_load_id;
+        to_chip_ids[InstOutChipType::RAMStore as usize] = ram_store_id;
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         circuit_builder.configure();
 

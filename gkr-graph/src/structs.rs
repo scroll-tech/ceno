@@ -1,7 +1,7 @@
-use gkr::structs::{Circuit, CircuitWitness, Point, PointAndEval};
+use gkr::structs::{Circuit, CircuitWitness, PointAndEval};
 use goldilocks::SmallField;
 use simple_frontend::structs::WitnessId;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 pub(crate) type GKRProverState<F> = gkr::structs::IOPProverState<F>;
 pub(crate) type GKRVerifierState<F> = gkr::structs::IOPVerifierState<F>;
@@ -10,11 +10,7 @@ pub(crate) type GKRProof<F> = gkr::structs::IOPProof<F>;
 /// Corresponds to the `output_evals` and `wires_out_evals` in gkr
 /// `prove_parallel`.
 pub struct IOPProverState<F: SmallField> {
-    output_evals: Vec<Option<(Point<F>, F)>>,
-    wire_out_evals: Vec<Vec<Option<(Point<F>, F)>>>,
-
-    graph: CircuitGraph<F>,
-    witness: CircuitGraphWitness<F>,
+    marker: PhantomData<F>,
 }
 
 pub struct IOPProof<F: SmallField> {
@@ -22,7 +18,7 @@ pub struct IOPProof<F: SmallField> {
 }
 
 pub struct IOPVerifierState<F: SmallField> {
-    marker: std::marker::PhantomData<F>,
+    marker: PhantomData<F>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -71,6 +67,7 @@ pub struct CircuitGraphBuilder<F: SmallField> {
     pub(crate) witness: CircuitGraphWitness<F::BaseField>,
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct CircuitGraphAuxInfo {
     pub instance_num_vars: Vec<usize>,
 }

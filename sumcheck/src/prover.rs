@@ -3,10 +3,7 @@ use std::sync::Arc;
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
-use rayon::{
-    iter::IntoParallelRefMutIterator,
-    prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
-};
+use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use transcript::{Challenge, Transcript};
 
 use crate::{
@@ -136,8 +133,13 @@ impl<F: SmallField> IOPProverState<F> {
             self.challenges.push(*chal);
 
             let r = self.challenges[self.round - 1];
+            #[cfg(feature = "parallel")]
             flattened_ml_extensions
                 .par_iter_mut()
+                .for_each(|mle| *mle = fix_variables(mle, &[r]));
+            #[cfg(not(feature = "parallel"))]
+            flattened_ml_extensions
+                .iter_mut()
                 .for_each(|mle| *mle = mle.fix_variables(&[r.elements]));
         } else if self.round > 0 {
             panic!("verifier message is empty");

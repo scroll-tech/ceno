@@ -1,14 +1,11 @@
-use std::{mem, ops::Add, sync::Arc};
-
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
-    virtual_poly::{build_eq_x_r_vec, build_eq_x_r_vec_scaled, VirtualPolynomial},
+    virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use rayon::prelude::*;
-use simple_frontend::structs::{CellId, LayerId};
+use std::{mem, ops::Add, sync::Arc};
 use transcript::Transcript;
 
 use crate::{
@@ -66,6 +63,7 @@ impl<F: SmallField> IOPProverState<F> {
                     &self.layer_poly,
                     &point_and_eval.point[point_lo_num_vars..],
                 );
+                f1.push(Arc::new(f1_j));
 
                 let g1_j = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars])
                     .into_iter()

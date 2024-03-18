@@ -55,7 +55,7 @@ impl<F: SmallField> RangeChipOperations<F> for ROMHandler<F> {
             }
             Ok(range_value)
         } else {
-            Err(UtilError::ChipError)
+            Err(UtilError::ChipHandlerError)
         }
     }
 
@@ -79,7 +79,7 @@ impl<F: SmallField> ROMHandler<F> {
         bit_width: usize,
     ) -> Result<(), UtilError> {
         if bit_width > RANGE_CHIP_BIT_WIDTH {
-            return Err(UtilError::ChipError);
+            return Err(UtilError::ChipHandlerError);
         }
         let out = circuit_builder.create_ext_cell();
         let items = [value.mul(F::BaseField::from(1 << (RANGE_CHIP_BIT_WIDTH - bit_width)))];

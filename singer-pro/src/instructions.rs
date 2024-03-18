@@ -3,10 +3,10 @@ use std::{collections::HashMap, mem};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
+use singer_utils::{chips::SingerChipBuilder, structs::ChipChallenges};
 
 use crate::{
-    chips::SingerChipBuilder,
-    component::{AccessoryCircuit, ChipChallenges, InstCircuit},
+    component::{AccessoryCircuit, InstCircuit},
     error::ZKVMError,
     CircuitWitnessIn, SingerParams,
 };
@@ -62,7 +62,7 @@ impl<F: SmallField> SingerInstCircuitBuilder<F> {
     }
 }
 
-pub(crate) fn insts_graph_method<F: SmallField>(
+pub(crate) fn construct_inst_graph_and_witness<F: SmallField>(
     opcode: u8,
     graph_builder: &mut CircuitGraphBuilder<F>,
     chip_builder: &mut SingerChipBuilder<F>,
@@ -72,16 +72,16 @@ pub(crate) fn insts_graph_method<F: SmallField>(
     sources: Vec<CircuitWitnessIn<F::BaseField>>,
     real_challenges: &[F],
     real_n_instances: usize,
-    params: SingerParams,
+    params: &SingerParams,
 ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
     let method = match opcode {
-        0x01 => AddInstruction::construct_circuit_graph,
-        0x11 => GtInstruction::construct_circuit_graph,
-        0x35 => CalldataloadInstruction::construct_circuit_graph,
-        0x52 => MstoreInstruction::construct_circuit_graph,
-        0x56 => JumpInstruction::construct_circuit_graph,
-        0x57 => JumpiInstruction::construct_circuit_graph,
-        _ => unknown::UnknownInstruction::construct_circuit_graph,
+        0x01 => AddInstruction::construct_graph_and_witness,
+        0x11 => GtInstruction::construct_graph_and_witness,
+        0x35 => CalldataloadInstruction::construct_graph_and_witness,
+        0x52 => MstoreInstruction::construct_graph_and_witness,
+        0x56 => JumpInstruction::construct_graph_and_witness,
+        0x57 => JumpiInstruction::construct_graph_and_witness,
+        _ => unknown::UnknownInstruction::construct_graph_and_witness,
     };
     method(
         graph_builder,
@@ -91,6 +91,36 @@ pub(crate) fn insts_graph_method<F: SmallField>(
         preds,
         sources,
         real_challenges,
+        real_n_instances,
+        params,
+    )
+}
+
+pub(crate) fn construct_inst_graph<F: SmallField>(
+    opcode: u8,
+    graph_builder: &mut CircuitGraphBuilder<F>,
+    chip_builder: &mut SingerChipBuilder<F>,
+    inst_circuit: &InstCircuit<F>,
+    acc_circuits: &[AccessoryCircuit<F>],
+    preds: Vec<PredType>,
+    real_n_instances: usize,
+    params: &SingerParams,
+) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
+    let method = match opcode {
+        0x01 => AddInstruction::construct_graph,
+        0x11 => GtInstruction::construct_graph,
+        0x35 => CalldataloadInstruction::construct_graph,
+        0x52 => MstoreInstruction::construct_graph,
+        0x56 => JumpInstruction::construct_graph,
+        0x57 => JumpiInstruction::construct_graph,
+        _ => unknown::UnknownInstruction::construct_graph,
+    };
+    method(
+        graph_builder,
+        chip_builder,
+        inst_circuit,
+        acc_circuits,
+        preds,
         real_n_instances,
         params,
     )
@@ -112,10 +142,10 @@ pub(crate) trait InstructionGraph<F: SmallField> {
         Ok((Self::InstType::construct_circuit(challenges)?, vec![]))
     }
 
-    /// Add instruction circuits and its extensions to the graph. Besides,
-    /// Generate the tree-structured circuit to compute the product or fraction
-    /// summation of the chip check wires.
-    fn construct_circuit_graph(
+    /// Add instruction circuits, accessories and witnesses to the graph.
+    /// Besides, Generate the tree-structured circuit to compute the product or
+    /// fraction summation of the chip check wires.
+    fn construct_graph_and_witness(
         graph_builder: &mut CircuitGraphBuilder<F>,
         chip_builder: &mut SingerChipBuilder<F>,
         inst_circuit: &InstCircuit<F>,
@@ -124,7 +154,7 @@ pub(crate) trait InstructionGraph<F: SmallField> {
         mut sources: Vec<CircuitWitnessIn<F::BaseField>>,
         real_challenges: &[F],
         real_n_instances: usize,
-        _params: SingerParams,
+        _params: &SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
         let node_id = graph_builder.add_node_with_witness(
             stringify!(Self::InstType),
@@ -141,11 +171,41 @@ pub(crate) trait InstructionGraph<F: SmallField> {
             .iter()
             .map(|&wire_id| NodeOutputType::WireOut(node_id, wire_id))
             .collect_vec();
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             node_id,
             &inst_circuit.layout.to_chip_ids,
             real_challenges,
+            real_n_instances,
+        )?;
+        Ok((vec![node_id], stack, None))
+    }
+
+    /// Add instruction circuits and accessories to the graph. Besides, Generate
+    /// the tree-structured circuit to compute the product or fraction summation
+    /// of the chip check wires.
+    fn construct_graph(
+        graph_builder: &mut CircuitGraphBuilder<F>,
+        chip_builder: &mut SingerChipBuilder<F>,
+        inst_circuit: &InstCircuit<F>,
+        _acc_circuits: &[AccessoryCircuit<F>],
+        preds: Vec<PredType>,
+        real_n_instances: usize,
+        _params: &SingerParams,
+    ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
+        let node_id =
+            graph_builder.add_node(stringify!(Self::InstType), &inst_circuit.circuit, preds)?;
+        let stack = inst_circuit
+            .layout
+            .to_succ_inst
+            .stack_result_ids
+            .iter()
+            .map(|&wire_id| NodeOutputType::WireOut(node_id, wire_id))
+            .collect_vec();
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            node_id,
+            &inst_circuit.layout.to_chip_ids,
             real_n_instances,
         )?;
         Ok((vec![node_id], stack, None))
