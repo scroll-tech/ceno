@@ -1,26 +1,26 @@
-use ff::Field;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
+use singer_utils::{
+    chip_handler::{MemoryChipOperations, ROMOperations, RangeChipOperations},
+    chips::{IntoEnumIterator, SingerChipBuilder},
+    constants::EVM_STACK_BYTE_WIDTH,
+    register_witness,
+    structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::{UIntAddSub, UIntCmp},
+};
 use std::{mem, sync::Arc};
-use strum::IntoEnumIterator;
 
 use crate::{
-    chips::SingerChipBuilder,
     component::{
-        AccessoryCircuit, AccessoryLayout, ChipChallenges, ChipType, FromPredInst, FromWitness,
-        InstCircuit, InstLayout, ToSuccInst,
+        AccessoryCircuit, AccessoryLayout, FromPredInst, FromWitness, InstCircuit, InstLayout,
+        ToSuccInst,
     },
-    constants::EVM_STACK_BYTE_WIDTH,
     error::ZKVMError,
-    utils::{
-        add_assign_each_cell,
-        chip_handler::{ChipHandler, MemoryChipOperations, RangeChipOperations},
-        uint::{StackUInt, TSUInt, UIntAddSub, UIntCmp},
-    },
+    utils::add_assign_each_cell,
     CircuitWitnessIn, SingerParams,
 };
 
@@ -40,7 +40,7 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
         ))
     }
 
-    fn construct_circuit_graph(
+    fn construct_graph_and_witness(
         graph_builder: &mut CircuitGraphBuilder<F>,
         chip_builder: &mut SingerChipBuilder<F>,
         inst_circuit: &InstCircuit<F>,
@@ -49,7 +49,7 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
         mut sources: Vec<CircuitWitnessIn<F::BaseField>>,
         real_challenges: &[F],
         real_n_instances: usize,
-        _: SingerParams,
+        _: &SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
         // Add the instruction circuit to the graph.
         let node_id = graph_builder.add_node_with_witness(
@@ -68,7 +68,7 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
             .map(|&wire_id| NodeOutputType::WireOut(node_id, wire_id))
             .collect_vec();
 
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             node_id,
             &inst_circuit.layout.to_chip_ids,
@@ -96,7 +96,7 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
             real_n_instances * EVM_STACK_BYTE_WIDTH,
         )?;
 
-        chip_builder.construct_chip_checks(
+        chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             acc_node_id,
             &acc_circuits[0].layout.to_chip_ids,
@@ -128,11 +128,11 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
         let (mem_value_id, mem_values) =
             circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         // Update memory timestamp.
         let memory_ts = TSUInt::try_from(memory_ts.as_slice())?;
-        let next_memory_ts = range_chip_handler.add_ts_with_const(
+        let next_memory_ts = rom_handler.add_ts_with_const(
             &mut circuit_builder,
             &memory_ts,
             1,
@@ -144,7 +144,7 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
 
         // Pop mem_bytes from stack
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
-        range_chip_handler.range_check_bytes(&mut circuit_builder, mem_bytes)?;
+        rom_handler.range_check_bytes(&mut circuit_builder, mem_bytes)?;
 
         let mem_values = StackUInt::try_from(mem_values.as_slice())?;
         let mem_values_from_bytes =
@@ -152,9 +152,11 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
         UIntCmp::<StackUInt>::assert_eq(&mut circuit_builder, &mem_values_from_bytes, &mem_values)?;
 
         // To chips.
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::RangeChip as usize] = Some(range_chip_id);
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        circuit_builder.configure();
+
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         // To accessory circuits.
         let (to_acc_dup_id, to_acc_dup) =
@@ -235,9 +237,8 @@ impl MstoreAccessory {
         // From witness.
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
-        let mut memory_load_handler = ChipHandler::new(challenges.mem());
-        let mut memory_store_handler = ChipHandler::new(challenges.mem());
+        let mut ram_handler = RAMHandler::new(&challenges);
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         // Compute offset, offset + 1, ..., offset + EVM_STACK_BYTE_WIDTH - 1.
         // Load previous memory bytes.
@@ -249,14 +250,14 @@ impl MstoreAccessory {
         let delta = circuit_builder.create_counter_in(0)[0];
         let offset_plus_delta = UIntAddSub::<StackUInt>::add_small(
             &mut circuit_builder,
-            &mut range_chip_handler,
+            &mut rom_handler,
             &offset,
             delta,
             offset_add_delta,
         )?;
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
-            &mut range_chip_handler,
+            &mut rom_handler,
             &old_memory_ts,
             &memory_ts,
             old_memory_ts_lt,
@@ -264,30 +265,20 @@ impl MstoreAccessory {
 
         let mem_byte = pred_ooo[Self::pred_ooo_mem_byte().start];
         let prev_mem_byte = phase0[Self::phase0_prev_mem_byte().start];
-        memory_load_handler.mem_load(
+        ram_handler.mem_store(
             &mut circuit_builder,
             offset_plus_delta.values(),
             old_memory_ts.values(),
-            prev_mem_byte,
-        );
-        memory_store_handler.mem_store(
-            &mut circuit_builder,
-            offset_plus_delta.values(),
             memory_ts.values(),
+            prev_mem_byte,
             mem_byte,
         );
 
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let memory_load_id =
-            memory_load_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let memory_store_id =
-            memory_store_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::RangeChip as usize] = Some(range_chip_id);
-        to_chip_ids[ChipType::MemoryLoad as usize] = Some(memory_load_id);
-        to_chip_ids[ChipType::MemoryStore as usize] = Some(memory_store_id);
-
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
+
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         Ok(AccessoryCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),

@@ -4,20 +4,19 @@ use goldilocks::SmallField;
 use itertools::izip;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::{
+    chip_handler::{BytecodeChipOperations, ROMOperations},
+    chips::IntoEnumIterator,
+    constants::OpcodeType,
+    register_witness,
+    structs::{ChipChallenges, InstOutChipType, PCUInt, ROMHandler, StackUInt, TSUInt},
+};
 use std::sync::Arc;
-use strum::IntoEnumIterator;
 
 use crate::{
-    component::{
-        ChipChallenges, ChipType, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst,
-    },
-    constants::OpcodeType,
+    component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
     error::ZKVMError,
-    utils::{
-        add_assign_each_cell,
-        chip_handler::{BytecodeChipOperations, ChipHandler},
-        uint::{PCUInt, StackUInt, TSUInt},
-    },
+    utils::add_assign_each_cell,
 };
 
 use super::{Instruction, InstructionGraph};
@@ -51,18 +50,13 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
         let (cond_values_id, cond_values) =
             circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
-        let mut bytecode_chip_handler = ChipHandler::new(challenges.bytecode());
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         // Execution, cond_values_non_zero[i] = [cond_values[i] != 0]
         let cond_values_inv = &phase0[Self::phase0_cond_values_inv()];
         let mut cond_values_non_zero = Vec::new();
         for (val, wit) in izip!(cond_values, cond_values_inv) {
-            cond_values_non_zero.push(range_chip_handler.non_zero(
-                &mut circuit_builder,
-                val,
-                *wit,
-            )?);
+            cond_values_non_zero.push(rom_handler.non_zero(&mut circuit_builder, val, *wit)?);
         }
         // cond_non_zero = [summation of cond_values_non_zero[i] != 0]
         let non_zero_or = circuit_builder.create_cell();
@@ -71,7 +65,7 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
             .for_each(|x| circuit_builder.add(non_zero_or, *x, F::BaseField::ONE));
         let cond_non_zero_or_inv = phase0[Self::phase0_cond_non_zero_or_inv().start];
         let cond_non_zero =
-            range_chip_handler.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
+            rom_handler.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
 
         // If cond_non_zero, next_pc = dest, otherwise, pc = pc + 1
         let pc_plus_1 = &phase0[Self::phase0_pc_plus_1()];
@@ -90,20 +84,20 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
             cond_non_zero,
         );
         // Check (next_pc, next_opcode) is a valid instruction
-        bytecode_chip_handler.bytecode_with_pc_byte(&mut circuit_builder, &next_pc, next_opcode);
+        rom_handler.bytecode_with_pc_byte(&mut circuit_builder, &next_pc, next_opcode);
 
         // To successor instruction
         let (next_memory_ts_id, next_memory_ts) =
             circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
-        // To chips
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let bytecode_chip_id =
-            bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::RangeChip as usize] = Some(range_chip_id);
-        to_chip_ids[ChipType::BytecodeChip as usize] = Some(bytecode_chip_id);
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        circuit_builder.configure();
+
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::RAMLoad as usize] = None;
+        to_chip_ids[InstOutChipType::RAMStore as usize] = None;
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         circuit_builder.configure();
 

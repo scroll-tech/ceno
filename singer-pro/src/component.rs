@@ -1,18 +1,17 @@
-use std::sync::Arc;
-
 use gkr::structs::Circuit;
 use gkr_graph::structs::{NodeOutputType, PredType};
 use goldilocks::SmallField;
-use simple_frontend::structs::{ChallengeId, WitnessId};
-use strum_macros::EnumIter;
-
-use crate::constants::OpcodeType;
+use simple_frontend::structs::WitnessId;
+use singer_utils::constants::OpcodeType;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct InstCircuit<F: SmallField> {
     pub(crate) circuit: Arc<Circuit<F>>,
     pub(crate) layout: InstLayout,
 }
+
+pub(crate) type ToChipsWires = Vec<Option<(WitnessId, usize)>>;
 
 #[derive(Clone, Debug, Default)]
 pub struct InstLayout {
@@ -170,6 +169,7 @@ pub(crate) struct FromPredInst {
     pub(crate) stack_operand_ids: Vec<WitnessId>,
 }
 
+/// From public output. This is used in the return instruction.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FromPublicIO {
     pub(crate) public_output_id: WitnessId,
@@ -186,67 +186,4 @@ pub(crate) struct ToBBFinal {
     pub(crate) stack_ts_id: WitnessId,
     pub(crate) stack_top_id: WitnessId,
     pub(crate) clk_id: WitnessId,
-}
-
-#[derive(Clone, Copy, Debug, EnumIter)]
-pub(crate) enum ChipType {
-    GlobalStateIn,
-    GlobalStateOut,
-    BytecodeChip,
-    StackPop,
-    StackPush,
-    RangeChip,
-    MemoryLoad,
-    MemoryStore,
-    CalldataChip,
-}
-
-/// The wire id and the number of checks in a single instance.
-pub(crate) type ToChipsWires = Vec<Option<(WitnessId, usize)>>;
-
-#[derive(Clone, Copy, Debug)]
-pub struct ChipChallenges {
-    // Challenges for multiple-tuple chip records
-    record_rlc: ChallengeId,
-    // Challenges for multiple-cell values
-    record_item_rlc: ChallengeId,
-}
-
-impl Default for ChipChallenges {
-    fn default() -> Self {
-        Self {
-            record_rlc: 2,
-            record_item_rlc: 1,
-        }
-    }
-}
-
-impl ChipChallenges {
-    pub fn new(record_rlc: ChallengeId, record_item_rlc: ChallengeId) -> Self {
-        Self {
-            record_rlc,
-            record_item_rlc,
-        }
-    }
-    pub fn bytecode(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn stack(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn global_state(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn mem(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn range(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn calldata(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn record_item_rlc(&self) -> ChallengeId {
-        self.record_item_rlc
-    }
 }

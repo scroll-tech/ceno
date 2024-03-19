@@ -1,7 +1,7 @@
-use std::{borrow::Cow, iter, sync::Arc};
+use ff::Field;
+use std::{iter, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
-use ff::Field;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
@@ -166,37 +166,19 @@ pub fn fix_high_variables<F: SmallField>(
         partial_point.len() <= poly.num_vars,
         "invalid size of partial point"
     );
-
     let nv = poly.num_vars;
-    let poly = partial_point
-        .iter()
-        .rev()
-        .fold(Cow::Borrowed(&poly.evaluations), |mut poly, point| {
-            let mid = poly.len() >> 1;
-            match &mut poly {
-                poly @ Cow::Borrowed(_) => {
-                    let (lo, hi) = poly.split_at(mid);
-                    *poly = Cow::Owned(
-                        lo.par_iter()
-                            .zip(hi)
-                            .with_min_len(64)
-                            .map(|(lo, hi)| *lo + (*hi - lo) * point)
-                            .collect::<Vec<_>>(),
-                    )
-                }
-                Cow::Owned(poly) => {
-                    let (lo, hi) = poly.split_at_mut(mid);
-                    lo.par_iter_mut()
-                        .zip(hi)
-                        .with_min_len(64)
-                        .for_each(|(lo, hi)| *lo += (*hi - lo as &_) * point)
-                }
-            };
-            poly.to_mut().truncate(mid);
-            poly
-        })
-        .into_owned();
+    let new_len = 1 << (nv - partial_point.len());
+    let mut poly = poly.evaluations.to_vec();
 
+    for i in 0..new_len {
+        let partial_poly = DenseMultilinearExtension::from_evaluations_vec(
+            partial_point.len(),
+            poly[i..].iter().step_by(new_len).map(|x| *x).collect_vec(),
+        );
+        poly[i] = partial_poly.evaluate(&partial_point);
+    }
+
+    poly.resize(new_len, F::ZERO);
     DenseMultilinearExtension::from_evaluations_vec(nv - partial_point.len(), poly)
 }
 
@@ -245,19 +227,19 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] 
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>> {
         let n_zeros = (1 << lo_num_vars) - self[0].len();
         let n_zero_vecs = (1 << hi_num_vars) - self.len();
+        let vecs = self.to_vec();
 
         Arc::new(DenseMultilinearExtension::from_evaluations_vec(
             lo_num_vars + hi_num_vars,
-            self.par_iter()
+            vecs.into_iter()
                 .flat_map(|instance| {
                     instance
-                        .par_iter()
-                        .copied()
-                        .chain(rayon::iter::repeat(F::BaseField::ZERO).take(n_zeros))
+                        .into_iter()
+                        .chain(iter::repeat(F::BaseField::ZERO).take(n_zeros))
                 })
                 .chain(vec![F::BaseField::ZERO; n_zero_vecs])
                 .map(|x| F::from_base(&x))
-                .collect(),
+                .collect_vec(),
         ))
     }
     fn original_mle(&self) -> Arc<DenseMultilinearExtension<F>> {

@@ -1,18 +1,28 @@
 use goldilocks::SmallField;
 use simple_frontend::structs::{CellId, ChallengeId, ExtCellId};
+use strum_macros::EnumIter;
 
 use crate::constants::{EVM_STACK_BIT_WIDTH, VALUE_BIT_WIDTH};
 
+#[derive(Clone, Debug, Copy, EnumIter)]
 pub enum RAMType {
     Stack,
     Memory,
     GlobalState,
 }
 
+#[derive(Clone, Debug, Copy, EnumIter)]
 pub enum ROMType {
     Bytecode,
     Calldata,
     Range,
+}
+
+#[derive(Clone, Copy, Debug, EnumIter)]
+pub enum InstOutChipType {
+    RAMLoad,
+    RAMStore,
+    ROMInput,
 }
 
 #[derive(Clone, Copy, Debug)]

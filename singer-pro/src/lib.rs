@@ -2,26 +2,22 @@
 #![feature(const_trait_impl)]
 
 use basic_block::SingerBasicBlockBuilder;
-use chips::LookupChipType;
-use chips::SingerChipBuilder;
-use component::ChipChallenges;
-use component::ChipType;
 use error::ZKVMError;
 use gkr::structs::LayerWitness;
-use gkr_graph::structs::CircuitGraph;
-use gkr_graph::structs::CircuitGraphBuilder;
-use gkr_graph::structs::CircuitGraphWitness;
-use gkr_graph::structs::NodeOutputType;
+use gkr_graph::structs::{
+    CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
+};
 use goldilocks::SmallField;
+use instructions::SingerInstCircuitBuilder;
+use itertools::Itertools;
+use singer_utils::{
+    chips::SingerChipBuilder,
+    structs::{ChipChallenges, InstOutChipType},
+};
 use std::mem;
 
-#[macro_use]
-mod macros;
-
 pub mod basic_block;
-pub mod chips;
 pub mod component;
-pub mod constants;
 pub mod error;
 pub mod instructions;
 pub mod scheme;
@@ -38,7 +34,7 @@ pub(crate) mod utils;
 // 5. (commitments + point) => pcs proof
 
 /// Circuit graph builder for Singer pro. `output_wires_id` is indexed by
-/// ChipType, corresponding to the product of summation of the chip check
+/// InstOutChipType, corresponding to the product of summation of the chip check
 /// records. `public_output_size` is the wire id stores the size of public
 /// output.
 pub struct SingerGraphBuilder<F: SmallField> {
@@ -46,31 +42,28 @@ pub struct SingerGraphBuilder<F: SmallField> {
     bb_builder: SingerBasicBlockBuilder<F>,
     chip_builder: SingerChipBuilder<F>,
     public_output_size: Option<NodeOutputType>,
-    challenges: ChipChallenges,
 }
 
 impl<F: SmallField> SingerGraphBuilder<F> {
     pub fn new(
-        bb_builder: SingerBasicBlockBuilder<F>,
-        chip_builder: SingerChipBuilder<F>,
+        inst_circuit_builder: SingerInstCircuitBuilder<F>,
+        bytecode: &[Vec<u8>],
         challenges: ChipChallenges,
     ) -> Result<Self, ZKVMError> {
         Ok(Self {
             graph_builder: CircuitGraphBuilder::new(),
-            bb_builder,
-            chip_builder,
-            challenges,
+            bb_builder: SingerBasicBlockBuilder::new(inst_circuit_builder, bytecode, challenges)?,
+            chip_builder: SingerChipBuilder::new(),
             public_output_size: None,
         })
     }
 
-    pub fn construct(
+    pub fn construct_graph_and_witness(
         mut self,
         singer_wires_in: SingerWiresIn<F::BaseField>,
         program_input: &[u8],
-        program_output: &[u8],
         real_challenges: &[F],
-        params: SingerParams,
+        params: &SingerParams,
     ) -> Result<
         (
             SingerCircuit<F>,
@@ -81,45 +74,98 @@ impl<F: SmallField> SingerGraphBuilder<F> {
     > {
         let basic_blocks = self.bb_builder.basic_block_bytecode();
         // Construct tables for lookup arguments, including bytecode, range and
-        self.bb_builder.construct_gkr_graph(
+        // calldata
+        let pub_out_id = self.bb_builder.construct_graph_and_witness(
             &mut self.graph_builder,
             &mut self.chip_builder,
             singer_wires_in.basic_blocks,
             real_challenges,
             params,
         )?;
+        if pub_out_id.is_some() {
+            self.public_output_size = pub_out_id;
+        }
+
+        // Construct tables for lookup arguments, including bytecode, range and
         // calldata.
-        let table_out_node_id = self.chip_builder.construct_chip_tables(
+        let table_out_node_id = self.chip_builder.construct_lookup_table_graph_and_witness(
             &mut self.graph_builder,
-            &basic_blocks,
+            &basic_blocks.iter().cloned().flatten().collect_vec(),
             program_input,
             singer_wires_in.table_count_witnesses,
-            &self.challenges,
+            &self.bb_builder.challenges,
             real_challenges,
         )?;
 
-        let mut output_wires_id = self.chip_builder.output_wires_id;
+        let SingerGraphBuilder {
+            graph_builder,
+            chip_builder,
+            public_output_size,
+            bb_builder: _,
+        } = self;
+
+        let mut output_wires_id = chip_builder.output_wires_id;
 
         let singer_wire_out_id = SingerWiresOutID {
-            global_state_in: mem::take(&mut output_wires_id[ChipType::GlobalStateIn as usize]),
-            global_state_out: mem::take(&mut output_wires_id[ChipType::GlobalStateOut as usize]),
-            bytecode_chip_input: mem::take(&mut output_wires_id[ChipType::BytecodeChip as usize]),
-            bytecode_chip_table: table_out_node_id[LookupChipType::BytecodeChip as usize],
-            stack_push: mem::take(&mut output_wires_id[ChipType::StackPush as usize]),
-            stack_pop: mem::take(&mut output_wires_id[ChipType::StackPop as usize]),
-            range_chip_input: mem::take(&mut output_wires_id[ChipType::RangeChip as usize]),
-            range_chip_table: table_out_node_id[LookupChipType::RangeChip as usize],
-            calldata_chip_input: mem::take(&mut output_wires_id[ChipType::CalldataChip as usize]),
-            calldata_chip_table: table_out_node_id[LookupChipType::CalldataChip as usize],
-            public_output_size: self.public_output_size,
+            ram_load: mem::take(&mut output_wires_id[InstOutChipType::RAMLoad as usize]),
+            ram_store: mem::take(&mut output_wires_id[InstOutChipType::RAMStore as usize]),
+            rom_input: mem::take(&mut output_wires_id[InstOutChipType::ROMInput as usize]),
+            rom_table: table_out_node_id,
+
+            public_output_size,
         };
 
-        let (graph, graph_witness) = self.graph_builder.finalize();
+        let (graph, graph_witness) =
+            graph_builder.finalize_graph_and_witness_with_targets(&singer_wire_out_id.to_vec());
         Ok((
             SingerCircuit(graph),
             SingerWitness(graph_witness),
             singer_wire_out_id,
         ))
+    }
+
+    pub fn construct_graph(
+        mut self,
+        aux_info: &SingerAuxInfo,
+    ) -> Result<SingerCircuit<F>, ZKVMError> {
+        // Construct tables for lookup arguments, including bytecode, range and
+        // calldata
+        let pub_out_id = self.bb_builder.construct_graph(
+            &mut self.graph_builder,
+            &mut self.chip_builder,
+            &aux_info.real_n_instances,
+            &aux_info.singer_params,
+        )?;
+        if pub_out_id.is_some() {
+            self.public_output_size = pub_out_id;
+        }
+        let table_out_node_id = self.chip_builder.construct_lookup_table_graph(
+            &mut self.graph_builder,
+            aux_info.bytecode_len,
+            aux_info.program_input_len,
+            &self.bb_builder.challenges,
+        )?;
+
+        let SingerGraphBuilder {
+            graph_builder,
+            chip_builder,
+            public_output_size,
+            bb_builder: _,
+        } = self;
+
+        let mut output_wires_id = chip_builder.output_wires_id;
+
+        let singer_wire_out_id = SingerWiresOutID {
+            ram_load: mem::take(&mut output_wires_id[InstOutChipType::RAMLoad as usize]),
+            ram_store: mem::take(&mut output_wires_id[InstOutChipType::RAMStore as usize]),
+            rom_input: mem::take(&mut output_wires_id[InstOutChipType::ROMInput as usize]),
+            rom_table: table_out_node_id,
+
+            public_output_size,
+        };
+
+        let graph = graph_builder.finalize_graph_with_targets(&singer_wire_out_id.to_vec());
+        Ok(SingerCircuit(graph))
     }
 }
 
@@ -127,7 +173,7 @@ pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
 
 pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct SingerParams {
     pub n_public_output_bytes: usize,
     pub n_mem_initialize: usize,
@@ -137,33 +183,62 @@ pub struct SingerParams {
 
 #[derive(Clone, Debug, Default)]
 pub struct SingerWiresIn<F: SmallField> {
-    basic_blocks: Vec<BasicBlockWiresIn<F>>,
-    table_count_witnesses: Vec<LayerWitness<F>>,
+    pub basic_blocks: Vec<BasicBlockWiresIn<F>>,
+    pub table_count_witnesses: Vec<LayerWitness<F>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct SingerWiresOutID {
-    global_state_in: Vec<NodeOutputType>,
-    global_state_out: Vec<NodeOutputType>,
-    bytecode_chip_input: Vec<NodeOutputType>,
-    bytecode_chip_table: NodeOutputType,
-    stack_push: Vec<NodeOutputType>,
-    stack_pop: Vec<NodeOutputType>,
-    range_chip_input: Vec<NodeOutputType>,
-    range_chip_table: NodeOutputType,
-    calldata_chip_input: Vec<NodeOutputType>,
-    calldata_chip_table: NodeOutputType,
+    pub ram_load: Vec<NodeOutputType>,
+    pub ram_store: Vec<NodeOutputType>,
+    pub rom_input: Vec<NodeOutputType>,
+    pub rom_table: Vec<NodeOutputType>,
 
-    public_output_size: Option<NodeOutputType>,
+    pub public_output_size: Option<NodeOutputType>,
+}
+
+impl SingerWiresOutID {
+    pub fn to_vec(&self) -> Vec<NodeOutputType> {
+        let mut res = [
+            self.ram_load.clone(),
+            self.ram_store.clone(),
+            self.rom_input.clone(),
+        ]
+        .concat();
+        if let Some(public_output_size) = self.public_output_size {
+            res.push(public_output_size);
+        }
+        res
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SingerWiresOutValues<F: SmallField> {
+    pub ram_load: Vec<Vec<F>>,
+    pub ram_store: Vec<Vec<F>>,
+    pub rom_input: Vec<Vec<F>>,
+    pub rom_table: Vec<Vec<F>>,
+
+    pub public_output_size: Option<Vec<F>>,
 }
 
 pub(crate) type CircuitWitnessIn<F> = Vec<LayerWitness<F>>;
 
 #[derive(Clone, Debug, Default)]
 pub struct BasicBlockWiresIn<F: SmallField> {
-    real_n_instance: usize,
-    bb_start: CircuitWitnessIn<F>,
-    opcodes: Vec<Vec<CircuitWitnessIn<F>>>,
-    bb_final: CircuitWitnessIn<F>,
-    bb_accs: Vec<CircuitWitnessIn<F>>,
+    pub real_n_instance: usize,
+    pub bb_start: CircuitWitnessIn<F>,
+    pub opcodes: Vec<Vec<CircuitWitnessIn<F>>>,
+    pub bb_final: CircuitWitnessIn<F>,
+    pub bb_accs: Vec<CircuitWitnessIn<F>>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SingerAuxInfo {
+    pub graph_aux_info: CircuitGraphAuxInfo,
+    pub real_n_instances: Vec<usize>,
+    pub singer_params: SingerParams,
+    pub bytecode_len: usize,
+    pub program_input_len: usize,
+    pub program_output_len: usize,
 }

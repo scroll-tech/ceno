@@ -27,3 +27,5 @@ paste = "1.0.14"
 witness-count = []
 test-dbg = []
 dbg-add-opcode = []
+singer-utils = { version = "0.1.0", path = "../singer-utils" }
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }

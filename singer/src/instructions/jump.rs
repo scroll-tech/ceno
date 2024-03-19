@@ -3,25 +3,25 @@ use gkr::structs::Circuit;
 use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::{
+    chip_handler::{
+        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
+        RangeChipOperations, StackChipOperations,
+    },
+    constants::OpcodeType,
+    register_witness,
+    structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
+    uint::UIntCmp,
+};
 use std::sync::Arc;
 
-use crate::{
-    constants::OpcodeType,
-    error::ZKVMError,
-    utils::{
-        chip_handler::{
-            BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
-            StackChipOperations,
-        },
-        uint::{PCUInt, TSUInt, UIntCmp},
-    },
-};
+use crate::error::ZKVMError;
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 pub struct JumpInstruction;
 
-impl InstructionGraph for JumpInstruction {
+impl<F: SmallField> InstructionGraph<F> for JumpInstruction {
     type InstType = Self;
 }
 
@@ -45,17 +45,12 @@ impl JumpInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMP;
 }
 
-impl Instruction for JumpInstruction {
-    fn construct_circuit<F: SmallField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<F>, ZKVMError> {
+impl<F: SmallField> Instruction<F> for JumpInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut global_state_in_handler = ChipHandler::new(challenges.global_state());
-        let mut global_state_out_handler = ChipHandler::new(challenges.global_state());
-        let mut bytecode_chip_handler = ChipHandler::new(challenges.bytecode());
-        let mut stack_pop_handler = ChipHandler::new(challenges.stack());
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
+        let mut ram_handler = RAMHandler::new(&challenges);
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -65,7 +60,7 @@ impl Instruction for JumpInstruction {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        global_state_in_handler.state_in(
+        ram_handler.state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -75,26 +70,26 @@ impl Instruction for JumpInstruction {
         );
 
         // Pop next pc from stack
-        range_chip_handler
+        rom_handler
             .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(F::BaseField::ONE))?;
 
         let next_pc = &phase0[Self::phase0_next_pc()];
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
-            &mut range_chip_handler,
+            &mut rom_handler,
             &old_stack_ts,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt()],
         )?;
-        stack_pop_handler.stack_pop(
+        ram_handler.stack_pop(
             &mut circuit_builder,
             stack_top_expr.sub(F::BaseField::ONE),
             old_stack_ts.values(),
             next_pc,
         );
 
-        global_state_out_handler.state_out(
+        ram_handler.state_out(
             &mut circuit_builder,
             &next_pc,
             stack_ts.values(), // Because there is no stack push.
@@ -104,40 +99,15 @@ impl Instruction for JumpInstruction {
         );
 
         // Bytecode check for (pc, jump)
-        bytecode_chip_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            pc.values(),
-            Self::OPCODE,
-        );
+        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
         // Bytecode check for (next_pc, jumpdest)
-        bytecode_chip_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            &next_pc,
-            OpcodeType::JUMPDEST,
-        );
+        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, &next_pc, OpcodeType::JUMPDEST);
 
-        let global_state_in_id = global_state_in_handler
-            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let global_state_out_id = global_state_out_handler
-            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let bytecode_chip_id =
-            bytecode_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let stack_pop_id =
-            stack_pop_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
+        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
-        let outputs_wire_id = [
-            Some(global_state_in_id),
-            Some(global_state_out_id),
-            Some(bytecode_chip_id),
-            Some(stack_pop_id),
-            None,
-            Some(range_chip_id),
-            None,
-            None,
-            None,
-        ];
+        let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),

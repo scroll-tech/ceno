@@ -3,35 +3,35 @@ use gkr::structs::Circuit;
 use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::{
+    chip_handler::{
+        GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
+        StackChipOperations,
+    },
+    chips::IntoEnumIterator,
+    register_multi_witness,
+    structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::UIntCmp,
+};
 use std::sync::Arc;
-use strum::IntoEnumIterator;
 
 use crate::{
-    component::{
-        BBStartCircuit, BBStartLayout, ChipChallenges, ChipType, FromWitness, ToBBFinal, ToSuccInst,
-    },
+    component::{BBStartCircuit, BBStartLayout, FromWitness, ToBBFinal, ToSuccInst},
     error::ZKVMError,
-    utils::{
-        add_assign_each_cell,
-        chip_handler::{
-            ChipHandler, GlobalStateChipOperations, RangeChipOperations, StackChipOperations,
-        },
-        i64_to_base_field,
-        uint::{PCUInt, StackUInt, TSUInt, UIntCmp},
-    },
+    utils::{add_assign_each_cell, i64_to_base_field},
 };
 
 use super::BasicBlockInfo;
 
 pub(crate) struct BasicBlockStart;
 
-register_witness_multi!(BasicBlockStart, phase0(n_stack_items) {
+register_multi_witness!(BasicBlockStart, phase0(n_stack_items) {
     // State in related
-    pc(1) => PCUInt::N_OPRAND_CELLS,
-    stack_ts(1) => TSUInt::N_OPRAND_CELLS,
-    memory_ts(1) => TSUInt::N_OPRAND_CELLS,
-    stack_top(1) => 1,
-    clk(1) => 1,
+    pc => PCUInt::N_OPRAND_CELLS,
+    stack_ts => TSUInt::N_OPRAND_CELLS,
+    memory_ts => TSUInt::N_OPRAND_CELLS,
+    stack_top => 1,
+    clk => 1,
 
     // Stack values
     old_stack_values(n_stack_items) => StackUInt::N_OPRAND_CELLS,
@@ -52,18 +52,17 @@ impl BasicBlockStart {
         let (phase0_wire_id, phase0) =
             circuit_builder.create_witness_in(Self::phase0_size(n_stack_items));
 
-        let mut global_state_in_handler = ChipHandler::new(challenges.global_state());
-        let mut stack_pop_handler = ChipHandler::new(challenges.stack());
-        let mut range_chip_handler = ChipHandler::new(challenges.range());
+        let mut ram_handler = RAMHandler::new(&challenges);
+        let mut rom_handler = ROMHandler::new(&challenges);
 
         // State update
-        let pc = &phase0[Self::phase0_pc(0)];
-        let stack_ts = &phase0[Self::phase0_stack_ts(0)];
-        let memory_ts = &phase0[Self::phase0_memory_ts(0)];
-        let stack_top = phase0[Self::phase0_stack_top(0).start];
+        let pc = &phase0[Self::phase0_pc(n_stack_items)];
+        let stack_ts = &phase0[Self::phase0_stack_ts(n_stack_items)];
+        let memory_ts = &phase0[Self::phase0_memory_ts(n_stack_items)];
+        let stack_top = phase0[Self::phase0_stack_top(n_stack_items).start];
         let stack_top_expr = MixedCell::Cell(stack_top);
-        let clk = phase0[Self::phase0_clk(0).start];
-        global_state_in_handler.state_in(
+        let clk = phase0[Self::phase0_clk(n_stack_items).start];
+        ram_handler.state_in(
             &mut circuit_builder,
             pc,
             stack_ts,
@@ -74,27 +73,28 @@ impl BasicBlockStart {
 
         // Check the of stack_top + offset.
         let stack_top_l = stack_top_expr.add(i64_to_base_field::<F>(stack_top_offsets[0]));
-        range_chip_handler.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
+        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
         let stack_top_r =
             stack_top_expr.add(i64_to_base_field::<F>(stack_top_offsets[n_stack_items - 1]));
-        range_chip_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
+        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // pop all elements from the stack.
         let stack_ts = TSUInt::try_from(stack_ts)?;
         for (i, offset) in stack_top_offsets.iter().enumerate() {
-            let old_stack_ts = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts(i)])?;
+            let old_stack_ts =
+                TSUInt::try_from(&phase0[Self::phase0_old_stack_ts(i, n_stack_items)])?;
             UIntCmp::<TSUInt>::assert_lt(
                 &mut circuit_builder,
-                &mut range_chip_handler,
+                &mut rom_handler,
                 &old_stack_ts,
                 &stack_ts,
-                &phase0[Self::phase0_old_stack_ts_lt(i)],
+                &phase0[Self::phase0_old_stack_ts_lt(i, n_stack_items)],
             )?;
-            stack_pop_handler.stack_pop(
+            ram_handler.stack_pop(
                 &mut circuit_builder,
                 stack_top_expr.add(i64_to_base_field::<F>(*offset)),
                 old_stack_ts.values(),
-                &phase0[Self::phase0_old_stack_values(i)],
+                &phase0[Self::phase0_old_stack_values(i, n_stack_items)],
             );
         }
 
@@ -103,7 +103,7 @@ impl BasicBlockStart {
         for i in 0..n_stack_items {
             let (stack_operand_id, stack_operand) =
                 circuit_builder.create_witness_out(StackUInt::N_OPRAND_CELLS);
-            let old_stack = &phase0[Self::phase0_old_stack_values(i)];
+            let old_stack = &phase0[Self::phase0_old_stack_values(i, n_stack_items)];
             for j in 0..StackUInt::N_OPRAND_CELLS {
                 circuit_builder.add(stack_operand[j], old_stack[j], F::BaseField::ONE);
             }
@@ -122,15 +122,14 @@ impl BasicBlockStart {
         circuit_builder.add(out_clk[0], clk, F::BaseField::ONE);
 
         // To chips
-        let global_state_in_id = global_state_in_handler
-            .finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let stack_pop_id =
-            stack_pop_handler.finalize_with_const_pad(&mut circuit_builder, F::BaseField::ONE);
-        let range_chip_id = range_chip_handler.finalize_with_repeated_last(&mut circuit_builder);
-        let mut to_chip_ids = vec![None; ChipType::iter().count()];
-        to_chip_ids[ChipType::GlobalStateIn as usize] = Some(global_state_in_id);
-        to_chip_ids[ChipType::StackPop as usize] = Some(stack_pop_id);
-        to_chip_ids[ChipType::RangeChip as usize] = Some(range_chip_id);
+        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
+        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        circuit_builder.configure();
+
+        let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
+        to_chip_ids[InstOutChipType::RAMLoad as usize] = ram_load_id;
+        to_chip_ids[InstOutChipType::RAMStore as usize] = ram_store_id;
+        to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         circuit_builder.configure();
         Ok(BBStartCircuit {
