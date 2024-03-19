@@ -6,10 +6,8 @@ use gkr::utils::ceil_log2;
 use goldilocks::SmallField;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
-use crate::{
-    constants::{EVM_STACK_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH, VALUE_BIT_WIDTH},
-    error::ZKVMError,
-};
+use crate::error::ZKVMError;
+use singer_utils::constants::{EVM_STACK_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH, VALUE_BIT_WIDTH};
 
 /// Unsigned integer with `M` bits. C denotes the cell bit width.
 #[derive(Clone, Debug)]
@@ -21,9 +19,6 @@ pub(crate) type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
 pub(crate) type PCUInt = UInt64;
 pub(crate) type TSUInt = UInt<56, 56>;
 pub(crate) type StackUInt = UInt<{ EVM_STACK_BIT_WIDTH as usize }, { VALUE_BIT_WIDTH as usize }>;
-
-pub(crate) mod add_sub;
-pub(crate) mod cmp;
 
 impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
     type Error = ZKVMError;
@@ -190,146 +185,4 @@ fn convert_decomp<F: SmallField>(
         })
         .collect_vec();
     values
-}
-
-#[cfg(test)]
-mod test {
-    use crate::utils::uint::convert_decomp;
-
-    use super::UInt;
-    use gkr::structs::{Circuit, CircuitWitness};
-    use goldilocks::Goldilocks;
-    use simple_frontend::structs::CircuitBuilder;
-
-    #[test]
-    fn test_convert_decomp() {
-        // test case 1
-        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
-        let big_bit_width = 3;
-        let small_bit_width = 2;
-        let (small_values_wire_in_id, small_values) = circuit_builder.create_witness_in(31);
-        let values = convert_decomp(
-            &mut circuit_builder,
-            &small_values,
-            small_bit_width,
-            big_bit_width,
-            true,
-        );
-        assert_eq!(values.len(), 16);
-        circuit_builder.configure();
-        let circuit = Circuit::new(&circuit_builder);
-        let n_witness_in = circuit.n_witness_in;
-        let mut wires_in = vec![vec![]; n_witness_in];
-        wires_in[small_values_wire_in_id as usize] =
-            vec![Goldilocks::from(1u64), Goldilocks::from(1u64)];
-        wires_in[small_values_wire_in_id as usize].extend(vec![Goldilocks::from(0u64); 29]);
-        let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2)];
-            let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
-            circuit_witness.add_instance(&circuit, wires_in);
-            circuit_witness
-        };
-        #[cfg(feature = "test-dbg")]
-        println!("{:?}", circuit_witness);
-        circuit_witness.check_correctness(&circuit);
-        // check the result
-        let result_values = circuit_witness.output_layer_witness_ref();
-        assert_eq!(result_values.instances[0][0], Goldilocks::from(5u64));
-        for i in 1..16 {
-            assert_eq!(result_values.instances[0][i], Goldilocks::from(0u64));
-        }
-        // test case 2
-        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
-        let big_bit_width = 32;
-        let small_bit_width = 16;
-        let (small_values_wire_in_id, small_values) = circuit_builder.create_witness_in(4);
-        let values = convert_decomp(
-            &mut circuit_builder,
-            &small_values,
-            small_bit_width,
-            big_bit_width,
-            true,
-        );
-        assert_eq!(values.len(), 2);
-        circuit_builder.configure();
-        let circuit = Circuit::new(&circuit_builder);
-        let n_witness_in = circuit.n_witness_in;
-        let mut wires_in = vec![vec![]; n_witness_in];
-        wires_in[small_values_wire_in_id as usize] = vec![
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(1u64),
-            Goldilocks::from(0u64),
-        ];
-        let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2)];
-            let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
-            circuit_witness.add_instance(&circuit, wires_in);
-            circuit_witness
-        };
-        #[cfg(feature = "test-dbg")]
-        println!("{:?}", circuit_witness);
-        circuit_witness.check_correctness(&circuit);
-        // check the result
-        let result_values = circuit_witness.output_layer_witness_ref();
-        assert_eq!(
-            result_values.instances[0],
-            vec![Goldilocks::from(0u64), Goldilocks::from(1u64)]
-        );
-    }
-
-    #[test]
-    fn test_from_range_values() {
-        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
-        let (range_values_wire_in_id, range_values) = circuit_builder.create_witness_in(16);
-        let range_value =
-            UInt::<256, 32>::from_range_values(&mut circuit_builder, &range_values).unwrap();
-        assert_eq!(range_value.values.len(), 8);
-        circuit_builder.configure();
-        let circuit = Circuit::new(&circuit_builder);
-        let n_witness_in = circuit.n_witness_in;
-        let mut wires_in = vec![vec![]; n_witness_in];
-        wires_in[range_values_wire_in_id as usize] = vec![
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(1u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-        ];
-        let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2)];
-            let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
-            circuit_witness.add_instance(&circuit, wires_in);
-            circuit_witness
-        };
-        #[cfg(feature = "test-dbg")]
-        println!("{:?}", circuit_witness);
-        circuit_witness.check_correctness(&circuit);
-        // check the result
-        let result_values = circuit_witness.output_layer_witness_ref();
-        assert_eq!(
-            result_values.instances[0],
-            vec![
-                Goldilocks::from(0),
-                Goldilocks::from(1),
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-            ]
-        );
-    }
 }

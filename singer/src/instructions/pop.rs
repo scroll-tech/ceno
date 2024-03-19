@@ -126,12 +126,12 @@ mod test {
     use core::ops::Range;
     use std::collections::BTreeMap;
 
-    use crate::constants::RANGE_CHIP_BIT_WIDTH;
     use crate::instructions::{ChipChallenges, Instruction, PopInstruction};
     use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
     use crate::utils::uint::TSUInt;
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
+    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
 
     impl PopInstruction {
         #[inline]
@@ -174,7 +174,7 @@ mod test {
         }
 
         // initialize general test inputs associated with push1
-        let inst_circuit = PopInstruction::construct_circuit::<Goldilocks>(challenges).unwrap();
+        let inst_circuit = PopInstruction::construct_circuit(challenges).unwrap();
 
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);

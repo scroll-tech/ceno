@@ -2,10 +2,8 @@ use ff::Field;
 use goldilocks::SmallField;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
-use crate::{
-    error::ZKVMError,
-    utils::chip_handler::{ChipHandler, RangeChipOperations},
-};
+use singer_utils::chip_handler::{ChipHandler, RangeChipOperations};
+use crate::error::ZKVMError;
 
 use super::{UInt, UIntAddSub};
 

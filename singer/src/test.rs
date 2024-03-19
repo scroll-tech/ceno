@@ -1,4 +1,4 @@
-use crate::instructions::{ChipChallenges, InstCircuit};
+use crate::instructions::InstCircuit;
 use crate::utils::uint::UInt;
 use core::ops::Range;
 use ff::Field;
