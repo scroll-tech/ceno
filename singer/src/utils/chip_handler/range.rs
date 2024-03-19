@@ -124,13 +124,13 @@ impl<F: SmallField> ChipHandler<F> {
         constant: i64,
         witness: &[CellId],
     ) -> Result<TSUInt, ZKVMError> {
-        let carry = UIntAddSub::<TSUInt>::extract_unsafe_carry(witness);
+        //let carry = UIntAddSub::<TSUInt>::extract_unsafe_carry(witness);
         UIntAddSub::<TSUInt>::add_const(
             circuit_builder,
             self,
             &ts,
             i64_to_base_field::<F>(constant),
-            carry,
+            witness,
         )
     }
 
