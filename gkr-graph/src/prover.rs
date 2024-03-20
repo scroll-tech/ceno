@@ -1,4 +1,7 @@
-use gkr::{structs::{GKRInputClaims, PointAndEval}, utils::MultilinearExtensionFromVectors};
+use gkr::{
+    structs::{GKRInputClaims, PointAndEval},
+    utils::MultilinearExtensionFromVectors,
+};
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use std::mem;
@@ -107,6 +110,10 @@ impl<F: SmallField> IOPProverState<F> {
                 proof
             })
             .collect();
+
+        // Note that the input claims are pushed in reverse order. Reverse them back so that they
+        // are in the same order of the nodes and node witnesses.
+        let input_claims = input_claims.into_iter().rev().collect();
 
         Ok((IOPProof { gkr_proofs }, input_claims))
     }

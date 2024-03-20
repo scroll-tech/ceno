@@ -3,10 +3,13 @@ use std::{collections::HashMap, mem};
 use gkr::utils::MultilinearExtensionFromVectors;
 use gkr_graph::structs::{CircuitGraphAuxInfo, NodeOutputType, PredType};
 use goldilocks::SmallField;
-use mpcs::{poly::multilinear::MultilinearPolynomial, Basefold, BasefoldCommitmentWithData, BasefoldDefaultParams, PolynomialCommitmentScheme};
+use itertools::{izip, Itertools};
+use mpcs::{
+    poly::multilinear::MultilinearPolynomial, Basefold, BasefoldCommitmentWithData,
+    BasefoldDefaultParams, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
-use itertools::{izip, Itertools};
 
 use crate::{
     error::ZKVMError, SingerCircuit, SingerWiresOutID, SingerWiresOutValues, SingerWitness,
@@ -14,7 +17,7 @@ use crate::{
 
 use super::{GKRGraphProverState, SingerProof};
 
-type PCS<F> = Basefold::<F, BasefoldDefaultParams>;
+type PCS<F> = Basefold<F, BasefoldDefaultParams>;
 
 pub fn prove<F: SmallField + DeserializeOwned>(
     pcs_param: &<PCS<F> as PolynomialCommitmentScheme<F, F>>::ProverParam,
@@ -22,16 +25,18 @@ pub fn prove<F: SmallField + DeserializeOwned>(
     vm_witness: &SingerWitness<F::BaseField>,
     vm_out_id: &SingerWiresOutID,
     transcript: &mut Transcript<F>,
-) -> Result<(SingerProof<F>, CircuitGraphAuxInfo), ZKVMError> 
+) -> Result<(SingerProof<F>, CircuitGraphAuxInfo), ZKVMError>
 where
     F::BaseField: Serialize + DeserializeOwned,
-    <F as SmallField>::BaseField: Into<F>
+    <F as SmallField>::BaseField: Into<F>,
 {
     // Prepare the commitments (with the corresponding data, i.e., the Merkle leaves and Merkle trees).
     // This array is indexed first by the node indices, then by the wire in indices for each node.
-    let mut commitments_with_data = Vec::<Vec::<BasefoldCommitmentWithData::<F>>>::new();
+    let mut commitments_with_data = Vec::<Vec<BasefoldCommitmentWithData<F>>>::new();
+    let mut polys_for_pcs = Vec::<Vec<MultilinearPolynomial<F>>>::new();
     for (node, witness) in izip!(vm_circuit.0.nodes(), &vm_witness.0.node_witnesses) {
-        let mut commitments_with_data_for_node = Vec::<BasefoldCommitmentWithData::<F>>::new();
+        let mut commitments_with_data_for_node = Vec::<BasefoldCommitmentWithData<F>>::new();
+        let mut polys_for_pcs_for_node = Vec::<MultilinearPolynomial<F>>::new();
         for (wire_id, pred) in node.preds().iter().enumerate() {
             if matches!(pred, PredType::Source) {
                 // If this is a source wire in, i.e., a wire that is not copied from another node, but indeed an input
@@ -40,15 +45,19 @@ where
                     .instances
                     .as_slice()
                     .original_mle();
-                
-                let commitment_with_data = PCS::<F>::commit(pcs_param, &MultilinearPolynomial::new(mle.evaluations.clone()))?;
+
+                let poly = MultilinearPolynomial::new(mle.evaluations.clone());
+                let commitment_with_data = PCS::<F>::commit(pcs_param, &poly)?;
                 commitments_with_data_for_node.push(commitment_with_data);
+                polys_for_pcs_for_node.push(poly);
             } else {
                 // Otherwise, just store an empty commitment.
                 commitments_with_data_for_node.push(BasefoldCommitmentWithData::default());
+                polys_for_pcs_for_node.push(MultilinearPolynomial::default());
             }
         }
         commitments_with_data.push(commitments_with_data_for_node);
+        polys_for_pcs.push(polys_for_pcs_for_node);
     }
     // With all the commitments ready, we can now write them to the transcript.
     for (node_id, wire_in_id) in vm_circuit.0.sources() {
@@ -61,6 +70,7 @@ where
             transcript.append_field_element(&element.into());
         }
     }
+
     let point = (0..2 * F::DEGREE)
         .map(|_| {
             transcript
@@ -121,10 +131,35 @@ where
     let target_evals = vm_circuit.0.target_evals(&vm_witness.0, &point);
     let (gkr_phase_proof, input_claims) =
         GKRGraphProverState::prove(&vm_circuit.0, &vm_witness.0, &target_evals, transcript)?;
+
+    let mut polys = vec![];
+    let mut comms = vec![];
+    let mut points = vec![];
+    let mut evals = vec![];
+    for (node_id, wire_in_id) in vm_circuit.0.sources() {
+        polys.push(&polys_for_pcs[node_id][wire_in_id as usize]);
+        comms.push(&commitments_with_data[node_id][wire_in_id as usize]);
+        let input_claim = &input_claims[node_id];
+        points.push(
+            input_claim.point_and_evals[wire_in_id as usize]
+                .point
+                .clone(),
+        );
+        evals.push(Evaluation::new(
+            polys.len() - 1,  // The index of the current polynomial.
+            points.len() - 1, // The index of the current point.
+            input_claim.point_and_evals[wire_in_id as usize].eval,
+        ));
+    }
+
+    // Run the non-interactive batch opening protocol.
+    let pcs_proof = PCS::<F>::ni_batch_open(&pcs_param, polys, comms, points.as_slice(), &evals)?;
+
     Ok((
         SingerProof {
             gkr_phase_proof,
             singer_out_evals,
+            pcs_proof,
         },
         aux_info,
     ))

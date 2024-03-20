@@ -2,6 +2,7 @@ use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
 use gkr_graph::structs::TargetEvaluations;
 use goldilocks::SmallField;
 use itertools::{chain, Itertools};
+use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
 use crate::{error::ZKVMError, SingerAuxInfo, SingerCircuit, SingerWiresOutValues};
@@ -14,7 +15,10 @@ pub fn verify<F: SmallField>(
     aux_info: &SingerAuxInfo,
     challenges: &[F],
     transcript: &mut Transcript<F>,
-) -> Result<(), ZKVMError> {
+) -> Result<(), ZKVMError>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     // TODO: Add PCS.
     let point = (0..2 * F::DEGREE)
         .map(|_| {
