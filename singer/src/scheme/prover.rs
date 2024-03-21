@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem};
+use std::mem;
 
 use gkr::utils::MultilinearExtensionFromVectors;
 use gkr_graph::structs::{CircuitGraphAuxInfo, NodeOutputType, PredType};
@@ -60,10 +60,12 @@ where
         polys_for_pcs.push(polys_for_pcs_for_node);
     }
     // With all the commitments ready, we can now write them to the transcript.
+    let mut pcs_commitments = vec![];
     for (node_id, wire_in_id) in vm_circuit.0.sources() {
         // The commitment of Basefold is just the root of the Merkle tree. The root is of type Digest<F>, which
         // is defined as an array of F::BaseField.
         let cm = commitments_with_data[node_id][wire_in_id as usize].get_root_ref();
+        pcs_commitments.push(cm.clone());
         for element in cm.0 {
             // Note that this is only efficient when F is itself the base field.
             // When F is the extension field, the basefield elements should be packed before written to the transcript.
@@ -159,6 +161,7 @@ where
         SingerProof {
             gkr_phase_proof,
             singer_out_evals,
+            pcs_commitments,
             pcs_proof,
         },
         aux_info,
