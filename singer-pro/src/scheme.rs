@@ -1,5 +1,7 @@
 use gkr::structs::GKRInputClaims;
 use goldilocks::SmallField;
+use mpcs::{BasefoldCommitment, PCSProof};
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::SingerWiresOutValues;
 
@@ -34,9 +36,16 @@ pub struct OpenPhaseProof<F: SmallField> {
     pcs_proof: BatchedPCSProof<F>,
 }
 
-pub struct SingerProof<F: SmallField> {
+pub struct SingerProof<F: SmallField>
+where
+    F::BaseField: Serialize + DeserializeOwned,
+{
     // commitment_phase_proof: CommitPhaseProof<F>,
     gkr_phase_proof: GKRGraphProof<F>,
     // open_phase_proof: OpenPhaseProof<F>,
     singer_out_evals: SingerWiresOutValues<F::BaseField>,
+    // PCS commitments
+    pcs_commitments: Vec<BasefoldCommitment<F>>,
+    // PCS proof
+    pcs_proof: PCSProof<F>,
 }

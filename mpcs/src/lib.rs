@@ -20,6 +20,145 @@ pub type Point<F, P> = <P as PolynomialEvalExt<F>>::Point;
 pub type Commitment<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::Commitment;
 
 pub type CommitmentChunk<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::CommitmentChunk;
+pub type CommitmentWithData<F, PF, Pcs> =
+    <Pcs as PolynomialCommitmentScheme<F, PF>>::CommitmentWithData;
+
+pub type Param<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::Param;
+pub type ProverParam<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::ProverParam;
+pub type VerifierParam<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::VerifierParam;
+pub type PCSPolynomial<F, PF, Pcs> = <Pcs as PolynomialCommitmentScheme<F, PF>>::Polynomial;
+
+pub fn pcs_setup<F: SmallField, PF: SmallField, Pcs: PolynomialCommitmentScheme<F, PF>>(
+    poly_size: usize,
+    rng: &Pcs::Rng,
+) -> Result<Pcs::Param, Error> {
+    Pcs::setup(poly_size, rng)
+}
+
+pub fn pcs_trim<F: SmallField, PF: SmallField, Pcs: PolynomialCommitmentScheme<F, PF>>(
+    param: &Pcs::Param,
+) -> Result<(Pcs::ProverParam, Pcs::VerifierParam), Error> {
+    Pcs::trim(param)
+}
+
+pub fn pcs_commit<F: SmallField, PF: SmallField, Pcs: PolynomialCommitmentScheme<F, PF>>(
+    pp: &Pcs::ProverParam,
+    poly: &Pcs::Polynomial,
+) -> Result<Pcs::CommitmentWithData, Error> {
+    Pcs::commit(pp, poly)
+}
+
+pub fn pcs_commit_and_write<
+    F: SmallField,
+    PF: SmallField,
+    Pcs: PolynomialCommitmentScheme<F, PF>,
+>(
+    pp: &Pcs::ProverParam,
+    poly: &Pcs::Polynomial,
+    transcript: &mut impl TranscriptWrite<Pcs::CommitmentChunk, F>,
+) -> Result<Pcs::CommitmentWithData, Error> {
+    Pcs::commit_and_write(pp, poly, transcript)
+}
+
+pub fn pcs_batch_commit<'a, F: SmallField, PF: SmallField, Pcs: PolynomialCommitmentScheme<F, PF>>(
+    pp: &Pcs::ProverParam,
+    polys: impl IntoIterator<Item = &'a Pcs::Polynomial>,
+) -> Result<Vec<Pcs::CommitmentWithData>, Error>
+where
+    Pcs::Polynomial: 'a,
+{
+    Pcs::batch_commit(pp, polys)
+}
+
+pub fn pcs_batch_commit_and_write<
+    'a,
+    F: SmallField,
+    PF: SmallField,
+    Pcs: PolynomialCommitmentScheme<F, PF>,
+>(
+    pp: &Pcs::ProverParam,
+    polys: impl IntoIterator<Item = &'a Pcs::Polynomial>,
+    transcript: &mut impl TranscriptWrite<Pcs::CommitmentChunk, F>,
+) -> Result<Vec<Pcs::CommitmentWithData>, Error>
+where
+    Pcs::Polynomial: 'a,
+{
+    Pcs::batch_commit_and_write(pp, polys, transcript)
+}
+
+pub fn pcs_open<F: SmallField, PF: SmallField, Pcs: PolynomialCommitmentScheme<F, PF>>(
+    pp: &Pcs::ProverParam,
+    poly: &Pcs::Polynomial,
+    comm: &Pcs::CommitmentWithData,
+    point: &Point<F, Pcs::Polynomial>,
+    eval: &F,
+    transcript: &mut impl TranscriptWrite<Pcs::CommitmentChunk, F>,
+) -> Result<(), Error> {
+    Pcs::open(pp, poly, comm, point, eval, transcript)
+}
+
+pub fn pcs_batch_open<'a, F: SmallField, PF: SmallField, Pcs: PolynomialCommitmentScheme<F, PF>>(
+    pp: &Pcs::ProverParam,
+    polys: impl IntoIterator<Item = &'a Pcs::Polynomial>,
+    comms: impl IntoIterator<Item = &'a Pcs::CommitmentWithData>,
+    points: &[Point<F, Pcs::Polynomial>],
+    evals: &[Evaluation<F>],
+    transcript: &mut impl TranscriptWrite<Pcs::CommitmentChunk, F>,
+) -> Result<(), Error>
+where
+    Pcs::Polynomial: 'a,
+    Pcs::CommitmentWithData: 'a,
+{
+    Pcs::batch_open(pp, polys, comms, points, evals, transcript)
+}
+
+pub fn pcs_read_commitment<
+    F: SmallField,
+    PF: SmallField,
+    Pcs: PolynomialCommitmentScheme<F, PF>,
+>(
+    vp: &Pcs::VerifierParam,
+    transcript: &mut impl TranscriptRead<Pcs::CommitmentChunk, F>,
+) -> Result<Pcs::Commitment, Error> {
+    let comms = Pcs::read_commitments(vp, 1, transcript)?;
+    assert_eq!(comms.len(), 1);
+    Ok(comms.into_iter().next().unwrap())
+}
+
+pub fn pcs_read_commitments<
+    F: SmallField,
+    PF: SmallField,
+    Pcs: PolynomialCommitmentScheme<F, PF>,
+>(
+    vp: &Pcs::VerifierParam,
+    num_polys: usize,
+    transcript: &mut impl TranscriptRead<Pcs::CommitmentChunk, F>,
+) -> Result<Vec<Pcs::Commitment>, Error> {
+    Pcs::read_commitments(vp, num_polys, transcript)
+}
+
+pub fn pcs_verify<F: SmallField, PF: SmallField, Pcs: PolynomialCommitmentScheme<F, PF>>(
+    vp: &Pcs::VerifierParam,
+    comm: &Pcs::Commitment,
+    point: &Point<F, Pcs::Polynomial>,
+    eval: &F,
+    transcript: &mut impl TranscriptRead<Pcs::CommitmentChunk, F>,
+) -> Result<(), Error> {
+    Pcs::verify(vp, comm, point, eval, transcript)
+}
+
+pub fn pcs_batch_verify<'a, F: SmallField, PF: SmallField, Pcs: PolynomialCommitmentScheme<F, PF>>(
+    vp: &Pcs::VerifierParam,
+    comms: impl IntoIterator<Item = &'a Pcs::Commitment>,
+    points: &[Point<F, Pcs::Polynomial>],
+    evals: &[Evaluation<F>],
+    transcript: &mut impl TranscriptRead<Pcs::CommitmentChunk, F>,
+) -> Result<(), Error>
+where
+    Pcs::Commitment: 'a,
+{
+    Pcs::batch_verify(vp, comms, points, evals, transcript)
+}
 
 pub trait PolynomialCommitmentScheme<F: SmallField, PF: SmallField>: Clone + Debug {
     type Param: Clone + Debug + Serialize + DeserializeOwned;
@@ -228,8 +367,8 @@ use poly::multilinear::MultilinearPolynomial;
 
 mod basefold;
 pub use basefold::{
-    Basefold, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldDefaultParams,
-    BasefoldExtParams, BasefoldParams,
+    Basefold, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldDefault,
+    BasefoldDefaultParams, BasefoldExtParams, BasefoldParams,
 };
 
 fn validate_input<'a, F: Field>(

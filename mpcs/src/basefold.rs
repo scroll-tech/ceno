@@ -219,6 +219,8 @@ impl BasefoldExtParams for BasefoldDefaultParams {
 #[derive(Debug)]
 pub struct Basefold<F: SmallField, V: BasefoldExtParams>(PhantomData<(F, V)>);
 
+pub type BasefoldDefault<F> = Basefold<F, BasefoldDefaultParams>;
+
 impl<F: SmallField, V: BasefoldExtParams> Clone for Basefold<F, V> {
     fn clone(&self) -> Self {
         Self(PhantomData)

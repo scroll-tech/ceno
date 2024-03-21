@@ -4,6 +4,7 @@ use goldilocks::SmallField;
 use itertools::{chain, Itertools};
 use mpcs::{
     Basefold, BasefoldDefaultParams, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
+    VerifierParam,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
@@ -14,7 +15,7 @@ use super::{GKRGraphVerifierState, SingerProof};
 type PCS<F> = Basefold<F, BasefoldDefaultParams>;
 
 pub fn verify<F: SmallField>(
-    pcs_param: &<PCS<F> as PolynomialCommitmentScheme<F, F>>::VerifierParam,
+    pcs_param: &VerifierParam<F, F, PCS<F>>,
     vm_circuit: &SingerCircuit<F>,
     vm_proof: SingerProof<F>,
     aux_info: &SingerAuxInfo,

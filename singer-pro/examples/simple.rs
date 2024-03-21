@@ -1,5 +1,8 @@
+use ark_std::rand::SeedableRng;
 use goldilocks::Goldilocks;
 use itertools::Itertools;
+use mpcs::{pcs_setup, pcs_trim, BasefoldDefault, BasefoldParams};
+use rand_chacha::ChaCha8Rng;
 use singer_pro::{
     instructions::SingerInstCircuitBuilder,
     scheme::{prover::prove, verifier::verify},
@@ -25,7 +28,7 @@ fn main() {
     let real_challenges = vec![];
     let singer_params = SingerParams::default();
 
-    let (proof, singer_aux_info) = {
+    let (vp, proof, singer_aux_info) = {
         let real_n_instances = singer_wires_in
             .basic_blocks
             .iter()
@@ -35,8 +38,22 @@ fn main() {
             .construct_graph_and_witness(singer_wires_in, &[], &real_challenges, &singer_params)
             .expect("construct failed");
 
-        let (proof, graph_aux_info) =
-            prove(&circuit, &witness, &wires_out_id, &mut prover_transcript).expect("prove failed");
+        let (pp, vp) = {
+            let rng = ChaCha8Rng::from_seed([0u8; 32]);
+            let poly_size = 1 << 15; // Temporarily set to 15. Modify it to appropriate size later.
+            let param: BasefoldParams<Goldilocks, ChaCha8Rng> =
+                pcs_setup::<Goldilocks, Goldilocks, BasefoldDefault<Goldilocks>>(poly_size, &rng)
+                    .unwrap();
+            pcs_trim::<Goldilocks, Goldilocks, BasefoldDefault<Goldilocks>>(&param).unwrap()
+        };
+        let (proof, graph_aux_info) = prove(
+            &pp,
+            &circuit,
+            &witness,
+            &wires_out_id,
+            &mut prover_transcript,
+        )
+        .expect("prove failed");
         let aux_info = SingerAuxInfo {
             graph_aux_info,
             real_n_instances,
@@ -44,7 +61,7 @@ fn main() {
             bytecode_len: bytecode.len(),
             ..Default::default()
         };
-        (proof, aux_info)
+        (vp, proof, aux_info)
     };
 
     // 4. Verify.
@@ -56,6 +73,7 @@ fn main() {
         .construct_graph(&singer_aux_info)
         .expect("construct failed");
     verify(
+        &vp,
         &circuit,
         proof,
         &singer_aux_info,

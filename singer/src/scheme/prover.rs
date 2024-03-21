@@ -5,9 +5,8 @@ use gkr_graph::structs::{CircuitGraphAuxInfo, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use mpcs::{
-    poly::multilinear::MultilinearPolynomial, Basefold, BasefoldCommitment,
-    BasefoldCommitmentWithData, BasefoldDefaultParams, Evaluation, NoninteractivePCS,
-    PolynomialCommitmentScheme,
+    poly::multilinear::MultilinearPolynomial, Basefold, BasefoldCommitmentWithData,
+    BasefoldDefaultParams, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme, ProverParam,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
@@ -21,7 +20,7 @@ use super::{GKRGraphProverState, SingerProof};
 type PCS<F> = Basefold<F, BasefoldDefaultParams>;
 
 pub fn prove<F: SmallField + DeserializeOwned>(
-    pcs_param: &<PCS<F> as PolynomialCommitmentScheme<F, F>>::ProverParam,
+    pcs_param: &ProverParam<F, F, PCS<F>>,
     vm_circuit: &SingerCircuit<F>,
     vm_witness: &SingerWitness<F::BaseField>,
     vm_out_id: &SingerWiresOutID,
@@ -29,6 +28,7 @@ pub fn prove<F: SmallField + DeserializeOwned>(
 ) -> Result<(SingerProof<F>, CircuitGraphAuxInfo), ZKVMError>
 where
     F::BaseField: Serialize + DeserializeOwned,
+    F: DeserializeOwned,
     <F as SmallField>::BaseField: Into<F>,
 {
     // Prepare the commitments (with the corresponding data, i.e., the Merkle leaves and Merkle trees).

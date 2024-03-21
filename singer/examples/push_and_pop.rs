@@ -1,7 +1,10 @@
 use ark_std::rand::SeedableRng;
 use goldilocks::Goldilocks;
 use itertools::Itertools;
-use mpcs::{Basefold, BasefoldDefaultParams, BasefoldParams, PolynomialCommitmentScheme};
+use mpcs::{
+    pcs_setup, pcs_trim, Basefold, BasefoldDefault, BasefoldDefaultParams, BasefoldParams,
+    PolynomialCommitmentScheme,
+};
 use rand_chacha::ChaCha8Rng;
 use singer::{
     instructions::SingerCircuitBuilder,
@@ -47,16 +50,9 @@ fn main() {
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
             let poly_size = 1 << 15; // Temporarily set to 15. Modify it to appropriate size later.
             let param: BasefoldParams<Goldilocks, ChaCha8Rng> =
-                <Basefold<Goldilocks, BasefoldDefaultParams> as PolynomialCommitmentScheme<
-                    Goldilocks,
-                    Goldilocks,
-                >>::setup(poly_size, &rng)
-                .unwrap();
-            <Basefold<Goldilocks, BasefoldDefaultParams> as PolynomialCommitmentScheme<
-                Goldilocks,
-                Goldilocks,
-            >>::trim(&param)
-            .unwrap()
+                pcs_setup::<Goldilocks, Goldilocks, BasefoldDefault<Goldilocks>>(poly_size, &rng)
+                    .unwrap();
+            pcs_trim::<Goldilocks, Goldilocks, BasefoldDefault<Goldilocks>>(&param).unwrap()
         };
 
         let (proof, graph_aux_info) = prove(
