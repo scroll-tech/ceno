@@ -154,18 +154,18 @@ impl<F: SmallField> BasefoldCommitment<F>
 where
     F::BaseField: Serialize + DeserializeOwned,
 {
-    fn new(root: Digest<F>, num_vars: usize) -> Self {
+    pub fn new(root: Digest<F>, num_vars: usize) -> Self {
         Self {
             root,
             num_vars: Some(num_vars),
         }
     }
 
-    fn root(&self) -> Digest<F> {
+    pub fn root(&self) -> Digest<F> {
         self.root.clone()
     }
 
-    fn num_vars(&self) -> Option<usize> {
+    pub fn num_vars(&self) -> Option<usize> {
         self.num_vars
     }
 

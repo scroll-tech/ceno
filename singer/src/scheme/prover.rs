@@ -5,8 +5,9 @@ use gkr_graph::structs::{CircuitGraphAuxInfo, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use mpcs::{
-    poly::multilinear::MultilinearPolynomial, Basefold, BasefoldCommitmentWithData,
-    BasefoldDefaultParams, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
+    poly::multilinear::MultilinearPolynomial, Basefold, BasefoldCommitment,
+    BasefoldCommitmentWithData, BasefoldDefaultParams, Evaluation, NoninteractivePCS,
+    PolynomialCommitmentScheme,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
@@ -64,9 +65,9 @@ where
     for (node_id, wire_in_id) in vm_circuit.0.sources() {
         // The commitment of Basefold is just the root of the Merkle tree. The root is of type Digest<F>, which
         // is defined as an array of F::BaseField.
-        let cm = commitments_with_data[node_id][wire_in_id as usize].get_root_ref();
+        let cm = commitments_with_data[node_id][wire_in_id as usize].to_commitment();
         pcs_commitments.push(cm.clone());
-        for element in cm.0 {
+        for element in cm.root().0 {
             // Note that this is only efficient when F is itself the base field.
             // When F is the extension field, the basefield elements should be packed before written to the transcript.
             transcript.append_field_element(&element.into());
@@ -155,7 +156,7 @@ where
     }
 
     // Run the non-interactive batch opening protocol.
-    let pcs_proof = PCS::<F>::ni_batch_open(&pcs_param, polys, comms, points.as_slice(), &evals)?;
+    let pcs_proof = PCS::<F>::ni_batch_open(&pcs_param, polys, comms, &points, &evals)?;
 
     Ok((
         SingerProof {

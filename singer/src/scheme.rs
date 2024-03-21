@@ -1,5 +1,5 @@
 use goldilocks::SmallField;
-use mpcs::{util::hash::Digest, Basefold, BasefoldDefaultParams, PCSProof};
+use mpcs::{util::hash::Digest, Basefold, BasefoldCommitment, BasefoldDefaultParams, PCSProof};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::SingerWiresOutValues;
@@ -32,7 +32,7 @@ where
     // open_phase_proof: OpenPhaseProof<F>,
     singer_out_evals: SingerWiresOutValues<F::BaseField>,
     // PCS commitments
-    pcs_commitments: Vec<Digest<F>>,
+    pcs_commitments: Vec<BasefoldCommitment<F>>,
     // PCS proof
     pcs_proof: PCSProof<F>,
 }
