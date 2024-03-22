@@ -17,7 +17,7 @@ pub mod instructions;
 pub mod scheme;
 #[cfg(test)]
 pub mod test;
-pub mod utils;
+mod utils;
 
 // Process sketch:
 // 1. Construct instruction circuits and circuit gadgets => circuit gadgets

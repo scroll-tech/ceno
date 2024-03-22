@@ -128,7 +128,6 @@ mod test {
 
     use crate::instructions::{ChipChallenges, Instruction, PopInstruction};
     use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use crate::utils::uint::TSUInt;
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;

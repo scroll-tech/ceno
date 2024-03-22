@@ -877,8 +877,7 @@ mod tests {
             circuit.layers[1].sumcheck_steps,
             vec![
                 SumcheckStepType::Phase2Step1,
-                SumcheckStepType::Phase2Step2,
-                SumcheckStepType::Phase2Step3
+                SumcheckStepType::Phase2Step2NoStep3,
             ]
         );
         // Output layer, single output witness, therefore no output phase 1 steps.
@@ -908,8 +907,7 @@ mod tests {
             circuit.layers[0].sumcheck_steps,
             vec![
                 SumcheckStepType::Phase2Step1,
-                SumcheckStepType::Phase2Step2,
-                SumcheckStepType::Phase2Step3
+                SumcheckStepType::Phase2Step2NoStep3
             ]
         );
     }
