@@ -205,7 +205,6 @@ impl<F: SmallField> CircuitWitness<F> {
         ceil_log2(self.n_instances)
     }
 
-    #[cfg(debug_assertions)]
     pub fn check_correctness<Ext>(&self, circuit: &Circuit<Ext>)
     where
         Ext: SmallField<BaseField = F>,
