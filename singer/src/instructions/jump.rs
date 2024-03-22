@@ -132,6 +132,7 @@ mod test {
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
+    use singer_utils::structs::TSUInt;
 
     impl JumpInstruction {
         #[inline]

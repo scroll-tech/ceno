@@ -182,10 +182,10 @@ mod test {
 
     use crate::instructions::{AddInstruction, ChipChallenges, Instruction};
     use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use crate::utils::uint::{StackUInt, TSUInt};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
+    use singer_utils::structs::{StackUInt, TSUInt};
 
     impl AddInstruction {
         #[inline]

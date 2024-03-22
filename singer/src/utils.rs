@@ -2,7 +2,6 @@ use ff::Field;
 use goldilocks::SmallField;
 use itertools::izip;
 use simple_frontend::structs::{CellId, CircuitBuilder};
-pub(crate) mod uint;
 
 pub(crate) fn i64_to_base_field<F: SmallField>(x: i64) -> F::BaseField {
     if x >= 0 {
