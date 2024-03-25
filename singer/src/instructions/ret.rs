@@ -1,8 +1,8 @@
+use crate::{error::ZKVMError, CircuitWiresIn, SingerParams};
 use ff::Field;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
-use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
@@ -15,34 +15,21 @@ use singer_utils::{
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::UIntAddSub,
 };
+use singer_utils::{
+    copy_carry_values_from_addends, copy_clock_from_record, copy_operand_from_record,
+    copy_operand_timestamp_from_record, copy_pc_add_from_record, copy_pc_from_record,
+    copy_range_values_from_u256, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
+    copy_stack_ts_add_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
+};
 use std::{mem, sync::Arc};
-
-use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 
 use itertools::Itertools;
 use revm_interpreter::Record;
 use revm_primitives::U256;
 
 use crate::instructions::InstCircuitLayout;
-use crate::utils::uint::u2fvec;
-use crate::CircuitWiresIn;
-use crate::{constants::OpcodeType, error::ZKVMError};
-
-use crate::{
-    utils::{
-        add_assign_each_cell,
-        chip_handler::{
-            BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, MemoryChipOperations,
-            RangeChipOperations, StackChipOperations,
-        },
-        uint::{PCUInt, StackUInt, TSUInt, UIntAddSub},
-    },
-    SingerParams,
-};
 
 use paste::paste;
-use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use std::{mem, sync::Arc};
 
 use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
@@ -390,7 +377,7 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = vec![F::ZERO; Self::phase0_size()];
         copy_pc_from_record!(wire_values, record);
         copy_stack_ts_from_record!(wire_values, record);
@@ -403,7 +390,9 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         copy_operand_from_record!(wire_values, record, phase0_offset, 0);
         copy_operand_from_record!(wire_values, record, phase0_mem_length, 0);
 
-        vec![vec![wire_values]]
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }
 
@@ -469,7 +458,7 @@ impl<F: SmallField> Instruction<F> for ReturnPublicOutLoad {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
         let offset = record.operands[0];
         let len = record.operands[1].as_limbs()[0] as usize;
 
@@ -490,7 +479,9 @@ impl<F: SmallField> Instruction<F> for ReturnPublicOutLoad {
             );
         }
 
-        vec![Vec::new(), public_io_values, phase0_wire_values]
+        vec![LayerWitness {
+            instances: vec![Vec::new(), public_io_values, phase0_wire_values],
+        }]
     }
 }
 
@@ -535,7 +526,7 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemLoad {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = Vec::new();
         for i in 0..record.ret_info.rest_memory_loads.len() {
             let (offset, timestamp, value) = record.ret_info.rest_memory_loads[i];
@@ -547,7 +538,10 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemLoad {
                 .copy_from_slice(TSUInt::uint_to_field_elems(timestamp).as_slice());
             wire_values.push(wire_value);
         }
-        vec![wire_values]
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }
 
@@ -586,7 +580,7 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemStore {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = Vec::new();
         for i in 0..record.ret_info.rest_memory_store.len() {
             let (offset, value) = record.ret_info.rest_memory_store[i];
@@ -598,7 +592,10 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemStore {
                 .copy_from_slice(StackUInt::uint_to_field_elems(offset).as_slice());
             wire_values.push(wire_value);
         }
-        vec![wire_values]
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }
 
@@ -645,7 +642,7 @@ impl<F: SmallField> Instruction<F> for ReturnRestStackPop {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = Vec::new();
         for i in 0..record.ret_info.rest_stack.len() {
             let (timestamp, value) = record.ret_info.rest_stack[i];
@@ -658,6 +655,9 @@ impl<F: SmallField> Instruction<F> for ReturnRestStackPop {
                 .copy_from_slice(StackUInt::u256_to_field_elems(value).as_slice());
             wire_values.push(wire_value);
         }
-        vec![wire_values]
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }

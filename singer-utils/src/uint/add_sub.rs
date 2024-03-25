@@ -1,8 +1,8 @@
+use crate::{chip_handler::RangeChipOperations, error::UtilError, structs::UInt};
 use ff::Field;
 use goldilocks::SmallField;
+use revm_primitives::U256;
 use simple_frontend::structs::{CellId, CircuitBuilder};
-
-use crate::{chip_handler::RangeChipOperations, error::UtilError, structs::UInt};
 
 use super::UIntAddSub;
 
@@ -19,20 +19,188 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         &witness[..UInt::<M, C>::N_RANGE_CHECK_CELLS]
     }
 
+    pub fn range_values_range(offset: usize) -> std::ops::Range<usize> {
+        offset..offset + UInt::<M, C>::N_RANGE_CHECK_CELLS
+    }
+
     pub fn extract_range_values_no_overflow(witness: &[CellId]) -> &[CellId] {
         &witness[..UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS]
+    }
+
+    pub fn range_values_no_overflow_range(offset: usize) -> std::ops::Range<usize> {
+        offset..offset + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
     }
 
     pub fn extract_carry_no_overflow(witness: &[CellId]) -> &[CellId] {
         &witness[UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS..]
     }
 
+    pub fn carry_no_overflow_range(offset: usize) -> std::ops::Range<usize> {
+        offset + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
+            ..offset
+                + UInt::<M, C>::N_RANGE_CHECK_NO_OVERFLOW_CELLS
+                + UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS
+    }
+
     pub fn extract_carry(witness: &[CellId]) -> &[CellId] {
         &witness[UInt::<M, C>::N_RANGE_CHECK_CELLS..]
     }
 
+    pub fn carry_range(offset: usize) -> std::ops::Range<usize> {
+        offset + UInt::<M, C>::N_RANGE_CHECK_CELLS
+            ..offset + UInt::<M, C>::N_RANGE_CHECK_CELLS + UInt::<M, C>::N_CARRY_CELLS
+    }
+
     pub fn extract_unsafe_carry(witness: &[CellId]) -> &[CellId] {
         witness
+    }
+
+    pub fn unsafe_range(offset: usize) -> std::ops::Range<usize> {
+        offset..offset + UInt::<M, C>::N_CARRY_CELLS
+    }
+
+    pub fn compute_no_overflow_carries<F: SmallField>(
+        addend_0: u64,
+        addend_1: u64,
+    ) -> [F; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut carry = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::uint_to_limbs(addend_0)
+            .iter()
+            .zip(UInt::<M, C>::uint_to_limbs(addend_1).iter())
+            .enumerate()
+        {
+            carry = a + b + if carry { 1 } else { 0 } >= (1 << C);
+            if i < ret.len() {
+                ret[i] = if carry { F::ONE } else { F::ZERO };
+            }
+        }
+        ret
+    }
+
+    pub fn compute_carries<F: SmallField>(
+        addend_0: u64,
+        addend_1: u64,
+    ) -> [F; UInt::<M, C>::N_CARRY_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut carry = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::uint_to_limbs(addend_0)
+            .iter()
+            .zip(UInt::<M, C>::uint_to_limbs(addend_1).iter())
+            .enumerate()
+        {
+            carry = a + b + if carry { 1 } else { 0 } >= (1 << C);
+            if i < ret.len() {
+                ret[i] = if carry { F::ONE } else { F::ZERO };
+            }
+        }
+        ret
+    }
+
+    pub fn compute_carries_u256<F: SmallField>(
+        addend_0: U256,
+        addend_1: U256,
+    ) -> [F; UInt::<M, C>::N_CARRY_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut carry = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::u256_to_limbs(addend_0)
+            .iter()
+            .zip(UInt::<M, C>::u256_to_limbs(addend_1).iter())
+            .enumerate()
+        {
+            carry = a + b + if carry { 1 } else { 0 } >= (1 << C);
+            if i < ret.len() {
+                ret[i] = if carry { F::ONE } else { F::ZERO };
+            }
+        }
+        ret
+    }
+
+    pub fn compute_no_overflow_borrows<F: SmallField>(
+        minuend: u64,
+        subtrahend: u64,
+    ) -> [F; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut borrow = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_NO_OVERFLOW_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::uint_to_limbs(minuend)
+            .iter()
+            .zip(UInt::<M, C>::uint_to_limbs(subtrahend).iter())
+            .enumerate()
+        {
+            // If a - borrow (from previous limb) < b, then should borrow in this limb
+            borrow = b + if borrow { 1 } else { 0 } > *a;
+            // The highest borrow is omitted since we assume it's not overflowing
+            if i < ret.len() {
+                ret[i] = if borrow { F::ONE } else { F::ZERO };
+            }
+        }
+        ret
+    }
+
+    pub fn compute_borrows<F: SmallField>(
+        minuend: u64,
+        subtrahend: u64,
+    ) -> [F; UInt::<M, C>::N_CARRY_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut borrow = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::uint_to_limbs(minuend)
+            .iter()
+            .zip(UInt::<M, C>::uint_to_limbs(subtrahend).iter())
+            .enumerate()
+        {
+            // If a - borrow (from previous limb) < b, then should borrow in this limb
+            borrow = b + if borrow { 1 } else { 0 } > *a;
+            ret[i] = if borrow { F::ONE } else { F::ZERO };
+        }
+        ret
+    }
+
+    pub fn compute_borrows_u256<F: SmallField>(
+        minuend: U256,
+        subtrahend: U256,
+    ) -> [F; UInt::<M, C>::N_CARRY_CELLS]
+    // This weird where clause is a hack because of the issue
+    // https://github.com/rust-lang/rust/issues/82509
+    where
+        [(); UInt::<M, C>::N_OPRAND_CELLS]:,
+    {
+        let mut borrow = false;
+        let mut ret = [F::ZERO; UInt::<M, C>::N_CARRY_CELLS];
+        for (i, (a, b)) in UInt::<M, C>::u256_to_limbs(minuend)
+            .iter()
+            .zip(UInt::<M, C>::u256_to_limbs(subtrahend).iter())
+            .enumerate()
+        {
+            // If a - borrow (from previous limb) < b, then should borrow in this limb
+            borrow = b + if borrow { 1 } else { 0 } > *a;
+            ret[i] = if borrow { F::ONE } else { F::ZERO };
+        }
+        ret
     }
 
     /// Little-endian addition. Assume users to check the correct range of the

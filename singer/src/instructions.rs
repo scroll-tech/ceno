@@ -7,14 +7,10 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use simple_frontend::structs::WitnessId;
 
-use singer_utils::{chips::SingerChipBuilder, structs::ChipChallenges};
+use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType, structs::ChipChallenges};
 use strum_macros::EnumIter;
 
 use crate::{error::ZKVMError, CircuitWiresIn, SingerParams};
-
-use crate::{constants::OpcodeType, error::ZKVMError, CircuitWiresIn};
-
-use crate::{chips::SingerChipBuilder, SingerParams};
 
 use self::{
     add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
@@ -105,20 +101,20 @@ pub(crate) fn construct_inst_graph_and_witness<F: SmallField>(
     params: &SingerParams,
 ) -> Result<Option<NodeOutputType>, ZKVMError> {
     let construct_circuit_graph = match OpcodeType::from_u8(opcode) {
-        Some(OpcodeType::ADD) => AddInstruction::construct_circuit_graph,
-        Some(OpcodeType::GT) => GtInstruction::construct_circuit_graph,
-        Some(OpcodeType::CALLDATALOAD) => CalldataloadInstruction::construct_circuit_graph,
-        Some(OpcodeType::POP) => PopInstruction::construct_circuit_graph,
-        Some(OpcodeType::MSTORE) => MstoreInstruction::construct_circuit_graph,
-        Some(OpcodeType::JUMP) => JumpInstruction::construct_circuit_graph,
-        Some(OpcodeType::JUMPI) => JumpiInstruction::construct_circuit_graph,
-        Some(OpcodeType::JUMPDEST) => JumpdestInstruction::construct_circuit_graph,
-        Some(OpcodeType::PUSH1) => PushInstruction::<1>::construct_circuit_graph,
-        Some(OpcodeType::DUP1) => DupInstruction::<1>::construct_circuit_graph,
-        Some(OpcodeType::DUP2) => DupInstruction::<2>::construct_circuit_graph,
-        Some(OpcodeType::SWAP2) => SwapInstruction::<2>::construct_circuit_graph,
-        Some(OpcodeType::SWAP4) => SwapInstruction::<4>::construct_circuit_graph,
-        Some(OpcodeType::RETURN) => ReturnInstruction::construct_circuit_graph,
+        Some(OpcodeType::ADD) => AddInstruction::construct_graph,
+        Some(OpcodeType::GT) => GtInstruction::construct_graph,
+        Some(OpcodeType::CALLDATALOAD) => CalldataloadInstruction::construct_graph,
+        Some(OpcodeType::POP) => PopInstruction::construct_graph,
+        Some(OpcodeType::MSTORE) => MstoreInstruction::construct_graph,
+        Some(OpcodeType::JUMP) => JumpInstruction::construct_graph,
+        Some(OpcodeType::JUMPI) => JumpiInstruction::construct_graph,
+        Some(OpcodeType::JUMPDEST) => JumpdestInstruction::construct_graph,
+        Some(OpcodeType::PUSH1) => PushInstruction::<1>::construct_graph,
+        Some(OpcodeType::DUP1) => DupInstruction::<1>::construct_graph,
+        Some(OpcodeType::DUP2) => DupInstruction::<2>::construct_graph,
+        Some(OpcodeType::SWAP2) => SwapInstruction::<2>::construct_graph,
+        Some(OpcodeType::SWAP4) => SwapInstruction::<4>::construct_graph,
+        Some(OpcodeType::RETURN) => ReturnInstruction::construct_graph,
         _ => unimplemented!(),
     };
 
@@ -126,8 +122,6 @@ pub(crate) fn construct_inst_graph_and_witness<F: SmallField>(
         graph_builder,
         chip_builder,
         inst_circuits,
-        sources,
-        real_challenges,
         real_n_instances,
         params,
     )

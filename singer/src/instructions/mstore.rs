@@ -1,13 +1,12 @@
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 
 use itertools::Itertools;
+use paste::paste;
 use revm_interpreter::Record;
 use revm_primitives::U256;
-
-use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
@@ -16,31 +15,22 @@ use singer_utils::{
     },
     chips::SingerChipBuilder,
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
+    copy_memory_ts_add_from_record, copy_memory_ts_from_record, copy_memory_ts_lt_from_record,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::{UIntAddSub, UIntCmp},
 };
+use singer_utils::{
+    copy_carry_values_from_addends, copy_clock_from_record, copy_operand_from_record,
+    copy_operand_timestamp_from_record, copy_pc_add_from_record, copy_pc_from_record,
+    copy_range_values_from_u256, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
+    copy_stack_ts_add_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
+};
 use std::{mem, sync::Arc};
 
-use crate::utils::uint::{u256_to_fvec, u2fvec};
-use crate::{
-    constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
-    error::ZKVMError,
-    instructions::InstCircuitLayout,
-    utils::{
-        add_assign_each_cell,
-        chip_handler::{
-            BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, MemoryChipOperations,
-            RangeChipOperations, StackChipOperations,
-        },
-        uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
-    },
-    CircuitWiresIn, SingerParams,
-};
-use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
+use crate::{error::ZKVMError, CircuitWiresIn, SingerParams};
 
-use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
-
+use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 pub struct MstoreInstruction;
 
 impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
@@ -304,7 +294,7 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = vec![F::ZERO; Self::phase0_size()];
         copy_pc_from_record!(wire_values, record);
         copy_stack_ts_from_record!(wire_values, record);
@@ -357,7 +347,9 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
         //     record.operands[2]
         // ));
 
-        vec![vec![wire_values]]
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }
 
@@ -374,11 +366,8 @@ register_witness!(
     },
     phase0 {
         old_memory_ts => TSUInt::N_OPRAND_CELLS,
-<<<<<<< HEAD
-        old_memory_ts_lt =>  UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-=======
+
         old_memory_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
->>>>>>> origin/singe-add-interpreter
 
         offset_add_delta => UIntAddSub::<StackUInt>::N_WITNESS_CELLS,
         prev_mem_bytes => 1
@@ -451,7 +440,7 @@ impl<F: SmallField> Instruction<F> for MstoreAccessory {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
         let old_memory_value = record.operands[2];
         let old_value_bytes: [u8; EVM_STACK_BYTE_WIDTH] = old_memory_value.to_le_bytes();
         // This circuit will be repeated EVM_STACK_BYTE_WIDTH times for every mstore. So prepare these
@@ -484,6 +473,12 @@ impl<F: SmallField> Instruction<F> for MstoreAccessory {
 
         // The first two empty vectors are for the first two wires in that are passed from the previous
         // circuit. We don't need to prepare their values here, so leave them empty.
-        vec![Vec::new(), Vec::new(), wire_values]
+        vec![
+            LayerWitness { instances: vec![] },
+            LayerWitness { instances: vec![] },
+            LayerWitness {
+                instances: wire_values,
+            },
+        ]
     }
 }

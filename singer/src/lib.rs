@@ -54,22 +54,20 @@
 //!  5. Generate a PCS proof for this statement.
 #![feature(generic_const_exprs)]
 
-use chips::LookupChipType;
-use chips::SingerChipBuilder;
-use constants::OpcodeType;
 use error::ZKVMError;
 use gkr::structs::LayerWitness;
 use gkr_graph::structs::{
     CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
 };
 use goldilocks::SmallField;
+use singer_utils::chips::LookupChipType;
+use singer_utils::chips::SingerChipBuilder;
+use singer_utils::constants::OpcodeType;
 
-use instructions::construct_inst_circuit_graph;
 use instructions::construct_instruction_circuits;
 use instructions::ret::ReturnPublicOutLoad;
 use instructions::ret::ReturnRestMemLoad;
 use instructions::ret::ReturnRestMemStore;
-use instructions::ChipChallenges;
 use instructions::InstCircuit;
 use instructions::InstOutputType;
 use instructions::Instruction;
@@ -79,22 +77,19 @@ use instructions::{
     jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
     ret::ReturnInstruction, swap::SwapInstruction,
 };
-use instructions::{
-    construct_inst_graph, construct_inst_graph_and_witness, InstOutputType, SingerCircuitBuilder,
-};
+use instructions::{construct_inst_graph, construct_inst_graph_and_witness};
 use num_traits::FromPrimitive;
 use rand::RngCore;
 use revm_interpreter::{Interpreter, Record};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use singer_utils::chips::SingerChipBuilder;
+use singer_utils::structs::ChipChallenges;
 use std::collections::HashMap;
 use std::mem;
 
 pub mod error;
 pub mod instructions;
 pub mod scheme;
-pub mod utils;
 
 // Process sketch:
 // 1. Construct instruction circuits and circuit gadgets => circuit gadgets
@@ -162,7 +157,9 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
                     assert_eq!(wires_in.len(), to_add.len()); // The number of wires in should match
                     wires_in.iter_mut().zip(to_add).for_each(
                         |(wires_in_instance, to_add_instance)| {
-                            wires_in_instance.extend(to_add_instance);
+                            wires_in_instance
+                                .instances
+                                .extend(to_add_instance.instances);
                         },
                     );
                 });
@@ -328,17 +325,6 @@ pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
 
 pub struct SingerWitness<F: SmallField>(pub CircuitGraphWitness<F>);
 
-/// The structure for storing the input values for an instruction. The values
-/// are stored in a three-dimensional array, where
-/// - the first dimension is indexed by the phase index, so the outmost vector
-///   usually has length only 2, each for one phase;
-/// - the second dimension is indexed by the number of repetitions this opcode appears
-///   during the execution;
-/// - the last dimension is indexed by the offsets of the input wire values for this opcode,
-///   in another word, the innermost vector is the input for this opcode for a particular
-///   execution
-pub(crate) type CircuitWiresIn<F> = Vec<Vec<Vec<F>>>;
-
 fn circuit_wires_in_from_record<F: SmallField>(record: &Record) -> Vec<CircuitWiresIn<F>> {
     match OpcodeType::from_u8(record.opcode) {
         Some(OpcodeType::ADD) => vec![AddInstruction::generate_wires_in(record)],
@@ -431,6 +417,15 @@ pub struct SingerAuxInfo {
     pub program_output_len: usize,
 }
 
+/// The structure for storing the input values for an instruction. The values
+/// are stored in a three-dimensional array, where
+/// - the first dimension is indexed by the phase index, so the outmost vector
+///   usually has length only 2, each for one phase;
+/// - the second dimension is indexed by the number of repetitions this opcode appears
+///   during the execution;
+/// - the last dimension is indexed by the offsets of the input wire values for this opcode,
+///   in another word, the innermost vector is the input for this opcode for a particular
+///   execution
 // Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
 pub(crate) type CircuitWiresIn<F> = Vec<LayerWitness<F>>;
 

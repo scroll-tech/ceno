@@ -1,39 +1,36 @@
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
 use revm_interpreter::Record;
 
-use crate::instructions::InstCircuitLayout;
-use crate::{constants::OpcodeType, error::ZKVMError};
-use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
-
 use super::InstructionGraph;
-use crate::utils::uint::u2fvec;
-use crate::utils::{
-    chip_handler::{
-        BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
-        StackChipOperations,
-    },
-    uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
+use crate::instructions::InstCircuitLayout;
+
+use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
+use singer_utils::{
+    copy_carry_values_from_addends, copy_clock_from_record, copy_operand_from_record,
+    copy_operand_timestamp_from_record, copy_pc_add_from_record, copy_pc_from_record,
+    copy_range_values_from_u256, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
+    copy_stack_ts_add_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
 };
 
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RangeChipOperations, StackChipOperations,
+        BytecodeChipOperations, CalldataChipOperations, GlobalStateChipOperations, OAMOperations,
+        ROMOperations, RangeChipOperations, StackChipOperations,
     },
     constants::OpcodeType,
     register_witness,
-    structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt, UInt64},
     uint::{UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 
 use crate::error::ZKVMError;
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction};
 
 pub struct DupInstruction<const N: usize>;
 
@@ -167,7 +164,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for DupInstruction<N> {
         })
     }
 
-    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = vec![F::ZERO; Self::phase0_size()];
         copy_pc_from_record!(wire_values, record);
         copy_stack_ts_from_record!(wire_values, record);
@@ -176,6 +173,9 @@ impl<F: SmallField, const N: usize> Instruction<F> for DupInstruction<N> {
         copy_pc_add_from_record!(wire_values, record);
         copy_stack_ts_add_from_record!(wire_values, record);
         copy_stack_ts_lt_from_record!(wire_values, record);
-        vec![vec![wire_values]]
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }
