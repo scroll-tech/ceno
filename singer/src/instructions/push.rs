@@ -22,9 +22,6 @@ use singer_utils::{
 };
 use std::sync::Arc;
 
-<<<<<<< HEAD
-use crate::error::ZKVMError;
-=======
 use crate::CircuitWiresIn;
 use crate::{
     constants::OpcodeType,
@@ -37,7 +34,6 @@ use crate::{
         uint::{PCUInt, StackUInt, TSUInt, UIntAddSub},
     },
 };
->>>>>>> origin/singe-add-interpreter
 
 use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 

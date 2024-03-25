@@ -16,6 +16,7 @@ use crate::utils::{
     uint::{PCUInt, StackUInt, TSUInt, UInt64, UIntAddSub, UIntCmp},
 };
 
+use crate::error::ZKVMError;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -30,13 +31,7 @@ use singer_utils::{
 };
 use std::sync::Arc;
 
-<<<<<<< HEAD
-use crate::error::ZKVMError;
-
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
-=======
-use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
->>>>>>> origin/singe-add-interpreter
 
 impl<F: SmallField> InstructionGraph<F> for CalldataloadInstruction {
     type InstType = Self;

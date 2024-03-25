@@ -31,13 +31,9 @@ use singer_utils::{
 };
 use std::sync::Arc;
 
-<<<<<<< HEAD
 use crate::error::ZKVMError;
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
-=======
-use super::{ChipChallenges, InstCircuit, Instruction};
->>>>>>> origin/singe-add-interpreter
 
 pub struct AddInstruction;
 
