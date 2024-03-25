@@ -6,7 +6,7 @@ use goldilocks::SmallField;
 use revm_interpreter::Record;
 use revm_primitives::U256;
 use singer_utils::{
-    copy_borrow_values_from_oprands, copy_carry_values_from_addends, copy_clock_from_record,
+    copy_borrow_values_from_oprands, copy_clock_from_record,
     copy_operand_from_record, copy_operand_timestamp_from_record, copy_pc_add_from_record,
     copy_pc_from_record, copy_range_values_from_u256, copy_stack_memory_ts_add_from_record,
     copy_stack_top_from_record, copy_stack_ts_add_from_record, copy_stack_ts_from_record,

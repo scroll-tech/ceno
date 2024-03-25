@@ -12,7 +12,7 @@ use singer_utils::{
 use super::InstructionGraph;
 use crate::error::ZKVMError;
 use crate::instructions::InstCircuitLayout;
-use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
+use crate::{CircuitWiresIn};
 use singer_utils::uint::u2fvec;
 use singer_utils::{
     chip_handler::{

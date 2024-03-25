@@ -95,8 +95,8 @@ pub(crate) fn construct_inst_graph_and_witness<F: SmallField>(
     graph_builder: &mut CircuitGraphBuilder<F>,
     chip_builder: &mut SingerChipBuilder<F>,
     inst_circuits: &[InstCircuit<F>],
-    sources: Vec<CircuitWiresIn<F::BaseField>>,
-    real_challenges: &[F],
+    _sources: Vec<CircuitWiresIn<F::BaseField>>,
+    _real_challenges: &[F],
     real_n_instances: usize,
     params: &SingerParams,
 ) -> Result<Option<NodeOutputType>, ZKVMError> {

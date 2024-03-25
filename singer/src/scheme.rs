@@ -1,5 +1,5 @@
 use goldilocks::SmallField;
-use mpcs::{util::hash::Digest, Basefold, BasefoldCommitment, BasefoldDefaultParams, PCSProof};
+use mpcs::{BasefoldCommitment, PCSProof};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::SingerWiresOutValues;

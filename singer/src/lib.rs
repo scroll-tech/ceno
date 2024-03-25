@@ -60,7 +60,7 @@ use gkr_graph::structs::{
     CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
 };
 use goldilocks::SmallField;
-use singer_utils::chips::LookupChipType;
+
 use singer_utils::chips::SingerChipBuilder;
 use singer_utils::constants::OpcodeType;
 

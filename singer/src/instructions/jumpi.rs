@@ -19,10 +19,8 @@ use std::sync::Arc;
 use crate::error::ZKVMError;
 use revm_interpreter::Record;
 use singer_utils::{
-    copy_carry_values_from_addends, copy_clock_from_record, copy_operand_from_record,
-    copy_operand_timestamp_from_record, copy_pc_add_from_record, copy_pc_from_record,
-    copy_range_values_from_u256, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
-    copy_stack_ts_add_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
+    copy_clock_from_record, copy_operand_from_record,
+    copy_operand_timestamp_from_record, copy_pc_add_from_record, copy_pc_from_record, copy_stack_top_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
 };
 
 use super::InstructionGraph;
