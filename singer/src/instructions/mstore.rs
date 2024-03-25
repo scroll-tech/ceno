@@ -22,7 +22,6 @@ use singer_utils::{
 };
 use std::{mem, sync::Arc};
 
-use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 use crate::utils::uint::{u256_to_fvec, u2fvec};
 use crate::{
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
@@ -38,6 +37,7 @@ use crate::{
     },
     CircuitWiresIn, SingerParams,
 };
+use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 
 use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
@@ -106,7 +106,6 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
             &mstore_acc_circuit.layout.chip_check_wire_id,
             real_challenges,
             real_n_instances * EVM_STACK_BYTE_WIDTH,
-<<<<<<< HEAD
         )?;
         Ok(None)
     }
@@ -153,8 +152,6 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
             mstore_acc_node_id,
             &mstore_acc_circuit.layout.chip_check_wire_id,
             real_n_instances * EVM_STACK_BYTE_WIDTH,
-=======
->>>>>>> origin/singe-add-interpreter
         )?;
         Ok(None)
     }
