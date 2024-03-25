@@ -2,8 +2,7 @@ use ark_std::rand::SeedableRng;
 use goldilocks::Goldilocks;
 use itertools::Itertools;
 use mpcs::{
-    pcs_setup, pcs_trim, Basefold, BasefoldDefault, BasefoldDefaultParams, BasefoldParams,
-    PolynomialCommitmentScheme,
+    pcs_setup, pcs_trim, BasefoldDefault, BasefoldParams,
 };
 use rand_chacha::ChaCha8Rng;
 use singer::{
