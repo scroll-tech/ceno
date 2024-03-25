@@ -25,10 +25,10 @@ use singer_utils::{
     copy_stack_ts_add_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
 };
 
+use super::InstructionGraph;
 use crate::instructions::InstCircuitLayout;
 use crate::CircuitWiresIn;
-
-use super::InstructionGraph;
+use singer_utils::uint::u2fvec;
 
 use super::{ChipChallenges, InstCircuit, Instruction};
 

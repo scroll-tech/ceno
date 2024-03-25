@@ -17,6 +17,7 @@ use super::InstructionGraph;
 
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::u2fvec;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,

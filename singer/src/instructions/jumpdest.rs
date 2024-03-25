@@ -14,8 +14,10 @@ use singer_utils::{
 use super::InstructionGraph;
 use super::{ChipChallenges, InstCircuit, Instruction};
 
+use crate::error::ZKVMError;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::u2fvec;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -26,8 +28,6 @@ use singer_utils::{
     uint::UIntAddSub,
 };
 use std::sync::Arc;
-
-use crate::error::ZKVMError;
 
 pub struct JumpdestInstruction;
 

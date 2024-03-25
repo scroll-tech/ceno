@@ -2,12 +2,12 @@ use ff::Field;
 use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
-
 use itertools::Itertools;
 use paste::paste;
 use revm_interpreter::Record;
 use revm_primitives::U256;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::u2fvec;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, MemoryChipOperations, OAMOperations,
@@ -18,7 +18,7 @@ use singer_utils::{
     copy_memory_ts_add_from_record, copy_memory_ts_from_record, copy_memory_ts_lt_from_record,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
+    uint::{u256_to_fvec, UIntAddSub, UIntCmp},
 };
 use singer_utils::{
     copy_carry_values_from_addends, copy_clock_from_record, copy_operand_from_record,
@@ -28,7 +28,7 @@ use singer_utils::{
 };
 use std::{mem, sync::Arc};
 
-use crate::{error::ZKVMError, CircuitWiresIn, SingerParams};
+use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 pub struct MstoreInstruction;

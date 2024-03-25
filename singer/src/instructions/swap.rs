@@ -1,21 +1,13 @@
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
-
 use revm_interpreter::Record;
+use singer_utils::uint::u2fvec;
 
 use super::InstructionGraph;
 use crate::instructions::InstCircuitLayout;
-use crate::utils::uint::u2fvec;
-use crate::utils::{
-    chip_handler::{
-        BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
-        StackChipOperations,
-    },
-    uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
-};
+
 use crate::CircuitWiresIn;
-use crate::{constants::OpcodeType, error::ZKVMError};
 use singer_utils::{
     copy_carry_values_from_addends, copy_clock_from_record, copy_operand_from_record,
     copy_operand_timestamp_from_record, copy_pc_add_from_record, copy_pc_from_record,
@@ -39,7 +31,7 @@ use std::sync::Arc;
 
 use crate::error::ZKVMError;
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction};
 pub struct SwapInstruction<const N: usize>;
 
 impl<F: SmallField, const N: usize> InstructionGraph<F> for SwapInstruction<N> {

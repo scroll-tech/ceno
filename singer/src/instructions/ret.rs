@@ -1,9 +1,13 @@
-use crate::{error::ZKVMError, CircuitWiresIn, SingerParams};
+use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
+use itertools::Itertools;
+use revm_interpreter::Record;
+use revm_primitives::U256;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::u2fvec;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -11,7 +15,7 @@ use singer_utils::{
     },
     chips::SingerChipBuilder,
     constants::OpcodeType,
-    register_witness,
+    copy_memory_ts_from_record, register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::UIntAddSub,
 };
@@ -22,10 +26,6 @@ use singer_utils::{
     copy_stack_ts_add_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
 };
 use std::{mem, sync::Arc};
-
-use itertools::Itertools;
-use revm_interpreter::Record;
-use revm_primitives::U256;
 
 use crate::instructions::InstCircuitLayout;
 
@@ -479,9 +479,17 @@ impl<F: SmallField> Instruction<F> for ReturnPublicOutLoad {
             );
         }
 
-        vec![LayerWitness {
-            instances: vec![Vec::new(), public_io_values, phase0_wire_values],
-        }]
+        vec![
+            LayerWitness {
+                instances: vec![Vec::new()],
+            },
+            LayerWitness {
+                instances: public_io_values,
+            },
+            LayerWitness {
+                instances: phase0_wire_values,
+            },
+        ]
     }
 }
 
@@ -540,7 +548,7 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemLoad {
         }
 
         vec![LayerWitness {
-            instances: vec![wire_values],
+            instances: wire_values,
         }]
     }
 }
@@ -594,7 +602,7 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemStore {
         }
 
         vec![LayerWitness {
-            instances: vec![wire_values],
+            instances: wire_values,
         }]
     }
 }
@@ -657,7 +665,7 @@ impl<F: SmallField> Instruction<F> for ReturnRestStackPop {
         }
 
         vec![LayerWitness {
-            instances: vec![wire_values],
+            instances: wire_values,
         }]
     }
 }

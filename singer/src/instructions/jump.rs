@@ -16,6 +16,7 @@ use super::{ChipChallenges, InstCircuit, InstOutputType, Instruction};
 
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::u2fvec;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -24,7 +25,7 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
-    uint::UIntCmp,
+    uint::{UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 

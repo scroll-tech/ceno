@@ -21,7 +21,7 @@ pub fn u2fvec<F: SmallField, const W: usize, const C: usize>(x: u64) -> [F; W] {
     ret
 }
 
-pub(crate) fn u256_to_fvec<F: SmallField, const W: usize, const C: usize>(x: U256) -> [F; W] {
+pub fn u256_to_fvec<F: SmallField, const W: usize, const C: usize>(x: U256) -> [F; W] {
     let mut x = x;
     let mut ret = [F::ZERO; W];
     for i in 0..ret.len() {
@@ -33,7 +33,7 @@ pub(crate) fn u256_to_fvec<F: SmallField, const W: usize, const C: usize>(x: U25
     ret
 }
 
-pub(crate) fn u256_to_vec<const W: usize, const C: usize>(x: U256) -> [u64; W] {
+pub fn u256_to_vec<const W: usize, const C: usize>(x: U256) -> [u64; W] {
     let mut x = x;
     let mut ret = [0; W];
     for i in 0..ret.len() {
@@ -45,7 +45,7 @@ pub(crate) fn u256_to_vec<const W: usize, const C: usize>(x: U256) -> [u64; W] {
     ret
 }
 
-pub(crate) fn u2vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
+pub fn u2vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
     let mut x = x;
     let mut ret = [0; W];
     for i in 0..ret.len() {
@@ -55,15 +55,15 @@ pub(crate) fn u2vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
     ret
 }
 
-pub(crate) fn u2range_limbs<const W: usize>(x: u64) -> [u64; W] {
+pub fn u2range_limbs<const W: usize>(x: u64) -> [u64; W] {
     u2vec::<W, RANGE_CHIP_BIT_WIDTH>(x)
 }
 
-pub(crate) fn u2range_field_limbs<F: SmallField, const W: usize>(x: u64) -> [F; W] {
+pub fn u2range_field_limbs<F: SmallField, const W: usize>(x: u64) -> [F; W] {
     u2fvec::<F, W, RANGE_CHIP_BIT_WIDTH>(x)
 }
 
-pub(crate) fn u256_to_range_field_limbs<F: SmallField, const W: usize>(x: U256) -> [F; W] {
+pub fn u256_to_range_field_limbs<F: SmallField, const W: usize>(x: U256) -> [F; W] {
     u256_to_fvec::<F, W, RANGE_CHIP_BIT_WIDTH>(x)
 }
 

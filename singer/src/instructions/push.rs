@@ -1,9 +1,9 @@
 use ff::Field;
 use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
-
 use itertools::Itertools;
 use revm_interpreter::Record;
+use singer_utils::uint::u2fvec;
 
 use crate::{error::ZKVMError, instructions::InstCircuitLayout};
 use paste::paste;
