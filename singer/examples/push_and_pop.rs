@@ -29,7 +29,16 @@ fn main() {
     let real_challenges = vec![];
     let singer_params = SingerParams::default();
 
-    let (vp, proof, singer_aux_info) = {
+    let (pp, vp) = {
+        let rng = ChaCha8Rng::from_seed([0u8; 32]);
+        let poly_size = 1 << 15; // Temporarily set to 15. Modify it to appropriate size later.
+        let param: BasefoldParams<Goldilocks, ChaCha8Rng> =
+            pcs_setup::<Goldilocks, Goldilocks, BasefoldDefault<Goldilocks>>(poly_size, &rng)
+                .unwrap();
+        pcs_trim::<Goldilocks, Goldilocks, BasefoldDefault<Goldilocks>>(&param).unwrap()
+    };
+
+    let (proof, singer_aux_info) = {
         let real_n_instances = singer_wires_in
             .instructions
             .iter()
@@ -46,15 +55,6 @@ fn main() {
             )
             .expect("construct failed");
 
-        let (pp, vp) = {
-            let rng = ChaCha8Rng::from_seed([0u8; 32]);
-            let poly_size = 1 << 15; // Temporarily set to 15. Modify it to appropriate size later.
-            let param: BasefoldParams<Goldilocks, ChaCha8Rng> =
-                pcs_setup::<Goldilocks, Goldilocks, BasefoldDefault<Goldilocks>>(poly_size, &rng)
-                    .unwrap();
-            pcs_trim::<Goldilocks, Goldilocks, BasefoldDefault<Goldilocks>>(&param).unwrap()
-        };
-
         let (proof, graph_aux_info) = prove(
             &pp,
             &circuit,
@@ -70,7 +70,7 @@ fn main() {
             bytecode_len: bytecode.len(),
             ..Default::default()
         };
-        (vp, proof, aux_info)
+        (proof, aux_info)
     };
 
     // 4. Verify.
