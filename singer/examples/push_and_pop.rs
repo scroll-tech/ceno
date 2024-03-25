@@ -7,9 +7,8 @@ use mpcs::{
 };
 use rand_chacha::ChaCha8Rng;
 use singer::{
-    instructions::SingerCircuitBuilder,
     scheme::{prover::prove, verifier::verify},
-    SingerAuxInfo, SingerGraphBuilder, SingerParams, SingerWiresIn,
+    SingerAuxInfo, SingerCircuitBuilder, SingerGraphBuilder, SingerParams, SingerWiresIn,
 };
 use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;
