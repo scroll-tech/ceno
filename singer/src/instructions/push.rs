@@ -1,6 +1,13 @@
 use ff::Field;
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
+
+use itertools::Itertools;
+use revm_interpreter::Record;
+
+use crate::instructions::InstCircuitLayout;
+use crate::utils::uint::u2fvec;
+
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -15,9 +22,24 @@ use singer_utils::{
 };
 use std::sync::Arc;
 
+<<<<<<< HEAD
 use crate::error::ZKVMError;
+=======
+use crate::CircuitWiresIn;
+use crate::{
+    constants::OpcodeType,
+    error::ZKVMError,
+    utils::{
+        chip_handler::{
+            BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
+            StackChipOperations,
+        },
+        uint::{PCUInt, StackUInt, TSUInt, UIntAddSub},
+    },
+};
+>>>>>>> origin/singe-add-interpreter
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
 pub struct PushInstruction<const N: usize>;
 
@@ -135,5 +157,24 @@ impl<F: SmallField, const N: usize> Instruction<F> for PushInstruction<N> {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        for offset in 1..=N {
+            copy_pc_add_from_record!(wire_values, record, phase0_pc_add_i_plus_1, offset as u64);
+        }
+        copy_stack_ts_add_from_record!(wire_values, record);
+        wire_values[Self::phase0_stack_bytes()].copy_from_slice(
+            (0..N)
+                .map(|index| F::from(record.operands[index].as_limbs()[0]))
+                .collect_vec()
+                .as_slice(),
+        );
+        vec![vec![wire_values]]
     }
 }

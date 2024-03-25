@@ -1,6 +1,21 @@
 use ff::Field;
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
+use revm_interpreter::Record;
+
+use crate::instructions::InstCircuitLayout;
+use crate::{constants::OpcodeType, error::ZKVMError};
+use crate::{CircuitWiresIn, PrepareSingerWiresIn, SingerWiresIn};
+
+use crate::utils::uint::u2fvec;
+use crate::utils::{
+    chip_handler::{
+        BytecodeChipOperations, CalldataChip, ChipHandler, GlobalStateChipOperations,
+        RangeChipOperations, StackChipOperations,
+    },
+    uint::{PCUInt, StackUInt, TSUInt, UInt64, UIntAddSub, UIntCmp},
+};
+
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -15,9 +30,13 @@ use singer_utils::{
 };
 use std::sync::Arc;
 
+<<<<<<< HEAD
 use crate::error::ZKVMError;
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+=======
+use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
+>>>>>>> origin/singe-add-interpreter
 
 impl<F: SmallField> InstructionGraph<F> for CalldataloadInstruction {
     type InstType = Self;
@@ -143,5 +162,21 @@ impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_pc_add_from_record!(wire_values, record);
+        copy_stack_ts_add_from_record!(wire_values, record);
+
+        // The operand offset is assumed to be 64 bit, although stored in a U256
+        copy_operand_u64_from_record!(wire_values, record, phase0_offset, 0);
+        copy_stack_ts_lt_from_record!(wire_values, record);
+
+        vec![vec![wire_values]]
     }
 }

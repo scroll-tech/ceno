@@ -1,6 +1,23 @@
 use ff::Field;
 use gkr::structs::Circuit;
 use goldilocks::SmallField;
+
+use revm_interpreter::Record;
+
+use crate::instructions::InstCircuitLayout;
+use crate::utils::uint::u2fvec;
+use crate::CircuitWiresIn;
+use crate::{constants::OpcodeType, error::ZKVMError};
+
+use super::InstructionGraph;
+use crate::utils::{
+    chip_handler::{
+        BytecodeChipOperations, ChipHandler, GlobalStateChipOperations, RangeChipOperations,
+        StackChipOperations,
+    },
+    uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
+};
+
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -118,5 +135,17 @@ impl<F: SmallField> Instruction<F> for PopInstruction {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_pc_add_from_record!(wire_values, record);
+        copy_stack_ts_lt_from_record!(wire_values, record);
+        copy_operand_from_record!(wire_values, record, phase0_stack_values, 0);
+        vec![vec![wire_values]]
     }
 }

@@ -18,7 +18,27 @@ use std::sync::Arc;
 
 use crate::error::ZKVMError;
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use crate::utils::uint::u2fvec;
+use gkr::structs::Circuit;
+use goldilocks::SmallField;
+use revm_interpreter::Record;
+use simple_frontend::structs::{CircuitBuilder, MixedCell};
+
+use crate::instructions::InstCircuitLayout;
+use crate::CircuitWiresIn;
+use crate::{constants::OpcodeType, error::ZKVMError};
+
+use super::InstructionGraph;
+use crate::utils::{
+    chip_handler::ChipHandler,
+    uint::{PCUInt, StackUInt, TSUInt, UIntAddSub, UIntCmp},
+};
+
+use crate::utils::chip_handler::{
+    BytecodeChipOperations, GlobalStateChipOperations, RangeChipOperations, StackChipOperations,
+};
+
+use super::{ChipChallenges, InstCircuit, Instruction};
 
 pub struct JumpiInstruction;
 
@@ -185,5 +205,34 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_stack_ts_lt_from_record!(
+            wire_values,
+            record,
+            phase0_old_stack_ts_dest,
+            phase0_old_stack_ts_dest_lt,
+            0
+        );
+        copy_stack_ts_lt_from_record!(
+            wire_values,
+            record,
+            phase0_old_stack_ts_cond,
+            phase0_old_stack_ts_cond_lt,
+            1
+        );
+        copy_operand_from_record!(wire_values, record, phase0_cond_values, 0);
+        // TODO: cond values inv and cond_nonzero_or_inv
+        copy_pc_add_from_record!(wire_values, record);
+        // Although the pc_plus_1_opcode is not strictly speaking an operand,
+        // it is passed from the interpreter in the operands array.
+        copy_operand_single_cell_from_record!(wire_values, record, phase0_pc_plus_1_opcode, 2);
+        vec![vec![wire_values]]
     }
 }
