@@ -94,3 +94,77 @@ impl<F: SmallField> Instruction<F> for JumpdestInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::instructions::{ChipChallenges, Instruction, JumpdestInstruction};
+    use crate::test::test_opcode_circuit;
+    use goldilocks::Goldilocks;
+    use simple_frontend::structs::CellId;
+
+    impl JumpdestInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("phase0_pc".to_string(), Self::phase0_pc());
+            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
+            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
+            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
+            map.insert("phase0_clk".to_string(), Self::phase0_clk());
+            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_jumpdest_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = JumpdestInstruction::phase0_idxes_map();
+        let phase0_witness_size = JumpdestInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("JUMPDEST {:?}", &phase0_idx_map);
+            println!("JUMPDEST witness_size = {:?}", phase0_witness_size);
+        }
+
+        // initialize general test inputs associated with push1
+        let inst_circuit = JumpdestInstruction::construct_circuit(challenges).unwrap();
+
+        #[cfg(feature = "test-dbg")]
+        println!("{:?}", inst_circuit);
+
+        let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
+        phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_stack_top".to_string(),
+            vec![Goldilocks::from(100u64)],
+        );
+        phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_pc_add".to_string(),
+            vec![], // carry is 0, may test carry using larger values in PCUInt
+        );
+
+        let circuit_witness_challenges = vec![
+            Goldilocks::from(2),
+            Goldilocks::from(2),
+            Goldilocks::from(2),
+        ];
+
+        let _circuit_witness = test_opcode_circuit(
+            &inst_circuit,
+            &phase0_idx_map,
+            phase0_witness_size,
+            &phase0_values_map,
+            circuit_witness_challenges,
+        );
+    }
+}

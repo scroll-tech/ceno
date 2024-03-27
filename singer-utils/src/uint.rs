@@ -63,11 +63,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         circuit_builder: &mut CircuitBuilder<F>,
         bytes: &[CellId],
     ) -> Result<Self, UtilError> {
-        if C <= M {
-            convert_decomp(circuit_builder, bytes, 8, C, true).try_into()
+        let mut values = if C <= M {
+            convert_decomp(circuit_builder, bytes, 8, C, true)
         } else {
-            convert_decomp(circuit_builder, bytes, 8, M, true).try_into()
+            convert_decomp(circuit_builder, bytes, 8, M, true)
+        };
+        while values.len() < Self::N_OPRAND_CELLS {
+            values.push(circuit_builder.create_cell());
         }
+        Self::try_from(values)
     }
 
     pub fn assert_eq<F: SmallField>(&self, circuit_builder: &mut CircuitBuilder<F>, other: &Self) {
