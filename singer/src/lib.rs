@@ -121,10 +121,7 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
         })
     }
 
-    pub fn execute<EF: SmallField<BaseField = F>, Rng: RngCore + Clone>(
-        bytecode: &[u8],
-        input: &[u8],
-    ) -> SingerWiresIn<F>
+    pub fn execute<EF: SmallField<BaseField = F>>(bytecode: &[u8], input: &[u8]) -> SingerWiresIn<F>
     where
         F: SmallField<BaseField = F> + Serialize + DeserializeOwned + Into<EF>,
         EF: Serialize + DeserializeOwned + TryInto<F>,
@@ -352,12 +349,6 @@ fn circuit_wires_in_from_record<F: SmallField>(record: &Record) -> Vec<CircuitWi
         None => panic!("Unsupported opcode: {}", record.opcode),
         _ => unimplemented!(),
     }
-}
-
-/// The information used to generate the wires in values once the challenge
-/// is ready.
-pub struct PrepareSingerWiresIn<F: SmallField> {
-    opcode_wires_in: Vec<(u8, Vec<CircuitWiresIn<F>>)>,
 }
 
 #[derive(Clone, Debug, Default)]

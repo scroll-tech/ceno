@@ -1,9 +1,7 @@
 use ark_std::rand::SeedableRng;
 use goldilocks::Goldilocks;
 use itertools::Itertools;
-use mpcs::{
-    pcs_setup, pcs_trim, BasefoldDefault, BasefoldParams,
-};
+use mpcs::{pcs_setup, pcs_trim, BasefoldDefault, BasefoldParams};
 use rand_chacha::ChaCha8Rng;
 use singer::{
     scheme::{prover::prove, verifier::verify},
@@ -19,11 +17,12 @@ fn main() {
     let singer_builder = SingerGraphBuilder::<Goldilocks>::new();
 
     let bytecode = [0x60 as u8, 0x01, 0x50];
-
-    let mut prover_transcript = Transcript::new(b"Singer");
+    let program_input = [];
 
     // TODO: Generate the following items.
-    let singer_wires_in = SingerWiresIn::default();
+    let singer_wires_in = SingerCircuitBuilder::execute::<Goldilocks>(&bytecode, &program_input);
+
+    let mut prover_transcript = Transcript::new(b"Singer");
     let real_challenges = vec![];
     let singer_params = SingerParams::default();
 
@@ -47,7 +46,7 @@ fn main() {
                 &circuit_builder,
                 singer_wires_in,
                 &bytecode,
-                &[],
+                &program_input,
                 &real_challenges,
                 &singer_params,
             )
