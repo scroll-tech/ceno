@@ -3,7 +3,7 @@ use gkr::utils::ceil_log2;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, process::exit};
 
 use crate::{constants::RANGE_CHIP_BIT_WIDTH, error::UtilError, structs::UInt};
 
@@ -14,7 +14,11 @@ impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
     type Error = UtilError;
     fn try_from(values: &[usize]) -> Result<Self, Self::Error> {
         if values.len() != Self::N_OPRAND_CELLS {
-            return Err(UtilError::UIntError);
+            panic!(
+                "expected = {}, got = {}",
+                Self::N_OPRAND_CELLS,
+                values.len()
+            );
         }
         Ok(Self {
             values: values.to_vec(),

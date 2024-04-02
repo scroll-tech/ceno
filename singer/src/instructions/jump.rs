@@ -42,11 +42,9 @@ register_witness!(
     }
 );
 
-impl JumpInstruction {
-    const OPCODE: OpcodeType = OpcodeType::JUMP;
-}
-
 impl<F: SmallField> Instruction<F> for JumpInstruction {
+    const OPCODE: OpcodeType = OpcodeType::JUMP;
+    const NAME: &'static str = "JUMP";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -100,7 +98,11 @@ impl<F: SmallField> Instruction<F> for JumpInstruction {
         );
 
         // Bytecode check for (pc, jump)
-        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
+        rom_handler.bytecode_with_pc_opcode(
+            &mut circuit_builder,
+            pc.values(),
+            <Self as Instruction<F>>::OPCODE,
+        );
         // Bytecode check for (next_pc, jumpdest)
         rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, &next_pc, OpcodeType::JUMPDEST);
 

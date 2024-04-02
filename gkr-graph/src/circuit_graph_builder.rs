@@ -36,6 +36,10 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         num_instances: usize,
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
+        // println!(
+        //     "id: {}, label: {}, num_instances: {}, preds: {:?}",
+        //     id, label, num_instances, preds
+        // );
 
         assert_eq!(preds.len(), circuit.n_witness_in);
         assert!(num_instances.is_power_of_two());

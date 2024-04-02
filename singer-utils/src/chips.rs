@@ -82,7 +82,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
                 preds,
                 &leaf.circuit,
                 inner,
-                vec![],
+                vec![LayerWitness::default(); 2],
                 real_challenges,
                 instance_num_vars,
             )
@@ -91,6 +91,8 @@ impl<F: SmallField> SingerChipBuilder<F> {
         // Set equality argument
         for output_type in [InstOutChipType::RAMLoad, InstOutChipType::RAMStore] {
             if let Some((id, num)) = to_chip_ids[output_type as usize] {
+                println!("output_type: {:?}", output_type);
+                println!("real_n_instances: {:?}", real_n_instances);
                 let out = build(
                     real_n_instances,
                     num,
@@ -104,6 +106,8 @@ impl<F: SmallField> SingerChipBuilder<F> {
 
         // Lookup argument
         for output_type in [InstOutChipType::ROMInput] {
+            println!("output_type: {:?}", output_type);
+            println!("real_n_instances: {:?}", real_n_instances);
             if let Some((id, num)) = to_chip_ids[output_type as usize] {
                 let out = build(
                     real_n_instances,

@@ -276,11 +276,9 @@ register_witness!(
     }
 );
 
-impl ReturnInstruction {
-    const OPCODE: OpcodeType = OpcodeType::RETURN;
-}
-
 impl<F: SmallField> Instruction<F> for ReturnInstruction {
+    const OPCODE: OpcodeType = OpcodeType::RETURN;
+    const NAME: &'static str = "RETURN";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -310,7 +308,7 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         )?;
 
         // Pop offset and mem_size from stack
-        let old_stack_ts0 = StackUInt::try_from(&phase0[Self::phase0_old_stack_ts0()])?;
+        let old_stack_ts0 = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts0()])?;
         let offset = StackUInt::try_from(&phase0[Self::phase0_offset()])?;
         ram_handler.stack_pop(
             &mut circuit_builder,
@@ -319,7 +317,7 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
             offset.values(),
         );
 
-        let old_stack_ts1 = StackUInt::try_from(&phase0[Self::phase0_old_stack_ts1()])?;
+        let old_stack_ts1 = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts1()])?;
         let length = StackUInt::try_from(&phase0[Self::phase0_mem_length()])?;
         ram_handler.stack_pop(
             &mut circuit_builder,
@@ -329,7 +327,11 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         );
 
         // Bytecode check for (pc, ret)
-        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
+        rom_handler.bytecode_with_pc_opcode(
+            &mut circuit_builder,
+            pc.values(),
+            <Self as Instruction<F>>::OPCODE,
+        );
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
         let rom_id = rom_handler.finalize(&mut circuit_builder);
@@ -346,12 +348,18 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         }
         circuit_builder.add(target[0], length[0], F::BaseField::ONE);
 
+        println!("target: {:?}", target);
+
         // Copy offset to wires of public output load circuit.
         let (pub_out_wire_id, pub_out) =
             circuit_builder.create_witness_out(ReturnPublicOutLoad::pred_size());
         let pub_out_offset = &pub_out[ReturnPublicOutLoad::pred_offset()];
         let offset = offset.values();
         add_assign_each_cell(&mut circuit_builder, pub_out_offset, offset);
+
+        println!("pub_out: {:?}", pub_out);
+
+        circuit_builder.configure();
 
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
@@ -381,8 +389,10 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for ReturnPublicOutLoad {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl ReturnPublicOutLoad {
+    fn construct_circuit<F: SmallField>(
+        challenges: ChipChallenges,
+    ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (pred_wire_id, pred) = circuit_builder.create_witness_in(Self::pred_size());
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -427,6 +437,10 @@ impl<F: SmallField> Instruction<F> for ReturnPublicOutLoad {
             },
         })
     }
+
+    fn name() -> &'static str {
+        "ReturnPublicOutLoad"
+    }
 }
 
 register_witness!(
@@ -438,8 +452,10 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for ReturnRestMemLoad {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl ReturnRestMemLoad {
+    fn construct_circuit<F: SmallField>(
+        challenges: ChipChallenges,
+    ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -469,6 +485,10 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemLoad {
             },
         })
     }
+
+    fn name() -> &'static str {
+        "ReturnRestMemLoad"
+    }
 }
 
 register_witness!(
@@ -479,8 +499,10 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for ReturnRestMemStore {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl ReturnRestMemStore {
+    fn construct_circuit<F: SmallField>(
+        challenges: ChipChallenges,
+    ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -505,6 +527,10 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemStore {
             },
         })
     }
+
+    fn name() -> &'static str {
+        "ReturnRestMemStore"
+    }
 }
 
 pub struct ReturnRestStackPop;
@@ -517,8 +543,10 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for ReturnRestStackPop {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl ReturnRestStackPop {
+    fn construct_circuit<F: SmallField>(
+        challenges: ChipChallenges,
+    ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -548,5 +576,9 @@ impl<F: SmallField> Instruction<F> for ReturnRestStackPop {
                 ..Default::default()
             },
         })
+    }
+
+    fn name() -> &'static str {
+        "ReturnRestStackPop"
     }
 }

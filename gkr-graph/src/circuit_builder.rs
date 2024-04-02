@@ -13,6 +13,7 @@ impl<F: SmallField> CircuitGraph<F> {
         witness: &CircuitGraphWitness<F::BaseField>,
         point: &Point<F>,
     ) -> TargetEvaluations<F> {
+        // println!("targets: {:?}, point: {:?}", self.targets, point);
         let target_evals = self
             .targets
             .iter()
@@ -29,7 +30,9 @@ impl<F: SmallField> CircuitGraph<F> {
                         .as_slice()
                         .original_mle(),
                 };
-                PointAndEval::new(point[..poly.num_vars].to_vec(), poly.evaluate(point))
+                // println!("target: {:?}, poly.num_vars: {:?}", target, poly.num_vars);
+                let p = point[..poly.num_vars].to_vec();
+                PointAndEval::new_from_ref(&p, &poly.evaluate(&p))
             })
             .collect_vec();
         TargetEvaluations(target_evals)

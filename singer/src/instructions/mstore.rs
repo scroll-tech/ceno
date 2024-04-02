@@ -158,11 +158,9 @@ register_witness!(
     }
 );
 
-impl MstoreInstruction {
-    const OPCODE: OpcodeType = OpcodeType::MSTORE;
-}
-
 impl<F: SmallField> Instruction<F> for MstoreInstruction {
+    const OPCODE: OpcodeType = OpcodeType::MSTORE;
+    const NAME: &'static str = "MSTORE";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -246,7 +244,11 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
         );
 
         // Bytecode check for (pc, mstore)
-        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
+        rom_handler.bytecode_with_pc_opcode(
+            &mut circuit_builder,
+            pc.values(),
+            <Self as Instruction<F>>::OPCODE,
+        );
 
         // To accessory
         let (to_acc_dup_id, to_acc_dup) =
@@ -305,8 +307,10 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for MstoreAccessory {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl MstoreAccessory {
+    fn construct_circuit<F: SmallField>(
+        challenges: ChipChallenges,
+    ) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From predesessor circuit.

@@ -45,16 +45,19 @@ register_witness!(
     }
 );
 
-impl<const N: usize> SwapInstruction<N> {
+impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
     const OPCODE: OpcodeType = match N {
         1 => OpcodeType::SWAP1,
         2 => OpcodeType::SWAP2,
         4 => OpcodeType::SWAP4,
         _ => unimplemented!(),
     };
-}
-
-impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
+    const NAME: &'static str = match N {
+        1 => "SWAP1",
+        2 => "SWAP2",
+        4 => "SWAP4",
+        _ => unimplemented!(),
+    };
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -152,7 +155,11 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
         );
 
         // Bytecode check for (pc, SWAP{N}).
-        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
+        rom_handler.bytecode_with_pc_opcode(
+            &mut circuit_builder,
+            pc.values(),
+            <Self as Instruction<F>>::OPCODE,
+        );
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
         let rom_id = rom_handler.finalize(&mut circuit_builder);

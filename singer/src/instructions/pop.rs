@@ -41,11 +41,9 @@ register_witness!(
     }
 );
 
-impl PopInstruction {
-    const OPCODE: OpcodeType = OpcodeType::POP;
-}
-
 impl<F: SmallField> Instruction<F> for PopInstruction {
+    const OPCODE: OpcodeType = OpcodeType::POP;
+    const NAME: &'static str = "POP";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -102,7 +100,11 @@ impl<F: SmallField> Instruction<F> for PopInstruction {
         );
 
         // Bytecode check for (pc, POP)
-        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
+        rom_handler.bytecode_with_pc_opcode(
+            &mut circuit_builder,
+            pc.values(),
+            <Self as Instruction<F>>::OPCODE,
+        );
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
         let rom_id = rom_handler.finalize(&mut circuit_builder);

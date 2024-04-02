@@ -41,14 +41,15 @@ register_witness!(
     }
 );
 
-impl<const N: usize> PushInstruction<N> {
+impl<F: SmallField, const N: usize> Instruction<F> for PushInstruction<N> {
     const OPCODE: OpcodeType = match N {
         1 => OpcodeType::PUSH1,
         _ => unimplemented!(),
     };
-}
-
-impl<F: SmallField, const N: usize> Instruction<F> for PushInstruction<N> {
+    const NAME: &'static str = match N {
+        1 => "PUSH1",
+        _ => unimplemented!(),
+    };
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -107,7 +108,11 @@ impl<F: SmallField, const N: usize> Instruction<F> for PushInstruction<N> {
         );
 
         // Bytecode check for (pc, PUSH{N}), (pc + 1, byte[0]), ..., (pc + N, byte[N - 1])
-        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
+        rom_handler.bytecode_with_pc_opcode(
+            &mut circuit_builder,
+            pc.values(),
+            <Self as Instruction<F>>::OPCODE,
+        );
         for (i, pc_add_i_plus_1) in phase0[Self::phase0_pc_add_i_plus_1()]
             .chunks(UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
             .enumerate()
