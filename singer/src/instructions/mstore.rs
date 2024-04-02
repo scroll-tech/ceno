@@ -375,3 +375,99 @@ impl MstoreAccessory {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{instructions::InstructionGraph, scheme::GKRGraphProverState, SingerParams};
+    use ark_std::test_rng;
+    use ff::Field;
+    use gkr::structs::LayerWitness;
+    use goldilocks::{GoldilocksExt2, SmallField};
+    use itertools::Itertools;
+    use singer_utils::structs::ChipChallenges;
+    use std::time::Instant;
+    use transcript::Transcript;
+
+    use crate::{
+        instructions::{
+            mstore::{MstoreAccessory, MstoreInstruction},
+            Instruction, SingerCircuitBuilder,
+        },
+        CircuitWiresIn, SingerGraphBuilder,
+    };
+
+    fn bench_mstore_instruction_helper<F: SmallField>(instance_num_vars: usize) {
+        let chip_challenges = ChipChallenges::default();
+        let circuit_builder =
+            SingerCircuitBuilder::<F>::new(chip_challenges).expect("circuit builder failed");
+        let mut singer_builder = SingerGraphBuilder::<F>::new();
+
+        let mut rng = test_rng();
+        let inst_phase0_size = MstoreInstruction::phase0_size();
+        let inst_wit: CircuitWiresIn<F::BaseField> = vec![LayerWitness {
+            instances: (0..(1 << instance_num_vars))
+                .map(|_| {
+                    (0..inst_phase0_size)
+                        .map(|_| F::BaseField::random(&mut rng))
+                        .collect_vec()
+                })
+                .collect_vec(),
+        }];
+        let acc_phase0_size = MstoreAccessory::phase0_size();
+        let acc_wit: CircuitWiresIn<F::BaseField> = vec![
+            LayerWitness { instances: vec![] },
+            LayerWitness { instances: vec![] },
+            LayerWitness {
+                instances: (0..(1 << instance_num_vars) * 32)
+                    .map(|_| {
+                        (0..acc_phase0_size)
+                            .map(|_| F::BaseField::random(&mut rng))
+                            .collect_vec()
+                    })
+                    .collect_vec(),
+            },
+        ];
+
+        let real_challenges = vec![F::random(&mut rng), F::random(&mut rng)];
+
+        let timer = Instant::now();
+
+        let _ = MstoreInstruction::construct_graph_and_witness(
+            &mut singer_builder.graph_builder,
+            &mut singer_builder.chip_builder,
+            &circuit_builder.insts_circuits[<MstoreInstruction as Instruction<F>>::OPCODE as usize],
+            vec![inst_wit, acc_wit],
+            &real_challenges,
+            1 << instance_num_vars,
+            &SingerParams::default(),
+        )
+        .expect("gkr graph construction failed");
+
+        let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
+
+        println!(
+            "MstoreInstruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
+
+        let point = vec![F::random(&mut rng), F::random(&mut rng)];
+        let target_evals = graph.target_evals(&wit, &point);
+
+        let mut prover_transcript = &mut Transcript::new(b"Singer");
+
+        let timer = Instant::now();
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript)
+            .expect("prove failed");
+        println!(
+            "MstoreInstruction::prove, instance_num_vars = {}, time = {}",
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
+    }
+
+    #[test]
+    fn bench_mstore_instruction() {
+        bench_mstore_instruction_helper::<GoldilocksExt2>(5);
+    }
+}
