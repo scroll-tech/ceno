@@ -5,7 +5,6 @@ use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use rayon::prelude::*;
 
 pub fn i64_to_field<F: SmallField>(x: i64) -> F {
     if x >= 0 {

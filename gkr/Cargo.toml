@@ -22,3 +22,13 @@ rayon.workspace = true
 
 [dev-dependencies]
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
+pprof = { version = "0.13" }
+criterion = { version = "0.5", features = ["html_reports"] }
+cfg-if = "1.0.0"
+
+[features]
+flamegraph = ["pprof/flamegraph", "pprof/criterion"]
+
+[[bench]]
+name = "keccak256"
+harness = false
