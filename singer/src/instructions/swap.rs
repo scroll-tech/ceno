@@ -359,14 +359,14 @@ mod test {
         );
     }
 
-    fn bench_swap2_instruction_helper<F: SmallField>(instance_num_vars: usize) {
+    fn bench_swap_instruction_helper<F: SmallField, const N: usize>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
             SingerCircuitBuilder::<F>::new(chip_challenges).expect("circuit builder failed");
         let mut singer_builder = SingerGraphBuilder::<F>::new();
 
         let mut rng = test_rng();
-        let size = SwapInstruction::<2>::phase0_size();
+        let size = SwapInstruction::<N>::phase0_size();
         let phase0: CircuitWiresIn<F::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
                 .map(|_| {
@@ -381,11 +381,11 @@ mod test {
 
         let timer = Instant::now();
 
-        let _ = SwapInstruction::<2>::construct_graph_and_witness(
+        let _ = SwapInstruction::<N>::construct_graph_and_witness(
             &mut singer_builder.graph_builder,
             &mut singer_builder.chip_builder,
             &circuit_builder.insts_circuits
-                [<SwapInstruction<2> as Instruction<F>>::OPCODE as usize],
+                [<SwapInstruction<N> as Instruction<F>>::OPCODE as usize],
             vec![phase0],
             &real_challenges,
             1 << instance_num_vars,
@@ -396,7 +396,8 @@ mod test {
         let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
 
         println!(
-            "Swap2Instruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
+            "Swap{}Instruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
+            N,
             instance_num_vars,
             timer.elapsed().as_secs_f64()
         );
@@ -410,7 +411,8 @@ mod test {
         let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript)
             .expect("prove failed");
         println!(
-            "Swap2Instruction::prove, instance_num_vars = {}, time = {}",
+            "Swap{}Instruction::prove, instance_num_vars = {}, time = {}",
+            N,
             instance_num_vars,
             timer.elapsed().as_secs_f64()
         );
@@ -418,6 +420,11 @@ mod test {
 
     #[test]
     fn bench_swap2_instruction() {
-        bench_swap2_instruction_helper::<GoldilocksExt2>(10);
+        bench_swap_instruction_helper::<GoldilocksExt2, 2>(10);
+    }
+
+    #[test]
+    fn bench_swap4_instruction() {
+        bench_swap_instruction_helper::<GoldilocksExt2, 4>(10);
     }
 }
