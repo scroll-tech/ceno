@@ -180,15 +180,25 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
 
 #[cfg(test)]
 mod test {
+    use ark_std::test_rng;
     use core::ops::Range;
-    use std::collections::BTreeMap;
-
-    use crate::instructions::{ChipChallenges, Instruction, SwapInstruction};
-    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use goldilocks::Goldilocks;
+    use ff::Field;
+    use gkr::structs::LayerWitness;
+    use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
+    use itertools::Itertools;
     use simple_frontend::structs::CellId;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
     use singer_utils::structs::TSUInt;
+    use std::collections::BTreeMap;
+    use std::time::Instant;
+    use transcript::Transcript;
+
+    use crate::instructions::{
+        ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder, SwapInstruction,
+    };
+    use crate::scheme::GKRGraphProverState;
+    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
+    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
 
     impl<const N: usize> SwapInstruction<N> {
         #[inline]
@@ -347,5 +357,67 @@ mod test {
             &phase0_values_map,
             circuit_witness_challenges,
         );
+    }
+
+    fn bench_swap2_instruction_helper<F: SmallField>(instance_num_vars: usize) {
+        let chip_challenges = ChipChallenges::default();
+        let circuit_builder =
+            SingerCircuitBuilder::<F>::new(chip_challenges).expect("circuit builder failed");
+        let mut singer_builder = SingerGraphBuilder::<F>::new();
+
+        let mut rng = test_rng();
+        let size = SwapInstruction::<2>::phase0_size();
+        let phase0: CircuitWiresIn<F::BaseField> = vec![LayerWitness {
+            instances: (0..(1 << instance_num_vars))
+                .map(|_| {
+                    (0..size)
+                        .map(|_| F::BaseField::random(&mut rng))
+                        .collect_vec()
+                })
+                .collect_vec(),
+        }];
+
+        let real_challenges = vec![F::random(&mut rng), F::random(&mut rng)];
+
+        let timer = Instant::now();
+
+        let _ = SwapInstruction::<2>::construct_graph_and_witness(
+            &mut singer_builder.graph_builder,
+            &mut singer_builder.chip_builder,
+            &circuit_builder.insts_circuits
+                [<SwapInstruction<2> as Instruction<F>>::OPCODE as usize],
+            vec![phase0],
+            &real_challenges,
+            1 << instance_num_vars,
+            &SingerParams::default(),
+        )
+        .expect("gkr graph construction failed");
+
+        let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
+
+        println!(
+            "Swap2Instruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
+
+        let point = vec![F::random(&mut rng), F::random(&mut rng)];
+        let target_evals = graph.target_evals(&wit, &point);
+
+        let mut prover_transcript = &mut Transcript::new(b"Singer");
+
+        let timer = Instant::now();
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript)
+            .expect("prove failed");
+        println!(
+            "Swap2Instruction::prove, instance_num_vars = {}, time = {}",
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
+    }
+
+    #[test]
+    fn bench_swap2_instruction() {
+        bench_swap2_instruction_helper::<GoldilocksExt2>(10);
     }
 }
