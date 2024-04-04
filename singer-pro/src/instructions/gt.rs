@@ -5,6 +5,7 @@ use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::ROMOperations,
     chips::IntoEnumIterator,
+    constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt},
     uint::UIntCmp,
@@ -32,6 +33,8 @@ register_witness!(
 );
 
 impl<F: SmallField> Instruction<F> for GtInstruction {
+    const OPCODE: OpcodeType = OpcodeType::GT;
+    const NAME: &'static str = "GT";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 

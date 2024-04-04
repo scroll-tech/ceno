@@ -7,7 +7,7 @@ use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{MemoryChipOperations, ROMOperations, RangeChipOperations},
     chips::{IntoEnumIterator, SingerChipBuilder},
-    constants::EVM_STACK_BYTE_WIDTH,
+    constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
     structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::{UIntAddSub, UIntCmp},
@@ -117,6 +117,8 @@ register_witness!(
 );
 
 impl<F: SmallField> Instruction<F> for MstoreInstruction {
+    const OPCODE: OpcodeType = OpcodeType::MSTORE;
+    const NAME: &'static str = "MSTORE";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::<F>::new();
         // From witness

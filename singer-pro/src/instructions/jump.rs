@@ -3,6 +3,7 @@ use goldilocks::SmallField;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chips::IntoEnumIterator,
+    constants::OpcodeType,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
 use std::sync::Arc;
@@ -21,6 +22,8 @@ impl<F: SmallField> InstructionGraph<F> for JumpInstruction {
 }
 
 impl<F: SmallField> Instruction<F> for JumpInstruction {
+    const OPCODE: OpcodeType = OpcodeType::JUMP;
+    const NAME: &'static str = "JUMP";
     fn construct_circuit(_: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         // From predesessor instruction

@@ -100,6 +100,7 @@ impl BBFinalLayout {
         memory_ts: NodeOutputType,
         stack_top: NodeOutputType,
         clk: NodeOutputType,
+        next_pc: Option<NodeOutputType>,
     ) -> Vec<PredType> {
         let mut input = vec![PredType::Source; n_wires_in];
         self.from_pred_inst
@@ -113,6 +114,10 @@ impl BBFinalLayout {
         input[self.from_pred_inst.memory_ts_id as usize] = PredType::PredWire(memory_ts);
         input[self.from_bb_start.stack_top_id as usize] = PredType::PredWire(stack_top);
         input[self.from_bb_start.clk_id as usize] = PredType::PredWire(clk);
+        // TODO: Incorrect
+        if let (Some(next_pc_id), Some(next_pc)) = (self.next_pc_id.as_ref(), next_pc) {
+            input[*next_pc_id as usize] = PredType::PredWire(next_pc);
+        }
         input
     }
 }

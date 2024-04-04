@@ -5,6 +5,7 @@ use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::ROMOperations,
     chips::IntoEnumIterator,
+    constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt},
     uint::UIntAddSub,
@@ -34,6 +35,8 @@ register_witness!(
 );
 
 impl<F: SmallField> Instruction<F> for AddInstruction {
+    const OPCODE: OpcodeType = OpcodeType::ADD;
+    const NAME: &'static str = "ADD";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 

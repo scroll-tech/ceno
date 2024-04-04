@@ -244,6 +244,7 @@ impl<F: SmallField> BasicBlock<F> {
         )?;
 
         let mut to_succ = &bb_start_circuit.layout.to_succ_inst;
+        let mut next_pc = None;
         let mut local_stack =
             BasicBlockStack::initialize(self.info.clone(), bb_start_node_id, to_succ);
         let mut pred_node_id = bb_start_node_id;
@@ -282,6 +283,9 @@ impl<F: SmallField> BasicBlock<F> {
             }
             pred_node_id = node_id[0];
             to_succ = &inst_circuit.layout.to_succ_inst;
+            if let Some(to_bb_final) = inst_circuit.layout.to_bb_final {
+                next_pc = Some(NodeOutputType::WireOut(pred_node_id, to_bb_final));
+            }
             local_stack.push_node_outputs(stack, mode);
         }
 
@@ -304,6 +308,7 @@ impl<F: SmallField> BasicBlock<F> {
             memory_ts,
             stack_top,
             clk,
+            next_pc,
         );
         let bb_final_node_id = graph_builder.add_node_with_witness(
             "BB final",
@@ -378,6 +383,7 @@ impl<F: SmallField> BasicBlock<F> {
         )?;
 
         let mut to_succ = &bb_start_circuit.layout.to_succ_inst;
+        let mut next_pc = None;
         let mut local_stack =
             BasicBlockStack::initialize(self.info.clone(), bb_start_node_id, to_succ);
         let mut pred_node_id = bb_start_node_id;
@@ -413,6 +419,9 @@ impl<F: SmallField> BasicBlock<F> {
             }
             pred_node_id = node_id[0];
             to_succ = &inst_circuit.layout.to_succ_inst;
+            if let Some(op_to_bb_final) = inst_circuit.layout.to_bb_final {
+                next_pc = Some(NodeOutputType::WireOut(pred_node_id, op_to_bb_final));
+            }
             local_stack.push_node_outputs(stack, mode);
         }
 
@@ -435,6 +444,7 @@ impl<F: SmallField> BasicBlock<F> {
             memory_ts,
             stack_top,
             clk,
+            next_pc,
         );
         let bb_final_node_id =
             graph_builder.add_node("BB final", &bb_final_circuit.circuit, preds)?;
@@ -464,5 +474,144 @@ impl<F: SmallField> BasicBlock<F> {
             )?;
         }
         Ok(public_output_size)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        basic_block::{
+            bb_final::BasicBlockFinal, bb_start::BasicBlockStart, BasicBlock, BasicBlockInfo,
+        },
+        instructions::{add::AddInstruction, SingerInstCircuitBuilder},
+        scheme::GKRGraphProverState,
+        BasicBlockWiresIn, SingerParams,
+    };
+    use ark_std::test_rng;
+    use ff::Field;
+    use gkr::structs::LayerWitness;
+    use gkr_graph::structs::CircuitGraphBuilder;
+    use goldilocks::{GoldilocksExt2, SmallField};
+    use itertools::Itertools;
+    use singer_utils::{
+        chips::SingerChipBuilder,
+        constants::OpcodeType,
+        structs::{ChipChallenges, PCUInt},
+    };
+    use std::time::Instant;
+    use transcript::Transcript;
+
+    // A benchmark containing `n_adds_in_bb` ADD instructions in a basic block.
+    fn bench_bb_helper<F: SmallField>(instance_num_vars: usize, n_adds_in_bb: usize) {
+        let chip_challenges = ChipChallenges::default();
+        let circuit_builder =
+            SingerInstCircuitBuilder::<F>::new(chip_challenges).expect("circuit builder failed");
+
+        let bytecode = vec![vec![OpcodeType::ADD as u8; n_adds_in_bb]];
+
+        let mut rng = test_rng();
+        let real_challenges = vec![F::random(&mut rng), F::random(&mut rng)];
+        let n_instances = 1 << instance_num_vars;
+
+        let timer = Instant::now();
+
+        let mut random_matrix = |n, m| {
+            (0..n)
+                .map(|_| (0..m).map(|_| F::BaseField::random(&mut rng)).collect())
+                .collect()
+        };
+        let bb_witness = BasicBlockWiresIn {
+            bb_start: vec![LayerWitness {
+                instances: random_matrix(
+                    n_instances,
+                    BasicBlockStart::phase0_size(n_adds_in_bb + 1),
+                ),
+            }],
+            bb_final: vec![
+                LayerWitness {
+                    instances: random_matrix(n_instances, BasicBlockFinal::phase0_size()),
+                },
+                LayerWitness::default(),
+                LayerWitness::default(),
+                LayerWitness::default(),
+                LayerWitness {
+                    instances: random_matrix(n_instances, PCUInt::N_OPRAND_CELLS),
+                },
+                LayerWitness::default(),
+                LayerWitness::default(),
+            ],
+            bb_accs: vec![],
+            opcodes: (0..n_adds_in_bb)
+                .map(|_| {
+                    vec![vec![
+                        LayerWitness {
+                            instances: random_matrix(n_instances, AddInstruction::phase0_size()),
+                        },
+                        LayerWitness::default(),
+                        LayerWitness::default(),
+                        LayerWitness::default(),
+                    ]]
+                })
+                .collect_vec(),
+            real_n_instance: n_instances,
+        };
+
+        let info = BasicBlockInfo {
+            pc_start: 0,
+            bb_start_stack_top_offsets: (-((n_adds_in_bb + 1) as i64)..0).collect_vec(),
+            bb_final_stack_top_offsets: vec![-1],
+            delta_stack_top: -(n_adds_in_bb as i64),
+        };
+        let bb_start_circuit = BasicBlockStart::construct_circuit(&info, chip_challenges)
+            .expect("construct circuit failed");
+        let bb_final_circuit = BasicBlockFinal::construct_circuit(&info, chip_challenges)
+            .expect("construct circuit failed");
+        let bb = BasicBlock {
+            bytecode: bytecode[0].clone(),
+            info,
+            bb_start_circuit,
+            bb_final_circuit,
+            bb_acc_circuits: vec![],
+        };
+
+        let mut graph_builder = CircuitGraphBuilder::<F>::new();
+        let mut chip_builder = SingerChipBuilder::<F>::new();
+        let _ = bb
+            .construct_graph_and_witness(
+                &mut graph_builder,
+                &mut chip_builder,
+                &circuit_builder,
+                bb_witness,
+                &real_challenges,
+                &SingerParams::default(),
+            )
+            .expect("gkr graph construction failed");
+
+        let (graph, wit) = graph_builder.finalize_graph_and_witness();
+
+        println!(
+            "AddInstruction::construct_graph_and_witness, instance_num_vars = {}, time = {}s",
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
+
+        let point = (0..20).map(|_| F::random(&mut rng)).collect_vec();
+        let target_evals = graph.target_evals(&wit, &point);
+
+        let mut prover_transcript = &mut Transcript::new(b"Singer");
+
+        let timer = Instant::now();
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript)
+            .expect("prove failed");
+        println!(
+            "AddInstruction::prove, instance_num_vars = {}, time = {}s",
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
+    }
+
+    #[test]
+    fn bench_bb() {
+        bench_bb_helper::<GoldilocksExt2>(10, 5);
     }
 }
