@@ -7,7 +7,9 @@ use ark_std::rand::Rng;
 use ark_std::{end_timer, start_timer};
 use ff::PrimeField;
 use goldilocks::SmallField;
-use rayon::prelude::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::IntoParallelRefIterator;
+use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 use serde::{Deserialize, Serialize};
 
 use crate::mle::DenseMultilinearExtension;
@@ -33,10 +35,10 @@ use crate::util::bit_decompose;
 ///
 /// - flattened_ml_extensions stores the multilinear extension representation of
 ///   f0, f1, f2, f3 and f4
-/// - products is 
-///     \[ 
-///         (c0, \[0, 1, 2\]), 
-///         (c1, \[3, 4\]) 
+/// - products is
+///     \[
+///         (c0, \[0, 1, 2\]),
+///         (c1, \[3, 4\])
 ///     \]
 /// - raw_pointers_lookup_table maps fi to i
 ///
@@ -403,52 +405,61 @@ pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
 
-    let mut eval = Vec::new();
+    let mut eval = vec![F::ZERO; 1 << r.len()];
     build_eq_x_r_helper(r, &mut eval);
 
     eval
 }
 
-/// A helper function to build eq(x, r) recursively.
-/// This function takes `r.len()` steps, and for each step it requires a maximum
-/// `r.len()-1` multiplications.
+/// A helper function to build eq(x, r) via dynamic programing tricks.
+/// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
 fn build_eq_x_r_helper<F: PrimeField>(r: &[F], buf: &mut Vec<F>) {
-    // assert!(!r.is_empty(), "r length is 0");
+    assert!(
+        buf.len() == 1 << r.len(),
+        "invalid buffer length {} giving r size {}",
+        buf.len(),
+        r.len()
+    );
     if r.is_empty() {
         buf.resize(1, F::ZERO);
         buf[0] = F::ONE;
         return;
     }
 
-    if r.len() == 1 {
-        // initializing the buffer with [1-r_0, r_0]
-        buf.push(F::ONE - r[0]);
-        buf.push(r[0]);
-    } else {
-        build_eq_x_r_helper(&r[1..], buf);
+    buf[0] = F::ONE;
+    for (i, r) in r.iter().rev().enumerate() {
+        let size = 1 << (i + 1);
+        // suppose at the previous step we processed buf [0..size]
+        // for the current step we are populating new buf[0..2*size]
+        // for j travese 0..size
+        // buf[2*j + 1] = r * buf[j]
+        // buf[2*j] = (1 - r) * buf[j]
+        if size <= 2 {
+            buf[0] = F::ONE - *r;
+            buf[1] = *r;
+        } else {
+            let (half_buf_len, quar_buf_len) = (size >> 1, size >> 2);
+            let (low_buf, high_buf) = buf.split_at_mut(half_buf_len);
 
-        // suppose at the previous step we received [b_1, ..., b_k]
-        // for the current step we will need
-        // if x_0 = 0:   (1-r0) * [b_1, ..., b_k]
-        // if x_0 = 1:   r0 * [b_1, ..., b_k]
-        // let mut res = vec![];
-        // for &b_i in buf.iter() {
-        //     let tmp = r[0] * b_i;
-        //     res.push(b_i - tmp);
-        //     res.push(tmp);
-        // }
-        // *buf = res;
-
-        let mut res = vec![F::ZERO; buf.len() << 1];
-        res.par_iter_mut().enumerate().for_each(|(i, val)| {
-            let bi = buf[i >> 1];
-            let tmp = r[0] * bi;
-            if i & 1 == 0 {
-                *val = bi - tmp;
-            } else {
-                *val = tmp;
+            // update second half in-place parallelly
+            // use buf[quar_buf_len..half_buf_len] to update buf[half_buf_len..size]
+            high_buf
+                .par_chunks_mut(2)
+                .with_min_len(64)
+                .zip(low_buf.par_iter().skip(quar_buf_len))
+                .for_each(|(buf, prev_val)| {
+                    assert!(buf.len() == 2);
+                    let tmp = *r * prev_val;
+                    buf[1] = tmp;
+                    buf[0] = *prev_val - tmp;
+                });
+            // update first half in-place sequentially
+            // use buf[0..quar_buf_len] to update buf[0..half_buf_len], in reverse order
+            for j in (0..quar_buf_len).rev() {
+                let tmp = *r * buf[j];
+                buf[(j << 1) + 1] = tmp;
+                buf[j << 1] = buf[j] - tmp;
             }
-        });
-        *buf = res;
+        }
     }
 }
