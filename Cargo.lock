@@ -623,6 +623,7 @@ dependencies = [
 name = "singer-utils"
 version = "0.1.0"
 dependencies = [
+ "ark-std",
  "ff",
  "gkr",
  "gkr-graph",
@@ -631,6 +632,7 @@ dependencies = [
  "simple-frontend",
  "strum 0.26.1",
  "strum_macros 0.26.1",
+ "transcript",
 ]
 
 [[package]]
