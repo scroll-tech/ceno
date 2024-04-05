@@ -146,7 +146,8 @@ impl<F: SmallField> IOPProverState<F> {
         let hi_num_vars = circuit_witness.instance_num_vars();
 
         // f2(t) = layers[i](t || ry)
-        let f2 = Arc::new(self.layer_poly.fix_variables(&self.to_next_step_point));
+        let mut f2 = Arc::clone(&mut self.layer_poly);
+        Arc::make_mut(&mut f2).fix_variables(&self.to_next_step_point);
 
         // g2^{(j)}(t) = \alpha^j copy_to[j](ry_j, ry) eq(rt_j, t)
         let output_points = chain![

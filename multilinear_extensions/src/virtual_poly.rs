@@ -33,10 +33,10 @@ use crate::util::bit_decompose;
 ///
 /// - flattened_ml_extensions stores the multilinear extension representation of
 ///   f0, f1, f2, f3 and f4
-/// - products is 
-///     \[ 
-///         (c0, \[0, 1, 2\]), 
-///         (c1, \[3, 4\]) 
+/// - products is
+///     \[
+///         (c0, \[0, 1, 2\]),
+///         (c1, \[3, 4\])
 ///     \]
 /// - raw_pointers_lookup_table maps fi to i
 ///

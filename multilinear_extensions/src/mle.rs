@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{cell::Cell, sync::Arc};
 
 use ark_std::{end_timer, rand::RngCore, start_timer};
 use goldilocks::SmallField;
+use rayon::iter::IntoParallelIterator;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "parallel")]
@@ -51,44 +52,45 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
             point.len(),
             "MLE size does not match the point"
         );
-        self.fix_variables(point).evaluations[0]
+
+        // TODO evaluate without clone?
+        let mut to_bind_poly = self.clone();
+        to_bind_poly.fix_variables(point);
+        to_bind_poly.evaluations[0]
     }
 
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point`.
-    pub fn fix_variables(&self, partial_point: &[F]) -> DenseMultilinearExtension<F> {
+    pub fn fix_variables(&mut self, partial_point: &[F]) {
         // TODO: return error.
         assert!(
             partial_point.len() <= self.num_vars,
             "invalid size of partial point"
         );
         let nv = self.num_vars;
-        let mut poly = self.evaluations.to_vec();
-        let dim = partial_point.len();
+        let poly = &mut self.evaluations;
         // evaluate single variable of partial point from left to right
-        for (i, point) in partial_point.iter().enumerate().take(dim) {
-            poly = Self::fix_one_variable_helper(&poly, nv - i, point);
+        for (i, point) in partial_point.iter().enumerate() {
+            Self::fix_one_variable_helper(poly, nv - i, point);
         }
-
-        Self::from_evaluations_slice(nv - dim, &poly[..(1 << (nv - dim))])
+        let dim = partial_point.len();
+        poly.resize(1 << (nv - dim), F::ZERO);
+        self.num_vars = nv - dim;
     }
 
     /// Helper function. Fix 1 variable.
-    fn fix_one_variable_helper(data: &[F], nv: usize, point: &F) -> Vec<F> {
-        let mut res = vec![F::ZERO; 1 << (nv - 1)];
+    fn fix_one_variable_helper(data: &mut Vec<F>, max_log2_size: usize, point: &F) {
+        // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
+        data[0..1 << max_log2_size]
+            .par_iter_mut()
+            .chunks(2)
+            .with_min_len(64)
+            .for_each(|mut buf| *buf[0] = *buf[0] + (*buf[1] - *buf[0]) * point);
 
-        // evaluate single variable of partial point from left to right
-        #[cfg(not(feature = "parallel"))]
-        for i in 0..(1 << (nv - 1)) {
-            res[i] = data[i << 1] + (data[(i << 1) + 1] - data[i << 1]) * point;
+        // sequentially update buf[b1, b2,..bt] = buf[b1, b2,..bt, 0]
+        for index in 0..1 << (max_log2_size - 1) {
+            data[index] = data[index << 1];
         }
-
-        #[cfg(feature = "parallel")]
-        res.par_iter_mut().enumerate().for_each(|(i, x)| {
-            *x = data[i << 1] + (data[(i << 1) + 1] - data[i << 1]) * point;
-        });
-
-        res
     }
 
     /// Generate a random evaluation of a multilinear poly

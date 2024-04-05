@@ -224,8 +224,6 @@ pub trait MultilinearExtensionFromVectors<F: SmallField> {
 
 impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>> {
-        let n_zeros = (1 << lo_num_vars) - self[0].len();
-        let n_zero_vecs = (1 << hi_num_vars) - self.len();
         let vecs = self.to_vec();
 
         Arc::new(DenseMultilinearExtension::from_evaluations_vec(
@@ -234,10 +232,12 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] 
                 .flat_map(|instance| {
                     instance
                         .into_iter()
-                        .chain(iter::repeat(F::BaseField::ZERO).take(n_zeros))
+                        .chain(iter::repeat(F::BaseField::ZERO))
+                        .take(1 << lo_num_vars)
                 })
-                .chain(vec![F::BaseField::ZERO; n_zero_vecs])
+                .chain(iter::repeat(F::BaseField::ZERO))
                 .map(|x| F::from_base(&x))
+                .take(1 << (lo_num_vars + hi_num_vars))
                 .collect_vec(),
         ))
     }

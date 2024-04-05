@@ -3,7 +3,10 @@ use std::sync::Arc;
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
-use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::{
+    iter::IntoParallelRefMutIterator,
+    prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+};
 use transcript::{Challenge, Transcript};
 
 use crate::{
@@ -120,6 +123,7 @@ impl<F: SmallField> IOPProverState<F> {
         //    g(r_1, ..., r_{m-1}, x_m ... x_n)
         //
         // eval g over r_m, and mutate g to g(r_1, ... r_m,, x_{m+1}... x_n)
+
         let mut flattened_ml_extensions: Vec<DenseMultilinearExtension<F>> = self
             .poly
             .flattened_ml_extensions
@@ -133,14 +137,9 @@ impl<F: SmallField> IOPProverState<F> {
             self.challenges.push(*chal);
 
             let r = self.challenges[self.round - 1];
-            #[cfg(feature = "parallel")]
             flattened_ml_extensions
                 .par_iter_mut()
-                .for_each(|mle| *mle = fix_variables(mle, &[r]));
-            #[cfg(not(feature = "parallel"))]
-            flattened_ml_extensions
-                .iter_mut()
-                .for_each(|mle| *mle = mle.fix_variables(&[r.elements]));
+                .for_each(|mle| mle.fix_variables(&[r.elements]));
         } else if self.round > 0 {
             panic!("verifier message is empty");
         }
@@ -207,8 +206,8 @@ impl<F: SmallField> IOPProverState<F> {
 
         // update prover's state to the partial evaluated polynomial
         self.poly.flattened_ml_extensions = flattened_ml_extensions
-            .par_iter()
-            .map(|x| Arc::new(x.clone()))
+            .into_par_iter()
+            .map(|x| Arc::new(x))
             .collect();
         end_timer!(start);
 
