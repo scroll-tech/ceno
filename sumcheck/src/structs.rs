@@ -29,6 +29,7 @@ pub struct IOPProverMessage<F> {
 }
 
 /// Prover State of a PolyIOP.
+#[derive(Default)]
 pub struct IOPProverState<F> {
     /// sampled randomness given by the verifier
     pub challenges: Vec<Challenge<F>>,

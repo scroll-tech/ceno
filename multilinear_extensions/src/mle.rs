@@ -1,8 +1,7 @@
-use std::{cell::Cell, sync::Arc};
+use std::sync::Arc;
 
 use ark_std::{end_timer, rand::RngCore, start_timer};
 use goldilocks::SmallField;
-use rayon::iter::IntoParallelIterator;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "parallel")]
@@ -16,6 +15,8 @@ pub struct DenseMultilinearExtension<F> {
     /// Number of variables
     pub num_vars: usize,
 }
+
+pub type ArcDenseMultilinearExtension<F> = Arc<DenseMultilinearExtension<F>>;
 
 impl<F: SmallField> DenseMultilinearExtension<F> {
     /// Construct a new polynomial from a list of evaluations where the index
@@ -56,6 +57,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
         // TODO evaluate without clone?
         let mut to_bind_poly = self.clone();
         to_bind_poly.fix_variables(point);
+        assert!(to_bind_poly.evaluations.len() == 1);
         to_bind_poly.evaluations[0]
     }
 
@@ -81,8 +83,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
     /// Helper function. Fix 1 variable.
     fn fix_one_variable_helper(data: &mut Vec<F>, max_log2_size: usize, point: &F) {
         // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
-        data[0..1 << max_log2_size]
-            .par_iter_mut()
+        data.par_iter_mut()
             .chunks(2)
             .with_min_len(64)
             .for_each(|mut buf| *buf[0] = *buf[0] + (*buf[1] - *buf[0]) * point);
@@ -107,7 +108,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
         nv: usize,
         degree: usize,
         mut rng: &mut impl RngCore,
-    ) -> (Vec<Arc<DenseMultilinearExtension<F>>>, F) {
+    ) -> (Vec<ArcDenseMultilinearExtension<F>>, F) {
         let start = start_timer!(|| "sample random mle list");
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
@@ -128,7 +129,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
 
         let list = multiplicands
             .into_iter()
-            .map(|x| Arc::new(DenseMultilinearExtension::from_evaluations_vec(nv, x)))
+            .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x).into())
             .collect();
 
         end_timer!(start);
@@ -140,7 +141,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
         nv: usize,
         degree: usize,
         mut rng: impl RngCore,
-    ) -> Vec<Arc<DenseMultilinearExtension<F>>> {
+    ) -> Vec<ArcDenseMultilinearExtension<F>> {
         let start = start_timer!(|| "sample random zero mle list");
 
         let mut multiplicands = Vec::with_capacity(degree);
@@ -156,7 +157,7 @@ impl<F: SmallField> DenseMultilinearExtension<F> {
 
         let list = multiplicands
             .into_iter()
-            .map(|x| Arc::new(DenseMultilinearExtension::from_evaluations_vec(nv, x)))
+            .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x).into())
             .collect();
 
         end_timer!(start);
