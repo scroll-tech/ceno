@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
-use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
+use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use rayon::{
     iter::IntoParallelRefMutIterator,
-    prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    prelude::{IntoParallelIterator, ParallelIterator},
 };
 use transcript::{Challenge, Transcript};
 

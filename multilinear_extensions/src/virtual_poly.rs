@@ -47,7 +47,7 @@ pub struct VirtualPolynomial<F> {
     pub products: Vec<(F, Vec<usize>)>,
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
-    pub flattened_ml_extensions: Vec<Arc<DenseMultilinearExtension<F>>>,
+    pub flattened_ml_extensions: Vec<ArcDenseMultilinearExtension<F>>,
     /// Pointers to the above poly extensions
     raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<F>, usize>,
 }

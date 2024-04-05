@@ -4,7 +4,7 @@ use std::{iter, sync::Arc};
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use itertools::Itertools;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension};
 
 pub fn i64_to_field<F: SmallField>(x: i64) -> F {
     if x >= 0 {
@@ -157,7 +157,7 @@ pub fn counter_eval<F: SmallField>(num_vars: usize, x: &[F]) -> F {
 /// Reduce the number of variables of `self` by fixing the
 /// `partial_point.len()` variables at `partial_point`.
 pub fn fix_high_variables<F: SmallField>(
-    poly: &Arc<DenseMultilinearExtension<F>>,
+    poly: &ArcDenseMultilinearExtension<F>,
     partial_point: &[F],
 ) -> DenseMultilinearExtension<F> {
     // TODO: return error.
@@ -218,12 +218,12 @@ pub fn tensor_product<F: SmallField>(a: &[F], b: &[F]) -> Vec<F> {
 }
 
 pub trait MultilinearExtensionFromVectors<F: SmallField> {
-    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>>;
-    fn original_mle(&self) -> Arc<DenseMultilinearExtension<F>>;
+    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> ArcDenseMultilinearExtension<F>;
+    fn original_mle(&self) -> ArcDenseMultilinearExtension<F>;
 }
 
 impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] {
-    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> Arc<DenseMultilinearExtension<F>> {
+    fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> ArcDenseMultilinearExtension<F> {
         let vecs = self.to_vec();
 
         Arc::new(DenseMultilinearExtension::from_evaluations_vec(
@@ -241,14 +241,14 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] 
                 .collect_vec(),
         ))
     }
-    fn original_mle(&self) -> Arc<DenseMultilinearExtension<F>> {
+    fn original_mle(&self) -> ArcDenseMultilinearExtension<F> {
         let lo_num_vars = ceil_log2(self[0].len());
         let hi_num_vars = ceil_log2(self.len());
         let n_zeros = (1 << lo_num_vars) - self[0].len();
         let n_zero_vecs = (1 << hi_num_vars) - self.len();
         let vecs = self.to_vec();
 
-        Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+        DenseMultilinearExtension::from_evaluations_vec(
             lo_num_vars + hi_num_vars,
             vecs.into_iter()
                 .flat_map(|instance| {
@@ -259,7 +259,8 @@ impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] 
                 .chain(vec![F::BaseField::ZERO; n_zero_vecs])
                 .map(|x| F::from_base(&x))
                 .collect_vec(),
-        ))
+        )
+        .into()
     }
 }
 

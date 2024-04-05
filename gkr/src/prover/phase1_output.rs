@@ -5,7 +5,6 @@ use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use rayon::iter::IntoParallelRefIterator;
 use std::{iter, mem, sync::Arc};
 use transcript::Transcript;
 

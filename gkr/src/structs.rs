@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use goldilocks::SmallField;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use serde::{Deserialize, Serialize, Serializer};
 use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId};
 
@@ -58,7 +58,7 @@ pub struct IOPProverState<F: SmallField> {
 
     /// The point to the next step.
     pub(crate) to_next_step_point: Point<F>,
-    pub(crate) layer_poly: Arc<DenseMultilinearExtension<F>>,
+    pub(crate) layer_poly: ArcDenseMultilinearExtension<F>,
 
     // Especially for output phase1.
     pub(crate) assert_point: Point<F>,
