@@ -10,6 +10,7 @@ members = [
     "singer-utils",
     "sumcheck",
     "transcript",
+    "interpreter",
 ]
 
 [workspace.package]
