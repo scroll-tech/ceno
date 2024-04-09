@@ -63,25 +63,11 @@ use goldilocks::SmallField;
 
 use instructions::SingerCircuitBuilder;
 use singer_utils::chips::SingerChipBuilder;
-use singer_utils::constants::OpcodeType;
 
-use instructions::construct_instruction_circuits;
-use instructions::ret::ReturnPublicOutLoad;
-use instructions::ret::ReturnRestMemLoad;
-use instructions::ret::ReturnRestMemStore;
-use instructions::InstCircuit;
 use instructions::InstOutputType;
-use instructions::Instruction;
-use instructions::{
-    add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
-    gt::GtInstruction, jump::JumpInstruction, jumpdest::JumpdestInstruction,
-    jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
-    ret::ReturnInstruction, swap::SwapInstruction,
-};
+
 use instructions::{construct_inst_graph, construct_inst_graph_and_witness};
-use num_traits::FromPrimitive;
-use rand::RngCore;
-use revm_interpreter::{Interpreter, Record};
+
 use std::mem;
 
 pub mod error;

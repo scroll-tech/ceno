@@ -6,7 +6,7 @@ use rand_chacha::ChaCha8Rng;
 use singer::{
     instructions::SingerCircuitBuilder,
     scheme::{prover::prove, verifier::verify},
-    SingerAuxInfo, SingerGraphBuilder, SingerParams, SingerWiresIn,
+    SingerAuxInfo, SingerGraphBuilder, SingerParams,
 };
 use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;
