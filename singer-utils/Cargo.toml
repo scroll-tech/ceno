@@ -16,3 +16,6 @@ simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
 strum = "0.26.1"
 strum_macros = "0.26.1"
+revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "6a8b44d", default-features = false }
+num-traits = "0.2"
+num-derive = "0.2"

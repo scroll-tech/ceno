@@ -118,10 +118,9 @@ mod test {
     use crate::structs::{ChipChallenges, ROMHandler};
 
     use super::{UInt, UIntCmp};
+    use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CircuitBuilder;
-
-    use gkr::structs::{Circuit, CircuitWitness};
 
     #[test]
     fn test_lt() {
