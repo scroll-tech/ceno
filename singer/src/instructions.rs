@@ -1,5 +1,5 @@
 use num_traits::FromPrimitive;
-use revm_interpreter::Record;
+use revm_interpreter::{Interpreter, Record};
 use std::{mem, sync::Arc};
 
 use gkr::structs::Circuit;
@@ -7,16 +7,29 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use simple_frontend::structs::WitnessId;
 
-use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType, structs::ChipChallenges};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use singer_utils::structs::ChipChallenges;
+use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType};
+use std::collections::HashMap;
 use strum_macros::EnumIter;
 
-use crate::{error::ZKVMError, CircuitWiresIn, SingerParams};
+use crate::InstWiresIn;
+use crate::{error::ZKVMError, CircuitWiresIn, SingerParams, SingerWiresIn};
 
 use self::{
-    add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
-    gt::GtInstruction, jump::JumpInstruction, jumpdest::JumpdestInstruction,
-    jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
-    ret::ReturnInstruction, swap::SwapInstruction,
+    add::AddInstruction,
+    calldataload::CalldataloadInstruction,
+    dup::DupInstruction,
+    gt::GtInstruction,
+    jump::JumpInstruction,
+    jumpdest::JumpdestInstruction,
+    jumpi::JumpiInstruction,
+    mstore::MstoreInstruction,
+    pop::PopInstruction,
+    push::PushInstruction,
+    ret::{ReturnInstruction, ReturnPublicOutLoad, ReturnRestMemLoad, ReturnRestMemStore},
+    swap::SwapInstruction,
 };
 
 // arithmetic
@@ -63,6 +76,84 @@ impl<F: SmallField> SingerCircuitBuilder<F> {
             insts_circuits,
             challenges,
         })
+    }
+
+    pub fn execute<EF: SmallField<BaseField = F>>(bytecode: &[u8], input: &[u8]) -> SingerWiresIn<F>
+    where
+        F: SmallField<BaseField = F> + Serialize + DeserializeOwned + Into<EF>,
+        EF: Serialize + DeserializeOwned + TryInto<F>,
+        <EF as TryInto<F>>::Error: core::fmt::Debug,
+    {
+        let records = Interpreter::<F>::execute(bytecode, input);
+        let mut opcode_wires_in = HashMap::<u8, InstWiresIn<F>>::new();
+        for record in records.iter() {
+            let wires_in = circuit_wires_in_from_record(record);
+            let wires = opcode_wires_in.entry(record.opcode).or_insert(InstWiresIn {
+                opcode: record.opcode,
+                real_n_instances: 0,
+                wires_in: Vec::new(),
+            });
+            wires.real_n_instances += 1;
+            // wires is a four-dimensional array indexed by
+            // 1. Different circuits for one opcode
+            // 2. Different wire_in for one circuit
+            // 3. Different repetitions/instances for one circuit
+            // 4. Different wire values for one wire_in
+            // The wires_in from the `circuit_wires_in_from_record` is also arranged in this order.
+            // The merge of the wires_in into the final result happens in the third (instance) dimension:
+            // the first two dimensions should match, then merge the third dimension, i.e., concatenate the
+            // instances.
+            assert_eq!(wires.wires_in.len(), wires_in.len()); // The number of circuits should match
+            wires
+                .wires_in
+                .iter_mut()
+                .zip(wires_in)
+                .for_each(|(wires_in, to_add)| {
+                    assert_eq!(wires_in.len(), to_add.len()); // The number of wires in should match
+                    wires_in.iter_mut().zip(to_add).for_each(
+                        |(wires_in_instance, to_add_instance)| {
+                            wires_in_instance
+                                .instances
+                                .extend(to_add_instance.instances);
+                        },
+                    );
+                });
+        }
+
+        let table_count = Vec::new();
+
+        SingerWiresIn {
+            instructions: opcode_wires_in.into_iter().map(|x| x.1).collect(),
+            table_count,
+        }
+    }
+}
+
+fn circuit_wires_in_from_record<F: SmallField>(record: &Record) -> Vec<CircuitWiresIn<F>> {
+    match OpcodeType::from_u8(record.opcode) {
+        Some(OpcodeType::ADD) => vec![AddInstruction::generate_wires_in(record)],
+        Some(OpcodeType::GT) => vec![GtInstruction::generate_wires_in(record)],
+        Some(OpcodeType::CALLDATALOAD) => vec![CalldataloadInstruction::generate_wires_in(record)],
+        Some(OpcodeType::POP) => vec![PopInstruction::generate_wires_in(record)],
+        Some(OpcodeType::MSTORE) => vec![MstoreInstruction::generate_wires_in(record)],
+        Some(OpcodeType::JUMP) => vec![JumpInstruction::generate_wires_in(record)],
+        Some(OpcodeType::JUMPI) => vec![JumpiInstruction::generate_wires_in(record)],
+        Some(OpcodeType::JUMPDEST) => vec![JumpdestInstruction::generate_wires_in(record)],
+        Some(OpcodeType::PUSH1) => vec![PushInstruction::<1>::generate_wires_in(record)],
+        Some(OpcodeType::DUP1) => vec![DupInstruction::<1>::generate_wires_in(record)],
+        Some(OpcodeType::DUP2) => vec![DupInstruction::<2>::generate_wires_in(record)],
+        Some(OpcodeType::SWAP2) => vec![SwapInstruction::<2>::generate_wires_in(record)],
+        Some(OpcodeType::SWAP4) => vec![SwapInstruction::<4>::generate_wires_in(record)],
+        Some(OpcodeType::RETURN) => {
+            vec![
+                ReturnInstruction::generate_wires_in(record),
+                ReturnPublicOutLoad::generate_wires_in(record),
+                ReturnRestMemLoad::generate_wires_in(record),
+                ReturnRestMemStore::generate_wires_in(record),
+            ]
+        }
+        None => panic!("Unsupported opcode: {}", record.opcode),
+        _ => unimplemented!(),
     }
 }
 

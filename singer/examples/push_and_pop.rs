@@ -4,8 +4,9 @@ use itertools::Itertools;
 use mpcs::{pcs_setup, pcs_trim, BasefoldDefault, BasefoldParams};
 use rand_chacha::ChaCha8Rng;
 use singer::{
+    instructions::SingerCircuitBuilder,
     scheme::{prover::prove, verifier::verify},
-    SingerAuxInfo, SingerCircuitBuilder, SingerGraphBuilder, SingerParams, SingerWiresIn,
+    SingerAuxInfo, SingerGraphBuilder, SingerParams, SingerWiresIn,
 };
 use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;
