@@ -3,6 +3,7 @@ use goldilocks::Goldilocks;
 use itertools::Itertools;
 use mpcs::{pcs_setup, pcs_trim, BasefoldDefault, BasefoldParams};
 use rand_chacha::ChaCha8Rng;
+
 use singer_pro::{
     instructions::SingerInstCircuitBuilder,
     scheme::{prover::prove, verifier::verify},
@@ -55,6 +56,7 @@ fn main() {
             &mut prover_transcript,
         )
         .expect("prove failed");
+
         let aux_info = SingerAuxInfo {
             graph_aux_info,
             real_n_instances,

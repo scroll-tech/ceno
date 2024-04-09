@@ -1,4 +1,5 @@
 use ff::Field;
+
 use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
 use revm_interpreter::Record;
@@ -30,7 +31,8 @@ use std::sync::Arc;
 
 use crate::error::ZKVMError;
 
-use super::{ChipChallenges, InstCircuit, Instruction};
+use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+
 pub struct SwapInstruction<const N: usize>;
 
 impl<F: SmallField, const N: usize> InstructionGraph<F> for SwapInstruction<N> {

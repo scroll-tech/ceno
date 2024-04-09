@@ -6,6 +6,7 @@ use goldilocks::SmallField;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 
 use crate::{
+    constants::RANGE_CHIP_BIT_WIDTH,
     error::UtilError,
     structs::{ChipChallenges, ROMType},
 };
@@ -35,7 +36,7 @@ pub(crate) fn construct_range_table_and_witness<F: SmallField>(
         vec![],
         real_challenges.to_vec(),
         vec![],
-        1 << bit_width,
+        1 << RANGE_CHIP_BIT_WIDTH,
     )?;
     Ok((
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),

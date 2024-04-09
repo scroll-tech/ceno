@@ -12,7 +12,7 @@ use singer_utils::{
 use super::InstructionGraph;
 use crate::error::ZKVMError;
 use crate::instructions::InstCircuitLayout;
-use crate::{CircuitWiresIn};
+use crate::CircuitWiresIn;
 use singer_utils::uint::u2fvec;
 use singer_utils::{
     chip_handler::{
@@ -182,7 +182,6 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
             },
         })
     }
-
     fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = vec![F::ZERO; Self::phase0_size()];
         copy_pc_from_record!(wire_values, record);

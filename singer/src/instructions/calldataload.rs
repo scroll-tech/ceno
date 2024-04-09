@@ -1,21 +1,22 @@
 use ff::Field;
+
 use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
 use revm_interpreter::Record;
 
 use crate::instructions::InstCircuitLayout;
-use crate::{CircuitWiresIn};
+use crate::CircuitWiresIn;
 use singer_utils::uint::u2fvec;
 
 use singer_utils::{
-    copy_clock_from_record,
-    copy_operand_timestamp_from_record, copy_operand_u64_from_record, copy_pc_add_from_record,
-    copy_pc_from_record, copy_stack_memory_ts_add_from_record,
+    copy_clock_from_record, copy_operand_timestamp_from_record, copy_operand_u64_from_record,
+    copy_pc_add_from_record, copy_pc_from_record, copy_stack_memory_ts_add_from_record,
     copy_stack_top_from_record, copy_stack_ts_add_from_record, copy_stack_ts_from_record,
     copy_stack_ts_lt_from_record,
 };
 
 use crate::error::ZKVMError;
+
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -30,7 +31,9 @@ use singer_utils::{
 };
 use std::sync::Arc;
 
-use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
+use crate::error::ZKVMError;
+
+use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 impl<F: SmallField> InstructionGraph<F> for CalldataloadInstruction {
     type InstType = Self;

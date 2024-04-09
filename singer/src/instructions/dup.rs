@@ -1,4 +1,5 @@
 use ff::Field;
+
 use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
 use revm_interpreter::Record;
@@ -6,30 +7,32 @@ use revm_interpreter::Record;
 use super::InstructionGraph;
 use crate::instructions::InstCircuitLayout;
 
-use crate::{CircuitWiresIn};
+use crate::CircuitWiresIn;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::uint::u2fvec;
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations,
-        ROMOperations, RangeChipOperations, StackChipOperations,
+        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
+        RangeChipOperations, StackChipOperations,
     },
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::{UIntAddSub, UIntCmp},
 };
+
 use singer_utils::{
-    copy_clock_from_record,
-    copy_operand_timestamp_from_record, copy_pc_add_from_record, copy_pc_from_record, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
+    copy_clock_from_record, copy_operand_timestamp_from_record, copy_pc_add_from_record,
+    copy_pc_from_record, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
     copy_stack_ts_add_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
 };
+
 use std::sync::Arc;
 
 use crate::error::ZKVMError;
 
-use super::{ChipChallenges, InstCircuit, Instruction};
+use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 pub struct DupInstruction<const N: usize>;
 

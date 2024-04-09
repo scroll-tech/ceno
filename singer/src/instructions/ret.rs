@@ -8,6 +8,7 @@ use revm_interpreter::Record;
 use revm_primitives::U256;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::uint::u2fvec;
+
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -21,8 +22,8 @@ use singer_utils::{
 };
 use singer_utils::{
     copy_carry_values_from_addends, copy_clock_from_record, copy_operand_from_record,
-    copy_operand_timestamp_from_record, copy_pc_from_record,
-    copy_range_values_from_u256, copy_stack_top_from_record, copy_stack_ts_from_record,
+    copy_operand_timestamp_from_record, copy_pc_from_record, copy_range_values_from_u256,
+    copy_stack_top_from_record, copy_stack_ts_from_record,
 };
 use std::{mem, sync::Arc};
 
@@ -30,7 +31,7 @@ use crate::instructions::InstCircuitLayout;
 
 use paste::paste;
 
-use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 /// This circuit is to pop offset and public output size from stack.
 pub struct ReturnInstruction;

@@ -1,4 +1,5 @@
 use ff::Field;
+
 use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -6,6 +7,7 @@ use revm_interpreter::Record;
 use singer_utils::uint::u2fvec;
 
 use crate::{error::ZKVMError, instructions::InstCircuitLayout};
+
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -18,15 +20,17 @@ use singer_utils::{
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::UIntAddSub,
 };
+
 use singer_utils::{
-    copy_clock_from_record, copy_pc_add_from_record, copy_pc_from_record, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
+    copy_clock_from_record, copy_pc_add_from_record, copy_pc_from_record,
+    copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
     copy_stack_ts_add_from_record, copy_stack_ts_from_record,
 };
 use std::sync::Arc;
 
 use crate::CircuitWiresIn;
 
-use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 pub struct PushInstruction<const N: usize>;
 

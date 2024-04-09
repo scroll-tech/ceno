@@ -61,18 +61,18 @@ use gkr_graph::structs::{
 };
 use goldilocks::SmallField;
 
-use instructions::SingerCircuitBuilder;
 use singer_utils::chips::SingerChipBuilder;
 
-use instructions::InstOutputType;
-
-use instructions::{construct_inst_graph, construct_inst_graph_and_witness};
+use instructions::{
+    construct_inst_graph, construct_inst_graph_and_witness, InstOutputType, SingerCircuitBuilder,
+};
 
 use std::mem;
 
 pub mod error;
 pub mod instructions;
 pub mod scheme;
+pub mod test;
 pub mod utils;
 
 // Process sketch:

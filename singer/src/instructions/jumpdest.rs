@@ -5,16 +5,18 @@ use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
 use revm_interpreter::Record;
 use singer_utils::{
-    copy_clock_from_record, copy_pc_add_from_record, copy_pc_from_record, copy_stack_top_from_record,
+    copy_clock_from_record, copy_pc_add_from_record, copy_pc_from_record,
+    copy_stack_top_from_record,
 };
 
 use super::InstructionGraph;
-use super::{ChipChallenges, InstCircuit, Instruction};
+use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 use crate::error::ZKVMError;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::uint::u2fvec;
+
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,

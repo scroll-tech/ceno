@@ -205,7 +205,6 @@ impl<F: SmallField> CircuitWitness<F> {
         ceil_log2(self.n_instances)
     }
 
-    #[cfg(debug_assertions)]
     pub fn check_correctness<Ext>(&self, circuit: &Circuit<Ext>)
     where
         Ext: SmallField<BaseField = F>,
@@ -796,7 +795,7 @@ mod test {
         circuit
     }
 
-    fn rlc_witness<Ext>() -> (
+    fn rlc_witness_2<Ext>() -> (
         Vec<LayerWitness<Ext::BaseField>>,
         CircuitWitness<Ext::BaseField>,
         Vec<Ext>,
@@ -941,7 +940,7 @@ mod test {
 
         let (wits_in, expect_circuit_wits) = copy_to_wit_out_witness_2::<GoldilocksExt2>();
         let mut circuit_wits = CircuitWitness::new(&circuit, vec![]);
-        circuit_wits.add_instances(&circuit, wits_in, 1);
+        circuit_wits.add_instances(&circuit, wits_in, 2);
 
         assert_eq!(circuit_wits, expect_circuit_wits);
     }
@@ -957,9 +956,9 @@ mod test {
     #[test]
     fn test_challenges() {
         let circuit = rlc_circuit::<GoldilocksExt2>();
-        let (wits_in, expect_circuit_wits, challenges) = rlc_witness::<GoldilocksExt2>();
+        let (wits_in, expect_circuit_wits, challenges) = rlc_witness_2::<GoldilocksExt2>();
         let mut circuit_wits = CircuitWitness::new(&circuit, challenges);
-        circuit_wits.add_instances(&circuit, wits_in, 1);
+        circuit_wits.add_instances(&circuit, wits_in, 2);
 
         assert_eq!(circuit_wits, expect_circuit_wits);
     }

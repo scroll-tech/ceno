@@ -20,7 +20,7 @@ impl<F: SmallField> IOPVerifierState<F> {
         proof: IOPProof<F>,
         aux_info: &CircuitGraphAuxInfo,
         transcript: &mut Transcript<F>,
-    ) -> Result<Vec<Vec<PointAndEval<F>>>, GKRGraphError> {
+    ) -> Result<(), GKRGraphError> {
         assert_eq!(target_evals.0.len(), circuit.targets.len());
 
         let mut output_evals = vec![vec![]; circuit.nodes.len()];
@@ -33,8 +33,6 @@ impl<F: SmallField> IOPVerifierState<F> {
             NodeOutputType::OutputLayer(id) => output_evals[*id].push(eval.clone()),
             NodeOutputType::WireOut(id, _) => wit_out_evals[*id].push(eval.clone()),
         });
-
-        let mut pcs_point_evals = vec![];
 
         for ((node, instance_num_vars), proof) in izip!(
             izip!(&circuit.nodes, &aux_info.instance_num_vars,).rev(),
@@ -51,19 +49,13 @@ impl<F: SmallField> IOPVerifierState<F> {
             )?;
 
             let new_instance_num_vars = aux_info.instance_num_vars[node.id];
-            let mut pcs_point_evals_for_node = vec![];
 
             izip!(&node.preds, input_claim.point_and_evals).for_each(|(pred, point_and_eval)| {
                 match pred {
                     PredType::Source => {
-                        pcs_point_evals_for_node.push(point_and_eval.clone());
+                        // TODO: collect `(proof.point.clone(), *eval)` as `TargetEvaluations` for later PCS open?
                     }
                     PredType::PredWire(out) | PredType::PredWireDup(out) => {
-                        // No need to push the real one because it is not going to be
-                        // used by the PCS opening. But still need to push something
-                        // to take the position and make the wire id correct. So push
-                        // an empty point.
-                        pcs_point_evals_for_node.push(PointAndEval::default());
                         let old_point = match pred {
                             PredType::PredWire(_) => point_and_eval.point.clone(),
                             PredType::PredWireDup(out) => {
@@ -104,12 +96,8 @@ impl<F: SmallField> IOPVerifierState<F> {
                     }
                 }
             });
-            pcs_point_evals.push(pcs_point_evals_for_node);
         }
 
-        // Reverse the vector because they were pushed in the reverse order of the nodes.
-        let pcs_point_evals = pcs_point_evals.into_iter().rev().collect();
-
-        Ok(pcs_point_evals)
+        Ok(())
     }
 }

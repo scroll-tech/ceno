@@ -1,7 +1,6 @@
 use num_derive::FromPrimitive;
 
 pub const STACK_TOP_BIT_WIDTH: usize = 10;
-
 pub const RANGE_CHIP_BIT_WIDTH: usize = 16;
 pub const VALUE_BIT_WIDTH: usize = 32;
 pub const EVM_STACK_BIT_WIDTH: usize = 256;
