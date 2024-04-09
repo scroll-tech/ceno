@@ -31,9 +31,7 @@ use singer_utils::{
 };
 use std::sync::Arc;
 
-use crate::error::ZKVMError;
-
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
 impl<F: SmallField> InstructionGraph<F> for CalldataloadInstruction {
     type InstType = Self;

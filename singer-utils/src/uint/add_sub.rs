@@ -1,5 +1,4 @@
 use crate::{chip_handler::RangeChipOperations, error::UtilError, structs::UInt};
-use crate::{chip_handler::RangeChipOperations, error::UtilError, structs::UInt};
 use ff::Field;
 use goldilocks::SmallField;
 use revm_primitives::U256;

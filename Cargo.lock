@@ -815,6 +815,7 @@ dependencies = [
  "goldilocks",
  "itertools 0.12.1",
  "multilinear_extensions",
+ "rayon",
  "serde",
  "serde_json",
  "simple-frontend",

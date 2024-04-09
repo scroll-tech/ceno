@@ -9,8 +9,7 @@ use singer_utils::{
     copy_stack_top_from_record,
 };
 
-use super::InstructionGraph;
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
 use crate::error::ZKVMError;
 use paste::paste;

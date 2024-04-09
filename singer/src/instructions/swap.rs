@@ -5,7 +5,6 @@ use goldilocks::SmallField;
 use revm_interpreter::Record;
 use singer_utils::uint::u2fvec;
 
-use super::InstructionGraph;
 use crate::instructions::InstCircuitLayout;
 
 use crate::CircuitWiresIn;
@@ -31,7 +30,7 @@ use std::sync::Arc;
 
 use crate::error::ZKVMError;
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
 pub struct SwapInstruction<const N: usize>;
 

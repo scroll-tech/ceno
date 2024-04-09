@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use crate::error::ZKVMError;
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction};
 
 pub struct DupInstruction<const N: usize>;
 

@@ -31,7 +31,7 @@ use crate::instructions::InstCircuitLayout;
 
 use paste::paste;
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
 /// This circuit is to pop offset and public output size from stack.
 pub struct ReturnInstruction;

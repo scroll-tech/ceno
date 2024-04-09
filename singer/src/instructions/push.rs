@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use crate::CircuitWiresIn;
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::{ChipChallenges, InstCircuit, Instruction, InstructionGraph};
 
 pub struct PushInstruction<const N: usize>;
 
