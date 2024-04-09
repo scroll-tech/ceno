@@ -1,7 +1,8 @@
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
 use paste::paste;
+use revm_interpreter::Record;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
@@ -9,13 +10,17 @@ use singer_utils::{
         RangeChipOperations, StackChipOperations,
     },
     constants::OpcodeType,
+    copy_carry_values_from_addends, copy_clock_from_record, copy_operand_from_record,
+    copy_operand_timestamp_from_record, copy_pc_add_from_record, copy_pc_from_record,
+    copy_range_values_from_u256, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
+    copy_stack_ts_add_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
+    uint::{u2fvec, UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 
-use crate::error::ZKVMError;
+use crate::{error::ZKVMError, CircuitWiresIn};
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
@@ -167,5 +172,33 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
                 ..Default::default()
             },
         })
+    }
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_pc_add_from_record!(wire_values, record);
+        copy_stack_ts_add_from_record!(wire_values, record);
+        copy_stack_ts_lt_from_record!(wire_values, record, 0);
+        copy_stack_ts_lt_from_record!(wire_values, record, 1);
+        copy_operand_from_record!(wire_values, record, phase0_addend_0, 0);
+        copy_operand_from_record!(wire_values, record, phase0_addend_1, 1);
+        copy_range_values_from_u256!(
+            wire_values,
+            phase0_instruction_add,
+            record.operands[0] + record.operands[1]
+        );
+        copy_carry_values_from_addends!(
+            wire_values,
+            phase0_instruction_add,
+            record.operands[0],
+            record.operands[1]
+        );
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }

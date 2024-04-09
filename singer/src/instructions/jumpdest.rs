@@ -1,20 +1,22 @@
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
 use paste::paste;
+use revm_interpreter::Record;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
     },
     constants::OpcodeType,
-    register_witness,
+    copy_clock_from_record, copy_pc_add_from_record, copy_pc_from_record,
+    copy_stack_top_from_record, register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
-    uint::UIntAddSub,
+    uint::{u2fvec, UIntAddSub},
 };
 use std::sync::Arc;
 
-use crate::error::ZKVMError;
+use crate::{error::ZKVMError, CircuitWiresIn};
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
@@ -32,7 +34,6 @@ register_witness!(
         memory_ts => TSUInt::N_OPRAND_CELLS,
         stack_top => 1,
         clk => 1,
-
         pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS
     }
 );
@@ -92,5 +93,17 @@ impl<F: SmallField> Instruction<F> for JumpdestInstruction {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_pc_add_from_record!(wire_values, record);
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }

@@ -1,8 +1,10 @@
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use paste::paste;
+use revm_interpreter::Record;
+use revm_primitives::U256;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
@@ -11,9 +13,13 @@ use singer_utils::{
     },
     chips::SingerChipBuilder,
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
-    register_witness,
+    copy_carry_values_from_addends, copy_clock_from_record, copy_memory_ts_add_from_record,
+    copy_memory_ts_from_record, copy_memory_ts_lt_from_record, copy_operand_from_record,
+    copy_operand_timestamp_from_record, copy_pc_add_from_record, copy_pc_from_record,
+    copy_range_values_from_u256, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
+    copy_stack_ts_from_record, copy_stack_ts_lt_from_record, register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
+    uint::{u256_to_fvec, u2fvec, UIntAddSub, UIntCmp},
 };
 use std::{mem, sync::Arc};
 
@@ -47,7 +53,7 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
         let inst_circuit = &inst_circuits[0];
         let n_witness_in = inst_circuit.circuit.n_witness_in;
         let inst_node_id = graph_builder.add_node_with_witness(
-            stringify!(ReturnInstruction),
+            stringify!(MstoreInstruction),
             &inst_circuit.circuit,
             vec![PredType::Source; n_witness_in],
             real_challenges.to_vec(),
@@ -283,6 +289,64 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
             },
         })
     }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_memory_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_pc_add_from_record!(wire_values, record);
+        copy_memory_ts_add_from_record!(wire_values, record);
+        copy_stack_ts_lt_from_record!(
+            wire_values,
+            record,
+            phase0_old_stack_ts_offset,
+            phase0_old_stack_ts_lt_offset,
+            0
+        );
+        copy_stack_ts_lt_from_record!(
+            wire_values,
+            record,
+            phase0_old_stack_ts_value,
+            phase0_old_stack_ts_lt_value,
+            0
+        );
+        // The memory value timestamps are stored starting from the third cell
+        // copy_memory_ts_lt_from_record!(wire_values, record, 2);
+        copy_operand_from_record!(wire_values, record, phase0_offset, 0);
+        // for offset in 0..EVM_STACK_BYTE_WIDTH {
+        //     copy_range_values_from_u256!(
+        //         wire_values,
+        //         phase0_offset_add_i_plus_1,
+        //         record.operands[0] + U256::from(offset),
+        //         offset
+        //     );
+        //     copy_carry_values_from_addends!(
+        //         wire_values,
+        //         phase0_offset_add_i_plus_1,
+        //         record.operands[0],
+        //         U256::from(offset)
+        //     );
+        // }
+        wire_values[Self::phase0_mem_bytes()].copy_from_slice(&u256_to_fvec::<
+            F,
+            { StackUInt::BIT_SIZE },
+            8,
+        >(record.operands[1]));
+        // wire_values[Self::phase0_prev_mem_bytes()].copy_from_slice(&u256_to_fvec::<
+        //     F,
+        //     { StackUInt::BIT_SIZE },
+        //     8,
+        // >(
+        //     record.operands[2]
+        // ));
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
+    }
 }
 
 pub struct MstoreAccessory;
@@ -298,8 +362,7 @@ register_witness!(
     },
     phase0 {
         old_memory_ts => TSUInt::N_OPRAND_CELLS,
-        old_memory_ts_lt =>  UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-
+        old_memory_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
         offset_add_delta => UIntAddSub::<StackUInt>::N_WITNESS_CELLS,
         prev_mem_bytes => 1
     }
@@ -369,5 +432,47 @@ impl<F: SmallField> Instruction<F> for MstoreAccessory {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let old_memory_value = record.operands[2];
+        let old_value_bytes: [u8; EVM_STACK_BYTE_WIDTH] = old_memory_value.to_le_bytes();
+        // This circuit will be repeated EVM_STACK_BYTE_WIDTH times for every mstore. So prepare these
+        // number of wires in values.
+        let mut wire_values = vec![vec![F::ZERO; Self::phase0_size()]; EVM_STACK_BYTE_WIDTH];
+        for i in 0..EVM_STACK_BYTE_WIDTH {
+            copy_memory_ts_lt_from_record!(
+                wire_values[i],
+                record,
+                phase0_old_memory_ts,
+                phase0_old_memory_ts_lt,
+                2, // The operand_timestamps passed from the interepreter stores two timestamps for the stack operands,
+                // so the memory timestamps start from position 2
+                i
+            );
+            copy_range_values_from_u256!(
+                wire_values[i],
+                phase0_offset_add_delta,
+                record.operands[0] + U256::from(i)
+            );
+            copy_carry_values_from_addends!(
+                wire_values[i],
+                phase0_offset_add_delta,
+                record.operands[0],
+                U256::from(i)
+            );
+            wire_values[i][Self::phase0_prev_mem_bytes().start] =
+                F::from(old_value_bytes[i] as u64);
+        }
+
+        // The first two empty vectors are for the first two wires in that are passed from the previous
+        // circuit. We don't need to prepare their values here, so leave them empty.
+        vec![
+            LayerWitness { instances: vec![] },
+            LayerWitness { instances: vec![] },
+            LayerWitness {
+                instances: wire_values,
+            },
+        ]
     }
 }

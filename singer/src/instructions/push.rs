@@ -1,7 +1,9 @@
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
+use itertools::Itertools;
 use paste::paste;
+use revm_interpreter::Record;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
@@ -9,13 +11,15 @@ use singer_utils::{
         RangeChipOperations, StackChipOperations,
     },
     constants::OpcodeType,
-    register_witness,
+    copy_clock_from_record, copy_pc_add_from_record, copy_pc_from_record,
+    copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
+    copy_stack_ts_add_from_record, copy_stack_ts_from_record, register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::UIntAddSub,
+    uint::{u2fvec, UIntAddSub},
 };
 use std::sync::Arc;
 
-use crate::error::ZKVMError;
+use crate::{error::ZKVMError, CircuitWiresIn};
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
@@ -135,5 +139,27 @@ impl<F: SmallField, const N: usize> Instruction<F> for PushInstruction<N> {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        for offset in 1..=N {
+            copy_pc_add_from_record!(wire_values, record, phase0_pc_add_i_plus_1, offset as u64);
+        }
+        copy_stack_ts_add_from_record!(wire_values, record);
+        wire_values[Self::phase0_stack_bytes()].copy_from_slice(
+            (0..N)
+                .map(|index| F::from(record.operands[index].as_limbs()[0]))
+                .collect_vec()
+                .as_slice(),
+        );
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }

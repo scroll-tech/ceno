@@ -1,8 +1,10 @@
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use goldilocks::SmallField;
 use paste::paste;
+use revm_interpreter::Record;
+use revm_primitives::U256;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
@@ -11,9 +13,12 @@ use singer_utils::{
     },
     chips::SingerChipBuilder,
     constants::OpcodeType,
+    copy_carry_values_from_addends, copy_clock_from_record, copy_memory_ts_from_record,
+    copy_operand_from_record, copy_operand_timestamp_from_record, copy_pc_from_record,
+    copy_range_values_from_u256, copy_stack_top_from_record, copy_stack_ts_from_record,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::UIntAddSub,
+    uint::{u2fvec, UIntAddSub},
 };
 use std::{mem, sync::Arc};
 
@@ -364,6 +369,24 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
             },
         })
     }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_memory_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_operand_timestamp_from_record!(wire_values, record, phase0_old_stack_ts0, 0, 0);
+        copy_operand_timestamp_from_record!(wire_values, record, phase0_old_stack_ts1, 0, 1);
+
+        copy_operand_from_record!(wire_values, record, phase0_offset, 0);
+        copy_operand_from_record!(wire_values, record, phase0_mem_length, 0);
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
+    }
 }
 
 register_witness!(
@@ -427,6 +450,40 @@ impl<F: SmallField> Instruction<F> for ReturnPublicOutLoad {
             },
         })
     }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let offset = record.operands[0];
+        let len = record.operands[1].as_limbs()[0] as usize;
+
+        let mut public_io_values = vec![vec![F::ZERO; Self::public_io_size()]; len];
+        let mut phase0_wire_values = vec![vec![F::ZERO; Self::phase0_size()]; len];
+        for i in 0..len {
+            public_io_values[i][..]
+                .copy_from_slice(&[F::from(record.operands[i + 2].as_limbs()[0])]);
+            phase0_wire_values[i][Self::phase0_old_memory_ts()]
+                .copy_from_slice(&[F::from(record.operands_timestamps[i + 2])]);
+            let delta = U256::from(i);
+            copy_range_values_from_u256!(phase0_wire_values[i], phase0_offset_add, offset + delta);
+            copy_carry_values_from_addends!(
+                phase0_wire_values[i],
+                phase0_offset_add,
+                offset,
+                delta
+            );
+        }
+
+        vec![
+            LayerWitness {
+                instances: vec![Vec::new()],
+            },
+            LayerWitness {
+                instances: public_io_values,
+            },
+            LayerWitness {
+                instances: phase0_wire_values,
+            },
+        ]
+    }
 }
 
 register_witness!(
@@ -469,6 +526,24 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemLoad {
             },
         })
     }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = Vec::new();
+        for i in 0..record.ret_info.rest_memory_loads.len() {
+            let (offset, timestamp, value) = record.ret_info.rest_memory_loads[i];
+            let mut wire_value = vec![F::ZERO; Self::phase0_size()];
+            wire_value[Self::phase0_mem_byte()].copy_from_slice(&[F::from(value as u64)]);
+            wire_value[Self::phase0_offset()]
+                .copy_from_slice(StackUInt::uint_to_field_elems(offset).as_slice());
+            wire_value[Self::phase0_old_memory_ts()]
+                .copy_from_slice(TSUInt::uint_to_field_elems(timestamp).as_slice());
+            wire_values.push(wire_value);
+        }
+
+        vec![LayerWitness {
+            instances: wire_values,
+        }]
+    }
 }
 
 register_witness!(
@@ -504,6 +579,24 @@ impl<F: SmallField> Instruction<F> for ReturnRestMemStore {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = Vec::new();
+        for i in 0..record.ret_info.rest_memory_store.len() {
+            let (offset, value) = record.ret_info.rest_memory_store[i];
+            let mut wire_value = vec![F::ZERO; Self::phase0_size()];
+            // All memory addresses are initialized with zero when first
+            // accessed.
+            wire_value[Self::phase0_mem_byte()].copy_from_slice(&[F::from(value as u64)]);
+            wire_value[Self::phase0_offset()]
+                .copy_from_slice(StackUInt::uint_to_field_elems(offset).as_slice());
+            wire_values.push(wire_value);
+        }
+
+        vec![LayerWitness {
+            instances: wire_values,
+        }]
     }
 }
 
@@ -548,5 +641,24 @@ impl<F: SmallField> Instruction<F> for ReturnRestStackPop {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = Vec::new();
+        for i in 0..record.ret_info.rest_stack.len() {
+            let (timestamp, value) = record.ret_info.rest_stack[i];
+            let mut wire_value = vec![F::ZERO; Self::phase0_size()];
+            // All memory addresses are initialized with zero when first
+            // accessed.
+            wire_value[Self::phase0_old_stack_ts()]
+                .copy_from_slice(TSUInt::uint_to_field_elems(timestamp).as_slice());
+            wire_value[Self::phase0_stack_values()]
+                .copy_from_slice(StackUInt::u256_to_field_elems(value).as_slice());
+            wire_values.push(wire_value);
+        }
+
+        vec![LayerWitness {
+            instances: wire_values,
+        }]
     }
 }

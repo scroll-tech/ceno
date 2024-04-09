@@ -1,7 +1,8 @@
 use ff::Field;
-use gkr::structs::Circuit;
+use gkr::structs::{Circuit, LayerWitness};
 use goldilocks::SmallField;
 use paste::paste;
+use revm_interpreter::Record;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
@@ -9,13 +10,16 @@ use singer_utils::{
         RangeChipOperations, StackChipOperations,
     },
     constants::OpcodeType,
+    copy_clock_from_record, copy_operand_timestamp_from_record, copy_pc_add_from_record,
+    copy_pc_from_record, copy_stack_memory_ts_add_from_record, copy_stack_top_from_record,
+    copy_stack_ts_add_from_record, copy_stack_ts_from_record, copy_stack_ts_lt_from_record,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
+    uint::{u2fvec, UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 
-use crate::error::ZKVMError;
+use crate::{error::ZKVMError, CircuitWiresIn};
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
@@ -149,5 +153,20 @@ impl<F: SmallField, const N: usize> Instruction<F> for DupInstruction<N> {
                 ..Default::default()
             },
         })
+    }
+
+    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        let mut wire_values = vec![F::ZERO; Self::phase0_size()];
+        copy_pc_from_record!(wire_values, record);
+        copy_stack_ts_from_record!(wire_values, record);
+        copy_stack_top_from_record!(wire_values, record);
+        copy_clock_from_record!(wire_values, record);
+        copy_pc_add_from_record!(wire_values, record);
+        copy_stack_ts_add_from_record!(wire_values, record);
+        copy_stack_ts_lt_from_record!(wire_values, record);
+
+        vec![LayerWitness {
+            instances: vec![wire_values],
+        }]
     }
 }
