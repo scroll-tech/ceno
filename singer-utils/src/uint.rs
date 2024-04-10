@@ -15,8 +15,9 @@ pub fn u2fvec<F: SmallField, const W: usize, const C: usize>(x: u64) -> [F; W] {
     let mut x = x;
     let mut ret = [F::ZERO; W];
     for i in 0..ret.len() {
-        ret[i] = F::from(x & ((1 << C) - 1));
-        x >>= C;
+        // Cast to u128 to prevent overflow in case C = 64
+        ret[i] = F::from(x & ((1u128 << C) - 1) as u64);
+        x = ((x as u128) >> C) as u64;
     }
     ret
 }
@@ -27,7 +28,7 @@ pub fn u256_to_fvec<F: SmallField, const W: usize, const C: usize>(x: U256) -> [
     for i in 0..ret.len() {
         // U256 is least significant first. The limbs are u64. C is assumed to be
         // no more than 64.
-        ret[i] = F::from(x.as_limbs()[0] & ((1 << C) - 1));
+        ret[i] = F::from(x.as_limbs()[0] & (((1u128 << C) - 1) as u64));
         x >>= C;
     }
     ret

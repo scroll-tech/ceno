@@ -152,3 +152,31 @@ pub(crate) fn test_opcode_circuit<Ext: SmallField>(
     println!("verification succeeded");
     */
 }
+
+pub(crate) fn test_opcode_circuit_with_witness_vector<Ext: SmallField>(
+    inst_circuit: &InstCircuit<Ext>,
+    witness_in: Vec<Vec<Ext::BaseField>>,
+    circuit_witness_challenges: Vec<Ext>,
+) -> CircuitWitness<<Ext as SmallField>::BaseField> {
+    // configure circuit
+    let circuit = inst_circuit.circuit.as_ref();
+
+    #[cfg(feature = "test-dbg")]
+    println!("{:?}", circuit);
+
+    #[cfg(feature = "test-dbg")]
+    println!("{:?}", witness_in);
+
+    let circuit_witness = {
+        let mut circuit_witness = CircuitWitness::new(&circuit, circuit_witness_challenges);
+        circuit_witness.add_instance(&circuit, witness_in);
+        circuit_witness
+    };
+
+    #[cfg(feature = "test-dbg")]
+    println!("{:?}", circuit_witness);
+
+    circuit_witness.check_correctness(&circuit);
+
+    circuit_witness
+}
