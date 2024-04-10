@@ -438,7 +438,7 @@ impl MstoreAccessory {
         })
     }
 
-    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+    fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
         let old_memory_value = record.operands[2];
         let old_value_bytes: [u8; EVM_STACK_BYTE_WIDTH] = old_memory_value.to_le_bytes();
         // This circuit will be repeated EVM_STACK_BYTE_WIDTH times for every mstore. So prepare these

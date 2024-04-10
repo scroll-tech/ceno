@@ -461,7 +461,7 @@ impl ReturnPublicOutLoad {
         })
     }
 
-    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+    pub fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
         let offset = record.operands[0];
         let len = record.operands[1].as_limbs()[0] as usize;
 
@@ -543,7 +543,7 @@ impl ReturnRestMemLoad {
         })
     }
 
-    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+    pub fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = Vec::new();
         for i in 0..record.ret_info.rest_memory_loads.len() {
             let (offset, timestamp, value) = record.ret_info.rest_memory_loads[i];
@@ -603,7 +603,7 @@ impl ReturnRestMemStore {
         })
     }
 
-    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+    pub fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = Vec::new();
         for i in 0..record.ret_info.rest_memory_store.len() {
             let (offset, value) = record.ret_info.rest_memory_store[i];
@@ -671,7 +671,7 @@ impl ReturnRestStackPop {
         })
     }
 
-    fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+    pub fn generate_wires_in<F: SmallField>(record: &Record) -> CircuitWiresIn<F> {
         let mut wire_values = Vec::new();
         for i in 0..record.ret_info.rest_stack.len() {
             let (timestamp, value) = record.ret_info.rest_stack[i];
