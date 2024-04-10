@@ -174,7 +174,7 @@ pub(crate) fn construct_instruction_circuits<F: SmallField>(
         Some(OpcodeType::SWAP2) => SwapInstruction::<2>::construct_circuits(challenges),
         Some(OpcodeType::SWAP4) => SwapInstruction::<4>::construct_circuits(challenges),
         Some(OpcodeType::RETURN) => ReturnInstruction::construct_circuits(challenges),
-        _ => unimplemented!(),
+        _ => Ok(vec![]), // TODO: Add more instructions.
     }
 }
 
@@ -203,7 +203,7 @@ pub(crate) fn construct_inst_graph_and_witness<F: SmallField>(
         Some(OpcodeType::SWAP2) => SwapInstruction::<2>::construct_graph_and_witness,
         Some(OpcodeType::SWAP4) => SwapInstruction::<4>::construct_graph_and_witness,
         Some(OpcodeType::RETURN) => ReturnInstruction::construct_graph_and_witness,
-        _ => unimplemented!(),
+        _ => return Ok(None), // TODO: Add more instructions.
     };
 
     construct_circuit_graph(
@@ -283,6 +283,8 @@ pub struct InstCircuitLayout {
 }
 
 pub(crate) trait Instruction<F: SmallField> {
+    const OPCODE: OpcodeType;
+    const NAME: &'static str;
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError>;
     fn generate_wires_in(record: &Record) -> CircuitWiresIn<F>;
 }
@@ -313,7 +315,7 @@ pub(crate) trait InstructionGraph<F: SmallField> {
         let inst_circuit = &inst_circuits[0];
         let inst_wires_in = mem::take(&mut sources[0]);
         let node_id = graph_builder.add_node_with_witness(
-            stringify!(Self::InstType),
+            Self::InstType::NAME,
             &inst_circuits[0].circuit,
             vec![PredType::Source; inst_wires_in.len()],
             real_challenges.to_vec(),

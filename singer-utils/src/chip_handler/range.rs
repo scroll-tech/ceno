@@ -112,13 +112,13 @@ impl<Ext: SmallField> ROMHandler<Ext> {
         constant: i64,
         witness: &[CellId],
     ) -> Result<TSUInt, UtilError> {
-        let carry = UIntAddSub::<TSUInt>::extract_unsafe_carry(witness);
+        //let carry = UIntAddSub::<TSUInt>::extract_unsafe_carry(witness);
         UIntAddSub::<TSUInt>::add_const(
             circuit_builder,
             self,
             &ts,
             i64_to_base_field::<Ext>(constant),
-            carry,
+            witness,
         )
     }
 

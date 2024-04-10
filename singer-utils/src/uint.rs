@@ -4,7 +4,7 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use revm_primitives::U256;
 use simple_frontend::structs::{CellId, CircuitBuilder};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, process::exit};
 
 use crate::{constants::RANGE_CHIP_BIT_WIDTH, error::UtilError, structs::UInt};
 
@@ -71,7 +71,11 @@ impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
     type Error = UtilError;
     fn try_from(values: &[usize]) -> Result<Self, Self::Error> {
         if values.len() != Self::N_OPRAND_CELLS {
-            return Err(UtilError::UIntError);
+            panic!(
+                "expected = {}, got = {}",
+                Self::N_OPRAND_CELLS,
+                values.len()
+            );
         }
         Ok(Self {
             values: values.to_vec(),
@@ -96,9 +100,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     pub const N_CARRY_NO_OVERFLOW_CELLS: usize = Self::N_OPRAND_CELLS - 1;
 
     pub const N_RANGE_CHECK_CELLS: usize =
-        Self::N_OPRAND_CELLS * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
+        Self::N_OPRAND_CELLS * ((C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH);
     pub const N_RANGE_CHECK_NO_OVERFLOW_CELLS: usize =
-        (Self::N_OPRAND_CELLS - 1) * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
+        (Self::N_OPRAND_CELLS - 1) * ((C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH);
 
     pub fn values(&self) -> &[CellId] {
         &self.values
@@ -192,11 +196,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         circuit_builder: &mut CircuitBuilder<F>,
         bytes: &[CellId],
     ) -> Result<Self, UtilError> {
-        if C <= M {
-            convert_decomp(circuit_builder, bytes, 8, C, true).try_into()
+        let mut values = if C <= M {
+            convert_decomp(circuit_builder, bytes, 8, C, true)
         } else {
-            convert_decomp(circuit_builder, bytes, 8, M, true).try_into()
+            convert_decomp(circuit_builder, bytes, 8, M, true)
+        };
+        while values.len() < Self::N_OPRAND_CELLS {
+            values.push(circuit_builder.create_cell());
         }
+        Self::try_from(values)
     }
 
     pub fn assert_eq<F: SmallField>(&self, circuit_builder: &mut CircuitBuilder<F>, other: &Self) {
@@ -289,7 +297,7 @@ fn convert_decomp<F: SmallField>(
                 circuit_builder.add(
                     tmp,
                     small_values[k],
-                    F::BaseField::from((1 as u64) << k - j * small_bit_width),
+                    F::BaseField::from((1 as u64) << (k - j) * small_bit_width),
                 );
             }
             tmp
@@ -302,15 +310,14 @@ fn convert_decomp<F: SmallField>(
 mod test {
     use crate::uint::convert_decomp;
 
+    use super::UInt;
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CircuitBuilder;
 
     #[test]
     fn test_convert_decomp() {
-        // use of convert_decomp must ensure that
-        //      small_len * small_bit_width does not exceed
-        //      the field's max bit size (64 for Goldlilocks)
+        // test case 1
         let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
         let big_bit_width = 3;
         let small_bit_width = 2;
@@ -345,5 +352,98 @@ mod test {
         for i in 1..16 {
             assert_eq!(result_values.instances[0][i], Goldilocks::from(0u64));
         }
+        // test case 2
+        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let big_bit_width = 32;
+        let small_bit_width = 16;
+        let (small_values_wire_in_id, small_values) = circuit_builder.create_witness_in(4);
+        let values = convert_decomp(
+            &mut circuit_builder,
+            &small_values,
+            small_bit_width,
+            big_bit_width,
+            true,
+        );
+        assert_eq!(values.len(), 2);
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+        let n_witness_in = circuit.n_witness_in;
+        let mut wires_in = vec![vec![]; n_witness_in];
+        wires_in[small_values_wire_in_id as usize] = vec![
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(1u64),
+            Goldilocks::from(0u64),
+        ];
+        let circuit_witness = {
+            let challenges = vec![Goldilocks::from(2)];
+            let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
+            circuit_witness.add_instance(&circuit, wires_in);
+            circuit_witness
+        };
+        #[cfg(feature = "test-dbg")]
+        println!("{:?}", circuit_witness);
+        circuit_witness.check_correctness(&circuit);
+        // check the result
+        let result_values = circuit_witness.output_layer_witness_ref();
+        assert_eq!(
+            result_values.instances[0],
+            vec![Goldilocks::from(0u64), Goldilocks::from(1u64)]
+        );
+    }
+
+    #[test]
+    fn test_from_range_values() {
+        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let (range_values_wire_in_id, range_values) = circuit_builder.create_witness_in(16);
+        let range_value =
+            UInt::<256, 32>::from_range_values(&mut circuit_builder, &range_values).unwrap();
+        assert_eq!(range_value.values.len(), 8);
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+        let n_witness_in = circuit.n_witness_in;
+        let mut wires_in = vec![vec![]; n_witness_in];
+        wires_in[range_values_wire_in_id as usize] = vec![
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(1u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+        ];
+        let circuit_witness = {
+            let challenges = vec![Goldilocks::from(2)];
+            let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
+            circuit_witness.add_instance(&circuit, wires_in);
+            circuit_witness
+        };
+        #[cfg(feature = "test-dbg")]
+        println!("{:?}", circuit_witness);
+        circuit_witness.check_correctness(&circuit);
+        // check the result
+        let result_values = circuit_witness.output_layer_witness_ref();
+        assert_eq!(
+            result_values.instances[0],
+            vec![
+                Goldilocks::from(0),
+                Goldilocks::from(1),
+                Goldilocks::from(0),
+                Goldilocks::from(0),
+                Goldilocks::from(0),
+                Goldilocks::from(0),
+                Goldilocks::from(0),
+                Goldilocks::from(0),
+            ]
+        );
     }
 }
