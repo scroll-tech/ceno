@@ -5,7 +5,7 @@ use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use std::{iter, mem, ops::Add, sync::Arc};
+use std::{iter, mem, sync::Arc};
 use transcript::Transcript;
 
 use crate::{
@@ -66,17 +66,14 @@ impl<F: SmallField> IOPProverState<F> {
                 let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
 
                 let f1_j = fix_high_variables(&self.layer_poly, &point[point_lo_num_vars..]);
-                f1.push(Arc::new(f1_j));
+                f1.push(f1_j.into());
 
                 let g1_j = lo_eq_w_p
                     .into_iter()
                     .map(|eq| *alpha_pow * eq)
                     .collect_vec();
 
-                g1.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                    lo_num_vars,
-                    g1_j,
-                )));
+                g1.push(DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into());
             },
         );
 
@@ -94,7 +91,7 @@ impl<F: SmallField> IOPProverState<F> {
             assert!(copy_to.len() <= lo_eq_w_p.len());
 
             let f1_j = fix_high_variables(&self.layer_poly, &point[point_lo_num_vars..]);
-            f1.push(Arc::new(f1_j));
+            f1.push(f1_j.into());
 
             let g1_j = copy_to.as_slice().fix_row_row_first_with_scalar(
                 &lo_eq_w_p,
@@ -102,14 +99,11 @@ impl<F: SmallField> IOPProverState<F> {
                 alpha_pow,
             );
 
-            g1.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                lo_num_vars,
-                g1_j,
-            )));
+            g1.push(DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into());
         });
 
         let f1_j = fix_high_variables(&self.layer_poly, &self.assert_point[lo_num_vars..]);
-        f1.push(Arc::new(f1_j));
+        f1.push(f1_j.into());
 
         let alpha_pow = alpha_pows.last().unwrap();
         let lo_eq_w_p = build_eq_x_r_vec(&self.assert_point[..lo_num_vars]);
@@ -118,30 +112,26 @@ impl<F: SmallField> IOPProverState<F> {
             g_last[gate.idx_out as usize] = lo_eq_w_p[gate.idx_out as usize] * alpha_pow;
         });
 
-        g1.push(Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-            lo_num_vars,
-            g_last,
-        )));
+        g1.push(DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g_last).into());
 
         // sumcheck: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
         let mut virtual_poly_1 = VirtualPolynomial::new(lo_num_vars);
-        for (f1_j, g1_j) in f1.iter().zip(g1.iter()) {
+        for (f1_j, g1_j) in f1.into_iter().zip(g1.into_iter()) {
             let mut tmp = VirtualPolynomial::new_from_mle(f1_j, F::ONE);
-            tmp.mul_by_mle(g1_j.clone(), F::ONE);
-            virtual_poly_1 = virtual_poly_1.add(&tmp);
+            tmp.mul_by_mle(g1_j, F::ONE);
+            virtual_poly_1.merge(&tmp);
         }
 
-        let sumcheck_proof_1 = SumcheckState::prove(&virtual_poly_1, transcript);
-        let eval_value_1 = f1
-            .iter()
-            .map(|f1_j| f1_j.evaluate(&sumcheck_proof_1.point))
-            .collect_vec();
+        let (sumcheck_proof_1, prover_state) = SumcheckState::prove(virtual_poly_1, transcript);
+        let (f1, g1): (Vec<_>, Vec<_>) = prover_state
+            .get_mle_final_evaluations()
+            .into_iter()
+            .enumerate()
+            .partition(|(i, _)| i % 2 == 0);
+        let eval_value_1 = f1.into_iter().map(|(_, f1_j)| f1_j).collect_vec();
 
         self.to_next_step_point = sumcheck_proof_1.point.clone();
-        self.g1_values = g1
-            .iter()
-            .map(|g1_j| g1_j.evaluate(&sumcheck_proof_1.point))
-            .collect_vec();
+        self.g1_values = g1.into_iter().map(|(_, g1_j)| g1_j).collect_vec();
 
         end_timer!(timer);
         IOPProverStepMessage {
@@ -166,7 +156,8 @@ impl<F: SmallField> IOPProverState<F> {
         let hi_num_vars = circuit_witness.instance_num_vars();
 
         // f2(t) = layers[i](t || ry)
-        let f2 = Arc::new(self.layer_poly.fix_variables(&self.to_next_step_point));
+        let mut f2 = Arc::clone(&mut self.layer_poly);
+        Arc::make_mut(&mut f2).fix_variables(&self.to_next_step_point);
 
         // g2(t) = \sum_j \alpha^j (eq or copy_to[j] or assert_subset)(ry_j, ry) eq(rt_j, t)
         let output_points = chain![
@@ -191,16 +182,18 @@ impl<F: SmallField> IOPProverState<F> {
                     .map(|(a, b)| a + b)
                     .collect_vec()
             });
-        let g2 = Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-            hi_num_vars,
-            g2,
-        ));
+        let g2 = DenseMultilinearExtension::from_evaluations_vec(hi_num_vars, g2);
         // sumcheck: sigma = \sum_t( g2(t) * f2(t) )
-        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(&f2, F::ONE);
-        virtual_poly_2.mul_by_mle(g2, F::ONE);
+        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, F::ONE);
+        virtual_poly_2.mul_by_mle(g2.into(), F::ONE);
 
-        let sumcheck_proof_2 = SumcheckState::prove(&virtual_poly_2, transcript);
-        let eval_value_2 = f2.evaluate(&sumcheck_proof_2.point);
+        let (sumcheck_proof_2, prover_state) = SumcheckState::prove(virtual_poly_2, transcript);
+        let (mut f2, _): (Vec<_>, Vec<_>) = prover_state
+            .get_mle_final_evaluations()
+            .into_iter()
+            .enumerate()
+            .partition(|(i, _)| i % 2 == 0);
+        let eval_value_2 = f2.remove(0).1;
 
         self.to_next_step_point = [
             mem::take(&mut self.to_next_step_point),

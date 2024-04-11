@@ -1,8 +1,8 @@
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug};
 
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use simple_frontend::structs::{ChallengeConst, ConstantType, LayerId};
 
 use crate::{
@@ -400,7 +400,7 @@ impl<F: SmallField> CircuitWitness<F> {
         &self,
         layer_id: LayerId,
         single_num_vars: usize,
-    ) -> Arc<DenseMultilinearExtension<E>>
+    ) -> ArcDenseMultilinearExtension<E>
     where
         E: SmallField<BaseField = F>,
     {

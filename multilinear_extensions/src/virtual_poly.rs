@@ -1,6 +1,5 @@
 use std::cmp::max;
 use std::hash::Hash;
-use std::ops::Add;
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use ark_std::rand::Rng;
@@ -12,7 +11,7 @@ use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use serde::{Deserialize, Serialize};
 
-use crate::mle::DenseMultilinearExtension;
+use crate::mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension};
 use crate::util::bit_decompose;
 
 #[rustfmt::skip]
@@ -50,7 +49,7 @@ pub struct VirtualPolynomial<F> {
     pub products: Vec<(F, Vec<usize>)>,
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
-    pub flattened_ml_extensions: Vec<Arc<DenseMultilinearExtension<F>>>,
+    pub flattened_ml_extensions: Vec<ArcDenseMultilinearExtension<F>>,
     /// Pointers to the above poly extensions
     raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<F>, usize>,
 }
@@ -83,26 +82,6 @@ impl<F> VPAuxInfo<F> {
     }
 }
 
-impl<F: SmallField> Add for &VirtualPolynomial<F> {
-    type Output = VirtualPolynomial<F>;
-    fn add(self, other: &VirtualPolynomial<F>) -> Self::Output {
-        let start = start_timer!(|| "virtual poly add");
-        let mut res = self.clone();
-        for products in other.products.iter() {
-            let cur: Vec<Arc<DenseMultilinearExtension<F>>> = products
-                .1
-                .iter()
-                .map(|&x| other.flattened_ml_extensions[x].clone())
-                .collect();
-
-            res.add_mle_list(cur, products.0);
-        }
-        end_timer!(start);
-        res
-    }
-}
-
-// TODO: convert this into a trait
 impl<F: SmallField> VirtualPolynomial<F> {
     /// Creates an empty virtual polynomial with `num_variables`.
     pub fn new(num_variables: usize) -> Self {
@@ -119,8 +98,8 @@ impl<F: SmallField> VirtualPolynomial<F> {
     }
 
     /// Creates an new virtual polynomial from a MLE and its coefficient.
-    pub fn new_from_mle(mle: &Arc<DenseMultilinearExtension<F>>, coefficient: F) -> Self {
-        let mle_ptr: *const DenseMultilinearExtension<F> = Arc::as_ptr(mle);
+    pub fn new_from_mle(mle: ArcDenseMultilinearExtension<F>, coefficient: F) -> Self {
+        let mle_ptr: *const DenseMultilinearExtension<F> = Arc::as_ptr(&mle);
         let mut hm = HashMap::new();
         hm.insert(mle_ptr, 0);
 
@@ -133,7 +112,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             },
             // here `0` points to the first polynomial of `flattened_ml_extensions`
             products: vec![(coefficient, vec![0])],
-            flattened_ml_extensions: vec![mle.clone()],
+            flattened_ml_extensions: vec![mle],
             raw_pointers_lookup_table: hm,
         }
     }
@@ -144,12 +123,8 @@ impl<F: SmallField> VirtualPolynomial<F> {
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
     /// `coefficient`.
-    pub fn add_mle_list(
-        &mut self,
-        mle_list: impl IntoIterator<Item = Arc<DenseMultilinearExtension<F>>>,
-        coefficient: F,
-    ) {
-        let mle_list: Vec<Arc<DenseMultilinearExtension<F>>> = mle_list.into_iter().collect();
+    pub fn add_mle_list(&mut self, mle_list: Vec<ArcDenseMultilinearExtension<F>>, coefficient: F) {
+        let mle_list: Vec<ArcDenseMultilinearExtension<F>> = mle_list.into_iter().collect();
         let mut indexed_product = Vec::with_capacity(mle_list.len());
 
         assert!(!mle_list.is_empty(), "input mle_list is empty");
@@ -168,7 +143,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
                 indexed_product.push(*index)
             } else {
                 let curr_index = self.flattened_ml_extensions.len();
-                self.flattened_ml_extensions.push(mle.clone());
+                self.flattened_ml_extensions.push(mle);
                 self.raw_pointers_lookup_table.insert(mle_ptr, curr_index);
                 indexed_product.push(curr_index);
             }
@@ -176,11 +151,25 @@ impl<F: SmallField> VirtualPolynomial<F> {
         self.products.push((coefficient, indexed_product));
     }
 
+    /// in-place merge with another virtual polynomial
+    pub fn merge(&mut self, other: &VirtualPolynomial<F>) {
+        let start = start_timer!(|| "virtual poly add");
+        for (coeffient, products) in other.products.iter() {
+            let cur: Vec<ArcDenseMultilinearExtension<F>> = products
+                .iter()
+                .map(|&x| other.flattened_ml_extensions[x].clone())
+                .collect();
+
+            self.add_mle_list(cur, *coeffient);
+        }
+        end_timer!(start);
+    }
+
     /// Multiple the current VirtualPolynomial by an MLE:
     /// - add the MLE to the MLE list;
     /// - multiple each product by MLE and its coefficient.
     /// Returns an error if the MLE has a different `num_vars` from self.
-    pub fn mul_by_mle(&mut self, mle: Arc<DenseMultilinearExtension<F>>, coefficient: F) {
+    pub fn mul_by_mle(&mut self, mle: ArcDenseMultilinearExtension<F>, coefficient: F) {
         let start = start_timer!(|| "mul by mle");
 
         assert_eq!(
@@ -260,7 +249,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             let (product, product_sum) =
                 DenseMultilinearExtension::random_mle_list(nv, num_multiplicands, rng);
             let coefficient = F::random(&mut rng);
-            poly.add_mle_list(product.into_iter(), coefficient);
+            poly.add_mle_list(product, coefficient);
             sum += product_sum * coefficient;
         }
 
@@ -283,7 +272,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             let product =
                 DenseMultilinearExtension::random_zero_mle_list(nv, num_multiplicands, rng);
             let coefficient = F::random(&mut rng);
-            poly.add_mle_list(product.into_iter(), coefficient);
+            poly.add_mle_list(product, coefficient);
         }
 
         poly
@@ -380,11 +369,11 @@ pub fn eq_eval<F: PrimeField>(x: &[F], y: &[F]) -> F {
 ///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 /// over r, which is
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> Arc<DenseMultilinearExtension<F>> {
+pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> ArcDenseMultilinearExtension<F> {
     let evals = build_eq_x_r_vec(r);
     let mle = DenseMultilinearExtension::from_evaluations_vec(r.len(), evals);
 
-    Arc::new(mle)
+    mle.into()
 }
 /// This function build the eq(x, r) polynomial for any given r, and output the
 /// evaluation of eq(x, r) in its vector form.

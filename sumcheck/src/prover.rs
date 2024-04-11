@@ -2,8 +2,11 @@ use std::sync::Arc;
 
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
-use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
-use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use multilinear_extensions::virtual_poly::VirtualPolynomial;
+use rayon::{
+    iter::IntoParallelRefMutIterator,
+    prelude::{IntoParallelIterator, ParallelIterator},
+};
 use transcript::{Challenge, Transcript};
 
 use crate::{
@@ -15,30 +18,31 @@ impl<F: SmallField> IOPProverState<F> {
     /// Identical to `prove` function. With the exception that the input poly is
     /// over the base field rather than the extension field
     pub fn prove_base_poly(
-        poly: &VirtualPolynomial<F::BaseField>,
+        poly: VirtualPolynomial<F::BaseField>,
         transcript: &mut Transcript<F>,
-    ) -> IOPProof<F> {
+    ) -> (IOPProof<F>, IOPProverState<F>) {
         let ploy_ext = poly.to_ext_field::<F>();
-        Self::prove(&ploy_ext, transcript)
+        Self::prove(ploy_ext, transcript)
     }
 
     /// Given a virtual polynomial, generate an IOP proof.
-    pub fn prove(poly: &VirtualPolynomial<F>, transcript: &mut Transcript<F>) -> IOPProof<F> {
-        if poly.aux_info.num_variables == 0 {
-            return IOPProof {
-                point: vec![],
-                proofs: vec![],
-            };
+    pub fn prove(
+        poly: VirtualPolynomial<F>,
+        transcript: &mut Transcript<F>,
+    ) -> (IOPProof<F>, IOPProverState<F>) {
+        let (num_variables, max_degree) = (poly.aux_info.num_variables, poly.aux_info.max_degree);
+        if num_variables == 0 {
+            return (IOPProof::default(), IOPProverState::default());
         }
         let start = start_timer!(|| "sum check prove");
 
-        transcript.append_message(&poly.aux_info.num_variables.to_le_bytes());
-        transcript.append_message(&poly.aux_info.max_degree.to_le_bytes());
+        transcript.append_message(&num_variables.to_le_bytes());
+        transcript.append_message(&max_degree.to_le_bytes());
 
-        let mut prover_state = Self::prover_init(&poly);
+        let mut prover_state = Self::prover_init(poly);
         let mut challenge = None;
-        let mut prover_msgs = Vec::with_capacity(poly.aux_info.num_variables);
-        for _ in 0..poly.aux_info.num_variables {
+        let mut prover_msgs = Vec::with_capacity(num_variables);
+        for _ in 0..num_variables {
             let prover_msg =
                 IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
 
@@ -52,24 +56,35 @@ impl<F: SmallField> IOPProverState<F> {
         }
         // pushing the last challenge point to the state
         if let Some(p) = challenge {
-            prover_state.challenges.push(p)
+            prover_state.challenges.push(p);
+            // fix last challenge to collect final evaluation
+            prover_state
+                .poly
+                .flattened_ml_extensions
+                .par_iter_mut()
+                .for_each(|mle| {
+                    Arc::get_mut(mle).unwrap().fix_variables(&[p.elements]);
+                });
         };
 
         end_timer!(start);
-        IOPProof {
-            // the point consists of the first elements in the challenge
-            point: prover_state
-                .challenges
-                .iter()
-                .map(|challenge| challenge.elements)
-                .collect(),
-            proofs: prover_msgs,
-        }
+        (
+            IOPProof {
+                // the point consists of the first elements in the challenge
+                point: prover_state
+                    .challenges
+                    .iter()
+                    .map(|challenge| challenge.elements)
+                    .collect(),
+                proofs: prover_msgs,
+            },
+            prover_state.into(),
+        )
     }
 
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
-    pub(crate) fn prover_init(polynomial: &VirtualPolynomial<F>) -> Self {
+    pub(crate) fn prover_init(polynomial: VirtualPolynomial<F>) -> Self {
         let start = start_timer!(|| "sum check prover init");
         assert_ne!(
             polynomial.aux_info.num_variables, 0,
@@ -77,11 +92,12 @@ impl<F: SmallField> IOPProverState<F> {
         );
         end_timer!(start);
 
+        let max_degree = polynomial.aux_info.max_degree;
         Self {
             challenges: Vec::with_capacity(polynomial.aux_info.num_variables),
             round: 0,
-            poly: polynomial.clone(),
-            extrapolation_aux: (1..polynomial.aux_info.max_degree)
+            poly: polynomial,
+            extrapolation_aux: (1..max_degree)
                 .map(|degree| {
                     let points = (0..1 + degree as u64).map(F::from).collect::<Vec<_>>();
                     let weights = barycentric_weights(&points);
@@ -120,12 +136,12 @@ impl<F: SmallField> IOPProverState<F> {
         //    g(r_1, ..., r_{m-1}, x_m ... x_n)
         //
         // eval g over r_m, and mutate g to g(r_1, ... r_m,, x_{m+1}... x_n)
-        let mut flattened_ml_extensions: Vec<DenseMultilinearExtension<F>> = self
+        let mut flattened_ml_extensions = self
             .poly
             .flattened_ml_extensions
-            .par_iter()
-            .map(|x| x.as_ref().clone())
-            .collect();
+            .par_iter_mut()
+            .map(Arc::make_mut)
+            .collect::<Vec<_>>();
 
         if let Some(chal) = challenge {
             assert!(self.round != 0, "first round should be prover first.");
@@ -133,14 +149,9 @@ impl<F: SmallField> IOPProverState<F> {
             self.challenges.push(*chal);
 
             let r = self.challenges[self.round - 1];
-            #[cfg(feature = "parallel")]
-            flattened_ml_extensions
-                .par_iter_mut()
-                .for_each(|mle| *mle = fix_variables(mle, &[r]));
-            #[cfg(not(feature = "parallel"))]
-            flattened_ml_extensions
-                .iter_mut()
-                .for_each(|mle| *mle = mle.fix_variables(&[r.elements]));
+            flattened_ml_extensions.par_iter_mut().for_each(|mle| {
+                mle.fix_variables(&[r.elements]);
+            });
         } else if self.round > 0 {
             panic!("verifier message is empty");
         }
@@ -148,72 +159,85 @@ impl<F: SmallField> IOPProverState<F> {
 
         self.round += 1;
 
-        let products_list = self.poly.products.clone();
         let mut products_sum = vec![F::ZERO; self.poly.aux_info.max_degree + 1];
 
         // Step 2: generate sum for the partial evaluated polynomial:
         // f(r_1, ... r_m,, x_{m+1}... x_n)
 
-        products_list.iter().for_each(|(coefficient, products)| {
-            let mut sum = (0..1 << (self.poly.aux_info.num_variables - self.round))
-                .into_par_iter()
-                .fold(
-                    || {
-                        (
-                            vec![(F::ZERO, F::ZERO); products.len()],
-                            vec![F::ZERO; products.len() + 1],
-                        )
-                    },
-                    |(mut buf, mut acc), b| {
-                        buf.iter_mut()
-                            .zip(products.iter())
-                            .for_each(|((eval, step), f)| {
-                                let table = &flattened_ml_extensions[*f].evaluations;
-                                *eval = table[b << 1];
-                                *step = table[(b << 1) + 1] - table[b << 1];
+        self.poly
+            .products
+            .iter()
+            .for_each(|(coefficient, products)| {
+                let mut sum = (0..1 << (self.poly.aux_info.num_variables - self.round))
+                    .into_par_iter()
+                    .fold(
+                        || {
+                            (
+                                vec![(F::ZERO, F::ZERO); products.len()],
+                                vec![F::ZERO; products.len() + 1],
+                            )
+                        },
+                        |(mut buf, mut acc), b| {
+                            buf.iter_mut()
+                                .zip(products.iter())
+                                .for_each(|((eval, step), f)| {
+                                    let table = &flattened_ml_extensions[*f].evaluations;
+                                    *eval = table[b << 1];
+                                    *step = table[(b << 1) + 1] - table[b << 1];
+                                });
+                            acc[0] += buf.iter().map(|(eval, _)| eval).product::<F>();
+                            acc[1..].iter_mut().for_each(|acc| {
+                                buf.iter_mut().for_each(|(eval, step)| *eval += step as &_);
+                                *acc += buf.iter().map(|(eval, _)| eval).product::<F>();
                             });
-                        acc[0] += buf.iter().map(|(eval, _)| eval).product::<F>();
-                        acc[1..].iter_mut().for_each(|acc| {
-                            buf.iter_mut().for_each(|(eval, step)| *eval += step as &_);
-                            *acc += buf.iter().map(|(eval, _)| eval).product::<F>();
-                        });
-                        (buf, acc)
-                    },
-                )
-                .map(|(_, partial)| partial)
-                .reduce(
-                    || vec![F::ZERO; products.len() + 1],
-                    |mut sum, partial| {
-                        sum.iter_mut()
-                            .zip(partial.iter())
-                            .for_each(|(sum, partial)| *sum += partial);
-                        sum
-                    },
-                );
-            sum.iter_mut().for_each(|sum| *sum *= coefficient);
-            let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
-                .into_par_iter()
-                .map(|i| {
-                    let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                    let at = F::from((products.len() + 1 + i) as u64);
-                    extrapolate(points, weights, &sum, &at)
-                })
-                .collect::<Vec<_>>();
-            products_sum
-                .iter_mut()
-                .zip(sum.iter().chain(extrapolation.iter()))
-                .for_each(|(products_sum, sum)| *products_sum += sum);
-        });
+                            (buf, acc)
+                        },
+                    )
+                    .map(|(_, partial)| partial)
+                    .reduce(
+                        || vec![F::ZERO; products.len() + 1],
+                        |mut sum, partial| {
+                            sum.iter_mut()
+                                .zip(partial.iter())
+                                .for_each(|(sum, partial)| *sum += partial);
+                            sum
+                        },
+                    );
+                sum.iter_mut().for_each(|sum| *sum *= coefficient);
+                let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
+                    .into_par_iter()
+                    .map(|i| {
+                        let (points, weights) = &self.extrapolation_aux[products.len() - 1];
+                        let at = F::from((products.len() + 1 + i) as u64);
+                        extrapolate(points, weights, &sum, &at)
+                    })
+                    .collect::<Vec<_>>();
+                products_sum
+                    .iter_mut()
+                    .zip(sum.iter().chain(extrapolation.iter()))
+                    .for_each(|(products_sum, sum)| *products_sum += sum);
+            });
 
-        // update prover's state to the partial evaluated polynomial
-        self.poly.flattened_ml_extensions = flattened_ml_extensions
-            .par_iter()
-            .map(|x| Arc::new(x.clone()))
-            .collect();
         end_timer!(start);
 
         IOPProverMessage {
             evaluations: products_sum,
         }
+    }
+
+    /// collect all mle evaluation (claim) after sumcheck
+    pub fn get_mle_final_evaluations(&self) -> Vec<F> {
+        self.poly
+            .flattened_ml_extensions
+            .iter()
+            .map(|mle| {
+                assert!(
+                    mle.evaluations.len() == 1,
+                    "mle.evaluations.len() {} != 1, must be called after prove_round_and_update_state",
+                    mle.evaluations.len(),
+                );
+                mle.evaluations[0]
+            })
+            .collect()
     }
 }
