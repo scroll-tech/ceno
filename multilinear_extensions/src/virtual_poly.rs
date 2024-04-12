@@ -382,6 +382,8 @@ pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> ArcDenseMultilinearExtension<F> {
 ///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 /// over r, which is
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
+
+#[tracing::instrument(skip_all, name = "multilinear_extensions::build_eq_x_r_vec")]
 pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
     // we build eq(x,r) from its evaluations
     // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars

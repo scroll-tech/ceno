@@ -62,7 +62,6 @@ fn test_sumcheck_internal<F: SmallField>(
         num_products,
         &mut rng,
     );
-    // let poly_bak = poly.clone();
     let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.num_variables);
     let mut prover_state = IOPProverState::prover_init(poly.clone());
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
@@ -91,7 +90,7 @@ fn test_sumcheck_internal<F: SmallField>(
             .flattened_ml_extensions
             .par_iter_mut()
             .for_each(|mle| {
-                Arc::get_mut(mle).unwrap().fix_variables(&[p.elements]);
+                Arc::make_mut(mle).fix_variables_in_place(&[p.elements]);
             });
     };
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);

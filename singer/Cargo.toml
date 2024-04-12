@@ -13,7 +13,7 @@ goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
 
-gkr = { path = "../gkr" }
+gkr = { path = "../gkr", features = ["parallel"] }
 transcript = { path = "../transcript" }
 mpcs = { path = "../mpcs" }
 gkr-graph = { version = "0.1.0", path = "../gkr-graph" }

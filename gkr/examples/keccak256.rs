@@ -7,13 +7,17 @@ use ark_std::rand::{
 };
 use ff::Field;
 use gkr::{
-    structs::{Circuit, CircuitWitness, PointAndEval},
+    error::GKRError,
+    structs::{Circuit, CircuitWitness, GKRInputClaims, IOPProof, PointAndEval},
     utils::MultilinearExtensionFromVectors,
 };
 use goldilocks::{GoldilocksExt2, SmallField};
 use itertools::{chain, izip, Itertools};
+use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use simple_frontend::structs::CircuitBuilder;
 use std::iter;
+use tracing_flame::FlameLayer;
+use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 use transcript::Transcript;
 
 const RHO: [u32; 24] = [
@@ -250,45 +254,10 @@ fn keccak256_circuit<F: SmallField>() -> Circuit<F> {
     Circuit::new(cb)
 }
 
-fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
-    let circuit = keccak256_circuit::<F>();
-
-    // Sanity-check
-    {
-        let all_zero = vec![
-            vec![F::BaseField::ZERO; 25 * 64],
-            vec![F::BaseField::ZERO; 17 * 64],
-        ];
-        let all_one = vec![
-            vec![F::BaseField::ONE; 25 * 64],
-            vec![F::BaseField::ZERO; 17 * 64],
-        ];
-        let mut witness = CircuitWitness::new(&circuit, Vec::new());
-        witness.add_instance(&circuit, all_zero);
-        witness.add_instance(&circuit, all_one);
-
-        izip!(
-            &witness.witness_out_ref()[0].instances,
-            [[0; 25], [u64::MAX; 25]]
-        )
-        .for_each(|(wire_out, state)| {
-            let output = wire_out[..256]
-                .chunks_exact(64)
-                .map(|bits| {
-                    bits.iter().fold(0, |acc, bit| {
-                        (acc << 1) + (*bit == F::BaseField::ONE) as u64
-                    })
-                })
-                .collect_vec();
-            let expected = {
-                let mut state = state;
-                tiny_keccak::keccakf(&mut state);
-                state[0..4].to_vec()
-            };
-            assert_eq!(output, expected)
-        });
-    }
-
+fn prove_keccak256<F: SmallField>(
+    instance_num_vars: usize,
+    circuit: &Circuit<F>,
+) -> Option<(IOPProof<F>, ArcDenseMultilinearExtension<F>)> {
     let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
     let mut witness = CircuitWitness::new(&circuit, Vec::new());
     for _ in 0..1 << instance_num_vars {
@@ -329,7 +298,15 @@ fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
         &mut prover_transcript,
     );
     println!("{}: {:?}", 1 << instance_num_vars, start.elapsed());
+    Some((proof, output_mle))
+}
 
+fn verify_keccak256<F: SmallField>(
+    instance_num_vars: usize,
+    output_mle: ArcDenseMultilinearExtension<F>,
+    proof: IOPProof<F>,
+    circuit: &Circuit<F>,
+) -> Result<GKRInputClaims<F>, GKRError> {
     let mut verifer_transcript = Transcript::<F>::new(b"test");
     let output_point = iter::repeat_with(|| {
         verifer_transcript
@@ -338,7 +315,8 @@ fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
     })
     .take(output_mle.num_vars)
     .collect_vec();
-    let _claim = gkr::structs::IOPVerifierState::verify_parallel(
+    let output_eval = output_mle.evaluate(&output_point);
+    gkr::structs::IOPVerifierState::verify_parallel(
         &circuit,
         &[],
         vec![],
@@ -347,7 +325,6 @@ fn prove_keccak256<F: SmallField>(instance_num_vars: usize) {
         instance_num_vars,
         &mut verifer_transcript,
     )
-    .unwrap();
 }
 
 fn main() {
@@ -356,7 +333,59 @@ fn main() {
         keccak256_circuit::<GoldilocksExt2>().layers.len()
     );
 
+    let circuit = keccak256_circuit::<GoldilocksExt2>();
+    // Sanity-check
+    {
+        let all_zero = vec![
+            vec![<GoldilocksExt2 as SmallField>::BaseField::ZERO; 25 * 64],
+            vec![<GoldilocksExt2 as SmallField>::BaseField::ZERO; 17 * 64],
+        ];
+        let all_one = vec![
+            vec![<GoldilocksExt2 as SmallField>::BaseField::ONE; 25 * 64],
+            vec![<GoldilocksExt2 as SmallField>::BaseField::ZERO; 17 * 64],
+        ];
+        let mut witness = CircuitWitness::new(&circuit, Vec::new());
+        witness.add_instance(&circuit, all_zero);
+        witness.add_instance(&circuit, all_one);
+
+        izip!(
+            &witness.witness_out_ref()[0].instances,
+            [[0; 25], [u64::MAX; 25]]
+        )
+        .for_each(|(wire_out, state)| {
+            let output = wire_out[..256]
+                .chunks_exact(64)
+                .map(|bits| {
+                    bits.iter().fold(0, |acc, bit| {
+                        (acc << 1) + (*bit == <GoldilocksExt2 as SmallField>::BaseField::ONE) as u64
+                    })
+                })
+                .collect_vec();
+            let expected = {
+                let mut state = state;
+                tiny_keccak::keccakf(&mut state);
+                state[0..4].to_vec()
+            };
+            assert_eq!(output, expected)
+        });
+    }
+
+    let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
+    let subscriber = Registry::default()
+        .with(
+            fmt::layer()
+                .compact()
+                .with_thread_ids(false)
+                .with_thread_names(false),
+        )
+        .with(EnvFilter::from_default_env())
+        .with(flame_layer.with_threads_collapsed(true));
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
     for log2_n in 1..12 {
-        prove_keccak256::<GoldilocksExt2>(log2_n);
+        let Some((proof, output_mle)) = prove_keccak256::<GoldilocksExt2>(log2_n, &circuit) else {
+            return;
+        };
+        assert!(verify_keccak256(log2_n, output_mle, proof, &circuit).is_ok());
     }
 }

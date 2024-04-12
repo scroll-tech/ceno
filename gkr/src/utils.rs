@@ -1,4 +1,5 @@
 use ff::Field;
+
 use std::{iter, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
@@ -154,33 +155,6 @@ pub fn counter_eval<F: SmallField>(num_vars: usize, x: &[F]) -> F {
     ans
 }
 
-/// Reduce the number of variables of `self` by fixing the
-/// `partial_point.len()` variables at `partial_point`.
-pub fn fix_high_variables<F: SmallField>(
-    poly: &ArcDenseMultilinearExtension<F>,
-    partial_point: &[F],
-) -> DenseMultilinearExtension<F> {
-    // TODO: return error.
-    assert!(
-        partial_point.len() <= poly.num_vars,
-        "invalid size of partial point"
-    );
-    let nv = poly.num_vars;
-    let new_len = 1 << (nv - partial_point.len());
-    let mut poly = poly.evaluations.to_vec();
-
-    for i in 0..new_len {
-        let partial_poly = DenseMultilinearExtension::from_evaluations_vec(
-            partial_point.len(),
-            poly[i..].iter().step_by(new_len).map(|x| *x).collect_vec(),
-        );
-        poly[i] = partial_poly.evaluate(&partial_point);
-    }
-
-    poly.resize(new_len, F::ZERO);
-    DenseMultilinearExtension::from_evaluations_vec(nv - partial_point.len(), poly)
-}
-
 /// Evaluate eq polynomial for 3 random points.
 pub fn eq3_eval<F: SmallField>(x: &[F], y: &[F], z: &[F]) -> F {
     assert_eq!(x.len(), y.len(), "x and y have different length");
@@ -224,14 +198,13 @@ pub trait MultilinearExtensionFromVectors<F: SmallField> {
 
 impl<F: SmallField> MultilinearExtensionFromVectors<F> for &[Vec<F::BaseField>] {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> ArcDenseMultilinearExtension<F> {
-        let vecs = self.to_vec();
-
         Arc::new(DenseMultilinearExtension::from_evaluations_vec(
             lo_num_vars + hi_num_vars,
-            vecs.into_iter()
+            self.iter()
                 .flat_map(|instance| {
                     instance
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .chain(iter::repeat(F::BaseField::ZERO))
                         .take(1 << lo_num_vars)
                 })
@@ -449,45 +422,6 @@ mod test {
                 DenseMultilinearExtension::from_evaluations_vec(n, partial_eq_vec).evaluate(&b);
             assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
-    }
-
-    #[test]
-    fn test_fix_high_variables() {
-        let poly = DenseMultilinearExtension::from_evaluations_vec(
-            3,
-            vec![
-                Goldilocks::from(13),
-                Goldilocks::from(97),
-                Goldilocks::from(11),
-                Goldilocks::from(101),
-                Goldilocks::from(7),
-                Goldilocks::from(103),
-                Goldilocks::from(5),
-                Goldilocks::from(107),
-            ],
-        );
-        let poly = Arc::new(poly);
-
-        let partial_point = vec![Goldilocks::from(3), Goldilocks::from(5)];
-
-        let expected1 = DenseMultilinearExtension::from_evaluations_vec(
-            2,
-            vec![
-                -Goldilocks::from(17),
-                Goldilocks::from(127),
-                -Goldilocks::from(19),
-                Goldilocks::from(131),
-            ],
-        );
-        let got1 = fix_high_variables(&poly, &partial_point[1..]);
-        assert_eq!(got1, expected1);
-
-        let expected2 = DenseMultilinearExtension::from_evaluations_vec(
-            1,
-            vec![-Goldilocks::from(23), Goldilocks::from(139)],
-        );
-        let got2: DenseMultilinearExtension<Goldilocks> = fix_high_variables(&poly, &partial_point);
-        assert_eq!(got2, expected2);
     }
 
     #[test]

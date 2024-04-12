@@ -5,13 +5,12 @@ use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use std::sync::Arc;
 use transcript::Transcript;
 
 use crate::{
     circuit::EvaluateConstant,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
-    utils::{fix_high_variables, MultilinearExtensionFromVectors},
+    utils::MultilinearExtensionFromVectors,
 };
 
 use super::SumcheckState;
@@ -29,6 +28,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///     g1(x1) = add(ry, x1)
     ///     f1'^{(j)}(x1) = subset[j][i](rt || x1)
     ///     g1'^{(j)}(x1) = paste_from[j](ry, x1)
+    #[tracing::instrument(skip_all, name = "prove_and_update_state_linear_phase2_step1")]
     pub(super) fn prove_and_update_state_linear_phase2_step1(
         &mut self,
         circuit: &Circuit<F>,
@@ -52,7 +52,7 @@ impl<F: SmallField> IOPProverState<F> {
         let challenges = &circuit_witness.challenges;
         let (mut f1_vec, mut g1_vec) = {
             // f1(x1) = layers[i + 1](rt || x1)
-            let f1 = fix_high_variables(&self.layer_poly, &hi_point);
+            let f1 = self.layer_poly.fix_high_variables(&hi_point);
 
             // g1(x1) = add(ry, x1)
             let g1 = {
@@ -88,16 +88,14 @@ impl<F: SmallField> IOPProverState<F> {
 
                     g1_j[subset_wire_id] += eq_y_ry[new_wire_id];
                 });
-            f1_vec.push(
-                fix_high_variables(
-                    &Arc::new(DenseMultilinearExtension::from_evaluations_vec(
-                        lo_in_num_vars + hi_num_vars,
-                        f1_j,
-                    )),
-                    &hi_point,
-                )
-                .into(),
-            );
+            f1_vec.push({
+                let mut f1_j = DenseMultilinearExtension::from_evaluations_vec(
+                    lo_in_num_vars + hi_num_vars,
+                    f1_j,
+                );
+                f1_j.fix_high_variables_in_place(&hi_point);
+                f1_j.into()
+            });
             g1_vec
                 .push(DenseMultilinearExtension::from_evaluations_vec(lo_in_num_vars, g1_j).into());
         });

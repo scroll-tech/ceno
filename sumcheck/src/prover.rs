@@ -4,12 +4,13 @@ use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use rayon::{
-    iter::IntoParallelRefMutIterator,
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
 };
 use transcript::{Challenge, Transcript};
 
 use crate::{
+    entered_span, exit_span,
     structs::{IOPProof, IOPProverMessage, IOPProverState},
     util::{barycentric_weights, extrapolate},
 };
@@ -26,13 +27,22 @@ impl<F: SmallField> IOPProverState<F> {
     }
 
     /// Given a virtual polynomial, generate an IOP proof.
+    #[tracing::instrument(skip_all, name = "sumcheck::prove")]
     pub fn prove(
         poly: VirtualPolynomial<F>,
         transcript: &mut Transcript<F>,
     ) -> (IOPProof<F>, IOPProverState<F>) {
         let (num_variables, max_degree) = (poly.aux_info.num_variables, poly.aux_info.max_degree);
+
+        // return empty proof when target polymonial is constant
         if num_variables == 0 {
-            return (IOPProof::default(), IOPProverState::default());
+            return (
+                IOPProof::default(),
+                IOPProverState {
+                    poly: poly,
+                    ..Default::default()
+                },
+            );
         }
         let start = start_timer!(|| "sum check prove");
 
@@ -42,6 +52,7 @@ impl<F: SmallField> IOPProverState<F> {
         let mut prover_state = Self::prover_init(poly);
         let mut challenge = None;
         let mut prover_msgs = Vec::with_capacity(num_variables);
+        let span = entered_span!("prove_rounds");
         for _ in 0..num_variables {
             let prover_msg =
                 IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
@@ -52,8 +63,13 @@ impl<F: SmallField> IOPProverState<F> {
                 .for_each(|e| transcript.append_field_element(e));
 
             prover_msgs.push(prover_msg);
+            let span = entered_span!("get_challenge");
             challenge = Some(transcript.get_and_append_challenge(b"Internal round"));
+            exit_span!(span);
         }
+        exit_span!(span);
+
+        let span = entered_span!("after_rounds_prover_state");
         // pushing the last challenge point to the state
         if let Some(p) = challenge {
             prover_state.challenges.push(p);
@@ -63,9 +79,10 @@ impl<F: SmallField> IOPProverState<F> {
                 .flattened_ml_extensions
                 .par_iter_mut()
                 .for_each(|mle| {
-                    Arc::get_mut(mle).unwrap().fix_variables(&[p.elements]);
+                    Arc::make_mut(mle).fix_variables_in_place(&[p.elements]);
                 });
         };
+        exit_span!(span);
 
         end_timer!(start);
         (
@@ -111,6 +128,7 @@ impl<F: SmallField> IOPProverState<F> {
     /// next round.
     ///
     /// Main algorithm used is from section 3.2 of [XZZPS19](https://eprint.iacr.org/2019/317.pdf#subsection.3.2).
+    #[tracing::instrument(skip_all, name = "sumcheck::prove_round_and_update_state")]
     pub(crate) fn prove_round_and_update_state(
         &mut self,
         challenge: &Option<Challenge<F>>,
@@ -136,87 +154,121 @@ impl<F: SmallField> IOPProverState<F> {
         //    g(r_1, ..., r_{m-1}, x_m ... x_n)
         //
         // eval g over r_m, and mutate g to g(r_1, ... r_m,, x_{m+1}... x_n)
-        let mut flattened_ml_extensions = self
-            .poly
-            .flattened_ml_extensions
-            .par_iter_mut()
-            .map(Arc::make_mut)
-            .collect::<Vec<_>>();
-
-        if let Some(chal) = challenge {
-            assert!(self.round != 0, "first round should be prover first.");
-
-            self.challenges.push(*chal);
-
+        let span = entered_span!("fix_variables");
+        if self.round == 0 {
+            assert!(challenge.is_none(), "first round should be prover first.");
+        } else {
+            assert!(challenge.is_some(), "verifier message is empty");
+            let chal = challenge.unwrap();
+            self.challenges.push(chal);
             let r = self.challenges[self.round - 1];
-            flattened_ml_extensions.par_iter_mut().for_each(|mle| {
-                mle.fix_variables(&[r.elements]);
-            });
-        } else if self.round > 0 {
-            panic!("verifier message is empty");
+
+            if self.challenges.len() == 1 {
+                self.poly
+                    .flattened_ml_extensions
+                    .par_iter_mut()
+                    .for_each(|f| *f = f.fix_variables(&[r.elements]).into());
+            } else {
+                self.poly
+                    .flattened_ml_extensions
+                    .par_iter_mut()
+                    .map(Arc::make_mut)
+                    .for_each(|f| {
+                        f.fix_variables_in_place(&[r.elements]);
+                    });
+            }
         }
+        exit_span!(span);
         // end_timer!(fix_argument);
 
         self.round += 1;
 
-        let mut products_sum = vec![F::ZERO; self.poly.aux_info.max_degree + 1];
-
         // Step 2: generate sum for the partial evaluated polynomial:
         // f(r_1, ... r_m,, x_{m+1}... x_n)
-
-        self.poly
+        let zero_degrees_vector = || vec![F::ZERO; self.poly.aux_info.max_degree + 1];
+        let span = entered_span!("products_sum");
+        let products_sum = self
+            .poly
             .products
-            .iter()
-            .for_each(|(coefficient, products)| {
-                let mut sum = (0..1 << (self.poly.aux_info.num_variables - self.round))
-                    .into_par_iter()
-                    .fold(
-                        || {
-                            (
-                                vec![(F::ZERO, F::ZERO); products.len()],
-                                vec![F::ZERO; products.len() + 1],
-                            )
-                        },
-                        |(mut buf, mut acc), b| {
-                            buf.iter_mut()
-                                .zip(products.iter())
-                                .for_each(|((eval, step), f)| {
-                                    let table = &flattened_ml_extensions[*f].evaluations;
-                                    *eval = table[b << 1];
-                                    *step = table[(b << 1) + 1] - table[b << 1];
+            .par_iter()
+            .fold(
+                zero_degrees_vector,
+                |mut products_sum, (coefficient, products)| {
+                    let span = entered_span!("sum");
+                    let mut sum = (0..1 << (self.poly.aux_info.num_variables - self.round))
+                        .into_par_iter()
+                        .with_min_len(64)
+                        .fold(
+                            || {
+                                (
+                                    vec![(F::ZERO, F::ZERO); products.len()],
+                                    vec![F::ZERO; products.len() + 1],
+                                )
+                            },
+                            |(mut buf, mut acc), b| {
+                                let mut product = F::ONE;
+                                buf.iter_mut().zip(products.iter()).for_each(
+                                    |((eval, step), f)| {
+                                        let table =
+                                            &self.poly.flattened_ml_extensions[*f].evaluations;
+                                        *eval = table[b << 1];
+                                        *step = table[(b << 1) + 1] - table[b << 1];
+                                        product *= *eval;
+                                    },
+                                );
+                                acc[0] += product;
+                                acc[1..].iter_mut().for_each(|acc| {
+                                    let mut product = F::ONE;
+                                    buf.iter_mut().for_each(|(eval, step)| {
+                                        *eval += step as &_;
+                                        product *= *eval;
+                                    });
+                                    *acc += product;
                                 });
-                            acc[0] += buf.iter().map(|(eval, _)| eval).product::<F>();
-                            acc[1..].iter_mut().for_each(|acc| {
-                                buf.iter_mut().for_each(|(eval, step)| *eval += step as &_);
-                                *acc += buf.iter().map(|(eval, _)| eval).product::<F>();
-                            });
-                            (buf, acc)
-                        },
-                    )
-                    .map(|(_, partial)| partial)
-                    .reduce(
-                        || vec![F::ZERO; products.len() + 1],
-                        |mut sum, partial| {
-                            sum.iter_mut()
-                                .zip(partial.iter())
-                                .for_each(|(sum, partial)| *sum += partial);
-                            sum
-                        },
-                    );
-                sum.iter_mut().for_each(|sum| *sum *= coefficient);
-                let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
-                    .into_par_iter()
-                    .map(|i| {
-                        let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                        let at = F::from((products.len() + 1 + i) as u64);
-                        extrapolate(points, weights, &sum, &at)
-                    })
-                    .collect::<Vec<_>>();
-                products_sum
-                    .iter_mut()
-                    .zip(sum.iter().chain(extrapolation.iter()))
-                    .for_each(|(products_sum, sum)| *products_sum += sum);
+                                (buf, acc)
+                            },
+                        )
+                        .map(|(_, partial)| partial)
+                        .reduce(
+                            || vec![F::ZERO; products.len() + 1],
+                            |mut sum, partial| {
+                                sum.iter_mut()
+                                    .zip(partial.iter())
+                                    .for_each(|(sum, partial)| *sum += partial);
+                                sum
+                            },
+                        );
+                    exit_span!(span);
+                    sum.iter_mut().for_each(|sum| *sum *= coefficient);
+
+                    let span = entered_span!("extrapolation");
+                    let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
+                        .into_par_iter()
+                        .map(|i| {
+                            let (points, weights) = &self.extrapolation_aux[products.len() - 1];
+                            let at = F::from((products.len() + 1 + i) as u64);
+                            extrapolate(points, weights, &sum, &at)
+                        })
+                        .collect::<Vec<_>>();
+                    exit_span!(span);
+                    let span = entered_span!("extend_extrapolate");
+                    products_sum
+                        .iter_mut()
+                        .zip(sum.iter().chain(extrapolation.iter()))
+                        .for_each(|(products_sum, sum)| *products_sum += sum);
+                    exit_span!(span);
+                    products_sum
+                },
+            )
+            .reduce(zero_degrees_vector, |mut a, b| {
+                // vector element-wise adding
+                a.par_iter_mut()
+                    .zip_eq(b)
+                    .with_min_len(64)
+                    .for_each(|(a, b)| *a += b);
+                a
             });
+        exit_span!(span);
 
         end_timer!(start);
 

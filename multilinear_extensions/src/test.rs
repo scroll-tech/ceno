@@ -64,6 +64,37 @@ fn test_eq_xr() {
     }
 }
 
+#[test]
+fn test_fix_high_variables() {
+    let poly = DenseMultilinearExtension::from_evaluations_vec(
+        3,
+        vec![
+            F::from(13),
+            F::from(97),
+            F::from(11),
+            F::from(101),
+            F::from(7),
+            F::from(103),
+            F::from(5),
+            F::from(107),
+        ],
+    );
+
+    let partial_point = vec![F::from(3), F::from(5)];
+
+    let expected1 = DenseMultilinearExtension::from_evaluations_vec(
+        2,
+        vec![-F::from(17), F::from(127), -F::from(19), F::from(131)],
+    );
+    let result1 = poly.fix_high_variables(&partial_point[1..]);
+    assert_eq!(result1, expected1);
+
+    let expected2 =
+        DenseMultilinearExtension::from_evaluations_vec(1, vec![-F::from(23), F::from(139)]);
+    let result2 = poly.fix_high_variables(&partial_point);
+    assert_eq!(result2, expected2);
+}
+
 /// Naive method to build eq(x, r).
 /// Only used for testing purpose.
 // Evaluate

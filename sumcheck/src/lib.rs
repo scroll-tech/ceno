@@ -1,3 +1,4 @@
+mod macros;
 mod prover;
 pub mod structs;
 mod util;

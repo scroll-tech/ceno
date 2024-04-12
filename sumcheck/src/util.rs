@@ -84,10 +84,12 @@ pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F
     let (coeffs, sum_inv) = {
         let mut coeffs = points.iter().map(|point| *at - point).collect::<Vec<_>>();
         batch_inversion(&mut coeffs);
+        let mut sum = F::ZERO;
         coeffs.iter_mut().zip(weights).for_each(|(coeff, weight)| {
             *coeff *= weight;
+            sum += *coeff
         });
-        let sum_inv = coeffs.iter().sum::<F>().invert().unwrap_or(F::ZERO);
+        let sum_inv = sum.invert().unwrap_or(F::ZERO);
         (coeffs, sum_inv)
     };
     coeffs

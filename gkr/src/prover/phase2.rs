@@ -2,16 +2,20 @@ use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension,
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
 use std::sync::Arc;
 use transcript::Transcript;
 
+#[cfg(feature = "parallel")]
+use rayon::iter::ParallelIterator;
+
 use crate::{
     circuit::EvaluateConstant,
+    izip_parallizable,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
-    utils::{tensor_product, MultilinearExtensionFromVectors},
+    utils::MultilinearExtensionFromVectors,
 };
 
 use super::SumcheckState;
@@ -39,6 +43,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///     ) ) + eq(rt, s1) * add(ry, x1)
     ///     f1'^{(j)}(s1 || x1) = subset[j][i](s1 || x1)
     ///     g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
+    #[tracing::instrument(skip_all, name = "prove_and_update_state_phase2_step1")]
     pub(super) fn prove_and_update_state_phase2_step1(
         &mut self,
         circuit: &Circuit<F>,
@@ -52,9 +57,7 @@ impl<F: SmallField> IOPProverState<F> {
         let hi_num_vars = circuit_witness.instance_num_vars();
         let in_num_vars = lo_in_num_vars + hi_num_vars;
 
-        let eq_y_ry = build_eq_x_r_vec(&self.to_next_step_point[..lo_out_num_vars]);
-        let eq_t_rt = build_eq_x_r_vec(&self.to_next_step_point[lo_out_num_vars..]);
-        self.tensor_eq_ty_rtry = tensor_product(&eq_t_rt, &eq_y_ry);
+        self.tensor_eq_ty_rtry = build_eq_x_r_vec(&self.to_next_step_point);
 
         let layer_in_vec = circuit_witness.layers[self.layer_id as usize + 1]
             .instances
@@ -102,32 +105,43 @@ impl<F: SmallField> IOPProverState<F> {
             };
             (vec![f1], vec![g1.into()])
         };
+
         // f1'^{(j)}(s1 || x1) = subset[j][i](s1 || x1)
         // g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
         let paste_from_sources = circuit_witness.layers_ref();
         let old_wire_id = |old_layer_id: usize, subset_wire_id: usize| -> usize {
             circuit.layers[old_layer_id].copy_to[&self.layer_id][subset_wire_id]
         };
-        layer.paste_from.iter().for_each(|(&j, paste_from)| {
-            let mut f1_j = vec![F::ZERO; 1 << in_num_vars];
-            let mut g1_j = vec![F::ZERO; 1 << in_num_vars];
+        let (f1_vec_paste_from, g1_vec_paste_from): (
+            Vec<ArcDenseMultilinearExtension<F>>,
+            Vec<ArcDenseMultilinearExtension<F>>,
+        ) = izip_parallizable!(&layer.paste_from)
+            .map(|(j, paste_from)| {
+                let mut f1_j = vec![F::ZERO; 1 << in_num_vars];
+                let mut g1_j = vec![F::ZERO; 1 << in_num_vars];
 
-            paste_from
-                .iter()
-                .enumerate()
-                .for_each(|(subset_wire_id, &new_wire_id)| {
-                    for s in 0..(1 << hi_num_vars) {
-                        f1_j[(s << lo_in_num_vars) ^ subset_wire_id] = F::from_base(
-                            &paste_from_sources[j as usize].instances[s]
-                                [old_wire_id(j as usize, subset_wire_id)],
-                        );
-                        g1_j[(s << lo_in_num_vars) ^ subset_wire_id] +=
-                            self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ new_wire_id];
-                    }
-                });
-            f1_vec.push(DenseMultilinearExtension::from_evaluations_vec(in_num_vars, f1_j).into());
-            g1_vec.push(DenseMultilinearExtension::from_evaluations_vec(in_num_vars, g1_j).into());
-        });
+                paste_from
+                    .iter()
+                    .enumerate()
+                    .for_each(|(subset_wire_id, &new_wire_id)| {
+                        for s in 0..(1 << hi_num_vars) {
+                            f1_j[(s << lo_in_num_vars) ^ subset_wire_id] = F::from_base(
+                                &paste_from_sources[*j as usize].instances[s]
+                                    [old_wire_id(*j as usize, subset_wire_id)],
+                            );
+                            g1_j[(s << lo_in_num_vars) ^ subset_wire_id] +=
+                                self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ new_wire_id];
+                        }
+                    });
+                (
+                    DenseMultilinearExtension::from_evaluations_vec(in_num_vars, f1_j).into(),
+                    DenseMultilinearExtension::from_evaluations_vec(in_num_vars, g1_j).into(),
+                )
+            })
+            .unzip();
+
+        f1_vec.extend(f1_vec_paste_from);
+        g1_vec.extend(g1_vec_paste_from);
 
         // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
         let mut virtual_poly_1 = VirtualPolynomial::new(in_num_vars);
@@ -178,6 +192,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///     g2(s2 || x2) = \sum_{s3}( \sum_{x3}(
     ///         eq(rt, rs1, s2, s3) * mul3(ry, rx1, x2, x3) * layers[i + 1](s3 || x3)
     ///     ) ) + eq(rt, rs1, s2) * mul2(ry, rx1, x2)
+    #[tracing::instrument(skip_all, name = "prove_and_update_state_phase2_step2")]
     pub(super) fn prove_and_update_state_phase2_step2(
         &mut self,
         circuit: &Circuit<F>,
@@ -191,10 +206,7 @@ impl<F: SmallField> IOPProverState<F> {
         let lo_in_num_vars = layer.max_previous_num_vars;
         let hi_num_vars = circuit_witness.instance_num_vars();
 
-        let eval_point_1 = &self.to_next_step_point;
-        let eq_x1_rx1 = build_eq_x_r_vec(&eval_point_1[..lo_in_num_vars]);
-        let eq_s1_rs1 = build_eq_x_r_vec(&eval_point_1[lo_in_num_vars..]);
-        self.tensor_eq_s1x1_rs1rx1 = tensor_product(&eq_s1_rs1, &eq_x1_rx1);
+        self.tensor_eq_s1x1_rs1rx1 = build_eq_x_r_vec(&self.to_next_step_point);
 
         let layer_in_vec = circuit_witness.layers[self.layer_id as usize + 1]
             .instances
@@ -262,6 +274,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///     sigma = g2(rs2 || rx2) - eq(rt, rs1, rs2) * mul2(ry, rx1, rx2)
     ///     f3(s3 || x3) = layers[i + 1](s3 || x3)
     ///     g3(s3 || x3) = eq(rt, rs1, rs2, s3) * mul3(ry, rx1, rx2, x3)
+    #[tracing::instrument(skip_all, name = "prove_and_update_state_phase2_step3")]
     pub(super) fn prove_and_update_state_phase2_step3(
         &mut self,
         circuit: &Circuit<F>,
@@ -274,10 +287,7 @@ impl<F: SmallField> IOPProverState<F> {
         let lo_in_num_vars = layer.max_previous_num_vars;
         let hi_num_vars = circuit_witness.instance_num_vars();
 
-        let eval_point_2 = &self.to_next_step_point;
-        let eq_x2_rx2 = build_eq_x_r_vec(&eval_point_2[..lo_in_num_vars]);
-        let eq_s2_rs2 = build_eq_x_r_vec(&eval_point_2[lo_in_num_vars..]);
-        self.tensor_eq_s2x2_rs2rx2 = tensor_product(&eq_s2_rs2, &eq_x2_rx2);
+        self.tensor_eq_s2x2_rs2rx2 = build_eq_x_r_vec(&self.to_next_step_point);
 
         let challenges = &circuit_witness.challenges;
 

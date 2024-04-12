@@ -1,17 +1,23 @@
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
-use itertools::{chain, izip, Itertools};
+use itertools::{chain, Itertools};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use std::{mem, sync::Arc};
+use std::mem;
+use sumcheck::entered_span;
 use transcript::Transcript;
 
+#[cfg(feature = "parallel")]
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+
 use crate::{
+    exit_span, izip_parallizable,
     prover::SumcheckState,
-    structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
-    utils::{fix_high_variables, MatrixMLERowFirst},
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, Point, PointAndEval},
+    tracing_span,
+    utils::MatrixMLERowFirst,
 };
 
 // Prove the items copied from the current layer to later layers for data parallel circuits.
@@ -22,6 +28,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///     sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
     ///     f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
     ///     g1^{(j)}(y) = \alpha^j copy_to[j](ry_j, y)
+    #[tracing::instrument(skip_all, name = "prove_and_update_state_phase1_step1")]
     pub(super) fn prove_and_update_state_phase1_step1(
         &mut self,
         circuit: &Circuit<F>,
@@ -50,62 +57,79 @@ impl<F: SmallField> IOPProverState<F> {
         // sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
         // f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
         // g1^{(j)}(y) = \alpha^j copy_to[j](ry_j, y)
-        let total_length =
-            self.to_next_phase_point_and_evals.len() + self.subset_point_and_evals.len();
-        let mut f1: Vec<ArcDenseMultilinearExtension<F>> = Vec::with_capacity(total_length);
-        let mut g1: Vec<ArcDenseMultilinearExtension<F>> = Vec::with_capacity(total_length);
+        let span = entered_span!("fg");
+        let (mut f1, mut g1): (
+            Vec<ArcDenseMultilinearExtension<F>>,
+            Vec<ArcDenseMultilinearExtension<F>>,
+        ) = tracing_span!("f1g1").in_scope(|| {
+            izip_parallizable!(&self.to_next_phase_point_and_evals, &alpha_pows)
+                .map(|(point_and_eval, alpha_pow)| {
+                    let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
 
-        izip!(self.to_next_phase_point_and_evals.iter(), alpha_pows.iter()).for_each(
-            |(point_and_eval, &alpha_pow)| {
-                let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                    let f1_j = self
+                        .layer_poly
+                        .fix_high_variables(&point_and_eval.point[point_lo_num_vars..]);
 
-                let f1_j = fix_high_variables(
-                    &self.layer_poly,
-                    &point_and_eval.point[point_lo_num_vars..],
-                );
-                f1.push(f1_j.into());
+                    let g1_j = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars])
+                        .into_iter()
+                        .take(1 << lo_num_vars)
+                        .map(|eq| *alpha_pow * eq)
+                        .collect_vec();
 
-                let g1_j = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars])
-                    .into_iter()
-                    .take(1 << lo_num_vars)
-                    .map(|eq| alpha_pow * eq)
-                    .collect_vec();
-                g1.push(DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into());
-            },
-        );
-
-        let copy_to_matrices = &circuit.layers[self.layer_id as usize].copy_to;
-        izip!(
-            self.subset_point_and_evals[self.layer_id as usize].iter(),
-            alpha_pows
-                .iter()
-                .skip(self.to_next_phase_point_and_evals.len())
-        )
-        .for_each(|((new_layer_id, point_and_eval), alpha_pow)| {
-            let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
-            let copy_to = &copy_to_matrices[new_layer_id];
-            let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
-
-            let f1_j =
-                fix_high_variables(&self.layer_poly, &point_and_eval.point[point_lo_num_vars..]);
-            f1.push(f1_j.into());
-
-            assert!(copy_to.len() <= lo_eq_w_p.len());
-            let g1_j = copy_to.as_slice().fix_row_row_first_with_scalar(
-                &lo_eq_w_p,
-                lo_num_vars,
-                alpha_pow,
-            );
-            g1.push(DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into());
+                    (
+                        f1_j.into(),
+                        DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into(),
+                    )
+                })
+                .unzip()
         });
 
+        let copy_to_matrices = &circuit.layers[self.layer_id as usize].copy_to;
+        let (f1_subset_point_and_evals, g1_subset_point_and_evals): (
+            Vec<ArcDenseMultilinearExtension<F>>,
+            Vec<ArcDenseMultilinearExtension<F>>,
+        ) = tracing_span!("f1_j_g1_j").in_scope(|| {
+            izip_parallizable!(
+                &self.subset_point_and_evals[self.layer_id as usize],
+                &alpha_pows[self.to_next_phase_point_and_evals.len()..]
+            )
+            .map(|((new_layer_id, point_and_eval), alpha_pow)| {
+                let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                let copy_to = &copy_to_matrices[new_layer_id];
+                let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
+
+                let f1_j = self
+                    .layer_poly
+                    .fix_high_variables(&point_and_eval.point[point_lo_num_vars..]);
+
+                assert!(copy_to.len() <= lo_eq_w_p.len());
+                let g1_j = copy_to.as_slice().fix_row_row_first_with_scalar(
+                    &lo_eq_w_p,
+                    lo_num_vars,
+                    alpha_pow,
+                );
+                (
+                    f1_j.into(),
+                    DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into(),
+                )
+            })
+            .unzip()
+        });
+        exit_span!(span);
+
+        f1.extend(f1_subset_point_and_evals);
+        g1.extend(g1_subset_point_and_evals);
+
         // sumcheck: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
-        let mut virtual_poly_1 = VirtualPolynomial::new(lo_num_vars);
-        for (f1_j, g1_j) in f1.into_iter().zip(g1.into_iter()) {
-            let mut tmp = VirtualPolynomial::new_from_mle(f1_j, F::ONE);
-            tmp.mul_by_mle(g1_j, F::ONE);
-            virtual_poly_1.merge(&tmp);
-        }
+        let virtual_poly_1 = tracing_span!("virtual_poly").in_scope(|| {
+            let mut virtual_poly_1 = VirtualPolynomial::new(lo_num_vars);
+            for (f1_j, g1_j) in f1.into_iter().zip(g1.into_iter()) {
+                let mut tmp = VirtualPolynomial::new_from_mle(f1_j, F::ONE);
+                tmp.mul_by_mle(g1_j, F::ONE);
+                virtual_poly_1.merge(&tmp);
+            }
+            virtual_poly_1
+        });
 
         let (sumcheck_proof_1, prover_state) = SumcheckState::prove(virtual_poly_1, transcript);
         let (f1, g1): (Vec<_>, Vec<_>) = prover_state
@@ -129,6 +153,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///     sigma = \sum_j( f1^{(j)}(ry) * g1^{(j)}(ry) )
     ///     f2(t) = layers[i](t || ry)
     ///     g2^{(j)}(t) = \alpha^j copy_to[j](ry_j, ry) eq(rt_j, t)
+    #[tracing::instrument(skip_all, name = "prove_and_update_state_phase1_step2")]
     pub(super) fn prove_and_update_state_phase1_step2(
         &mut self,
         _: &Circuit<F>,
@@ -138,19 +163,31 @@ impl<F: SmallField> IOPProverState<F> {
         let timer = start_timer!(|| "Prover sumcheck phase 1 step 2");
         let hi_num_vars = circuit_witness.instance_num_vars();
 
+        let span = entered_span!("f2_fix_variables");
         // f2(t) = layers[i](t || ry)
-        let mut f2 = Arc::clone(&mut self.layer_poly);
-        Arc::make_mut(&mut f2).fix_variables(&self.to_next_step_point);
+        let f2 = self
+            .layer_poly
+            .fix_variables(&self.to_next_step_point)
+            .into();
+        exit_span!(span);
 
         // g2^{(j)}(t) = \alpha^j copy_to[j](ry_j, ry) eq(rt_j, t)
-        let output_points = chain![
+        let output_points: Vec<&Point<F>> = chain![
             self.to_next_phase_point_and_evals.iter().map(|x| &x.point),
             self.subset_point_and_evals[self.layer_id as usize]
                 .iter()
                 .map(|x| &x.1.point),
-        ];
-        let g2 = output_points
-            .zip(self.g1_values.iter())
+        ]
+        .collect();
+        let span = entered_span!("g2");
+
+        #[cfg(not(feature = "parallel"))]
+        let zeros = vec![F::ZERO; 1 << hi_num_vars];
+
+        #[cfg(feature = "parallel")]
+        let zeros = || vec![F::ZERO; 1 << hi_num_vars];
+
+        let g2 = izip_parallizable!(output_points, &self.g1_values)
             .map(|(point, &g1_value)| {
                 let point_lo_num_vars = point.len() - hi_num_vars;
                 build_eq_x_r_vec(&point[point_lo_num_vars..])
@@ -158,13 +195,30 @@ impl<F: SmallField> IOPProverState<F> {
                     .map(|eq| g1_value * eq)
                     .collect_vec()
             })
-            .fold(vec![F::ZERO; 1 << hi_num_vars], |acc, nxt| {
+            .fold(zeros, |acc, nxt| {
                 acc.into_iter()
                     .zip(nxt.into_iter())
                     .map(|(a, b)| a + b)
                     .collect_vec()
             });
+
+        #[cfg(not(feature = "parallel"))]
         let g2 = DenseMultilinearExtension::from_evaluations_vec(hi_num_vars, g2);
+
+        // When rayon is used, the `fold` operation results in a iterator of `Vec<F>` rather than a single `Vec<F>`. In this case, we simply need to sum them.
+        #[cfg(feature = "parallel")]
+        let g2 = DenseMultilinearExtension::from_evaluations_vec(
+            hi_num_vars,
+            g2.reduce(zeros, |acc, nxt| {
+                acc.into_iter()
+                    .zip(nxt.into_iter())
+                    .map(|(a, b)| a + b)
+                    .collect_vec()
+            }),
+        );
+
+        exit_span!(span);
+
         // sumcheck: sigma = \sum_t( \sum_j( g2^{(j)}(t) ) ) * f2(t)
         let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, F::ONE);
         virtual_poly_2.mul_by_mle(g2.into(), F::ONE);

@@ -6,9 +6,13 @@ use simple_frontend::structs::LayerId;
 use std::sync::Arc;
 use transcript::Transcript;
 
-use crate::structs::{
-    Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, PointAndEval,
-    SumcheckStepType,
+use crate::{
+    entered_span, exit_span,
+    structs::{
+        Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, PointAndEval,
+        SumcheckStepType,
+    },
+    tracing_span,
 };
 
 mod phase1;
@@ -24,6 +28,7 @@ type SumcheckState<F> = sumcheck::structs::IOPProverState<F>;
 
 impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
     /// Prove process for data parallel circuits.
+    #[tracing::instrument(skip_all, name = "gkr::prove_parallel")]
     pub fn prove_parallel(
         circuit: &Circuit<F>,
         circuit_witness: &CircuitWitness<F::BaseField>,
@@ -32,16 +37,19 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
         transcript: &mut Transcript<F>,
     ) -> (IOPProof<F>, GKRInputClaims<F>) {
         let timer = start_timer!(|| "Proving");
+        let span = entered_span!("Proving");
         // TODO: Currently haven't support non-power-of-two number of instances.
         assert!(circuit_witness.n_instances == 1 << circuit_witness.instance_num_vars());
 
-        let mut prover_state = Self::prover_init_parallel(
-            circuit.layers.len(),
-            output_evals,
-            wires_out_evals,
-            transcript,
-            circuit.layers[0].num_vars + circuit_witness.instance_num_vars(),
-        );
+        let mut prover_state = tracing_span!("prover_init_parallel").in_scope(|| {
+            Self::prover_init_parallel(
+                circuit.layers.len(),
+                output_evals,
+                wires_out_evals,
+                transcript,
+                circuit.layers[0].num_vars + circuit_witness.instance_num_vars(),
+            )
+        });
 
         let sumcheck_proofs = (0..circuit.layers.len() as LayerId)
             .map(|layer_id| {
@@ -117,11 +125,13 @@ impl<F: SmallField + FromUniformBytes<64>> IOPProverState<F> {
                     })
                     .collect_vec();
                 end_timer!(timer);
+
                 proofs
             })
             .flatten()
             .collect_vec();
         end_timer!(timer);
+        exit_span!(span);
 
         (
             IOPProof { sumcheck_proofs },

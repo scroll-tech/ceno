@@ -12,16 +12,17 @@ use ark_std::rand::{
 use ff::Field;
 use gkr::{
     error::GKRError,
-    structs::{Circuit, CircuitWitness, GKRInputClaims, PointAndEval},
+    structs::{Circuit, CircuitWitness, GKRInputClaims, IOPProof, PointAndEval},
     utils::MultilinearExtensionFromVectors,
 };
 use goldilocks::{GoldilocksExt2, SmallField};
 use itertools::{chain, izip, Itertools};
+use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use simple_frontend::structs::CircuitBuilder;
 use std::iter;
 use transcript::Transcript;
 
-// cargo bench keccak256 --features flamegraph
+// cargo bench --bench keccak256 --features parallel --features flamegraph --package gkr -- --profile-time <secs>
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
     criterion_group! {
@@ -277,7 +278,7 @@ fn keccak256_circuit<F: SmallField>() -> Circuit<F> {
 fn prove_keccak256<F: SmallField>(
     instance_num_vars: usize,
     circuit: &Circuit<F>,
-) -> Result<GKRInputClaims<F>, GKRError> {
+) -> Option<(IOPProof<F>, ArcDenseMultilinearExtension<F>)> {
     // Sanity-check
     {
         let all_zero = vec![
@@ -354,7 +355,15 @@ fn prove_keccak256<F: SmallField>(
         &mut prover_transcript,
     );
     println!("{}: {:?}", 1 << instance_num_vars, start.elapsed());
+    Some((proof, output_mle))
+}
 
+fn verify_keccak256<F: SmallField>(
+    instance_num_vars: usize,
+    output_mle: ArcDenseMultilinearExtension<F>,
+    proof: IOPProof<F>,
+    circuit: &Circuit<F>,
+) -> Result<GKRInputClaims<F>, GKRError> {
     let mut verifer_transcript = Transcript::<F>::new(b"test");
     let output_point = iter::repeat_with(|| {
         verifer_transcript
@@ -363,6 +372,7 @@ fn prove_keccak256<F: SmallField>(
     })
     .take(output_mle.num_vars)
     .collect_vec();
+    let output_eval = output_mle.evaluate(&output_point);
     gkr::structs::IOPVerifierState::verify_parallel(
         &circuit,
         &[],
@@ -383,7 +393,13 @@ fn bench_keccak256(c: &mut Criterion) {
     );
 
     let circuit = keccak256_circuit::<GoldilocksExt2>();
-    for log2_n in 1..2 {
+
+    let Some((proof, output_mle)) = prove_keccak256::<GoldilocksExt2>(1, &circuit) else {
+        return;
+    };
+    assert!(verify_keccak256(1, output_mle, proof, &circuit).is_ok());
+
+    for log2_n in 1..6 {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("keccak256_log2_{}", log2_n));
         group.sample_size(NUM_SAMPLES);
@@ -393,7 +409,7 @@ fn bench_keccak256(c: &mut Criterion) {
             BenchmarkId::new("prove_keccak256", format!("keccak256_log2_{}", log2_n)),
             |b| {
                 b.iter(|| {
-                    assert!(prove_keccak256::<GoldilocksExt2>(log2_n, &circuit).is_ok());
+                    let _ = prove_keccak256::<GoldilocksExt2>(log2_n, &circuit);
                 });
             },
         );

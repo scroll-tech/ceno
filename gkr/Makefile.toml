@@ -1,0 +1,17 @@
+[env]
+CORE = { script = ["grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}'"] }
+RAYON_NUM_THREADS = "${CORE}"
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+
+[tasks.gkr_bench]
+command = "cargo"
+args = ["bench", "--bench", "keccak256", "--features", "flamegraph", "--package", "gkr"]
+
+[tasks.gkr_example]
+command = "cargo"
+args = ["run", "--package", "gkr", "--release", "--example", "keccak256"]
+
+[tasks.gkr_example_flamegraph]
+env = { "RUST_LOG" = "debug"}
+command = "cargo"
+args = ["run", "--package", "gkr", "--release", "--example", "keccak256"]

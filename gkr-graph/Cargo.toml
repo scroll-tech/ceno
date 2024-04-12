@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 ark-std.workspace = true
 ff.workspace = true
-gkr = { path = "../gkr" }
+gkr = { path = "../gkr", features = ["parallel"] }
 goldilocks.workspace = true
 itertools = "0.12.0"
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }

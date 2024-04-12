@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 ark-ff = "0.4.0"
+tracing = "0.1.40"
 ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true

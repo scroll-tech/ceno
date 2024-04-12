@@ -1,18 +1,22 @@
 use ark_std::{end_timer, start_timer};
 use goldilocks::SmallField;
-use itertools::{chain, izip, Itertools};
+use itertools::{chain, Itertools};
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension,
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use std::{iter, mem, sync::Arc};
+use std::{iter, mem};
 use transcript::Transcript;
 
 use crate::{
+    izip_parallizable,
     prover::SumcheckState,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
-    utils::{fix_high_variables, MatrixMLERowFirst},
+    utils::MatrixMLERowFirst,
 };
+
+#[cfg(feature = "parallel")]
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
 // Prove the items copied from the output layer to the output witness for data parallel circuits.
 // \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
@@ -25,6 +29,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///     g1^{(j)}(y) = \alpha^j eq(ry_j, y)
     //                      or \alpha^j copy_to[j](ry_j, y)
     //                      or \alpha^j assert_subset_eq(ry, y)
+    #[tracing::instrument(skip_all, name = "prove_and_update_state_output_phase1_step1")]
     pub(super) fn prove_and_update_state_output_phase1_step1(
         &mut self,
         circuit: &Circuit<F>,
@@ -55,43 +60,48 @@ impl<F: SmallField> IOPProverState<F> {
         // g1^{(j)}(y) = \alpha^j eq(ry_j, y)
         //                  or \alpha^j copy_to[j](ry_j, y)
         //                  or \alpha^j assert_subset_eq[j](ry, y)
-
         // TODO: Double check the soundness here.
-        let mut f1 = Vec::with_capacity(total_length);
-        let mut g1 = Vec::with_capacity(total_length);
-        izip!(self.to_next_phase_point_and_evals.iter(), alpha_pows.iter()).for_each(
-            |(point_and_eval, alpha_pow)| {
+        let (mut f1, mut g1): (
+            Vec<ArcDenseMultilinearExtension<F>>,
+            Vec<ArcDenseMultilinearExtension<F>>,
+        ) = izip_parallizable!(&self.to_next_phase_point_and_evals, &alpha_pows)
+            .map(|(point_and_eval, alpha_pow)| {
                 let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
                 let point = &point_and_eval.point;
                 let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
 
-                let f1_j = fix_high_variables(&self.layer_poly, &point[point_lo_num_vars..]);
-                f1.push(f1_j.into());
+                let f1_j = self
+                    .layer_poly
+                    .fix_high_variables(&point[point_lo_num_vars..]);
 
                 let g1_j = lo_eq_w_p
                     .into_iter()
                     .map(|eq| *alpha_pow * eq)
                     .collect_vec();
+                (
+                    f1_j.into(),
+                    DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into(),
+                )
+            })
+            .unzip();
 
-                g1.push(DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into());
-            },
-        );
-
-        izip!(
-            circuit.copy_to_wits_out.iter(),
-            self.subset_point_and_evals[self.layer_id as usize].iter(),
-            alpha_pows
-                .iter()
-                .skip(self.to_next_phase_point_and_evals.len())
+        let (f1_copy_to, g1_copy_to): (
+            Vec<ArcDenseMultilinearExtension<F>>,
+            Vec<ArcDenseMultilinearExtension<F>>,
+        ) = izip_parallizable!(
+            &circuit.copy_to_wits_out,
+            &self.subset_point_and_evals[self.layer_id as usize],
+            &alpha_pows[self.to_next_phase_point_and_evals.len()..]
         )
-        .for_each(|(copy_to, (_, point_and_eval), alpha_pow)| {
+        .map(|(copy_to, (_, point_and_eval), alpha_pow)| {
             let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
             let point = &point_and_eval.point;
             let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
             assert!(copy_to.len() <= lo_eq_w_p.len());
 
-            let f1_j = fix_high_variables(&self.layer_poly, &point[point_lo_num_vars..]);
-            f1.push(f1_j.into());
+            let f1_j = self
+                .layer_poly
+                .fix_high_variables(&point[point_lo_num_vars..]);
 
             let g1_j = copy_to.as_slice().fix_row_row_first_with_scalar(
                 &lo_eq_w_p,
@@ -99,10 +109,19 @@ impl<F: SmallField> IOPProverState<F> {
                 alpha_pow,
             );
 
-            g1.push(DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into());
-        });
+            (
+                f1_j.into(),
+                DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into(),
+            )
+        })
+        .unzip();
 
-        let f1_j = fix_high_variables(&self.layer_poly, &self.assert_point[lo_num_vars..]);
+        f1.extend(f1_copy_to);
+        g1.extend(g1_copy_to);
+
+        let f1_j = self
+            .layer_poly
+            .fix_high_variables(&self.assert_point[lo_num_vars..]);
         f1.push(f1_j.into());
 
         let alpha_pow = alpha_pows.last().unwrap();
@@ -146,6 +165,7 @@ impl<F: SmallField> IOPProverState<F> {
     ///     g2^{(j)}(t) = \alpha^j eq(ry_j, ry) eq(rt_j, t)
     //                      or \alpha^j copy_to[j](ry_j, ry) eq(rt_j, t)
     //                      or \alpha^j assert_subset_eq(ry, ry) eq(rt, t)
+    #[tracing::instrument(skip_all, name = "prove_and_update_state_output_phase1_step2")]
     pub(super) fn prove_and_update_state_output_phase1_step2(
         &mut self,
         _: &Circuit<F>,
@@ -156,8 +176,10 @@ impl<F: SmallField> IOPProverState<F> {
         let hi_num_vars = circuit_witness.instance_num_vars();
 
         // f2(t) = layers[i](t || ry)
-        let mut f2 = Arc::clone(&mut self.layer_poly);
-        Arc::make_mut(&mut f2).fix_variables(&self.to_next_step_point);
+        let f2 = self
+            .layer_poly
+            .fix_variables(&self.to_next_step_point)
+            .into();
 
         // g2(t) = \sum_j \alpha^j (eq or copy_to[j] or assert_subset)(ry_j, ry) eq(rt_j, t)
         let output_points = chain![

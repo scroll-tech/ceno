@@ -2,6 +2,7 @@
 
 mod circuit;
 pub mod error;
+pub mod macros;
 mod prover;
 pub mod structs;
 pub mod utils;

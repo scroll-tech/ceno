@@ -1,0 +1,7 @@
+[env]
+CORE = { script = ["grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}'"] }
+RAYON_NUM_THREADS = "${CORE}"
+
+[tasks.test]
+command = "cargo"
+args = ["test", "--release", "--all", "--all-features"]
