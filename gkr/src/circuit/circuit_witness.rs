@@ -148,6 +148,14 @@ impl<F: SmallField> CircuitWitness<F> {
                 });
             circuit.assert_consts.iter().for_each(|gate| {
                 if let ConstantType::Field(constant) = gate.scalar {
+                    #[cfg(feature = "dbg-assert-const")]
+                    {
+                        println!("gate.idx_out {:?}", gate.idx_out);
+                        println!(
+                            "lhs {:?}, rhs {:?}",
+                            layer_wits[0].instances[instance_id][gate.idx_out], constant
+                        );
+                    }
                     assert_eq!(layer_wits[0].instances[instance_id][gate.idx_out], constant);
                 }
             });

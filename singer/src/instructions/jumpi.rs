@@ -342,7 +342,7 @@ mod test {
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
-            ], 
+            ],
         );
         phase0_values_map.insert(
             "phase0_cond_non_zero_or_inv".to_string(),
@@ -358,7 +358,7 @@ mod test {
         );
 
         println!("phase0_values_map {:?}", phase0_values_map);
-        
+
         let circuit_witness_challenges = vec![
             Goldilocks::from(2),
             Goldilocks::from(2),
