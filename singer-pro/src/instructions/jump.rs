@@ -61,3 +61,18 @@ impl<F: SmallField> Instruction<F> for JumpInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::instructions::ChipChallenges;
+
+    #[test]
+    fn test_jump_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("JUMP: witness_in size {:?}", 0);
+        }
+    }
+}

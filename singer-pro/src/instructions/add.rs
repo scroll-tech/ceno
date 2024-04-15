@@ -94,3 +94,38 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::instructions::{AddInstruction, ChipChallenges};
+    use core::ops::Range;
+    use simple_frontend::structs::CellId;
+    use std::collections::BTreeMap;
+
+    impl AddInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert(
+                "phase0_instruction_add".to_string(),
+                Self::phase0_instruction_add(),
+            );
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_add_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = AddInstruction::phase0_idxes_map();
+        let phase0_witness_size = AddInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("ADD: {:?}", &phase0_idx_map);
+            println!("ADD witness_size: {:?}", phase0_witness_size);
+        }
+    }
+}

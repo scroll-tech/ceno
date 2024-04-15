@@ -125,3 +125,48 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::instructions::{ChipChallenges, JumpiInstruction};
+    use simple_frontend::structs::CellId;
+
+    impl JumpiInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("phase0_pc_plus_1".to_string(), Self::phase0_pc_plus_1());
+            map.insert(
+                "phase0_pc_plus_1_opcode".to_string(),
+                Self::phase0_pc_plus_1_opcode(),
+            );
+            map.insert(
+                "phase0_cond_values_inv".to_string(),
+                Self::phase0_cond_values_inv(),
+            );
+            map.insert(
+                "phase0_cond_nonzero_or_inv".to_string(),
+                Self::phase0_cond_non_zero_or_inv(),
+            );
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_jumpi_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = JumpiInstruction::phase0_idxes_map();
+        let phase0_witness_size = JumpiInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("JUMPI: {:?}", &phase0_idx_map);
+            println!("JUMPI witness_size: {:?}", phase0_witness_size);
+        }
+    }
+}

@@ -161,3 +161,49 @@ impl<F: SmallField> Instruction<F> for ReturnInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::instructions::{ret::ReturnInstruction, ChipChallenges};
+    use simple_frontend::structs::CellId;
+
+    impl ReturnInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert(
+                "phase0_old_memory_ts".to_string(),
+                Self::phase0_old_memory_ts(),
+            );
+            map.insert("phase0_offset_add".to_string(), Self::phase0_offset_add());
+
+            map
+        }
+
+        fn public_io_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("public_io_byte".to_string(), Self::public_io_byte());
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_return_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = ReturnInstruction::phase0_idxes_map();
+        let public_io_idx_map = ReturnInstruction::public_io_idxes_map();
+        let phase0_witness_size = ReturnInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("RETURN: {:?}", &phase0_idx_map);
+            println!("RETURN: {:?}", &public_io_idx_map);
+            println!("RETURN witness_size: {:?}", phase0_witness_size);
+        }
+    }
+}

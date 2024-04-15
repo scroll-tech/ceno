@@ -85,3 +85,36 @@ impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use core::ops::Range;
+    use std::collections::BTreeMap;
+
+    use crate::instructions::{CalldataloadInstruction, ChipChallenges};
+    use simple_frontend::structs::CellId;
+
+    impl CalldataloadInstruction {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("phase0_data".to_string(), Self::phase0_data());
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_calldataload_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = CalldataloadInstruction::phase0_idxes_map();
+        let phase0_witness_size = CalldataloadInstruction::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("CALLDATALOAD: {:?}", &phase0_idx_map);
+            println!("CALLDATALOAD witness_size: {:?}", phase0_witness_size);
+        }
+    }
+}
