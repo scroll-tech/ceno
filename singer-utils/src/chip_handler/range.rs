@@ -9,7 +9,7 @@ use crate::{
     uint::UIntAddSub,
 };
 
-use super::RangeChipOperations;
+use super::{ROMOperations, RangeChipOperations};
 
 impl<F: SmallField> RangeChipOperations<F> for ROMHandler<F> {
     fn range_check_stack_top(
@@ -69,6 +69,10 @@ impl<F: SmallField> RangeChipOperations<F> for ROMHandler<F> {
         }
         Ok(())
     }
+
+    fn range_check_table_item(&mut self, circuit_builder: &mut CircuitBuilder<F>, item: CellId) {
+        self.rom_load(circuit_builder, &[], &[item]);
+    }
 }
 
 impl<F: SmallField> ROMHandler<F> {
@@ -81,10 +85,8 @@ impl<F: SmallField> ROMHandler<F> {
         if bit_width > RANGE_CHIP_BIT_WIDTH {
             return Err(UtilError::ChipHandlerError);
         }
-        let out = circuit_builder.create_ext_cell();
         let items = [value.mul(F::BaseField::from(1 << (RANGE_CHIP_BIT_WIDTH - bit_width)))];
-        circuit_builder.rlc_mixed(&out, &items, self.challenge.record_rlc);
-        self.records.push(out);
+        self.rom_load_mixed(circuit_builder, &[], &items);
         Ok(())
     }
 }

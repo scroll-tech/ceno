@@ -28,9 +28,9 @@ pub enum InstOutChipType {
 #[derive(Clone, Copy, Debug)]
 pub struct ChipChallenges {
     // Challenges for multiple-tuple chip records
-    pub record_rlc: ChallengeId,
+    pub(super) record_rlc: ChallengeId,
     // Challenges for multiple-cell values
-    pub record_item_rlc: ChallengeId,
+    pub(super) record_item_rlc: ChallengeId,
 }
 
 #[derive(Clone, Debug)]
