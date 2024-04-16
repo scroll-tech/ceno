@@ -106,3 +106,64 @@ pub(crate) fn construct_bytecode_table<F: SmallField>(
         ceil_log2(bytecode_len) - 1,
     ))
 }
+
+#[cfg(test)]
+mod test {
+    use ark_std::rand::Rng;
+    use ark_std::test_rng;
+    use goldilocks::{GoldilocksExt2, SmallField};
+    use itertools::Itertools;
+    use std::time::Instant;
+    use transcript::Transcript;
+
+    use crate::chips::bytecode::construct_bytecode_table_and_witness;
+    use crate::structs::ChipChallenges;
+    use gkr_graph::structs::{CircuitGraphBuilder, IOPProverState};
+
+    fn bench_construct_bytecode_table_and_witness_helper<F: SmallField>(bytecode_size: usize) {
+        let chip_challenges = ChipChallenges::default();
+        let mut circuit_graph_builder = CircuitGraphBuilder::<F>::new();
+
+        let mut rng = test_rng();
+        let bytecode: Vec<u8> = (0..bytecode_size).map(|_| rng.gen()).collect_vec();
+
+        let real_challenges = vec![F::random(&mut rng), F::random(&mut rng)];
+
+        let timer = Instant::now();
+
+        let _ = construct_bytecode_table_and_witness(
+            &mut circuit_graph_builder,
+            &bytecode,
+            &chip_challenges,
+            &real_challenges,
+        )
+        .expect("gkr graph construction failed");
+
+        let (graph, wit) = circuit_graph_builder.finalize_graph_and_witness();
+
+        println!(
+            "bytecode::construct_bytecode_table_and_witness, bytecode_size = {}, time = {}",
+            bytecode_size,
+            timer.elapsed().as_secs_f64()
+        );
+
+        let point = vec![F::random(&mut rng), F::random(&mut rng)];
+        let target_evals = graph.target_evals(&wit, &point);
+
+        let mut prover_transcript = &mut Transcript::new(b"Singer");
+
+        let timer = Instant::now();
+        let _ = IOPProverState::<F>::prove(&graph, &wit, &target_evals, &mut prover_transcript)
+            .expect("prove failed");
+        println!(
+            "bytecode::prove, bytecode_size = {}, time = {}",
+            bytecode_size,
+            timer.elapsed().as_secs_f64()
+        );
+    }
+
+    #[test]
+    fn bench_construct_bytecode_table_and_witness() {
+        bench_construct_bytecode_table_and_witness_helper::<GoldilocksExt2>(16);
+    }
+}
