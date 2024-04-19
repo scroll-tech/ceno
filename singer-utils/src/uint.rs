@@ -124,11 +124,19 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             }
             res
         };
-        let counter = (0..(1 << C)).map(|x| F::from(x as u64)).collect_vec();
+        #[cfg(feature="dbg-counter_vector")]
+        println!("UInt<M,C> M {:?}, C {:?}", M, C);
+        let counter = (0..(1u64 << C)).map(|x| F::from(x as u64)).collect_vec();
+        #[cfg(feature="dbg-counter_vector")]
+        println!("counter len {:?}", counter.len());
         let (di, mo) = (num_vars / C, num_vars % C);
-        let mut res = (0..(1 << mo)).map(|x| F::from(x as u64)).collect_vec();
+        #[cfg(feature="dbg-counter_vector")]
+        println!("di {:?}", di);
+        let mut res = (0..(1u64 << mo)).map(|x| F::from(x as u64)).collect_vec();
         for _ in 0..di {
             res = tensor(&counter, res);
+            #[cfg(feature="dbg-counter_vector")]
+            println!("index {:?} res {:?}", idx, res);
         }
         res
     }
@@ -179,9 +187,9 @@ fn convert_decomp<F: SmallField>(
 
 #[cfg(test)]
 mod test {
-    use crate::uint::convert_decomp;
-
     use super::UInt;
+    use crate::structs::PCUInt;
+    use crate::uint::convert_decomp;
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CircuitBuilder;
@@ -316,5 +324,12 @@ mod test {
                 Goldilocks::from(0),
             ]
         );
+    }
+
+    #[test]
+    fn test_counter_vector() {
+        let res = PCUInt::counter_vector::<Goldilocks>(1).into_iter();
+        #[cfg(feature="dbg-counter_vector")]
+        println!("test_counter_vector result = {:?}", res);
     }
 }

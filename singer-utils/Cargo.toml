@@ -18,3 +18,6 @@ gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
 strum = "0.26.1"
 strum_macros = "0.26.1"
 transcript = { version = "0.1.0", path = "../transcript" }
+
+[features]
+dbg-counter_vector = []
