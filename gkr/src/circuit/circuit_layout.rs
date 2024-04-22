@@ -184,21 +184,25 @@ impl<F: SmallField> Circuit<F> {
                             idx_in: [],
                             idx_out: i,
                             scalar: gate.scalar,
+                            debug_info: cell.debug_info,
                         }),
                         1 => layers[layer_id as usize].adds.push(Gate1In {
                             idx_in: idx_in.try_into().unwrap(),
                             idx_out: i,
                             scalar: gate.scalar,
+                            debug_info: cell.debug_info,
                         }),
                         2 => layers[layer_id as usize].mul2s.push(Gate2In {
                             idx_in: idx_in.try_into().unwrap(),
                             idx_out: i,
                             scalar: gate.scalar,
+                            debug_info: cell.debug_info,
                         }),
                         3 => layers[layer_id as usize].mul3s.push(Gate3In {
                             idx_in: idx_in.try_into().unwrap(),
                             idx_out: i,
                             scalar: gate.scalar,
+                            debug_info: cell.debug_info,
                         }),
                         _ => unreachable!(),
                     }
@@ -240,6 +244,7 @@ impl<F: SmallField> Circuit<F> {
                             idx_in: [],
                             idx_out: output_subsets.update_wire_id(old_layer_id, old_wire_id),
                             scalar: ConstantType::Field(i64_to_field(constant)),
+                            debug_info: cell.debug_info,
                         });
                     }
                 }
@@ -638,6 +643,7 @@ mod tests {
             idx_in: [],
             idx_out: 0,
             scalar: ConstantType::Field(Goldilocks::ONE),
+            debug_info: None,
         });
 
         assert_eq!(circuit.copy_to_wits_out, expected_copy_to_wits_out);
@@ -673,6 +679,7 @@ mod tests {
                     },
                     0,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [],
@@ -684,6 +691,7 @@ mod tests {
                     },
                     1,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [],
@@ -695,6 +703,7 @@ mod tests {
                     },
                     0,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [],
@@ -706,6 +715,7 @@ mod tests {
                     },
                     1,
                 ),
+                debug_info: None,
             },
         ];
 
@@ -720,6 +730,7 @@ mod tests {
                     },
                     0,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [1],
@@ -731,6 +742,7 @@ mod tests {
                     },
                     0,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [0],
@@ -742,6 +754,7 @@ mod tests {
                     },
                     1,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [1],
@@ -753,6 +766,7 @@ mod tests {
                     },
                     1,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [2],
@@ -764,6 +778,7 @@ mod tests {
                     },
                     0,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [3],
@@ -775,6 +790,7 @@ mod tests {
                     },
                     0,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [2],
@@ -786,6 +802,7 @@ mod tests {
                     },
                     1,
                 ),
+                debug_info: None,
             },
             Gate {
                 idx_in: [3],
@@ -797,6 +814,7 @@ mod tests {
                     },
                     1,
                 ),
+                debug_info: None,
             },
         ];
 
@@ -805,21 +823,25 @@ mod tests {
                 idx_in: [0, 2],
                 idx_out: 0,
                 scalar: ConstantType::<GoldilocksExt2>::Field(Goldilocks::ONE),
+                debug_info: None,
             },
             Gate {
                 idx_in: [0, 3],
                 idx_out: 1,
                 scalar: ConstantType::Field(Goldilocks::ONE),
+                debug_info: None,
             },
             Gate {
                 idx_in: [1, 2],
                 idx_out: 2,
                 scalar: ConstantType::Field(Goldilocks::ONE),
+                debug_info: None,
             },
             Gate {
                 idx_in: [1, 3],
                 idx_out: 3,
                 scalar: ConstantType::Field(Goldilocks::ONE),
+                debug_info: None,
             },
         ];
 

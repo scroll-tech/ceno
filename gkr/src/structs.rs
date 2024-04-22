@@ -205,6 +205,7 @@ pub struct Gate<C, const FAN_IN: usize> {
     pub(crate) idx_in: [CellId; FAN_IN],
     pub(crate) idx_out: CellId,
     pub(crate) scalar: C,
+    pub(crate) debug_info: Option<&'static str>,
 }
 
 impl<C, const FAN_IN: usize> Serialize for Gate<C, FAN_IN> {

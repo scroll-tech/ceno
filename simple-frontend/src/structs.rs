@@ -45,6 +45,8 @@ pub struct Cell<Ext: SmallField> {
     pub gates: Vec<GateType<Ext>>,
     /// The type of the cell, e.g., public input, witness, challenge, etc.
     pub cell_type: Option<CellType>,
+    /// Debug info
+    pub debug_info: Option<&'static str>,
 }
 
 /// An ExtCell consists DEGREE number of cells.

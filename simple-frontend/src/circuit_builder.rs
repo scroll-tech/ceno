@@ -14,6 +14,7 @@ impl<Ext: SmallField> Cell<Ext> {
             layer: None,
             gates: vec![],
             cell_type: None,
+            debug_info: None,
         }
     }
 }
