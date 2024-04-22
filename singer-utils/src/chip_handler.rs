@@ -62,6 +62,7 @@ pub trait RangeChipOperations<Ext: SmallField>: ROMOperations<Ext> {
         circuit_builder: &mut CircuitBuilder<Ext>,
         uint: &UInt<M, C>,
         range_value_witness: Option<&[CellId]>,
+        debug_info: &'static str,
     ) -> Result<UInt<M, C>, UtilError>;
 
     fn range_check_bytes(

@@ -121,12 +121,13 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
 
         // Pop two values from stack
         let old_stack_ts0 = (&phase0[Self::phase0_old_stack_ts0()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        UIntCmp::<TSUInt>::assert_lt_debug(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts0,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt0()],
+            "old_stack_ts0_assert_lt",
         )?;
         ram_handler.stack_pop(
             &mut circuit_builder,
@@ -136,12 +137,13 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
         );
 
         let old_stack_ts1 = (&phase0[Self::phase0_old_stack_ts1()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        UIntCmp::<TSUInt>::assert_lt_debug(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts1,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt1()],
+            "old_stack_ts1_assert_lt",
         )?;
         ram_handler.stack_pop(
             &mut circuit_builder,

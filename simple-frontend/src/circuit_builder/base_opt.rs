@@ -146,6 +146,11 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         self.mark_cells(CellType::Out(OutType::AssertConst(constant)), &[out]);
     }
 
+    pub fn assert_const_debug(&mut self, out: CellId, constant: i64, debug_info: &'static str) {
+        self.assert_const(out, constant);
+        self.cells[out].debug_info = Some(debug_info);
+    }
+
     pub fn add_cell_expr(&mut self, out: CellId, in_0: MixedCell<Ext>) {
         match in_0 {
             MixedCell::Constant(constant) => {

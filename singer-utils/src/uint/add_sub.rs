@@ -241,7 +241,12 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        range_chip_handler.range_check_uint(
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+            "UIntAddSub::add -> range_check_uint",
+        )
     }
 
     /// Little-endian addition with a constant. Assume users to check the
@@ -282,7 +287,32 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        range_chip_handler.range_check_uint(
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+            "UIntAddSub::add_const -> range_check_uint",
+        )
+    }
+
+    /// Little-endian addition with a constant.
+    pub fn add_const_debug<Ext: SmallField, H: RangeChipOperations<Ext>>(
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        range_chip_handler: &mut H,
+        addend_0: &UInt<M, C>,
+        constant: Ext::BaseField,
+        witness: &[CellId],
+        debug_info: &'static str,
+    ) -> Result<UInt<M, C>, UtilError> {
+        let carry = Self::extract_carry(witness);
+        let range_values = Self::extract_range_values(witness);
+        let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
+        range_chip_handler.range_check_uint(
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+            debug_info,
+        )
     }
 
     /// Little-endian addition with a constant, guaranteed no overflow.
@@ -296,7 +326,12 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         let carry = Self::extract_carry_no_overflow(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        range_chip_handler.range_check_uint(
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+            "UIntAddSub::add_const_no_overflow -> range_check_uint",
+        )
     }
 
     /// Little-endian addition with a small number. Notice that the user should
@@ -338,7 +373,12 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_small_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        range_chip_handler.range_check_uint(
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+            "UIntAddSub::add_small -> range_check_uint",
+        )
     }
 
     /// Little-endian addition with a small number, guaranteed no overflow.
@@ -353,7 +393,12 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         let carry = Self::extract_carry_no_overflow(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_small_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        range_chip_handler.range_check_uint(
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+            "UIntAddSub::add_small_no_overflow -> range_check_uint",
+        )
     }
 
     /// Little-endian subtraction. Assume users to check the correct range of

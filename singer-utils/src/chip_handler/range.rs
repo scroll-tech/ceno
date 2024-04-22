@@ -27,6 +27,7 @@ impl<F: SmallField> RangeChipOperations<F> for ROMHandler<F> {
         circuit_builder: &mut CircuitBuilder<F>,
         uint: &UInt<M, C>,
         range_value_witness: Option<&[CellId]>,
+        debug_info: &'static str,
     ) -> Result<UInt<M, C>, UtilError>
     where
         F: SmallField,
@@ -40,7 +41,7 @@ impl<F: SmallField> RangeChipOperations<F> for ROMHandler<F> {
             Ok((*uint).clone())
         } else if let Some(range_values) = range_value_witness {
             let range_value = UInt::<M, C>::from_range_values(circuit_builder, range_values)?;
-            uint.assert_eq(circuit_builder, &range_value);
+            uint.assert_eq_debug(circuit_builder, &range_value, debug_info);
             let b: usize = M.min(C);
             let chunk_size = (b + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
             for chunk in range_values.chunks(chunk_size) {
@@ -113,12 +114,13 @@ impl<Ext: SmallField> ROMHandler<Ext> {
         witness: &[CellId],
     ) -> Result<TSUInt, UtilError> {
         //let carry = UIntAddSub::<TSUInt>::extract_unsafe_carry(witness);
-        UIntAddSub::<TSUInt>::add_const(
+        UIntAddSub::<TSUInt>::add_const_debug(
             circuit_builder,
             self,
             &ts,
             i64_to_base_field::<Ext>(constant),
             witness,
+            "ROMHandler::add_ts_with_const -> add_const",
         )
     }
 

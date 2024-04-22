@@ -40,6 +40,7 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
             circuit_builder,
             &computed_diff,
             Some(&range_values),
+            "UIntAddSub::lt -> range_check_uint",
         )?;
         if borrow.len() == UInt::<M, C>::N_CARRY_CELLS {
             Ok((borrow[UInt::<M, C>::N_CARRY_CELLS - 1], diff))
@@ -64,7 +65,29 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
         )?;
         let const_borrow = circuit_builder.create_cell();
         circuit_builder.add(const_borrow, borrow, Ext::BaseField::ONE);
-        circuit_builder.assert_const(const_borrow, 1);
+        circuit_builder.assert_const_debug(const_borrow, 1, "assert_lt");
+        //circuit_builder.assert_const(borrow, 1);
+        Ok(())
+    }
+
+    pub fn assert_lt_debug<Ext: SmallField, H: RangeChipOperations<Ext>>(
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        range_chip_handler: &mut H,
+        oprand_0: &UInt<M, C>,
+        oprand_1: &UInt<M, C>,
+        witness: &[CellId],
+        debug_info: &'static str,
+    ) -> Result<(), UtilError> {
+        let (borrow, _) = Self::lt(
+            circuit_builder,
+            range_chip_handler,
+            oprand_0,
+            oprand_1,
+            witness,
+        )?;
+        let const_borrow = circuit_builder.create_cell();
+        circuit_builder.add(const_borrow, borrow, Ext::BaseField::ONE);
+        circuit_builder.assert_const_debug(const_borrow, 1, debug_info);
         //circuit_builder.assert_const(borrow, 1);
         Ok(())
     }
@@ -94,7 +117,7 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
                 MixedCell::Constant(Ext::BaseField::ZERO),
                 borrow,
             );
-            circuit_builder.assert_const(s, 0);
+            circuit_builder.assert_const_debug(s, 0, "assert_leq");
         }
         Ok(())
     }
@@ -110,7 +133,7 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
         for i in 0..diff.len() {
             circuit_builder.add(diff[i], opr_0[i], Ext::BaseField::ONE);
             circuit_builder.add(diff[i], opr_1[i], -Ext::BaseField::ONE);
-            circuit_builder.assert_const(diff[i], 0);
+            circuit_builder.assert_const_debug(diff[i], 0, "assert_eq");
         }
         Ok(())
     }

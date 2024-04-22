@@ -213,7 +213,21 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             let diff = circuit_builder.create_cell();
             circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
             circuit_builder.add(diff, other.values[i], -F::BaseField::ONE);
-            circuit_builder.assert_const(diff, 0);
+            circuit_builder.assert_const_debug(diff, 0, "UInt::assert_eq");
+        }
+    }
+
+    pub fn assert_eq_debug<F: SmallField>(
+        &self,
+        circuit_builder: &mut CircuitBuilder<F>,
+        other: &Self,
+        debug_info: &'static str,
+    ) {
+        for i in 0..self.values.len() {
+            let diff = circuit_builder.create_cell();
+            circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
+            circuit_builder.add(diff, other.values[i], -F::BaseField::ONE);
+            circuit_builder.assert_const_debug(diff, 0, debug_info);
         }
     }
 
@@ -232,13 +246,17 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             let diff = circuit_builder.create_cell();
             circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
             circuit_builder.add(diff, values[i], -F::BaseField::ONE);
-            circuit_builder.assert_const(diff, 0);
+            circuit_builder.assert_const_debug(diff, 0, "UInt::assert_eq_range_values diff");
         }
         for i in length..values.len() {
-            circuit_builder.assert_const(values[i], 0);
+            circuit_builder.assert_const_debug(values[i], 0, "UInt::assert_eq_range_values values");
         }
         for i in length..self.values.len() {
-            circuit_builder.assert_const(self.values[i], 0);
+            circuit_builder.assert_const_debug(
+                self.values[i],
+                0,
+                "UInt::assert_eq_range_values self.values",
+            );
         }
     }
 

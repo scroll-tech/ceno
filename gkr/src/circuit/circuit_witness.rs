@@ -162,6 +162,9 @@ impl<F: SmallField> CircuitWitness<F> {
                             "lhs {:?}, rhs {:?}",
                             layer_wits[0].instances[instance_id][gate.idx_out], constant
                         );
+                        if let Some(debug_info) = gate.debug_info {
+                            println!("Gate debug info: {}", debug_info);
+                        }
                     }
                     assert_eq!(layer_wits[0].instances[instance_id][gate.idx_out], constant);
                 }
