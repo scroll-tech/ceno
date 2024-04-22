@@ -230,6 +230,12 @@ impl<F: SmallField> Circuit<F> {
                             .push(output_subsets.update_wire_id(old_layer_id, old_wire_id));
                     }
                     OutType::AssertConst(constant) => {
+                        #[cfg(feature = "dbg-assert-const")]
+                        println!(
+                            "circuit_layout assert const cell_id {:?} gate_idx_out {:?}",
+                            cell_id,
+                            output_subsets.update_wire_id(old_layer_id, old_wire_id)
+                        );
                         output_assert_const.push(GateCIn {
                             idx_in: [],
                             idx_out: output_subsets.update_wire_id(old_layer_id, old_wire_id),

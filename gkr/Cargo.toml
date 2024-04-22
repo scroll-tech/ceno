@@ -22,3 +22,6 @@ rayon.workspace = true
 
 [dev-dependencies]
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
+
+[features]
+dbg-assert-const = []

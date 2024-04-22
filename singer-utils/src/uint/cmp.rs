@@ -62,7 +62,10 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
             oprand_1,
             witness,
         )?;
-        circuit_builder.assert_const(borrow, 1);
+        let const_borrow = circuit_builder.create_cell();
+        circuit_builder.add(const_borrow, borrow, Ext::BaseField::ONE);
+        circuit_builder.assert_const(const_borrow, 1);
+        //circuit_builder.assert_const(borrow, 1);
         Ok(())
     }
 
