@@ -147,11 +147,16 @@ macro_rules! copy_pc_add_from_record {
 #[macro_export]
 macro_rules! copy_stack_memory_ts_add_from_record {
     ($wire_values: expr, $record: expr, $dst_slice: tt, $timestamp: tt) => {
-        $wire_values
-            [UIntAddSub::<TSUInt>::range_values_no_overflow_range(Self::$dst_slice().start)]
-        .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
-            $record.$timestamp + 1,
-        ));
+        println!(
+            "Range values range: {:?}",
+            UIntAddSub::<TSUInt>::range_values_range(Self::$dst_slice().start)
+        );
+        $wire_values[UIntAddSub::<TSUInt>::range_values_range(Self::$dst_slice().start)]
+            .copy_from_slice(&TSUInt::uint_to_range_field_limbs($record.$timestamp + 1));
+        println!(
+            "Carry values range: {:?}",
+            UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::$dst_slice().start)
+        );
         $wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::$dst_slice().start)]
             .copy_from_slice(&UIntAddSub::<TSUInt>::compute_no_overflow_carries(
                 $record.$timestamp,
