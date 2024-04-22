@@ -302,14 +302,10 @@ mod test {
     fn bench_jumpi_instruction() {
         bench_jumpi_instruction_helper::<GoldilocksExt2>(10);
     }
-}
 
-#[cfg(test)]
-mod test {
     use core::ops::Range;
     use std::collections::BTreeMap;
 
-    use crate::instructions::{ChipChallenges, Instruction, JumpiInstruction};
     use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
