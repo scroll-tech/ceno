@@ -194,17 +194,17 @@ macro_rules! copy_stack_ts_lt_from_record {
     ($wire_values: expr, $record: expr, $stack_ts: tt, $stack_ts_lt: tt, $index: expr) => {
         copy_operand_timestamp_from_record!($wire_values, $record, $stack_ts, 0, $index);
 
-        $wire_values[UIntAddSub::<TSUInt>::carry_no_overflow_range(Self::$stack_ts_lt().start)]
-            .copy_from_slice(&UIntAddSub::<TSUInt>::compute_no_overflow_borrows(
+        $wire_values[UIntAddSub::<TSUInt>::carry_range(Self::$stack_ts_lt().start)]
+            .copy_from_slice(&UIntAddSub::<TSUInt>::compute_borrows(
                 $record.operands_timestamps[$index],
                 $record.stack_timestamp,
             ));
 
-        $wire_values
-            [UIntAddSub::<TSUInt>::range_values_no_overflow_range(Self::$stack_ts_lt().start)]
-        .copy_from_slice(&TSUInt::uint_to_range_no_overflow_field_limbs(
-            $record.operands_timestamps[$index] + (1 << TSUInt::BIT_SIZE) - $record.stack_timestamp,
-        ));
+        $wire_values[UIntAddSub::<TSUInt>::range_values_range(Self::$stack_ts_lt().start)]
+            .copy_from_slice(&TSUInt::uint_to_range_field_limbs(
+                $record.operands_timestamps[$index] + (1 << TSUInt::BIT_SIZE)
+                    - $record.stack_timestamp,
+            ));
     };
 
     ($wire_values: expr, $record: expr, 0) => {

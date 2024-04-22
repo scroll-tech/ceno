@@ -49,6 +49,32 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
         }
     }
 
+    /// Greater than implemented by little-endian subtraction.
+    pub fn lt_debug<Ext: SmallField, H: RangeChipOperations<Ext>>(
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        range_chip_handler: &mut H,
+        oprand_0: &UInt<M, C>,
+        oprand_1: &UInt<M, C>,
+        witness: &[CellId],
+        debug_info: &'static str,
+    ) -> Result<(CellId, UInt<M, C>), UtilError> {
+        let borrow = Self::extract_borrow(witness);
+        let range_values = Self::extract_range_values(witness);
+        let computed_diff =
+            UIntAddSub::<UInt<M, C>>::sub_unsafe(circuit_builder, oprand_0, oprand_1, borrow)?;
+        let diff = range_chip_handler.range_check_uint(
+            circuit_builder,
+            &computed_diff,
+            Some(&range_values),
+            debug_info,
+        )?;
+        if borrow.len() == UInt::<M, C>::N_CARRY_CELLS {
+            Ok((borrow[UInt::<M, C>::N_CARRY_CELLS - 1], diff))
+        } else {
+            Ok((circuit_builder.create_cell(), diff))
+        }
+    }
+
     pub fn assert_lt<Ext: SmallField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
@@ -56,12 +82,13 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
         oprand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(), UtilError> {
-        let (borrow, _) = Self::lt(
+        let (borrow, _) = Self::lt_debug(
             circuit_builder,
             range_chip_handler,
             oprand_0,
             oprand_1,
             witness,
+            "UIntAddSub::assert_lt -> UIntAddSub::lt",
         )?;
         let const_borrow = circuit_builder.create_cell();
         circuit_builder.add(const_borrow, borrow, Ext::BaseField::ONE);
@@ -78,12 +105,13 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
         witness: &[CellId],
         debug_info: &'static str,
     ) -> Result<(), UtilError> {
-        let (borrow, _) = Self::lt(
+        let (borrow, _) = Self::lt_debug(
             circuit_builder,
             range_chip_handler,
             oprand_0,
             oprand_1,
             witness,
+            debug_info,
         )?;
         let const_borrow = circuit_builder.create_cell();
         circuit_builder.add(const_borrow, borrow, Ext::BaseField::ONE);
@@ -100,12 +128,13 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
         oprand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(), UtilError> {
-        let (borrow, diff) = Self::lt(
+        let (borrow, diff) = Self::lt_debug(
             circuit_builder,
             range_chip_handler,
             oprand_0,
             oprand_1,
             witness,
+            "UIntAddSub::assert_leq -> UIntAddSub::lt",
         )?;
         let diff_values = diff.values();
         for d in diff_values.iter() {
