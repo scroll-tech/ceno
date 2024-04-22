@@ -347,8 +347,8 @@ mod test {
 
         #[cfg(feature = "witness-count")]
         {
-            println!("Calldataload: {:?}", &phase0_idx_map);
-            println!("Calldataload witness_size: {:?}", phase0_witness_size);
+            println!("DUP: {:?}", &phase0_idx_map);
+            println!("DUP witness_size: {:?}", phase0_witness_size);
         }
 
         let inst_circuit = DupInstruction::<1>::construct_circuit(challenges).unwrap();
