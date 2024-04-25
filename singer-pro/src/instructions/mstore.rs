@@ -301,7 +301,7 @@ mod test {
     use core::ops::Range;
     use std::collections::BTreeMap;
 
-    use crate::instructions::{ChipChallenges, MstoreInstruction};
+    use crate::instructions::{mstore::MstoreAccessory, ChipChallenges, MstoreInstruction};
     use simple_frontend::structs::CellId;
 
     impl MstoreInstruction {
@@ -318,17 +318,47 @@ mod test {
         }
     }
 
+    impl MstoreAccessory {
+        #[inline]
+        fn accessory_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("pred_dup_memory_ts".to_string(), Self::pred_dup_memory_ts());
+            map.insert("pred_dup_offset".to_string(), Self::pred_dup_offset());
+            map.insert("pred_ooo_mem_byte".to_string(), Self::pred_ooo_mem_byte());
+            map.insert(
+                "phase0_old_memory_ts".to_string(),
+                Self::phase0_old_memory_ts(),
+            );
+            map.insert(
+                "phase0_old_memory_ts_lt".to_string(),
+                Self::phase0_old_memory_ts_lt(),
+            );
+            map.insert(
+                "phase0_offset_add_delta".to_string(),
+                Self::phase0_offset_add_delta(),
+            );
+            map.insert(
+                "phase0_prev_mem_byte".to_string(),
+                Self::phase0_prev_mem_byte(),
+            );
+
+            map
+        }
+    }
+
     #[test]
     fn test_mstore_construct_circuit() {
         let challenges = ChipChallenges::default();
 
-        let phase0_idx_map = MstoreInstruction::phase0_idxes_map();
+        let instruction_phase0_idx_map = MstoreInstruction::phase0_idxes_map();
+        let accessory_idx_map = MstoreAccessory::accessory_idxes_map();
         let phase0_witness_size = MstoreInstruction::phase0_size();
 
         #[cfg(feature = "witness-count")]
         {
-            println!("MSTORE: {:?}", &phase0_idx_map);
-            println!("MSTORE witness_size: {:?}", phase0_witness_size);
+            println!("MSTORE Instruction: {:?}", &instruction_phase0_idx_map);
+            println!("MSTORE Accessory: {:?}", &accessory_idx_map);
+            println!("MSTORE phase0_size: {:?}", phase0_witness_size);
         }
     }
 }

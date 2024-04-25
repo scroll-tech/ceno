@@ -124,18 +124,18 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             }
             res
         };
-        #[cfg(feature="dbg-counter_vector")]
+        #[cfg(feature = "dbg-counter_vector")]
         println!("UInt<M,C> M {:?}, C {:?}", M, C);
         let counter = (0..(1u64 << C)).map(|x| F::from(x as u64)).collect_vec();
-        #[cfg(feature="dbg-counter_vector")]
+        #[cfg(feature = "dbg-counter_vector")]
         println!("counter len {:?}", counter.len());
         let (di, mo) = (num_vars / C, num_vars % C);
-        #[cfg(feature="dbg-counter_vector")]
+        #[cfg(feature = "dbg-counter_vector")]
         println!("di {:?}", di);
         let mut res = (0..(1u64 << mo)).map(|x| F::from(x as u64)).collect_vec();
         for _ in 0..di {
             res = tensor(&counter, res);
-            #[cfg(feature="dbg-counter_vector")]
+            #[cfg(feature = "dbg-counter_vector")]
             println!("index {:?} res {:?}", idx, res);
         }
         res
@@ -329,7 +329,7 @@ mod test {
     #[test]
     fn test_counter_vector() {
         let res = PCUInt::counter_vector::<Goldilocks>(1).into_iter();
-        #[cfg(feature="dbg-counter_vector")]
+        #[cfg(feature = "dbg-counter_vector")]
         println!("test_counter_vector result = {:?}", res);
     }
 }
