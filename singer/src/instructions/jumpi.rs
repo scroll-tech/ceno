@@ -541,8 +541,8 @@ mod test {
 
         #[cfg(feature = "witness-count")]
         {
-            println!("GT: {:?}", &phase0_idx_map);
-            println!("GT witness_size: {:?}", phase0_witness_size);
+            println!("JUMPI: {:?}", &phase0_idx_map);
+            println!("JUMPI witness_size: {:?}", phase0_witness_size);
         }
 
         let inst_circuit = JumpiInstruction::construct_circuit(challenges).unwrap();
