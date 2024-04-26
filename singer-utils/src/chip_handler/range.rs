@@ -138,7 +138,26 @@ impl<Ext: SmallField> ROMHandler<Ext> {
         // If val != 0, then prod = 1. => assert!( val (prod - 1) = 0 )
         circuit_builder.mul2(statement, val, prod, Ext::BaseField::ONE);
         circuit_builder.add(statement, val, -Ext::BaseField::ONE);
-        circuit_builder.assert_const(statement, 0);
+        circuit_builder.assert_const_debug(statement, 0, "non_zero");
+        Ok(prod)
+    }
+
+    pub fn non_zero_debug(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        val: CellId,
+        wit: CellId,
+        debug_info: &'static str,
+    ) -> Result<CellId, UtilError> {
+        let prod = circuit_builder.create_cell();
+        circuit_builder.mul2(prod, val, wit, Ext::BaseField::ONE);
+        self.small_range_check(circuit_builder, prod.into(), 1)?;
+
+        let statement = circuit_builder.create_cell();
+        // If val != 0, then prod = 1. => assert!( val (prod - 1) = 0 )
+        circuit_builder.mul2(statement, val, prod, Ext::BaseField::ONE);
+        circuit_builder.add(statement, val, -Ext::BaseField::ONE);
+        circuit_builder.assert_const_debug(statement, 0, debug_info);
         Ok(prod)
     }
 }

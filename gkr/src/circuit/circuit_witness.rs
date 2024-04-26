@@ -655,7 +655,7 @@ mod test {
         // Layer 0
         let root = circuit_builder.create_cell();
         circuit_builder.mul2(root, inners[0], inners[1], Ext::BaseField::ONE);
-        circuit_builder.assert_const(root, 5005);
+        circuit_builder.assert_const_debug(root, 5005, "copy_to_wit_out");
 
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
