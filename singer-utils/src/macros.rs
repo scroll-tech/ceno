@@ -112,7 +112,8 @@ macro_rules! copy_stack_ts_from_record {
 #[macro_export]
 macro_rules! copy_memory_ts_from_record {
     ($wire_values: expr, $record: expr) => {
-        $wire_values[..].copy_from_slice(&TSUInt::uint_to_field_elems($record.memory_timestamp));
+        $wire_values[Self::phase0_memory_ts()]
+            .copy_from_slice(&TSUInt::uint_to_field_elems($record.memory_timestamp));
     };
 }
 
