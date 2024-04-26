@@ -183,6 +183,12 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
     }
 
     fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        match N {
+            1 => assert_eq!(record.opcode, OpcodeType::SWAP1 as u8),
+            2 => assert_eq!(record.opcode, OpcodeType::SWAP2 as u8),
+            4 => assert_eq!(record.opcode, OpcodeType::SWAP4 as u8),
+            _ => unimplemented!(),
+        }
         let mut wire_values = vec![F::ZERO; Self::phase0_size()];
         copy_pc_from_record!(wire_values, record);
         copy_stack_ts_from_record!(wire_values, record);

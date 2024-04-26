@@ -162,6 +162,11 @@ impl<F: SmallField, const N: usize> Instruction<F> for DupInstruction<N> {
     }
 
     fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        match N {
+            1 => assert_eq!(record.opcode, OpcodeType::DUP1 as u8),
+            2 => assert_eq!(record.opcode, OpcodeType::DUP2 as u8),
+            _ => unimplemented!(),
+        }
         let mut wire_values = vec![F::ZERO; Self::phase0_size()];
         copy_pc_from_record!(wire_values, record);
         copy_stack_ts_from_record!(wire_values, record);

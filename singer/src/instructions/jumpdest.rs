@@ -98,6 +98,7 @@ impl<F: SmallField> Instruction<F> for JumpdestInstruction {
     }
 
     fn generate_wires_in(record: &Record) -> CircuitWiresIn<F> {
+        assert_eq!(record.opcode, OpcodeType::JUMPDEST as u8);
         let mut wire_values = vec![F::ZERO; Self::phase0_size()];
         copy_pc_from_record!(wire_values, record);
         copy_stack_top_from_record!(wire_values, record);
