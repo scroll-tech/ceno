@@ -243,8 +243,7 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_swap2_construct_circuit() {
+    fn test_swap2_construct_circuit_helper<F: SmallField>() {
         let challenges = ChipChallenges::default();
 
         let phase0_idx_map = SwapInstruction::<2>::phase0_idxes_map();
@@ -262,15 +261,21 @@ mod test {
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);
 
-        let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
-        phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(4u64)]);
-        phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        let mut phase0_values_map = BTreeMap::<String, Vec<F::BaseField>>::new();
+        phase0_values_map.insert("phase0_pc".to_string(), vec![F::BaseField::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_stack_ts".to_string(),
+            vec![F::BaseField::from(4u64)],
+        );
+        phase0_values_map.insert(
+            "phase0_memory_ts".to_string(),
+            vec![F::BaseField::from(1u64)],
+        );
         phase0_values_map.insert(
             "phase0_stack_top".to_string(),
-            vec![Goldilocks::from(100u64)],
+            vec![F::BaseField::from(100u64)],
         );
-        phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_clk".to_string(), vec![F::BaseField::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),
             vec![], // carry is 0, may test carry using larger values in PCUInt
@@ -278,77 +283,73 @@ mod test {
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
             vec![
-                Goldilocks::from(5u64), // first TSUInt::N_RANGE_CHECK_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
-                Goldilocks::from(0u64),
-                Goldilocks::from(0u64),
-                Goldilocks::from(0u64),
+                F::BaseField::from(5u64), // first TSUInt::N_RANGE_CHECK_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
+                F::BaseField::from(0u64),
+                F::BaseField::from(0u64),
+                F::BaseField::from(0u64),
                 // no place for carry
             ],
         );
         phase0_values_map.insert(
             "phase0_old_stack_ts_1".to_string(),
-            vec![Goldilocks::from(3u64)],
+            vec![F::BaseField::from(3u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt_1".to_string(),
             vec![
-                Goldilocks::from(range_values[0]),
-                Goldilocks::from(range_values[1]),
-                Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
-                Goldilocks::from(1u64), // current length has no cells for borrow
+                F::BaseField::from(range_values[0]),
+                F::BaseField::from(range_values[1]),
+                F::BaseField::from(range_values[2]),
+                F::BaseField::from(range_values[3]),
+                F::BaseField::from(1u64), // current length has no cells for borrow
             ],
         );
         phase0_values_map.insert(
             "phase0_old_stack_ts_n_plus_1".to_string(),
-            vec![Goldilocks::from(1u64)],
+            vec![F::BaseField::from(1u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 3;
         let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt_n_plus_1".to_string(),
             vec![
-                Goldilocks::from(range_values[0]),
-                Goldilocks::from(range_values[1]),
-                Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
-                Goldilocks::from(1u64), // current length has no cells for borrow
+                F::BaseField::from(range_values[0]),
+                F::BaseField::from(range_values[1]),
+                F::BaseField::from(range_values[2]),
+                F::BaseField::from(range_values[3]),
+                F::BaseField::from(1u64), // current length has no cells for borrow
             ],
         );
         phase0_values_map.insert(
             "phase0_stack_values_1".to_string(),
             vec![
-                Goldilocks::from(7u64),
-                Goldilocks::from(6u64),
-                Goldilocks::from(5u64),
-                Goldilocks::from(4u64),
-                Goldilocks::from(3u64),
-                Goldilocks::from(2u64),
-                Goldilocks::from(1u64),
-                Goldilocks::from(0u64),
+                F::BaseField::from(7u64),
+                F::BaseField::from(6u64),
+                F::BaseField::from(5u64),
+                F::BaseField::from(4u64),
+                F::BaseField::from(3u64),
+                F::BaseField::from(2u64),
+                F::BaseField::from(1u64),
+                F::BaseField::from(0u64),
             ],
         );
         phase0_values_map.insert(
             "phase0_stack_values_n_plus_1".to_string(),
             vec![
-                Goldilocks::from(0u64),
-                Goldilocks::from(1u64),
-                Goldilocks::from(2u64),
-                Goldilocks::from(3u64),
-                Goldilocks::from(4u64),
-                Goldilocks::from(5u64),
-                Goldilocks::from(6u64),
-                Goldilocks::from(7u64),
+                F::BaseField::from(0u64),
+                F::BaseField::from(1u64),
+                F::BaseField::from(2u64),
+                F::BaseField::from(3u64),
+                F::BaseField::from(4u64),
+                F::BaseField::from(5u64),
+                F::BaseField::from(6u64),
+                F::BaseField::from(7u64),
             ],
         );
 
-        let circuit_witness_challenges = vec![
-            Goldilocks::from(2),
-            Goldilocks::from(2),
-            Goldilocks::from(2),
-        ];
+        let circuit_witness_challenges = vec![F::from(2), F::from(2), F::from(2)];
 
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
@@ -357,6 +358,11 @@ mod test {
             &phase0_values_map,
             circuit_witness_challenges,
         );
+    }
+
+    #[test]
+    fn test_swap2_construct_circuit() {
+        test_swap2_construct_circuit_helper::<GoldilocksExt2>()
     }
 
     fn bench_swap_instruction_helper<F: SmallField, const N: usize>(instance_num_vars: usize) {

@@ -183,7 +183,7 @@ mod test {
     use core::ops::Range;
     use ff::Field;
     use gkr::structs::LayerWitness;
-    use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
+    use goldilocks::{GoldilocksExt2, SmallField};
     use itertools::Itertools;
     use simple_frontend::structs::CellId;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
@@ -340,11 +340,7 @@ mod test {
         // challenges
         //  { ChallengeConst { challenge: 1, exp: i }: [Goldilocks(c^i)] }
         let c: u64 = 6;
-        let circuit_witness_challenges = vec![
-            F::BaseField::from(c),
-            F::BaseField::from(c),
-            F::BaseField::from(c),
-        ];
+        let circuit_witness_challenges = vec![F::from(c), F::from(c), F::from(c)];
 
         let circuit_witness = test_opcode_circuit(
             &inst_circuit,

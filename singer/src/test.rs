@@ -41,7 +41,7 @@ pub(crate) fn test_opcode_circuit<Ext: SmallField>(
     phase0_witness_size: usize,
     phase0_values_map: &BTreeMap<String, Vec<Ext::BaseField>>,
     circuit_witness_challenges: Vec<Ext>,
-) -> CircuitWitness<Ext> {
+) -> CircuitWitness<Ext::BaseField> {
     // configure circuit
     let circuit = inst_circuit.circuit.as_ref();
 
