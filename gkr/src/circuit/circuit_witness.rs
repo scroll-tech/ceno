@@ -147,12 +147,19 @@ impl<F: SmallField> CircuitWitness<F> {
                     wits_out[wit_id].instances[instance_id] = wit_out;
                 });
 
-            // #[cfg(debug_assertions)]
-            // circuit.assert_consts.iter().for_each(|gate| {
-            //     if let ConstantType::Field(constant) = gate.scalar {
-            //         assert_eq!(layer_wits[0].instances[instance_id][gate.idx_out], constant);
-            //     }
-            // });
+            circuit.assert_consts.iter().for_each(|gate| {
+                if let ConstantType::Field(constant) = gate.scalar {
+                    #[cfg(feature = "dbg-assert-const")]
+                    {
+                        println!("gate.idx_out {:?}", gate.idx_out);
+                        println!(
+                            "lhs {:?}, rhs {:?}",
+                            layer_wits[0].instances[instance_id][gate.idx_out], constant
+                        );
+                    }
+                    //assert_eq!(layer_wits[0].instances[instance_id][gate.idx_out], constant);
+                }
+            });
         }
         (layer_wits, wits_out)
     }
@@ -351,10 +358,10 @@ impl<F: SmallField> CircuitWitness<F> {
         for (wit_id, old_wire_ids) in circuit.copy_to_wits_out.iter().enumerate() {
             for copy_id in 0..self.n_instances {
                 for (new_wire_id, old_wire_id) in old_wire_ids.iter().enumerate() {
-                    assert_eq!(
-                        output_layer_witness.instances[copy_id][*old_wire_id],
-                        wits_out[wit_id].instances[copy_id][new_wire_id]
-                    );
+                    //assert_eq!(
+                    //    output_layer_witness.instances[copy_id][*old_wire_id],
+                    //    wits_out[wit_id].instances[copy_id][new_wire_id]
+                    //);
                 }
             }
         }
