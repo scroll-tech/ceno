@@ -153,7 +153,7 @@ impl<F: SmallField> CircuitWitness<F> {
                     {
                         println!("gate.idx_out {:?}", gate.idx_out);
                         println!(
-                            "lhs {:?}, rhs {:?}",
+                            "lhs: circuit computed const {:?}, rhs: witness assigned const {:?}",
                             layer_wits[0].instances[instance_id][gate.idx_out], constant
                         );
                     }
