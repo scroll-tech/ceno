@@ -66,16 +66,40 @@ pub(crate) fn construct_range_table<F: SmallField>(
 
 #[cfg(test)]
 mod test {
-    use ark_std::rand::Rng;
+    use crate::chips::range::{construct_circuit, construct_range_table_and_witness};
+    use crate::structs::ChipChallenges;
     use ark_std::test_rng;
+    use gkr::structs::CircuitWitness;
+    use gkr_graph::structs::{CircuitGraphBuilder, IOPProverState};
     use goldilocks::{GoldilocksExt2, SmallField};
-    use itertools::Itertools;
     use std::time::Instant;
     use transcript::Transcript;
 
-    use crate::chips::range::construct_range_table_and_witness;
-    use crate::structs::ChipChallenges;
-    use gkr_graph::structs::{CircuitGraphBuilder, IOPProverState};
+    fn test_range_construct_circuit_helper<F: SmallField>() {
+        let challenges = ChipChallenges::default();
+        let circuit = construct_circuit::<F>(&challenges);
+        let n_witness_in = circuit.n_witness_in;
+        let witness_in = vec![vec![]; n_witness_in];
+
+        // The actual challenges used is:
+        // challenges
+        //  { ChallengeConst { challenge: 1, exp: i }: [Goldilocks(c^i)] }
+        let c: u64 = 6;
+        let circuit_witness_challenges = vec![F::from(c), F::from(c), F::from(c)];
+
+        let circuit_witness = {
+            let mut circuit_witness = CircuitWitness::new(&circuit, circuit_witness_challenges);
+            circuit_witness.add_instance(&circuit, witness_in);
+            circuit_witness
+        };
+
+        circuit_witness.check_correctness(&circuit);
+    }
+
+    #[test]
+    fn test_range_construct_circuit() {
+        test_range_construct_circuit_helper::<GoldilocksExt2>()
+    }
 
     fn bench_construct_range_table_and_witness_helper<F: SmallField>(bit_width: usize) {
         let chip_challenges = ChipChallenges::default();
