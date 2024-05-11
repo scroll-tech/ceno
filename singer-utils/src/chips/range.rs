@@ -127,7 +127,7 @@ mod test {
             timer.elapsed().as_secs_f64()
         );
 
-        let point = vec![F::random(&mut rng), F::random(&mut rng)];
+        let point = vec![F::random(&mut rng); 17];
         let target_evals = graph.target_evals(&wit, &point);
 
         let mut prover_transcript = &mut Transcript::new(b"Singer");
@@ -144,6 +144,6 @@ mod test {
 
     #[test]
     fn bench_construct_range_table_and_witness() {
-        bench_construct_range_table_and_witness_helper::<GoldilocksExt2>(1);
+        bench_construct_range_table_and_witness_helper::<GoldilocksExt2>(16);
     }
 }

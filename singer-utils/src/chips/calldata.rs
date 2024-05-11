@@ -118,14 +118,54 @@ pub(crate) fn construct_calldata_table<F: SmallField>(
 mod test {
     use ark_std::rand::Rng;
     use ark_std::test_rng;
+    use gkr::structs::CircuitWitness;
     use goldilocks::{GoldilocksExt2, SmallField};
     use itertools::Itertools;
     use std::time::Instant;
     use transcript::Transcript;
 
-    use crate::chips::calldata::construct_calldata_table_and_witness;
+    use crate::chips::calldata::{construct_calldata_table_and_witness, construct_circuit};
     use crate::structs::ChipChallenges;
     use gkr_graph::structs::{CircuitGraphBuilder, IOPProverState};
+
+    fn test_calldata_construct_circuit_helper<F: SmallField>() {
+        let challenges = ChipChallenges::default();
+        let circuit = construct_circuit::<F>(&challenges);
+        let n_witness_in = circuit.n_witness_in;
+        let mut witness_in = vec![vec![]; n_witness_in];
+        // id, UInt64::N_OPRAND_CELLS = 2 cells
+        witness_in[0] = vec![F::BaseField::from(1u64), F::BaseField::from(0u64)];
+        // calldata, StackUInt::N_OPRAND_CELLS = 8 cells
+        witness_in[1] = vec![
+            F::BaseField::from(1u64),
+            F::BaseField::from(2u64),
+            F::BaseField::from(3u64),
+            F::BaseField::from(4u64),
+            F::BaseField::from(5u64),
+            F::BaseField::from(6u64),
+            F::BaseField::from(7u64),
+            F::BaseField::from(8u64),
+        ];
+
+        // The actual challenges used is:
+        // challenges
+        //  { ChallengeConst { challenge: 1, exp: i }: [Goldilocks(c^i)] }
+        let c: u64 = 6;
+        let circuit_witness_challenges = vec![F::from(c), F::from(c), F::from(c)];
+
+        let circuit_witness = {
+            let mut circuit_witness = CircuitWitness::new(&circuit, circuit_witness_challenges);
+            circuit_witness.add_instance(&circuit, witness_in);
+            circuit_witness
+        };
+
+        circuit_witness.check_correctness(&circuit);
+    }
+
+    #[test]
+    fn test_calldata_construct_circuit() {
+        test_calldata_construct_circuit_helper::<GoldilocksExt2>()
+    }
 
     fn bench_construct_calldata_table_and_witness_helper<F: SmallField>(program_input_size: usize) {
         let chip_challenges = ChipChallenges::default();
