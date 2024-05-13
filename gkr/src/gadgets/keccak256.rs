@@ -158,19 +158,6 @@ fn xor3<'a, F: SmallField>(cb: &mut CircuitBuilder<F>, words: &[Word; 3]) -> Wor
     out
 }
 
-fn xor_constant<F: SmallField>(cb: &mut CircuitBuilder<F>, lhs: &Word, constant: u64) -> Word {
-    let mut out = *lhs;
-    izip!(&mut out.0, (0..64).rev()).for_each(|(out, idx)| {
-        if (constant >> idx) & 1 == 1 {
-            let not = cb.create_cell();
-            cb.add(not, *out, -F::BaseField::ONE);
-            cb.add_const(not, F::BaseField::ONE);
-            *out = not;
-        }
-    });
-    out
-}
-
 // chi truth table
 // | x0 | x1 | x2 | x0 ^ ((not x1) & x2) |
 // |----|----|----|----------------------|
@@ -199,6 +186,80 @@ fn chi<'a, F: SmallField>(cb: &mut CircuitBuilder<F>, words: &[Word; 3]) -> Word
             cb.mul3(*out, *wire_0, *wire_1, *wire_2, F::BaseField::ONE.double());
         },
     );
+    out
+}
+
+// chi_output xor constant
+// = chi_output + constant - 2*chi_output*constant
+// = c + (x0 + x2) - 2x0x2 - x1x2 + 2x0x1x2 - 2(c*x0 + c*x2 - 2c*x0*x2 - c*x1*x2 + 2*c*x0*x1*x2)
+// = x0 + x2 + c - 2*x0*x2 - x1*x2 + 2*x0*x1*x2 - 2*c*x0 - 2*c*x2 + 4*c*x0*x2 + 2*c*x1*x2 - 4*c*x0*x1*x2
+// = x0*(1-2c) + x2*(1-2c) + c + x0*x2*(-2 + 4c) + x1*x2(-1 + 2c) + x0*x1*x2(2 - 4c)
+fn chi_and_xor_constant<'a, F: SmallField>(
+    cb: &mut CircuitBuilder<F>,
+    words: &[Word; 3],
+    constant: u64,
+) -> Word {
+    let out = Word::new(cb);
+    izip!(
+        &out.0,
+        &words[0].0,
+        &words[1].0,
+        &words[2].0,
+        iter::successors(Some(constant.reverse_bits()), |constant| {
+            Some(constant >> 1)
+        })
+    )
+    .for_each(|(out, wire_0, wire_1, wire_2, constant)| {
+        let const_bit = constant & 1;
+        // x0*(1-2c) + x2*(1-2c) + c
+        if const_bit & 1 == 1 {
+            // -x0
+            cb.add(*out, *wire_0, -F::BaseField::ONE);
+        } else {
+            // x0
+            cb.add(*out, *wire_0, 1.into());
+        };
+        if const_bit & 1 == 1 {
+            // -x2
+            cb.add(*out, *wire_2, -F::BaseField::ONE);
+        } else {
+            // x2
+            cb.add(*out, *wire_2, 1.into());
+        };
+        cb.add_const(
+            *out,
+            if const_bit & 1 == 1 {
+                F::BaseField::ONE
+            } else {
+                F::BaseField::ZERO
+            },
+        );
+
+        // x0*x2*(-2 + 4c) + x1*x2(-1 + 2c)
+        if const_bit & 1 == 1 {
+            // 2*x0*x2
+            cb.mul2(*out, *wire_0, *wire_2, F::BaseField::ONE.double());
+        } else {
+            // -2*x0*x2
+            cb.mul2(*out, *wire_0, *wire_2, -F::BaseField::ONE.double());
+        };
+        if const_bit & 1 == 1 {
+            // x1*x2
+            cb.mul2(*out, *wire_1, *wire_2, F::BaseField::ONE);
+        } else {
+            // -x1*x2
+            cb.mul2(*out, *wire_1, *wire_2, -F::BaseField::ONE);
+        };
+
+        // x0*x1*x2(2 - 4c)
+        if const_bit & 1 == 1 {
+            // -2*x0*x1*x2
+            cb.mul3(*out, *wire_0, *wire_1, *wire_2, -F::BaseField::ONE.double());
+        } else {
+            // 2*x0*x1*x2
+            cb.mul3(*out, *wire_0, *wire_1, *wire_2, F::BaseField::ONE.double());
+        }
+    });
     out
 }
 
@@ -338,31 +399,22 @@ pub fn keccak256_circuit<F: SmallField>() -> Circuit<F> {
             last = array[0];
         }
 
-        // Chi
+        // Chi + Iota
         for y_step in 0..5 {
             let y = y_step * 5;
             for x in 0..5 {
                 array[x] = state[y + x];
             }
             for x in 0..5 {
-                // TODO
-                // need optimized: this use less layer but got slower performance
-                // state[y + x] = chi(cb, &[array[x], array[(x + 1) % 5], array[(x + 2) % 5]]);
-
-                let tmp = not_lhs_and_rhs(cb, &array[(x + 1) % 5], &array[(x + 2) % 5]);
                 if x == 0 && y == 0 {
-                    // Iota
-                    // state[0] ^= $rc[i];
-                    state[0] = xor2_constant(cb, &[array[x], tmp], RC[i]);
+                    // Chi + Iota
+                    state[0] = chi_and_xor_constant(cb, &[array[0], array[1], array[2]], RC[i]);
                 } else {
-                    state[y + x] = xor(cb, &array[x], &tmp)
-                };
+                    // Chi
+                    state[y + x] = chi(cb, &[array[x], array[(x + 1) % 5], array[(x + 2) % 5]]);
+                }
             }
         }
-
-        // Iota
-        // state[0] ^= $rc[i];
-        // state[0] = xor_constant(cb, &state[0], RC[i]);
     }
 
     // FIXME: If we use the `create_wire_out_from_cells`, the ordering of these cells in wire_out
