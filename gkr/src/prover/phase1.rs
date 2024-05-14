@@ -52,7 +52,6 @@ impl<F: SmallField> IOPProverState<F> {
 
         let lo_num_vars = circuit.layers[self.layer_id as usize].num_vars;
         let hi_num_vars = circuit_witness.instance_num_vars();
-        self.layer_poly = circuit_witness.layer_poly(self.layer_id, lo_num_vars);
 
         // sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
         // f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
@@ -66,8 +65,7 @@ impl<F: SmallField> IOPProverState<F> {
                 .map(|(point_and_eval, alpha_pow)| {
                     let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
 
-                    let f1_j = self
-                        .layer_poly
+                    let f1_j = self.phase1_layer_polys[self.layer_id as usize]
                         .fix_high_variables(&point_and_eval.point[point_lo_num_vars..]);
 
                     let g1_j = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars])
@@ -98,8 +96,7 @@ impl<F: SmallField> IOPProverState<F> {
                 let copy_to = &copy_to_matrices[new_layer_id];
                 let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
 
-                let f1_j = self
-                    .layer_poly
+                let f1_j = self.phase1_layer_polys[self.layer_id as usize]
                     .fix_high_variables(&point_and_eval.point[point_lo_num_vars..]);
 
                 assert!(copy_to.len() <= lo_eq_w_p.len());
@@ -165,8 +162,7 @@ impl<F: SmallField> IOPProverState<F> {
 
         let span = entered_span!("f2_fix_variables");
         // f2(t) = layers[i](t || ry)
-        let f2 = self
-            .layer_poly
+        let f2 = self.phase1_layer_polys[self.layer_id as usize]
             .fix_variables(&self.to_next_step_point)
             .into();
         exit_span!(span);

@@ -172,6 +172,8 @@ impl<F: SmallField> IOPProverState<F> {
                 self.poly
                     .flattened_ml_extensions
                     .par_iter_mut()
+                    // benchmark result indicate make_mut achieve better performange than get_mut, which can be +5% overhead
+                    // rust docs doen't explain the reason
                     .map(Arc::make_mut)
                     .for_each(|f| {
                         f.fix_variables_in_place(&[r.elements]);

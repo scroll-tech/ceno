@@ -1,4 +1,8 @@
-use std::collections::HashMap;
+use std::{
+    array,
+    collections::{BTreeMap, HashMap},
+    default,
+};
 
 use goldilocks::SmallField;
 use multilinear_extensions::mle::ArcDenseMultilinearExtension;
@@ -58,7 +62,10 @@ pub struct IOPProverState<F: SmallField> {
 
     /// The point to the next step.
     pub(crate) to_next_step_point: Point<F>,
-    pub(crate) layer_poly: ArcDenseMultilinearExtension<F>,
+    /// layer poly for phase 1 which point to current layer
+    pub(crate) phase1_layer_polys: Vec<ArcDenseMultilinearExtension<F>>,
+    /// layer poly for phase 2 which point to the next layer
+    pub(crate) phase2_next_layer_polys: Vec<ArcDenseMultilinearExtension<F>>,
 
     // Especially for output phase1.
     pub(crate) assert_point: Point<F>,
@@ -142,8 +149,11 @@ pub struct Layer<F: SmallField> {
     // Gates. Should be all None if it's the input layer.
     pub(crate) add_consts: Vec<GateCIn<ConstantType<F>>>,
     pub(crate) adds: Vec<Gate1In<ConstantType<F>>>,
+    pub(crate) adds_fanin_mapping: [BTreeMap<CellId, Vec<Gate1In<ConstantType<F>>>>; 1], // grouping for 1 fanins
     pub(crate) mul2s: Vec<Gate2In<ConstantType<F>>>,
+    pub(crate) mul2s_fanin_mapping: [BTreeMap<CellId, Vec<Gate2In<ConstantType<F>>>>; 2], // grouping for 2 fanins
     pub(crate) mul3s: Vec<Gate3In<ConstantType<F>>>,
+    pub(crate) mul3s_fanin_mapping: [BTreeMap<CellId, Vec<Gate3In<ConstantType<F>>>>; 3], // grouping for 3 fanins
 
     /// The corresponding wires copied from this layer to later layers. It is
     /// (later layer id -> current wire id to be copied). It stores the non-zero
@@ -166,8 +176,11 @@ impl<F: SmallField> Default for Layer<F> {
             sumcheck_steps: vec![],
             add_consts: vec![],
             adds: vec![],
+            adds_fanin_mapping: [BTreeMap::new(); 1],
             mul2s: vec![],
+            mul2s_fanin_mapping: array::from_fn(|_| BTreeMap::new()),
             mul3s: vec![],
+            mul3s_fanin_mapping: array::from_fn(|_| BTreeMap::new()),
             copy_to: HashMap::new(),
             paste_from: HashMap::new(),
             num_vars: 0,

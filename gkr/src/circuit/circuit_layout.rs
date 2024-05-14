@@ -185,21 +185,48 @@ impl<F: SmallField> Circuit<F> {
                             idx_out: i,
                             scalar: gate.scalar,
                         }),
-                        1 => layers[layer_id as usize].adds.push(Gate1In {
-                            idx_in: idx_in.try_into().unwrap(),
-                            idx_out: i,
-                            scalar: gate.scalar,
-                        }),
-                        2 => layers[layer_id as usize].mul2s.push(Gate2In {
-                            idx_in: idx_in.try_into().unwrap(),
-                            idx_out: i,
-                            scalar: gate.scalar,
-                        }),
-                        3 => layers[layer_id as usize].mul3s.push(Gate3In {
-                            idx_in: idx_in.try_into().unwrap(),
-                            idx_out: i,
-                            scalar: gate.scalar,
-                        }),
+                        1 => {
+                            let gate = Gate1In {
+                                idx_in: idx_in.clone().try_into().unwrap(),
+                                idx_out: i,
+                                scalar: gate.scalar,
+                            };
+                            layers[layer_id as usize].adds.push(gate.clone());
+                            for (i, idx_in) in idx_in.iter().enumerate() {
+                                layers[layer_id as usize].adds_fanin_mapping[i]
+                                    .entry(*idx_in)
+                                    .or_insert(vec![])
+                                    .push(gate.clone());
+                            }
+                        }
+                        2 => {
+                            let gate = Gate2In {
+                                idx_in: idx_in.clone().try_into().unwrap(),
+                                idx_out: i,
+                                scalar: gate.scalar,
+                            };
+                            layers[layer_id as usize].mul2s.push(gate.clone());
+                            for (i, idx_in) in idx_in.iter().enumerate() {
+                                layers[layer_id as usize].mul2s_fanin_mapping[i]
+                                    .entry(*idx_in)
+                                    .or_insert(vec![])
+                                    .push(gate.clone());
+                            }
+                        }
+                        3 => {
+                            let gate = Gate3In {
+                                idx_in: idx_in.clone().try_into().unwrap(),
+                                idx_out: i,
+                                scalar: gate.scalar,
+                            };
+                            layers[layer_id as usize].mul3s.push(gate.clone());
+                            for (i, idx_in) in idx_in.iter().enumerate() {
+                                layers[layer_id as usize].mul3s_fanin_mapping[i]
+                                    .entry(*idx_in)
+                                    .or_insert(vec![])
+                                    .push(gate.clone());
+                            }
+                        }
                         _ => unreachable!(),
                     }
                 }

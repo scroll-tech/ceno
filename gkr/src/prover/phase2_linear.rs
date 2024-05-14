@@ -10,7 +10,6 @@ use transcript::Transcript;
 use crate::{
     circuit::EvaluateConstant,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
-    utils::MultilinearExtensionFromVectors,
 };
 
 use super::SumcheckState;
@@ -44,15 +43,12 @@ impl<F: SmallField> IOPProverState<F> {
 
         let eq_y_ry = build_eq_x_r_vec(&self.to_next_step_point[..lo_out_num_vars]);
 
-        let layer_in_vec = circuit_witness.layers[self.layer_id as usize + 1]
-            .instances
-            .as_slice();
-        self.layer_poly = layer_in_vec.mle(lo_in_num_vars, hi_num_vars);
-
         let challenges = &circuit_witness.challenges;
-        let (mut f1_vec, mut g1_vec) = {
+
+        let f1_g2 = || {
             // f1(x1) = layers[i + 1](rt || x1)
-            let f1 = self.layer_poly.fix_high_variables(&hi_point);
+            let f1 =
+                self.phase2_next_layer_polys[self.layer_id as usize].fix_high_variables(&hi_point);
 
             // g1(x1) = add(ry, x1)
             let g1 = {
@@ -65,6 +61,9 @@ impl<F: SmallField> IOPProverState<F> {
             };
             (vec![f1.into()], vec![g1.into()])
         };
+
+        let (mut f1_vec, mut g1_vec) = f1_g2();
+
         // f1'^{(j)}(x1) = subset[j][i](rt || x1)
         // g1'^{(j)}(x1) = paste_from[j](ry, x1)
         let paste_from_sources = circuit_witness.layers_ref();

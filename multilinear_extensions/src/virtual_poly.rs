@@ -1,11 +1,13 @@
 use std::cmp::max;
 use std::hash::Hash;
+use std::mem;
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use ark_std::rand::Rng;
 use ark_std::{end_timer, start_timer};
 use ff::PrimeField;
 use goldilocks::SmallField;
+use rayon::iter::IntoParallelIterator;
 use rayon::iter::IntoParallelRefIterator;
 use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
@@ -169,6 +171,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
     /// - add the MLE to the MLE list;
     /// - multiple each product by MLE and its coefficient.
     /// Returns an error if the MLE has a different `num_vars` from self.
+    #[tracing::instrument(skip_all, name = "mul_by_mle")]
     pub fn mul_by_mle(&mut self, mle: ArcDenseMultilinearExtension<F>, coefficient: F) {
         let start = start_timer!(|| "mul by mle");
 
@@ -385,6 +388,10 @@ pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> ArcDenseMultilinearExtension<F> {
 
 #[tracing::instrument(skip_all, name = "multilinear_extensions::build_eq_x_r_vec")]
 pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
+    // avoid unnecessary allocation
+    if r.is_empty() {
+        return vec![F::ONE];
+    }
     // we build eq(x,r) from its evaluations
     // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
     // for example, with num_vars = 4, x is a binary vector of 4, then
@@ -396,61 +403,43 @@ pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
 
-    let mut eval = vec![F::ZERO; 1 << r.len()];
-    build_eq_x_r_helper(r, &mut eval);
+    let mut evals: [Vec<F>; 2] = (0..2) // allocate 2 vector as rolling buffer
+        .into_par_iter()
+        .map(|_| vec![F::ZERO; 1 << r.len()])
+        .collect::<Vec<Vec<F>>>()
+        .try_into()
+        .unwrap();
+    build_eq_x_r_helper(r, &mut evals);
 
-    eval
+    mem::take(&mut evals[0])
 }
 
 /// A helper function to build eq(x, r) via dynamic programing tricks.
 /// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
-fn build_eq_x_r_helper<F: PrimeField>(r: &[F], buf: &mut Vec<F>) {
-    assert!(
-        buf.len() == 1 << r.len(),
-        "invalid buffer length {} giving r size {}",
-        buf.len(),
-        r.len()
-    );
+fn build_eq_x_r_helper<F: PrimeField>(r: &[F], buf: &mut [Vec<F>; 2]) {
+    buf[0][0] = F::ONE;
     if r.is_empty() {
-        buf.resize(1, F::ZERO);
-        buf[0] = F::ONE;
+        buf[0].resize(1, F::ZERO);
         return;
     }
-
-    buf[0] = F::ONE;
     for (i, r) in r.iter().rev().enumerate() {
-        let size = 1 << (i + 1);
+        let [current, next] = buf;
+        let (cur_size, next_size) = (1 << i, 1 << (i + 1));
         // suppose at the previous step we processed buf [0..size]
         // for the current step we are populating new buf[0..2*size]
         // for j travese 0..size
         // buf[2*j + 1] = r * buf[j]
         // buf[2*j] = (1 - r) * buf[j]
-        if size <= 2 {
-            buf[0] = F::ONE - *r;
-            buf[1] = *r;
-        } else {
-            let (half_buf_len, quar_buf_len) = (size >> 1, size >> 2);
-            let (low_buf, high_buf) = buf.split_at_mut(half_buf_len);
-
-            // update second half in-place parallelly
-            // use buf[quar_buf_len..half_buf_len] to update buf[half_buf_len..size]
-            high_buf
-                .par_chunks_mut(2)
-                .with_min_len(64)
-                .zip(low_buf.par_iter().skip(quar_buf_len))
-                .for_each(|(buf, prev_val)| {
-                    assert!(buf.len() == 2);
-                    let tmp = *r * prev_val;
-                    buf[1] = tmp;
-                    buf[0] = *prev_val - tmp;
-                });
-            // update first half in-place sequentially
-            // use buf[0..quar_buf_len] to update buf[0..half_buf_len], in reverse order
-            for j in (0..quar_buf_len).rev() {
-                let tmp = *r * buf[j];
-                buf[(j << 1) + 1] = tmp;
-                buf[j << 1] = buf[j] - tmp;
-            }
-        }
+        current[0..cur_size]
+            .par_iter()
+            .zip_eq(next[0..next_size].par_chunks_mut(2))
+            .with_min_len(64)
+            .for_each(|(prev_val, next_vals)| {
+                assert!(next_vals.len() == 2);
+                let tmp = *r * prev_val;
+                next_vals[1] = tmp;
+                next_vals[0] = *prev_val - tmp;
+            });
+        buf.swap(0, 1); // swap rolling buffer
     }
 }

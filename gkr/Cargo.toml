@@ -33,6 +33,7 @@ cfg-if = "1.0.0"
 default = [ ]
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 parallel = [ ]
+unsafe = [ ]
 
 [[bench]]
 name = "keccak256"

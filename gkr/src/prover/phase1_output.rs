@@ -53,7 +53,6 @@ impl<F: SmallField> IOPProverState<F> {
 
         let lo_num_vars = circuit.layers[self.layer_id as usize].num_vars;
         let hi_num_vars = circuit_witness.instance_num_vars();
-        self.layer_poly = circuit_witness.layer_poly(self.layer_id, lo_num_vars);
 
         // sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
         // f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
@@ -70,8 +69,7 @@ impl<F: SmallField> IOPProverState<F> {
                 let point = &point_and_eval.point;
                 let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
 
-                let f1_j = self
-                    .layer_poly
+                let f1_j = self.phase1_layer_polys[self.layer_id as usize]
                     .fix_high_variables(&point[point_lo_num_vars..]);
 
                 let g1_j = lo_eq_w_p
@@ -99,8 +97,7 @@ impl<F: SmallField> IOPProverState<F> {
             let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
             assert!(copy_to.len() <= lo_eq_w_p.len());
 
-            let f1_j = self
-                .layer_poly
+            let f1_j = self.phase1_layer_polys[self.layer_id as usize]
                 .fix_high_variables(&point[point_lo_num_vars..]);
 
             let g1_j = copy_to.as_slice().fix_row_row_first_with_scalar(
@@ -119,8 +116,7 @@ impl<F: SmallField> IOPProverState<F> {
         f1.extend(f1_copy_to);
         g1.extend(g1_copy_to);
 
-        let f1_j = self
-            .layer_poly
+        let f1_j = self.phase1_layer_polys[self.layer_id as usize]
             .fix_high_variables(&self.assert_point[lo_num_vars..]);
         f1.push(f1_j.into());
 
@@ -176,8 +172,7 @@ impl<F: SmallField> IOPProverState<F> {
         let hi_num_vars = circuit_witness.instance_num_vars();
 
         // f2(t) = layers[i](t || ry)
-        let f2 = self
-            .layer_poly
+        let f2 = self.phase1_layer_polys[self.layer_id as usize]
             .fix_variables(&self.to_next_step_point)
             .into();
 

@@ -52,7 +52,7 @@ fn bench_keccak256(c: &mut Criterion) {
             BenchmarkId::new("prove_keccak256", format!("keccak256_log2_{}", log2_n)),
             |b| {
                 b.iter(|| {
-                    let _ = prove_keccak256::<GoldilocksExt2>(log2_n, &circuit);
+                    assert!(prove_keccak256::<GoldilocksExt2>(log2_n, &circuit).is_some());
                 });
             },
         );
