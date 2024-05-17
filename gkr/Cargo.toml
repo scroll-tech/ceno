@@ -38,3 +38,7 @@ unsafe = [ ]
 [[bench]]
 name = "keccak256"
 harness = false
+
+[[bench]]
+name = "keccak256_expander"
+harness = false

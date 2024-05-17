@@ -30,12 +30,8 @@ criterion_main!(keccak256);
 const NUM_SAMPLES: usize = 10;
 
 fn bench_keccak256(c: &mut Criterion) {
-    println!(
-        "#layers: {}",
-        keccak256_circuit::<GoldilocksExt2>().layers.len()
-    );
-
     let circuit = keccak256_circuit::<GoldilocksExt2>();
+    println!("#layers: {}", circuit.layers.len());
 
     let Some((proof, output_mle)) = prove_keccak256::<GoldilocksExt2>(1, &circuit) else {
         return;
