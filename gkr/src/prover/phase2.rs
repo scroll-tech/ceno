@@ -6,30 +6,46 @@ use multilinear_extensions::{
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
 use simple_frontend::structs::ConstantType;
-use std::{process::exit, sync::Arc};
+use std::sync::Arc;
 use sumcheck::{entered_span, exit_span};
 use transcript::Transcript;
 
 #[cfg(feature = "parallel")]
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-        IntoParallelRefMutIterator, ParallelIterator,
-    },
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSliceMut,
 };
 
+#[cfg(feature = "parallel")]
+use std::collections::BTreeMap;
+
+#[cfg(feature = "parallel")]
+use crate::structs::Step::{Step1, Step2, Step3};
+
 #[cfg(feature = "unsafe")]
+#[cfg(feature = "parallel")]
 use crate::unsafe_utils::UnsafeSlice;
 
 use crate::{
     circuit::EvaluateConstant,
     izip_parallizable,
     structs::{Circuit, CircuitWitness, Gate, IOPProverState, IOPProverStepMessage, PointAndEval},
-    utils::MultilinearExtensionFromVectors,
 };
 
 use super::SumcheckState;
+
+trait GateEval<F, T> {
+    fn eval(&self, s: usize, gates: &T) -> F;
+}
+
+impl<FnI, F, T> GateEval<F, T> for FnI
+where
+    FnI: Fn(usize, &T) -> F,
+{
+    fn eval(&self, s: usize, gates: &T) -> F {
+        self(s, gates)
+    }
+}
 
 // Prove the computation in the current layer for data parallel circuits.
 // The number of terms depends on the gate.
@@ -73,7 +89,7 @@ impl<F: SmallField> IOPProverState<F> {
         let challenges = &circuit_witness.challenges;
 
         let span = entered_span!("f_g");
-        let mut f1_g1 = || {
+        let f1_g1_fn = || {
             let span = entered_span!("f1_g1");
             let phase2_next_layer_vec = circuit_witness.layers[self.layer_id as usize + 1]
                 .instances
@@ -102,173 +118,41 @@ impl<F: SmallField> IOPProverState<F> {
                 self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
                     .mul_base(&gate.scalar.eval(&challenges))
             };
+
             #[cfg(feature = "parallel")]
             let g1 = {
-                let mut g1_mul3s = vec![F::ZERO; 1 << in_num_vars];
-                let mut g1_mul2s = vec![F::ZERO; 1 << in_num_vars];
-                let mut g1_adds = vec![F::ZERO; 1 << in_num_vars];
-
-                // default: O(Chunk_Size/#thread)
-                // unsafe feature: O(#disjoint_fanin_id_set/#thread)
-                // unsafe should performance better when Chunk_Size >> #disjoint_fanin_id_set
-                // benchmark shows it's strongly depends on application circuit pattern
-                let _ = rayon::join(
+                let (g1_mul3s, (g1_mul2s, g1_adds)) = rayon::join(
                     || {
-                        #[cfg(not(feature = "unsafe"))]
-                        {
-                            g1_mul3s
-                                .par_chunks_mut(1 << lo_in_num_vars)
-                                .enumerate()
-                                .for_each(|(s, chunk)| {
-                                    chunk.par_iter_mut().enumerate().for_each(
-                                        |(index, place_holder)| {
-                                            layer.mul3s_fanin_mapping[0].get(&index).map(|gates| {
-                                                *place_holder = gates
-                                                    .par_iter()
-                                                    .with_min_len(64)
-                                                    .fold(
-                                                        || F::ZERO,
-                                                        |acc, gate| acc + mul3_gate_fn(s, gate),
-                                                    )
-                                                    .reduce(|| F::ZERO, |a, b| a + b)
-                                            });
-                                        },
-                                    );
-                                });
-                        }
-
-                        #[cfg(feature = "unsafe")]
+                        let mut g1_mul3s = vec![F::ZERO; 1 << in_num_vars];
+                        Self::prepare_stepx_g_fn(
+                            &mut g1_mul3s,
+                            lo_in_num_vars,
+                            &layer.mul3s_fanin_mapping[Step1 as usize],
+                            mul3_gate_fn,
+                        );
                         g1_mul3s
-                            .par_chunks_mut(1 << lo_in_num_vars)
-                            .enumerate()
-                            .for_each(|(s, chunk)| {
-                                let chunk_unsafe = UnsafeSlice::new(chunk);
-                                layer.mul3s_fanin_mapping[0].par_iter().for_each(
-                                    |(fanin_cell_id, gates)| {
-                                        let eval_folded = gates
-                                            .par_iter()
-                                            .with_min_len(64)
-                                            .fold(
-                                                || F::ZERO,
-                                                |acc, gate| acc + mul3_gate_fn(s, gate),
-                                            )
-                                            .reduce(|| F::ZERO, |a, b| a + b);
-                                        unsafe {
-                                            chunk_unsafe.write(*fanin_cell_id, eval_folded);
-                                        }
-                                    },
-                                );
-                            });
                     },
                     || {
                         rayon::join(
                             || {
-                                #[cfg(not(feature = "unsafe"))]
-                                {
-                                    g1_mul2s
-                                        .par_chunks_mut(1 << lo_in_num_vars)
-                                        .enumerate()
-                                        .for_each(|(s, chunk)| {
-                                            chunk.par_iter_mut().enumerate().for_each(
-                                                |(index, place_holder)| {
-                                                    layer.mul2s_fanin_mapping[0].get(&index).map(
-                                                        |gates| {
-                                                            *place_holder = gates
-                                                                .par_iter()
-                                                                .with_min_len(64)
-                                                                .fold(
-                                                                    || F::ZERO,
-                                                                    |acc, gate| {
-                                                                        acc + mul2_gate_fn(s, gate)
-                                                                    },
-                                                                )
-                                                                .reduce(|| F::ZERO, |a, b| a + b)
-                                                        },
-                                                    );
-                                                },
-                                            );
-                                        });
-                                }
-
-                                #[cfg(feature = "unsafe")]
-                                {
-                                    g1_mul2s
-                                        .par_chunks_mut(1 << lo_in_num_vars)
-                                        .enumerate()
-                                        .for_each(|(s, chunk)| {
-                                            let chunk_unsafe = UnsafeSlice::new(chunk);
-                                            layer.mul2s_fanin_mapping[0].par_iter().for_each(
-                                                |(fanin_cell_id, gates)| {
-                                                    let eval_folded = gates
-                                                        .par_iter()
-                                                        .with_min_len(64)
-                                                        .fold(
-                                                            || F::ZERO,
-                                                            |acc, gate| acc + mul2_gate_fn(s, gate),
-                                                        )
-                                                        .reduce(|| F::ZERO, |a, b| a + b);
-                                                    unsafe {
-                                                        chunk_unsafe
-                                                            .write(*fanin_cell_id, eval_folded);
-                                                    }
-                                                },
-                                            );
-                                        });
-                                }
+                                let mut g1_mul2s = vec![F::ZERO; 1 << in_num_vars];
+                                Self::prepare_stepx_g_fn(
+                                    &mut g1_mul2s,
+                                    lo_in_num_vars,
+                                    &layer.mul2s_fanin_mapping[Step1 as usize],
+                                    mul2_gate_fn,
+                                );
+                                g1_mul2s
                             },
                             || {
-                                #[cfg(not(feature = "unsafe"))]
-                                {
-                                    g1_adds
-                                        .par_chunks_mut(1 << lo_in_num_vars)
-                                        .enumerate()
-                                        .for_each(|(s, chunk)| {
-                                            chunk.par_iter_mut().enumerate().for_each(
-                                                |(index, place_holder)| {
-                                                    layer.adds_fanin_mapping[0].get(&index).map(
-                                                        |gates| {
-                                                            *place_holder = gates
-                                                                .par_iter()
-                                                                .with_min_len(64)
-                                                                .fold(
-                                                                    || F::ZERO,
-                                                                    |acc, gate| {
-                                                                        acc + adds_gate_fn(s, gate)
-                                                                    },
-                                                                )
-                                                                .reduce(|| F::ZERO, |a, b| a + b)
-                                                        },
-                                                    );
-                                                },
-                                            );
-                                        });
-                                }
-
-                                #[cfg(feature = "unsafe")]
-                                {
-                                    g1_adds
-                                        .par_chunks_mut(1 << lo_in_num_vars)
-                                        .enumerate()
-                                        .for_each(|(s, chunk)| {
-                                            let chunk_unsafe = UnsafeSlice::new(chunk);
-                                            layer.adds_fanin_mapping[0].par_iter().for_each(
-                                                |(fanin_cell_id, gates)| {
-                                                    let eval_folded = gates
-                                                        .par_iter()
-                                                        .with_min_len(64)
-                                                        .fold(
-                                                            || F::ZERO,
-                                                            |acc, gate| acc + adds_gate_fn(s, gate),
-                                                        )
-                                                        .reduce(|| F::ZERO, |a, b| a + b);
-                                                    unsafe {
-                                                        chunk_unsafe
-                                                            .write(*fanin_cell_id, eval_folded);
-                                                    }
-                                                },
-                                            );
-                                        });
-                                }
+                                let mut g1_adds = vec![F::ZERO; 1 << in_num_vars];
+                                Self::prepare_stepx_g_fn(
+                                    &mut g1_adds,
+                                    lo_in_num_vars,
+                                    &layer.adds_fanin_mapping[Step1 as usize],
+                                    adds_gate_fn,
+                                );
+                                g1_adds
                             },
                         )
                     },
@@ -343,7 +227,7 @@ impl<F: SmallField> IOPProverState<F> {
         #[cfg(feature = "parallel")]
         let (f1_vec, g1_vec) = {
             let ((mut f1_vec, mut g1_vec), (f1_vec_paste_from, g1_vec_paste_from)) =
-                rayon::join(f1_g1, f1_g1_paste_from);
+                rayon::join(f1_g1_fn, f1_g1_paste_from);
             f1_vec.extend(f1_vec_paste_from);
             g1_vec.extend(g1_vec_paste_from);
             (f1_vec, g1_vec)
@@ -351,7 +235,7 @@ impl<F: SmallField> IOPProverState<F> {
 
         #[cfg(not(feature = "parallel"))]
         let (f1_vec, g1_vec) = {
-            let (mut f1_vec, mut g1_vec) = f1_g1();
+            let (mut f1_vec, mut g1_vec) = f1_g1_fn();
             let (f1_vec_paste_from, g1_vec_paste_from): (
                 Vec<ArcDenseMultilinearExtension<F>>,
                 Vec<ArcDenseMultilinearExtension<F>>,
@@ -423,7 +307,6 @@ impl<F: SmallField> IOPProverState<F> {
         let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let lo_in_num_vars = layer.max_previous_num_vars;
-        let hi_num_vars = circuit_witness.instance_num_vars();
 
         self.tensor_eq_s1x1_rs1rx1 = build_eq_x_r_vec(&self.to_next_step_point);
 
@@ -450,105 +333,30 @@ impl<F: SmallField> IOPProverState<F> {
                 * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
                     .mul_base(&gate.scalar.eval(&challenges))
         };
+
         let g2 = {
             #[cfg(feature = "parallel")]
             let g2: Vec<_> = {
-                let mut g2_mul3s = vec![F::ZERO; 1 << f2.num_vars];
-                let mut g2_mul2s = vec![F::ZERO; 1 << f2.num_vars];
-                rayon::join(
+                let (g2_mul3s, g2_mul2s) = rayon::join(
                     || {
-                        #[cfg(not(feature = "unsafe"))]
-                        {
-                            g2_mul3s
-                                .par_chunks_mut(1 << lo_in_num_vars)
-                                .enumerate()
-                                .for_each(|(s, chunk)| {
-                                    chunk.par_iter_mut().enumerate().for_each(
-                                        |(index, place_holder)| {
-                                            layer.mul3s_fanin_mapping[1].get(&index).map(|gates| {
-                                                *place_holder = gates
-                                                    .par_iter()
-                                                    .with_min_len(64)
-                                                    .fold(
-                                                        || F::ZERO,
-                                                        |acc, gate| acc + mul3_gate_fn(s, gate),
-                                                    )
-                                                    .reduce(|| F::ZERO, |a, b| a + b)
-                                            });
-                                        },
-                                    );
-                                });
-                        }
-
-                        #[cfg(feature = "unsafe")]
+                        let mut g2_mul3s = vec![F::ZERO; 1 << f2.num_vars];
+                        Self::prepare_stepx_g_fn(
+                            &mut g2_mul3s,
+                            lo_in_num_vars,
+                            &layer.mul3s_fanin_mapping[Step2 as usize],
+                            mul3_gate_fn,
+                        );
                         g2_mul3s
-                            .par_chunks_mut(1 << lo_in_num_vars)
-                            .enumerate()
-                            .for_each(|(s, chunk)| {
-                                let chunk_unsafe = UnsafeSlice::new(chunk);
-                                layer.mul3s_fanin_mapping[1].par_iter().for_each(
-                                    |(fanin_cell_id, gates)| {
-                                        let eval_folded = gates
-                                            .par_iter()
-                                            .with_min_len(64)
-                                            .fold(
-                                                || F::ZERO,
-                                                |acc, gate| acc + mul3_gate_fn(s, gate),
-                                            )
-                                            .reduce(|| F::ZERO, |a, b| a + b);
-                                        unsafe {
-                                            chunk_unsafe.write(*fanin_cell_id, eval_folded);
-                                        }
-                                    },
-                                );
-                            });
                     },
                     || {
-                        #[cfg(not(feature = "unsafe"))]
-                        {
-                            g2_mul2s
-                                .par_chunks_mut(1 << lo_in_num_vars)
-                                .enumerate()
-                                .for_each(|(s, chunk)| {
-                                    chunk.par_iter_mut().enumerate().for_each(
-                                        |(index, place_holder)| {
-                                            layer.mul2s_fanin_mapping[1].get(&index).map(|gates| {
-                                                *place_holder = gates
-                                                    .par_iter()
-                                                    .with_min_len(64)
-                                                    .fold(
-                                                        || F::ZERO,
-                                                        |acc, gate| acc + mul2_gate_fn(s, gate),
-                                                    )
-                                                    .reduce(|| F::ZERO, |a, b| a + b)
-                                            });
-                                        },
-                                    );
-                                });
-                        }
-
-                        #[cfg(feature = "unsafe")]
+                        let mut g2_mul2s = vec![F::ZERO; 1 << f2.num_vars];
+                        Self::prepare_stepx_g_fn(
+                            &mut g2_mul2s,
+                            lo_in_num_vars,
+                            &layer.mul2s_fanin_mapping[Step2 as usize],
+                            mul2_gate_fn,
+                        );
                         g2_mul2s
-                            .par_chunks_mut(1 << lo_in_num_vars)
-                            .enumerate()
-                            .for_each(|(s, chunk)| {
-                                let chunk_unsafe = UnsafeSlice::new(chunk);
-                                layer.mul2s_fanin_mapping[1].par_iter().for_each(
-                                    |(fanin_cell_id, gates)| {
-                                        let eval_folded = gates
-                                            .par_iter()
-                                            .with_min_len(64)
-                                            .fold(
-                                                || F::ZERO,
-                                                |acc, gate| acc + mul2_gate_fn(s, gate),
-                                            )
-                                            .reduce(|| F::ZERO, |a, b| a + b);
-                                        unsafe {
-                                            chunk_unsafe.write(*fanin_cell_id, eval_folded);
-                                        }
-                                    },
-                                );
-                            });
                     },
                 );
                 izip_parallizable!(g2_mul3s, g2_mul2s)
@@ -558,6 +366,7 @@ impl<F: SmallField> IOPProverState<F> {
 
             #[cfg(not(feature = "parallel"))]
             let g2 = {
+                let hi_num_vars = circuit_witness.instance_num_vars();
                 let mut g2 = vec![F::ZERO; 1 << f2.num_vars];
                 layer.mul3s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
@@ -621,7 +430,6 @@ impl<F: SmallField> IOPProverState<F> {
         let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let lo_in_num_vars = layer.max_previous_num_vars;
-        let hi_num_vars = circuit_witness.instance_num_vars();
 
         self.tensor_eq_s2x2_rs2rx2 = build_eq_x_r_vec(&self.to_next_step_point);
 
@@ -643,54 +451,18 @@ impl<F: SmallField> IOPProverState<F> {
             #[cfg(feature = "parallel")]
             let g3 = {
                 let mut g3 = vec![F::ZERO; 1 << f3.num_vars];
-
-                #[cfg(not(feature = "unsafe"))]
-                {
-                    g3.par_chunks_mut(1 << lo_in_num_vars)
-                        .enumerate()
-                        .for_each(|(s, chunk)| {
-                            chunk
-                                .par_iter_mut()
-                                .enumerate()
-                                .for_each(|(index, place_holder)| {
-                                    layer.mul3s_fanin_mapping[2].get(&index).map(|gates| {
-                                        *place_holder = gates
-                                            .par_iter()
-                                            .with_min_len(64)
-                                            .fold(
-                                                || F::ZERO,
-                                                |acc, gate| acc + mul3_gate_fn(s, gate),
-                                            )
-                                            .reduce(|| F::ZERO, |a, b| a + b)
-                                    });
-                                });
-                        });
-                }
-
-                #[cfg(feature = "unsafe")]
-                g3.par_chunks_mut(1 << lo_in_num_vars)
-                    .enumerate()
-                    .for_each(|(s, chunk)| {
-                        let chunk_unsafe = UnsafeSlice::new(chunk);
-                        layer.mul3s_fanin_mapping[2].par_iter().for_each(
-                            |(fanin_cell_id, gates)| {
-                                let eval_folded = gates
-                                    .par_iter()
-                                    .with_min_len(64)
-                                    .fold(|| F::ZERO, |acc, gate| acc + mul3_gate_fn(s, gate))
-                                    .reduce(|| F::ZERO, |a, b| a + b);
-                                unsafe {
-                                    chunk_unsafe.write(*fanin_cell_id, eval_folded);
-                                }
-                            },
-                        );
-                    });
-
+                Self::prepare_stepx_g_fn(
+                    &mut g3,
+                    lo_in_num_vars,
+                    &layer.mul3s_fanin_mapping[Step3 as usize],
+                    mul3_gate_fn,
+                );
                 g3
             };
 
             #[cfg(not(feature = "parallel"))]
             let g3 = {
+                let hi_num_vars = circuit_witness.instance_num_vars();
                 let mut g3 = vec![F::ZERO; 1 << f3.num_vars];
                 layer.mul3s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
@@ -722,5 +494,60 @@ impl<F: SmallField> IOPProverState<F> {
             sumcheck_proof: sumcheck_proof_3,
             sumcheck_eval_values: eval_values_3,
         }
+    }
+
+    #[cfg(feature = "parallel")]
+    fn prepare_stepx_g_fn<'data, G: Sync, Fn: GateEval<F, G> + Sync + Send>(
+        eval_vec: &mut Vec<F>,
+        lo_in_num_vars: usize,
+        fanin_gate_mapping: &BTreeMap<usize, Vec<G>>,
+        eval_fn: Fn,
+    ) {
+        eval_vec
+            // each chunk hold one instance data
+            .par_chunks_mut(1 << lo_in_num_vars)
+            // enumerated index is the instance index
+            .enumerate()
+            .for_each(|(s, evals_vec)| {
+                // default: O(Chunk_Size/#thread)
+                // unsafe feature: O(#disjoint_fanin_id_set/#thread)
+                // unsafe should performance better when Chunk_Size >> #disjoint_fanin_id_set
+                // benchmark shows it's strongly depends on application circuit pattern
+
+                #[cfg(not(feature = "unsafe"))]
+                {
+                    use rayon::iter::IntoParallelRefMutIterator;
+                    evals_vec
+                        .par_iter_mut()
+                        .enumerate()
+                        .for_each(|(fanin_cellid, eval_holder)| {
+                            let fanin_grouped_gates = fanin_gate_mapping.get(&fanin_cellid);
+                            if let Some(gates) = fanin_grouped_gates {
+                                *eval_holder = gates
+                                    .par_iter()
+                                    .with_min_len(64)
+                                    .fold(|| F::ZERO, |acc, gate| acc + eval_fn.eval(s, gate))
+                                    .reduce(|| F::ZERO, |a, b| a + b);
+                            }
+                        });
+                };
+
+                #[cfg(feature = "unsafe")]
+                {
+                    let evals_vec_unsafe = UnsafeSlice::new(evals_vec);
+                    fanin_gate_mapping.par_iter().for_each(
+                        |(fanin_cellid, fanin_grouped_gates)| {
+                            let eval_folded = fanin_grouped_gates
+                                .par_iter()
+                                .with_min_len(64)
+                                .fold(|| F::ZERO, |acc, gate| acc + eval_fn.eval(s, gate))
+                                .reduce(|| F::ZERO, |a, b| a + b);
+                            unsafe {
+                                evals_vec_unsafe.write(*fanin_cellid, eval_folded);
+                            }
+                        },
+                    );
+                };
+            });
     }
 }

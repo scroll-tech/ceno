@@ -45,7 +45,7 @@ impl<F: SmallField> IOPProverState<F> {
 
         let challenges = &circuit_witness.challenges;
 
-        let f1_g2 = || {
+        let f1_g1 = || {
             // f1(x1) = layers[i + 1](rt || x1)
             let f1 =
                 self.phase2_next_layer_polys[self.layer_id as usize].fix_high_variables(&hi_point);
@@ -62,7 +62,7 @@ impl<F: SmallField> IOPProverState<F> {
             (vec![f1.into()], vec![g1.into()])
         };
 
-        let (mut f1_vec, mut g1_vec) = f1_g2();
+        let (mut f1_vec, mut g1_vec) = f1_g1();
 
         // f1'^{(j)}(x1) = subset[j][i](rt || x1)
         // g1'^{(j)}(x1) = paste_from[j](ry, x1)

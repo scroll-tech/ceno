@@ -1,7 +1,6 @@
 use std::{
     array,
     collections::{BTreeMap, HashMap},
-    default,
 };
 
 use goldilocks::SmallField;
@@ -138,6 +137,12 @@ pub(crate) enum SumcheckStepType {
     Phase2Step3,
     LinearPhase2Step1,
     InputPhase2Step1,
+}
+
+pub(crate) enum Step {
+    Step1 = 0,
+    Step2,
+    Step3,
 }
 
 #[derive(Clone, Serialize)]
