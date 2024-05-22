@@ -508,3 +508,41 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         self.add(out[2], a2b2, Ext::BaseField::ONE);
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::structs::{ChallengeId, CircuitBuilder};
+    use goldilocks::{GoldilocksExt2, GoldilocksExt3};
+
+    #[test]
+    fn test_rlc_ext_2() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let (_in_id, in_array) = circuit_builder.create_ext_witness_in(2);
+        let (_out_id, out) = circuit_builder.create_ext_witness_out(1);
+        let challenge: ChallengeId = 2;
+        circuit_builder.rlc_ext_2(&out[0], &in_array, challenge);
+        circuit_builder.configure();
+        assert_eq!(circuit_builder.cells.len(), 14);
+        let layers = vec![2, 2, 2, 2, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+        for cell_id in 0..14 {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        }
+    }
+
+    #[test]
+    fn test_rlc_ext_3() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt3>::new();
+        let (_in_id, in_array) = circuit_builder.create_ext_witness_in(2);
+        let (_out_id, out) = circuit_builder.create_ext_witness_out(1);
+        let challenge: ChallengeId = 2;
+        circuit_builder.rlc_ext_3(&out[0], &in_array, challenge);
+        circuit_builder.configure();
+        assert_eq!(circuit_builder.cells.len(), 27);
+        let layers = vec![
+            2, 2, 2, 2, 2, 2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        ];
+        for cell_id in 0..27 {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        }
+    }
+}
