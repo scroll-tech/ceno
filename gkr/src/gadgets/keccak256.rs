@@ -11,8 +11,8 @@ use ark_std::rand::{
     Rng, RngCore, SeedableRng,
 };
 use ff::Field;
-use goldilocks::SmallField;
-use itertools::{chain, izip, Itertools};
+use ff_ext::ExtensionField;
+use itertools::{izip, Itertools};
 use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use simple_frontend::structs::CircuitBuilder;
 use std::iter;
@@ -99,7 +99,7 @@ impl Default for Word {
 }
 
 impl Word {
-    fn new<F: SmallField>(cb: &mut CircuitBuilder<F>) -> Self {
+    fn new<E: ExtensionField>(cb: &mut CircuitBuilder<E>) -> Self {
         Self(cb.create_cells(64).try_into().unwrap())
     }
 
@@ -111,47 +111,56 @@ impl Word {
 }
 
 // out = lhs ^ rhs = lhs + rhs - 2 * lhs * rhs
-fn xor<F: SmallField>(cb: &mut CircuitBuilder<F>, lhs: &Word, rhs: &Word) -> Word {
+fn xor<E: ExtensionField>(cb: &mut CircuitBuilder<E>, lhs: &Word, rhs: &Word) -> Word {
     let out = Word::new(cb);
     izip!(&out.0, &lhs.0, &rhs.0).for_each(|(out, lhs, rhs)| {
-        cb.add(*out, *lhs, F::BaseField::ONE);
-        cb.add(*out, *rhs, F::BaseField::ONE);
-        cb.mul2(*out, *lhs, *rhs, -F::BaseField::ONE.double());
+        cb.add(*out, *lhs, E::BaseField::ONE);
+        cb.add(*out, *rhs, E::BaseField::ONE);
+        cb.mul2(*out, *lhs, *rhs, -E::BaseField::ONE.double());
+    });
+    out
+}
+
+// out = lhs ^ rhs = lhs + rhs - 2 * lhs * rhs
+fn relay<E: ExtensionField>(cb: &mut CircuitBuilder<E>, lhs: &Word) -> Word {
+    let out = Word::new(cb);
+    izip!(&out.0, &lhs.0).for_each(|(out, lhs)| {
+        cb.add(*out, *lhs, E::BaseField::ONE);
     });
     out
 }
 
 // out = !lhs & rhs
 #[allow(dead_code)]
-fn not_lhs_and_rhs<F: SmallField>(cb: &mut CircuitBuilder<F>, lhs: &Word, rhs: &Word) -> Word {
+fn not_lhs_and_rhs<E: ExtensionField>(cb: &mut CircuitBuilder<E>, lhs: &Word, rhs: &Word) -> Word {
     let out = Word::new(cb);
     izip!(&out.0, &lhs.0, &rhs.0).for_each(|(out, lhs, rhs)| {
-        cb.add(*out, *rhs, F::BaseField::ONE);
-        cb.mul2(*out, *lhs, *rhs, -F::BaseField::ONE);
+        cb.add(*out, *rhs, E::BaseField::ONE);
+        cb.mul2(*out, *lhs, *rhs, -E::BaseField::ONE);
     });
     out
 }
 
 // (x0 + x1 + x2) - 2x0x2 - 2x1x2 - 2x0x1 + 4x0x1x2
-fn xor3<'a, F: SmallField>(cb: &mut CircuitBuilder<F>, words: &[Word; 3]) -> Word {
+fn xor3<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> Word {
     let out = Word::new(cb);
     izip!(&out.0, &words[0].0, &words[1].0, &words[2].0).for_each(
         |(out, wire_0, wire_1, wire_2)| {
             // (x0 + x1 + x2)
-            cb.add(*out, *wire_0, F::BaseField::ONE);
-            cb.add(*out, *wire_1, F::BaseField::ONE);
-            cb.add(*out, *wire_2, F::BaseField::ONE);
+            cb.add(*out, *wire_0, E::BaseField::ONE);
+            cb.add(*out, *wire_1, E::BaseField::ONE);
+            cb.add(*out, *wire_2, E::BaseField::ONE);
             // - 2x0x2 - 2x1x2 - 2x0x1
-            cb.mul2(*out, *wire_0, *wire_1, -F::BaseField::ONE.double());
-            cb.mul2(*out, *wire_0, *wire_2, -F::BaseField::ONE.double());
-            cb.mul2(*out, *wire_1, *wire_2, -F::BaseField::ONE.double());
+            cb.mul2(*out, *wire_0, *wire_1, -E::BaseField::ONE.double());
+            cb.mul2(*out, *wire_0, *wire_2, -E::BaseField::ONE.double());
+            cb.mul2(*out, *wire_1, *wire_2, -E::BaseField::ONE.double());
             // 4x0x1x2
             cb.mul3(
                 *out,
                 *wire_0,
                 *wire_1,
                 *wire_2,
-                F::BaseField::ONE.double().double(),
+                E::BaseField::ONE.double().double(),
             );
         },
     );
@@ -172,18 +181,18 @@ fn xor3<'a, F: SmallField>(cb: &mut CircuitBuilder<F>, words: &[Word; 3]) -> Wor
 // (1-x0)*(1-x1)*(x2) + x0(1-x1)(1-x2) + x0x1(1-x2) + x0x1x2
 // = x2 - x0x2 - x1x2 + x0x1x2 + x0 - x0x1 - x0x2 + x0x1x2 + x0x1 - x0x1x2 + x0x1x2
 // = (x0 + x2) - 2x0x2 - x1x2 + 2x0x1x2
-fn chi<'a, F: SmallField>(cb: &mut CircuitBuilder<F>, words: &[Word; 3]) -> Word {
+fn chi<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> Word {
     let out = Word::new(cb);
     izip!(&out.0, &words[0].0, &words[1].0, &words[2].0).for_each(
         |(out, wire_0, wire_1, wire_2)| {
             // (x0 + x2)
-            cb.add(*out, *wire_0, F::BaseField::ONE);
-            cb.add(*out, *wire_2, F::BaseField::ONE);
+            cb.add(*out, *wire_0, E::BaseField::ONE);
+            cb.add(*out, *wire_2, E::BaseField::ONE);
             // - 2x0x2 - x1x2
-            cb.mul2(*out, *wire_0, *wire_2, -F::BaseField::ONE.double());
-            cb.mul2(*out, *wire_1, *wire_2, -F::BaseField::ONE);
+            cb.mul2(*out, *wire_0, *wire_2, -E::BaseField::ONE.double());
+            cb.mul2(*out, *wire_1, *wire_2, -E::BaseField::ONE);
             // 2x0x1x2
-            cb.mul3(*out, *wire_0, *wire_1, *wire_2, F::BaseField::ONE.double());
+            cb.mul3(*out, *wire_0, *wire_1, *wire_2, E::BaseField::ONE.double());
         },
     );
     out
@@ -194,8 +203,8 @@ fn chi<'a, F: SmallField>(cb: &mut CircuitBuilder<F>, words: &[Word; 3]) -> Word
 // = c + (x0 + x2) - 2x0x2 - x1x2 + 2x0x1x2 - 2(c*x0 + c*x2 - 2c*x0*x2 - c*x1*x2 + 2*c*x0*x1*x2)
 // = x0 + x2 + c - 2*x0*x2 - x1*x2 + 2*x0*x1*x2 - 2*c*x0 - 2*c*x2 + 4*c*x0*x2 + 2*c*x1*x2 - 4*c*x0*x1*x2
 // = x0*(1-2c) + x2*(1-2c) + c + x0*x2*(-2 + 4c) + x1*x2(-1 + 2c) + x0*x1*x2(2 - 4c)
-fn chi_and_xor_constant<'a, F: SmallField>(
-    cb: &mut CircuitBuilder<F>,
+fn chi_and_xor_constant<'a, E: ExtensionField>(
+    cb: &mut CircuitBuilder<E>,
     words: &[Word; 3],
     constant: u64,
 ) -> Word {
@@ -214,14 +223,14 @@ fn chi_and_xor_constant<'a, F: SmallField>(
         // x0*(1-2c) + x2*(1-2c) + c
         if const_bit & 1 == 1 {
             // -x0
-            cb.add(*out, *wire_0, -F::BaseField::ONE);
+            cb.add(*out, *wire_0, -E::BaseField::ONE);
         } else {
             // x0
             cb.add(*out, *wire_0, 1.into());
         };
         if const_bit & 1 == 1 {
             // -x2
-            cb.add(*out, *wire_2, -F::BaseField::ONE);
+            cb.add(*out, *wire_2, -E::BaseField::ONE);
         } else {
             // x2
             cb.add(*out, *wire_2, 1.into());
@@ -229,43 +238,43 @@ fn chi_and_xor_constant<'a, F: SmallField>(
         cb.add_const(
             *out,
             if const_bit & 1 == 1 {
-                F::BaseField::ONE
+                E::BaseField::ONE
             } else {
-                F::BaseField::ZERO
+                E::BaseField::ZERO
             },
         );
 
         // x0*x2*(-2 + 4c) + x1*x2(-1 + 2c)
         if const_bit & 1 == 1 {
             // 2*x0*x2
-            cb.mul2(*out, *wire_0, *wire_2, F::BaseField::ONE.double());
+            cb.mul2(*out, *wire_0, *wire_2, E::BaseField::ONE.double());
         } else {
             // -2*x0*x2
-            cb.mul2(*out, *wire_0, *wire_2, -F::BaseField::ONE.double());
+            cb.mul2(*out, *wire_0, *wire_2, -E::BaseField::ONE.double());
         };
         if const_bit & 1 == 1 {
             // x1*x2
-            cb.mul2(*out, *wire_1, *wire_2, F::BaseField::ONE);
+            cb.mul2(*out, *wire_1, *wire_2, E::BaseField::ONE);
         } else {
             // -x1*x2
-            cb.mul2(*out, *wire_1, *wire_2, -F::BaseField::ONE);
+            cb.mul2(*out, *wire_1, *wire_2, -E::BaseField::ONE);
         };
 
         // x0*x1*x2(2 - 4c)
         if const_bit & 1 == 1 {
             // -2*x0*x1*x2
-            cb.mul3(*out, *wire_0, *wire_1, *wire_2, -F::BaseField::ONE.double());
+            cb.mul3(*out, *wire_0, *wire_1, *wire_2, -E::BaseField::ONE.double());
         } else {
             // 2*x0*x1*x2
-            cb.mul3(*out, *wire_0, *wire_1, *wire_2, F::BaseField::ONE.double());
+            cb.mul3(*out, *wire_0, *wire_1, *wire_2, E::BaseField::ONE.double());
         }
     });
     out
 }
 
 #[allow(dead_code)]
-fn xor2_constant<F: SmallField>(
-    cb: &mut CircuitBuilder<F>,
+fn xor2_constant<E: ExtensionField>(
+    cb: &mut CircuitBuilder<E>,
     words: &[Word; 2],
     constant: u64,
 ) -> Word {
@@ -282,26 +291,26 @@ fn xor2_constant<F: SmallField>(
     .for_each(|(out, wire_0, wire_1, constant)| {
         let const_bit = constant & 1;
         // (x0 + x1 + x2)
-        cb.add(*out, *wire_0, F::BaseField::ONE);
-        cb.add(*out, *wire_1, F::BaseField::ONE);
+        cb.add(*out, *wire_0, E::BaseField::ONE);
+        cb.add(*out, *wire_1, E::BaseField::ONE);
         cb.add_const(
             *out,
             if const_bit & 1 == 1 {
-                F::BaseField::ONE
+                E::BaseField::ONE
             } else {
-                F::BaseField::ZERO
+                E::BaseField::ZERO
             },
         );
         // - 2x0x2 - 2x1x2 - 2x0x1
         if const_bit == 1 {
-            cb.add(*out, *wire_0, -F::BaseField::ONE.double());
-            cb.add(*out, *wire_1, -F::BaseField::ONE.double());
+            cb.add(*out, *wire_0, -E::BaseField::ONE.double());
+            cb.add(*out, *wire_1, -E::BaseField::ONE.double());
         }
-        cb.mul2(*out, *wire_0, *wire_1, -F::BaseField::ONE.double());
+        cb.mul2(*out, *wire_0, *wire_1, -E::BaseField::ONE.double());
 
         // 4x0x1x2
         if const_bit == 1 {
-            cb.mul2(*out, *wire_0, *wire_1, F::BaseField::ONE.double().double());
+            cb.mul2(*out, *wire_0, *wire_1, E::BaseField::ONE.double().double());
         }
     });
     out
@@ -310,7 +319,7 @@ fn xor2_constant<F: SmallField>(
 // TODO: Optimization:
 //       - Theta use lookup
 //       - Use mul3 to make Chi less layers
-pub fn keccak256_circuit<F: SmallField>() -> Circuit<F> {
+pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
     let cb = &mut CircuitBuilder::new();
 
     let [mut state, input] = [25 * 64, 17 * 64].map(|n| {
@@ -322,10 +331,20 @@ pub fn keccak256_circuit<F: SmallField>() -> Circuit<F> {
     });
 
     // Absorption
-    state = chain![
-        izip!(&state, &input).map(|(state, input)| xor(cb, state, input)),
-        state.iter().skip(input.len()).copied()
-    ]
+    state = izip!(
+        state.iter(),
+        input
+            .into_iter()
+            .map(|input| Some(input))
+            .chain(iter::repeat(None))
+    )
+    .map(|(state, input)| {
+        if let Some(input) = input {
+            xor(cb, state, &input)
+        } else {
+            relay(cb, &state)
+        }
+    })
     .collect_vec();
 
     // Permutation
@@ -423,26 +442,26 @@ pub fn keccak256_circuit<F: SmallField>() -> Circuit<F> {
 
     let (_, out) = cb.create_witness_out(256);
     izip!(&out, state.iter().flat_map(|word| &word.0))
-        .for_each(|(out, state)| cb.add(*out, *state, F::BaseField::ONE));
+        .for_each(|(out, state)| cb.add(*out, *state, E::BaseField::ONE));
 
     cb.configure();
     Circuit::new(cb)
 }
 
-pub fn prove_keccak256<F: SmallField>(
+pub fn prove_keccak256<E: ExtensionField>(
     instance_num_vars: usize,
-    circuit: &Circuit<F>,
-) -> Option<(IOPProof<F>, ArcDenseMultilinearExtension<F>)> {
+    circuit: &Circuit<E>,
+) -> Option<(IOPProof<E>, ArcDenseMultilinearExtension<E>)> {
     // Sanity-check
     #[cfg(test)]
     {
         let all_zero = vec![
-            vec![F::BaseField::ZERO; 25 * 64],
-            vec![F::BaseField::ZERO; 17 * 64],
+            vec![E::BaseField::ZERO; 25 * 64],
+            vec![E::BaseField::ZERO; 17 * 64],
         ];
         let all_one = vec![
-            vec![F::BaseField::ONE; 25 * 64],
-            vec![F::BaseField::ZERO; 17 * 64],
+            vec![E::BaseField::ONE; 25 * 64],
+            vec![E::BaseField::ZERO; 17 * 64],
         ];
         let mut witness = CircuitWitness::new(&circuit, Vec::new());
         witness.add_instance(&circuit, all_zero);
@@ -457,7 +476,7 @@ pub fn prove_keccak256<F: SmallField>(
                 .chunks_exact(64)
                 .map(|bits| {
                     bits.iter().fold(0, |acc, bit| {
-                        (acc << 1) + (*bit == F::BaseField::ONE) as u64
+                        (acc << 1) + (*bit == E::BaseField::ONE) as u64
                     })
                 })
                 .collect_vec();
@@ -476,7 +495,7 @@ pub fn prove_keccak256<F: SmallField>(
         let [rand_state, rand_input] = [25 * 64, 17 * 64].map(|n| {
             iter::repeat_with(|| rng.gen_bool(0.5) as u64)
                 .take(n)
-                .map(F::BaseField::from)
+                .map(E::BaseField::from)
                 .collect_vec()
         });
         witness.add_instance(&circuit, vec![rand_state, rand_input]);
@@ -491,7 +510,7 @@ pub fn prove_keccak256<F: SmallField>(
         .as_slice()
         .mle(lo_num_vars, instance_num_vars);
 
-    let mut prover_transcript = Transcript::<F>::new(b"test");
+    let mut prover_transcript = Transcript::<E>::new(b"test");
     let output_point = iter::repeat_with(|| {
         prover_transcript
             .get_and_append_challenge(b"output point")
@@ -513,13 +532,13 @@ pub fn prove_keccak256<F: SmallField>(
     Some((proof, output_mle))
 }
 
-pub fn verify_keccak256<F: SmallField>(
+pub fn verify_keccak256<E: ExtensionField>(
     instance_num_vars: usize,
-    output_mle: ArcDenseMultilinearExtension<F>,
-    proof: IOPProof<F>,
-    circuit: &Circuit<F>,
-) -> Result<GKRInputClaims<F>, GKRError> {
-    let mut verifer_transcript = Transcript::<F>::new(b"test");
+    output_mle: ArcDenseMultilinearExtension<E>,
+    proof: IOPProof<E>,
+    circuit: &Circuit<E>,
+) -> Result<GKRInputClaims<E>, GKRError> {
+    let mut verifer_transcript = Transcript::<E>::new(b"test");
     let output_point = iter::repeat_with(|| {
         verifer_transcript
             .get_and_append_challenge(b"output point")

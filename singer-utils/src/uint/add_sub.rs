@@ -1,5 +1,5 @@
 use ff::Field;
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
 use crate::{chip_handler::RangeChipOperations, error::UtilError, structs::UInt};
@@ -37,7 +37,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
 
     /// Little-endian addition. Assume users to check the correct range of the
     /// result by themselves.
-    pub fn add_unsafe<Ext: SmallField>(
+    pub fn add_unsafe<Ext: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         addend_0: &UInt<M, C>,
         addend_1: &UInt<M, C>,
@@ -63,7 +63,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     }
 
     /// Little-endian addition.
-    pub fn add<Ext: SmallField, H: RangeChipOperations<Ext>>(
+    pub fn add<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
         addend_0: &UInt<M, C>,
@@ -78,7 +78,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
 
     /// Little-endian addition with a constant. Assume users to check the
     /// correct range of the result by themselves.
-    pub fn add_const_unsafe<Ext: SmallField>(
+    pub fn add_const_unsafe<Ext: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         addend_0: &UInt<M, C>,
         constant: Ext::BaseField,
@@ -104,7 +104,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     }
 
     /// Little-endian addition with a constant.
-    pub fn add_const<Ext: SmallField, H: RangeChipOperations<Ext>>(
+    pub fn add_const<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
         addend_0: &UInt<M, C>,
@@ -118,7 +118,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     }
 
     /// Little-endian addition with a constant, guaranteed no overflow.
-    pub fn add_const_no_overflow<Ext: SmallField, H: RangeChipOperations<Ext>>(
+    pub fn add_const_no_overflow<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
         addend_0: &UInt<M, C>,
@@ -133,8 +133,8 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
 
     /// Little-endian addition with a small number. Notice that the user should
     /// guarantee addend_1 < 1 << C.
-    pub fn add_small_unsafe<F: SmallField>(
-        circuit_builder: &mut CircuitBuilder<F>,
+    pub fn add_small_unsafe<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         carry: &[CellId],
@@ -145,14 +145,14 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         for i in 0..result.values.len() {
             let (a, result) = (addend_0.values[i], result.values[i]);
             // result = addend_0 + addend_1 + last_carry - carry * (256 << BYTE_WIDTH)
-            circuit_builder.add(result, a, F::BaseField::ONE);
-            circuit_builder.add(result, addend_1, F::BaseField::ONE);
+            circuit_builder.add(result, a, E::BaseField::ONE);
+            circuit_builder.add(result, addend_1, E::BaseField::ONE);
             // It is equivalent to pad carry with 0s.
             if i < carry.len() {
-                circuit_builder.add(result, carry[i], -F::BaseField::from(1 << C));
+                circuit_builder.add(result, carry[i], -E::BaseField::from(1 << C));
             }
             if i > 0 && i - 1 < carry.len() {
-                circuit_builder.add(result, carry[i - 1], F::BaseField::ONE);
+                circuit_builder.add(result, carry[i - 1], E::BaseField::ONE);
             }
         }
         Ok(result)
@@ -160,7 +160,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
 
     /// Little-endian addition with a small number. Notice that the user should
     /// guarantee addend_1 < 1 << C.
-    pub fn add_small<Ext: SmallField, H: RangeChipOperations<Ext>>(
+    pub fn add_small<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
         addend_0: &UInt<M, C>,
@@ -175,7 +175,7 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
 
     /// Little-endian addition with a small number, guaranteed no overflow.
     /// Notice that the user should guarantee addend_1 < 1 << C.
-    pub fn add_small_no_overflow<Ext: SmallField, H: RangeChipOperations<Ext>>(
+    pub fn add_small_no_overflow<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
         addend_0: &UInt<M, C>,
@@ -190,8 +190,8 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
 
     /// Little-endian subtraction. Assume users to check the correct range of
     /// the result by themselves.
-    pub fn sub_unsafe<F: SmallField>(
-        circuit_builder: &mut CircuitBuilder<F>,
+    pub fn sub_unsafe<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
         minuend: &UInt<M, C>,
         subtrahend: &UInt<M, C>,
         borrow: &[CellId],
@@ -203,13 +203,13 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         for i in 0..result.values.len() {
             let (minuend, subtrahend, result) =
                 (minuend.values[i], subtrahend.values[i], result.values[i]);
-            circuit_builder.add(result, minuend, F::BaseField::ONE);
-            circuit_builder.add(result, subtrahend, -F::BaseField::ONE);
+            circuit_builder.add(result, minuend, E::BaseField::ONE);
+            circuit_builder.add(result, subtrahend, -E::BaseField::ONE);
             if i < borrow.len() {
-                circuit_builder.add(result, borrow[i], F::BaseField::from(1 << C));
+                circuit_builder.add(result, borrow[i], E::BaseField::from(1 << C));
             }
             if i > 0 && i - 1 < borrow.len() {
-                circuit_builder.add(result, borrow[i - 1], -F::BaseField::ONE);
+                circuit_builder.add(result, borrow[i - 1], -E::BaseField::ONE);
             }
         }
         Ok(result)
@@ -220,14 +220,14 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
 mod test {
     use super::{UInt, UIntAddSub};
     use gkr::structs::{Circuit, CircuitWitness};
-    use goldilocks::Goldilocks;
+    use goldilocks::{Goldilocks, GoldilocksExt2};
     use simple_frontend::structs::CircuitBuilder;
 
     #[test]
     fn test_add_unsafe() {
         type Uint256_8 = UInt<256, 8>;
         assert_eq!(Uint256_8::N_OPRAND_CELLS, 32);
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder: CircuitBuilder<GoldilocksExt2> = CircuitBuilder::new();
 
         // configure circuit with cells for addend_0, addend_1 and carry as wire_in
         let (addend_0_wire_in_id, addend_0_wire_in_cells) =
@@ -265,7 +265,7 @@ mod test {
         wires_in[carry_wire_in_id as usize]
             .extend(vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]);
         let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2)];
+            let challenges = vec![GoldilocksExt2::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
             circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness
@@ -285,7 +285,7 @@ mod test {
     fn test_sub_unsafe() {
         type Uint256_8 = UInt<256, 8>;
         assert_eq!(Uint256_8::N_OPRAND_CELLS, 32);
-        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
 
         // configure circuit with cells for minuend, subtrend and borrow as wire_in
         let (minuend_wire_in_id, minuend_wire_in_cells) =
@@ -323,7 +323,7 @@ mod test {
         wires_in[borrow_wire_in_id as usize]
             .extend(vec![Goldilocks::from(0u64); Uint256_8::N_OPRAND_CELLS - 2]);
         let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2)];
+            let challenges = vec![GoldilocksExt2::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
             circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness

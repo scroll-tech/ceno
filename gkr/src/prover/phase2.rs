@@ -1,5 +1,6 @@
 use ark_std::{end_timer, iterable::Iterable, start_timer};
-use goldilocks::SmallField;
+use ff::Field;
+use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
@@ -59,7 +60,7 @@ where
 // ) ) + \sum_{s1}( \sum_{x1}(
 //      \sum_j eq(rt, s1) paste_from[j](ry, x1) * subset[j][i](s1 || x1)
 // ) ) + add_const(ry)
-impl<F: SmallField> IOPProverState<F> {
+impl<E: ExtensionField> IOPProverState<E> {
     /// Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
     ///     sigma = layers[i](rt || ry) - add_const(ry),
     ///     f1(s1 || x1) = layers[i + 1](s1 || x1)
@@ -73,10 +74,10 @@ impl<F: SmallField> IOPProverState<F> {
     #[tracing::instrument(skip_all, name = "prove_and_update_state_phase2_step1")]
     pub(super) fn prove_and_update_state_phase2_step1(
         &mut self,
-        circuit: &Circuit<F>,
-        circuit_witness: &CircuitWitness<F::BaseField>,
-        transcript: &mut Transcript<F>,
-    ) -> IOPProverStepMessage<F> {
+        circuit: &Circuit<E>,
+        circuit_witness: &CircuitWitness<E::BaseField>,
+        transcript: &mut Transcript<E>,
+    ) -> IOPProverStepMessage<E> {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 1");
         let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
@@ -95,7 +96,7 @@ impl<F: SmallField> IOPProverState<F> {
                 .instances
                 .as_slice();
             // f1(s1 || x1) = layers[i + 1](s1 || x1)
-            let f1: Arc<DenseMultilinearExtension<F>> =
+            let f1: Arc<DenseMultilinearExtension<E>> =
                 Arc::clone(&self.phase2_next_layer_polys[self.layer_id as usize]);
 
             // g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
@@ -103,27 +104,27 @@ impl<F: SmallField> IOPProverState<F> {
             // ) ) ) ) + \sum_{s2}( \sum_{x2}(
             //     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
             // ) ) + eq(rt, s1) * add(ry, x1)
-            let mul3_gate_fn = |s: usize, gate: &Gate<ConstantType<F>, 3>| -> F {
+            let mul3_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 3>| -> E {
                 self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                    .mul_base(&phase2_next_layer_vec[s][gate.idx_in[1]])
-                    .mul_base(&phase2_next_layer_vec[s][gate.idx_in[2]])
-                    .mul_base(&gate.scalar.eval(&challenges))
+                    * (&phase2_next_layer_vec[s][gate.idx_in[1]])
+                    * (&phase2_next_layer_vec[s][gate.idx_in[2]])
+                    * (&gate.scalar.eval(&challenges))
             };
-            let mul2_gate_fn = |s: usize, gate: &Gate<ConstantType<F>, 2>| -> F {
+            let mul2_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 2>| -> E {
                 self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                    .mul_base(&phase2_next_layer_vec[s][gate.idx_in[1]])
-                    .mul_base(&gate.scalar.eval(&challenges))
+                    * (&phase2_next_layer_vec[s][gate.idx_in[1]])
+                    * (&gate.scalar.eval(&challenges))
             };
-            let adds_gate_fn = |s: usize, gate: &Gate<ConstantType<F>, 1>| -> F {
+            let adds_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 1>| -> E {
                 self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                    .mul_base(&gate.scalar.eval(&challenges))
+                    * (&gate.scalar.eval(&challenges))
             };
 
             #[cfg(feature = "parallel")]
             let g1 = {
                 let (g1_mul3s, (g1_mul2s, g1_adds)) = rayon::join(
                     || {
-                        let mut g1_mul3s = vec![F::ZERO; 1 << in_num_vars];
+                        let mut g1_mul3s = vec![E::ZERO; 1 << in_num_vars];
                         Self::prepare_stepx_g_fn(
                             &mut g1_mul3s,
                             lo_in_num_vars,
@@ -135,7 +136,7 @@ impl<F: SmallField> IOPProverState<F> {
                     || {
                         rayon::join(
                             || {
-                                let mut g1_mul2s = vec![F::ZERO; 1 << in_num_vars];
+                                let mut g1_mul2s = vec![E::ZERO; 1 << in_num_vars];
                                 Self::prepare_stepx_g_fn(
                                     &mut g1_mul2s,
                                     lo_in_num_vars,
@@ -145,7 +146,7 @@ impl<F: SmallField> IOPProverState<F> {
                                 g1_mul2s
                             },
                             || {
-                                let mut g1_adds = vec![F::ZERO; 1 << in_num_vars];
+                                let mut g1_adds = vec![E::ZERO; 1 << in_num_vars];
                                 Self::prepare_stepx_g_fn(
                                     &mut g1_adds,
                                     lo_in_num_vars,
@@ -158,14 +159,15 @@ impl<F: SmallField> IOPProverState<F> {
                     },
                 );
                 let g1 = izip_parallizable!(g1_mul3s, g1_mul2s, g1_adds)
+                    .with_min_len(64)
                     .map(|(g1_mul3s, g1_mul2s, g1_adds)| g1_mul3s + g1_mul2s + g1_adds)
                     .collect();
-                DenseMultilinearExtension::from_evaluations_vec(in_num_vars, g1)
+                DenseMultilinearExtension::from_evaluations_ext_vec(in_num_vars, g1)
             };
 
             #[cfg(not(feature = "parallel"))]
             let g1 = {
-                let mut g1 = vec![F::ZERO; 1 << in_num_vars];
+                let mut g1 = vec![E::ZERO; 1 << in_num_vars];
                 layer.mul3s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
                         g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += mul3_gate_fn(s, gate);
@@ -181,7 +183,7 @@ impl<F: SmallField> IOPProverState<F> {
                         g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += adds_gate_fn(s, gate);
                     }
                 });
-                DenseMultilinearExtension::from_evaluations_vec(in_num_vars, g1)
+                DenseMultilinearExtension::from_evaluations_ext_vec(in_num_vars, g1)
             };
             exit_span!(span);
             (vec![f1], vec![g1.into()])
@@ -198,25 +200,25 @@ impl<F: SmallField> IOPProverState<F> {
                         circuit.layers[old_layer_id].copy_to[&self.layer_id][subset_wire_id]
                     };
 
-                    let mut f1_j = vec![F::ZERO; 1 << in_num_vars];
-                    let mut g1_j = vec![F::ZERO; 1 << in_num_vars];
+                    let mut f1_j = vec![0.into(); 1 << in_num_vars];
+                    let mut g1_j = vec![E::ZERO; 1 << in_num_vars];
 
                     paste_from
                         .iter()
                         .enumerate()
                         .for_each(|(subset_wire_id, &new_wire_id)| {
                             for s in 0..(1 << hi_num_vars) {
-                                f1_j[(s << lo_in_num_vars) ^ subset_wire_id] = F::from_base(
-                                    &paste_from_sources[*j as usize].instances[s]
-                                        [old_wire_id(*j as usize, subset_wire_id)],
-                                );
+                                f1_j[(s << lo_in_num_vars) ^ subset_wire_id] =
+                                    paste_from_sources[*j as usize].instances[s]
+                                        [old_wire_id(*j as usize, subset_wire_id)]
+                                ;
                                 g1_j[(s << lo_in_num_vars) ^ subset_wire_id] +=
                                     self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ new_wire_id];
                             }
                         });
                     (
                         DenseMultilinearExtension::from_evaluations_vec(in_num_vars, f1_j).into(),
-                        DenseMultilinearExtension::from_evaluations_vec(in_num_vars, g1_j).into(),
+                        DenseMultilinearExtension::from_evaluations_ext_vec(in_num_vars, g1_j).into(),
                     )
                 })
                 .unzip::<_, _, Vec<ArcDenseMultilinearExtension<_>>, Vec<ArcDenseMultilinearExtension<_>>>();
@@ -237,8 +239,8 @@ impl<F: SmallField> IOPProverState<F> {
         let (f1_vec, g1_vec) = {
             let (mut f1_vec, mut g1_vec) = f1_g1_fn();
             let (f1_vec_paste_from, g1_vec_paste_from): (
-                Vec<ArcDenseMultilinearExtension<F>>,
-                Vec<ArcDenseMultilinearExtension<F>>,
+                Vec<ArcDenseMultilinearExtension<E>>,
+                Vec<ArcDenseMultilinearExtension<E>>,
             ) = f1_g1_paste_from();
             f1_vec.extend(f1_vec_paste_from);
             g1_vec.extend(g1_vec_paste_from);
@@ -249,8 +251,8 @@ impl<F: SmallField> IOPProverState<F> {
         // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
         let mut virtual_poly_1 = VirtualPolynomial::new(in_num_vars);
         for (f1_j, g1_j) in f1_vec.into_iter().zip(g1_vec.into_iter()) {
-            let mut tmp = VirtualPolynomial::new_from_mle(f1_j, F::ONE);
-            tmp.mul_by_mle(g1_j, F::ONE);
+            let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::BaseField::ONE);
+            tmp.mul_by_mle(g1_j, E::BaseField::ONE);
             virtual_poly_1.merge(&tmp);
         }
 
@@ -298,11 +300,11 @@ impl<F: SmallField> IOPProverState<F> {
     #[tracing::instrument(skip_all, name = "prove_and_update_state_phase2_step2")]
     pub(super) fn prove_and_update_state_phase2_step2(
         &mut self,
-        circuit: &Circuit<F>,
-        circuit_witness: &CircuitWitness<F::BaseField>,
-        transcript: &mut Transcript<F>,
+        circuit: &Circuit<E>,
+        circuit_witness: &CircuitWitness<E::BaseField>,
+        transcript: &mut Transcript<E>,
         no_step3: bool,
-    ) -> IOPProverStepMessage<F> {
+    ) -> IOPProverStepMessage<E> {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 2");
         let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
@@ -322,16 +324,16 @@ impl<F: SmallField> IOPProverState<F> {
         // g2(s2 || x2) = \sum_{s3}( \sum_{x3}(
         //     eq(rt, rs1, s2, s3) * mul3(ry, rx1, x2, x3) * layers[i + 1](s3 || x3)
         // ) ) + eq(rt, rs1, s2) * mul2(ry, rx1, x2)
-        let mul3_gate_fn = |s: usize, gate: &Gate<ConstantType<F>, 3>| -> F {
+        let mul3_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 3>| -> E {
             self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
                 * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                    .mul_base(&phase2_next_layer_vec[s][gate.idx_in[2]])
-                    .mul_base(&gate.scalar.eval(&challenges))
+                * (&phase2_next_layer_vec[s][gate.idx_in[2]])
+                * (&gate.scalar.eval(&challenges))
         };
-        let mul2_gate_fn = |s: usize, gate: &Gate<ConstantType<F>, 2>| -> F {
+        let mul2_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 2>| -> E {
             self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
                 * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                    .mul_base(&gate.scalar.eval(&challenges))
+                * (&gate.scalar.eval(&challenges))
         };
 
         let g2 = {
@@ -339,7 +341,7 @@ impl<F: SmallField> IOPProverState<F> {
             let g2: Vec<_> = {
                 let (g2_mul3s, g2_mul2s) = rayon::join(
                     || {
-                        let mut g2_mul3s = vec![F::ZERO; 1 << f2.num_vars];
+                        let mut g2_mul3s = vec![E::ZERO; 1 << f2.num_vars];
                         Self::prepare_stepx_g_fn(
                             &mut g2_mul3s,
                             lo_in_num_vars,
@@ -349,7 +351,7 @@ impl<F: SmallField> IOPProverState<F> {
                         g2_mul3s
                     },
                     || {
-                        let mut g2_mul2s = vec![F::ZERO; 1 << f2.num_vars];
+                        let mut g2_mul2s = vec![E::ZERO; 1 << f2.num_vars];
                         Self::prepare_stepx_g_fn(
                             &mut g2_mul2s,
                             lo_in_num_vars,
@@ -367,7 +369,7 @@ impl<F: SmallField> IOPProverState<F> {
             #[cfg(not(feature = "parallel"))]
             let g2 = {
                 let hi_num_vars = circuit_witness.instance_num_vars();
-                let mut g2 = vec![F::ZERO; 1 << f2.num_vars];
+                let mut g2 = vec![E::ZERO; 1 << f2.num_vars];
                 layer.mul3s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
                         g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += mul3_gate_fn(s, gate);
@@ -381,13 +383,13 @@ impl<F: SmallField> IOPProverState<F> {
                 g2
             };
 
-            DenseMultilinearExtension::from_evaluations_vec(f2.num_vars, g2).into()
+            DenseMultilinearExtension::from_evaluations_ext_vec(f2.num_vars, g2).into()
         };
         exit_span!(span);
 
         // sumcheck: sigma = \sum_{s2 || x2} f2(s2 || x2) * g2(s2 || x2)
-        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, F::ONE);
-        virtual_poly_2.mul_by_mle(g2, F::ONE);
+        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::BaseField::ONE);
+        virtual_poly_2.mul_by_mle(g2, E::BaseField::ONE);
         let (sumcheck_proof_2, prover_state) = SumcheckState::prove(virtual_poly_2, transcript);
 
         let eval_point_2 = sumcheck_proof_2.point.clone();
@@ -422,10 +424,10 @@ impl<F: SmallField> IOPProverState<F> {
     #[tracing::instrument(skip_all, name = "prove_and_update_state_phase2_step3")]
     pub(super) fn prove_and_update_state_phase2_step3(
         &mut self,
-        circuit: &Circuit<F>,
-        circuit_witness: &CircuitWitness<F::BaseField>,
-        transcript: &mut Transcript<F>,
-    ) -> IOPProverStepMessage<F> {
+        circuit: &Circuit<E>,
+        circuit_witness: &CircuitWitness<E::BaseField>,
+        transcript: &mut Transcript<E>,
+    ) -> IOPProverStepMessage<E> {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 3");
         let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
@@ -435,11 +437,11 @@ impl<F: SmallField> IOPProverState<F> {
 
         let challenges = &circuit_witness.challenges;
 
-        let mul3_gate_fn = |s: usize, gate: &Gate<ConstantType<F>, 3>| -> F {
+        let mul3_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 3>| -> E {
             self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
                 * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
                 * self.tensor_eq_s2x2_rs2rx2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
-                    .mul_base(&gate.scalar.eval(&challenges))
+                * (&gate.scalar.eval(&challenges))
         };
 
         let span = entered_span!("f3_g3");
@@ -450,7 +452,7 @@ impl<F: SmallField> IOPProverState<F> {
         let g3 = {
             #[cfg(feature = "parallel")]
             let g3 = {
-                let mut g3 = vec![F::ZERO; 1 << f3.num_vars];
+                let mut g3 = vec![E::ZERO; 1 << f3.num_vars];
                 Self::prepare_stepx_g_fn(
                     &mut g3,
                     lo_in_num_vars,
@@ -463,7 +465,7 @@ impl<F: SmallField> IOPProverState<F> {
             #[cfg(not(feature = "parallel"))]
             let g3 = {
                 let hi_num_vars = circuit_witness.instance_num_vars();
-                let mut g3 = vec![F::ZERO; 1 << f3.num_vars];
+                let mut g3 = vec![E::ZERO; 1 << f3.num_vars];
                 layer.mul3s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
                         g3[(s << lo_in_num_vars) ^ gate.idx_in[2]] += mul3_gate_fn(s, gate);
@@ -471,13 +473,13 @@ impl<F: SmallField> IOPProverState<F> {
                 });
                 g3
             };
-            DenseMultilinearExtension::from_evaluations_vec(f3.num_vars, g3).into()
+            DenseMultilinearExtension::from_evaluations_ext_vec(f3.num_vars, g3).into()
         };
         exit_span!(span);
 
         // sumcheck: sigma = \sum_{s3 || x3} f3(s3 || x3) * g3(s3 || x3)
-        let mut virtual_poly_3 = VirtualPolynomial::new_from_mle(f3, F::ONE);
-        virtual_poly_3.mul_by_mle(g3, F::ONE);
+        let mut virtual_poly_3 = VirtualPolynomial::new_from_mle(f3, E::BaseField::ONE);
+        virtual_poly_3.mul_by_mle(g3, E::BaseField::ONE);
         let (sumcheck_proof_3, prover_state) = SumcheckState::prove(virtual_poly_3, transcript);
         let eval_point_3 = sumcheck_proof_3.point.clone();
         let (f3, _): (Vec<_>, Vec<_>) = prover_state
@@ -497,8 +499,8 @@ impl<F: SmallField> IOPProverState<F> {
     }
 
     #[cfg(feature = "parallel")]
-    fn prepare_stepx_g_fn<'data, G: Sync, Fn: GateEval<F, G> + Sync + Send>(
-        eval_vec: &mut Vec<F>,
+    fn prepare_stepx_g_fn<'data, G: Sync, Fn: GateEval<E, G> + Sync + Send>(
+        eval_vec: &mut Vec<E>,
         lo_in_num_vars: usize,
         fanin_gate_mapping: &BTreeMap<usize, Vec<G>>,
         eval_fn: Fn,
@@ -526,8 +528,8 @@ impl<F: SmallField> IOPProverState<F> {
                                 *eval_holder = gates
                                     .par_iter()
                                     .with_min_len(64)
-                                    .fold(|| F::ZERO, |acc, gate| acc + eval_fn.eval(s, gate))
-                                    .reduce(|| F::ZERO, |a, b| a + b);
+                                    .fold(|| E::ZERO, |acc, gate| acc + eval_fn.eval(s, gate))
+                                    .reduce(|| E::ZERO, |a, b| a + b);
                             }
                         });
                 };
@@ -540,8 +542,8 @@ impl<F: SmallField> IOPProverState<F> {
                             let eval_folded = fanin_grouped_gates
                                 .par_iter()
                                 .with_min_len(64)
-                                .fold(|| F::ZERO, |acc, gate| acc + eval_fn.eval(s, gate))
-                                .reduce(|| F::ZERO, |a, b| a + b);
+                                .fold(|| E::ZERO, |acc, gate| acc + eval_fn.eval(s, gate))
+                                .reduce(|| E::ZERO, |a, b| a + b);
                             unsafe {
                                 evals_vec_unsafe.write(*fanin_cellid, eval_folded);
                             }

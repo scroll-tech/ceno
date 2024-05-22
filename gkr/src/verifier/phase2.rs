@@ -1,5 +1,5 @@
 use ark_std::{end_timer, start_timer};
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
 use std::mem;
@@ -14,12 +14,12 @@ use crate::{
 
 use super::SumcheckState;
 
-impl<F: SmallField> IOPVerifierState<F> {
+impl<E: ExtensionField> IOPVerifierState<E> {
     pub(super) fn verify_and_update_state_phase2_step1(
         &mut self,
-        circuit: &Circuit<F>,
-        step_msg: IOPProverStepMessage<F>,
-        transcript: &mut Transcript<F>,
+        circuit: &Circuit<E>,
+        step_msg: IOPProverStepMessage<E>,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 2 step 1");
         let layer = &circuit.layers[self.layer_id as usize];
@@ -79,7 +79,7 @@ impl<F: SmallField> IOPVerifierState<F> {
             })
         ];
         let got_value_1 =
-            izip!(f1_values.iter(), g1_values_iter).fold(F::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
+            izip!(f1_values.iter(), g1_values_iter).fold(E::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
 
         end_timer!(timer);
         if claim_1.expected_evaluation != got_value_1 {
@@ -103,9 +103,9 @@ impl<F: SmallField> IOPVerifierState<F> {
 
     pub(super) fn verify_and_update_state_phase2_step2(
         &mut self,
-        circuit: &Circuit<F>,
-        step_msg: IOPProverStepMessage<F>,
-        transcript: &mut Transcript<F>,
+        circuit: &Circuit<E>,
+        step_msg: IOPProverStepMessage<E>,
+        transcript: &mut Transcript<E>,
         no_step3: bool,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 2 step 2");
@@ -173,9 +173,9 @@ impl<F: SmallField> IOPVerifierState<F> {
 
     pub(super) fn verify_and_update_state_phase2_step3(
         &mut self,
-        circuit: &Circuit<F>,
-        step_msg: IOPProverStepMessage<F>,
-        transcript: &mut Transcript<F>,
+        circuit: &Circuit<E>,
+        step_msg: IOPProverStepMessage<E>,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 2 step 3");
         let layer = &circuit.layers[self.layer_id as usize];
@@ -234,7 +234,7 @@ impl<F: SmallField> IOPVerifierState<F> {
 
         self.to_next_phase_point_and_evals
             .push(PointAndEval::new_from_ref(&claim3_point, &f3_value));
-        self.to_next_step_point_and_eval = PointAndEval::new(claim3_point, F::ZERO);
+        self.to_next_step_point_and_eval = PointAndEval::new(claim3_point, E::ZERO);
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
 use ark_std::{end_timer, start_timer};
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, VPAuxInfo};
 use std::{iter, mem};
@@ -14,12 +14,12 @@ use crate::{
 
 use super::SumcheckState;
 
-impl<F: SmallField> IOPVerifierState<F> {
+impl<E: ExtensionField> IOPVerifierState<E> {
     pub(super) fn verify_and_update_state_linear_phase2_step1(
         &mut self,
-        circuit: &Circuit<F>,
-        step_msg: IOPProverStepMessage<F>,
-        transcript: &mut Transcript<F>,
+        circuit: &Circuit<E>,
+        step_msg: IOPProverStepMessage<E>,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 2 step 1");
         let layer = &circuit.layers[self.layer_id as usize];
@@ -72,7 +72,7 @@ impl<F: SmallField> IOPVerifierState<F> {
 
         let f1_values = &step_msg.sumcheck_eval_values;
         let got_value_1 =
-            izip!(f1_values.iter(), g1_values_iter).fold(F::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
+            izip!(f1_values.iter(), g1_values_iter).fold(E::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
 
         end_timer!(timer);
         if claim_1.expected_evaluation != got_value_1 {

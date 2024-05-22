@@ -1,5 +1,5 @@
 use ff::Field;
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
 use crate::{chip_handler::RangeChipOperations, error::UtilError, structs::UInt};
@@ -25,7 +25,7 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
     }
 
     /// Greater than implemented by little-endian subtraction.
-    pub fn lt<Ext: SmallField, H: RangeChipOperations<Ext>>(
+    pub fn lt<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
         oprand_0: &UInt<M, C>,
@@ -48,7 +48,7 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
         }
     }
 
-    pub fn assert_lt<Ext: SmallField, H: RangeChipOperations<Ext>>(
+    pub fn assert_lt<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
         oprand_0: &UInt<M, C>,
@@ -67,7 +67,7 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
     }
 
     /// Greater or equal than implemented by little-endian subtraction.
-    pub fn assert_leq<Ext: SmallField, H: RangeChipOperations<Ext>>(
+    pub fn assert_leq<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
         oprand_0: &UInt<M, C>,
@@ -96,7 +96,7 @@ impl<const M: usize, const C: usize> UIntCmp<UInt<M, C>> {
         Ok(())
     }
 
-    pub fn assert_eq<Ext: SmallField>(
+    pub fn assert_eq<Ext: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         oprand_0: &UInt<M, C>,
         oprand_1: &UInt<M, C>,
@@ -118,7 +118,7 @@ mod test {
     use crate::structs::{ChipChallenges, ROMHandler};
 
     use super::{UInt, UIntCmp};
-    use goldilocks::Goldilocks;
+    use goldilocks::{Goldilocks, GoldilocksExt2};
     use simple_frontend::structs::CircuitBuilder;
 
     use gkr::structs::{Circuit, CircuitWitness};
@@ -128,7 +128,7 @@ mod test {
         type Uint256_8 = UInt<256, 8>;
         assert_eq!(Uint256_8::N_OPRAND_CELLS, 32);
         // build the circuit for lt
-        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let (operand_0_wire_in_id, operand_0_wire_in_cells) =
             circuit_builder.create_witness_in(Uint256_8::N_OPRAND_CELLS);
         let (operand_1_wire_in_id, operand_1_wire_in_cells) =
@@ -137,7 +137,7 @@ mod test {
             .create_witness_in(Uint256_8::N_RANGE_CHECK_CELLS + Uint256_8::N_CARRY_CELLS);
         let operand_0 = Uint256_8::try_from(operand_0_wire_in_cells);
         let operand_1 = Uint256_8::try_from(operand_1_wire_in_cells);
-        let mut range_chip_handler = ROMHandler::<Goldilocks>::new(&ChipChallenges::default());
+        let mut range_chip_handler = ROMHandler::<GoldilocksExt2>::new(&ChipChallenges::default());
         let result = UIntCmp::<Uint256_8>::lt(
             &mut circuit_builder,
             &mut range_chip_handler,
@@ -174,7 +174,7 @@ mod test {
         wires_in[witness_wire_in_id as usize]
             .extend(vec![Goldilocks::from(1u64); Uint256_8::N_CARRY_CELLS]);
         let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2), Goldilocks::from(2)];
+            let challenges = vec![GoldilocksExt2::from(2), GoldilocksExt2::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
             circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness

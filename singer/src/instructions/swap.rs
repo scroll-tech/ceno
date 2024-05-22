@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -20,7 +20,7 @@ use crate::error::ZKVMError;
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 pub struct SwapInstruction<const N: usize>;
 
-impl<F: SmallField, const N: usize> InstructionGraph<F> for SwapInstruction<N> {
+impl<E: ExtensionField, const N: usize> InstructionGraph<E> for SwapInstruction<N> {
     type InstType = Self;
 }
 
@@ -54,8 +54,8 @@ impl<const N: usize> SwapInstruction<N> {
     };
 }
 
-impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -93,13 +93,13 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
             next_stack_ts.values(),
             &memory_ts,
             stack_top_expr,
-            clk_expr.add(F::BaseField::ONE),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Check the range of stack_top - (N + 1) is within [0, 1 << STACK_TOP_BIT_WIDTH).
         rom_handler.range_check_stack_top(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(N as u64 + 1)),
+            stack_top_expr.sub(E::BaseField::from(N as u64 + 1)),
         )?;
 
         // Pop rlc of stack[top - (N + 1)] from stack
@@ -114,7 +114,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
         let stack_values_n_plus_1 = &phase0[Self::phase0_stack_values_n_plus_1()];
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(N as u64 + 1)),
+            stack_top_expr.sub(E::BaseField::from(N as u64 + 1)),
             old_stack_ts_n_plus_1.values(),
             stack_values_n_plus_1,
         );
@@ -131,7 +131,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
         let stack_values_1 = &phase0[Self::phase0_stack_values_1()];
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts_1.values(),
             stack_values_1,
         );
@@ -139,14 +139,14 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
         // Push stack_1 to the stack at top - (N + 1)
         ram_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(N as u64 + 1)),
+            stack_top_expr.sub(E::BaseField::from(N as u64 + 1)),
             stack_ts.values(),
             stack_values_1,
         );
         // Push stack_n_plus_1 to the stack at top - 1
         ram_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::ONE),
             stack_ts.values(),
             stack_values_n_plus_1,
         );

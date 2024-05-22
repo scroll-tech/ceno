@@ -3,6 +3,7 @@ use std::{
     collections::{BTreeMap, HashMap},
 };
 
+use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use serde::{Deserialize, Serialize, Serializer};
@@ -20,11 +21,11 @@ pub struct PointAndEval<F> {
     pub eval: F,
 }
 
-impl<F: SmallField> Default for PointAndEval<F> {
+impl<E: ExtensionField> Default for PointAndEval<E> {
     fn default() -> Self {
         Self {
             point: vec![],
-            eval: F::ZERO,
+            eval: E::ZERO,
         }
     }
 }
@@ -49,56 +50,56 @@ impl<F: Clone> PointAndEval<F> {
 /// Represent the prover state for each layer in the IOP protocol. To support
 /// gates between non-adjacent layers, we leverage the techniques in
 /// [Virgo++](https://eprint.iacr.org/2020/1247).
-pub struct IOPProverState<F: SmallField> {
+pub struct IOPProverState<E: ExtensionField> {
     pub(crate) layer_id: LayerId,
     /// Evaluations to the next phase.
-    pub(crate) to_next_phase_point_and_evals: Vec<PointAndEval<F>>,
+    pub(crate) to_next_phase_point_and_evals: Vec<PointAndEval<E>>,
     /// Evaluations of subsets from layers __closer__ to the output.
     /// __closer__ as in the layer that the subset elements lie in has not been processed.
     ///
     /// LayerId is the layer id of the incoming subset point and evaluation.
-    pub(crate) subset_point_and_evals: Vec<Vec<(LayerId, PointAndEval<F>)>>,
+    pub(crate) subset_point_and_evals: Vec<Vec<(LayerId, PointAndEval<E>)>>,
 
     /// The point to the next step.
-    pub(crate) to_next_step_point: Point<F>,
+    pub(crate) to_next_step_point: Point<E>,
     /// layer poly for phase 1 which point to current layer
-    pub(crate) phase1_layer_polys: Vec<ArcDenseMultilinearExtension<F>>,
+    pub(crate) phase1_layer_polys: Vec<ArcDenseMultilinearExtension<E>>,
     /// layer poly for phase 2 which point to the next layer
-    pub(crate) phase2_next_layer_polys: Vec<ArcDenseMultilinearExtension<F>>,
+    pub(crate) phase2_next_layer_polys: Vec<ArcDenseMultilinearExtension<E>>,
 
     // Especially for output phase1.
-    pub(crate) assert_point: Point<F>,
+    pub(crate) assert_point: Point<E>,
     // Especially for phase1.
-    pub(crate) g1_values: Vec<F>,
+    pub(crate) g1_values: Vec<E>,
     // Especially for phase2.
-    pub(crate) tensor_eq_ty_rtry: Vec<F>,
-    pub(crate) tensor_eq_s1x1_rs1rx1: Vec<F>,
-    pub(crate) tensor_eq_s2x2_rs2rx2: Vec<F>,
+    pub(crate) tensor_eq_ty_rtry: Vec<E>,
+    pub(crate) tensor_eq_s1x1_rs1rx1: Vec<E>,
+    pub(crate) tensor_eq_s2x2_rs2rx2: Vec<E>,
 }
 
 /// Represent the verifier state for each layer in the IOP protocol.
-pub struct IOPVerifierState<F: SmallField> {
+pub struct IOPVerifierState<E: ExtensionField> {
     pub(crate) layer_id: LayerId,
     /// Evaluations from the next layer.
-    pub(crate) to_next_phase_point_and_evals: Vec<PointAndEval<F>>,
+    pub(crate) to_next_phase_point_and_evals: Vec<PointAndEval<E>>,
     /// Evaluations of subsets from layers closer to the output. LayerId is the
     /// layer id of the incoming subset point and evaluation.
-    pub(crate) subset_point_and_evals: Vec<Vec<(LayerId, PointAndEval<F>)>>,
+    pub(crate) subset_point_and_evals: Vec<Vec<(LayerId, PointAndEval<E>)>>,
 
-    pub(crate) challenges: HashMap<ChallengeConst, Vec<F::BaseField>>,
+    pub(crate) challenges: HashMap<ChallengeConst, Vec<E::BaseField>>,
     pub(crate) instance_num_vars: usize,
 
-    pub(crate) to_next_step_point_and_eval: PointAndEval<F>,
+    pub(crate) to_next_step_point_and_eval: PointAndEval<E>,
 
     // Especially for output phase1.
-    pub(crate) assert_point: Point<F>,
+    pub(crate) assert_point: Point<E>,
     // Especially for phase1.
-    pub(crate) g1_values: Vec<F>,
+    pub(crate) g1_values: Vec<E>,
     // Especially for phase2.
-    pub(crate) out_point: Point<F>,
-    pub(crate) eq_y_ry: Vec<F>,
-    pub(crate) eq_x1_rx1: Vec<F>,
-    pub(crate) eq_x2_rx2: Vec<F>,
+    pub(crate) out_point: Point<E>,
+    pub(crate) eq_y_ry: Vec<E>,
+    pub(crate) eq_x1_rx1: Vec<E>,
+    pub(crate) eq_x2_rx2: Vec<E>,
 }
 
 /// Phase 1 is a sumcheck protocol merging the subset evaluations from the
@@ -108,21 +109,21 @@ pub struct IOPVerifierState<F: SmallField> {
 /// reducing the correctness of the output of the current layer to the input of
 /// the current layer.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IOPProverStepMessage<F: SmallField> {
+pub struct IOPProverStepMessage<E: ExtensionField> {
     /// Sumcheck proofs for each sumcheck protocol.
-    pub sumcheck_proof: SumcheckProof<F>,
-    pub sumcheck_eval_values: Vec<F>,
+    pub sumcheck_proof: SumcheckProof<E>,
+    pub sumcheck_eval_values: Vec<E>,
 }
 
-pub struct IOPProof<F: SmallField> {
-    pub sumcheck_proofs: Vec<IOPProverStepMessage<F>>,
+pub struct IOPProof<E: ExtensionField> {
+    pub sumcheck_proofs: Vec<IOPProverStepMessage<E>>,
 }
 
 /// Represent the point at the final step and the evaluations of the subsets of
 /// the input layer.
 #[derive(Clone, Debug, PartialEq)]
-pub struct GKRInputClaims<F: SmallField> {
-    pub point_and_evals: Vec<PointAndEval<F>>,
+pub struct GKRInputClaims<E: ExtensionField> {
+    pub point_and_evals: Vec<PointAndEval<E>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -146,37 +147,37 @@ pub(crate) enum Step {
 }
 
 #[derive(Clone, Serialize)]
-pub struct Layer<F: SmallField> {
+pub struct Layer<E: ExtensionField> {
     pub(crate) layer_id: u32,
     pub(crate) sumcheck_steps: Vec<SumcheckStepType>,
     pub(crate) num_vars: usize,
 
     // Gates. Should be all None if it's the input layer.
-    pub(crate) add_consts: Vec<GateCIn<ConstantType<F>>>,
-    pub(crate) adds: Vec<Gate1In<ConstantType<F>>>,
-    pub(crate) adds_fanin_mapping: [BTreeMap<CellId, Vec<Gate1In<ConstantType<F>>>>; 1], // grouping for 1 fanins
-    pub(crate) mul2s: Vec<Gate2In<ConstantType<F>>>,
-    pub(crate) mul2s_fanin_mapping: [BTreeMap<CellId, Vec<Gate2In<ConstantType<F>>>>; 2], // grouping for 2 fanins
-    pub(crate) mul3s: Vec<Gate3In<ConstantType<F>>>,
-    pub(crate) mul3s_fanin_mapping: [BTreeMap<CellId, Vec<Gate3In<ConstantType<F>>>>; 3], // grouping for 3 fanins
+    pub(crate) add_consts: Vec<GateCIn<ConstantType<E>>>,
+    pub(crate) adds: Vec<Gate1In<ConstantType<E>>>,
+    pub(crate) adds_fanin_mapping: [BTreeMap<CellId, Vec<Gate1In<ConstantType<E>>>>; 1], // grouping for 1 fanins
+    pub(crate) mul2s: Vec<Gate2In<ConstantType<E>>>,
+    pub(crate) mul2s_fanin_mapping: [BTreeMap<CellId, Vec<Gate2In<ConstantType<E>>>>; 2], // grouping for 2 fanins
+    pub(crate) mul3s: Vec<Gate3In<ConstantType<E>>>,
+    pub(crate) mul3s_fanin_mapping: [BTreeMap<CellId, Vec<Gate3In<ConstantType<E>>>>; 3], // grouping for 3 fanins
 
     /// The corresponding wires copied from this layer to later layers. It is
     /// (later layer id -> current wire id to be copied). It stores the non-zero
     /// entry of copy_to[layer_id] for each row.
-    pub(crate) copy_to: HashMap<LayerId, Vec<CellId>>,
+    pub(crate) copy_to: BTreeMap<LayerId, Vec<CellId>>,
     /// The corresponding wires from previous layers pasted to this layer. It is
     /// (shallower layer id -> pasted to the current id). It stores the non-zero
     /// entry of paste_from[layer_id] for each column. Undefined for the input.
-    pub(crate) paste_from: HashMap<LayerId, Vec<CellId>>,
+    pub(crate) paste_from: BTreeMap<LayerId, Vec<CellId>>,
     /// Maximum size of the subsets pasted from the previous layers, rounded up
     /// to the next power of two. This is the logarithm of the rounded size.
     /// Undefined for the input layer.
     pub(crate) max_previous_num_vars: usize,
 }
 
-impl<F: SmallField> Default for Layer<F> {
+impl<E: ExtensionField> Default for Layer<E> {
     fn default() -> Self {
-        Layer::<F> {
+        Layer::<E> {
             layer_id: 0,
             sumcheck_steps: vec![],
             add_consts: vec![],
@@ -186,8 +187,8 @@ impl<F: SmallField> Default for Layer<F> {
             mul2s_fanin_mapping: array::from_fn(|_| BTreeMap::new()),
             mul3s: vec![],
             mul3s_fanin_mapping: array::from_fn(|_| BTreeMap::new()),
-            copy_to: HashMap::new(),
-            paste_from: HashMap::new(),
+            copy_to: BTreeMap::new(),
+            paste_from: BTreeMap::new(),
             num_vars: 0,
             max_previous_num_vars: 0,
         }
@@ -195,8 +196,8 @@ impl<F: SmallField> Default for Layer<F> {
 }
 
 #[derive(Clone, Serialize)]
-pub struct Circuit<F: SmallField> {
-    pub layers: Vec<Layer<F>>,
+pub struct Circuit<E: ExtensionField> {
+    pub layers: Vec<Layer<E>>,
 
     pub n_witness_in: usize,
     pub n_witness_out: usize,
@@ -208,7 +209,7 @@ pub struct Circuit<F: SmallField> {
     pub paste_from_consts_in: Vec<(i64, (CellId, CellId))>,
     /// The wires copied to the output witness
     pub copy_to_wits_out: Vec<Vec<CellId>>,
-    pub assert_consts: Vec<GateCIn<ConstantType<F>>>,
+    pub assert_consts: Vec<GateCIn<ConstantType<E>>>,
     pub max_wit_in_num_vars: Option<usize>,
 }
 

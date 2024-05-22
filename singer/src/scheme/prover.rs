@@ -1,7 +1,7 @@
 use std::mem;
 
+use ff_ext::ExtensionField;
 use gkr_graph::structs::{CircuitGraphAuxInfo, NodeOutputType};
-use goldilocks::SmallField;
 use itertools::Itertools;
 use transcript::Transcript;
 
@@ -11,14 +11,14 @@ use crate::{
 
 use super::{GKRGraphProverState, SingerProof};
 
-pub fn prove<F: SmallField>(
-    vm_circuit: &SingerCircuit<F>,
-    vm_witness: &SingerWitness<F::BaseField>,
+pub fn prove<E: ExtensionField>(
+    vm_circuit: &SingerCircuit<E>,
+    vm_witness: &SingerWitness<E::BaseField>,
     vm_out_id: &SingerWiresOutID,
-    transcript: &mut Transcript<F>,
-) -> Result<(SingerProof<F>, CircuitGraphAuxInfo), ZKVMError> {
+    transcript: &mut Transcript<E>,
+) -> Result<(SingerProof<E>, CircuitGraphAuxInfo), ZKVMError> {
     // TODO: Add PCS.
-    let point = (0..2 * F::DEGREE)
+    let point = (0..2 * <E as ExtensionField>::DEGREE)
         .map(|_| {
             transcript
                 .get_and_append_challenge(b"output point")

@@ -1,6 +1,6 @@
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use goldilocks::SmallField;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
@@ -28,12 +28,12 @@ use super::{Instruction, InstructionGraph};
 
 pub struct MstoreInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
     type InstType = Self;
 
     fn construct_circuits(
         challenges: ChipChallenges,
-    ) -> Result<(InstCircuit<F>, Vec<AccessoryCircuit<F>>), ZKVMError> {
+    ) -> Result<(InstCircuit<E>, Vec<AccessoryCircuit<E>>), ZKVMError> {
         Ok((
             Self::InstType::construct_circuit(challenges)?,
             vec![MstoreAccessory::construct_circuit(challenges)?],
@@ -41,13 +41,13 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
     }
 
     fn construct_graph_and_witness(
-        graph_builder: &mut CircuitGraphBuilder<F>,
-        chip_builder: &mut SingerChipBuilder<F>,
-        inst_circuit: &InstCircuit<F>,
-        acc_circuits: &[AccessoryCircuit<F>],
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
+        inst_circuit: &InstCircuit<E>,
+        acc_circuits: &[AccessoryCircuit<E>],
         preds: Vec<PredType>,
-        mut sources: Vec<CircuitWitnessIn<F::BaseField>>,
-        real_challenges: &[F],
+        mut sources: Vec<CircuitWitnessIn<E::BaseField>>,
+        real_challenges: &[E],
         real_n_instances: usize,
         _: &SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
@@ -116,9 +116,9 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for MstoreInstruction {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::<F>::new();
+impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
+        let mut circuit_builder = CircuitBuilder::<E>::new();
         // From witness
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
@@ -225,9 +225,9 @@ register_witness!(
 );
 
 impl MstoreAccessory {
-    pub fn construct_circuit<F: SmallField>(
+    pub fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
-    ) -> Result<AccessoryCircuit<F>, ZKVMError> {
+    ) -> Result<AccessoryCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From predesessor circuit.

@@ -1,3 +1,4 @@
+use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::{Deserialize, Serialize};
 use transcript::Challenge;
@@ -24,9 +25,9 @@ pub struct Commitment {
 /// - Prover messages during the interactive phase
 /// - The proofs for query phase
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PCSProof<F> {
-    pub prover_messages: Vec<PCSProverMessage<F>>,
-    pub query_proof: Vec<QueryProof<F>>,
+pub struct PCSProof<E: ExtensionField> {
+    pub prover_messages: Vec<PCSProverMessage<E>>,
+    pub query_proof: Vec<QueryProof<E>>,
 }
 
 #[allow(unused)]
@@ -55,19 +56,19 @@ pub(crate) const MAX_DEGREE: usize = 2;
 /// 2. The polynomial h(X) in its evaluation form, and the commitment to the new polynomial
 /// 3. The last polynomial in clear
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PCSProverMessage<F> {
+pub enum PCSProverMessage<E: ExtensionField> {
     #[default]
     None,
     Initial {
-        h0: F, // h(0)
-        h2: F, // h(2)
+        h0: E, // h(0)
+        h2: E, // h(2)
     },
     Normal {
-        h0: F,              // h(0)
-        h2: F,              // h(2)
+        h0: E,              // h(0)
+        h2: E,              // h(2)
         f_comm: Commitment, // Commitment to the current polynomial
     },
-    Last(DenseMultilinearExtension<F>), // The polynomial sent in the last round in FRI. It won't be very large.
+    Last(DenseMultilinearExtension<E>), // The polynomial sent in the last round in FRI. It won't be very large.
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,16 +79,16 @@ pub struct QueryProof<F> {
 
 /// Prover State of the MPCS opening protocol.
 #[allow(unused)]
-pub struct PCSProverState<F> {
+pub struct PCSProverState<E: ExtensionField> {
     /// sampled randomness given by the verifier
-    pub(crate) challenges: Vec<Challenge<F>>,
+    pub(crate) challenges: Vec<Challenge<E>>,
     /// evaluation point
-    pub(crate) eval_point: Vec<F>,
+    pub(crate) eval_point: Vec<E>,
     /// the current round number
     pub(crate) round: usize,
     /// the prover maintains a multilinear polynomial which is repeatedly folded
     /// during the execution
-    pub(crate) poly: DenseMultilinearExtension<F>,
+    pub(crate) poly: DenseMultilinearExtension<E>,
 }
 
 /// Verifier State of the MPCS opening protocol.

@@ -1,4 +1,4 @@
-use goldilocks::Goldilocks;
+use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use singer::{
     instructions::SingerCircuitBuilder,
@@ -10,9 +10,9 @@ use transcript::Transcript;
 
 fn main() {
     let chip_challenges = ChipChallenges::default();
-    let circuit_builder =
-        SingerCircuitBuilder::<Goldilocks>::new(chip_challenges).expect("circuit builder failed");
-    let singer_builder = SingerGraphBuilder::<Goldilocks>::new();
+    let circuit_builder = SingerCircuitBuilder::<GoldilocksExt2>::new(chip_challenges)
+        .expect("circuit builder failed");
+    let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::new();
 
     let bytecode = [0x60 as u8, 0x01, 0x50];
 
@@ -54,7 +54,7 @@ fn main() {
 
     // 4. Verify.
     let mut verifier_transcript = Transcript::new(b"Singer");
-    let singer_builder = SingerGraphBuilder::<Goldilocks>::new();
+    let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::new();
     let circuit = singer_builder
         .construct_graph(&circuit_builder, &singer_aux_info)
         .expect("construct failed");

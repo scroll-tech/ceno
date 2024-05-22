@@ -1,13 +1,13 @@
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{NodeOutputType, PredType};
-use goldilocks::SmallField;
 use simple_frontend::structs::WitnessId;
 use singer_utils::constants::OpcodeType;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
-pub struct InstCircuit<F: SmallField> {
-    pub(crate) circuit: Arc<Circuit<F>>,
+pub struct InstCircuit<E: ExtensionField> {
+    pub(crate) circuit: Arc<Circuit<E>>,
     pub(crate) layout: InstLayout,
 }
 
@@ -61,8 +61,8 @@ impl InstLayout {
 }
 
 #[derive(Clone, Debug)]
-pub struct BBStartCircuit<F: SmallField> {
-    pub(crate) circuit: Arc<Circuit<F>>,
+pub struct BBStartCircuit<E: ExtensionField> {
+    pub(crate) circuit: Arc<Circuit<E>>,
     pub(crate) layout: BBStartLayout,
 }
 
@@ -76,8 +76,8 @@ pub struct BBStartLayout {
 }
 
 #[derive(Clone, Debug)]
-pub struct BBFinalCircuit<F: SmallField> {
-    pub(crate) circuit: Arc<Circuit<F>>,
+pub struct BBFinalCircuit<E: ExtensionField> {
+    pub(crate) circuit: Arc<Circuit<E>>,
     pub(crate) layout: BBFinalLayout,
 }
 
@@ -118,8 +118,8 @@ impl BBFinalLayout {
 }
 
 #[derive(Clone, Debug)]
-pub struct AccessoryCircuit<F: SmallField> {
-    pub(crate) circuit: Arc<Circuit<F>>,
+pub struct AccessoryCircuit<E: ExtensionField> {
+    pub(crate) circuit: Arc<Circuit<E>>,
     pub(crate) layout: AccessoryLayout,
 }
 

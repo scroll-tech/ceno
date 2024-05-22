@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use itertools::izip;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
@@ -23,7 +23,7 @@ use super::{Instruction, InstructionGraph};
 
 pub struct JumpiInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for JumpiInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for JumpiInstruction {
     type InstType = Self;
 }
 
@@ -37,8 +37,8 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for JumpiInstruction {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From witness
@@ -62,7 +62,7 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
         let non_zero_or = circuit_builder.create_cell();
         cond_values_non_zero
             .iter()
-            .for_each(|x| circuit_builder.add(non_zero_or, *x, F::BaseField::ONE));
+            .for_each(|x| circuit_builder.add(non_zero_or, *x, E::BaseField::ONE));
         let cond_non_zero_or_inv = phase0[Self::phase0_cond_non_zero_or_inv().start];
         let cond_non_zero =
             rom_handler.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
@@ -80,7 +80,7 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
         circuit_builder.sel_mixed(
             next_opcode,
             pc_plus_1_opcode.into(),
-            MixedCell::Constant(F::BaseField::from(OpcodeType::JUMPDEST as u64)),
+            MixedCell::Constant(E::BaseField::from(OpcodeType::JUMPDEST as u64)),
             cond_non_zero,
         );
         // Check (next_pc, next_opcode) is a valid instruction

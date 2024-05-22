@@ -6,13 +6,14 @@ use ark_std::rand::{
     Rng, RngCore, SeedableRng,
 };
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::{
     error::GKRError,
     gadgets::keccak256::keccak256_circuit,
     structs::{Circuit, CircuitWitness, GKRInputClaims, IOPProof, PointAndEval},
     utils::MultilinearExtensionFromVectors,
 };
-use goldilocks::{GoldilocksExt2, SmallField};
+use goldilocks::GoldilocksExt2;
 use itertools::{izip, Itertools};
 use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use std::iter;
@@ -20,17 +21,17 @@ use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 use transcript::Transcript;
 
-fn prove_keccak256<F: SmallField>(
+fn prove_keccak256<E: ExtensionField>(
     instance_num_vars: usize,
-    circuit: &Circuit<F>,
-) -> Option<(IOPProof<F>, ArcDenseMultilinearExtension<F>)> {
+    circuit: &Circuit<E>,
+) -> Option<(IOPProof<E>, ArcDenseMultilinearExtension<E>)> {
     let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
     let mut witness = CircuitWitness::new(&circuit, Vec::new());
     for _ in 0..1 << instance_num_vars {
         let [rand_state, rand_input] = [25 * 64, 17 * 64].map(|n| {
             iter::repeat_with(|| rng.gen_bool(0.5) as u64)
                 .take(n)
-                .map(F::BaseField::from)
+                .map(E::BaseField::from)
                 .collect_vec()
         });
         witness.add_instance(&circuit, vec![rand_state, rand_input]);
@@ -45,7 +46,7 @@ fn prove_keccak256<F: SmallField>(
         .as_slice()
         .mle(lo_num_vars, instance_num_vars);
 
-    let mut prover_transcript = Transcript::<F>::new(b"test");
+    let mut prover_transcript = Transcript::<E>::new(b"test");
     let output_point = iter::repeat_with(|| {
         prover_transcript
             .get_and_append_challenge(b"output point")
@@ -67,13 +68,13 @@ fn prove_keccak256<F: SmallField>(
     Some((proof, output_mle))
 }
 
-fn verify_keccak256<F: SmallField>(
+fn verify_keccak256<E: ExtensionField>(
     instance_num_vars: usize,
-    output_mle: ArcDenseMultilinearExtension<F>,
-    proof: IOPProof<F>,
-    circuit: &Circuit<F>,
-) -> Result<GKRInputClaims<F>, GKRError> {
-    let mut verifer_transcript = Transcript::<F>::new(b"test");
+    output_mle: ArcDenseMultilinearExtension<E>,
+    proof: IOPProof<E>,
+    circuit: &Circuit<E>,
+) -> Result<GKRInputClaims<E>, GKRError> {
+    let mut verifer_transcript = Transcript::<E>::new(b"test");
     let output_point = iter::repeat_with(|| {
         verifer_transcript
             .get_and_append_challenge(b"output point")
@@ -103,12 +104,12 @@ fn main() {
     // Sanity-check
     {
         let all_zero = vec![
-            vec![<GoldilocksExt2 as SmallField>::BaseField::ZERO; 25 * 64],
-            vec![<GoldilocksExt2 as SmallField>::BaseField::ZERO; 17 * 64],
+            vec![<GoldilocksExt2 as ExtensionField>::BaseField::ZERO; 25 * 64],
+            vec![<GoldilocksExt2 as ExtensionField>::BaseField::ZERO; 17 * 64],
         ];
         let all_one = vec![
-            vec![<GoldilocksExt2 as SmallField>::BaseField::ONE; 25 * 64],
-            vec![<GoldilocksExt2 as SmallField>::BaseField::ZERO; 17 * 64],
+            vec![<GoldilocksExt2 as ExtensionField>::BaseField::ONE; 25 * 64],
+            vec![<GoldilocksExt2 as ExtensionField>::BaseField::ZERO; 17 * 64],
         ];
         let mut witness = CircuitWitness::new(&circuit, Vec::new());
         witness.add_instance(&circuit, all_zero);
@@ -123,7 +124,8 @@ fn main() {
                 .chunks_exact(64)
                 .map(|bits| {
                     bits.iter().fold(0, |acc, bit| {
-                        (acc << 1) + (*bit == <GoldilocksExt2 as SmallField>::BaseField::ONE) as u64
+                        (acc << 1)
+                            + (*bit == <GoldilocksExt2 as ExtensionField>::BaseField::ONE) as u64
                     })
                 })
                 .collect_vec();

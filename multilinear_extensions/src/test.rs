@@ -1,6 +1,9 @@
 use ark_std::test_rng;
 use ff::Field;
-use goldilocks::{Goldilocks as F, SmallField};
+use ff_ext::ExtensionField;
+use goldilocks::GoldilocksExt2;
+
+type E = GoldilocksExt2;
 
 use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
@@ -13,10 +16,10 @@ fn test_virtual_polynomial_additions() {
     let mut rng = test_rng();
     for nv in 2..5 {
         for num_products in 2..5 {
-            let base: Vec<F> = (0..nv).map(|_| F::random(&mut rng)).collect();
+            let base: Vec<E> = (0..nv).map(|_| E::random(&mut rng)).collect();
 
-            let (a, _a_sum) = VirtualPolynomial::<F>::random(nv, (2, 3), num_products, &mut rng);
-            let (b, _b_sum) = VirtualPolynomial::<F>::random(nv, (2, 3), num_products, &mut rng);
+            let (a, _a_sum) = VirtualPolynomial::<E>::random(nv, (2, 3), num_products, &mut rng);
+            let (b, _b_sum) = VirtualPolynomial::<E>::random(nv, (2, 3), num_products, &mut rng);
             let mut c = a.clone();
             c.merge(&b);
 
@@ -33,12 +36,12 @@ fn test_virtual_polynomial_mul_by_mle() {
     let mut rng = test_rng();
     for nv in 2..5 {
         for num_products in 2..5 {
-            let base: Vec<F> = (0..nv).map(|_| F::random(&mut rng)).collect();
+            let base: Vec<E> = (0..nv).map(|_| E::random(&mut rng)).collect();
 
-            let (a, _a_sum) = VirtualPolynomial::<F>::random(nv, (2, 3), num_products, &mut rng);
-            let (b, _b_sum) = DenseMultilinearExtension::<F>::random_mle_list(nv, 1, &mut rng);
+            let (a, _a_sum) = VirtualPolynomial::<E>::random(nv, (2, 3), num_products, &mut rng);
+            let (b, _b_sum) = DenseMultilinearExtension::<E>::random_mle_list(nv, 1, &mut rng);
             let b_mle = b[0].clone();
-            let coeff = F::random(&mut rng);
+            let coeff = <E as ExtensionField>::BaseField::random(&mut rng);
             let b_vp = VirtualPolynomial::new_from_mle(b_mle.clone(), coeff);
 
             let mut c = a.clone();
@@ -57,7 +60,7 @@ fn test_virtual_polynomial_mul_by_mle() {
 fn test_eq_xr() {
     let mut rng = test_rng();
     for nv in 4..10 {
-        let r: Vec<F> = (0..nv).map(|_| F::random(&mut rng)).collect();
+        let r: Vec<_> = (0..nv).map(|_| E::random(&mut rng)).collect();
         let eq_x_r = build_eq_x_r(r.as_ref());
         let eq_x_r2 = build_eq_x_r_for_test(r.as_ref());
         assert_eq!(eq_x_r, eq_x_r2);
@@ -66,31 +69,31 @@ fn test_eq_xr() {
 
 #[test]
 fn test_fix_high_variables() {
-    let poly = DenseMultilinearExtension::from_evaluations_vec(
+    let poly: DenseMultilinearExtension<E> = DenseMultilinearExtension::from_evaluations_vec(
         3,
         vec![
-            F::from(13),
-            F::from(97),
-            F::from(11),
-            F::from(101),
-            F::from(7),
-            F::from(103),
-            F::from(5),
-            F::from(107),
+            <E as ExtensionField>::BaseField::from(13),
+            <E as ExtensionField>::BaseField::from(97),
+            <E as ExtensionField>::BaseField::from(11),
+            <E as ExtensionField>::BaseField::from(101),
+            <E as ExtensionField>::BaseField::from(7),
+            <E as ExtensionField>::BaseField::from(103),
+            <E as ExtensionField>::BaseField::from(5),
+            <E as ExtensionField>::BaseField::from(107),
         ],
     );
 
-    let partial_point = vec![F::from(3), F::from(5)];
+    let partial_point = vec![E::from(3), E::from(5)];
 
-    let expected1 = DenseMultilinearExtension::from_evaluations_vec(
+    let expected1 = DenseMultilinearExtension::from_evaluations_ext_vec(
         2,
-        vec![-F::from(17), F::from(127), -F::from(19), F::from(131)],
+        vec![-E::from(17), E::from(127), -E::from(19), E::from(131)],
     );
     let result1 = poly.fix_high_variables(&partial_point[1..]);
     assert_eq!(result1, expected1);
 
     let expected2 =
-        DenseMultilinearExtension::from_evaluations_vec(1, vec![-F::from(23), F::from(139)]);
+        DenseMultilinearExtension::from_evaluations_ext_vec(1, vec![-E::from(23), E::from(139)]);
     let result2 = poly.fix_high_variables(&partial_point);
     assert_eq!(result2, expected2);
 }
@@ -101,7 +104,7 @@ fn test_fix_high_variables() {
 //      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 // over r, which is
 //      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-fn build_eq_x_r_for_test<F: SmallField>(r: &[F]) -> ArcDenseMultilinearExtension<F> {
+fn build_eq_x_r_for_test<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
     // we build eq(x,r) from its evaluations
     // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
     // for example, with num_vars = 4, x is a binary vector of 4, then
@@ -114,13 +117,13 @@ fn build_eq_x_r_for_test<F: SmallField>(r: &[F]) -> ArcDenseMultilinearExtension
     // we will need 2^num_var evaluations
 
     // First, we build array for {1 - r_i}
-    let one_minus_r: Vec<F> = r.iter().map(|ri| F::ONE - ri).collect();
+    let one_minus_r: Vec<E> = r.iter().map(|ri| E::ONE - ri).collect();
 
     let num_var = r.len();
     let mut eval = vec![];
 
     for i in 0..1 << num_var {
-        let mut current_eval = F::ONE;
+        let mut current_eval = E::ONE;
         let bit_sequence = bit_decompose(i, num_var);
 
         for (&bit, (ri, one_minus_ri)) in bit_sequence.iter().zip(r.iter().zip(one_minus_r.iter()))
@@ -130,7 +133,7 @@ fn build_eq_x_r_for_test<F: SmallField>(r: &[F]) -> ArcDenseMultilinearExtension
         eval.push(current_eval);
     }
 
-    let mle = DenseMultilinearExtension::from_evaluations_vec(num_var, eval);
+    let mle = DenseMultilinearExtension::from_evaluations_ext_vec(num_var, eval);
 
     mle.into()
 }

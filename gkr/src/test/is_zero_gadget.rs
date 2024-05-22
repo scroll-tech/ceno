@@ -1,7 +1,8 @@
 use crate::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState, PointAndEval};
 use crate::utils::MultilinearExtensionFromVectors;
 use ff::Field;
-use goldilocks::{Goldilocks, SmallField};
+use ff_ext::ExtensionField;
+use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 use std::iter;
@@ -16,7 +17,7 @@ use transcript::Transcript;
 // inv - 1) = 0
 // value and inv must occupy one cell and
 // all intermediate computations are restricted by field size
-pub fn is_zero_gadget<Ext: SmallField>(
+pub fn is_zero_gadget<Ext: ExtensionField>(
     circuit_builder: &mut CircuitBuilder<Ext>,
     value: CellId,
     inv: CellId,
@@ -48,7 +49,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     let out_is_zero = Goldilocks::from(0);
 
     // build the circuit, only one cell for value, inv and value * inv etc
-    let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
     let (value_wire_in_id, value) = circuit_builder.create_witness_in(1);
     let (inv_wire_in_id, inv) = circuit_builder.create_witness_in(1);
     let (is_zero, cond1, cond2) = is_zero_gadget(&mut circuit_builder, value[0], inv[0]);
@@ -67,7 +68,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     wit_in[value_wire_in_id as usize] = in_value;
     wit_in[inv_wire_in_id as usize] = in_inv;
     let circuit_witness = {
-        let challenges = vec![Goldilocks::from(2)];
+        let challenges = vec![GoldilocksExt2::from(2)];
         let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
         circuit_witness.add_instance(&circuit, wit_in);
         circuit_witness
@@ -96,9 +97,9 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
 
     // add prover-verifier process
     let mut prover_transcript =
-        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+        Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
     let mut verifier_transcript =
-        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+        Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
 
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];
@@ -180,7 +181,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
 
     // build the circuit, number of cells for value is UINT256_4_N_OPERAND_CELLS
     // inv is the inverse of each cell's value, if value = 0 then inv = 0
-    let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
     let (value_wire_in_id, value) = circuit_builder.create_witness_in(UINT256_4_N_OPERAND_CELLS);
     let (inv_wire_in_id, inv) = circuit_builder.create_witness_in(UINT256_4_N_OPERAND_CELLS);
 
@@ -223,7 +224,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     wits_in[value_wire_in_id as usize] = in_value;
     wits_in[inv_wire_in_id as usize] = in_inv;
     let circuit_witness = {
-        let challenges = vec![Goldilocks::from(2)];
+        let challenges = vec![GoldilocksExt2::from(2)];
         let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
         circuit_witness.add_instance(&circuit, wits_in);
         circuit_witness
@@ -253,9 +254,9 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
 
     // add prover-verifier process
     let mut prover_transcript =
-        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+        Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
     let mut verifier_transcript =
-        Transcript::<Goldilocks>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+        Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
 
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];

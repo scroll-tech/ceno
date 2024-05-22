@@ -42,7 +42,7 @@ fn bench_keccak256(c: &mut Criterion) {
     };
     assert!(verify_keccak256(1, output_mle, proof, &circuit).is_ok());
 
-    for log2_n in 1..6 {
+    for log2_n in 0..10 {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("keccak256_log2_{}", log2_n));
         group.sample_size(NUM_SAMPLES);

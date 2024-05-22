@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -19,7 +19,7 @@ use crate::error::ZKVMError;
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
-impl<F: SmallField> InstructionGraph<F> for CalldataloadInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for CalldataloadInstruction {
     type InstType = Self;
 }
 
@@ -49,8 +49,8 @@ impl CalldataloadInstruction {
     const OPCODE: OpcodeType = OpcodeType::CALLDATALOAD;
 }
 
-impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -88,13 +88,13 @@ impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
             next_stack_ts.values(),
             &memory_ts,
             stack_top_expr,
-            clk_expr.add(F::BaseField::ONE),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Range check for stack top
         rom_handler.range_check_stack_top(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(1)),
+            stack_top_expr.sub(E::BaseField::from(1)),
         )?;
 
         // Stack pop offset from the stack.
@@ -102,7 +102,7 @@ impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
         let offset = &phase0[Self::phase0_offset()];
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts.values(),
             offset,
         );
@@ -121,7 +121,7 @@ impl<F: SmallField> Instruction<F> for CalldataloadInstruction {
         // Stack push data to the stack.
         ram_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::ONE),
             stack_ts.values(),
             data,
         );

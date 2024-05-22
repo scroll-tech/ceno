@@ -1,5 +1,6 @@
 use ark_std::{end_timer, start_timer};
-use goldilocks::SmallField;
+use ff::Field;
+use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
@@ -23,7 +24,7 @@ use crate::{
 // layers[i](rt || ry) = \sum_x(
 //     \sum_j  paste_from[j](ry, x) * subset[j][i](rt || x)
 // ) + add_const(ry)
-impl<F: SmallField> IOPProverState<F> {
+impl<E: ExtensionField> IOPProverState<E> {
     /// Sumcheck 1: sigma = \sum_j f1'_j(x1) * g1'_j(x1)
     ///     sigma = layers[i](rt || ry) - add_const(ry),
     ///     f1'^{(j)}(x1) = subset[j][i](rt || x1)
@@ -31,10 +32,10 @@ impl<F: SmallField> IOPProverState<F> {
     #[tracing::instrument(skip_all, name = "prove_and_update_state_input_phase2_step1")]
     pub(super) fn prove_and_update_state_input_phase2_step1(
         &mut self,
-        circuit: &Circuit<F>,
-        circuit_witness: &CircuitWitness<F::BaseField>,
-        transcript: &mut Transcript<F>,
-    ) -> IOPProverStepMessage<F> {
+        circuit: &Circuit<E>,
+        circuit_witness: &CircuitWitness<E::BaseField>,
+        transcript: &mut Transcript<E>,
+    ) -> IOPProverStepMessage<E> {
         let timer = start_timer!(|| "Prover sumcheck input phase 2 step 1");
         let layer = &circuit.layers[self.layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
@@ -48,19 +49,19 @@ impl<F: SmallField> IOPProverState<F> {
         let wits_in = circuit_witness.witness_in_ref();
 
         let (mut f_vec, mut g_vec): (
-            Vec<ArcDenseMultilinearExtension<F>>,
-            Vec<ArcDenseMultilinearExtension<F>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
         ) = izip_parallizable!(paste_from_wit_in)
             .enumerate()
             .map(|(j, (l, r))| {
-                let mut f = vec![F::ZERO; 1 << (max_lo_in_num_vars + hi_num_vars)];
-                let mut g = vec![F::ZERO; 1 << max_lo_in_num_vars];
+                let mut f = vec![0.into(); 1 << (max_lo_in_num_vars + hi_num_vars)];
+                let mut g = vec![E::ZERO; 1 << max_lo_in_num_vars];
 
                 for new_wire_id in *l..*r {
                     let subset_wire_id = new_wire_id - l;
                     for s in 0..(1 << hi_num_vars) {
                         f[(s << max_lo_in_num_vars) ^ subset_wire_id] =
-                            F::from_base(&wits_in[j as usize].instances[s][subset_wire_id]);
+                            wits_in[j as usize].instances[s][subset_wire_id];
                     }
                     g[subset_wire_id] = eq_y_ry[new_wire_id];
                 }
@@ -71,28 +72,29 @@ impl<F: SmallField> IOPProverState<F> {
                             max_lo_in_num_vars + hi_num_vars,
                             f,
                         );
-                        f.fix_high_variables_in_place(&hi_point);
+                        f.fix_high_variables_in_place(hi_point);
                         f.into()
                     },
-                    DenseMultilinearExtension::from_evaluations_vec(max_lo_in_num_vars, g).into(),
+                    DenseMultilinearExtension::from_evaluations_ext_vec(max_lo_in_num_vars, g)
+                        .into(),
                 )
             })
             .unzip();
 
         let paste_from_counter_in = &circuit.paste_from_counter_in;
         let (f_vec_counter_in, g_vec_counter_in): (
-            Vec<ArcDenseMultilinearExtension<F>>,
-            Vec<ArcDenseMultilinearExtension<F>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
         ) = izip_parallizable!(paste_from_counter_in)
             .map(|(num_vars, (l, r))| {
-                let mut f = vec![F::ZERO; 1 << (max_lo_in_num_vars + hi_num_vars)];
-                let mut g = vec![F::ZERO; 1 << max_lo_in_num_vars];
+                let mut f = vec![0.into(); 1 << (max_lo_in_num_vars + hi_num_vars)];
+                let mut g = vec![E::ZERO; 1 << max_lo_in_num_vars];
 
                 for new_wire_id in *l..*r {
                     let subset_wire_id = new_wire_id - l;
                     for s in 0..(1 << hi_num_vars) {
                         f[(s << max_lo_in_num_vars) ^ subset_wire_id] =
-                            F::from(((s << num_vars) ^ subset_wire_id) as u64);
+                            E::BaseField::from(((s << num_vars) ^ subset_wire_id) as u64);
                     }
                     g[subset_wire_id] = eq_y_ry[new_wire_id];
                 }
@@ -105,7 +107,8 @@ impl<F: SmallField> IOPProverState<F> {
                         f.fix_high_variables_in_place(&hi_point);
                         f.into()
                     },
-                    DenseMultilinearExtension::from_evaluations_vec(max_lo_in_num_vars, g).into(),
+                    DenseMultilinearExtension::from_evaluations_ext_vec(max_lo_in_num_vars, g)
+                        .into(),
                 )
             })
             .unzip();
@@ -115,8 +118,8 @@ impl<F: SmallField> IOPProverState<F> {
 
         let mut virtual_poly = VirtualPolynomial::new(max_lo_in_num_vars);
         for (f, g) in f_vec.into_iter().zip(g_vec.into_iter()) {
-            let mut tmp = VirtualPolynomial::new_from_mle(f, F::ONE);
-            tmp.mul_by_mle(g, F::ONE);
+            let mut tmp = VirtualPolynomial::new_from_mle(f, E::BaseField::ONE);
+            tmp.mul_by_mle(g, E::BaseField::ONE);
             virtual_poly.merge(&tmp);
         }
 
@@ -140,8 +143,8 @@ impl<F: SmallField> IOPProverState<F> {
                 let wit_in_eval = *eval
                     * eval_point[num_vars..]
                         .iter()
-                        .map(|x| F::ONE - *x)
-                        .product::<F>()
+                        .map(|x| E::ONE - *x)
+                        .product::<E>()
                         .invert()
                         .unwrap();
                 PointAndEval::new_from_ref(&point, &wit_in_eval)

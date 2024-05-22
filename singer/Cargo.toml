@@ -20,6 +20,7 @@ gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
 simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 singer-utils = { version = "0.1.0", path = "../singer-utils" }
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
+ff_ext = { path = "../ff_ext" }
 
 itertools = "0.12.0"
 strum = "0.25.0"

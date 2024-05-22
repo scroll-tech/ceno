@@ -1,5 +1,6 @@
 use ark_std::{end_timer, start_timer};
-use goldilocks::SmallField;
+use ff::Field;
+use ff_ext::ExtensionField;
 use itertools::{chain, Itertools};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
@@ -23,7 +24,7 @@ use crate::{
 // Prove the items copied from the current layer to later layers for data parallel circuits.
 // \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
 //     = \sum_y( \sum_j( \alpha^j copy_to[j](ry_j, y) \sum_t( eq(rt_j, t) * layers[i](t || y) ) ) )
-impl<F: SmallField> IOPProverState<F> {
+impl<E: ExtensionField> IOPProverState<E> {
     /// Sumcheck 1: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
     ///     sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
     ///     f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
@@ -31,10 +32,10 @@ impl<F: SmallField> IOPProverState<F> {
     #[tracing::instrument(skip_all, name = "prove_and_update_state_phase1_step1")]
     pub(super) fn prove_and_update_state_phase1_step1(
         &mut self,
-        circuit: &Circuit<F>,
-        circuit_witness: &CircuitWitness<F::BaseField>,
-        transcript: &mut Transcript<F>,
-    ) -> IOPProverStepMessage<F> {
+        circuit: &Circuit<E>,
+        circuit_witness: &CircuitWitness<E::BaseField>,
+        transcript: &mut Transcript<E>,
+    ) -> IOPProverStepMessage<E> {
         let timer = start_timer!(|| "Prover sumcheck phase 1 step 1");
         let alpha = transcript
             .get_and_append_challenge(b"combine subset evals")
@@ -43,7 +44,7 @@ impl<F: SmallField> IOPProverState<F> {
             + self.subset_point_and_evals[self.layer_id as usize].len()
             + 1;
         let alpha_pows = {
-            let mut alpha_pows = vec![F::ONE; total_length];
+            let mut alpha_pows = vec![E::ONE; total_length];
             for i in 0..total_length.saturating_sub(1) {
                 alpha_pows[i + 1] = alpha_pows[i] * alpha;
             }
@@ -58,8 +59,8 @@ impl<F: SmallField> IOPProverState<F> {
         // g1^{(j)}(y) = \alpha^j copy_to[j](ry_j, y)
         let span = entered_span!("fg");
         let (mut f1, mut g1): (
-            Vec<ArcDenseMultilinearExtension<F>>,
-            Vec<ArcDenseMultilinearExtension<F>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
         ) = tracing_span!("f1g1").in_scope(|| {
             izip_parallizable!(&self.to_next_phase_point_and_evals, &alpha_pows)
                 .map(|(point_and_eval, alpha_pow)| {
@@ -76,7 +77,8 @@ impl<F: SmallField> IOPProverState<F> {
 
                     (
                         f1_j.into(),
-                        DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into(),
+                        DenseMultilinearExtension::from_evaluations_ext_vec(lo_num_vars, g1_j)
+                            .into(),
                     )
                 })
                 .unzip()
@@ -84,8 +86,8 @@ impl<F: SmallField> IOPProverState<F> {
 
         let copy_to_matrices = &circuit.layers[self.layer_id as usize].copy_to;
         let (f1_subset_point_and_evals, g1_subset_point_and_evals): (
-            Vec<ArcDenseMultilinearExtension<F>>,
-            Vec<ArcDenseMultilinearExtension<F>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
         ) = tracing_span!("f1_j_g1_j").in_scope(|| {
             izip_parallizable!(
                 &self.subset_point_and_evals[self.layer_id as usize],
@@ -107,7 +109,7 @@ impl<F: SmallField> IOPProverState<F> {
                 );
                 (
                     f1_j.into(),
-                    DenseMultilinearExtension::from_evaluations_vec(lo_num_vars, g1_j).into(),
+                    DenseMultilinearExtension::from_evaluations_ext_vec(lo_num_vars, g1_j).into(),
                 )
             })
             .unzip()
@@ -121,8 +123,8 @@ impl<F: SmallField> IOPProverState<F> {
         let virtual_poly_1 = tracing_span!("virtual_poly").in_scope(|| {
             let mut virtual_poly_1 = VirtualPolynomial::new(lo_num_vars);
             for (f1_j, g1_j) in f1.into_iter().zip(g1.into_iter()) {
-                let mut tmp = VirtualPolynomial::new_from_mle(f1_j, F::ONE);
-                tmp.mul_by_mle(g1_j, F::ONE);
+                let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::BaseField::ONE);
+                tmp.mul_by_mle(g1_j, E::BaseField::ONE);
                 virtual_poly_1.merge(&tmp);
             }
             virtual_poly_1
@@ -153,10 +155,10 @@ impl<F: SmallField> IOPProverState<F> {
     #[tracing::instrument(skip_all, name = "prove_and_update_state_phase1_step2")]
     pub(super) fn prove_and_update_state_phase1_step2(
         &mut self,
-        _: &Circuit<F>,
-        circuit_witness: &CircuitWitness<F::BaseField>,
-        transcript: &mut Transcript<F>,
-    ) -> IOPProverStepMessage<F> {
+        _: &Circuit<E>,
+        circuit_witness: &CircuitWitness<E::BaseField>,
+        transcript: &mut Transcript<E>,
+    ) -> IOPProverStepMessage<E> {
         let timer = start_timer!(|| "Prover sumcheck phase 1 step 2");
         let hi_num_vars = circuit_witness.instance_num_vars();
 
@@ -168,7 +170,7 @@ impl<F: SmallField> IOPProverState<F> {
         exit_span!(span);
 
         // g2^{(j)}(t) = \alpha^j copy_to[j](ry_j, ry) eq(rt_j, t)
-        let output_points: Vec<&Point<F>> = chain![
+        let output_points: Vec<&Point<E>> = chain![
             self.to_next_phase_point_and_evals.iter().map(|x| &x.point),
             self.subset_point_and_evals[self.layer_id as usize]
                 .iter()
@@ -178,10 +180,10 @@ impl<F: SmallField> IOPProverState<F> {
         let span = entered_span!("g2");
 
         #[cfg(not(feature = "parallel"))]
-        let zeros = vec![F::ZERO; 1 << hi_num_vars];
+        let zeros = vec![E::ZERO; 1 << hi_num_vars];
 
         #[cfg(feature = "parallel")]
-        let zeros = || vec![F::ZERO; 1 << hi_num_vars];
+        let zeros = || vec![E::ZERO; 1 << hi_num_vars];
 
         let g2 = izip_parallizable!(output_points, &self.g1_values)
             .map(|(point, &g1_value)| {
@@ -199,11 +201,11 @@ impl<F: SmallField> IOPProverState<F> {
             });
 
         #[cfg(not(feature = "parallel"))]
-        let g2 = DenseMultilinearExtension::from_evaluations_vec(hi_num_vars, g2);
+        let g2 = DenseMultilinearExtension::from_evaluations_ext_vec(hi_num_vars, g2);
 
         // When rayon is used, the `fold` operation results in a iterator of `Vec<F>` rather than a single `Vec<F>`. In this case, we simply need to sum them.
         #[cfg(feature = "parallel")]
-        let g2 = DenseMultilinearExtension::from_evaluations_vec(
+        let g2 = DenseMultilinearExtension::from_evaluations_ext_vec(
             hi_num_vars,
             g2.reduce(zeros, |acc, nxt| {
                 acc.into_iter()
@@ -216,8 +218,8 @@ impl<F: SmallField> IOPProverState<F> {
         exit_span!(span);
 
         // sumcheck: sigma = \sum_t( \sum_j( g2^{(j)}(t) ) ) * f2(t)
-        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, F::ONE);
-        virtual_poly_2.mul_by_mle(g2.into(), F::ONE);
+        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::BaseField::ONE);
+        virtual_poly_2.mul_by_mle(g2.into(), E::BaseField::ONE);
 
         let (sumcheck_proof_2, prover_state) = SumcheckState::prove(virtual_poly_2, transcript);
         let (mut f2, _): (Vec<_>, Vec<_>) = prover_state

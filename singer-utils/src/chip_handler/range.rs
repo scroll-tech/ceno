@@ -1,5 +1,5 @@
 use ff::Field;
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
 use crate::{
@@ -11,11 +11,11 @@ use crate::{
 
 use super::RangeChipOperations;
 
-impl<F: SmallField> RangeChipOperations<F> for ROMHandler<F> {
+impl<E: ExtensionField> RangeChipOperations<E> for ROMHandler<E> {
     fn range_check_stack_top(
         &mut self,
-        circuit_builder: &mut CircuitBuilder<F>,
-        stack_top: MixedCell<F>,
+        circuit_builder: &mut CircuitBuilder<E>,
+        stack_top: MixedCell<E>,
     ) -> Result<(), UtilError> {
         self.small_range_check(circuit_builder, stack_top, STACK_TOP_BIT_WIDTH)
     }
@@ -24,12 +24,12 @@ impl<F: SmallField> RangeChipOperations<F> for ROMHandler<F> {
     /// Return the verified values.
     fn range_check_uint<const M: usize, const C: usize>(
         &mut self,
-        circuit_builder: &mut CircuitBuilder<F>,
+        circuit_builder: &mut CircuitBuilder<E>,
         uint: &UInt<M, C>,
         range_value_witness: Option<&[CellId]>,
     ) -> Result<UInt<M, C>, UtilError>
     where
-        F: SmallField,
+        E: ExtensionField,
     {
         let n_cell = (M + C - 1) / C;
         if C <= RANGE_CHIP_BIT_WIDTH {
@@ -61,7 +61,7 @@ impl<F: SmallField> RangeChipOperations<F> for ROMHandler<F> {
 
     fn range_check_bytes(
         &mut self,
-        circuit_builder: &mut CircuitBuilder<F>,
+        circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[CellId],
     ) -> Result<(), UtilError> {
         for byte in bytes {
@@ -71,25 +71,25 @@ impl<F: SmallField> RangeChipOperations<F> for ROMHandler<F> {
     }
 }
 
-impl<F: SmallField> ROMHandler<F> {
+impl<E: ExtensionField> ROMHandler<E> {
     fn small_range_check(
         &mut self,
-        circuit_builder: &mut CircuitBuilder<F>,
-        value: MixedCell<F>,
+        circuit_builder: &mut CircuitBuilder<E>,
+        value: MixedCell<E>,
         bit_width: usize,
     ) -> Result<(), UtilError> {
         if bit_width > RANGE_CHIP_BIT_WIDTH {
             return Err(UtilError::ChipHandlerError);
         }
         let out = circuit_builder.create_ext_cell();
-        let items = [value.mul(F::BaseField::from(1 << (RANGE_CHIP_BIT_WIDTH - bit_width)))];
+        let items = [value.mul(E::BaseField::from(1 << (RANGE_CHIP_BIT_WIDTH - bit_width)))];
         circuit_builder.rlc_mixed(&out, &items, self.challenge.record_rlc);
         self.records.push(out);
         Ok(())
     }
 }
 
-impl<Ext: SmallField> ROMHandler<Ext> {
+impl<Ext: ExtensionField> ROMHandler<Ext> {
     pub fn add_pc_const(
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &PCUInt,
@@ -141,10 +141,10 @@ impl<Ext: SmallField> ROMHandler<Ext> {
     }
 }
 
-fn i64_to_base_field<F: SmallField>(x: i64) -> F::BaseField {
+fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
     if x >= 0 {
-        F::BaseField::from(x as u64)
+        E::BaseField::from(x as u64)
     } else {
-        -F::BaseField::from((-x) as u64)
+        -E::BaseField::from((-x) as u64)
     }
 }

@@ -1,4 +1,4 @@
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use singer_utils::structs::ChipChallenges;
 
 use crate::{component::InstCircuit, error::ZKVMError};
@@ -6,11 +6,11 @@ use crate::{component::InstCircuit, error::ZKVMError};
 use super::{Instruction, InstructionGraph};
 
 pub struct UnknownInstruction;
-impl<F: SmallField> Instruction<F> for UnknownInstruction {
-    fn construct_circuit(_: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField> Instruction<E> for UnknownInstruction {
+    fn construct_circuit(_: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         Err(ZKVMError::CircuitError)
     }
 }
-impl<F: SmallField> InstructionGraph<F> for UnknownInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for UnknownInstruction {
     type InstType = Self;
 }

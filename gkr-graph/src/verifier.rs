@@ -1,5 +1,5 @@
+use ff_ext::ExtensionField;
 use gkr::structs::PointAndEval;
-use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use std::mem;
 use transcript::Transcript;
@@ -12,14 +12,14 @@ use crate::{
     },
 };
 
-impl<F: SmallField> IOPVerifierState<F> {
+impl<E: ExtensionField> IOPVerifierState<E> {
     pub fn verify(
-        circuit: &CircuitGraph<F>,
-        challenges: &[F],
-        target_evals: &TargetEvaluations<F>,
-        proof: IOPProof<F>,
+        circuit: &CircuitGraph<E>,
+        challenges: &[E],
+        target_evals: &TargetEvaluations<E>,
+        proof: IOPProof<E>,
         aux_info: &CircuitGraphAuxInfo,
-        transcript: &mut Transcript<F>,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), GKRGraphError> {
         assert_eq!(target_evals.0.len(), circuit.targets.len());
 

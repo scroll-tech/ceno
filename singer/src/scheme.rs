@@ -1,4 +1,4 @@
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 
 use crate::SingerWiresOutValues;
 
@@ -9,21 +9,21 @@ type Commitment<F> = Vec<F>;
 pub mod prover;
 pub mod verifier;
 
-pub struct CommitPhaseProof<F: SmallField> {
-    commitments: Vec<Commitment<F>>,
+pub struct CommitPhaseProof<E: ExtensionField> {
+    commitments: Vec<Commitment<E>>,
 }
 
 pub type GKRGraphProof<F> = gkr_graph::structs::IOPProof<F>;
 pub type GKRGraphProverState<F> = gkr_graph::structs::IOPProverState<F>;
 pub type GKRGraphVerifierState<F> = gkr_graph::structs::IOPVerifierState<F>;
 
-pub struct OpenPhaseProof<F: SmallField> {
-    pcs_proof: BatchedPCSProof<F>,
+pub struct OpenPhaseProof<E: ExtensionField> {
+    pcs_proof: BatchedPCSProof<E>,
 }
 
-pub struct SingerProof<F: SmallField> {
+pub struct SingerProof<E: ExtensionField> {
     // commitment_phase_proof: CommitPhaseProof<F>,
-    gkr_phase_proof: GKRGraphProof<F>,
+    gkr_phase_proof: GKRGraphProof<E>,
     // open_phase_proof: OpenPhaseProof<F>,
-    singer_out_evals: SingerWiresOutValues<F::BaseField>,
+    singer_out_evals: SingerWiresOutValues<E::BaseField>,
 }

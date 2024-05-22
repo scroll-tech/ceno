@@ -21,6 +21,7 @@ singer-utils = { version = "0.1.0", path = "../singer-utils" }
 strum = "0.25.0"
 strum_macros = "0.25.3"
 transcript = { version = "0.1.0", path = "../transcript" }
+ff_ext = { path = "../ff_ext" }
 
 [features]
 debug_wenqing = []

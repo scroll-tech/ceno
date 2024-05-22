@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 tracing = "0.1.40"
+ff_ext = { path = "../ff_ext" }
 ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true

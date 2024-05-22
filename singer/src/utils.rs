@@ -1,23 +1,23 @@
 use ff::Field;
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use itertools::izip;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
-pub(crate) fn i64_to_base_field<F: SmallField>(x: i64) -> F::BaseField {
+pub(crate) fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
     if x >= 0 {
-        F::BaseField::from(x as u64)
+        E::BaseField::from(x as u64)
     } else {
-        -F::BaseField::from((-x) as u64)
+        -E::BaseField::from((-x) as u64)
     }
 }
 
-pub(crate) fn add_assign_each_cell<F: SmallField>(
-    circuit_builder: &mut CircuitBuilder<F>,
+pub(crate) fn add_assign_each_cell<E: ExtensionField>(
+    circuit_builder: &mut CircuitBuilder<E>,
     dest: &[CellId],
     src: &[CellId],
 ) {
     assert_eq!(dest.len(), src.len());
     for (dest, src) in izip!(dest, src) {
-        circuit_builder.add(*dest, *src, F::BaseField::ONE);
+        circuit_builder.add(*dest, *src, E::BaseField::ONE);
     }
 }

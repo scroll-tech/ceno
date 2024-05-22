@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use itertools::izip;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
@@ -22,7 +22,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct JumpiInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for JumpiInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for JumpiInstruction {
     type InstType = Self;
 }
 
@@ -54,8 +54,8 @@ impl JumpiInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMPI;
 }
 
-impl<F: SmallField> Instruction<F> for JumpiInstruction {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -81,12 +81,12 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
         // Range check stack_top - 2
         rom_handler.range_check_stack_top(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
         )?;
 
         // Pop the destination pc from stack.
         let dest_values = &phase0[Self::phase0_dest_values()];
-        let dest_stack_addr = stack_top_expr.sub(F::BaseField::ONE);
+        let dest_stack_addr = stack_top_expr.sub(E::BaseField::ONE);
 
         let old_stack_ts_dest = (&phase0[Self::phase0_old_stack_ts_dest()]).try_into()?;
         UIntCmp::<TSUInt>::assert_lt(
@@ -116,7 +116,7 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
 
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
             old_stack_ts_cond.values(),
             cond_values,
         );
@@ -131,7 +131,7 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
         let non_zero_or = circuit_builder.create_cell();
         cond_values_non_zero
             .iter()
-            .for_each(|x| circuit_builder.add(non_zero_or, *x, F::BaseField::ONE));
+            .for_each(|x| circuit_builder.add(non_zero_or, *x, E::BaseField::ONE));
         let cond_non_zero_or_inv = phase0[Self::phase0_cond_non_zero_or_inv().start];
         let cond_non_zero =
             rom_handler.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
@@ -151,8 +151,8 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
             &next_pc,
             stack_ts.values(), // Because there is no stack push.
             memory_ts,
-            stack_top_expr.sub(F::BaseField::from(2)),
-            clk_expr.add(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::from(2)),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Bytecode check for (pc, jumpi)
@@ -164,7 +164,7 @@ impl<F: SmallField> Instruction<F> for JumpiInstruction {
         circuit_builder.sel_mixed(
             next_opcode,
             pc_plus_1_opcode.into(),
-            MixedCell::Constant(F::BaseField::from(OpcodeType::JUMPDEST as u64)),
+            MixedCell::Constant(E::BaseField::from(OpcodeType::JUMPDEST as u64)),
             cond_non_zero,
         );
 

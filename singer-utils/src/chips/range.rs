@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use goldilocks::SmallField;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 
 use crate::{
@@ -13,16 +13,16 @@ use crate::{
 
 /// Add range table circuit and witness to the circuit graph. Return node id and
 /// lookup instance log size.
-pub(crate) fn construct_range_table_and_witness<F: SmallField>(
-    builder: &mut CircuitGraphBuilder<F>,
+pub(crate) fn construct_range_table_and_witness<E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<E>,
     bit_with: usize,
     challenges: &ChipChallenges,
-    real_challenges: &[F],
+    real_challenges: &[E],
 ) -> Result<(PredType, usize), UtilError> {
-    let mut circuit_builder = CircuitBuilder::<F>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::new();
     let cells = circuit_builder.create_counter_in(0);
     let items = [
-        MixedCell::Constant(F::BaseField::from(ROMType::Range as u64)),
+        MixedCell::Constant(E::BaseField::from(ROMType::Range as u64)),
         MixedCell::Cell(cells[0]),
     ];
     let rlc = circuit_builder.create_ext_cell();
@@ -46,15 +46,15 @@ pub(crate) fn construct_range_table_and_witness<F: SmallField>(
 
 /// Add range table circuit to the circuit graph. Return node id and lookup
 /// instance log size.
-pub(crate) fn construct_range_table<F: SmallField>(
-    builder: &mut CircuitGraphBuilder<F>,
+pub(crate) fn construct_range_table<E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<E>,
     bit_with: usize,
     challenges: &ChipChallenges,
 ) -> Result<(PredType, usize), UtilError> {
-    let mut circuit_builder = CircuitBuilder::<F>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::new();
     let cells = circuit_builder.create_counter_in(0);
     let items = [
-        MixedCell::Constant(F::BaseField::from(ROMType::Range as u64)),
+        MixedCell::Constant(E::BaseField::from(ROMType::Range as u64)),
         MixedCell::Cell(cells[0]),
     ];
     let rlc = circuit_builder.create_ext_cell();

@@ -1,6 +1,6 @@
+use ff_ext::ExtensionField;
 use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
 use gkr_graph::structs::TargetEvaluations;
-use goldilocks::SmallField;
 use itertools::{chain, Itertools};
 use transcript::Transcript;
 
@@ -8,15 +8,15 @@ use crate::{error::ZKVMError, SingerAuxInfo, SingerCircuit, SingerWiresOutValues
 
 use super::{GKRGraphVerifierState, SingerProof};
 
-pub fn verify<F: SmallField>(
-    vm_circuit: &SingerCircuit<F>,
-    vm_proof: SingerProof<F>,
+pub fn verify<E: ExtensionField>(
+    vm_circuit: &SingerCircuit<E>,
+    vm_proof: SingerProof<E>,
     aux_info: &SingerAuxInfo,
-    challenges: &[F],
-    transcript: &mut Transcript<F>,
+    challenges: &[E],
+    transcript: &mut Transcript<E>,
 ) -> Result<(), ZKVMError> {
     // TODO: Add PCS.
-    let point = (0..2 * F::DEGREE)
+    let point = (0..2 * <E as ExtensionField>::DEGREE)
         .map(|_| {
             transcript
                 .get_and_append_challenge(b"output point")
@@ -32,8 +32,8 @@ pub fn verify<F: SmallField>(
         public_output_size,
     } = vm_proof.singer_out_evals;
 
-    let ram_load_product: F = ram_load.iter().map(|x| F::from_limbs(&x)).product();
-    let ram_store_product = ram_store.iter().map(|x| F::from_limbs(&x)).product();
+    let ram_load_product: E = ram_load.iter().map(|x| E::from_limbs(&x)).product();
+    let ram_store_product = ram_store.iter().map(|x| E::from_limbs(&x)).product();
     if ram_load_product != ram_store_product {
         return Err(ZKVMError::VerifyError);
     }
@@ -43,9 +43,9 @@ pub fn verify<F: SmallField>(
         .map(|x| {
             let l = x.len();
             let (den, num) = x.split_at(l / 2);
-            (F::from_limbs(den), F::from_limbs(num))
+            (E::from_limbs(den), E::from_limbs(num))
         })
-        .fold((F::ONE, F::ZERO), |acc, x| {
+        .fold((E::ONE, E::ZERO), |acc, x| {
             (acc.0 * x.0, acc.0 * x.1 + acc.1 * x.0)
         });
     let rom_table_sum = rom_table
@@ -53,9 +53,9 @@ pub fn verify<F: SmallField>(
         .map(|x| {
             let l = x.len();
             let (den, num) = x.split_at(l / 2);
-            (F::from_limbs(den), F::from_limbs(num))
+            (E::from_limbs(den), E::from_limbs(num))
         })
-        .fold((F::ONE, F::ZERO), |acc, x| {
+        .fold((E::ONE, E::ZERO), |acc, x| {
             (acc.0 * x.0, acc.0 * x.1 + acc.1 * x.0)
         });
     if rom_input_sum.0 * rom_table_sum.1 != rom_input_sum.1 * rom_table_sum.0 {
@@ -82,7 +82,7 @@ pub fn verify<F: SmallField>(
         ));
         assert_eq!(
             output[0],
-            F::BaseField::from(aux_info.program_output_len as u64)
+            E::BaseField::from(aux_info.program_output_len as u64)
         )
     }
 

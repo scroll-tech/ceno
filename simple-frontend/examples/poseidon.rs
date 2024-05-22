@@ -1,7 +1,8 @@
 //! Poseidon hash function. This is modified from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom.
 
 use ff::Field;
-use goldilocks::{Goldilocks, SmallField};
+use ff_ext::ExtensionField;
+use goldilocks::GoldilocksExt2;
 use mock_constant::{poseidon_c, poseidon_m, poseidon_p, poseidon_s};
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
@@ -23,13 +24,13 @@ const N_ROUNDS_P: [usize; 16] = [
 //     out <== in4*in;
 // }
 
-fn sigma<F: SmallField>(circuit_builder: &mut CircuitBuilder<F>, in_: CellId) -> CellId {
+fn sigma<E: ExtensionField>(circuit_builder: &mut CircuitBuilder<E>, in_: CellId) -> CellId {
     let in2 = circuit_builder.create_cell();
     let in4 = circuit_builder.create_cell();
 
     let out = circuit_builder.create_cell();
 
-    let one = F::BaseField::ONE;
+    let one = E::BaseField::ONE;
     circuit_builder.mul2(in2, in_, in_, one);
     circuit_builder.mul2(in4, in2, in2, one);
     circuit_builder.mul2(out, in4, in_, one);
@@ -46,15 +47,15 @@ fn sigma<F: SmallField>(circuit_builder: &mut CircuitBuilder<F>, in_: CellId) ->
 //     }
 // }
 
-fn ark<F: SmallField>(
-    circuit_builder: &mut CircuitBuilder<F>,
+fn ark<E: ExtensionField>(
+    circuit_builder: &mut CircuitBuilder<E>,
     in_: &[CellId],
-    c: &[F::BaseField],
+    c: &[E::BaseField],
     r: usize,
 ) -> Vec<CellId> {
     let out = circuit_builder.create_cells(in_.len());
 
-    let one = F::BaseField::ONE;
+    let one = E::BaseField::ONE;
 
     for i in 0..in_.len() {
         circuit_builder.add(out[i], in_[i], one);
@@ -78,10 +79,10 @@ fn ark<F: SmallField>(
 //     }
 // }
 
-fn mix<F: SmallField>(
-    circuit_builder: &mut CircuitBuilder<F>,
+fn mix<E: ExtensionField>(
+    circuit_builder: &mut CircuitBuilder<E>,
     in_: &[CellId],
-    m: &[&[F::BaseField]],
+    m: &[&[E::BaseField]],
 ) -> Vec<CellId> {
     let out = circuit_builder.create_cells(in_.len());
 
@@ -105,10 +106,10 @@ fn mix<F: SmallField>(
 //     out <== lc;
 // }
 
-fn mix_last<F: SmallField>(
-    circuit_builder: &mut CircuitBuilder<F>,
+fn mix_last<E: ExtensionField>(
+    circuit_builder: &mut CircuitBuilder<E>,
     in_: &[CellId],
-    m: &[&[F::BaseField]],
+    m: &[&[E::BaseField]],
     s: usize,
 ) -> CellId {
     let out = circuit_builder.create_cell();
@@ -134,16 +135,16 @@ fn mix_last<F: SmallField>(
 //     }
 // }
 
-fn mix_s<F: SmallField>(
-    circuit_builder: &mut CircuitBuilder<F>,
+fn mix_s<E: ExtensionField>(
+    circuit_builder: &mut CircuitBuilder<E>,
     in_: &[CellId],
-    s: &[F::BaseField],
+    s: &[E::BaseField],
     r: usize,
 ) -> Vec<CellId> {
     let t = in_.len();
     let out = circuit_builder.create_cells(t);
 
-    let one = F::BaseField::ONE;
+    let one = E::BaseField::ONE;
 
     for i in 0..in_.len() {
         circuit_builder.add(out[0], in_[i], s[(t * 2 - 1) * r + i]);
@@ -157,8 +158,8 @@ fn mix_s<F: SmallField>(
     out
 }
 
-fn poseidon_ex<F: SmallField>(
-    circuit_builder: &mut CircuitBuilder<F>,
+fn poseidon_ex<E: ExtensionField>(
+    circuit_builder: &mut CircuitBuilder<E>,
     n_outs: usize,
     inputs: &[CellId],
     initial_state: CellId,
@@ -181,18 +182,18 @@ fn poseidon_ex<F: SmallField>(
     let t = n_inputs + 1;
     let n_rounds_f = 8;
     let n_rounds_p = N_ROUNDS_P[t - 2];
-    let c = poseidon_c::<F>(t);
-    let s = poseidon_s::<F>(t);
-    let m = poseidon_m::<F>(t);
+    let c = poseidon_c::<E::BaseField>(t);
+    let s = poseidon_s::<E::BaseField>(t);
+    let m = poseidon_m::<E::BaseField>(t);
     let m_slices = m
         .iter()
         .map(|row| row.as_slice())
-        .collect::<Vec<&[F::BaseField]>>();
-    let p = poseidon_p::<F>(t);
+        .collect::<Vec<&[E::BaseField]>>();
+    let p = poseidon_p::<E::BaseField>(t);
     let p_slices = p
         .iter()
         .map(|row| row.as_slice())
-        .collect::<Vec<&[F::BaseField]>>();
+        .collect::<Vec<&[E::BaseField]>>();
 
     //     component ark[nRoundsF];
     //     component sigmaF[nRoundsF][t];
@@ -329,7 +330,7 @@ fn poseidon_ex<F: SmallField>(
     //         }
     //     }
 
-    let one = F::BaseField::ONE;
+    let one = E::BaseField::ONE;
     for r in 0..n_rounds_p {
         sigma_p_in[r] = if r == 0 {
             mix_out[n_rounds_f / 2 - 1][0]
@@ -429,7 +430,7 @@ fn poseidon_ex<F: SmallField>(
     mix_last_out
 }
 fn main() {
-    let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
     let n_inputs = 4;
     let (_, poseidon_ex_initial_state) = circuit_builder.create_witness_in(1);
     let (_, poseidon_ex_inputs) = circuit_builder.create_witness_in(n_inputs);
@@ -450,42 +451,42 @@ mod mock_constant {
 
     use crate::N_ROUNDS_P;
 
-    pub(crate) fn poseidon_c<F: SmallField>(t: usize) -> Vec<F::BaseField> {
+    pub(crate) fn poseidon_c<F: SmallField>(t: usize) -> Vec<F> {
         let n = t * 8 + N_ROUNDS_P[t - 2];
         let mut c = Vec::with_capacity(n);
         for i in 0..n {
-            c.push(F::BaseField::from(i as u64));
+            c.push(F::from(i as u64));
         }
         c
     }
 
-    pub(crate) fn poseidon_s<F: SmallField>(t: usize) -> Vec<F::BaseField> {
+    pub(crate) fn poseidon_s<F: SmallField>(t: usize) -> Vec<F> {
         let n = N_ROUNDS_P[t - 2] * (t * 2 - 1);
         let mut s = Vec::with_capacity(n);
         for i in 0..n {
-            s.push(F::BaseField::from(i as u64));
+            s.push(F::from(i as u64));
         }
         s
     }
 
-    pub(crate) fn poseidon_m<F: SmallField>(t: usize) -> Vec<Vec<F::BaseField>> {
+    pub(crate) fn poseidon_m<F: SmallField>(t: usize) -> Vec<Vec<F>> {
         let mut m = Vec::with_capacity(t);
         for i in 0..t {
             let mut row = Vec::with_capacity(t);
             for j in 0..t {
-                row.push(F::BaseField::from((i * t + j) as u64));
+                row.push(F::from((i * t + j) as u64));
             }
             m.push(row);
         }
         m
     }
 
-    pub(crate) fn poseidon_p<F: SmallField>(t: usize) -> Vec<Vec<F::BaseField>> {
+    pub(crate) fn poseidon_p<F: SmallField>(t: usize) -> Vec<Vec<F>> {
         let mut p = Vec::with_capacity(t);
         for i in 0..t {
             let mut row = Vec::with_capacity(t);
             for j in 0..t {
-                row.push(F::BaseField::from((i * t + j) as u64));
+                row.push(F::from((i * t + j) as u64));
             }
             p.push(row);
         }

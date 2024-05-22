@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -21,7 +21,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct AddInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for AddInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for AddInstruction {
     type InstType = Self;
 }
 
@@ -52,8 +52,8 @@ impl AddInstruction {
     const OPCODE: OpcodeType = OpcodeType::ADD;
 }
 
-impl<F: SmallField> Instruction<F> for AddInstruction {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField> Instruction<E> for AddInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -90,8 +90,8 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
             next_pc.values(),
             next_stack_ts.values(),
             &memory_ts,
-            stack_top_expr.sub(F::BaseField::from(1)),
-            clk_expr.add(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::from(1)),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Execution result = addend0 + addend1, with carry.
@@ -108,7 +108,7 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
         // Check the range of stack_top - 2 is within [0, 1 << STACK_TOP_BIT_WIDTH).
         rom_handler.range_check_stack_top(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
         )?;
 
         // Pop two values from stack
@@ -122,7 +122,7 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
         )?;
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(1)),
+            stack_top_expr.sub(E::BaseField::from(1)),
             old_stack_ts0.values(),
             addend_0.values(),
         );
@@ -137,7 +137,7 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
         )?;
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
             &old_stack_ts1.values(),
             addend_1.values(),
         );
@@ -145,7 +145,7 @@ impl<F: SmallField> Instruction<F> for AddInstruction {
         // Push one result to stack
         ram_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
             stack_ts.values(),
             result.values(),
         );

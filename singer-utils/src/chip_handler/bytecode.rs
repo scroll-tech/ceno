@@ -1,4 +1,4 @@
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
@@ -9,7 +9,7 @@ use crate::{
 
 use super::{BytecodeChipOperations, ROMOperations};
 
-impl<Ext: SmallField> BytecodeChipOperations<Ext> for ROMHandler<Ext> {
+impl<Ext: ExtensionField> BytecodeChipOperations<Ext> for ROMHandler<Ext> {
     fn bytecode_with_pc_opcode(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

@@ -1,6 +1,7 @@
 #![feature(generic_const_exprs)]
 
 use error::ZKVMError;
+use ff_ext::ExtensionField;
 use gkr::structs::LayerWitness;
 use gkr_graph::structs::{
     CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
@@ -32,13 +33,13 @@ mod utils;
 /// InstOutputType, corresponding to the product of summation of the chip check
 /// records. `public_output_size` is the wire id stores the size of public
 /// output.
-pub struct SingerGraphBuilder<F: SmallField> {
-    graph_builder: CircuitGraphBuilder<F>,
-    chip_builder: SingerChipBuilder<F>,
+pub struct SingerGraphBuilder<E: ExtensionField> {
+    graph_builder: CircuitGraphBuilder<E>,
+    chip_builder: SingerChipBuilder<E>,
     public_output_size: Option<NodeOutputType>,
 }
 
-impl<F: SmallField> SingerGraphBuilder<F> {
+impl<E: ExtensionField> SingerGraphBuilder<E> {
     pub fn new() -> Self {
         Self {
             graph_builder: CircuitGraphBuilder::new(),
@@ -49,16 +50,16 @@ impl<F: SmallField> SingerGraphBuilder<F> {
 
     pub fn construct_graph_and_witness(
         mut self,
-        circuit_builder: &SingerCircuitBuilder<F>,
-        singer_wires_in: SingerWiresIn<F::BaseField>,
+        circuit_builder: &SingerCircuitBuilder<E>,
+        singer_wires_in: SingerWiresIn<E::BaseField>,
         bytecode: &[u8],
         program_input: &[u8],
-        real_challenges: &[F],
+        real_challenges: &[E],
         params: &SingerParams,
     ) -> Result<
         (
-            SingerCircuit<F>,
-            SingerWitness<F::BaseField>,
+            SingerCircuit<E>,
+            SingerWitness<E::BaseField>,
             SingerWiresOutID,
         ),
         ZKVMError,
@@ -125,9 +126,9 @@ impl<F: SmallField> SingerGraphBuilder<F> {
 
     pub fn construct_graph(
         mut self,
-        circuit_builder: &SingerCircuitBuilder<F>,
+        circuit_builder: &SingerCircuitBuilder<E>,
         aux_info: &SingerAuxInfo,
-    ) -> Result<SingerCircuit<F>, ZKVMError> {
+    ) -> Result<SingerCircuit<E>, ZKVMError> {
         // Add instruction and its extension (if any) circuits to the graph.
         for (opcode, real_n_instances) in aux_info.real_n_instances.iter() {
             let inst_circuits = &circuit_builder.insts_circuits[*opcode as usize];
@@ -175,7 +176,7 @@ impl<F: SmallField> SingerGraphBuilder<F> {
     }
 }
 
-pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
+pub struct SingerCircuit<E: ExtensionField>(CircuitGraph<E>);
 
 pub struct SingerWitness<F: SmallField>(pub CircuitGraphWitness<F>);
 
