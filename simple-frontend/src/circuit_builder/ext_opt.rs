@@ -545,4 +545,23 @@ mod test {
             assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
         }
     }
+
+    #[test]
+    fn test_rlc_then_rlc_ext_2() {
+        // TODO: finish this test and compare with demo's singer commit ea960c9
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let item_rlc = circuit_builder.create_ext_cell();
+        let items = vec![1, 2, 3];
+        let challenge_record_item_rlc: ChallengeId = 0;
+        circuit_builder.rlc(&item_rlc, &items, challenge_record_item_rlc);
+        let out = circuit_builder.create_ext_cell();
+        let challenge_record_rlc: ChallengeId = 1;
+        circuit_builder.rlc_ext(&out, &[item_rlc], challenge_record_rlc);
+        for cell_id in 0..circuit_builder.cells.len() {
+            println!(
+                "circuit cell_id {:?} cell {:?}",
+                cell_id, circuit_builder.cells[cell_id]
+            );
+        }
+    }
 }
