@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -20,7 +20,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct JumpdestInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for JumpdestInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for JumpdestInstruction {
     type InstType = Self;
 }
 
@@ -41,8 +41,8 @@ impl JumpdestInstruction {
     pub const OPCODE: OpcodeType = OpcodeType::JUMPDEST;
 }
 
-impl<F: SmallField> Instruction<F> for JumpdestInstruction {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -72,7 +72,7 @@ impl<F: SmallField> Instruction<F> for JumpdestInstruction {
             stack_ts.values(), // Because there is no stack push.
             memory_ts,
             stack_top.into(),
-            clk_expr.add(F::BaseField::ONE),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Bytecode check for (pc, jump)

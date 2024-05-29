@@ -1,12 +1,12 @@
 use ff::Field;
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 
 use crate::structs::{
     Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, InType, MixedCell, OutType,
     WitnessId,
 };
 
-impl<Ext: SmallField> CircuitBuilder<Ext> {
+impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     pub fn create_cell(&mut self) -> CellId {
         self.cells.push(Cell::new());
         self.cells.len() - 1

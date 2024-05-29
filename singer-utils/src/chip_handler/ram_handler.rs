@@ -1,12 +1,12 @@
 use ff::Field;
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, ExtCellId, MixedCell, WitnessId};
 
 use crate::structs::{ChipChallenges, RAMHandler};
 
 use super::{OAMOperations, RAMOperations};
 
-impl<Ext: SmallField> RAMHandler<Ext> {
+impl<Ext: ExtensionField> RAMHandler<Ext> {
     pub fn new(challenge: &ChipChallenges) -> Self {
         Self {
             rd_records: Vec::new(),
@@ -16,7 +16,7 @@ impl<Ext: SmallField> RAMHandler<Ext> {
     }
 }
 
-impl<Ext: SmallField> OAMOperations<Ext> for RAMHandler<Ext> {
+impl<Ext: ExtensionField> OAMOperations<Ext> for RAMHandler<Ext> {
     fn oam_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -103,7 +103,7 @@ impl<Ext: SmallField> OAMOperations<Ext> for RAMHandler<Ext> {
     }
 }
 
-impl<Ext: SmallField> RAMOperations<Ext> for RAMHandler<Ext> {
+impl<Ext: ExtensionField> RAMOperations<Ext> for RAMHandler<Ext> {
     fn ram_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

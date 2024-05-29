@@ -1,7 +1,7 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -23,10 +23,10 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct MstoreInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
     type InstType = Self;
 
-    fn construct_circuits(challenges: ChipChallenges) -> Result<Vec<InstCircuit<F>>, ZKVMError> {
+    fn construct_circuits(challenges: ChipChallenges) -> Result<Vec<InstCircuit<E>>, ZKVMError> {
         let circuits = vec![
             MstoreInstruction::construct_circuit(challenges)?,
             MstoreAccessory::construct_circuit(challenges)?,
@@ -35,11 +35,11 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
     }
 
     fn construct_graph_and_witness(
-        graph_builder: &mut CircuitGraphBuilder<F>,
-        chip_builder: &mut SingerChipBuilder<F>,
-        inst_circuits: &[InstCircuit<F>],
-        mut sources: Vec<CircuitWiresIn<F::BaseField>>,
-        real_challenges: &[F],
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
+        inst_circuits: &[InstCircuit<E>],
+        mut sources: Vec<CircuitWiresIn<E::BaseField>>,
+        real_challenges: &[E],
         real_n_instances: usize,
         _: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
@@ -91,9 +91,9 @@ impl<F: SmallField> InstructionGraph<F> for MstoreInstruction {
     }
 
     fn construct_graph(
-        graph_builder: &mut CircuitGraphBuilder<F>,
-        chip_builder: &mut SingerChipBuilder<F>,
-        inst_circuits: &[InstCircuit<F>],
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
+        inst_circuits: &[InstCircuit<E>],
         real_n_instances: usize,
         _: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
@@ -162,8 +162,8 @@ impl MstoreInstruction {
     const OPCODE: OpcodeType = OpcodeType::MSTORE;
 }
 
-impl<F: SmallField> Instruction<F> for MstoreInstruction {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -200,12 +200,12 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
             stack_ts.values(),
             next_memory_ts.values(),
             stack_top_expr,
-            clk_expr.add(F::BaseField::ONE),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         rom_handler.range_check_stack_top(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
         )?;
 
         // Pop offset from stack
@@ -220,7 +220,7 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
         )?;
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts_offset.values(),
             offset.values(),
         );
@@ -240,7 +240,7 @@ impl<F: SmallField> Instruction<F> for MstoreInstruction {
         )?;
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
             old_stack_ts_value.values(),
             mem_value.values(),
         );
@@ -305,8 +305,8 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for MstoreAccessory {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField> Instruction<E> for MstoreAccessory {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From predesessor circuit.

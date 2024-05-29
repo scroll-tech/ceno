@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use ark_std::test_rng;
 use ff::Field;
-use goldilocks::{GoldilocksExt2, SmallField};
+use ff_ext::ExtensionField;
+use goldilocks::GoldilocksExt2;
 use itertools::{izip, Itertools};
 use simple_frontend::structs::{ChallengeConst, ChallengeId, CircuitBuilder, MixedCell};
 use transcript::Transcript;
@@ -14,7 +15,7 @@ use crate::{
     utils::{i64_to_field, MultilinearExtensionFromVectors},
 };
 
-fn copy_and_paste_circuit<Ext: SmallField>() -> Circuit<Ext> {
+fn copy_and_paste_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     let mut circuit_builder = CircuitBuilder::<Ext>::new();
     // Layer 3
     let (_, input) = circuit_builder.create_witness_in(4);
@@ -43,7 +44,7 @@ fn copy_and_paste_circuit<Ext: SmallField>() -> Circuit<Ext> {
     circuit
 }
 
-fn copy_and_paste_witness<Ext: SmallField>() -> (
+fn copy_and_paste_witness<Ext: ExtensionField>() -> (
     Vec<LayerWitness<Ext::BaseField>>,
     CircuitWitness<Ext::BaseField>,
 ) {
@@ -96,7 +97,7 @@ fn copy_and_paste_witness<Ext: SmallField>() -> (
     )
 }
 
-fn paste_from_wit_in_circuit<Ext: SmallField>() -> Circuit<Ext> {
+fn paste_from_wit_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     let mut circuit_builder = CircuitBuilder::<Ext>::new();
 
     // Layer 2
@@ -121,7 +122,7 @@ fn paste_from_wit_in_circuit<Ext: SmallField>() -> Circuit<Ext> {
     circuit
 }
 
-fn paste_from_wit_in_witness<Ext: SmallField>() -> (
+fn paste_from_wit_in_witness<Ext: ExtensionField>() -> (
     Vec<LayerWitness<Ext::BaseField>>,
     CircuitWitness<Ext::BaseField>,
 ) {
@@ -192,7 +193,7 @@ fn paste_from_wit_in_witness<Ext: SmallField>() -> (
     )
 }
 
-fn copy_to_wit_out_circuit<Ext: SmallField>() -> Circuit<Ext> {
+fn copy_to_wit_out_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     let mut circuit_builder = CircuitBuilder::<Ext>::new();
     // Layer 2
     let (_, leaves) = circuit_builder.create_witness_in(4);
@@ -213,7 +214,7 @@ fn copy_to_wit_out_circuit<Ext: SmallField>() -> Circuit<Ext> {
     circuit
 }
 
-fn copy_to_wit_out_witness<Ext: SmallField>() -> (
+fn copy_to_wit_out_witness<Ext: ExtensionField>() -> (
     Vec<LayerWitness<Ext::BaseField>>,
     CircuitWitness<Ext::BaseField>,
 ) {
@@ -263,7 +264,7 @@ fn copy_to_wit_out_witness<Ext: SmallField>() -> (
     )
 }
 
-fn copy_to_wit_out_witness_2<Ext: SmallField>() -> (
+fn copy_to_wit_out_witness_2<Ext: ExtensionField>() -> (
     Vec<LayerWitness<Ext::BaseField>>,
     CircuitWitness<Ext::BaseField>,
 ) {
@@ -343,7 +344,7 @@ fn copy_to_wit_out_witness_2<Ext: SmallField>() -> (
     )
 }
 
-fn rlc_circuit<Ext: SmallField>() -> Circuit<Ext> {
+fn rlc_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     let mut circuit_builder = CircuitBuilder::<Ext>::new();
     // Layer 2
     let (_, leaves) = circuit_builder.create_witness_in(4);
@@ -369,11 +370,11 @@ fn rlc_witness<Ext>() -> (
     Vec<Ext>,
 )
 where
-    Ext: SmallField<DEGREE = 2>,
+    Ext: ExtensionField<DEGREE = 2>,
 {
     let challenges = vec![
-        Ext::from_limbs(&[i64_to_field(31), i64_to_field(37)]),
-        Ext::from_limbs(&[i64_to_field(97), i64_to_field(23)]),
+        Ext::from_bases(&[i64_to_field(31), i64_to_field(37)]),
+        Ext::from_bases(&[i64_to_field(97), i64_to_field(23)]),
     ];
     let challenge_pows = challenges
         .iter()
@@ -412,22 +413,22 @@ where
         instances: leaves.clone(),
     }];
 
-    let inner00 = challenge_pows[0][0].1.mul_base(&leaves[0][0])
-        + challenge_pows[0][1].1.mul_base(&leaves[0][1])
+    let inner00: Ext = challenge_pows[0][0].1 * (&leaves[0][0])
+        + challenge_pows[0][1].1 * (&leaves[0][1])
         + challenge_pows[0][2].1;
-    let inner01 = challenge_pows[1][0].1.mul_base(&leaves[0][2])
-        + challenge_pows[1][1].1.mul_base(&leaves[0][3])
+    let inner01: Ext = challenge_pows[1][0].1 * (&leaves[0][2])
+        + challenge_pows[1][1].1 * (&leaves[0][3])
         + challenge_pows[1][2].1;
-    let inner10 = challenge_pows[0][0].1.mul_base(&leaves[1][0])
-        + challenge_pows[0][1].1.mul_base(&leaves[1][1])
+    let inner10: Ext = challenge_pows[0][0].1 * (&leaves[1][0])
+        + challenge_pows[0][1].1 * (&leaves[1][1])
         + challenge_pows[0][2].1;
-    let inner11 = challenge_pows[1][0].1.mul_base(&leaves[1][2])
-        + challenge_pows[1][1].1.mul_base(&leaves[1][3])
+    let inner11: Ext = challenge_pows[1][0].1 * (&leaves[1][2])
+        + challenge_pows[1][1].1 * (&leaves[1][3])
         + challenge_pows[1][2].1;
 
     let inners = vec![
-        [inner00.clone().to_limbs(), inner01.clone().to_limbs()].concat(),
-        [inner10.clone().to_limbs(), inner11.clone().to_limbs()].concat(),
+        [inner00.clone().as_bases(), inner01.clone().as_bases()].concat(),
+        [inner10.clone().as_bases(), inner11.clone().as_bases()].concat(),
     ];
 
     let root_tmp0 = vec![
@@ -446,7 +447,10 @@ where
 
     let root0 = inner00 * inner01;
     let root1 = inner10 * inner11;
-    let roots = vec![root0.to_limbs(), root1.to_limbs()];
+    let roots = vec![
+        root0.as_bases().into_iter().cloned().collect_vec(),
+        root1.as_bases().into_iter().cloned().collect_vec(),
+    ];
 
     let layers = vec![
         LayerWitness {
@@ -473,14 +477,14 @@ where
                 .iter()
                 .flatten()
                 .cloned()
-                .map(|(k, v)| (k, v.to_limbs()))
+                .map(|(k, v)| (k, v.as_bases().to_vec()))
                 .collect::<HashMap<_, _>>(),
         },
         challenges,
     )
 }
 
-fn inv_sum_circuit<Ext: SmallField>() -> Circuit<Ext> {
+fn inv_sum_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     let mut circuit_builder = CircuitBuilder::<Ext>::new();
     let (_input_id, input) = circuit_builder.create_ext_witness_in(2);
     let (_cond_id, cond) = circuit_builder.create_witness_in(2);
@@ -500,14 +504,14 @@ fn inv_sum_circuit<Ext: SmallField>() -> Circuit<Ext> {
     // select the numerator 0 or 1 or input[0] + input[1]
     let den_add = circuit_builder.create_ext_cell();
     circuit_builder.add_ext(&den_add, &input[0], Ext::BaseField::ONE);
-    circuit_builder.add_ext(&den_add, &input[0], Ext::BaseField::ONE);
+    circuit_builder.add_ext(&den_add, &input[1], Ext::BaseField::ONE);
     circuit_builder.sel_mixed_and_ext(&output[1], &cond[0].into(), &den_add, cond[1]);
 
     circuit_builder.configure();
     Circuit::new(&circuit_builder)
 }
 
-fn inv_sum_witness_4_instances<Ext: SmallField>() -> CircuitWitness<Ext::BaseField> {
+fn inv_sum_witness_4_instances<Ext: ExtensionField>() -> CircuitWitness<Ext::BaseField> {
     let circuit = inv_sum_circuit::<Ext>();
     // witness_in, double instances
     let leaves = vec![
@@ -536,7 +540,7 @@ fn inv_sum_witness_4_instances<Ext: SmallField>() -> CircuitWitness<Ext::BaseFie
             i64_to_field(23),
         ],
     ];
-    let cond: Vec<Vec<<Ext as SmallField>::BaseField>> = vec![
+    let cond: Vec<Vec<<Ext as ExtensionField>::BaseField>> = vec![
         vec![i64_to_field(1), i64_to_field(1)],
         vec![i64_to_field(1), i64_to_field(1)],
         vec![i64_to_field(1), i64_to_field(1)],
@@ -551,7 +555,7 @@ fn inv_sum_witness_4_instances<Ext: SmallField>() -> CircuitWitness<Ext::BaseFie
     circuit_wits
 }
 
-fn lookup_inner_circuit<Ext: SmallField>() -> Circuit<Ext> {
+fn lookup_inner_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     let mut circuit_builder = CircuitBuilder::<Ext>::new();
 
     // Layer 2
@@ -584,7 +588,7 @@ fn lookup_inner_circuit<Ext: SmallField>() -> Circuit<Ext> {
     Circuit::new(&circuit_builder)
 }
 
-fn lookup_inner_witness_4_instances<Ext: SmallField>() -> CircuitWitness<Ext::BaseField> {
+fn lookup_inner_witness_4_instances<Ext: ExtensionField>() -> CircuitWitness<Ext::BaseField> {
     let circuit = lookup_inner_circuit::<Ext>();
     // witness_in, double instances
     let leaves = vec![
@@ -635,7 +639,7 @@ fn lookup_inner_witness_4_instances<Ext: SmallField>() -> CircuitWitness<Ext::Ba
     circuit_wits
 }
 
-fn mixed_in_circuit<Ext: SmallField>() -> Circuit<Ext> {
+fn mixed_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     let mut circuit_builder = CircuitBuilder::<Ext>::new();
 
     // Layer 1
@@ -649,7 +653,7 @@ fn mixed_in_circuit<Ext: SmallField>() -> Circuit<Ext> {
     Circuit::new(&circuit_builder)
 }
 
-fn mixed_in_witness_4_instances<Ext: SmallField>() -> CircuitWitness<Ext::BaseField> {
+fn mixed_in_witness_4_instances<Ext: ExtensionField>() -> CircuitWitness<Ext::BaseField> {
     let circuit = mixed_in_circuit::<Ext>();
     // witness_in, double instances
     let input = vec![
@@ -727,7 +731,7 @@ fn mixed_in_witness_4_instances<Ext: SmallField>() -> CircuitWitness<Ext::BaseFi
     circuit_wits
 }
 
-fn prove_and_verify<Ext: SmallField>(
+fn prove_and_verify<Ext: ExtensionField>(
     circuit: Circuit<Ext>,
     circuit_wits: CircuitWitness<Ext::BaseField>,
     challenges: Vec<Ext>,

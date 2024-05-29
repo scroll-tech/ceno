@@ -1,8 +1,8 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use ark_std::Zero;
+use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, CircuitWitness, LayerWitness};
-use goldilocks::SmallField;
 use itertools::{chain, izip, Itertools};
 use simple_frontend::structs::WitnessId;
 
@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-impl<F: SmallField> CircuitGraphBuilder<F> {
+impl<E: ExtensionField> CircuitGraphBuilder<E> {
     pub fn new() -> Self {
         Self {
             graph: Default::default(),
@@ -29,10 +29,10 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
     pub fn add_node_with_witness(
         &mut self,
         label: &'static str,
-        circuit: &Arc<Circuit<F>>,
+        circuit: &Arc<Circuit<E>>,
         preds: Vec<PredType>,
-        challenges: Vec<F>,
-        sources: Vec<LayerWitness<F::BaseField>>,
+        challenges: Vec<E>,
+        sources: Vec<LayerWitness<E::BaseField>>,
         num_instances: usize,
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
@@ -125,7 +125,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
     pub fn add_node(
         &mut self,
         label: &'static str,
-        circuit: &Arc<Circuit<F>>,
+        circuit: &Arc<Circuit<E>>,
         preds: Vec<PredType>,
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
@@ -143,7 +143,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
     /// Collect the information of `self.sources` and `self.targets`.
     pub fn finalize_graph_and_witness(
         mut self,
-    ) -> (CircuitGraph<F>, CircuitGraphWitness<F::BaseField>) {
+    ) -> (CircuitGraph<E>, CircuitGraphWitness<E::BaseField>) {
         // Generate all possible graph output
         let outs = self
             .graph
@@ -189,7 +189,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         (self.graph, self.witness)
     }
 
-    pub fn finalize_graph(self) -> CircuitGraph<F> {
+    pub fn finalize_graph(self) -> CircuitGraph<E> {
         let (graph, _) = self.finalize_graph_and_witness();
         graph
     }
@@ -198,7 +198,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
     pub fn finalize_graph_and_witness_with_targets(
         mut self,
         targets: &[NodeOutputType],
-    ) -> (CircuitGraph<F>, CircuitGraphWitness<F::BaseField>) {
+    ) -> (CircuitGraph<E>, CircuitGraphWitness<E::BaseField>) {
         // Generate all possible graph output
         let outs = self
             .graph
@@ -250,7 +250,7 @@ impl<F: SmallField> CircuitGraphBuilder<F> {
         (self.graph, self.witness)
     }
 
-    pub fn finalize_graph_with_targets(self, targets: &[NodeOutputType]) -> CircuitGraph<F> {
+    pub fn finalize_graph_with_targets(self, targets: &[NodeOutputType]) -> CircuitGraph<E> {
         let (graph, _) = self.finalize_graph_and_witness_with_targets(targets);
         graph
     }

@@ -1,8 +1,7 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use itertools::Itertools;
 use std::marker::PhantomData;
-
-use goldilocks::SmallField;
 
 use crate::{
     rlc_base_term, rlc_const_term,
@@ -12,7 +11,7 @@ use crate::{
     },
 };
 
-impl<Ext: SmallField> From<Vec<CellId>> for ExtCellId<Ext> {
+impl<Ext: ExtensionField> From<Vec<CellId>> for ExtCellId<Ext> {
     /// converting a vector of CellIds into an ext cell
     fn from(cells: Vec<CellId>) -> Self {
         Self {
@@ -22,20 +21,20 @@ impl<Ext: SmallField> From<Vec<CellId>> for ExtCellId<Ext> {
     }
 }
 
-impl<Ext: SmallField> Into<Vec<CellId>> for ExtCellId<Ext> {
+impl<Ext: ExtensionField> Into<Vec<CellId>> for ExtCellId<Ext> {
     /// converting an ext cell into a vector of CellIds
     fn into(self) -> Vec<CellId> {
         self.cells
     }
 }
 
-impl<Ext: SmallField> AsRef<[CellId]> for ExtCellId<Ext> {
+impl<Ext: ExtensionField> AsRef<[CellId]> for ExtCellId<Ext> {
     fn as_ref(&self) -> &[CellId] {
         &self.cells
     }
 }
 
-impl<Ext: SmallField> ExtCellId<Ext> {
+impl<Ext: ExtensionField> ExtCellId<Ext> {
     /// converting a vector of ext cells into a vector of CellIds
     pub fn exts_to_cells(exts: &[Self]) -> Vec<CellId> {
         exts.iter().flat_map(|ext| ext.cells.clone()).collect()
@@ -48,7 +47,7 @@ impl<Ext: SmallField> ExtCellId<Ext> {
 }
 
 // Public APIs
-impl<Ext: SmallField> CircuitBuilder<Ext> {
+impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     // ======================================
     // Cell creations
     // ======================================
@@ -56,21 +55,21 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
     /// Create an ExtCellId for an extension field element.
     /// Note: an extension cell already consists of multiple cells.
     pub fn create_ext_cell(&mut self) -> ExtCellId<Ext> {
-        self.create_cells(Ext::DEGREE).into()
+        self.create_cells(<Ext as ExtensionField>::DEGREE).into()
     }
 
     /// Create a vector of ExtCells for a vector of extension field elements.
     /// Note: an extension cell already consists of multiple cells.
     pub fn create_ext_cells(&mut self, num: usize) -> Vec<ExtCellId<Ext>> {
-        let cells = self.create_cells(num * Ext::DEGREE);
+        let cells = self.create_cells(num * <Ext as ExtensionField>::DEGREE);
         cells
-            .chunks_exact(Ext::DEGREE)
+            .chunks_exact(<Ext as ExtensionField>::DEGREE)
             .map(|x| x.to_vec().into())
             .collect()
     }
 
     pub fn create_ext_witness_in(&mut self, num: usize) -> (WitnessId, Vec<ExtCellId<Ext>>) {
-        let cells = self.create_cells(num * Ext::DEGREE);
+        let cells = self.create_cells(num * <Ext as ExtensionField>::DEGREE);
         self.mark_cells(
             CellType::In(InType::Witness(self.n_witness_in as WitnessId)),
             &cells,
@@ -79,7 +78,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         (
             (self.n_witness_in - 1) as WitnessId,
             cells
-                .chunks_exact(Ext::DEGREE)
+                .chunks_exact(<Ext as ExtensionField>::DEGREE)
                 .map(|x| x.to_vec().into())
                 .collect(),
         )
@@ -101,7 +100,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
     }
 
     pub fn create_ext_witness_out(&mut self, num: usize) -> (WitnessId, Vec<ExtCellId<Ext>>) {
-        let cells = self.create_cells(num * Ext::DEGREE);
+        let cells = self.create_cells(num * <Ext as ExtensionField>::DEGREE);
         self.mark_cells(
             CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)),
             &cells,
@@ -110,7 +109,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         (
             (self.n_witness_out - 1) as WitnessId,
             cells
-                .chunks_exact(Ext::DEGREE)
+                .chunks_exact(<Ext as ExtensionField>::DEGREE)
                 .map(|x| x.to_vec().into())
                 .collect(),
         )
@@ -140,14 +139,19 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         in_1: &MixedCell<Ext>,
         cond: CellId,
     ) {
-        assert_eq!(out.degree(), Ext::DEGREE);
-        assert_eq!(in_0.degree(), Ext::DEGREE);
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
+        assert_eq!(in_0.degree(), <Ext as ExtensionField>::DEGREE);
 
         out.cells
             .iter()
-            .zip_eq(in_0.cells.iter().zip_eq([*in_1].iter().chain(
-                std::iter::repeat(&MixedCell::Constant(Ext::BaseField::ZERO)).take(Ext::DEGREE - 1),
-            )))
+            .zip_eq(
+                in_0.cells.iter().zip_eq(
+                    [*in_1].iter().chain(
+                        std::iter::repeat(&MixedCell::Constant(Ext::BaseField::ZERO))
+                            .take(<Ext as ExtensionField>::DEGREE - 1),
+                    ),
+                ),
+            )
             .for_each(|(&out, (&in0, &in1))| self.sel_mixed(out, in0.into(), in1, cond));
     }
 
@@ -161,14 +165,19 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         in_1: &ExtCellId<Ext>,
         cond: CellId,
     ) {
-        assert_eq!(out.degree(), Ext::DEGREE);
-        assert_eq!(in_1.degree(), Ext::DEGREE);
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
+        assert_eq!(in_1.degree(), <Ext as ExtensionField>::DEGREE);
 
         out.cells
             .iter()
-            .zip_eq(in_1.cells.iter().zip_eq([*in_0].iter().chain(
-                std::iter::repeat(&MixedCell::Constant(Ext::BaseField::ZERO)).take(Ext::DEGREE - 1),
-            )))
+            .zip_eq(
+                in_1.cells.iter().zip_eq(
+                    [*in_0].iter().chain(
+                        std::iter::repeat(&MixedCell::Constant(Ext::BaseField::ZERO))
+                            .take(<Ext as ExtensionField>::DEGREE - 1),
+                    ),
+                ),
+            )
             .for_each(|(&out, (&in1, &in0))| self.sel_mixed(out, in0, in1.into(), cond));
     }
 
@@ -182,7 +191,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
     ) {
         // we only need to check one degree since the rest are
         // enforced by zip_eq
-        assert_eq!(out.degree(), Ext::DEGREE);
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
 
         out.cells
             .iter()
@@ -197,7 +206,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
     pub fn add_ext(&mut self, out: &ExtCellId<Ext>, in_0: &ExtCellId<Ext>, scalar: Ext::BaseField) {
         // we only need to check one degree since the rest are
         // enforced by zip_eq
-        assert_eq!(out.degree(), Ext::DEGREE);
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
         out.cells
             .iter()
             .zip_eq(in_0.cells.iter())
@@ -213,7 +222,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         in_1: CellId,
         scalar: Ext::BaseField,
     ) {
-        assert_eq!(out.degree(), Ext::DEGREE);
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
         out.cells
             .iter()
             .zip_eq(in_0.cells.iter())
@@ -231,8 +240,8 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         in_1: &ExtCellId<Ext>,
         scalar: Ext::BaseField,
     ) {
-        assert_eq!(out.degree(), Ext::DEGREE);
-        match Ext::DEGREE {
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
+        match <Ext as ExtensionField>::DEGREE {
             2 => self.mul2_degree_2_ext_internal(&out.cells, &in_0.cells, &in_1.cells, scalar),
             3 => self.mul2_degree_3_ext_internal(&out.cells, &in_0.cells, &in_1.cells, scalar),
             // we do not support extension field beyond 3 at the moment
@@ -240,16 +249,16 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         }
     }
 
-    /// Constrain out += in_0 * c  
+    /// Constrain out += in_0 * c
     pub fn add_product_of_ext_and_challenge(
         &mut self,
         out: &ExtCellId<Ext>,
         in_0: &ExtCellId<Ext>,
         c: ChallengeConst,
     ) {
-        assert_eq!(out.degree(), Ext::DEGREE);
-        assert_eq!(in_0.degree(), Ext::DEGREE);
-        match Ext::DEGREE {
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
+        assert_eq!(in_0.degree(), <Ext as ExtensionField>::DEGREE);
+        match <Ext as ExtensionField>::DEGREE {
             2 => self.add_ext_mul_challenge_2(&out.cells, &in_0.cells, c),
             3 => self.add_ext_mul_challenge_3(&out.cells, &in_0.cells, c),
             _ => unimplemented!(),
@@ -263,19 +272,19 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
     /// Compute the random linear combination of `in_array` by challenge.
     /// out = \sum_{i = 0}^{in_array.len()} challenge^i * in_array[i] + challenge^{in_array.len()}.
     pub fn rlc(&mut self, out: &ExtCellId<Ext>, in_array: &[CellId], challenge: ChallengeId) {
-        assert_eq!(out.degree(), Ext::DEGREE);
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
         for (i, item) in in_array.iter().enumerate() {
             let c = ChallengeConst {
                 challenge,
                 exp: i as u64,
             };
-            rlc_base_term!(self, Ext::DEGREE, out.cells, *item; c);
+            rlc_base_term!(self, <Ext as ExtensionField>::DEGREE, out.cells, *item; c);
         }
         let c = ChallengeConst {
             challenge,
             exp: in_array.len() as u64,
         };
-        rlc_const_term!(self, Ext::DEGREE, out.cells; c);
+        rlc_const_term!(self, <Ext as ExtensionField>::DEGREE, out.cells; c);
     }
 
     /// Compute the random linear combination of `in_array` by challenge.
@@ -286,8 +295,8 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         in_array: &[ExtCellId<Ext>],
         challenge: ChallengeId,
     ) {
-        assert_eq!(out.degree(), Ext::DEGREE);
-        match Ext::DEGREE {
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
+        match <Ext as ExtensionField>::DEGREE {
             2 => self.rlc_ext_2(out, in_array, challenge),
             3 => self.rlc_ext_3(out, in_array, challenge),
             _ => unimplemented!(),
@@ -302,7 +311,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         in_array: &[MixedCell<Ext>],
         challenge: ChallengeId,
     ) {
-        assert_eq!(out.degree(), Ext::DEGREE);
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
         for (i, item) in in_array.iter().enumerate() {
             let c: ChallengeConst = ChallengeConst {
                 challenge,
@@ -310,14 +319,14 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
             };
             match item {
                 MixedCell::Constant(constant) => {
-                    rlc_const_term!(self, Ext::DEGREE, out.cells; c, *constant)
+                    rlc_const_term!(self, <Ext as ExtensionField>::DEGREE, out.cells; c, *constant)
                 }
                 MixedCell::Cell(cell_id) => {
-                    rlc_base_term!(self, Ext::DEGREE, out.cells, *cell_id; c)
+                    rlc_base_term!(self, <Ext as ExtensionField>::DEGREE, out.cells, *cell_id; c)
                 }
                 MixedCell::CellExpr(cell_id, a, b) => {
-                    rlc_base_term!(self, Ext::DEGREE, out.cells, *cell_id; c, *a);
-                    rlc_const_term!(self, Ext::DEGREE, out.cells; c, *b);
+                    rlc_base_term!(self, <Ext as ExtensionField>::DEGREE, out.cells, *cell_id; c, *a);
+                    rlc_const_term!(self, <Ext as ExtensionField>::DEGREE, out.cells; c, *b);
                 }
             }
         }
@@ -325,12 +334,12 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
             challenge,
             exp: in_array.len() as u64,
         };
-        rlc_const_term!(self, Ext::DEGREE, out.cells; c);
+        rlc_const_term!(self, <Ext as ExtensionField>::DEGREE, out.cells; c);
     }
 }
 
 // Internal APIs
-impl<Ext: SmallField> CircuitBuilder<Ext> {
+impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     /// let a1b1 = a.0[0] * b.0[0];
     /// let a1b2 = a.0[0] * b.0[1];
     /// let a2b1 = a.0[1] * b.0[0];
@@ -381,7 +390,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
         in_array: &[ExtCellId<Ext>],
         challenge: ChallengeId,
     ) {
-        assert_eq!(out.degree(), Ext::DEGREE);
+        assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
         for (i, item) in in_array.iter().enumerate() {
             let c = ChallengeConst {
                 challenge,
@@ -393,7 +402,7 @@ impl<Ext: SmallField> CircuitBuilder<Ext> {
             challenge,
             exp: in_array.len() as u64,
         };
-        rlc_const_term!(self, Ext::DEGREE, out.cells; c);
+        rlc_const_term!(self, <Ext as ExtensionField>::DEGREE, out.cells; c);
     }
 
     /// Random linear combinations for extension cells with degree = 3

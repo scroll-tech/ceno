@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
@@ -32,10 +32,10 @@ register_witness!(BasicBlockFinal, phase0 {
 });
 
 impl BasicBlockFinal {
-    pub(crate) fn construct_circuit<F: SmallField>(
+    pub(crate) fn construct_circuit<E: ExtensionField>(
         params: &BasicBlockInfo,
         challenges: ChipChallenges,
-    ) -> Result<BBFinalCircuit<F>, ZKVMError> {
+    ) -> Result<BBFinalCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let BasicBlockInfo {
             delta_stack_top,
@@ -76,15 +76,15 @@ impl BasicBlockFinal {
             &next_pc,
             next_stack_ts.values(),
             &memory_ts,
-            stack_top_expr.add(i64_to_base_field::<F>(delta_stack_top)),
-            clk_expr.add(F::BaseField::ONE),
+            stack_top_expr.add(i64_to_base_field::<E>(delta_stack_top)),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Check the of stack_top + offset.
-        let stack_top_l = stack_top_expr.add(i64_to_base_field::<F>(stack_top_offsets[0]));
+        let stack_top_l = stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[0]));
         rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
         let stack_top_r =
-            stack_top_expr.add(i64_to_base_field::<F>(stack_top_offsets[n_stack_items - 1]));
+            stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[n_stack_items - 1]));
         rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // From predesessor instruction
@@ -94,7 +94,7 @@ impl BasicBlockFinal {
                 let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_witness_in(1);
                 ram_handler.stack_push(
                     &mut circuit_builder,
-                    stack_top_expr.add(i64_to_base_field::<F>(*offset)),
+                    stack_top_expr.add(i64_to_base_field::<E>(*offset)),
                     stack_ts.values(),
                     &stack_from_insts,
                 );

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, mem};
 
+use ff_ext::ExtensionField;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use goldilocks::SmallField;
 use itertools::Itertools;
 use singer_utils::{chips::SingerChipBuilder, structs::ChipChallenges};
 
@@ -36,13 +36,13 @@ pub mod ret;
 pub mod unknown;
 
 #[derive(Clone, Debug)]
-pub struct SingerInstCircuitBuilder<F: SmallField> {
+pub struct SingerInstCircuitBuilder<E: ExtensionField> {
     /// Opcode circuits
-    pub(crate) insts_circuits: HashMap<u8, (InstCircuit<F>, Vec<AccessoryCircuit<F>>)>,
+    pub(crate) insts_circuits: HashMap<u8, (InstCircuit<E>, Vec<AccessoryCircuit<E>>)>,
     pub(crate) challenges: ChipChallenges,
 }
 
-impl<F: SmallField> SingerInstCircuitBuilder<F> {
+impl<E: ExtensionField> SingerInstCircuitBuilder<E> {
     pub fn new(challenges: ChipChallenges) -> Result<Self, ZKVMError> {
         let mut insts_circuits = HashMap::new();
         insts_circuits.insert(0x01, AddInstruction::construct_circuits(challenges)?);
@@ -62,15 +62,15 @@ impl<F: SmallField> SingerInstCircuitBuilder<F> {
     }
 }
 
-pub(crate) fn construct_inst_graph_and_witness<F: SmallField>(
+pub(crate) fn construct_inst_graph_and_witness<E: ExtensionField>(
     opcode: u8,
-    graph_builder: &mut CircuitGraphBuilder<F>,
-    chip_builder: &mut SingerChipBuilder<F>,
-    inst_circuit: &InstCircuit<F>,
-    acc_circuits: &[AccessoryCircuit<F>],
+    graph_builder: &mut CircuitGraphBuilder<E>,
+    chip_builder: &mut SingerChipBuilder<E>,
+    inst_circuit: &InstCircuit<E>,
+    acc_circuits: &[AccessoryCircuit<E>],
     preds: Vec<PredType>,
-    sources: Vec<CircuitWitnessIn<F::BaseField>>,
-    real_challenges: &[F],
+    sources: Vec<CircuitWitnessIn<E::BaseField>>,
+    real_challenges: &[E],
     real_n_instances: usize,
     params: &SingerParams,
 ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
@@ -96,12 +96,12 @@ pub(crate) fn construct_inst_graph_and_witness<F: SmallField>(
     )
 }
 
-pub(crate) fn construct_inst_graph<F: SmallField>(
+pub(crate) fn construct_inst_graph<E: ExtensionField>(
     opcode: u8,
-    graph_builder: &mut CircuitGraphBuilder<F>,
-    chip_builder: &mut SingerChipBuilder<F>,
-    inst_circuit: &InstCircuit<F>,
-    acc_circuits: &[AccessoryCircuit<F>],
+    graph_builder: &mut CircuitGraphBuilder<E>,
+    chip_builder: &mut SingerChipBuilder<E>,
+    inst_circuit: &InstCircuit<E>,
+    acc_circuits: &[AccessoryCircuit<E>],
     preds: Vec<PredType>,
     real_n_instances: usize,
     params: &SingerParams,
@@ -126,19 +126,19 @@ pub(crate) fn construct_inst_graph<F: SmallField>(
     )
 }
 
-pub(crate) trait Instruction<F: SmallField> {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError>;
+pub(crate) trait Instruction<E: ExtensionField> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError>;
 }
 
 /// Construct the part of the circuit graph for an instruction.
-pub(crate) trait InstructionGraph<F: SmallField> {
-    type InstType: Instruction<F>;
+pub(crate) trait InstructionGraph<E: ExtensionField> {
+    type InstType: Instruction<E>;
 
     /// Construct instruction circuits and its extensions. Mostly there is no
     /// extensions.
     fn construct_circuits(
         challenges: ChipChallenges,
-    ) -> Result<(InstCircuit<F>, Vec<AccessoryCircuit<F>>), ZKVMError> {
+    ) -> Result<(InstCircuit<E>, Vec<AccessoryCircuit<E>>), ZKVMError> {
         Ok((Self::InstType::construct_circuit(challenges)?, vec![]))
     }
 
@@ -146,13 +146,13 @@ pub(crate) trait InstructionGraph<F: SmallField> {
     /// Besides, Generate the tree-structured circuit to compute the product or
     /// fraction summation of the chip check wires.
     fn construct_graph_and_witness(
-        graph_builder: &mut CircuitGraphBuilder<F>,
-        chip_builder: &mut SingerChipBuilder<F>,
-        inst_circuit: &InstCircuit<F>,
-        _acc_circuits: &[AccessoryCircuit<F>],
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
+        inst_circuit: &InstCircuit<E>,
+        _acc_circuits: &[AccessoryCircuit<E>],
         preds: Vec<PredType>,
-        mut sources: Vec<CircuitWitnessIn<F::BaseField>>,
-        real_challenges: &[F],
+        mut sources: Vec<CircuitWitnessIn<E::BaseField>>,
+        real_challenges: &[E],
         real_n_instances: usize,
         _params: &SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
@@ -185,10 +185,10 @@ pub(crate) trait InstructionGraph<F: SmallField> {
     /// the tree-structured circuit to compute the product or fraction summation
     /// of the chip check wires.
     fn construct_graph(
-        graph_builder: &mut CircuitGraphBuilder<F>,
-        chip_builder: &mut SingerChipBuilder<F>,
-        inst_circuit: &InstCircuit<F>,
-        _acc_circuits: &[AccessoryCircuit<F>],
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
+        inst_circuit: &InstCircuit<E>,
+        _acc_circuits: &[AccessoryCircuit<E>],
         preds: Vec<PredType>,
         real_n_instances: usize,
         _params: &SingerParams,

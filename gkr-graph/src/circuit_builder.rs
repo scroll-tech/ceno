@@ -1,18 +1,18 @@
+use ff_ext::ExtensionField;
 use gkr::{
     structs::{Point, PointAndEval},
     utils::MultilinearExtensionFromVectors,
 };
-use goldilocks::SmallField;
 use itertools::Itertools;
 
 use crate::structs::{CircuitGraph, CircuitGraphWitness, NodeOutputType, TargetEvaluations};
 
-impl<F: SmallField> CircuitGraph<F> {
+impl<E: ExtensionField> CircuitGraph<E> {
     pub fn target_evals(
         &self,
-        witness: &CircuitGraphWitness<F::BaseField>,
-        point: &Point<F>,
-    ) -> TargetEvaluations<F> {
+        witness: &CircuitGraphWitness<E::BaseField>,
+        point: &Point<E>,
+    ) -> TargetEvaluations<E> {
         let target_evals = self
             .targets
             .iter()

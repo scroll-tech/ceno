@@ -1,18 +1,19 @@
 use std::cmp::max;
-use std::hash::Hash;
+use std::mem;
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
+use crate::mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension};
+use crate::util::bit_decompose;
 use ark_std::rand::Rng;
 use ark_std::{end_timer, start_timer};
+use ff::Field;
 use ff::PrimeField;
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
+use rayon::iter::IntoParallelIterator;
 use rayon::iter::IntoParallelRefIterator;
 use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use serde::{Deserialize, Serialize};
-
-use crate::mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension};
-use crate::util::bit_decompose;
 
 #[rustfmt::skip]
 /// A virtual polynomial is a sum of products of multilinear polynomials;
@@ -42,47 +43,37 @@ use crate::util::bit_decompose;
 /// - raw_pointers_lookup_table maps fi to i
 ///
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct VirtualPolynomial<F> {
+pub struct VirtualPolynomial<E: ExtensionField> {
     /// Aux information about the multilinear polynomial
-    pub aux_info: VPAuxInfo<F>,
+    pub aux_info: VPAuxInfo<E>,
     /// list of reference to products (as usize) of multilinear extension
-    pub products: Vec<(F, Vec<usize>)>,
+    pub products: Vec<(E::BaseField, Vec<usize>)>,
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
-    pub flattened_ml_extensions: Vec<ArcDenseMultilinearExtension<F>>,
+    pub flattened_ml_extensions: Vec<ArcDenseMultilinearExtension<E>>,
     /// Pointers to the above poly extensions
-    raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<F>, usize>,
+    raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<E>, usize>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 /// Auxiliary information about the multilinear polynomial
-pub struct VPAuxInfo<F> {
+pub struct VPAuxInfo<E> {
     /// max number of multiplicands in each product
     pub max_degree: usize,
     /// number of variables of the polynomial
     pub num_variables: usize,
     /// Associated field
     #[doc(hidden)]
-    pub phantom: PhantomData<F>,
+    pub phantom: PhantomData<E>,
 }
 
-impl<F: PrimeField> AsRef<[u8]> for VPAuxInfo<F> {
+impl<E: ExtensionField> AsRef<[u8]> for VPAuxInfo<E> {
     fn as_ref(&self) -> &[u8] {
         todo!()
     }
 }
 
-impl<F> VPAuxInfo<F> {
-    pub fn to_ext_field<Ext: SmallField<BaseField = F>>(&self) -> VPAuxInfo<Ext> {
-        VPAuxInfo::<Ext> {
-            max_degree: self.max_degree,
-            num_variables: self.num_variables,
-            phantom: PhantomData::default(),
-        }
-    }
-}
-
-impl<F: SmallField> VirtualPolynomial<F> {
+impl<E: ExtensionField> VirtualPolynomial<E> {
     /// Creates an empty virtual polynomial with `num_variables`.
     pub fn new(num_variables: usize) -> Self {
         VirtualPolynomial {
@@ -98,8 +89,8 @@ impl<F: SmallField> VirtualPolynomial<F> {
     }
 
     /// Creates an new virtual polynomial from a MLE and its coefficient.
-    pub fn new_from_mle(mle: ArcDenseMultilinearExtension<F>, coefficient: F) -> Self {
-        let mle_ptr: *const DenseMultilinearExtension<F> = Arc::as_ptr(&mle);
+    pub fn new_from_mle(mle: ArcDenseMultilinearExtension<E>, coefficient: E::BaseField) -> Self {
+        let mle_ptr: *const DenseMultilinearExtension<E> = Arc::as_ptr(&mle);
         let mut hm = HashMap::new();
         hm.insert(mle_ptr, 0);
 
@@ -123,8 +114,12 @@ impl<F: SmallField> VirtualPolynomial<F> {
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
     /// `coefficient`.
-    pub fn add_mle_list(&mut self, mle_list: Vec<ArcDenseMultilinearExtension<F>>, coefficient: F) {
-        let mle_list: Vec<ArcDenseMultilinearExtension<F>> = mle_list.into_iter().collect();
+    pub fn add_mle_list(
+        &mut self,
+        mle_list: Vec<ArcDenseMultilinearExtension<E>>,
+        coefficient: E::BaseField,
+    ) {
+        let mle_list: Vec<ArcDenseMultilinearExtension<E>> = mle_list.into_iter().collect();
         let mut indexed_product = Vec::with_capacity(mle_list.len());
 
         assert!(!mle_list.is_empty(), "input mle_list is empty");
@@ -138,7 +133,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
                 mle.num_vars, self.aux_info.num_variables
             );
 
-            let mle_ptr: *const DenseMultilinearExtension<F> = Arc::as_ptr(&mle);
+            let mle_ptr: *const DenseMultilinearExtension<E> = Arc::as_ptr(&mle);
             if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
                 indexed_product.push(*index)
             } else {
@@ -152,10 +147,10 @@ impl<F: SmallField> VirtualPolynomial<F> {
     }
 
     /// in-place merge with another virtual polynomial
-    pub fn merge(&mut self, other: &VirtualPolynomial<F>) {
+    pub fn merge(&mut self, other: &VirtualPolynomial<E>) {
         let start = start_timer!(|| "virtual poly add");
         for (coeffient, products) in other.products.iter() {
-            let cur: Vec<ArcDenseMultilinearExtension<F>> = products
+            let cur: Vec<ArcDenseMultilinearExtension<E>> = products
                 .iter()
                 .map(|&x| other.flattened_ml_extensions[x].clone())
                 .collect();
@@ -169,7 +164,8 @@ impl<F: SmallField> VirtualPolynomial<F> {
     /// - add the MLE to the MLE list;
     /// - multiple each product by MLE and its coefficient.
     /// Returns an error if the MLE has a different `num_vars` from self.
-    pub fn mul_by_mle(&mut self, mle: ArcDenseMultilinearExtension<F>, coefficient: F) {
+    #[tracing::instrument(skip_all, name = "mul_by_mle")]
+    pub fn mul_by_mle(&mut self, mle: ArcDenseMultilinearExtension<E>, coefficient: E::BaseField) {
         let start = start_timer!(|| "mul by mle");
 
         assert_eq!(
@@ -178,7 +174,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             mle.num_vars, self.aux_info.num_variables
         );
 
-        let mle_ptr: *const DenseMultilinearExtension<F> = Arc::as_ptr(&mle);
+        let mle_ptr: *const DenseMultilinearExtension<E> = Arc::as_ptr(&mle);
 
         // check if this mle already exists in the virtual polynomial
         let mle_index = match self.raw_pointers_lookup_table.get(&mle_ptr) {
@@ -205,7 +201,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
 
     /// Evaluate the virtual polynomial at point `point`.
     /// Returns an error is point.len() does not match `num_variables`.
-    pub fn evaluate(&self, point: &[F]) -> F {
+    pub fn evaluate(&self, point: &[E]) -> E {
         let start = start_timer!(|| "evaluation");
 
         assert_eq!(
@@ -216,7 +212,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
             point.len()
         );
 
-        let evals: Vec<F> = self
+        let evals: Vec<E> = self
             .flattened_ml_extensions
             .iter()
             .map(|x| x.evaluate(point))
@@ -225,7 +221,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
         let res = self
             .products
             .iter()
-            .map(|(c, p)| *c * p.iter().map(|&i| evals[i]).product::<F>())
+            .map(|(c, p)| p.iter().map(|&i| evals[i]).product::<E>() * *c)
             .sum();
 
         end_timer!(start);
@@ -238,17 +234,17 @@ impl<F: SmallField> VirtualPolynomial<F> {
         num_multiplicands_range: (usize, usize),
         num_products: usize,
         mut rng: &mut impl Rng,
-    ) -> (Self, F) {
+    ) -> (Self, E) {
         let start = start_timer!(|| "sample random virtual polynomial");
 
-        let mut sum = F::ZERO;
+        let mut sum = E::ZERO;
         let mut poly = VirtualPolynomial::new(nv);
         for _ in 0..num_products {
             let num_multiplicands =
                 rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
             let (product, product_sum) =
                 DenseMultilinearExtension::random_mle_list(nv, num_multiplicands, rng);
-            let coefficient = F::random(&mut rng);
+            let coefficient = E::BaseField::random(&mut rng);
             poly.add_mle_list(product, coefficient);
             sum += product_sum * coefficient;
         }
@@ -271,7 +267,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
                 rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
             let product =
                 DenseMultilinearExtension::random_zero_mle_list(nv, num_multiplicands, rng);
-            let coefficient = F::random(&mut rng);
+            let coefficient = E::BaseField::random(&mut rng);
             poly.add_mle_list(product, coefficient);
         }
 
@@ -284,7 +280,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
     //      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
     //
     // This function is used in ZeroCheck.
-    pub fn build_f_hat(&self, r: &[F]) -> Self {
+    pub fn build_f_hat(&self, r: &[E]) -> Self {
         let start = start_timer!(|| "zero check build hat f");
 
         assert_eq!(
@@ -297,7 +293,7 @@ impl<F: SmallField> VirtualPolynomial<F> {
 
         let eq_x_r = build_eq_x_r(r);
         let mut res = self.clone();
-        res.mul_by_mle(eq_x_r, F::ONE);
+        res.mul_by_mle(eq_x_r, E::BaseField::ONE);
 
         end_timer!(start);
         res
@@ -310,38 +306,33 @@ impl<F: SmallField> VirtualPolynomial<F> {
         }
         for i in 0..1 << self.aux_info.num_variables {
             let point = bit_decompose(i, self.aux_info.num_variables);
-            let point_fr: Vec<F> = point.iter().map(|&x| F::from(x as u64)).collect();
+            let point_fr: Vec<E> = point.iter().map(|&x| E::from(x as u64)).collect();
             println!("{} {:?}", i, self.evaluate(point_fr.as_ref()))
         }
         println!()
     }
 
     // TODO: This seems expensive. Is there a better way to covert poly into its ext fields?
-    pub fn to_ext_field<Ext: SmallField<BaseField = F> + Hash>(&self) -> VirtualPolynomial<Ext> {
+    pub fn to_ext_field(&self) -> VirtualPolynomial<E> {
         let timer = start_timer!(|| "convert VP to ext field");
-        let aux_info = self.aux_info.to_ext_field();
-        let products = self
-            .products
-            .iter()
-            .map(|(f, v)| (Ext::from_base(f), v.clone()))
-            .collect();
+        let products = self.products.iter().map(|(f, v)| (*f, v.clone())).collect();
 
         let mut flattened_ml_extensions = vec![];
         let mut hm = HashMap::new();
         for mle in self.flattened_ml_extensions.iter() {
-            let mle_ptr: *const DenseMultilinearExtension<F> = Arc::as_ptr(mle);
+            let mle_ptr: *const DenseMultilinearExtension<E> = Arc::as_ptr(mle);
             let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
 
             let mle_ext_field = mle.as_ref().to_ext_field();
             let mle_ext_field = Arc::new(mle_ext_field);
-            let mle_ext_field_ptr: *const DenseMultilinearExtension<Ext> =
+            let mle_ext_field_ptr: *const DenseMultilinearExtension<E> =
                 Arc::as_ptr(&mle_ext_field);
             flattened_ml_extensions.push(mle_ext_field);
             hm.insert(mle_ext_field_ptr, *index);
         }
         end_timer!(timer);
         VirtualPolynomial {
-            aux_info,
+            aux_info: self.aux_info.clone(),
             products,
             flattened_ml_extensions,
             raw_pointers_lookup_table: hm,
@@ -369,9 +360,9 @@ pub fn eq_eval<F: PrimeField>(x: &[F], y: &[F]) -> F {
 ///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 /// over r, which is
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> ArcDenseMultilinearExtension<F> {
+pub fn build_eq_x_r<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
     let evals = build_eq_x_r_vec(r);
-    let mle = DenseMultilinearExtension::from_evaluations_vec(r.len(), evals);
+    let mle = DenseMultilinearExtension::from_evaluations_ext_vec(r.len(), evals);
 
     mle.into()
 }
@@ -384,7 +375,11 @@ pub fn build_eq_x_r<F: SmallField>(r: &[F]) -> ArcDenseMultilinearExtension<F> {
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
 
 #[tracing::instrument(skip_all, name = "multilinear_extensions::build_eq_x_r_vec")]
-pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
+pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
+    // avoid unnecessary allocation
+    if r.is_empty() {
+        return vec![E::ONE];
+    }
     // we build eq(x,r) from its evaluations
     // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
     // for example, with num_vars = 4, x is a binary vector of 4, then
@@ -396,61 +391,43 @@ pub fn build_eq_x_r_vec<F: PrimeField>(r: &[F]) -> Vec<F> {
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
 
-    let mut eval = vec![F::ZERO; 1 << r.len()];
-    build_eq_x_r_helper(r, &mut eval);
+    let mut evals: [Vec<E>; 2] = (0..2) // allocate 2 vector as rolling buffer
+        .into_par_iter()
+        .map(|_| vec![E::ZERO; 1 << r.len()])
+        .collect::<Vec<Vec<E>>>()
+        .try_into()
+        .unwrap();
+    build_eq_x_r_helper(r, &mut evals);
 
-    eval
+    mem::take(&mut evals[0])
 }
 
 /// A helper function to build eq(x, r) via dynamic programing tricks.
 /// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
-fn build_eq_x_r_helper<F: PrimeField>(r: &[F], buf: &mut Vec<F>) {
-    assert!(
-        buf.len() == 1 << r.len(),
-        "invalid buffer length {} giving r size {}",
-        buf.len(),
-        r.len()
-    );
+fn build_eq_x_r_helper<E: ExtensionField>(r: &[E], buf: &mut [Vec<E>; 2]) {
+    buf[0][0] = E::ONE;
     if r.is_empty() {
-        buf.resize(1, F::ZERO);
-        buf[0] = F::ONE;
+        buf[0].resize(1, E::ZERO);
         return;
     }
-
-    buf[0] = F::ONE;
     for (i, r) in r.iter().rev().enumerate() {
-        let size = 1 << (i + 1);
+        let [current, next] = buf;
+        let (cur_size, next_size) = (1 << i, 1 << (i + 1));
         // suppose at the previous step we processed buf [0..size]
         // for the current step we are populating new buf[0..2*size]
         // for j travese 0..size
         // buf[2*j + 1] = r * buf[j]
         // buf[2*j] = (1 - r) * buf[j]
-        if size <= 2 {
-            buf[0] = F::ONE - *r;
-            buf[1] = *r;
-        } else {
-            let (half_buf_len, quar_buf_len) = (size >> 1, size >> 2);
-            let (low_buf, high_buf) = buf.split_at_mut(half_buf_len);
-
-            // update second half in-place parallelly
-            // use buf[quar_buf_len..half_buf_len] to update buf[half_buf_len..size]
-            high_buf
-                .par_chunks_mut(2)
-                .with_min_len(64)
-                .zip(low_buf.par_iter().skip(quar_buf_len))
-                .for_each(|(buf, prev_val)| {
-                    assert!(buf.len() == 2);
-                    let tmp = *r * prev_val;
-                    buf[1] = tmp;
-                    buf[0] = *prev_val - tmp;
-                });
-            // update first half in-place sequentially
-            // use buf[0..quar_buf_len] to update buf[0..half_buf_len], in reverse order
-            for j in (0..quar_buf_len).rev() {
-                let tmp = *r * buf[j];
-                buf[(j << 1) + 1] = tmp;
-                buf[j << 1] = buf[j] - tmp;
-            }
-        }
+        current[0..cur_size]
+            .par_iter()
+            .zip_eq(next[0..next_size].par_chunks_mut(2))
+            .with_min_len(64)
+            .for_each(|(prev_val, next_vals)| {
+                assert!(next_vals.len() == 2);
+                let tmp = *r * prev_val;
+                next_vals[1] = tmp;
+                next_vals[0] = *prev_val - tmp;
+            });
+        buf.swap(0, 1); // swap rolling buffer
     }
 }

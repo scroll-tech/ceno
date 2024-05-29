@@ -1,5 +1,5 @@
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
@@ -32,10 +32,10 @@ pub struct BBReturnRestMemLoad;
 pub struct BBReturnRestMemStore;
 
 impl BasicBlockReturn {
-    pub(crate) fn construct_circuit<F: SmallField>(
+    pub(crate) fn construct_circuit<E: ExtensionField>(
         params: &BasicBlockInfo,
         challenges: ChipChallenges,
-    ) -> Result<BBFinalCircuit<F>, ZKVMError> {
+    ) -> Result<BBFinalCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let BasicBlockInfo {
             delta_stack_top: _,
@@ -55,10 +55,10 @@ impl BasicBlockReturn {
 
         // Check the of stack_top + offset.
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
-        let stack_top_l = stack_top_expr.add(i64_to_base_field::<F>(stack_top_offsets[0]));
+        let stack_top_l = stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[0]));
         rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
         let stack_top_r =
-            stack_top_expr.add(i64_to_base_field::<F>(stack_top_offsets[n_stack_items - 1]));
+            stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[n_stack_items - 1]));
         rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // From predesessor instruction
@@ -69,7 +69,7 @@ impl BasicBlockReturn {
                 let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_witness_in(1);
                 ram_handler.stack_push(
                     &mut circuit_builder,
-                    stack_top_expr.add(i64_to_base_field::<F>(*offset)),
+                    stack_top_expr.add(i64_to_base_field::<E>(*offset)),
                     &stack_ts,
                     &stack_from_insts,
                 );
@@ -119,9 +119,9 @@ register_witness!(
 );
 
 impl BBReturnRestMemLoad {
-    pub(crate) fn construct_circuit<F: SmallField>(
+    pub(crate) fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
-    ) -> Result<AccessoryCircuit<F>, ZKVMError> {
+    ) -> Result<AccessoryCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -165,9 +165,9 @@ register_witness!(
 );
 
 impl BBReturnRestMemStore {
-    pub(crate) fn construct_circuit<F: SmallField>(
+    pub(crate) fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
-    ) -> Result<AccessoryCircuit<F>, ZKVMError> {
+    ) -> Result<AccessoryCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -212,9 +212,9 @@ register_witness!(
 );
 
 impl BBReturnRestStackPop {
-    pub(crate) fn construct_circuit<F: SmallField>(
+    pub(crate) fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
-    ) -> Result<AccessoryCircuit<F>, ZKVMError> {
+    ) -> Result<AccessoryCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);

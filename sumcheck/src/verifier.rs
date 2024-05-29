@@ -1,5 +1,5 @@
 use ark_std::{end_timer, start_timer};
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use multilinear_extensions::virtual_poly::VPAuxInfo;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use transcript::{Challenge, Transcript};
@@ -9,17 +9,18 @@ use crate::{
     util::interpolate_uni_poly,
 };
 
-impl<F: SmallField> IOPVerifierState<F> {
+impl<E: ExtensionField> IOPVerifierState<E> {
     pub fn verify(
-        claimed_sum: F,
-        proof: &IOPProof<F>,
-        aux_info: &VPAuxInfo<F>,
-        transcript: &mut Transcript<F>,
-    ) -> SumCheckSubClaim<F> {
+        claimed_sum: E,
+        proof: &IOPProof<E>,
+        aux_info: &VPAuxInfo<E>,
+        transcript: &mut Transcript<E>,
+    ) -> SumCheckSubClaim<E> {
         if aux_info.num_variables == 0 {
             return SumCheckSubClaim {
                 point: vec![],
                 expected_evaluation: claimed_sum,
+                ..Default::default()
             };
         }
         let start = start_timer!(|| "sum check verify");
@@ -33,7 +34,7 @@ impl<F: SmallField> IOPVerifierState<F> {
             prover_msg
                 .evaluations
                 .iter()
-                .for_each(|e| transcript.append_field_element(e));
+                .for_each(|e| transcript.append_field_element_ext(e));
             Self::verify_round_and_update_state(&mut verifier_state, prover_msg, transcript);
         }
 
@@ -44,7 +45,7 @@ impl<F: SmallField> IOPVerifierState<F> {
     }
 
     /// Initialize the verifier's state.
-    pub fn verifier_init(index_info: &VPAuxInfo<F>) -> Self {
+    pub fn verifier_init(index_info: &VPAuxInfo<E>) -> Self {
         let start = start_timer!(|| "sum check verifier init");
         let res = Self {
             round: 1,
@@ -66,9 +67,9 @@ impl<F: SmallField> IOPVerifierState<F> {
     /// at the last step.
     pub(crate) fn verify_round_and_update_state(
         &mut self,
-        prover_msg: &IOPProverMessage<F>,
-        transcript: &mut Transcript<F>,
-    ) -> Challenge<F> {
+        prover_msg: &IOPProverMessage<E>,
+        transcript: &mut Transcript<E>,
+    ) -> Challenge<E> {
         let start =
             start_timer!(|| format!("sum check verify {}-th round and update state", self.round));
 
@@ -110,7 +111,7 @@ impl<F: SmallField> IOPVerifierState<F> {
     /// evaluated at `subclaim.point` will be `subclaim.expected_evaluation`.
     /// Otherwise, it is highly unlikely that those two will be equal.
     /// Larger field size guarantees smaller soundness error.
-    pub(crate) fn check_and_generate_subclaim(&self, asserted_sum: &F) -> SumCheckSubClaim<F> {
+    pub(crate) fn check_and_generate_subclaim(&self, asserted_sum: &E) -> SumCheckSubClaim<E> {
         let start = start_timer!(|| "sum check check and generate subclaim");
         if !self.finished {
             panic!("Incorrect verifier state: Verifier has not finished.",);
@@ -136,8 +137,7 @@ impl<F: SmallField> IOPVerifierState<F> {
                         self.max_degree + 1
                     );
                 }
-                // fixme: move to extension field
-                interpolate_uni_poly::<F>(&evaluations, challenge.elements)
+                interpolate_uni_poly::<E>(&evaluations, challenge.elements)
             })
             .collect::<Vec<_>>();
 
@@ -166,6 +166,7 @@ impl<F: SmallField> IOPVerifierState<F> {
             // the last expected value (not checked within this function) will be included in the
             // subclaim
             expected_evaluation: expected_vec[self.num_vars],
+            ..Default::default()
         }
     }
 }

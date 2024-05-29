@@ -1,5 +1,5 @@
 use ark_std::{end_timer, start_timer};
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, VPAuxInfo};
 use std::mem;
@@ -14,12 +14,12 @@ use crate::{
 
 use super::SumcheckState;
 
-impl<F: SmallField> IOPVerifierState<F> {
+impl<E: ExtensionField> IOPVerifierState<E> {
     pub(super) fn verify_and_update_state_input_phase2_step1(
         &mut self,
-        circuit: &Circuit<F>,
-        step_msg: IOPProverStepMessage<F>,
-        transcript: &mut Transcript<F>,
+        circuit: &Circuit<E>,
+        step_msg: IOPProverStepMessage<E>,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 2 step 1");
         let layer = &circuit.layers[self.layer_id as usize];
@@ -37,16 +37,16 @@ impl<F: SmallField> IOPVerifierState<F> {
             .paste_from_consts_in
             .iter()
             .map(|(c, (l, r))| {
-                let c = i64_to_field::<F::BaseField>(*c);
+                let c = i64_to_field::<E::BaseField>(*c);
                 let segment_greater_than_l_1 = if *l == 0 {
-                    F::ONE
+                    E::ONE
                 } else {
                     segment_eval_greater_than(l - 1, lo_point)
                 };
                 let segment_greater_than_r_1 = segment_eval_greater_than(r - 1, lo_point);
-                (segment_greater_than_l_1 - segment_greater_than_r_1).mul_base(&c)
+                (segment_greater_than_l_1 - segment_greater_than_r_1) * &c
             })
-            .sum::<F>();
+            .sum::<E>();
 
         let mut sumcheck_sigma = self.to_next_step_point_and_eval.eval - g_value_const;
         if !layer.add_consts.is_empty() {
@@ -57,7 +57,7 @@ impl<F: SmallField> IOPVerifierState<F> {
         }
 
         if lo_in_num_vars.is_none() {
-            if sumcheck_sigma != F::ZERO {
+            if sumcheck_sigma != E::ZERO {
                 return Err(GKRError::VerifyError("input phase2 step1 failed"));
             }
             return Ok(());
@@ -88,7 +88,7 @@ impl<F: SmallField> IOPVerifierState<F> {
         .map(|(l, r)| {
             (l..r)
                 .map(|i| self.eq_y_ry[i] * self.eq_x1_rx1[i - l])
-                .sum::<F>()
+                .sum::<E>()
         });
 
         // TODO: Double check here.
@@ -100,8 +100,8 @@ impl<F: SmallField> IOPVerifierState<F> {
                 counter_eval(num_vars + hi_num_vars, &point)
                     * claim_point[*num_vars..]
                         .iter()
-                        .map(|x| F::ONE - *x)
-                        .product::<F>()
+                        .map(|x| E::ONE - *x)
+                        .product::<E>()
             })
             .collect_vec();
         let got_value = izip!(
@@ -112,7 +112,7 @@ impl<F: SmallField> IOPVerifierState<F> {
             g_values_iter
         )
         .map(|(f, g)| *f * g)
-        .sum::<F>();
+        .sum::<E>();
 
         self.to_next_phase_point_and_evals = izip!(
             circuit.paste_from_wits_in.iter(),
@@ -124,15 +124,15 @@ impl<F: SmallField> IOPVerifierState<F> {
             let wit_in_eval = eval
                 * claim_point[num_vars..]
                     .iter()
-                    .map(|x| F::ONE - *x)
-                    .product::<F>()
+                    .map(|x| E::ONE - *x)
+                    .product::<E>()
                     .invert()
                     .unwrap();
             PointAndEval::new_from_ref(&point, &wit_in_eval)
         })
         .collect_vec();
         self.to_next_step_point_and_eval =
-            PointAndEval::new([&claim_point, hi_point].concat(), F::ZERO);
+            PointAndEval::new([&claim_point, hi_point].concat(), E::ZERO);
 
         end_timer!(timer);
         if claim.expected_evaluation != got_value {

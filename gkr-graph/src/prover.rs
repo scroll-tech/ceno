@@ -1,5 +1,5 @@
+use ff_ext::ExtensionField;
 use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
-use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use std::mem;
 use transcript::Transcript;
@@ -12,13 +12,13 @@ use crate::{
     },
 };
 
-impl<F: SmallField> IOPProverState<F> {
+impl<E: ExtensionField> IOPProverState<E> {
     pub fn prove(
-        circuit: &CircuitGraph<F>,
-        circuit_witness: &CircuitGraphWitness<F::BaseField>,
-        target_evals: &TargetEvaluations<F>,
-        transcript: &mut Transcript<F>,
-    ) -> Result<IOPProof<F>, GKRGraphError> {
+        circuit: &CircuitGraph<E>,
+        circuit_witness: &CircuitGraphWitness<E::BaseField>,
+        target_evals: &TargetEvaluations<E>,
+        transcript: &mut Transcript<E>,
+    ) -> Result<IOPProof<E>, GKRGraphError> {
         assert_eq!(target_evals.0.len(), circuit.targets.len());
 
         let mut output_evals = vec![vec![]; circuit.nodes.len()];

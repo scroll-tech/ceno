@@ -426,6 +426,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ff_ext"
+version = "0.1.0"
+dependencies = [
+ "ff",
+ "goldilocks",
+ "serde",
+]
+
+[[package]]
 name = "findshlibs"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -478,6 +487,7 @@ dependencies = [
  "cfg-if",
  "criterion",
  "ff",
+ "ff_ext",
  "goldilocks",
  "itertools 0.12.1",
  "multilinear_extensions",
@@ -500,6 +510,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "ff",
+ "ff_ext",
  "gkr",
  "goldilocks",
  "itertools 0.12.1",
@@ -512,7 +523,7 @@ dependencies = [
 [[package]]
 name = "goldilocks"
 version = "0.1.0"
-source = "git+https://github.com/zhenfeizhang/Goldilocks#bffec3f0a7e8592dc32849dcce4a6cc4b3615e48"
+source = "git+https://github.com/hero78119/Goldilocks#e400454b2689530fbd0dc14d2b6dc5eb6f96c973"
 dependencies = [
  "ff",
  "halo2curves",
@@ -728,6 +739,7 @@ name = "mpcs"
 version = "0.1.0"
 dependencies = [
  "ff",
+ "ff_ext",
  "goldilocks",
  "multilinear_extensions",
  "serde",
@@ -740,6 +752,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "ff",
+ "ff_ext",
  "goldilocks",
  "rayon",
  "serde",
@@ -1200,6 +1213,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "ff",
+ "ff_ext",
  "goldilocks",
  "itertools 0.12.1",
  "rayon",
@@ -1212,6 +1226,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "ff",
+ "ff_ext",
  "gkr",
  "gkr-graph",
  "goldilocks",
@@ -1234,6 +1249,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "ff",
+ "ff_ext",
  "gkr",
  "gkr-graph",
  "goldilocks",
@@ -1253,6 +1269,7 @@ name = "singer-utils"
 version = "0.1.0"
 dependencies = [
  "ff",
+ "ff_ext",
  "gkr",
  "gkr-graph",
  "goldilocks",
@@ -1343,6 +1360,7 @@ dependencies = [
  "ark-ff",
  "ark-std",
  "ff",
+ "ff_ext",
  "goldilocks",
  "multilinear_extensions",
  "rayon",
@@ -1541,6 +1559,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "ff",
+ "ff_ext",
  "goldilocks",
  "halo2curves",
  "poseidon",

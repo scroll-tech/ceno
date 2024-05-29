@@ -1,5 +1,5 @@
 use ark_std::{end_timer, start_timer};
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{ChallengeConst, LayerId};
 use std::collections::HashMap;
@@ -18,19 +18,19 @@ mod phase2;
 mod phase2_input;
 mod phase2_linear;
 
-type SumcheckState<F> = sumcheck::structs::IOPVerifierState<F>;
+type SumcheckState<E> = sumcheck::structs::IOPVerifierState<E>;
 
-impl<F: SmallField> IOPVerifierState<F> {
+impl<E: ExtensionField> IOPVerifierState<E> {
     /// Verify process for data parallel circuits.
     pub fn verify_parallel(
-        circuit: &Circuit<F>,
-        challenges: &[F],
-        output_evals: Vec<PointAndEval<F>>,
-        wires_out_evals: Vec<PointAndEval<F>>,
-        proof: IOPProof<F>,
+        circuit: &Circuit<E>,
+        challenges: &[E],
+        output_evals: Vec<PointAndEval<E>>,
+        wires_out_evals: Vec<PointAndEval<E>>,
+        proof: IOPProof<E>,
         instance_num_vars: usize,
-        transcript: &mut Transcript<F>,
-    ) -> Result<GKRInputClaims<F>, GKRError> {
+        transcript: &mut Transcript<E>,
+    ) -> Result<GKRInputClaims<E>, GKRError> {
         let timer = start_timer!(|| "Verification");
         let challenges = circuit.generate_basefield_challenges(challenges);
 
@@ -102,11 +102,11 @@ impl<F: SmallField> IOPVerifierState<F> {
     /// Initialize verifying state for data parallel circuits.
     fn verifier_init_parallel(
         n_layers: usize,
-        challenges: HashMap<ChallengeConst, Vec<F::BaseField>>,
-        output_evals: Vec<PointAndEval<F>>,
-        wires_out_evals: Vec<PointAndEval<F>>,
+        challenges: HashMap<ChallengeConst, Vec<E::BaseField>>,
+        output_evals: Vec<PointAndEval<E>>,
+        wires_out_evals: Vec<PointAndEval<E>>,
         instance_num_vars: usize,
-        transcript: &mut Transcript<F>,
+        transcript: &mut Transcript<E>,
         output_wit_num_vars: usize,
     ) -> Self {
         let mut subset_point_and_evals = vec![vec![]; n_layers];

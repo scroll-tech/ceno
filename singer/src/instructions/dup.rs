@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -21,7 +21,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct DupInstruction<const N: usize>;
 
-impl<F: SmallField, const N: usize> InstructionGraph<F> for DupInstruction<N> {
+impl<E: ExtensionField, const N: usize> InstructionGraph<E> for DupInstruction<N> {
     type InstType = Self;
 }
 
@@ -51,8 +51,8 @@ impl<const N: usize> DupInstruction<N> {
     };
 }
 
-impl<F: SmallField, const N: usize> Instruction<F> for DupInstruction<N> {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -89,14 +89,14 @@ impl<F: SmallField, const N: usize> Instruction<F> for DupInstruction<N> {
             next_pc.values(),
             next_stack_ts.values(),
             &memory_ts,
-            stack_top_expr.add(F::BaseField::from(1)),
-            clk_expr.add(F::BaseField::ONE),
+            stack_top_expr.add(E::BaseField::from(1)),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Check the range of stack_top - N is within [0, 1 << STACK_TOP_BIT_WIDTH).
         rom_handler.range_check_stack_top(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(N as u64)),
+            stack_top_expr.sub(E::BaseField::from(N as u64)),
         )?;
 
         // Pop rlc of stack[top - N] from stack
@@ -111,7 +111,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for DupInstruction<N> {
         let stack_values = &phase0[Self::phase0_stack_values()];
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(1)),
+            stack_top_expr.sub(E::BaseField::from(1)),
             old_stack_ts.values(),
             stack_values,
         );
@@ -121,7 +121,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for DupInstruction<N> {
         // Push stack_values twice to stack
         ram_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(1)),
+            stack_top_expr.sub(E::BaseField::from(1)),
             stack_ts.values(),
             stack_values,
         );

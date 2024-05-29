@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -22,7 +22,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct JumpInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for JumpInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for JumpInstruction {
     type InstType = Self;
 }
 
@@ -46,8 +46,8 @@ impl JumpInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMP;
 }
 
-impl<F: SmallField> Instruction<F> for JumpInstruction {
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+impl<E: ExtensionField> Instruction<E> for JumpInstruction {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -72,7 +72,7 @@ impl<F: SmallField> Instruction<F> for JumpInstruction {
 
         // Pop next pc from stack
         rom_handler
-            .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(F::BaseField::ONE))?;
+            .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(E::BaseField::ONE))?;
 
         let next_pc = &phase0[Self::phase0_next_pc()];
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
@@ -85,7 +85,7 @@ impl<F: SmallField> Instruction<F> for JumpInstruction {
         )?;
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts.values(),
             next_pc,
         );
@@ -95,8 +95,8 @@ impl<F: SmallField> Instruction<F> for JumpInstruction {
             &next_pc,
             stack_ts.values(), // Because there is no stack push.
             &memory_ts,
-            stack_top_expr.sub(F::BaseField::from(1)),
-            clk_expr.add(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::from(1)),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Bytecode check for (pc, jump)
@@ -129,7 +129,7 @@ mod test {
     use crate::instructions::{ChipChallenges, Instruction, JumpInstruction};
     use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
 
-    use goldilocks::Goldilocks;
+    use goldilocks::{Goldilocks, GoldilocksExt2};
     use simple_frontend::structs::CellId;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
     use singer_utils::structs::TSUInt;
@@ -207,9 +207,9 @@ mod test {
         );
 
         let circuit_witness_challenges = vec![
-            Goldilocks::from(2),
-            Goldilocks::from(2),
-            Goldilocks::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
         ];
 
         test_opcode_circuit(
