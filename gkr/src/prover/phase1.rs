@@ -164,7 +164,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let span = entered_span!("f2_fix_variables");
         // f2(t) = layers[i](t || ry)
-        let f2 = self.phase1_layer_polys[self.layer_id as usize]
+        let f2 = mem::take(&mut self.phase1_layer_polys[self.layer_id as usize])
             .fix_variables(&self.to_next_step_point)
             .into();
         exit_span!(span);

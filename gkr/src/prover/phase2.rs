@@ -6,19 +6,16 @@ use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use simple_frontend::structs::ConstantType;
-use std::sync::Arc;
+use std::{mem, sync::Arc};
+
 use sumcheck::{entered_span, exit_span};
 use transcript::Transcript;
 
 #[cfg(feature = "parallel")]
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, ParallelIterator},
     prelude::ParallelSliceMut,
 };
-
-#[cfg(feature = "parallel")]
-use std::collections::BTreeMap;
 
 #[cfg(feature = "parallel")]
 use crate::structs::Step::{Step1, Step2, Step3};
@@ -30,22 +27,39 @@ use crate::unsafe_utils::UnsafeSlice;
 use crate::{
     circuit::EvaluateConstant,
     izip_parallizable,
-    structs::{Circuit, CircuitWitness, Gate, IOPProverState, IOPProverStepMessage, PointAndEval},
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
 };
 
 use super::SumcheckState;
 
-trait GateEval<F, T> {
-    fn eval(&self, s: usize, gates: &T) -> F;
-}
+macro_rules! prepare_stepx_g_fn {
+    (&mut $a:ident, $b:ident $(,$c:ident, |$s:ident, $g:ident| $op:expr)* $(,)?) => {
+        $a
+            // each chunk hold one instance data
+            .par_chunks_mut(1 << $b)
+            // enumerated index is the instance index
+            .enumerate()
+            .for_each(|(s, evals_vec)| {
+                use std::iter;
+                evals_vec
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(fanin_cellid, eval_holder)| {
+                        let gates_iter = iter::empty();
 
-impl<FnI, F, T> GateEval<F, T> for FnI
-where
-    FnI: Fn(usize, &T) -> F,
-{
-    fn eval(&self, s: usize, gates: &T) -> F {
-        self(s, gates)
-    }
+                        $(
+                            let v = Vec::default();
+                            let gates_iter = gates_iter.chain($c.get(&fanin_cellid).unwrap_or_else(|| &v).iter().map(|$g| {
+                                let $s = s;
+                                $op
+                            }));
+                        )*
+
+                        *eval_holder = gates_iter
+                            .fold(E::ZERO, |acc, item| acc + item);
+                    });
+            });
+    };
 }
 
 // Prove the computation in the current layer for data parallel circuits.
@@ -104,64 +118,34 @@ impl<E: ExtensionField> IOPProverState<E> {
             // ) ) ) ) + \sum_{s2}( \sum_{x2}(
             //     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
             // ) ) + eq(rt, s1) * add(ry, x1)
-            let mul3_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 3>| -> E {
-                self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                    * (&phase2_next_layer_vec[s][gate.idx_in[1]])
-                    * (&phase2_next_layer_vec[s][gate.idx_in[2]])
-                    * (&gate.scalar.eval(&challenges))
-            };
-            let mul2_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 2>| -> E {
-                self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                    * (&phase2_next_layer_vec[s][gate.idx_in[1]])
-                    * (&gate.scalar.eval(&challenges))
-            };
-            let adds_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 1>| -> E {
-                self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                    * (&gate.scalar.eval(&challenges))
-            };
-
             #[cfg(feature = "parallel")]
             let g1 = {
-                let (g1_mul3s, (g1_mul2s, g1_adds)) = rayon::join(
-                    || {
-                        let mut g1_mul3s = vec![E::ZERO; 1 << in_num_vars];
-                        Self::prepare_stepx_g_fn(
-                            &mut g1_mul3s,
-                            lo_in_num_vars,
-                            &layer.mul3s_fanin_mapping[Step1 as usize],
-                            mul3_gate_fn,
-                        );
-                        g1_mul3s
+                let mut g1 = vec![E::ZERO; 1 << in_num_vars];
+                let mul3s_fanin_mapping = &layer.mul3s_fanin_mapping[Step1 as usize];
+                let mul2s_fanin_mapping = &layer.mul2s_fanin_mapping[Step1 as usize];
+                let adds_fanin_mapping = &layer.adds_fanin_mapping[Step1 as usize];
+                prepare_stepx_g_fn!(
+                    &mut g1,
+                    lo_in_num_vars,
+                    mul3s_fanin_mapping,
+                    |s, gate| {
+                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
+                            * (&phase2_next_layer_vec[s][gate.idx_in[1]])
+                            * (&phase2_next_layer_vec[s][gate.idx_in[2]])
+                            * (&gate.scalar.eval(&challenges))
                     },
-                    || {
-                        rayon::join(
-                            || {
-                                let mut g1_mul2s = vec![E::ZERO; 1 << in_num_vars];
-                                Self::prepare_stepx_g_fn(
-                                    &mut g1_mul2s,
-                                    lo_in_num_vars,
-                                    &layer.mul2s_fanin_mapping[Step1 as usize],
-                                    mul2_gate_fn,
-                                );
-                                g1_mul2s
-                            },
-                            || {
-                                let mut g1_adds = vec![E::ZERO; 1 << in_num_vars];
-                                Self::prepare_stepx_g_fn(
-                                    &mut g1_adds,
-                                    lo_in_num_vars,
-                                    &layer.adds_fanin_mapping[Step1 as usize],
-                                    adds_gate_fn,
-                                );
-                                g1_adds
-                            },
-                        )
+                    mul2s_fanin_mapping,
+                    |s, gate| {
+                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
+                            * (&phase2_next_layer_vec[s][gate.idx_in[1]])
+                            * (&gate.scalar.eval(&challenges))
                     },
+                    adds_fanin_mapping,
+                    |s, gate| {
+                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
+                            * (&gate.scalar.eval(&challenges))
+                    }
                 );
-                let g1 = izip_parallizable!(g1_mul3s, g1_mul2s, g1_adds)
-                    .with_min_len(64)
-                    .map(|(g1_mul3s, g1_mul2s, g1_adds)| g1_mul3s + g1_mul2s + g1_adds)
-                    .collect();
                 DenseMultilinearExtension::from_evaluations_ext_vec(in_num_vars, g1)
             };
 
@@ -170,17 +154,26 @@ impl<E: ExtensionField> IOPProverState<E> {
                 let mut g1 = vec![E::ZERO; 1 << in_num_vars];
                 layer.mul3s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += mul3_gate_fn(s, gate);
+                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += self.tensor_eq_ty_rtry
+                            [(s << lo_out_num_vars) ^ gate.idx_out]
+                            * (&phase2_next_layer_vec[s][gate.idx_in[1]])
+                            * (&phase2_next_layer_vec[s][gate.idx_in[2]])
+                            * (&gate.scalar.eval(&challenges));
                     }
                 });
                 layer.mul2s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += mul2_gate_fn(s, gate);
+                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += self.tensor_eq_ty_rtry
+                            [(s << lo_out_num_vars) ^ gate.idx_out]
+                            * (&phase2_next_layer_vec[s][gate.idx_in[1]])
+                            * (&gate.scalar.eval(&challenges));
                     }
                 });
                 layer.adds.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += adds_gate_fn(s, gate);
+                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += self.tensor_eq_ty_rtry
+                            [(s << lo_out_num_vars) ^ gate.idx_out]
+                            * (&gate.scalar.eval(&challenges));
                     }
                 });
                 DenseMultilinearExtension::from_evaluations_ext_vec(in_num_vars, g1)
@@ -324,46 +317,31 @@ impl<E: ExtensionField> IOPProverState<E> {
         // g2(s2 || x2) = \sum_{s3}( \sum_{x3}(
         //     eq(rt, rs1, s2, s3) * mul3(ry, rx1, x2, x3) * layers[i + 1](s3 || x3)
         // ) ) + eq(rt, rs1, s2) * mul2(ry, rx1, x2)
-        let mul3_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 3>| -> E {
-            self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                * (&phase2_next_layer_vec[s][gate.idx_in[2]])
-                * (&gate.scalar.eval(&challenges))
-        };
-        let mul2_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 2>| -> E {
-            self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                * (&gate.scalar.eval(&challenges))
-        };
 
         let g2 = {
             #[cfg(feature = "parallel")]
             let g2: Vec<_> = {
-                let (g2_mul3s, g2_mul2s) = rayon::join(
-                    || {
-                        let mut g2_mul3s = vec![E::ZERO; 1 << f2.num_vars];
-                        Self::prepare_stepx_g_fn(
-                            &mut g2_mul3s,
-                            lo_in_num_vars,
-                            &layer.mul3s_fanin_mapping[Step2 as usize],
-                            mul3_gate_fn,
-                        );
-                        g2_mul3s
+                let mut g2 = vec![E::ZERO; 1 << f2.num_vars];
+                let mul3s_fanin_mapping = &layer.mul3s_fanin_mapping[Step2 as usize];
+                let mul2s_fanin_mapping = &layer.mul2s_fanin_mapping[Step2 as usize];
+                prepare_stepx_g_fn!(
+                    &mut g2,
+                    lo_in_num_vars,
+                    mul3s_fanin_mapping,
+                    |s, gate| {
+                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
+                            * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                            * (&phase2_next_layer_vec[s][gate.idx_in[2]])
+                            * (&gate.scalar.eval(&challenges))
                     },
-                    || {
-                        let mut g2_mul2s = vec![E::ZERO; 1 << f2.num_vars];
-                        Self::prepare_stepx_g_fn(
-                            &mut g2_mul2s,
-                            lo_in_num_vars,
-                            &layer.mul2s_fanin_mapping[Step2 as usize],
-                            mul2_gate_fn,
-                        );
-                        g2_mul2s
+                    mul2s_fanin_mapping,
+                    |s, gate| {
+                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
+                            * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                            * (&gate.scalar.eval(&challenges))
                     },
                 );
-                izip_parallizable!(g2_mul3s, g2_mul2s)
-                    .map(|(g1_mul3s, g1_mul2s)| g1_mul3s + g1_mul2s)
-                    .collect()
+                g2
             };
 
             #[cfg(not(feature = "parallel"))]
@@ -372,12 +350,19 @@ impl<E: ExtensionField> IOPProverState<E> {
                 let mut g2 = vec![E::ZERO; 1 << f2.num_vars];
                 layer.mul3s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += mul3_gate_fn(s, gate);
+                        g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += self.tensor_eq_ty_rtry
+                            [(s << lo_out_num_vars) ^ gate.idx_out]
+                            * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                            * (&phase2_next_layer_vec[s][gate.idx_in[2]])
+                            * (&gate.scalar.eval(&challenges));
                     }
                 });
                 layer.mul2s.iter().for_each(|gate| {
                     for s in 0..(1 << hi_num_vars) {
-                        g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += mul2_gate_fn(s, gate);
+                        g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += self.tensor_eq_ty_rtry
+                            [(s << lo_out_num_vars) ^ gate.idx_out]
+                            * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                            * (&gate.scalar.eval(&challenges));
                     }
                 });
                 g2
@@ -437,28 +422,21 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let challenges = &circuit_witness.challenges;
 
-        let mul3_gate_fn = |s: usize, gate: &Gate<ConstantType<E>, 3>| -> E {
-            self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                * self.tensor_eq_s2x2_rs2rx2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
-                * (&gate.scalar.eval(&challenges))
-        };
-
         let span = entered_span!("f3_g3");
         // f3(s3 || x3) = layers[i + 1](s3 || x3)
-        let f3 = Arc::clone(&self.phase2_next_layer_polys[self.layer_id as usize]);
+        let f3 = mem::take(&mut self.phase2_next_layer_polys[self.layer_id as usize]);
 
         // g3(s3 || x3) = eq(rt, rs1, rs2, s3) * mul3(ry, rx1, rx2, x3)
         let g3 = {
             #[cfg(feature = "parallel")]
             let g3 = {
                 let mut g3 = vec![E::ZERO; 1 << f3.num_vars];
-                Self::prepare_stepx_g_fn(
-                    &mut g3,
-                    lo_in_num_vars,
-                    &layer.mul3s_fanin_mapping[Step3 as usize],
-                    mul3_gate_fn,
-                );
+                let fanin_mapping = &layer.mul3s_fanin_mapping[Step3 as usize];
+                prepare_stepx_g_fn!(&mut g3, lo_in_num_vars, fanin_mapping, |s, gate| self
+                    .tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
+                    * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                    * self.tensor_eq_s2x2_rs2rx2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
+                    * (&gate.scalar.eval(&challenges)));
                 g3
             };
 
@@ -496,60 +474,5 @@ impl<E: ExtensionField> IOPProverState<E> {
             sumcheck_proof: sumcheck_proof_3,
             sumcheck_eval_values: eval_values_3,
         }
-    }
-
-    #[cfg(feature = "parallel")]
-    fn prepare_stepx_g_fn<'data, G: Sync, Fn: GateEval<E, G> + Sync + Send>(
-        eval_vec: &mut Vec<E>,
-        lo_in_num_vars: usize,
-        fanin_gate_mapping: &BTreeMap<usize, Vec<G>>,
-        eval_fn: Fn,
-    ) {
-        eval_vec
-            // each chunk hold one instance data
-            .par_chunks_mut(1 << lo_in_num_vars)
-            // enumerated index is the instance index
-            .enumerate()
-            .for_each(|(s, evals_vec)| {
-                // default: O(Chunk_Size/#thread)
-                // unsafe feature: O(#disjoint_fanin_id_set/#thread)
-                // unsafe should performance better when Chunk_Size >> #disjoint_fanin_id_set
-                // benchmark shows it's strongly depends on application circuit pattern
-
-                #[cfg(not(feature = "unsafe"))]
-                {
-                    use rayon::iter::IntoParallelRefMutIterator;
-                    evals_vec
-                        .par_iter_mut()
-                        .enumerate()
-                        .for_each(|(fanin_cellid, eval_holder)| {
-                            let fanin_grouped_gates = fanin_gate_mapping.get(&fanin_cellid);
-                            if let Some(gates) = fanin_grouped_gates {
-                                *eval_holder = gates
-                                    .par_iter()
-                                    .with_min_len(64)
-                                    .fold(|| E::ZERO, |acc, gate| acc + eval_fn.eval(s, gate))
-                                    .reduce(|| E::ZERO, |a, b| a + b);
-                            }
-                        });
-                };
-
-                #[cfg(feature = "unsafe")]
-                {
-                    let evals_vec_unsafe = UnsafeSlice::new(evals_vec);
-                    fanin_gate_mapping.par_iter().for_each(
-                        |(fanin_cellid, fanin_grouped_gates)| {
-                            let eval_folded = fanin_grouped_gates
-                                .par_iter()
-                                .with_min_len(64)
-                                .fold(|| E::ZERO, |acc, gate| acc + eval_fn.eval(s, gate))
-                                .reduce(|| E::ZERO, |a, b| a + b);
-                            unsafe {
-                                evals_vec_unsafe.write(*fanin_cellid, eval_folded);
-                            }
-                        },
-                    );
-                };
-            });
     }
 }

@@ -154,6 +154,7 @@ pub(crate) trait EvaluateConstant<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> EvaluateConstant<E> for ConstantType<E> {
+    #[inline(always)]
     fn eval(&self, challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>) -> E::BaseField {
         match self {
             ConstantType::Challenge(c, j) => challenges[&c][*j],
