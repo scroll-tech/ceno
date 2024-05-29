@@ -18,6 +18,7 @@ impl<'a, T> UnsafeSlice<'a, T> {
 
     /// SAFETY: It is undefined-behavior if two threads write to the same index without
     /// synchronization.
+    #[inline(always)]
     pub unsafe fn write(&self, i: usize, value: T) {
         let ptr = self.slice[i].get();
         *ptr = value;

@@ -244,12 +244,10 @@ impl<E: ExtensionField> IOPProverState<E> {
                             extrapolate(points, weights, &sum, &at)
                         })
                         .collect::<Vec<_>>();
+                    sum.extend(extrapolation);
                     exit_span!(span);
                     let span = entered_span!("extend_extrapolate");
-                    products_sum
-                        .iter_mut()
-                        .zip(sum.iter().chain(extrapolation.iter()))
-                        .for_each(|(products_sum, sum)| *products_sum += sum);
+                    products_sum += AdditiveVec(sum);
                     exit_span!(span);
                     products_sum
                 },
