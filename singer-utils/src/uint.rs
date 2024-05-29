@@ -17,7 +17,8 @@ impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
     type Error = UtilError;
     fn try_from(values: &[usize]) -> Result<Self, Self::Error> {
         if values.len() != Self::N_OPRAND_CELLS {
-            return Err(UtilError::UIntError);
+            // TODO: this will be replaced soon
+            return Err(UtilError::UIntError("placeholder".to_string()));
         }
         Ok(Self {
             values: values.to_vec(),
