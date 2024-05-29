@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use multilinear_extensions::{op_mle, op_mles, virtual_poly::VirtualPolynomial};
+use multilinear_extensions::{commutative_op_mle_pair, op_mle, virtual_poly::VirtualPolynomial};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
@@ -212,7 +212,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 &self.poly.flattened_ml_extensions[products[0]],
                                 &self.poly.flattened_ml_extensions[products[1]],
                             );
-                            op_mles!(
+                            commutative_op_mle_pair!(
                                 |f, g| (0..f.len())
                                     .into_par_iter()
                                     .step_by(2)

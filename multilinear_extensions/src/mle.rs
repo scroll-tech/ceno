@@ -343,24 +343,6 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             )
         })
     }
-
-    /// Deal with operations of base/extension field pairs
-    pub fn op<T>(
-        a: &Self,
-        b: &Self,
-        bb: &impl Fn(&Vec<E::BaseField>, &Vec<E::BaseField>) -> T,
-        be: &impl Fn(&Vec<E>, &Vec<E::BaseField>) -> T,
-        ee: &impl Fn(&Vec<E>, &Vec<E>) -> T,
-    ) -> T {
-        match (&a.evaluations, &b.evaluations) {
-            (FieldType::Base(a), FieldType::Base(b)) => bb(a, b),
-            (FieldType::Ext(a), FieldType::Base(b)) | (FieldType::Base(b), FieldType::Ext(a)) => {
-                be(a, b)
-            }
-            (FieldType::Ext(a), FieldType::Ext(b)) => ee(a, b),
-            _ => unreachable!(),
-        }
-    }
 }
 
 #[macro_export]
@@ -390,29 +372,31 @@ macro_rules! op_mle {
     };
 }
 
+/// macro support op(a, b) and tackles type matching internally.
+/// Please noted that op must satisfy commutative rule w.r.t op(b, a) operand swap.
 #[macro_export]
-macro_rules! op_mles {
+macro_rules! commutative_op_mle_pair {
     (|$a:ident, $b:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
-        $crate::mle::DenseMultilinearExtension::op(
-            $a,
-            $b,
-            &|a, b| {
+        match (&$a.evaluations, &$b.evaluations) {
+            ($crate::mle::FieldType::Base(a), $crate::mle::FieldType::Base(b)) => {
                 let $a = a;
                 let $b = b;
                 let $bb_out = $op;
                 $op_bb_out
-            },
-            &|a, b| {
+            }
+            ($crate::mle::FieldType::Ext(a), $crate::mle::FieldType::Base(b))
+            | ($crate::mle::FieldType::Base(b), $crate::mle::FieldType::Ext(a)) => {
                 let $a = a;
                 let $b = b;
                 $op
-            },
-            &|a, b| {
+            }
+            ($crate::mle::FieldType::Ext(a), $crate::mle::FieldType::Ext(b)) => {
                 let $a = a;
                 let $b = b;
                 $op
-            },
-        )
+            }
+            _ => unreachable!(),
+        }
     };
     (|$a:ident, $b:ident| $op:expr) => {
         op_mles!(|$a, $b| $op, |out| out)
