@@ -6,6 +6,25 @@ pub struct UInt<const M: usize, const C: usize> {
     values: Vec<CellId>,
 }
 
+impl<const M: usize, const C: usize> UInt<M, C> {
+    // TODO: add documentation
+    fn values(&self) -> &[CellId] {
+        &self.values
+    }
+
+    // TODO: add documentation
+    fn from_range_values() {
+        // need to implement bit fitting (into new cell types)
+        todo!()
+    }
+
+    // TODO: add documentation
+    fn from_bytes_bit_endian() {
+        // need to implement bit fitting (into new cell types first)
+        todo!()
+    }
+}
+
 /// Construct `UInt` from `Vec<CellId>`
 impl<const M: usize, const C: usize> TryFrom<Vec<CellId>> for UInt<M, C> {
     type Error = UtilError;
