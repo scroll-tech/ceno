@@ -266,6 +266,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 
 [[package]]
+name = "const_env"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e9e4f72c6e3398ca6da372abd9affd8f89781fe728869bbf986206e9af9627e"
+dependencies = [
+ "const_env_impl",
+]
+
+[[package]]
+name = "const_env_impl"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a4f51209740b5e1589e702b3044cdd4562cef41b6da404904192ffffb852d62"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -314,6 +334,15 @@ checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
  "itertools 0.10.5",
+]
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.5.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33480d6946193aa8033910124896ca395333cae7e2d1113d1fef6c3272217df2"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -485,7 +514,9 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "cfg-if",
+ "const_env",
  "criterion",
+ "crossbeam-channel",
  "ff",
  "ff_ext",
  "goldilocks",
@@ -1277,6 +1308,7 @@ dependencies = [
  "simple-frontend",
  "strum 0.26.1",
  "strum_macros 0.26.1",
+ "sumcheck",
 ]
 
 [[package]]
@@ -1359,10 +1391,15 @@ version = "0.1.0"
 dependencies = [
  "ark-ff",
  "ark-std",
+ "const_env",
+ "criterion",
+ "crossbeam-channel",
  "ff",
  "ff_ext",
  "goldilocks",
+ "itertools 0.12.1",
  "multilinear_extensions",
+ "pprof",
  "rayon",
  "serde",
  "tracing",
@@ -1558,6 +1595,7 @@ name = "transcript"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "crossbeam-channel",
  "ff",
  "ff_ext",
  "goldilocks",

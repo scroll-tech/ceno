@@ -6,10 +6,11 @@ use itertools::Itertools;
 use simple_frontend::structs::{
     CellId, CellType, ChallengeConst, CircuitBuilder, ConstantType, InType, LayerId, OutType,
 };
+use sumcheck::util::ceil_log2;
 
 use crate::{
     structs::{Circuit, Gate1In, Gate2In, Gate3In, GateCIn, Layer, SumcheckStepType},
-    utils::{ceil_log2, i64_to_field, MatrixMLEColumnFirst, MatrixMLERowFirst},
+    utils::{i64_to_field, MatrixMLEColumnFirst, MatrixMLERowFirst},
 };
 
 struct LayerSubsets {

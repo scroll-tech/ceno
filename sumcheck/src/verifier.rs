@@ -47,7 +47,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
     /// Initialize the verifier's state.
     pub fn verifier_init(index_info: &VPAuxInfo<E>) -> Self {
         let start = start_timer!(|| "sum check verifier init");
-        let res = Self {
+        let verifier_state = Self {
             round: 1,
             num_vars: index_info.num_variables,
             max_degree: index_info.max_degree,
@@ -56,7 +56,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             challenges: Vec::with_capacity(index_info.num_variables),
         };
         end_timer!(start);
-        res
+        verifier_state
     }
 
     /// Run verifier for the current round, given a prover message.

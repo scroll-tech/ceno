@@ -3,7 +3,7 @@
 
 use crate::{
     error::GKRError,
-    structs::{Circuit, CircuitWitness, GKRInputClaims, IOPProof, PointAndEval},
+    structs::{Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, PointAndEval},
     utils::MultilinearExtensionFromVectors,
 };
 use ark_std::rand::{
@@ -16,6 +16,7 @@ use itertools::{izip, Itertools};
 use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use simple_frontend::structs::CircuitBuilder;
 use std::iter;
+use sumcheck::util::ceil_log2;
 use transcript::Transcript;
 
 const THETA: [(usize, [usize; 5], [usize; 5]); 25] = [
@@ -451,7 +452,14 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
 pub fn prove_keccak256<E: ExtensionField>(
     instance_num_vars: usize,
     circuit: &Circuit<E>,
+    max_thread_id: usize,
 ) -> Option<(IOPProof<E>, ArcDenseMultilinearExtension<E>)> {
+    assert!(
+        ceil_log2(max_thread_id) <= instance_num_vars,
+        "ceil_log2(N) {} > instance_num_vars {}",
+        ceil_log2(max_thread_id),
+        instance_num_vars
+    );
     // Sanity-check
     #[cfg(test)]
     {
@@ -521,11 +529,12 @@ pub fn prove_keccak256<E: ExtensionField>(
     let output_eval = output_mle.evaluate(&output_point);
 
     let start = std::time::Instant::now();
-    let (proof, _) = crate::structs::IOPProverState::prove_parallel(
+    let (proof, _) = IOPProverState::prove_parallel(
         &circuit,
         &witness,
         vec![],
         vec![PointAndEval::new(output_point, output_eval)],
+        max_thread_id,
         &mut prover_transcript,
     );
     println!("{}: {:?}", 1 << instance_num_vars, start.elapsed());

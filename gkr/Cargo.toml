@@ -16,13 +16,15 @@ transcript = { path = "../transcript" }
 sumcheck = { path = "../sumcheck" }
 multilinear_extensions = { path = "../multilinear_extensions" }
 ff_ext = { path = "../ff_ext" }
-itertools = "0.12.0"
 serde.workspace = true
 serde_json = "1.0.108"
 rayon.workspace = true
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-flame = "0.2.0"
 tracing = "0.1.40"
+crossbeam-channel = "0.5.13"
+itertools = "0.12.0"
+const_env = "0.1.2"
 
 [dev-dependencies]
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
@@ -34,8 +36,9 @@ cfg-if = "1.0.0"
 default = [ ]
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 parallel = [ ]
-unsafe = [ ]
+non_pow2_rayon_thread = ["sumcheck/non_pow2_rayon_thread"]
 
 [[bench]]
 name = "keccak256"
 harness = false
+

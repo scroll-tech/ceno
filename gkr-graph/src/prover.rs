@@ -40,6 +40,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     witness,
                     mem::take(&mut output_evals[node.id]),
                     mem::take(&mut wit_out_evals[node.id]),
+                    1,
                     transcript,
                 );
 
@@ -61,8 +62,8 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 PredType::PredWire(_) => point_and_eval.point.clone(),
                                 PredType::PredWireDup(out) => {
                                     let node_id = match out {
-                                        NodeOutputType::OutputLayer(id) => *id,
-                                        NodeOutputType::WireOut(id, _) => *id,
+                                        NodeOutputType::OutputLayer(id) => id,
+                                        NodeOutputType::WireOut(id, _) => id,
                                     };
                                     // Suppose the new point is
                                     // [single_instance_slice ||
@@ -70,8 +71,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                                     // is [single_instance_slices ||
                                     // new_instance_index_slices[(new_instance_num_vars
                                     // - old_instance_num_vars)..]]
-                                    let old_instance_num_vars =
-                                        circuit_witness.node_witnesses[node_id].instance_num_vars();
+                                    let old_instance_num_vars = circuit_witness.node_witnesses
+                                        [*node_id]
+                                        .instance_num_vars();
                                     let new_instance_num_vars = witness.instance_num_vars();
                                     let num_vars =
                                         point_and_eval.point.len() - new_instance_num_vars;

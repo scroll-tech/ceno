@@ -87,6 +87,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                         .verify_and_update_state_input_phase2_step1(
                             circuit, step_msg, transcript,
                         )?,
+                    _ => unreachable!(),
                 }
             }
             end_timer!(timer);

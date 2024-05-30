@@ -4,60 +4,39 @@ use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
-    virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
+    virtual_poly::VirtualPolynomial,
 };
-use std::{mem, sync::Arc};
+use simple_frontend::structs::LayerId;
+use std::sync::Arc;
 
-use sumcheck::{entered_span, exit_span};
-use transcript::Transcript;
+use sumcheck::{entered_span, exit_span, util::ceil_log2};
 
-#[cfg(feature = "parallel")]
-use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
-    prelude::ParallelSliceMut,
-};
-
-#[cfg(feature = "parallel")]
 use crate::structs::Step::{Step1, Step2, Step3};
-
-#[cfg(feature = "unsafe")]
-#[cfg(feature = "parallel")]
-use crate::unsafe_utils::UnsafeSlice;
 
 use crate::{
     circuit::EvaluateConstant,
-    izip_parallizable,
-    structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
+    structs::{
+        Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval, SumcheckProof,
+    },
 };
 
-use super::SumcheckState;
-
 macro_rules! prepare_stepx_g_fn {
-    (&mut $a:ident, $b:ident $(,$c:ident, |$s:ident, $g:ident| $op:expr)* $(,)?) => {
-        $a
-            // each chunk hold one instance data
-            .par_chunks_mut(1 << $b)
+    (&mut $a:ident, $b:ident, $d:ident $(,$c:ident, |$s:ident, $g:ident| $op:expr)* $(,)?) => {
+        $a.chunks_mut(1 << $b)
             // enumerated index is the instance index
             .enumerate()
             .for_each(|(s, evals_vec)| {
-                use std::iter;
-                evals_vec
-                    .iter_mut()
-                    .enumerate()
-                    .for_each(|(fanin_cellid, eval_holder)| {
-                        let gates_iter = iter::empty();
-
-                        $(
-                            let v = Vec::default();
-                            let gates_iter = gates_iter.chain($c.get(&fanin_cellid).unwrap_or_else(|| &v).iter().map(|$g| {
-                                let $s = s;
-                                $op
-                            }));
-                        )*
-
-                        *eval_holder = gates_iter
-                            .fold(E::ZERO, |acc, item| acc + item);
+                // prefix s with global thread id $d
+                let s = $d + s;
+                $(
+                    $c.iter().for_each(|(fanin_cellid, gates)| {
+                        let eval = gates.iter().map(|$g| {
+                            let $s = s;
+                            $op
+                        }).fold(E::ZERO, |acc, item| acc + item);
+                        evals_vec[*fanin_cellid] += eval;
                     });
+                )*
             });
     };
 }
@@ -85,171 +64,137 @@ impl<E: ExtensionField> IOPProverState<E> {
     ///     ) ) + eq(rt, s1) * add(ry, x1)
     ///     f1'^{(j)}(s1 || x1) = subset[j][i](s1 || x1)
     ///     g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
-    #[tracing::instrument(skip_all, name = "prove_and_update_state_phase2_step1")]
-    pub(super) fn prove_and_update_state_phase2_step1(
-        &mut self,
+    #[tracing::instrument(skip_all, name = "build_phase2_step1_sumcheck_poly")]
+    pub(super) fn build_phase2_step1_sumcheck_poly(
+        eq: &[Vec<E>; 1],
+        layer_id: LayerId,
         circuit: &Circuit<E>,
         circuit_witness: &CircuitWitness<E::BaseField>,
-        transcript: &mut Transcript<E>,
-    ) -> IOPProverStepMessage<E> {
+        multi_threads_meta: (usize, usize),
+    ) -> (ArcDenseMultilinearExtension<E>, VirtualPolynomial<E>) {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 1");
-        let layer = &circuit.layers[self.layer_id as usize];
+        let layer = &circuit.layers[layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let lo_in_num_vars = layer.max_previous_num_vars;
         let hi_num_vars = circuit_witness.instance_num_vars();
-        let in_num_vars = lo_in_num_vars + hi_num_vars;
+        let eq = &eq[0];
 
-        self.tensor_eq_ty_rtry = build_eq_x_r_vec(&self.to_next_step_point);
+        // parallel unit logic handling
+        let (thread_id, max_thread_id) = multi_threads_meta;
+        let log2_max_thread_id = ceil_log2(max_thread_id);
+        let threads_num_vars = hi_num_vars - log2_max_thread_id;
+        let thread_s = thread_id << threads_num_vars;
 
         let challenges = &circuit_witness.challenges;
 
-        let span = entered_span!("f_g");
-        let f1_g1_fn = || {
-            let span = entered_span!("f1_g1");
-            let phase2_next_layer_vec = circuit_witness.layers[self.layer_id as usize + 1]
-                .instances
-                .as_slice();
-            // f1(s1 || x1) = layers[i + 1](s1 || x1)
-            let f1: Arc<DenseMultilinearExtension<E>> =
-                Arc::clone(&self.phase2_next_layer_polys[self.layer_id as usize]);
+        let span = entered_span!("f1_g1");
+        // merge next_layer_vec with next_layer_poly
+        let next_layer_vec = circuit_witness.layers[layer_id as usize + 1]
+            .instances
+            .as_slice();
+        let num_vars = circuit.layers[layer_id as usize].max_previous_num_vars();
+        let phase2_next_layer_polys_v2: ArcDenseMultilinearExtension<E> = circuit_witness
+            .layer_poly(
+                (layer_id + 1).try_into().unwrap(),
+                num_vars,
+                multi_threads_meta,
+            )
+            .into();
 
-            // g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
-            //     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-            // ) ) ) ) + \sum_{s2}( \sum_{x2}(
-            //     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
-            // ) ) + eq(rt, s1) * add(ry, x1)
-            #[cfg(feature = "parallel")]
-            let g1 = {
-                let mut g1 = vec![E::ZERO; 1 << in_num_vars];
-                let mul3s_fanin_mapping = &layer.mul3s_fanin_mapping[Step1 as usize];
-                let mul2s_fanin_mapping = &layer.mul2s_fanin_mapping[Step1 as usize];
-                let adds_fanin_mapping = &layer.adds_fanin_mapping[Step1 as usize];
-                prepare_stepx_g_fn!(
-                    &mut g1,
-                    lo_in_num_vars,
-                    mul3s_fanin_mapping,
-                    |s, gate| {
-                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                            * (&phase2_next_layer_vec[s][gate.idx_in[1]])
-                            * (&phase2_next_layer_vec[s][gate.idx_in[2]])
-                            * (&gate.scalar.eval(&challenges))
-                    },
-                    mul2s_fanin_mapping,
-                    |s, gate| {
-                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                            * (&phase2_next_layer_vec[s][gate.idx_in[1]])
-                            * (&gate.scalar.eval(&challenges))
-                    },
-                    adds_fanin_mapping,
-                    |s, gate| {
-                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                            * (&gate.scalar.eval(&challenges))
-                    }
-                );
-                DenseMultilinearExtension::from_evaluations_ext_vec(in_num_vars, g1)
-            };
+        // f1(s1 || x1) = layers[i + 1](s1 || x1)
+        let f1 = phase2_next_layer_polys_v2.clone();
 
-            #[cfg(not(feature = "parallel"))]
-            let g1 = {
-                let mut g1 = vec![E::ZERO; 1 << in_num_vars];
-                layer.mul3s.iter().for_each(|gate| {
-                    for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += self.tensor_eq_ty_rtry
-                            [(s << lo_out_num_vars) ^ gate.idx_out]
-                            * (&phase2_next_layer_vec[s][gate.idx_in[1]])
-                            * (&phase2_next_layer_vec[s][gate.idx_in[2]])
-                            * (&gate.scalar.eval(&challenges));
-                    }
-                });
-                layer.mul2s.iter().for_each(|gate| {
-                    for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += self.tensor_eq_ty_rtry
-                            [(s << lo_out_num_vars) ^ gate.idx_out]
-                            * (&phase2_next_layer_vec[s][gate.idx_in[1]])
-                            * (&gate.scalar.eval(&challenges));
-                    }
-                });
-                layer.adds.iter().for_each(|gate| {
-                    for s in 0..(1 << hi_num_vars) {
-                        g1[(s << lo_in_num_vars) ^ gate.idx_in[0]] += self.tensor_eq_ty_rtry
-                            [(s << lo_out_num_vars) ^ gate.idx_out]
-                            * (&gate.scalar.eval(&challenges));
-                    }
-                });
-                DenseMultilinearExtension::from_evaluations_ext_vec(in_num_vars, g1)
-            };
-            exit_span!(span);
-            (vec![f1], vec![g1.into()])
-        };
+        // g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
+        //     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
+        // ) ) ) ) + \sum_{s2}( \sum_{x2}(
+        //     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
+        // ) ) + eq(rt, s1) * add(ry, x1)
+        let mut g1 = vec![E::ZERO; 1 << f1.num_vars];
+        let mul3s_fanin_mapping = &layer.mul3s_fanin_mapping[Step1 as usize];
+        let mul2s_fanin_mapping = &layer.mul2s_fanin_mapping[Step1 as usize];
+        let adds_fanin_mapping = &layer.adds_fanin_mapping[Step1 as usize];
+
+        prepare_stepx_g_fn!(
+            &mut g1,
+            lo_in_num_vars,
+            thread_s,
+            mul3s_fanin_mapping,
+            |s, gate| {
+                eq[(s << lo_out_num_vars) ^ gate.idx_out]
+                    * (&next_layer_vec[s][gate.idx_in[1]])
+                    * (&next_layer_vec[s][gate.idx_in[2]])
+                    * (&gate.scalar.eval(&challenges))
+            },
+            mul2s_fanin_mapping,
+            |s, gate| {
+                eq[(s << lo_out_num_vars) ^ gate.idx_out]
+                    * (&next_layer_vec[s][gate.idx_in[1]])
+                    * (&gate.scalar.eval(&challenges))
+            },
+            adds_fanin_mapping,
+            |s, gate| {
+                eq[(s << lo_out_num_vars) ^ gate.idx_out] * (&gate.scalar.eval(&challenges))
+            }
+        );
+        let g1 = DenseMultilinearExtension::from_evaluations_ext_vec(f1.num_vars, g1).into();
+        exit_span!(span);
 
         // f1'^{(j)}(s1 || x1) = subset[j][i](s1 || x1)
         // g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
-        let f1_g1_paste_from = || {
-            let span = entered_span!("f1_g1_paste_from");
-            let f1_g1_paste_from = izip_parallizable!(&layer.paste_from)
-                .map(|(j, paste_from)| {
-                    let paste_from_sources = circuit_witness.layers_ref();
-                    let old_wire_id = |old_layer_id: usize, subset_wire_id: usize| -> usize {
-                        circuit.layers[old_layer_id].copy_to[&self.layer_id][subset_wire_id]
-                    };
+        let span = entered_span!("f1j_g1j");
+        let (f1_j, g1_j)= izip!(&layer.paste_from).map(|(j, paste_from)| {
+            let paste_from_sources = circuit_witness.layers_ref();
+            let old_wire_id = |old_layer_id: usize, subset_wire_id: usize| -> usize {
+                circuit.layers[old_layer_id].copy_to[&(layer_id as u32)][subset_wire_id]
+            };
 
-                    let mut f1_j = vec![0.into(); 1 << in_num_vars];
-                    let mut g1_j = vec![E::ZERO; 1 << in_num_vars];
+            let mut f1_j = vec![0.into(); 1 << f1.num_vars];
+            let mut g1_j = vec![E::ZERO; 1 << f1.num_vars];
 
-                    paste_from
-                        .iter()
-                        .enumerate()
-                        .for_each(|(subset_wire_id, &new_wire_id)| {
-                            for s in 0..(1 << hi_num_vars) {
-                                f1_j[(s << lo_in_num_vars) ^ subset_wire_id] =
-                                    paste_from_sources[*j as usize].instances[s]
-                                        [old_wire_id(*j as usize, subset_wire_id)]
-                                ;
-                                g1_j[(s << lo_in_num_vars) ^ subset_wire_id] +=
-                                    self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ new_wire_id];
-                            }
-                        });
-                    (
-                        DenseMultilinearExtension::from_evaluations_vec(in_num_vars, f1_j).into(),
-                        DenseMultilinearExtension::from_evaluations_ext_vec(in_num_vars, g1_j).into(),
-                    )
-                })
-                .unzip::<_, _, Vec<ArcDenseMultilinearExtension<_>>, Vec<ArcDenseMultilinearExtension<_>>>();
-            exit_span!(span);
-            f1_g1_paste_from
-        };
-
-        #[cfg(feature = "parallel")]
-        let (f1_vec, g1_vec) = {
-            let ((mut f1_vec, mut g1_vec), (f1_vec_paste_from, g1_vec_paste_from)) =
-                rayon::join(f1_g1_fn, f1_g1_paste_from);
-            f1_vec.extend(f1_vec_paste_from);
-            g1_vec.extend(g1_vec_paste_from);
-            (f1_vec, g1_vec)
-        };
-
-        #[cfg(not(feature = "parallel"))]
-        let (f1_vec, g1_vec) = {
-            let (mut f1_vec, mut g1_vec) = f1_g1_fn();
-            let (f1_vec_paste_from, g1_vec_paste_from): (
-                Vec<ArcDenseMultilinearExtension<E>>,
-                Vec<ArcDenseMultilinearExtension<E>>,
-            ) = f1_g1_paste_from();
-            f1_vec.extend(f1_vec_paste_from);
-            g1_vec.extend(g1_vec_paste_from);
-            (f1_vec, g1_vec)
-        };
+            paste_from
+                .iter()
+                .enumerate()
+                .for_each(|(subset_wire_id, &new_wire_id)| {
+                    for s in 0..(1 << (hi_num_vars - log2_max_thread_id)) {
+                        let global_s = thread_s + s;
+                        f1_j[(s << lo_in_num_vars) ^ subset_wire_id] =
+                            paste_from_sources[*j as usize].instances[global_s]
+                                [old_wire_id(*j as usize, subset_wire_id)];
+                        g1_j[(s << lo_in_num_vars) ^ subset_wire_id] += eq[(global_s << lo_out_num_vars) ^ new_wire_id];
+                    }
+                });
+            (
+                DenseMultilinearExtension::from_evaluations_vec(f1.num_vars, f1_j).into(),
+                DenseMultilinearExtension::from_evaluations_ext_vec(f1.num_vars, g1_j).into()
+            )
+        })
+        .unzip::<_, _, Vec<ArcDenseMultilinearExtension<E>>, Vec<ArcDenseMultilinearExtension<E>>>();
         exit_span!(span);
 
+        let (f, g): (
+            Vec<ArcDenseMultilinearExtension<E>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
+        ) = ([vec![f1], f1_j].concat(), [vec![g1], g1_j].concat());
+
         // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
-        let mut virtual_poly_1 = VirtualPolynomial::new(in_num_vars);
-        for (f1_j, g1_j) in f1_vec.into_iter().zip(g1_vec.into_iter()) {
-            let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::BaseField::ONE);
-            tmp.mul_by_mle(g1_j, E::BaseField::ONE);
+        let mut virtual_poly_1 = VirtualPolynomial::new(f[0].num_vars);
+        for (f, g) in f.into_iter().zip(g.into_iter()) {
+            let mut tmp = VirtualPolynomial::new_from_mle(f, E::BaseField::ONE);
+            tmp.mul_by_mle(g, E::BaseField::ONE);
             virtual_poly_1.merge(&tmp);
         }
+        end_timer!(timer);
 
-        let (sumcheck_proof_1, prover_state) = SumcheckState::prove(virtual_poly_1, transcript);
+        (phase2_next_layer_polys_v2, virtual_poly_1)
+    }
+
+    pub(super) fn combine_phase2_step1_evals(
+        &mut self,
+        circuit: &Circuit<E>,
+        sumcheck_proof_1: SumcheckProof<E>,
+        prover_state: sumcheck::structs::IOPProverState<E>,
+    ) -> IOPProverStepMessage<E> {
+        let layer = &circuit.layers[self.layer_id as usize];
         let eval_point_1 = sumcheck_proof_1.point.clone();
         let (f1_vec, g1_vec): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
@@ -276,7 +221,6 @@ impl<E: ExtensionField> IOPProverState<E> {
             ));
         });
         self.to_next_step_point = eval_point_1;
-        end_timer!(timer);
 
         IOPProverStepMessage {
             sumcheck_proof: sumcheck_proof_1,
@@ -290,22 +234,29 @@ impl<E: ExtensionField> IOPProverState<E> {
     ///     g2(s2 || x2) = \sum_{s3}( \sum_{x3}(
     ///         eq(rt, rs1, s2, s3) * mul3(ry, rx1, x2, x3) * layers[i + 1](s3 || x3)
     ///     ) ) + eq(rt, rs1, s2) * mul2(ry, rx1, x2)
-    #[tracing::instrument(skip_all, name = "prove_and_update_state_phase2_step2")]
-    pub(super) fn prove_and_update_state_phase2_step2(
-        &mut self,
+    #[tracing::instrument(skip_all, name = "build_phase2_step2_sumcheck_poly")]
+    pub(super) fn build_phase2_step2_sumcheck_poly(
+        layer_poly: &ArcDenseMultilinearExtension<E>,
+        layer_id: LayerId,
+        eqs: &[Vec<E>; 2],
         circuit: &Circuit<E>,
         circuit_witness: &CircuitWitness<E::BaseField>,
-        transcript: &mut Transcript<E>,
-        no_step3: bool,
-    ) -> IOPProverStepMessage<E> {
+        multi_threads_meta: (usize, usize),
+    ) -> VirtualPolynomial<E> {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 2");
-        let layer = &circuit.layers[self.layer_id as usize];
+        let layer = &circuit.layers[layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let lo_in_num_vars = layer.max_previous_num_vars;
+        let (eq0, eq1) = (&eqs[0], &eqs[1]);
 
-        self.tensor_eq_s1x1_rs1rx1 = build_eq_x_r_vec(&self.to_next_step_point);
+        // parallel unit logic handling
+        let hi_num_vars = circuit_witness.instance_num_vars();
+        let (thread_id, max_thread_id) = multi_threads_meta;
+        let log2_max_thread_id = ceil_log2(max_thread_id);
+        let threads_num_vars = hi_num_vars - log2_max_thread_id;
+        let thread_s = thread_id << threads_num_vars;
 
-        let phase2_next_layer_vec = circuit_witness.layers[self.layer_id as usize + 1]
+        let phase2_next_layer_vec = circuit_witness.layers[layer_id as usize + 1]
             .instances
             .as_slice();
 
@@ -313,70 +264,51 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let span = entered_span!("f2_g2");
         // f2(s2 || x2) = layers[i + 1](s2 || x2)
-        let f2 = Arc::clone(&self.phase2_next_layer_polys[self.layer_id as usize]);
+        let f2 = layer_poly.clone();
+
         // g2(s2 || x2) = \sum_{s3}( \sum_{x3}(
         //     eq(rt, rs1, s2, s3) * mul3(ry, rx1, x2, x3) * layers[i + 1](s3 || x3)
         // ) ) + eq(rt, rs1, s2) * mul2(ry, rx1, x2)
-
-        let g2 = {
-            #[cfg(feature = "parallel")]
-            let g2: Vec<_> = {
-                let mut g2 = vec![E::ZERO; 1 << f2.num_vars];
-                let mul3s_fanin_mapping = &layer.mul3s_fanin_mapping[Step2 as usize];
-                let mul2s_fanin_mapping = &layer.mul2s_fanin_mapping[Step2 as usize];
-                prepare_stepx_g_fn!(
-                    &mut g2,
-                    lo_in_num_vars,
-                    mul3s_fanin_mapping,
-                    |s, gate| {
-                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                            * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                            * (&phase2_next_layer_vec[s][gate.idx_in[2]])
-                            * (&gate.scalar.eval(&challenges))
-                    },
-                    mul2s_fanin_mapping,
-                    |s, gate| {
-                        self.tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                            * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                            * (&gate.scalar.eval(&challenges))
-                    },
-                );
-                g2
-            };
-
-            #[cfg(not(feature = "parallel"))]
-            let g2 = {
-                let hi_num_vars = circuit_witness.instance_num_vars();
-                let mut g2 = vec![E::ZERO; 1 << f2.num_vars];
-                layer.mul3s.iter().for_each(|gate| {
-                    for s in 0..(1 << hi_num_vars) {
-                        g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += self.tensor_eq_ty_rtry
-                            [(s << lo_out_num_vars) ^ gate.idx_out]
-                            * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                            * (&phase2_next_layer_vec[s][gate.idx_in[2]])
-                            * (&gate.scalar.eval(&challenges));
-                    }
-                });
-                layer.mul2s.iter().for_each(|gate| {
-                    for s in 0..(1 << hi_num_vars) {
-                        g2[(s << lo_in_num_vars) ^ gate.idx_in[1]] += self.tensor_eq_ty_rtry
-                            [(s << lo_out_num_vars) ^ gate.idx_out]
-                            * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                            * (&gate.scalar.eval(&challenges));
-                    }
-                });
-                g2
-            };
-
+        let g2: ArcDenseMultilinearExtension<E> = {
+            let mut g2 = vec![E::ZERO; 1 << (f2.num_vars)];
+            let mul3s_fanin_mapping = &layer.mul3s_fanin_mapping[Step2 as usize];
+            let mul2s_fanin_mapping = &layer.mul2s_fanin_mapping[Step2 as usize];
+            prepare_stepx_g_fn!(
+                &mut g2,
+                lo_in_num_vars,
+                thread_s,
+                mul3s_fanin_mapping,
+                |s, gate| {
+                    eq0[(s << lo_out_num_vars) ^ gate.idx_out]
+                        * eq1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                        * (&phase2_next_layer_vec[s][gate.idx_in[2]])
+                        * (&gate.scalar.eval(&challenges))
+                },
+                mul2s_fanin_mapping,
+                |s, gate| {
+                    eq0[(s << lo_out_num_vars) ^ gate.idx_out]
+                        * eq1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                        * (&gate.scalar.eval(&challenges))
+                },
+            );
             DenseMultilinearExtension::from_evaluations_ext_vec(f2.num_vars, g2).into()
         };
         exit_span!(span);
+        end_timer!(timer);
 
         // sumcheck: sigma = \sum_{s2 || x2} f2(s2 || x2) * g2(s2 || x2)
         let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::BaseField::ONE);
         virtual_poly_2.mul_by_mle(g2, E::BaseField::ONE);
-        let (sumcheck_proof_2, prover_state) = SumcheckState::prove(virtual_poly_2, transcript);
+        virtual_poly_2
+    }
 
+    pub(super) fn combine_phase2_step2_evals(
+        &mut self,
+        _circuit: &Circuit<E>,
+        sumcheck_proof_2: SumcheckProof<E>,
+        prover_state: sumcheck::structs::IOPProverState<E>,
+        no_step3: bool,
+    ) -> IOPProverStepMessage<E> {
         let eval_point_2 = sumcheck_proof_2.point.clone();
         let (f2, g2): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
@@ -388,7 +320,6 @@ impl<E: ExtensionField> IOPProverState<E> {
         self.to_next_phase_point_and_evals
             .push(PointAndEval::new_from_ref(&eval_point_2, &eval_value_f2));
         self.to_next_step_point = eval_point_2;
-        end_timer!(timer);
         if no_step3 {
             IOPProverStepMessage {
                 sumcheck_proof: sumcheck_proof_2,
@@ -406,59 +337,64 @@ impl<E: ExtensionField> IOPProverState<E> {
     ///     sigma = g2(rs2 || rx2) - eq(rt, rs1, rs2) * mul2(ry, rx1, rx2)
     ///     f3(s3 || x3) = layers[i + 1](s3 || x3)
     ///     g3(s3 || x3) = eq(rt, rs1, rs2, s3) * mul3(ry, rx1, rx2, x3)
-    #[tracing::instrument(skip_all, name = "prove_and_update_state_phase2_step3")]
-    pub(super) fn prove_and_update_state_phase2_step3(
-        &mut self,
+    #[tracing::instrument(skip_all, name = "build_phase2_step3_sumcheck_poly")]
+    pub(super) fn build_phase2_step3_sumcheck_poly(
+        layer_poly: &ArcDenseMultilinearExtension<E>,
+        layer_id: LayerId,
+        eqs: &[Vec<E>; 3],
         circuit: &Circuit<E>,
         circuit_witness: &CircuitWitness<E::BaseField>,
-        transcript: &mut Transcript<E>,
-    ) -> IOPProverStepMessage<E> {
+        multi_threads_meta: (usize, usize),
+    ) -> VirtualPolynomial<E> {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 3");
-        let layer = &circuit.layers[self.layer_id as usize];
+        let layer = &circuit.layers[layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
         let lo_in_num_vars = layer.max_previous_num_vars;
+        let (eq0, eq1, eq2) = (&eqs[0], &eqs[1], &eqs[2]);
 
-        self.tensor_eq_s2x2_rs2rx2 = build_eq_x_r_vec(&self.to_next_step_point);
+        // parallel unit logic handling
+        let hi_num_vars = circuit_witness.instance_num_vars();
+        let (thread_id, max_thread_id) = multi_threads_meta;
+        let log2_max_thread_id = ceil_log2(max_thread_id);
+        let threads_num_vars = hi_num_vars - log2_max_thread_id;
+        let thread_s = thread_id << threads_num_vars;
 
         let challenges = &circuit_witness.challenges;
 
         let span = entered_span!("f3_g3");
         // f3(s3 || x3) = layers[i + 1](s3 || x3)
-        let f3 = mem::take(&mut self.phase2_next_layer_polys[self.layer_id as usize]);
-
+        let f3: Arc<DenseMultilinearExtension<E>> = layer_poly.clone();
         // g3(s3 || x3) = eq(rt, rs1, rs2, s3) * mul3(ry, rx1, rx2, x3)
         let g3 = {
-            #[cfg(feature = "parallel")]
-            let g3 = {
-                let mut g3 = vec![E::ZERO; 1 << f3.num_vars];
-                let fanin_mapping = &layer.mul3s_fanin_mapping[Step3 as usize];
-                prepare_stepx_g_fn!(&mut g3, lo_in_num_vars, fanin_mapping, |s, gate| self
-                    .tensor_eq_ty_rtry[(s << lo_out_num_vars) ^ gate.idx_out]
-                    * self.tensor_eq_s1x1_rs1rx1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                    * self.tensor_eq_s2x2_rs2rx2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
-                    * (&gate.scalar.eval(&challenges)));
-                g3
-            };
-
-            #[cfg(not(feature = "parallel"))]
-            let g3 = {
-                let hi_num_vars = circuit_witness.instance_num_vars();
-                let mut g3 = vec![E::ZERO; 1 << f3.num_vars];
-                layer.mul3s.iter().for_each(|gate| {
-                    for s in 0..(1 << hi_num_vars) {
-                        g3[(s << lo_in_num_vars) ^ gate.idx_in[2]] += mul3_gate_fn(s, gate);
-                    }
-                });
-                g3
-            };
+            let mut g3 = vec![E::ZERO; 1 << (f3.num_vars)];
+            let fanin_mapping = &layer.mul3s_fanin_mapping[Step3 as usize];
+            prepare_stepx_g_fn!(
+                &mut g3,
+                lo_in_num_vars,
+                thread_s,
+                fanin_mapping,
+                |s, gate| eq0[(s << lo_out_num_vars) ^ gate.idx_out]
+                    * eq1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                    * eq2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
+                    * (&gate.scalar.eval(&challenges))
+            );
             DenseMultilinearExtension::from_evaluations_ext_vec(f3.num_vars, g3).into()
         };
-        exit_span!(span);
 
-        // sumcheck: sigma = \sum_{s3 || x3} f3(s3 || x3) * g3(s3 || x3)
         let mut virtual_poly_3 = VirtualPolynomial::new_from_mle(f3, E::BaseField::ONE);
         virtual_poly_3.mul_by_mle(g3, E::BaseField::ONE);
-        let (sumcheck_proof_3, prover_state) = SumcheckState::prove(virtual_poly_3, transcript);
+
+        exit_span!(span);
+        end_timer!(timer);
+        virtual_poly_3
+    }
+
+    pub(super) fn combine_phase2_step3_evals(
+        &mut self,
+        _circuit: &Circuit<E>,
+        sumcheck_proof_3: SumcheckProof<E>,
+        prover_state: sumcheck::structs::IOPProverState<E>,
+    ) -> IOPProverStepMessage<E> {
         let eval_point_3 = sumcheck_proof_3.point.clone();
         let (f3, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
@@ -469,7 +405,6 @@ impl<E: ExtensionField> IOPProverState<E> {
         self.to_next_phase_point_and_evals
             .push(PointAndEval::new_from_ref(&eval_point_3, &eval_values_3[0]));
         self.to_next_step_point = eval_point_3;
-        end_timer!(timer);
         IOPProverStepMessage {
             sumcheck_proof: sumcheck_proof_3,
             sumcheck_eval_values: eval_values_3,

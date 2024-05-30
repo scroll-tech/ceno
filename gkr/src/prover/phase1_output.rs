@@ -139,7 +139,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             virtual_poly_1.merge(&tmp);
         }
 
-        let (sumcheck_proof_1, prover_state) = SumcheckState::prove(virtual_poly_1, transcript);
+        let (sumcheck_proof_1, prover_state) =
+            SumcheckState::prove_parallel(virtual_poly_1, transcript);
         let (f1, g1): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
             .into_iter()
@@ -175,7 +176,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         // f2(t) = layers[i](t || ry)
         let f2 = self.phase1_layer_polys[self.layer_id as usize]
-            .fix_variables(&self.to_next_step_point)
+            .fix_variables_parallel(&self.to_next_step_point)
             .into();
 
         // g2(t) = \sum_j \alpha^j (eq or copy_to[j] or assert_subset)(ry_j, ry) eq(rt_j, t)
@@ -206,7 +207,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::BaseField::ONE);
         virtual_poly_2.mul_by_mle(g2.into(), E::BaseField::ONE);
 
-        let (sumcheck_proof_2, prover_state) = SumcheckState::prove(virtual_poly_2, transcript);
+        let (sumcheck_proof_2, prover_state) =
+            SumcheckState::prove_parallel(virtual_poly_2, transcript);
         let (mut f2, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
             .into_iter()

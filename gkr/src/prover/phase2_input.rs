@@ -9,13 +9,13 @@ use multilinear_extensions::{
 #[cfg(feature = "parallel")]
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
+use sumcheck::util::ceil_log2;
 use transcript::Transcript;
 
 use crate::{
     izip_parallizable,
     prover::SumcheckState,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
-    utils::ceil_log2,
 };
 
 // Prove the computation in the current layer for data parallel circuits.
@@ -123,7 +123,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             virtual_poly.merge(&tmp);
         }
 
-        let (sumcheck_proofs, prover_state) = SumcheckState::prove(virtual_poly, transcript);
+        let (sumcheck_proofs, prover_state) =
+            SumcheckState::prove_parallel(virtual_poly, transcript);
         let eval_point = sumcheck_proofs.point.clone();
         let (f_vec, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()

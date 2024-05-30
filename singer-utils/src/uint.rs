@@ -1,10 +1,10 @@
 use ff::Field;
 use ff_ext::ExtensionField;
-use gkr::utils::ceil_log2;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 use std::marker::PhantomData;
+use sumcheck::util::ceil_log2;
 
 use crate::{constants::RANGE_CHIP_BIT_WIDTH, error::UtilError, structs::UInt};
 

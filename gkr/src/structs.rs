@@ -64,17 +64,12 @@ pub struct IOPProverState<E: ExtensionField> {
     pub(crate) to_next_step_point: Point<E>,
     /// layer poly for phase 1 which point to current layer
     pub(crate) phase1_layer_polys: Vec<ArcDenseMultilinearExtension<E>>,
-    /// layer poly for phase 2 which point to the next layer
-    pub(crate) phase2_next_layer_polys: Vec<ArcDenseMultilinearExtension<E>>,
 
     // Especially for output phase1.
     pub(crate) assert_point: Point<E>,
     // Especially for phase1.
     pub(crate) g1_values: Vec<E>,
     // Especially for phase2.
-    pub(crate) tensor_eq_ty_rtry: Vec<E>,
-    pub(crate) tensor_eq_s1x1_rs1rx1: Vec<E>,
-    pub(crate) tensor_eq_s2x2_rs2rx2: Vec<E>,
 }
 
 /// Represent the verifier state for each layer in the IOP protocol.
@@ -138,6 +133,7 @@ pub(crate) enum SumcheckStepType {
     Phase2Step3,
     LinearPhase2Step1,
     InputPhase2Step1,
+    Undefined,
 }
 
 pub(crate) enum Step {

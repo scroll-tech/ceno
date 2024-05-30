@@ -1,104 +1,47 @@
 #![allow(clippy::manual_memcpy)]
 #![allow(clippy::needless_range_loop)]
 
-use ark_std::rand::{
-    rngs::{OsRng, StdRng},
-    Rng, RngCore, SeedableRng,
-};
+use std::env;
+
 use ff::Field;
 use ff_ext::ExtensionField;
 use gkr::{
-    error::GKRError,
-    gadgets::keccak256::keccak256_circuit,
-    structs::{Circuit, CircuitWitness, GKRInputClaims, IOPProof, PointAndEval},
-    utils::MultilinearExtensionFromVectors,
+    gadgets::keccak256::{keccak256_circuit, prove_keccak256, verify_keccak256},
+    structs::CircuitWitness,
 };
 use goldilocks::GoldilocksExt2;
 use itertools::{izip, Itertools};
-use multilinear_extensions::mle::ArcDenseMultilinearExtension;
-use std::iter;
+use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
-use transcript::Transcript;
-
-fn prove_keccak256<E: ExtensionField>(
-    instance_num_vars: usize,
-    circuit: &Circuit<E>,
-) -> Option<(IOPProof<E>, ArcDenseMultilinearExtension<E>)> {
-    let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
-    let mut witness = CircuitWitness::new(&circuit, Vec::new());
-    for _ in 0..1 << instance_num_vars {
-        let [rand_state, rand_input] = [25 * 64, 17 * 64].map(|n| {
-            iter::repeat_with(|| rng.gen_bool(0.5) as u64)
-                .take(n)
-                .map(E::BaseField::from)
-                .collect_vec()
-        });
-        witness.add_instance(&circuit, vec![rand_state, rand_input]);
-    }
-
-    let lo_num_vars = witness.witness_out_ref()[0].instances[0]
-        .len()
-        .next_power_of_two()
-        .ilog2() as usize;
-    let output_mle = witness.witness_out_ref()[0]
-        .instances
-        .as_slice()
-        .mle(lo_num_vars, instance_num_vars);
-
-    let mut prover_transcript = Transcript::<E>::new(b"test");
-    let output_point = iter::repeat_with(|| {
-        prover_transcript
-            .get_and_append_challenge(b"output point")
-            .elements
-    })
-    .take(output_mle.num_vars)
-    .collect_vec();
-    let output_eval = output_mle.evaluate(&output_point);
-
-    let start = std::time::Instant::now();
-    let (proof, _) = gkr::structs::IOPProverState::prove_parallel(
-        &circuit,
-        &witness,
-        vec![],
-        vec![PointAndEval::new(output_point, output_eval)],
-        &mut prover_transcript,
-    );
-    println!("{}: {:?}", 1 << instance_num_vars, start.elapsed());
-    Some((proof, output_mle))
-}
-
-fn verify_keccak256<E: ExtensionField>(
-    instance_num_vars: usize,
-    output_mle: ArcDenseMultilinearExtension<E>,
-    proof: IOPProof<E>,
-    circuit: &Circuit<E>,
-) -> Result<GKRInputClaims<E>, GKRError> {
-    let mut verifer_transcript = Transcript::<E>::new(b"test");
-    let output_point = iter::repeat_with(|| {
-        verifer_transcript
-            .get_and_append_challenge(b"output point")
-            .elements
-    })
-    .take(output_mle.num_vars)
-    .collect_vec();
-    let output_eval = output_mle.evaluate(&output_point);
-    gkr::structs::IOPVerifierState::verify_parallel(
-        &circuit,
-        &[],
-        vec![],
-        vec![PointAndEval::new(output_point, output_eval)],
-        proof,
-        instance_num_vars,
-        &mut verifer_transcript,
-    )
-}
 
 fn main() {
     println!(
         "#layers: {}",
         keccak256_circuit::<GoldilocksExt2>().layers.len()
     );
+
+    #[allow(unused_mut)]
+    let mut max_thread_id: usize = env::var("RAYON_NUM_THREADS")
+        .map(|v| str::parse::<usize>(&v).unwrap_or(1))
+        .unwrap();
+
+    if !is_power_of_2(max_thread_id) {
+        #[cfg(not(feature = "non_pow2_rayon_thread"))]
+        {
+            panic!(
+                "add --features non_pow2_rayon_thread to support non pow of 2 rayon thread pool"
+            );
+        }
+
+        #[cfg(feature = "non_pow2_rayon_thread")]
+        {
+            use sumcheck::local_thread_pool::create_local_pool_once;
+            use sumcheck::util::ceil_log2;
+            max_thread_id = 1 << ceil_log2(max_thread_id);
+            create_local_pool_once(max_thread_id, true);
+        }
+    }
 
     let circuit = keccak256_circuit::<GoldilocksExt2>();
     // Sanity-check
@@ -150,8 +93,10 @@ fn main() {
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    for log2_n in 1..12 {
-        let Some((proof, output_mle)) = prove_keccak256::<GoldilocksExt2>(log2_n, &circuit) else {
+    for log2_n in 0..12 {
+        let Some((proof, output_mle)) =
+            prove_keccak256::<GoldilocksExt2>(log2_n, &circuit, (1 << log2_n).min(max_thread_id))
+        else {
             return;
         };
         assert!(verify_keccak256(log2_n, output_mle, proof, &circuit).is_ok());
