@@ -1,23 +1,16 @@
-// what do we call this convert_decomp
-// what is it actually doing?
-// basically, we need a way to convert the bit width to something else
-// and the something else can be bigger or smaller
-// what is the circuit builder used for here?
-// it creates new cells that represent the new values
-// seems you might not be able to split something big into something smaller
-
-// v1 assume the bit change is strictly increasing + no packing maximization
-// v2 assume packing maximization
-// v3 assume can increase or decrease
-// there might be tradeoff so v3 is not necessarily better than previous versions
-
-// TODO: explain tradeoffs with other potential approaches
-
 use crate::error::UtilError;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
-// TODO: add documentation
+/// Given some data represented by n small cells of size s
+/// this function represents the same data in m big cells of size b
+/// where b >= s
+/// e.g.
+/// information = 1100
+/// represented with 2 small cells of size 2 each
+/// small -> 11 | 00
+/// we can pack this into a single big cell of size 4
+/// big -> 1100
 fn pack_small_width_cells_into_bigger_width_cells<E: ExtensionField>(
     circuit_builder: &mut CircuitBuilder<E>,
     small_cells: &[CellId],
@@ -27,7 +20,7 @@ fn pack_small_width_cells_into_bigger_width_cells<E: ExtensionField>(
 ) -> Result<Vec<CellId>, UtilError> {
     // TODO: technically there is a limit on the bit width (based on the field size),
     //  we should handle this edge case
-
+    //  not sure this should (or can) be handled here tho
     if small_cell_bit_width > big_cell_bit_width {
         return Err(UtilError::UIntError(
             "cannot pack bigger width cells into smaller width cells".to_string(),
@@ -38,7 +31,6 @@ fn pack_small_width_cells_into_bigger_width_cells<E: ExtensionField>(
         return Ok(small_cells.to_vec());
     }
 
-    // TODO: think about the effect of endianness
     // ensure the small cell values are in little endian form
     let small_cells = if !is_little_endian {
         small_cells.to_vec().into_iter().rev().collect()
@@ -49,10 +41,9 @@ fn pack_small_width_cells_into_bigger_width_cells<E: ExtensionField>(
     // compute the number of small cells that can fit into each big cell
     let small_cell_count_per_big_cell = big_cell_bit_width / small_cell_bit_width;
 
-    // TODO: specify example that outlines what's happening here
-
     let mut new_cell_ids = vec![];
 
+    // iteratively take and pack n small cells into 1 big cell
     for values in small_cells.chunks(small_cell_count_per_big_cell) {
         let big_cell = circuit_builder.create_cell();
         for (small_chunk_index, small_bit_cell) in values.iter().enumerate() {

@@ -3,7 +3,7 @@ use simple_frontend::structs::CellId;
 
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 pub struct UInt<const M: usize, const C: usize> {
-    // TODO: we need to ensure C is not bigger than the system word length
+    // TODO: the size of C should not be more than the size of the underlying field
     values: Vec<CellId>,
 }
 
@@ -15,14 +15,14 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     // TODO: add documentation
     fn from_range_values() {
-        // need to implement bit fitting (into new cell types)
+        // need to implement bit fitting (into new cell width)
         todo!()
     }
 
     // TODO: add documentation
     fn from_bytes_bit_endian() {
         // TODO: what about little endian
-        // need to implement bit fitting (into new cell types first)
+        // need to implement bit fitting (into new cell width first)
         todo!()
     }
 }
