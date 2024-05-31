@@ -3,6 +3,7 @@ use simple_frontend::structs::CellId;
 
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 pub struct UInt<const M: usize, const C: usize> {
+    // TODO: we need to ensure C is not bigger than the system word length
     values: Vec<CellId>,
 }
 
@@ -20,6 +21,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     // TODO: add documentation
     fn from_bytes_bit_endian() {
+        // TODO: what about little endian
         // need to implement bit fitting (into new cell types first)
         todo!()
     }
