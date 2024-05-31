@@ -11,7 +11,7 @@ use simple_frontend::structs::{CellId, CircuitBuilder};
 /// small -> 11 | 00
 /// we can pack this into a single big cell of size 4
 /// big -> 1100
-fn pack_small_width_cells_into_bigger_width_cells<E: ExtensionField>(
+fn convert_decomp<E: ExtensionField>(
     circuit_builder: &mut CircuitBuilder<E>,
     small_cells: &[CellId],
     small_cell_bit_width: usize,
@@ -63,9 +63,10 @@ fn pack_small_width_cells_into_bigger_width_cells<E: ExtensionField>(
 
 #[cfg(test)]
 mod tests {
-    use crate::uint_new::util::pack_small_width_cells_into_bigger_width_cells;
+    use crate::uint_new::util::convert_decomp;
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
+    use itertools::Itertools;
     use simple_frontend::structs::CircuitBuilder;
 
     #[test]
@@ -75,7 +76,7 @@ mod tests {
         let (_, big_values) = circuit_builder.create_witness_in(5);
         let big_bit_width = 5;
         let small_bit_width = 2;
-        let cell_packing_result = pack_small_width_cells_into_bigger_width_cells(
+        let cell_packing_result = convert_decomp(
             &mut circuit_builder,
             &big_values,
             big_bit_width,
@@ -91,7 +92,7 @@ mod tests {
         let (_, initial_values) = circuit_builder.create_witness_in(5);
         let small_bit_width = 2;
         let big_bit_width = 2;
-        let new_values = pack_small_width_cells_into_bigger_width_cells(
+        let new_values = convert_decomp(
             &mut circuit_builder,
             &initial_values,
             small_bit_width,
@@ -108,7 +109,7 @@ mod tests {
         let (witness_id, small_values) = circuit_builder.create_witness_in(9);
         let small_bit_width = 2;
         let big_bit_width = 5;
-        let big_values = pack_small_width_cells_into_bigger_width_cells(
+        let big_values = convert_decomp(
             &mut circuit_builder,
             &small_values,
             small_bit_width,
@@ -148,16 +149,20 @@ mod tests {
 
         let output = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
 
-        // TODO: why is the full output length 8 instead of 5?
-        //  what are the extra zeros for
-        // assert_eq!(output.len(), 5);
-
         assert_eq!(
             &output[..5],
             vec![12, 11, 6, 5, 12]
                 .into_iter()
                 .map(|v| Goldilocks::from(v))
                 .collect::<Vec<_>>()
+        );
+
+        assert_eq!(
+            &output[5..],
+            vec![0, 0, 0]
+                .into_iter()
+                .map(|v| Goldilocks::from(v))
+                .collect_vec()
         );
     }
 }
