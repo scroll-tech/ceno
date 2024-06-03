@@ -178,6 +178,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
+        // padding to power of 2
         assert_eq!(
             &output[5..],
             vec![0, 0, 0]
