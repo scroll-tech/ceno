@@ -1,5 +1,8 @@
+use crate::constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH};
 use crate::error::UtilError;
-use simple_frontend::structs::CellId;
+use crate::uint_new::util::convert_decomp;
+use ff_ext::ExtensionField;
+use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
 
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 pub struct UInt<const M: usize, const C: usize> {
@@ -8,22 +11,61 @@ pub struct UInt<const M: usize, const C: usize> {
 }
 
 impl<const M: usize, const C: usize> UInt<M, C> {
-    // TODO: add documentation
+    /// Return the `UInt` underlying cell id's
     fn values(&self) -> &[CellId] {
         &self.values
     }
 
-    // TODO: add documentation
-    fn from_range_values() {
-        // need to implement bit fitting (into new cell width)
-        todo!()
+    /// Builds a `UInt` instance from a set of cells that represent `RANGE_VALUES`
+    fn from_range_values<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        range_values: &[CellId],
+    ) -> Result<Self, UtilError> {
+        let max_cell_width = M.min(C);
+        let mut values = convert_decomp(
+            circuit_builder,
+            range_values,
+            RANGE_CHIP_BIT_WIDTH,
+            max_cell_width,
+            true,
+        )?;
+        if values.len() < Self::N_OPERAND_CELLS {
+            values.extend(circuit_builder.create_cells(Self::N_OPERAND_CELLS - values.len()));
+        }
+        values.try_into()
     }
 
-    // TODO: add documentation
-    fn from_bytes_bit_endian() {
-        // TODO: what about little endian
-        // need to implement bit fitting (into new cell width first)
-        todo!()
+    /// Builds a `UInt` instance from a set of cells that represent big-endian `BYTE_VALUES`
+    fn from_bytes_big_endian<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        bytes: &[CellId],
+    ) -> Result<Self, UtilError> {
+        Self::from_bytes(circuit_builder, bytes, false)
+    }
+
+    /// Builds a `UInt` instance from a set of cells that represent little-endian `BYTE_VALUES`
+    fn from_bytes_little_endian<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        bytes: &[CellId],
+    ) -> Result<Self, UtilError> {
+        Self::from_bytes(circuit_builder, bytes, true)
+    }
+
+    /// Builds a `UInt` instance from a set of cells that represent `BYTE_VALUES`
+    fn from_bytes<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        bytes: &[CellId],
+        is_little_endian: bool,
+    ) -> Result<Self, UtilError> {
+        let max_cell_width = M.min(C);
+        convert_decomp(
+            circuit_builder,
+            bytes,
+            BYTE_BIT_WIDTH,
+            max_cell_width,
+            is_little_endian,
+        )
+        .try_into()
     }
 }
 

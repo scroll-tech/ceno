@@ -1,3 +1,3 @@
 mod constants;
 mod uint;
-mod util;
+pub mod util;

@@ -11,7 +11,7 @@ use simple_frontend::structs::{CellId, CircuitBuilder};
 /// small -> 11 | 00
 /// we can pack this into a single big cell of size 4
 /// big -> 1100
-fn convert_decomp<E: ExtensionField>(
+pub fn convert_decomp<E: ExtensionField>(
     circuit_builder: &mut CircuitBuilder<E>,
     small_cells: &[CellId],
     small_cell_bit_width: usize,
