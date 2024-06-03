@@ -2,7 +2,7 @@ use crate::constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH};
 use crate::error::UtilError;
 use crate::uint_new::util::{convert_decomp, pad_cells};
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
+use simple_frontend::structs::{CellId, CircuitBuilder};
 
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
@@ -23,17 +23,12 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         circuit_builder: &mut CircuitBuilder<E>,
         range_values: &[CellId],
     ) -> Result<Self, UtilError> {
-        let max_cell_width = M.min(C);
-        let mut values = convert_decomp(
+        Self::from_different_sized_cell_values(
             circuit_builder,
             range_values,
             RANGE_CHIP_BIT_WIDTH,
-            max_cell_width,
             true,
-        )?;
-        // TODO: is this safe, do we need to ensure that the padded cells are always 0?
-        pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
-        values.try_into()
+        )
     }
 
     /// Builds a `UInt` instance from a set of cells that represent big-endian `BYTE_VALUES`
@@ -58,14 +53,30 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         bytes: &[CellId],
         is_little_endian: bool,
     ) -> Result<Self, UtilError> {
-        let max_cell_width = M.min(C);
-        let mut values = convert_decomp(
+        Self::from_different_sized_cell_values(
             circuit_builder,
             bytes,
             BYTE_BIT_WIDTH,
+            is_little_endian,
+        )
+    }
+
+    /// Builds a `UInt` instance from a set of cell values of a certain `CELL_WIDTH`
+    fn from_different_sized_cell_values<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        cell_values: &[CellId],
+        cell_width: usize,
+        is_little_endian: bool,
+    ) -> Result<Self, UtilError> {
+        let max_cell_width = M.min(C);
+        let mut values = convert_decomp(
+            circuit_builder,
+            cell_values,
+            cell_width,
             max_cell_width,
             is_little_endian,
         )?;
+        // TODO: is this safe, do we need to ensure that the padded cells are always 0?
         pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
         values.try_into()
     }

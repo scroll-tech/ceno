@@ -18,5 +18,5 @@
 // assert_eq
 // assert_eq_range_values (this feels weird)
 //  feels like we should be able to convert the range values to uint
-//  then implement assert_eq on them
-//  what is the problem with this
+//  then run assert_eq on them
+//  what is the problem with this?
