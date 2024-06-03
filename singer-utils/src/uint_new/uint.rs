@@ -5,6 +5,7 @@ use ff_ext::ExtensionField;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
 
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
+/// Represented in little endian form.
 pub struct UInt<const M: usize, const C: usize> {
     // TODO: the size of C should not be more than the size of the underlying field
     values: Vec<CellId>,
@@ -17,6 +18,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Builds a `UInt` instance from a set of cells that represent `RANGE_VALUES`
+    /// assumes range_values are represented in little endian form
     fn from_range_values<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_values: &[CellId],
@@ -29,8 +31,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             max_cell_width,
             true,
         )?;
-        // TODO: move this logic to convert_decomp
-        //  also think about whether it is safe to do so
+        // TODO: replace this line with pad cell function
         if values.len() < Self::N_OPERAND_CELLS {
             values.extend(circuit_builder.create_cells(Self::N_OPERAND_CELLS - values.len()));
         }
@@ -66,7 +67,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             BYTE_BIT_WIDTH,
             max_cell_width,
             is_little_endian,
-        )
+        )?
         .try_into()
     }
 }

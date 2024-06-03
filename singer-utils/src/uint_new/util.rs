@@ -61,9 +61,20 @@ pub fn convert_decomp<E: ExtensionField>(
     Ok(new_cell_ids)
 }
 
+/// Pads a `Vec<CellId>` with new cells to reach some given size n
+pub fn pad_cells<E: ExtensionField>(
+    circuit_builder: &mut CircuitBuilder<E>,
+    cells: &mut Vec<CellId>,
+    size: usize,
+) {
+    if cells.len() < size {
+        cells.extend(circuit_builder.create_cells(size - cells.len()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::uint_new::util::convert_decomp;
+    use crate::uint_new::util::{convert_decomp, pad_cells};
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
@@ -106,7 +117,7 @@ mod tests {
     #[test]
     fn test_pack_small_cells_into_big_cells() {
         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
-        let (witness_id, small_values) = circuit_builder.create_witness_in(9);
+        let (_, small_values) = circuit_builder.create_witness_in(9);
         let small_bit_width = 2;
         let big_bit_width = 5;
         let big_values = convert_decomp(
@@ -164,5 +175,17 @@ mod tests {
                 .map(|v| Goldilocks::from(v))
                 .collect_vec()
         );
+    }
+
+    #[test]
+    fn test_pad_cells() {
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let (_, mut small_values) = circuit_builder.create_witness_in(3);
+        // assert before padding
+        assert_eq!(small_values, vec![0, 1, 2]);
+        // pad
+        pad_cells(&mut circuit_builder, &mut small_values, 5);
+        // assert after padding
+        assert_eq!(small_values, vec![0, 1, 2, 3, 4]);
     }
 }
