@@ -121,6 +121,7 @@ mod tests {
         type UInt64 = UInt<33, 4>;
         assert!(UInt64::try_from(vec![1, 2, 3, 4, 5, 6, 7, 8, 9]).is_ok());
         assert!(UInt64::try_from(vec![1, 2, 3]).is_err());
+        assert!(UInt64::try_from(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).is_err());
     }
 
     #[test]
