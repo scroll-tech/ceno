@@ -72,9 +72,19 @@ pub fn pad_cells<E: ExtensionField>(
     }
 }
 
+/// Compile time evaluated minimum function
+/// returns min(a, b)
+pub const fn const_min(a: usize, b: usize) -> usize {
+    if a <= b {
+        a
+    } else {
+        b
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::uint_new::util::{convert_decomp, pad_cells};
+    use crate::uint_new::util::{const_min, convert_decomp, pad_cells};
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
@@ -187,5 +197,12 @@ mod tests {
         pad_cells(&mut circuit_builder, &mut small_values, 5);
         // assert after padding
         assert_eq!(small_values, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_min_function() {
+        assert_eq!(const_min(2, 3), 2);
+        assert_eq!(const_min(3, 3), 3);
+        assert_eq!(const_min(5, 3), 3);
     }
 }
