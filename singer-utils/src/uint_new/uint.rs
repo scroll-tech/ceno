@@ -1,6 +1,6 @@
 use crate::constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH};
 use crate::error::UtilError;
-use crate::uint_new::util::convert_decomp;
+use crate::uint_new::util::{convert_decomp, pad_cells};
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
 
@@ -31,10 +31,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             max_cell_width,
             true,
         )?;
-        // TODO: replace this line with pad cell function
-        if values.len() < Self::N_OPERAND_CELLS {
-            values.extend(circuit_builder.create_cells(Self::N_OPERAND_CELLS - values.len()));
-        }
+        // TODO: is this safe, do we need to ensure that the padded cells are always 0?
+        pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
         values.try_into()
     }
 
@@ -61,14 +59,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         is_little_endian: bool,
     ) -> Result<Self, UtilError> {
         let max_cell_width = M.min(C);
-        convert_decomp(
+        let mut values = convert_decomp(
             circuit_builder,
             bytes,
             BYTE_BIT_WIDTH,
             max_cell_width,
             is_little_endian,
-        )?
-        .try_into()
+        )?;
+        pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
+        values.try_into()
     }
 }
 
@@ -117,6 +116,7 @@ mod tests {
     #[test]
     fn test_uint_from_range_values() {
         // TODO: implement test
+        //  first test without padding then test with padding, same for from_bytes
     }
 
     #[test]
