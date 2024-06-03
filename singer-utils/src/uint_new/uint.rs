@@ -68,12 +68,11 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         cell_width: usize,
         is_little_endian: bool,
     ) -> Result<Self, UtilError> {
-        let max_cell_width = M.min(C);
         let mut values = convert_decomp(
             circuit_builder,
             cell_values,
             cell_width,
-            max_cell_width,
+            Self::MAX_CELL_BIT_WIDTH,
             is_little_endian,
         )?;
         // TODO: is this safe, do we need to ensure that the padded cells are always 0?
