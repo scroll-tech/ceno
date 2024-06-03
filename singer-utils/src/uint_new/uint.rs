@@ -29,6 +29,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             max_cell_width,
             true,
         )?;
+        // TODO: move this logic to convert_decomp
+        //  also think about whether it is safe to do so
         if values.len() < Self::N_OPERAND_CELLS {
             values.extend(circuit_builder.create_cells(Self::N_OPERAND_CELLS - values.len()));
         }
