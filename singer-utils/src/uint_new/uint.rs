@@ -110,4 +110,14 @@ mod tests {
         assert!(UInt64::try_from(vec![1, 2, 3, 4, 5, 6, 7, 8, 9]).is_ok());
         assert!(UInt64::try_from(vec![1, 2, 3]).is_err());
     }
+
+    #[test]
+    fn test_uint_from_range_values() {
+        // TODO: implement test
+    }
+
+    #[test]
+    fn test_uint_from_bytes() {
+        // TODO: implement test
+    }
 }
