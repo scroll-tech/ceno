@@ -8,7 +8,8 @@ use simple_frontend::structs::{CellId, CircuitBuilder};
 /// Represented in little endian form.
 pub struct UInt<const M: usize, const C: usize> {
     // TODO: the size of C should not be more than the size of the underlying field
-    values: Vec<CellId>,
+    // TODO: should this be private?
+    pub values: Vec<CellId>,
 }
 
 impl<const M: usize, const C: usize> UInt<M, C> {

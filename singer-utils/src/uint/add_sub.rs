@@ -63,6 +63,27 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
     }
 
     /// Little-endian addition.
+    /// want to check = [a, b]
+    /// lookuptable = [a, b, c, d, e, f, g, h]
+    /// is 16bits
+    /// should_be_16 = [a, b]
+    /// table = [all possible 16 bit values]
+    /// range_values = contains all possible values of that range?
+    ///
+    /// a + b = c
+    /// c = computed_result
+    /// function(a, b, carry) = c
+    /// carry can be manipulated to give different c's
+    /// how do we ensure that the c we compute is the actual c
+    ///
+    /// [1, 0, 0] - carry_0
+    /// [0, 0, 0] - carry_1
+    ///
+    /// Double check: false carry should violate range check
+    ///
+    /// a b c
+    /// d e f
+    /// -----
     pub fn add<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         range_chip_handler: &mut H,
