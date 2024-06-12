@@ -29,7 +29,6 @@ impl<E: ExtensionField> IOPProverState<E> {
     /// This is experiment features. It's preferable that we move parallel level up more to "bould_poly" so it can be more isolation
     #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys")]
     pub fn prove_batch_polys(
-        //  pool: ThreadPool,
         max_thread_id: usize,
         mut polys: Vec<VirtualPolynomial<E>>,
         transcript: &mut Transcript<E>,
@@ -37,7 +36,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         assert!(!polys.is_empty());
         assert_eq!(polys.len(), max_thread_id);
 
-        let size_log2 = ceil_log2(max_thread_id); // do not support SIZE not power of 2
+        let log2_max_thread_id = ceil_log2(max_thread_id); // do not support SIZE not power of 2
         let (num_variables, max_degree) = (
             polys[0].aux_info.num_variables,
             polys[0].aux_info.max_degree,
@@ -59,7 +58,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         }
         let start = start_timer!(|| "sum check prove");
 
-        transcript.append_message(&(num_variables + size_log2).to_le_bytes());
+        transcript.append_message(&(num_variables + log2_max_thread_id).to_le_bytes());
         transcript.append_message(&max_degree.to_le_bytes());
         let thread_based_transcript = TranscriptSyncronized::new(max_thread_id);
         let (tx_prover_state, rx_prover_state) = bounded(max_thread_id);
@@ -168,6 +167,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
             let span = entered_span!("main_thread_get_challenge");
             transcript.append_field_element_exts(&evaluations.0);
+
             let next_challenge = transcript.get_and_append_challenge(b"Internal round");
             (0..max_thread_id).for_each(|_| {
                 thread_based_transcript.send_challenge(next_challenge.elements);
@@ -213,7 +213,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             }
         }
 
-        if size_log2 == 0 {
+        if log2_max_thread_id == 0 {
             let prover_state = mem::take(&mut prover_states[0]);
             return (
                 IOPProof {
@@ -236,7 +236,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let mut challenge = None;
         let span = entered_span!("prove_rounds_stage2");
-        for _ in 0..size_log2 {
+        for _ in 0..log2_max_thread_id {
             let prover_msg =
                 IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
 

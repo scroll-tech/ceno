@@ -13,8 +13,6 @@ pub struct Transcript<E: ExtensionField> {
     sponge_hasher: Poseidon<E::BaseField, 12, 11>,
 }
 
-static mut COUNT: usize = 0;
-
 impl<E: ExtensionField> Transcript<E> {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
@@ -76,13 +74,6 @@ impl<E: ExtensionField> Transcript<E> {
         let challenge = Challenge {
             elements: E::from_limbs(self.sponge_hasher.squeeze_vec().as_ref()),
         };
-        unsafe {
-            COUNT += 1;
-            if COUNT == 109 {
-                // panic!("got challenge {:?}", challenge);
-            }
-        }
-        // println!("got challenge {:?}", challenge);
         challenge
     }
 

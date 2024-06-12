@@ -51,8 +51,8 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let mut prover_state = tracing_span!("prover_init_parallel").in_scope(|| {
             Self::prover_init_parallel(
-                &circuit,
-                &circuit_witness,
+                circuit,
+                circuit_witness,
                 output_evals,
                 wires_out_evals,
                 transcript,
@@ -74,14 +74,14 @@ impl<E: ExtensionField> IOPProverState<E> {
                         (SumcheckStepType::OutputPhase1Step1, SumcheckStepType::OutputPhase1Step2, _) => {
                             [prover_state
                                 .prove_and_update_state_output_phase1_step1(
-                                    &circuit,
-                                    &circuit_witness,
+                                    circuit,
+                                    circuit_witness,
                                     transcript,
                                 ),
                             prover_state
                                 .prove_and_update_state_output_phase1_step2(
-                                    &circuit,
-                                    &circuit_witness,
+                                    circuit,
+                                    circuit_witness,
                                     transcript,
                                 )].to_vec()
                         },
@@ -89,21 +89,21 @@ impl<E: ExtensionField> IOPProverState<E> {
                             [
                                 prover_state
                                     .prove_and_update_state_phase1_step1(
-                                        &circuit,
-                                        &circuit_witness,
+                                        circuit,
+                                        circuit_witness,
                                         transcript,
                                     ),
                                 prover_state
                                     .prove_and_update_state_phase1_step2(
-                                        &circuit,
-                                        &circuit_witness,
+                                        circuit,
+                                        circuit_witness,
                                         transcript,
                                     ),
                             ].to_vec()
                         ,
                         (SumcheckStepType::Phase2Step1, step2, _) => {
                             let span = entered_span!("phase2_gkr");
-                            let max_phase = match step2 {
+                            let max_steps = match step2 {
                                 SumcheckStepType::Phase2Step2 => 3,
                                 SumcheckStepType::Phase2Step2NoStep3 => 2,
                                 _ => unreachable!(),
@@ -112,7 +112,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             let mut eqs = vec![];
                             let mut layer_polys = (0..max_thread_id).map(|_| ArcDenseMultilinearExtension::default()).collect::<Vec<ArcDenseMultilinearExtension<E>>>();
                             let mut res = vec![];
-                            for step in 0..max_phase {
+                            for step in 0..max_steps {
                                 let bounded_eval_point = prover_state.to_next_step_point.clone();
                                 eqs.push(build_eq_x_r_vec(&bounded_eval_point));
                                 // build step round poly
@@ -123,8 +123,8 @@ impl<E: ExtensionField> IOPProverState<E> {
                                             let (next_layer_poly, virtual_poly) = IOPProverState::build_phase2_step1_sumcheck_poly(
                                                 eqs.as_slice().try_into().unwrap(),
                                                 layer_id,
-                                                &circuit,
-                                                &circuit_witness,
+                                                circuit,
+                                                circuit_witness,
                                                 (thread_id, max_thread_id),
                                             );
                                             (Some(next_layer_poly), virtual_poly)
@@ -134,8 +134,8 @@ impl<E: ExtensionField> IOPProverState<E> {
                                                 &layer_poly,
                                                 layer_id,
                                                 eqs.as_slice().try_into().unwrap(),
-                                                &circuit,
-                                                &circuit_witness,
+                                                circuit,
+                                                circuit_witness,
                                                 (thread_id, max_thread_id),
                                             );
                                             (None, virtual_poly)
@@ -145,8 +145,8 @@ impl<E: ExtensionField> IOPProverState<E> {
                                                 &layer_poly,
                                                 layer_id,
                                                 eqs.as_slice().try_into().unwrap(),
-                                                &circuit,
-                                                &circuit_witness,
+                                                circuit,
+                                                circuit_witness,
                                                 (thread_id, max_thread_id),
                                             );
                                             (None, virtual_poly)
@@ -171,15 +171,15 @@ impl<E: ExtensionField> IOPProverState<E> {
                                     match step {
                                         0 => {
                                             prover_state.combine_phase2_step1_evals(
-                                                &circuit,
+                                                circuit,
                                                 sumcheck_proof,
                                                 sumcheck_prover_state,
                                             )
                                         },
                                         1 => {
-                                            let no_step3: bool = max_phase == 2;
+                                            let no_step3: bool = max_steps == 2;
                                             prover_state.combine_phase2_step2_evals(
-                                                &circuit,
+                                                circuit,
                                                 sumcheck_proof,
                                                 sumcheck_prover_state,
                                                 no_step3,
@@ -187,7 +187,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                         },
                                         2 => {
                                             prover_state.combine_phase2_step3_evals(
-                                                &circuit,
+                                                circuit,
                                                 sumcheck_proof,
                                                 sumcheck_prover_state,
                                             )
@@ -203,15 +203,15 @@ impl<E: ExtensionField> IOPProverState<E> {
                         (SumcheckStepType::LinearPhase2Step1, _, _) =>
                             [prover_state
                                 .prove_and_update_state_linear_phase2_step1(
-                                    &circuit,
-                                    &circuit_witness,
+                                    circuit,
+                                    circuit_witness,
                                     transcript,
                                 )].to_vec(),
                         (SumcheckStepType::InputPhase2Step1, _, _) =>
                             [prover_state
                                 .prove_and_update_state_input_phase2_step1(
-                                    &circuit,
-                                    &circuit_witness,
+                                    circuit,
+                                    circuit_witness,
                                     transcript,
                                 )
                             ].to_vec(),
