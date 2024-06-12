@@ -1,4 +1,4 @@
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, ChallengeId, ExtCellId};
 use strum_macros::EnumIter;
 
@@ -34,14 +34,14 @@ pub struct ChipChallenges {
 }
 
 #[derive(Clone, Debug)]
-pub struct RAMHandler<Ext: SmallField> {
+pub struct RAMHandler<Ext: ExtensionField> {
     pub(crate) rd_records: Vec<ExtCellId<Ext>>,
     pub(crate) wt_records: Vec<ExtCellId<Ext>>,
     pub(crate) challenge: ChipChallenges,
 }
 
 #[derive(Clone, Debug)]
-pub struct ROMHandler<Ext: SmallField> {
+pub struct ROMHandler<Ext: ExtensionField> {
     pub(crate) records: Vec<ExtCellId<Ext>>,
     pub(crate) challenge: ChipChallenges,
 }

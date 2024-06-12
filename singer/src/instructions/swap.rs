@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -20,7 +20,7 @@ use crate::error::ZKVMError;
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 pub struct SwapInstruction<const N: usize>;
 
-impl<F: SmallField, const N: usize> InstructionGraph<F> for SwapInstruction<N> {
+impl<E: ExtensionField, const N: usize> InstructionGraph<E> for SwapInstruction<N> {
     type InstType = Self;
 }
 
@@ -45,7 +45,7 @@ register_witness!(
     }
 );
 
-impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
+impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
     const OPCODE: OpcodeType = match N {
         1 => OpcodeType::SWAP1,
         2 => OpcodeType::SWAP2,
@@ -58,7 +58,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
         4 => "SWAP4",
         _ => unimplemented!(),
     };
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -96,13 +96,13 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
             next_stack_ts.values(),
             &memory_ts,
             stack_top_expr,
-            clk_expr.add(F::BaseField::ONE),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Check the range of stack_top - (N + 1) is within [0, 1 << STACK_TOP_BIT_WIDTH).
         rom_handler.range_check_stack_top(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(N as u64 + 1)),
+            stack_top_expr.sub(E::BaseField::from(N as u64 + 1)),
         )?;
 
         // Pop rlc of stack[top - (N + 1)] from stack
@@ -117,7 +117,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
         let stack_values_n_plus_1 = &phase0[Self::phase0_stack_values_n_plus_1()];
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(N as u64 + 1)),
+            stack_top_expr.sub(E::BaseField::from(N as u64 + 1)),
             old_stack_ts_n_plus_1.values(),
             stack_values_n_plus_1,
         );
@@ -134,7 +134,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
         let stack_values_1 = &phase0[Self::phase0_stack_values_1()];
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts_1.values(),
             stack_values_1,
         );
@@ -142,14 +142,14 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
         // Push stack_1 to the stack at top - (N + 1)
         ram_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(N as u64 + 1)),
+            stack_top_expr.sub(E::BaseField::from(N as u64 + 1)),
             stack_ts.values(),
             stack_values_1,
         );
         // Push stack_n_plus_1 to the stack at top - 1
         ram_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::ONE),
             stack_ts.values(),
             stack_values_n_plus_1,
         );
@@ -158,7 +158,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for SwapInstruction<N> {
         rom_handler.bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
-            <Self as Instruction<F>>::OPCODE,
+            <Self as Instruction<E>>::OPCODE,
         );
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
@@ -183,8 +183,9 @@ mod test {
     use ark_std::test_rng;
     use core::ops::Range;
     use ff::Field;
+    use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
-    use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
+    use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
     use simple_frontend::structs::CellId;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
@@ -345,9 +346,9 @@ mod test {
         );
 
         let circuit_witness_challenges = vec![
-            Goldilocks::from(2),
-            Goldilocks::from(2),
-            Goldilocks::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
         ];
 
         let _circuit_witness = test_opcode_circuit(
@@ -359,25 +360,25 @@ mod test {
         );
     }
 
-    fn bench_swap_instruction_helper<F: SmallField, const N: usize>(instance_num_vars: usize) {
+    fn bench_swap_instruction_helper<E: ExtensionField, const N: usize>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
-            SingerCircuitBuilder::<F>::new(chip_challenges).expect("circuit builder failed");
-        let mut singer_builder = SingerGraphBuilder::<F>::new();
+            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
         let size = SwapInstruction::<N>::phase0_size();
-        let phase0: CircuitWiresIn<F::BaseField> = vec![LayerWitness {
+        let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
                 .map(|_| {
                     (0..size)
-                        .map(|_| F::BaseField::random(&mut rng))
+                        .map(|_| E::BaseField::random(&mut rng))
                         .collect_vec()
                 })
                 .collect_vec(),
         }];
 
-        let real_challenges = vec![F::random(&mut rng), F::random(&mut rng)];
+        let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 
         let timer = Instant::now();
 
@@ -385,7 +386,7 @@ mod test {
             &mut singer_builder.graph_builder,
             &mut singer_builder.chip_builder,
             &circuit_builder.insts_circuits
-                [<SwapInstruction<N> as Instruction<F>>::OPCODE as usize],
+                [<SwapInstruction<N> as Instruction<E>>::OPCODE as usize],
             vec![phase0],
             &real_challenges,
             1 << instance_num_vars,
@@ -402,7 +403,7 @@ mod test {
             timer.elapsed().as_secs_f64()
         );
 
-        let point = vec![F::random(&mut rng), F::random(&mut rng)];
+        let point = vec![E::random(&mut rng), E::random(&mut rng)];
         let target_evals = graph.target_evals(&wit, &point);
 
         let mut prover_transcript = &mut Transcript::new(b"Singer");

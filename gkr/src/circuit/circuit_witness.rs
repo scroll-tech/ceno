@@ -1,13 +1,15 @@
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug};
 
+use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use simple_frontend::structs::{ChallengeConst, ConstantType, LayerId};
+use sumcheck::util::ceil_log2;
 
 use crate::{
     structs::{Circuit, CircuitWitness, LayerWitness},
-    utils::{ceil_log2, i64_to_field, MultilinearExtensionFromVectors},
+    utils::{i64_to_field, MultilinearExtensionFromVectors},
 };
 
 use super::EvaluateConstant;
@@ -16,7 +18,7 @@ impl<F: SmallField> CircuitWitness<F> {
     /// Initialize the structure of the circuit witness.
     pub fn new<E>(circuit: &Circuit<E>, challenges: Vec<E>) -> Self
     where
-        E: SmallField<BaseField = F>,
+        E: ExtensionField<BaseField = F>,
     {
         Self {
             layers: vec![LayerWitness::default(); circuit.layers.len()],
@@ -36,7 +38,7 @@ impl<F: SmallField> CircuitWitness<F> {
         n_instances: usize,
     ) -> (Vec<LayerWitness<F>>, Vec<LayerWitness<F>>)
     where
-        E: SmallField<BaseField = F>,
+        E: ExtensionField<BaseField = F>,
     {
         let n_layers = circuit.layers.len();
         let mut layer_wits = vec![
@@ -159,7 +161,7 @@ impl<F: SmallField> CircuitWitness<F> {
 
     pub fn add_instance<E>(&mut self, circuit: &Circuit<E>, wits_in: Vec<Vec<F>>)
     where
-        E: SmallField<BaseField = F>,
+        E: ExtensionField<BaseField = F>,
     {
         let wits_in = wits_in
             .into_iter()
@@ -176,7 +178,7 @@ impl<F: SmallField> CircuitWitness<F> {
         wits_in: Vec<LayerWitness<F>>,
         n_instances: usize,
     ) where
-        E: SmallField<BaseField = F>,
+        E: ExtensionField<BaseField = F>,
     {
         assert_eq!(wits_in.len(), circuit.n_witness_in);
         assert!(n_instances.is_power_of_two());
@@ -209,7 +211,7 @@ impl<F: SmallField> CircuitWitness<F> {
 
     pub fn check_correctness<Ext>(&self, circuit: &Circuit<Ext>)
     where
-        Ext: SmallField<BaseField = F>,
+        Ext: ExtensionField<BaseField = F>,
     {
         // Check input.
 
@@ -398,18 +400,20 @@ impl<F: SmallField> CircuitWitness<F> {
 }
 
 impl<F: SmallField> CircuitWitness<F> {
-    pub fn layer_poly<E>(
+    pub fn layer_poly<Ext: ExtensionField<BaseField = F>>(
         &self,
         layer_id: LayerId,
         single_num_vars: usize,
-    ) -> Arc<DenseMultilinearExtension<E>>
-    where
-        E: SmallField<BaseField = F>,
-    {
+        multi_threads_meta: (usize, usize),
+    ) -> ArcDenseMultilinearExtension<Ext> {
         self.layers[layer_id as usize]
             .instances
             .as_slice()
-            .mle(single_num_vars, self.instance_num_vars())
+            .mle_with_meta(
+                single_num_vars,
+                self.instance_num_vars(),
+                multi_threads_meta,
+            )
     }
 }
 
@@ -439,7 +443,8 @@ mod test {
     use std::collections::HashMap;
 
     use ff::Field;
-    use goldilocks::{GoldilocksExt2, SmallField};
+    use ff_ext::ExtensionField;
+    use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use simple_frontend::structs::{ChallengeConst, ChallengeId, CircuitBuilder};
 
@@ -448,7 +453,7 @@ mod test {
         utils::i64_to_field,
     };
 
-    fn copy_and_paste_circuit<Ext: SmallField>() -> Circuit<Ext> {
+    fn copy_and_paste_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
         let mut circuit_builder = CircuitBuilder::<Ext>::new();
         // Layer 3
         let (_, input) = circuit_builder.create_witness_in(4);
@@ -477,7 +482,7 @@ mod test {
         circuit
     }
 
-    fn copy_and_paste_witness<Ext: SmallField>() -> (
+    fn copy_and_paste_witness<Ext: ExtensionField>() -> (
         Vec<LayerWitness<Ext::BaseField>>,
         CircuitWitness<Ext::BaseField>,
     ) {
@@ -530,7 +535,7 @@ mod test {
         )
     }
 
-    fn paste_from_wit_in_circuit<Ext: SmallField>() -> Circuit<Ext> {
+    fn paste_from_wit_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
         let mut circuit_builder = CircuitBuilder::<Ext>::new();
 
         // Layer 2
@@ -555,7 +560,7 @@ mod test {
         circuit
     }
 
-    fn paste_from_wit_in_witness<Ext: SmallField>() -> (
+    fn paste_from_wit_in_witness<Ext: ExtensionField>() -> (
         Vec<LayerWitness<Ext::BaseField>>,
         CircuitWitness<Ext::BaseField>,
     ) {
@@ -626,7 +631,7 @@ mod test {
         )
     }
 
-    fn copy_to_wit_out_circuit<Ext: SmallField>() -> Circuit<Ext> {
+    fn copy_to_wit_out_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
         let mut circuit_builder = CircuitBuilder::<Ext>::new();
         // Layer 2
         let (_, leaves) = circuit_builder.create_witness_in(4);
@@ -647,7 +652,7 @@ mod test {
         circuit
     }
 
-    fn copy_to_wit_out_witness<Ext: SmallField>() -> (
+    fn copy_to_wit_out_witness<Ext: ExtensionField>() -> (
         Vec<LayerWitness<Ext::BaseField>>,
         CircuitWitness<Ext::BaseField>,
     ) {
@@ -697,7 +702,7 @@ mod test {
         )
     }
 
-    fn copy_to_wit_out_witness_2<Ext: SmallField>() -> (
+    fn copy_to_wit_out_witness_2<Ext: ExtensionField>() -> (
         Vec<LayerWitness<Ext::BaseField>>,
         CircuitWitness<Ext::BaseField>,
     ) {
@@ -777,7 +782,7 @@ mod test {
         )
     }
 
-    fn rlc_circuit<Ext: SmallField>() -> Circuit<Ext> {
+    fn rlc_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
         let mut circuit_builder = CircuitBuilder::<Ext>::new();
         // Layer 2
         let (_, leaves) = circuit_builder.create_witness_in(4);
@@ -803,11 +808,11 @@ mod test {
         Vec<Ext>,
     )
     where
-        Ext: SmallField<DEGREE = 2>,
+        Ext: ExtensionField<DEGREE = 2>,
     {
         let challenges = vec![
-            Ext::from_limbs(&[i64_to_field(31), i64_to_field(37)]),
-            Ext::from_limbs(&[i64_to_field(97), i64_to_field(23)]),
+            Ext::from_bases(&[i64_to_field(31), i64_to_field(37)]),
+            Ext::from_bases(&[i64_to_field(97), i64_to_field(23)]),
         ];
         let challenge_pows = challenges
             .iter()
@@ -846,22 +851,30 @@ mod test {
             instances: leaves.clone(),
         }];
 
-        let inner00 = challenge_pows[0][0].1.mul_base(&leaves[0][0])
-            + challenge_pows[0][1].1.mul_base(&leaves[0][1])
+        let inner00: Ext = challenge_pows[0][0].1 * (&leaves[0][0])
+            + challenge_pows[0][1].1 * (&leaves[0][1])
             + challenge_pows[0][2].1;
-        let inner01 = challenge_pows[1][0].1.mul_base(&leaves[0][2])
-            + challenge_pows[1][1].1.mul_base(&leaves[0][3])
+        let inner01: Ext = challenge_pows[1][0].1 * (&leaves[0][2])
+            + challenge_pows[1][1].1 * (&leaves[0][3])
             + challenge_pows[1][2].1;
-        let inner10 = challenge_pows[0][0].1.mul_base(&leaves[1][0])
-            + challenge_pows[0][1].1.mul_base(&leaves[1][1])
+        let inner10: Ext = challenge_pows[0][0].1 * (&leaves[1][0])
+            + challenge_pows[0][1].1 * (&leaves[1][1])
             + challenge_pows[0][2].1;
-        let inner11 = challenge_pows[1][0].1.mul_base(&leaves[1][2])
-            + challenge_pows[1][1].1.mul_base(&leaves[1][3])
+        let inner11: Ext = challenge_pows[1][0].1 * (&leaves[1][2])
+            + challenge_pows[1][1].1 * (&leaves[1][3])
             + challenge_pows[1][2].1;
 
         let inners = vec![
-            [inner00.clone().to_limbs(), inner01.clone().to_limbs()].concat(),
-            [inner10.clone().to_limbs(), inner11.clone().to_limbs()].concat(),
+            [
+                inner00.clone().as_bases().to_vec(),
+                inner01.clone().as_bases().to_vec(),
+            ]
+            .concat(),
+            [
+                inner10.clone().as_bases().to_vec(),
+                inner11.clone().as_bases().to_vec(),
+            ]
+            .concat(),
         ];
 
         let root_tmp0 = vec![
@@ -880,7 +893,7 @@ mod test {
 
         let root0 = inner00 * inner01;
         let root1 = inner10 * inner11;
-        let roots = vec![root0.to_limbs(), root1.to_limbs()];
+        let roots = vec![root0.as_bases().to_vec(), root1.as_bases().to_vec()];
 
         let layers = vec![
             LayerWitness {
@@ -907,7 +920,7 @@ mod test {
                     .iter()
                     .flatten()
                     .cloned()
-                    .map(|(k, v)| (k, v.to_limbs()))
+                    .map(|(k, v)| (k, v.as_bases().to_vec()))
                     .collect::<HashMap<_, _>>(),
             },
             challenges,

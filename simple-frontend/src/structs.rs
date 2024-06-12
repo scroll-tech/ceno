@@ -1,5 +1,5 @@
 use ff::Field;
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use serde::Serialize;
 use std::{hash::Hash, marker::PhantomData};
 
@@ -20,7 +20,7 @@ pub struct ChallengeConst {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
-pub enum ConstantType<Ext: SmallField> {
+pub enum ConstantType<Ext: ExtensionField> {
     Field(Ext::BaseField),
     /// ChallengeConst is an extension field element represents a power of ChallengeId.
     /// The usize here denotes the `usize`-th base field element of the const.
@@ -31,14 +31,14 @@ pub enum ConstantType<Ext: SmallField> {
 /// Represent a gate in the circuit. The inner variables denote the input
 /// indices and scalar.
 #[derive(Clone, Debug)]
-pub struct GateType<Ext: SmallField> {
+pub struct GateType<Ext: ExtensionField> {
     pub idx_in: Vec<CellId>,
     pub scalar: ConstantType<Ext>,
 }
 
 /// Store wire structure of the circuit.
 #[derive(Clone, Debug)]
-pub struct Cell<Ext: SmallField> {
+pub struct Cell<Ext: ExtensionField> {
     /// The layer of the cell.
     pub layer: Option<LayerId>,
     /// The value of the cell is the sum of all gates.
@@ -49,7 +49,7 @@ pub struct Cell<Ext: SmallField> {
 
 /// An ExtCell consists DEGREE number of cells.
 #[derive(Clone, Debug)]
-pub struct ExtCellId<Ext: SmallField> {
+pub struct ExtCellId<Ext: ExtensionField> {
     pub cells: Vec<CellId>,
     pub phantom: PhantomData<Ext>,
 }
@@ -78,19 +78,19 @@ pub enum CellType {
 
 /// A MixedCell can be a constant, a cell, or a Cell Expression
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
-pub enum MixedCell<Ext: SmallField> {
+pub enum MixedCell<Ext: ExtensionField> {
     Constant(Ext::BaseField),
     Cell(CellId),
     CellExpr(CellId, Ext::BaseField, Ext::BaseField),
 }
 
-impl<Ext: SmallField> From<CellId> for MixedCell<Ext> {
+impl<Ext: ExtensionField> From<CellId> for MixedCell<Ext> {
     fn from(cell_id: CellId) -> Self {
         MixedCell::Cell(cell_id)
     }
 }
 
-impl<Ext: SmallField> MixedCell<Ext> {
+impl<Ext: ExtensionField> MixedCell<Ext> {
     pub fn add(&self, shift: Ext::BaseField) -> Self {
         match self {
             MixedCell::Constant(c) => MixedCell::Constant(*c + shift),
@@ -121,7 +121,7 @@ impl<Ext: SmallField> MixedCell<Ext> {
     }
 }
 
-pub struct CircuitBuilder<Ext: SmallField> {
+pub struct CircuitBuilder<Ext: ExtensionField> {
     pub cells: Vec<Cell<Ext>>,
 
     /// Number of layers in the circuit.

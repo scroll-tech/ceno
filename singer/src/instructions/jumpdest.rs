@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -20,7 +20,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct JumpdestInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for JumpdestInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for JumpdestInstruction {
     type InstType = Self;
 }
 
@@ -37,10 +37,10 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for JumpdestInstruction {
+impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMPDEST;
     const NAME: &'static str = "JUMPDEST";
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -70,14 +70,14 @@ impl<F: SmallField> Instruction<F> for JumpdestInstruction {
             stack_ts.values(), // Because there is no stack push.
             memory_ts,
             stack_top.into(),
-            clk_expr.add(F::BaseField::ONE),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Bytecode check for (pc, jump)
         rom_handler.bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
-            <Self as Instruction<F>>::OPCODE,
+            <Self as Instruction<E>>::OPCODE,
         );
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
@@ -102,8 +102,9 @@ mod test {
     use ark_std::test_rng;
     use core::ops::Range;
     use ff::Field;
+    use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
-    use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
+    use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
     use simple_frontend::structs::CellId;
     use std::collections::BTreeMap;
@@ -166,9 +167,9 @@ mod test {
         );
 
         let circuit_witness_challenges = vec![
-            Goldilocks::from(2),
-            Goldilocks::from(2),
-            Goldilocks::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
         ];
 
         let _circuit_witness = test_opcode_circuit(
@@ -180,25 +181,25 @@ mod test {
         );
     }
 
-    fn bench_jumpdest_instruction_helper<F: SmallField>(instance_num_vars: usize) {
+    fn bench_jumpdest_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
-            SingerCircuitBuilder::<F>::new(chip_challenges).expect("circuit builder failed");
-        let mut singer_builder = SingerGraphBuilder::<F>::new();
+            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
         let size = JumpdestInstruction::phase0_size();
-        let phase0: CircuitWiresIn<F::BaseField> = vec![LayerWitness {
+        let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
                 .map(|_| {
                     (0..size)
-                        .map(|_| F::BaseField::random(&mut rng))
+                        .map(|_| E::BaseField::random(&mut rng))
                         .collect_vec()
                 })
                 .collect_vec(),
         }];
 
-        let real_challenges = vec![F::random(&mut rng), F::random(&mut rng)];
+        let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 
         let timer = Instant::now();
 
@@ -206,7 +207,7 @@ mod test {
             &mut singer_builder.graph_builder,
             &mut singer_builder.chip_builder,
             &circuit_builder.insts_circuits
-                [<JumpdestInstruction as Instruction<F>>::OPCODE as usize],
+                [<JumpdestInstruction as Instruction<E>>::OPCODE as usize],
             vec![phase0],
             &real_challenges,
             1 << instance_num_vars,
@@ -222,7 +223,7 @@ mod test {
             timer.elapsed().as_secs_f64()
         );
 
-        let point = vec![F::random(&mut rng), F::random(&mut rng)];
+        let point = vec![E::random(&mut rng), E::random(&mut rng)];
         let target_evals = graph.target_evals(&wit, &point);
 
         let mut prover_transcript = &mut Transcript::new(b"Singer");

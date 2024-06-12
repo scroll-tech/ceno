@@ -3,6 +3,7 @@
 
 use basic_block::SingerBasicBlockBuilder;
 use error::ZKVMError;
+use ff_ext::ExtensionField;
 use gkr::structs::LayerWitness;
 use gkr_graph::structs::{
     CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
@@ -37,16 +38,16 @@ pub(crate) mod utils;
 /// InstOutChipType, corresponding to the product of summation of the chip check
 /// records. `public_output_size` is the wire id stores the size of public
 /// output.
-pub struct SingerGraphBuilder<F: SmallField> {
-    graph_builder: CircuitGraphBuilder<F>,
-    bb_builder: SingerBasicBlockBuilder<F>,
-    chip_builder: SingerChipBuilder<F>,
+pub struct SingerGraphBuilder<E: ExtensionField> {
+    graph_builder: CircuitGraphBuilder<E>,
+    bb_builder: SingerBasicBlockBuilder<E>,
+    chip_builder: SingerChipBuilder<E>,
     public_output_size: Option<NodeOutputType>,
 }
 
-impl<F: SmallField> SingerGraphBuilder<F> {
+impl<E: ExtensionField> SingerGraphBuilder<E> {
     pub fn new(
-        inst_circuit_builder: SingerInstCircuitBuilder<F>,
+        inst_circuit_builder: SingerInstCircuitBuilder<E>,
         bytecode: &[Vec<u8>],
         challenges: ChipChallenges,
     ) -> Result<Self, ZKVMError> {
@@ -60,14 +61,14 @@ impl<F: SmallField> SingerGraphBuilder<F> {
 
     pub fn construct_graph_and_witness(
         mut self,
-        singer_wires_in: SingerWiresIn<F::BaseField>,
+        singer_wires_in: SingerWiresIn<E::BaseField>,
         program_input: &[u8],
-        real_challenges: &[F],
+        real_challenges: &[E],
         params: &SingerParams,
     ) -> Result<
         (
-            SingerCircuit<F>,
-            SingerWitness<F::BaseField>,
+            SingerCircuit<E>,
+            SingerWitness<E::BaseField>,
             SingerWiresOutID,
         ),
         ZKVMError,
@@ -127,7 +128,7 @@ impl<F: SmallField> SingerGraphBuilder<F> {
     pub fn construct_graph(
         mut self,
         aux_info: &SingerAuxInfo,
-    ) -> Result<SingerCircuit<F>, ZKVMError> {
+    ) -> Result<SingerCircuit<E>, ZKVMError> {
         // Construct tables for lookup arguments, including bytecode, range and
         // calldata
         let pub_out_id = self.bb_builder.construct_graph(
@@ -169,7 +170,7 @@ impl<F: SmallField> SingerGraphBuilder<F> {
     }
 }
 
-pub struct SingerCircuit<F: SmallField>(CircuitGraph<F>);
+pub struct SingerCircuit<E: ExtensionField>(CircuitGraph<E>);
 
 pub struct SingerWitness<F: SmallField>(CircuitGraphWitness<F>);
 

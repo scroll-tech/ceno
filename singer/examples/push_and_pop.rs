@@ -1,4 +1,4 @@
-use goldilocks::{Goldilocks, GoldilocksExt2};
+use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use singer::{
     instructions::SingerCircuitBuilder,

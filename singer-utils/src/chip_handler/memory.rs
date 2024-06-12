@@ -1,4 +1,4 @@
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
@@ -6,7 +6,7 @@ use crate::structs::{RAMHandler, RAMType};
 
 use super::{MemoryChipOperations, RAMOperations};
 
-impl<Ext: SmallField> MemoryChipOperations<Ext> for RAMHandler<Ext> {
+impl<Ext: ExtensionField> MemoryChipOperations<Ext> for RAMHandler<Ext> {
     fn mem_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

@@ -7,6 +7,8 @@ license.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ff_ext = { path = "../ff_ext" }
+crossbeam-channel = "0.5.13"
 ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true

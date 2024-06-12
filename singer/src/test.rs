@@ -1,5 +1,6 @@
 use core::ops::Range;
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::CircuitWitness;
 use gkr::structs::IOPProverState;
 use gkr::utils::MultilinearExtensionFromVectors;
@@ -35,13 +36,13 @@ pub(crate) fn u2vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
     ret
 }
 
-pub(crate) fn test_opcode_circuit<Ext: SmallField>(
+pub(crate) fn test_opcode_circuit<Ext: ExtensionField>(
     inst_circuit: &InstCircuit<Ext>,
     phase0_idx_map: &BTreeMap<String, Range<CellId>>,
     phase0_witness_size: usize,
     phase0_values_map: &BTreeMap<String, Vec<Ext::BaseField>>,
     circuit_witness_challenges: Vec<Ext>,
-) -> CircuitWitness<<Ext as SmallField>::BaseField> {
+) -> CircuitWitness<<Ext as ExtensionField>::BaseField> {
     // configure circuit
     let circuit = inst_circuit.circuit.as_ref();
 

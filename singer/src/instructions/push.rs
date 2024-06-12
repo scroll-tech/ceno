@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -21,7 +21,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct PushInstruction<const N: usize>;
 
-impl<F: SmallField, const N: usize> InstructionGraph<F> for PushInstruction<N> {
+impl<E: ExtensionField, const N: usize> InstructionGraph<E> for PushInstruction<N> {
     type InstType = Self;
 }
 
@@ -41,7 +41,7 @@ register_witness!(
     }
 );
 
-impl<F: SmallField, const N: usize> Instruction<F> for PushInstruction<N> {
+impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
     const OPCODE: OpcodeType = match N {
         1 => OpcodeType::PUSH1,
         _ => unimplemented!(),
@@ -50,7 +50,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for PushInstruction<N> {
         1 => "PUSH1",
         _ => unimplemented!(),
     };
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -90,8 +90,8 @@ impl<F: SmallField, const N: usize> Instruction<F> for PushInstruction<N> {
             next_pc.values(),
             next_stack_ts.values(),
             &memory_ts,
-            stack_top_expr.add(F::BaseField::from(1)),
-            clk_expr.add(F::BaseField::ONE),
+            stack_top_expr.add(E::BaseField::from(1)),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Check the range of stack_top is within [0, 1 << STACK_TOP_BIT_WIDTH).
@@ -111,7 +111,7 @@ impl<F: SmallField, const N: usize> Instruction<F> for PushInstruction<N> {
         rom_handler.bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
-            <Self as Instruction<F>>::OPCODE,
+            <Self as Instruction<E>>::OPCODE,
         );
         for (i, pc_add_i_plus_1) in phase0[Self::phase0_pc_add_i_plus_1()]
             .chunks(UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
@@ -148,8 +148,9 @@ mod test {
     use ark_std::test_rng;
     use core::ops::Range;
     use ff::Field;
+    use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
-    use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
+    use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
     use simple_frontend::structs::CellId;
     use std::collections::BTreeMap;
@@ -242,9 +243,9 @@ mod test {
         );
 
         let circuit_witness_challenges = vec![
-            Goldilocks::from(2),
-            Goldilocks::from(2),
-            Goldilocks::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
         ];
 
         let _circuit_witness = test_opcode_circuit(
@@ -256,25 +257,25 @@ mod test {
         );
     }
 
-    fn bench_push_instruction_helper<F: SmallField, const N: usize>(instance_num_vars: usize) {
+    fn bench_push_instruction_helper<E: ExtensionField, const N: usize>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
-            SingerCircuitBuilder::<F>::new(chip_challenges).expect("circuit builder failed");
-        let mut singer_builder = SingerGraphBuilder::<F>::new();
+            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
         let size = PushInstruction::<N>::phase0_size();
-        let phase0: CircuitWiresIn<F::BaseField> = vec![LayerWitness {
+        let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
                 .map(|_| {
                     (0..size)
-                        .map(|_| F::BaseField::random(&mut rng))
+                        .map(|_| E::BaseField::random(&mut rng))
                         .collect_vec()
                 })
                 .collect_vec(),
         }];
 
-        let real_challenges = vec![F::random(&mut rng), F::random(&mut rng)];
+        let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 
         let timer = Instant::now();
 
@@ -282,7 +283,7 @@ mod test {
             &mut singer_builder.graph_builder,
             &mut singer_builder.chip_builder,
             &circuit_builder.insts_circuits
-                [<PushInstruction<N> as Instruction<F>>::OPCODE as usize],
+                [<PushInstruction<N> as Instruction<E>>::OPCODE as usize],
             vec![phase0],
             &real_challenges,
             1 << instance_num_vars,
@@ -299,7 +300,7 @@ mod test {
             timer.elapsed().as_secs_f64()
         );
 
-        let point = vec![F::random(&mut rng), F::random(&mut rng)];
+        let point = vec![E::random(&mut rng), E::random(&mut rng)];
         let target_evals = graph.target_evals(&wit, &point);
 
         let mut prover_transcript = &mut Transcript::new(b"Singer");

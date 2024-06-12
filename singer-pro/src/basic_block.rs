@@ -1,7 +1,7 @@
 use std::{collections::HashSet, mem};
 
+use ff_ext::ExtensionField;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType, structs::ChipChallenges};
 
@@ -28,15 +28,15 @@ pub mod bb_ret;
 pub mod bb_start;
 pub mod utils;
 
-pub struct SingerBasicBlockBuilder<F: SmallField> {
-    inst_builder: SingerInstCircuitBuilder<F>,
-    basic_blocks: Vec<BasicBlock<F>>,
+pub struct SingerBasicBlockBuilder<E: ExtensionField> {
+    inst_builder: SingerInstCircuitBuilder<E>,
+    basic_blocks: Vec<BasicBlock<E>>,
     pub(crate) challenges: ChipChallenges,
 }
 
-impl<F: SmallField> SingerBasicBlockBuilder<F> {
+impl<E: ExtensionField> SingerBasicBlockBuilder<E> {
     pub fn new(
-        inst_builder: SingerInstCircuitBuilder<F>,
+        inst_builder: SingerInstCircuitBuilder<E>,
         bytecode: &[Vec<u8>],
         challenges: ChipChallenges,
     ) -> Result<Self, ZKVMError> {
@@ -56,10 +56,10 @@ impl<F: SmallField> SingerBasicBlockBuilder<F> {
 
     pub fn construct_graph_and_witness(
         &self,
-        graph_builder: &mut CircuitGraphBuilder<F>,
-        chip_builder: &mut SingerChipBuilder<F>,
-        mut bbs_wires_in: Vec<BasicBlockWiresIn<F::BaseField>>,
-        real_challenges: &[F],
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
+        mut bbs_wires_in: Vec<BasicBlockWiresIn<E::BaseField>>,
+        real_challenges: &[E],
         params: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
         let mut pub_out_id = None;
@@ -81,8 +81,8 @@ impl<F: SmallField> SingerBasicBlockBuilder<F> {
 
     pub fn construct_graph(
         &self,
-        graph_builder: &mut CircuitGraphBuilder<F>,
-        chip_builder: &mut SingerChipBuilder<F>,
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
         real_n_instances: &[usize],
         params: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
@@ -119,16 +119,16 @@ pub struct BasicBlockInfo {
 }
 
 #[derive(Clone, Debug)]
-pub struct BasicBlock<F: SmallField> {
+pub struct BasicBlock<E: ExtensionField> {
     pub bytecode: Vec<u8>,
     pub info: BasicBlockInfo,
 
-    bb_start_circuit: BBStartCircuit<F>,
-    bb_final_circuit: BBFinalCircuit<F>,
-    bb_acc_circuits: Vec<AccessoryCircuit<F>>,
+    bb_start_circuit: BBStartCircuit<E>,
+    bb_final_circuit: BBFinalCircuit<E>,
+    bb_acc_circuits: Vec<AccessoryCircuit<E>>,
 }
 
-impl<F: SmallField> BasicBlock<F> {
+impl<E: ExtensionField> BasicBlock<E> {
     pub(crate) fn new(
         bytecode: &[u8],
         pc_start: u64,
@@ -212,11 +212,11 @@ impl<F: SmallField> BasicBlock<F> {
     /// instruction.
     pub(crate) fn construct_graph_and_witness(
         &self,
-        graph_builder: &mut CircuitGraphBuilder<F>,
-        chip_builder: &mut SingerChipBuilder<F>,
-        inst_builder: &SingerInstCircuitBuilder<F>,
-        mut bb_wires_in: BasicBlockWiresIn<F::BaseField>,
-        real_challenges: &[F],
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
+        inst_builder: &SingerInstCircuitBuilder<E>,
+        mut bb_wires_in: BasicBlockWiresIn<E::BaseField>,
+        real_challenges: &[E],
         params: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
         let bb_start_circuit = &self.bb_start_circuit;
@@ -357,9 +357,9 @@ impl<F: SmallField> BasicBlock<F> {
 
     pub(crate) fn construct_graph(
         &self,
-        graph_builder: &mut CircuitGraphBuilder<F>,
-        chip_builder: &mut SingerChipBuilder<F>,
-        inst_builder: &SingerInstCircuitBuilder<F>,
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
+        inst_builder: &SingerInstCircuitBuilder<E>,
         real_n_instances: usize,
         params: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
@@ -489,9 +489,10 @@ mod test {
     };
     use ark_std::test_rng;
     use ff::Field;
+    use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
     use gkr_graph::structs::CircuitGraphBuilder;
-    use goldilocks::{GoldilocksExt2, SmallField};
+    use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use singer_utils::{
         chips::SingerChipBuilder,
@@ -502,22 +503,22 @@ mod test {
     use transcript::Transcript;
 
     // A benchmark containing `n_adds_in_bb` ADD instructions in a basic block.
-    fn bench_bb_helper<F: SmallField>(instance_num_vars: usize, n_adds_in_bb: usize) {
+    fn bench_bb_helper<E: ExtensionField>(instance_num_vars: usize, n_adds_in_bb: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
-            SingerInstCircuitBuilder::<F>::new(chip_challenges).expect("circuit builder failed");
+            SingerInstCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
 
         let bytecode = vec![vec![OpcodeType::ADD as u8; n_adds_in_bb]];
 
         let mut rng = test_rng();
-        let real_challenges = vec![F::random(&mut rng), F::random(&mut rng)];
+        let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
         let n_instances = 1 << instance_num_vars;
 
         let timer = Instant::now();
 
         let mut random_matrix = |n, m| {
             (0..n)
-                .map(|_| (0..m).map(|_| F::BaseField::random(&mut rng)).collect())
+                .map(|_| (0..m).map(|_| E::BaseField::random(&mut rng)).collect())
                 .collect()
         };
         let bb_witness = BasicBlockWiresIn {
@@ -574,8 +575,8 @@ mod test {
             bb_acc_circuits: vec![],
         };
 
-        let mut graph_builder = CircuitGraphBuilder::<F>::new();
-        let mut chip_builder = SingerChipBuilder::<F>::new();
+        let mut graph_builder = CircuitGraphBuilder::<E>::new();
+        let mut chip_builder = SingerChipBuilder::<E>::new();
         let _ = bb
             .construct_graph_and_witness(
                 &mut graph_builder,
@@ -595,7 +596,7 @@ mod test {
             timer.elapsed().as_secs_f64()
         );
 
-        let point = (0..20).map(|_| F::random(&mut rng)).collect_vec();
+        let point = (0..20).map(|_| E::random(&mut rng)).collect_vec();
         let target_evals = graph.target_evals(&wit, &point);
 
         let mut prover_transcript = &mut Transcript::new(b"Singer");

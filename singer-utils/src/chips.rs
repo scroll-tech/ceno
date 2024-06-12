@@ -1,14 +1,12 @@
 use std::{mem, sync::Arc};
 
-use gkr::{
-    structs::{Circuit, LayerWitness},
-    utils::ceil_log2,
-};
+use ff_ext::ExtensionField;
+use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use goldilocks::SmallField;
 use simple_frontend::structs::WitnessId;
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use sumcheck::util::ceil_log2;
 
 use crate::{
     constants::RANGE_CHIP_BIT_WIDTH,
@@ -30,12 +28,12 @@ mod range;
 pub mod circuit_gadgets;
 
 #[derive(Clone, Debug)]
-pub struct SingerChipBuilder<F: SmallField> {
-    pub chip_circuit_gadgets: ChipCircuitGadgets<F>,
+pub struct SingerChipBuilder<E: ExtensionField> {
+    pub chip_circuit_gadgets: ChipCircuitGadgets<E>,
     pub output_wires_id: Vec<Vec<NodeOutputType>>,
 }
 
-impl<F: SmallField> SingerChipBuilder<F> {
+impl<E: ExtensionField> SingerChipBuilder<E> {
     pub fn new() -> Self {
         let chip_circuit_gadgets = ChipCircuitGadgets::new();
         Self {
@@ -49,17 +47,17 @@ impl<F: SmallField> SingerChipBuilder<F> {
     /// equality check, and the input of lookup arguments.
     pub fn construct_chip_check_graph_and_witness(
         &mut self,
-        graph_builder: &mut CircuitGraphBuilder<F>,
+        graph_builder: &mut CircuitGraphBuilder<E>,
         node_id: usize,
         to_chip_ids: &[Option<(WitnessId, usize)>],
-        real_challenges: &[F],
+        real_challenges: &[E],
         real_n_instances: usize,
     ) -> Result<(), UtilError> {
         let mut build = |real_n_instances: usize,
                          num: usize,
                          input_wit_id: WitnessId,
-                         leaf: &LeafCircuit<F>,
-                         inner: &Arc<Circuit<F>>|
+                         leaf: &LeafCircuit<E>,
+                         inner: &Arc<Circuit<E>>|
          -> Result<NodeOutputType, UtilError> {
             let selector = ChipCircuitGadgets::construct_prefix_selector(real_n_instances, num);
             let selector_node_id = graph_builder.add_node_with_witness(
@@ -128,7 +126,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
     /// the input of lookup arguments.
     pub fn construct_chip_check_graph(
         &mut self,
-        graph_builder: &mut CircuitGraphBuilder<F>,
+        graph_builder: &mut CircuitGraphBuilder<E>,
         node_id: usize,
         to_chip_ids: &[Option<(WitnessId, usize)>],
         real_n_instances: usize,
@@ -136,8 +134,8 @@ impl<F: SmallField> SingerChipBuilder<F> {
         let mut build = |n_instances: usize,
                          num: usize,
                          input_wit_id: WitnessId,
-                         leaf: &LeafCircuit<F>,
-                         inner: &Arc<Circuit<F>>|
+                         leaf: &LeafCircuit<E>,
+                         inner: &Arc<Circuit<E>>|
          -> Result<NodeOutputType, UtilError> {
             let selector = ChipCircuitGadgets::construct_prefix_selector(n_instances, num);
             let selector_node_id =
@@ -194,12 +192,12 @@ impl<F: SmallField> SingerChipBuilder<F> {
     /// tree-structured circuits to fold the summation.
     pub fn construct_lookup_table_graph_and_witness(
         &self,
-        graph_builder: &mut CircuitGraphBuilder<F>,
+        graph_builder: &mut CircuitGraphBuilder<E>,
         bytecode: &[u8],
         program_input: &[u8],
-        mut table_count_witness: Vec<LayerWitness<F::BaseField>>,
+        mut table_count_witness: Vec<LayerWitness<E::BaseField>>,
         challenges: &ChipChallenges,
-        real_challenges: &[F],
+        real_challenges: &[E],
     ) -> Result<Vec<NodeOutputType>, UtilError> {
         let mut tables_out = vec![NodeOutputType::OutputLayer(0); LookupChipType::iter().count()];
 
@@ -290,7 +288,7 @@ impl<F: SmallField> SingerChipBuilder<F> {
     /// fold the summation.
     pub fn construct_lookup_table_graph(
         &self,
-        graph_builder: &mut CircuitGraphBuilder<F>,
+        graph_builder: &mut CircuitGraphBuilder<E>,
         byte_code_len: usize,
         program_input_len: usize,
         challenges: &ChipChallenges,
@@ -349,13 +347,13 @@ impl<F: SmallField> SingerChipBuilder<F> {
 }
 
 #[derive(Clone, Debug)]
-pub struct ChipCircuitGadgets<F: SmallField> {
-    inv_sum: LeafCircuit<F>,
-    frac_sum_inner: Arc<Circuit<F>>,
-    frac_sum_leaf: LeafFracSumCircuit<F>,
-    frac_sum_leaf_no_selector: LeafFracSumNoSelectorCircuit<F>,
-    product_inner: Arc<Circuit<F>>,
-    product_leaf: LeafCircuit<F>,
+pub struct ChipCircuitGadgets<E: ExtensionField> {
+    inv_sum: LeafCircuit<E>,
+    frac_sum_inner: Arc<Circuit<E>>,
+    frac_sum_leaf: LeafFracSumCircuit<E>,
+    frac_sum_leaf_no_selector: LeafFracSumNoSelectorCircuit<E>,
+    product_inner: Arc<Circuit<E>>,
+    product_leaf: LeafCircuit<E>,
 }
 
 #[derive(Clone, Copy, Debug, EnumIter)]
@@ -367,13 +365,13 @@ pub enum LookupChipType {
 
 /// Generate the tree-structured circuit and witness to compute the product or
 /// summation. `instance_num_vars` is corresponding to the leaves.
-fn build_tree_graph_and_witness<F: SmallField>(
-    graph_builder: &mut CircuitGraphBuilder<F>,
+fn build_tree_graph_and_witness<E: ExtensionField>(
+    graph_builder: &mut CircuitGraphBuilder<E>,
     first_pred: Vec<PredType>,
-    leaf: &Arc<Circuit<F>>,
-    inner: &Arc<Circuit<F>>,
-    first_source: Vec<LayerWitness<F::BaseField>>,
-    real_challenges: &[F],
+    leaf: &Arc<Circuit<E>>,
+    inner: &Arc<Circuit<E>>,
+    first_source: Vec<LayerWitness<E::BaseField>>,
+    real_challenges: &[E],
     instance_num_vars: usize,
 ) -> Result<NodeOutputType, UtilError> {
     let (last_pred, _) =
@@ -406,11 +404,11 @@ fn build_tree_graph_and_witness<F: SmallField>(
 
 /// Generate the tree-structured circuit to compute the product or summation.
 /// `instance_num_vars` is corresponding to the leaves.
-fn build_tree_graph<F: SmallField>(
-    graph_builder: &mut CircuitGraphBuilder<F>,
+fn build_tree_graph<E: ExtensionField>(
+    graph_builder: &mut CircuitGraphBuilder<E>,
     first_pred: Vec<PredType>,
-    leaf: &Arc<Circuit<F>>,
-    inner: &Arc<Circuit<F>>,
+    leaf: &Arc<Circuit<E>>,
+    inner: &Arc<Circuit<E>>,
     instance_num_vars: usize,
 ) -> Result<NodeOutputType, UtilError> {
     let last_pred = (0..=instance_num_vars).fold(Ok(first_pred), |prev, i| {

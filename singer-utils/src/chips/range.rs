@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use goldilocks::SmallField;
 use simple_frontend::structs::CircuitBuilder;
 
 use crate::{
@@ -12,8 +12,8 @@ use crate::{
     structs::{ChipChallenges, ROMHandler},
 };
 
-fn construct_circuit<F: SmallField>(challenges: &ChipChallenges) -> Arc<Circuit<F>> {
-    let mut circuit_builder = CircuitBuilder::<F>::new();
+fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
+    let mut circuit_builder = CircuitBuilder::<E>::new();
     let cells = circuit_builder.create_counter_in(0);
 
     let mut rom_handler = ROMHandler::new(&challenges);
@@ -26,11 +26,11 @@ fn construct_circuit<F: SmallField>(challenges: &ChipChallenges) -> Arc<Circuit<
 
 /// Add range table circuit and witness to the circuit graph. Return node id and
 /// lookup instance log size.
-pub(crate) fn construct_range_table_and_witness<F: SmallField>(
-    builder: &mut CircuitGraphBuilder<F>,
+pub(crate) fn construct_range_table_and_witness<E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<E>,
     bit_with: usize,
     challenges: &ChipChallenges,
-    real_challenges: &[F],
+    real_challenges: &[E],
 ) -> Result<(PredType, usize), UtilError> {
     let range_circuit = construct_circuit(challenges);
 
@@ -50,8 +50,8 @@ pub(crate) fn construct_range_table_and_witness<F: SmallField>(
 
 /// Add range table circuit to the circuit graph. Return node id and lookup
 /// instance log size.
-pub(crate) fn construct_range_table<F: SmallField>(
-    builder: &mut CircuitGraphBuilder<F>,
+pub(crate) fn construct_range_table<E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<E>,
     bit_with: usize,
     challenges: &ChipChallenges,
 ) -> Result<(PredType, usize), UtilError> {

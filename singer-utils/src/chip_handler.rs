@@ -1,4 +1,4 @@
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, ChallengeId, CircuitBuilder, MixedCell, WitnessId};
 
 use crate::{
@@ -16,7 +16,7 @@ pub mod range;
 pub mod rom_handler;
 pub mod stack;
 
-pub trait BytecodeChipOperations<Ext: SmallField>: ROMOperations<Ext> {
+pub trait BytecodeChipOperations<Ext: ExtensionField>: ROMOperations<Ext> {
     fn bytecode_with_pc_opcode(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -32,7 +32,7 @@ pub trait BytecodeChipOperations<Ext: SmallField>: ROMOperations<Ext> {
     );
 }
 
-pub trait StackChipOperations<Ext: SmallField>: OAMOperations<Ext> {
+pub trait StackChipOperations<Ext: ExtensionField>: OAMOperations<Ext> {
     fn stack_push(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -50,7 +50,7 @@ pub trait StackChipOperations<Ext: SmallField>: OAMOperations<Ext> {
     );
 }
 
-pub trait RangeChipOperations<Ext: SmallField>: ROMOperations<Ext> {
+pub trait RangeChipOperations<Ext: ExtensionField>: ROMOperations<Ext> {
     fn range_check_stack_top(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -73,7 +73,7 @@ pub trait RangeChipOperations<Ext: SmallField>: ROMOperations<Ext> {
     fn range_check_table_item(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, item: CellId);
 }
 
-pub trait MemoryChipOperations<Ext: SmallField>: RAMOperations<Ext> {
+pub trait MemoryChipOperations<Ext: ExtensionField>: RAMOperations<Ext> {
     fn mem_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -94,7 +94,7 @@ pub trait MemoryChipOperations<Ext: SmallField>: RAMOperations<Ext> {
     );
 }
 
-pub trait CalldataChipOperations<Ext: SmallField>: ROMOperations<Ext> {
+pub trait CalldataChipOperations<Ext: ExtensionField>: ROMOperations<Ext> {
     fn calldataload(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -103,10 +103,10 @@ pub trait CalldataChipOperations<Ext: SmallField>: ROMOperations<Ext> {
     );
 }
 
-pub trait GlobalStateChipOperations<F: SmallField> {
+pub trait GlobalStateChipOperations<E: ExtensionField> {
     fn state_in(
         &mut self,
-        circuit_builder: &mut CircuitBuilder<F>,
+        circuit_builder: &mut CircuitBuilder<E>,
         pc: &[CellId],
         stack_ts: &[CellId],
         memory_ts: &[CellId],
@@ -116,16 +116,16 @@ pub trait GlobalStateChipOperations<F: SmallField> {
 
     fn state_out(
         &mut self,
-        circuit_builder: &mut CircuitBuilder<F>,
+        circuit_builder: &mut CircuitBuilder<E>,
         pc: &[CellId],
         stack_ts: &[CellId],
         memory_ts: &[CellId],
-        stack_top: MixedCell<F>,
-        clk: MixedCell<F>,
+        stack_top: MixedCell<E>,
+        clk: MixedCell<E>,
     );
 }
 
-pub trait ROMOperations<Ext: SmallField> {
+pub trait ROMOperations<Ext: ExtensionField> {
     fn rom_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -144,7 +144,7 @@ pub trait ROMOperations<Ext: SmallField> {
 }
 
 // Once access memory
-pub trait OAMOperations<Ext: SmallField> {
+pub trait OAMOperations<Ext: ExtensionField> {
     fn oam_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -183,7 +183,7 @@ pub trait OAMOperations<Ext: SmallField> {
     ) -> (Option<(WitnessId, usize)>, Option<(WitnessId, usize)>);
 }
 
-pub trait RAMOperations<Ext: SmallField>: OAMOperations<Ext> {
+pub trait RAMOperations<Ext: ExtensionField>: OAMOperations<Ext> {
     fn ram_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

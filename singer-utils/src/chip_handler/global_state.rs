@@ -1,11 +1,11 @@
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
 use crate::structs::{RAMHandler, RAMType};
 
 use super::{GlobalStateChipOperations, OAMOperations};
 
-impl<Ext: SmallField> GlobalStateChipOperations<Ext> for RAMHandler<Ext> {
+impl<Ext: ExtensionField> GlobalStateChipOperations<Ext> for RAMHandler<Ext> {
     fn state_in(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

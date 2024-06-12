@@ -1,15 +1,16 @@
 use core::{fmt, panic};
 use std::collections::{BTreeMap, HashMap};
 
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{
     CellId, CellType, ChallengeConst, CircuitBuilder, ConstantType, InType, LayerId, OutType,
 };
+use sumcheck::util::ceil_log2;
 
 use crate::{
     structs::{Circuit, Gate1In, Gate2In, Gate3In, GateCIn, Layer, SumcheckStepType},
-    utils::{ceil_log2, i64_to_field, MatrixMLEColumnFirst, MatrixMLERowFirst},
+    utils::{i64_to_field, MatrixMLEColumnFirst, MatrixMLERowFirst},
 };
 
 struct LayerSubsets {
@@ -43,8 +44,8 @@ impl LayerSubsets {
 
     /// Compute `paste_from` matrix and `max_previous_num_vars` for
     /// `self.layer_id`, as well as `copy_to` for old layers.
-    fn update_layer_info<Ext: SmallField>(&self, layers: &mut Vec<Layer<Ext>>) {
-        let mut paste_from = HashMap::new();
+    fn update_layer_info<Ext: ExtensionField>(&self, layers: &mut Vec<Layer<Ext>>) {
+        let mut paste_from = BTreeMap::new();
         for ((old_layer_id, old_wire_id), new_wire_id) in self.subsets.iter() {
             paste_from
                 .entry(*old_layer_id)
@@ -72,9 +73,9 @@ impl LayerSubsets {
     }
 }
 
-impl<F: SmallField> Circuit<F> {
+impl<E: ExtensionField> Circuit<E> {
     /// Generate the circuit from circuit builder.
-    pub fn new(circuit_builder: &CircuitBuilder<F>) -> Self {
+    pub fn new(circuit_builder: &CircuitBuilder<E>) -> Self {
         assert!(circuit_builder.n_layers.is_some());
         let n_layers = circuit_builder.n_layers.unwrap();
 
@@ -185,21 +186,48 @@ impl<F: SmallField> Circuit<F> {
                             idx_out: i,
                             scalar: gate.scalar,
                         }),
-                        1 => layers[layer_id as usize].adds.push(Gate1In {
-                            idx_in: idx_in.try_into().unwrap(),
-                            idx_out: i,
-                            scalar: gate.scalar,
-                        }),
-                        2 => layers[layer_id as usize].mul2s.push(Gate2In {
-                            idx_in: idx_in.try_into().unwrap(),
-                            idx_out: i,
-                            scalar: gate.scalar,
-                        }),
-                        3 => layers[layer_id as usize].mul3s.push(Gate3In {
-                            idx_in: idx_in.try_into().unwrap(),
-                            idx_out: i,
-                            scalar: gate.scalar,
-                        }),
+                        1 => {
+                            let gate = Gate1In {
+                                idx_in: idx_in.clone().try_into().unwrap(),
+                                idx_out: i,
+                                scalar: gate.scalar,
+                            };
+                            layers[layer_id as usize].adds.push(gate.clone());
+                            for (i, idx_in) in idx_in.iter().enumerate() {
+                                layers[layer_id as usize].adds_fanin_mapping[i]
+                                    .entry(*idx_in)
+                                    .or_insert(vec![])
+                                    .push(gate.clone());
+                            }
+                        }
+                        2 => {
+                            let gate = Gate2In {
+                                idx_in: idx_in.clone().try_into().unwrap(),
+                                idx_out: i,
+                                scalar: gate.scalar,
+                            };
+                            layers[layer_id as usize].mul2s.push(gate.clone());
+                            for (i, idx_in) in idx_in.iter().enumerate() {
+                                layers[layer_id as usize].mul2s_fanin_mapping[i]
+                                    .entry(*idx_in)
+                                    .or_insert(vec![])
+                                    .push(gate.clone());
+                            }
+                        }
+                        3 => {
+                            let gate = Gate3In {
+                                idx_in: idx_in.clone().try_into().unwrap(),
+                                idx_out: i,
+                                scalar: gate.scalar,
+                            };
+                            layers[layer_id as usize].mul3s.push(gate.clone());
+                            for (i, idx_in) in idx_in.iter().enumerate() {
+                                layers[layer_id as usize].mul3s_fanin_mapping[i]
+                                    .entry(*idx_in)
+                                    .or_insert(vec![])
+                                    .push(gate.clone());
+                            }
+                        }
                         _ => unreachable!(),
                     }
                 }
@@ -309,9 +337,9 @@ impl<F: SmallField> Circuit<F> {
 
     pub(crate) fn generate_basefield_challenges(
         &self,
-        challenges: &[F],
-    ) -> HashMap<ChallengeConst, Vec<F::BaseField>> {
-        let mut challenge_exps = HashMap::<ChallengeConst, F>::new();
+        challenges: &[E],
+    ) -> HashMap<ChallengeConst, Vec<E::BaseField>> {
+        let mut challenge_exps = HashMap::<ChallengeConst, E>::new();
         let mut update_const = |constant| match constant {
             ConstantType::Challenge(c, _) => {
                 challenge_exps
@@ -342,15 +370,15 @@ impl<F: SmallField> Circuit<F> {
         });
         challenge_exps
             .into_iter()
-            .map(|(k, v)| (k, v.to_limbs()))
+            .map(|(k, v)| (k, v.as_bases().to_vec()))
             .collect()
     }
 
-    pub fn output_layer_ref(&self) -> &Layer<F> {
+    pub fn output_layer_ref(&self) -> &Layer<E> {
         self.layers.first().unwrap()
     }
 
-    pub fn first_layer_ref(&self) -> &Layer<F> {
+    pub fn first_layer_ref(&self) -> &Layer<E> {
         self.layers.last().unwrap()
     }
 
@@ -371,7 +399,7 @@ impl<F: SmallField> Circuit<F> {
     }
 }
 
-impl<F: SmallField> Layer<F> {
+impl<E: ExtensionField> Layer<E> {
     pub fn is_linear(&self) -> bool {
         self.mul2s.is_empty() && self.mul3s.is_empty()
     }
@@ -395,8 +423,8 @@ impl<F: SmallField> Layer<F> {
     pub fn paste_from_fix_variables_eq(
         &self,
         old_layer_id: LayerId,
-        current_point_eq: &[F],
-    ) -> Vec<F> {
+        current_point_eq: &[E],
+    ) -> Vec<E> {
         assert_eq!(current_point_eq.len(), self.size());
         self.paste_from
             .get(&old_layer_id)
@@ -408,9 +436,9 @@ impl<F: SmallField> Layer<F> {
     pub fn paste_from_eval_eq(
         &self,
         old_layer_id: LayerId,
-        current_point_eq: &[F],
-        subset_point_eq: &[F],
-    ) -> F {
+        current_point_eq: &[E],
+        subset_point_eq: &[E],
+    ) -> E {
         assert_eq!(current_point_eq.len(), self.size());
         assert_eq!(subset_point_eq.len(), self.max_previous_size());
         self.paste_from
@@ -420,7 +448,7 @@ impl<F: SmallField> Layer<F> {
             .eval_col_first(current_point_eq, subset_point_eq)
     }
 
-    pub fn copy_to_fix_variables(&self, new_layer_id: LayerId, subset_point_eq: &[F]) -> Vec<F> {
+    pub fn copy_to_fix_variables(&self, new_layer_id: LayerId, subset_point_eq: &[E]) -> Vec<E> {
         let old_wire_ids = self.copy_to.get(&new_layer_id).unwrap();
         old_wire_ids
             .as_slice()
@@ -430,9 +458,9 @@ impl<F: SmallField> Layer<F> {
     pub fn copy_to_eval_eq(
         &self,
         new_layer_id: LayerId,
-        subset_point_eq: &[F],
-        current_point_eq: &[F],
-    ) -> F {
+        subset_point_eq: &[E],
+        current_point_eq: &[E],
+    ) -> E {
         self.copy_to
             .get(&new_layer_id)
             .unwrap()
@@ -441,7 +469,7 @@ impl<F: SmallField> Layer<F> {
     }
 }
 
-impl<F: SmallField> fmt::Debug for Layer<F> {
+impl<E: ExtensionField> fmt::Debug for Layer<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Layer {{")?;
         writeln!(f, "  layer_id: {}", self.layer_id)?;
@@ -469,7 +497,7 @@ impl<F: SmallField> fmt::Debug for Layer<F> {
     }
 }
 
-impl<F: SmallField> fmt::Debug for Circuit<F> {
+impl<E: ExtensionField> fmt::Debug for Circuit<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Circuit {{")?;
         writeln!(f, "  layers: ")?;
@@ -493,7 +521,7 @@ impl<F: SmallField> fmt::Debug for Circuit<F> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -531,21 +559,21 @@ mod tests {
         // layers[3][2] is copied to layers[2][1], layers[3][3] is copied to layers[1][2]
         // layers[2][0] is copied to layers[1][1]
 
-        let mut expected_paste_from_2 = HashMap::new();
+        let mut expected_paste_from_2 = BTreeMap::new();
         expected_paste_from_2.insert(3, vec![1]);
         assert_eq!(circuit.layers[2].paste_from, expected_paste_from_2);
 
-        let mut expected_paste_from_1 = HashMap::new();
+        let mut expected_paste_from_1 = BTreeMap::new();
         expected_paste_from_1.insert(2, vec![1]);
         expected_paste_from_1.insert(3, vec![2]);
         assert_eq!(circuit.layers[1].paste_from, expected_paste_from_1);
 
-        let mut expected_copy_to_3 = HashMap::new();
+        let mut expected_copy_to_3 = BTreeMap::new();
         expected_copy_to_3.insert(2, vec![2]);
         expected_copy_to_3.insert(1, vec![3]);
         assert_eq!(circuit.layers[3].copy_to, expected_copy_to_3);
 
-        let mut expected_copy_to_2 = HashMap::new();
+        let mut expected_copy_to_2 = BTreeMap::new();
         expected_copy_to_2.insert(1, vec![0]);
         assert_eq!(circuit.layers[2].copy_to, expected_copy_to_2);
     }
@@ -618,9 +646,9 @@ mod tests {
         assert_eq!(circuit.layers[1].num_vars, 1);
         assert_eq!(circuit.layers[0].num_vars, 2);
         // Layers[1][0] -> Layers[0][1], Layers[1][1] -> Layers[0][2]
-        let mut expected_copy_to_1 = HashMap::new();
+        let mut expected_copy_to_1 = BTreeMap::new();
         expected_copy_to_1.insert(0, vec![0, 1]);
-        let mut expected_paste_from_0 = HashMap::new();
+        let mut expected_paste_from_0 = BTreeMap::new();
         expected_paste_from_0.insert(1, vec![1, 2]);
 
         assert_eq!(circuit.layers[1].copy_to, expected_copy_to_1);

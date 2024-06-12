@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 
 use crate::structs::{Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId};
 
@@ -8,7 +8,7 @@ mod base_opt;
 mod derives;
 mod ext_opt;
 
-impl<Ext: SmallField> Cell<Ext> {
+impl<Ext: ExtensionField> Cell<Ext> {
     pub fn new() -> Self {
         Self {
             layer: None,
@@ -18,7 +18,7 @@ impl<Ext: SmallField> Cell<Ext> {
     }
 }
 
-impl<Ext: SmallField> GateType<Ext> {
+impl<Ext: ExtensionField> GateType<Ext> {
     pub(crate) fn add_const(constant: ConstantType<Ext>) -> Self {
         Self {
             idx_in: vec![],
@@ -48,7 +48,7 @@ impl<Ext: SmallField> GateType<Ext> {
     }
 }
 
-impl<Ext: SmallField> CircuitBuilder<Ext> {
+impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     pub fn new() -> Self {
         Self {
             cells: vec![],

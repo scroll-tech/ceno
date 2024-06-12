@@ -7,6 +7,8 @@ license.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+tracing = "0.1.40"
+ff_ext = { path = "../ff_ext" }
 ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true

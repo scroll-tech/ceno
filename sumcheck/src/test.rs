@@ -1,9 +1,11 @@
-use std::hash::Hash;
+use std::sync::Arc;
 
 use ark_std::{rand::RngCore, test_rng};
 use ff::Field;
-use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
+use ff_ext::ExtensionField;
+use goldilocks::GoldilocksExt2;
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::Transcript;
 
 use crate::{
@@ -11,7 +13,7 @@ use crate::{
     util::interpolate_uni_poly,
 };
 
-fn test_sumcheck<F: SmallField>(
+fn test_sumcheck<E: ExtensionField>(
     nv: usize,
     num_multiplicands_range: (usize, usize),
     num_products: usize,
@@ -19,25 +21,15 @@ fn test_sumcheck<F: SmallField>(
     let mut rng = test_rng();
     let mut transcript = Transcript::new(b"test");
 
-    let (poly, asserted_sum) = VirtualPolynomial::<F::BaseField>::random(
-        nv,
-        num_multiplicands_range,
-        num_products,
-        &mut rng,
-    );
-    let proof = IOPProverState::<F>::prove_base_poly(&poly, &mut transcript);
+    let (poly, asserted_sum) =
+        VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
     let poly_info = poly.aux_info.clone();
-    let poly_ext = poly.to_ext_field();
+    let (proof, _) = IOPProverState::<E>::prove_parallel(poly.clone(), &mut transcript);
 
     let mut transcript = Transcript::new(b"test");
-    let subclaim = IOPVerifierState::<F>::verify(
-        F::from_base(&asserted_sum),
-        &proof,
-        &poly_info.to_ext_field(),
-        &mut transcript,
-    );
+    let subclaim = IOPVerifierState::<E>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
     assert!(
-        poly_ext.evaluate(
+        poly.evaluate(
             &subclaim
                 .point
                 .iter()
@@ -49,20 +41,16 @@ fn test_sumcheck<F: SmallField>(
     );
 }
 
-fn test_sumcheck_internal<F: SmallField>(
+fn test_sumcheck_internal<E: ExtensionField>(
     nv: usize,
     num_multiplicands_range: (usize, usize),
     num_products: usize,
 ) {
     let mut rng = test_rng();
-    let (poly, asserted_sum) = VirtualPolynomial::<F::BaseField>::random(
-        nv,
-        num_multiplicands_range,
-        num_products,
-        &mut rng,
-    );
-    let poly_info = poly.aux_info.clone();
-    let mut prover_state = IOPProverState::prover_init(&poly);
+    let (poly, asserted_sum) =
+        VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
+    let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.num_variables);
+    let mut prover_state = IOPProverState::prover_init_parallel(poly.clone());
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
     let mut challenge = None;
 
@@ -70,7 +58,7 @@ fn test_sumcheck_internal<F: SmallField>(
 
     transcript.append_message(b"initializing transcript for testing");
 
-    for _ in 0..poly.aux_info.num_variables {
+    for _ in 0..num_variables {
         let prover_message =
             IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
 
@@ -80,6 +68,18 @@ fn test_sumcheck_internal<F: SmallField>(
             &mut transcript,
         ));
     }
+    // pushing the last challenge point to the state
+    if let Some(p) = challenge {
+        prover_state.challenges.push(p);
+        // fix last challenge to collect final evaluation
+        prover_state
+            .poly
+            .flattened_ml_extensions
+            .par_iter_mut()
+            .for_each(|mle| {
+                Arc::make_mut(mle).fix_variables_in_place(&[p.elements]);
+            });
+    };
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);
     assert!(
         poly.evaluate(
@@ -96,32 +96,30 @@ fn test_sumcheck_internal<F: SmallField>(
 
 #[test]
 fn test_trivial_polynomial() {
-    test_trivial_polynomial_helper::<Goldilocks>();
     test_trivial_polynomial_helper::<GoldilocksExt2>();
 }
 
-fn test_trivial_polynomial_helper<F: SmallField>() {
+fn test_trivial_polynomial_helper<E: ExtensionField>() {
     let nv = 1;
     let num_multiplicands_range = (4, 13);
     let num_products = 5;
 
-    test_sumcheck::<F>(nv, num_multiplicands_range, num_products);
-    test_sumcheck_internal::<F>(nv, num_multiplicands_range, num_products);
+    test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
+    test_sumcheck_internal::<E>(nv, num_multiplicands_range, num_products);
 }
 
 #[test]
 fn test_normal_polynomial() {
-    test_normal_polynomial_helper::<Goldilocks>();
     test_normal_polynomial_helper::<GoldilocksExt2>();
 }
 
-fn test_normal_polynomial_helper<F: SmallField>() {
+fn test_normal_polynomial_helper<E: ExtensionField>() {
     let nv = 12;
     let num_multiplicands_range = (4, 9);
     let num_products = 5;
 
-    test_sumcheck::<F>(nv, num_multiplicands_range, num_products);
-    test_sumcheck_internal::<F>(nv, num_multiplicands_range, num_products);
+    test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
+    test_sumcheck_internal::<E>(nv, num_multiplicands_range, num_products);
 }
 
 // #[test]
@@ -136,17 +134,16 @@ fn test_normal_polynomial_helper<F: SmallField>() {
 
 #[test]
 fn test_extract_sum() {
-    test_extract_sum_helper::<Goldilocks>();
     test_extract_sum_helper::<GoldilocksExt2>();
 }
 
-fn test_extract_sum_helper<F: SmallField + Hash>() {
+fn test_extract_sum_helper<E: ExtensionField>() {
     let mut rng = test_rng();
-    let mut transcript = Transcript::<F>::new(b"test");
-    let (poly, asserted_sum) = VirtualPolynomial::<F::BaseField>::random(8, (3, 4), 3, &mut rng);
+    let mut transcript = Transcript::<E>::new(b"test");
+    let (poly, asserted_sum) = VirtualPolynomial::<E>::random(8, (2, 3), 3, &mut rng);
 
-    let proof = IOPProverState::<F>::prove_base_poly(&poly, &mut transcript);
-    assert_eq!(proof.extract_sum(), F::from_base(&asserted_sum));
+    let (proof, _) = IOPProverState::<E>::prove_parallel(poly, &mut transcript);
+    assert_eq!(proof.extract_sum(), asserted_sum);
 }
 
 struct DensePolynomial(Vec<GoldilocksExt2>);

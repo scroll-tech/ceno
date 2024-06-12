@@ -1,6 +1,6 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
@@ -21,7 +21,7 @@ use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, Instruc
 
 pub struct GtInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for GtInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for GtInstruction {
     type InstType = Self;
 }
 
@@ -48,10 +48,10 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for GtInstruction {
+impl<E: ExtensionField> Instruction<E> for GtInstruction {
     const OPCODE: OpcodeType = OpcodeType::GT;
     const NAME: &'static str = "GT";
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -88,8 +88,8 @@ impl<F: SmallField> Instruction<F> for GtInstruction {
             next_pc.values(),
             next_stack_ts.values(),
             &memory_ts,
-            stack_top_expr.sub(F::BaseField::from(1)),
-            clk_expr.add(F::BaseField::ONE),
+            stack_top_expr.sub(E::BaseField::from(1)),
+            clk_expr.add(E::BaseField::ONE),
         );
 
         // Execution result = addend0 + addend1, with carry.
@@ -106,7 +106,7 @@ impl<F: SmallField> Instruction<F> for GtInstruction {
         // Check the range of stack_top - 2 is within [0, 1 << STACK_TOP_BIT_WIDTH).
         rom_handler.range_check_stack_top(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
         )?;
 
         // Pop two values from stack
@@ -120,7 +120,7 @@ impl<F: SmallField> Instruction<F> for GtInstruction {
         )?;
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(1)),
+            stack_top_expr.sub(E::BaseField::from(1)),
             old_stack_ts0.values(),
             oprand_0.values(),
         );
@@ -135,7 +135,7 @@ impl<F: SmallField> Instruction<F> for GtInstruction {
         )?;
         ram_handler.stack_pop(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
             &old_stack_ts1.values(),
             oprand_1.values(),
         );
@@ -144,7 +144,7 @@ impl<F: SmallField> Instruction<F> for GtInstruction {
         // equivalent to pad result with 0s.
         ram_handler.stack_push(
             &mut circuit_builder,
-            stack_top_expr.sub(F::BaseField::from(2)),
+            stack_top_expr.sub(E::BaseField::from(2)),
             stack_ts.values(),
             &[result],
         );
@@ -153,7 +153,7 @@ impl<F: SmallField> Instruction<F> for GtInstruction {
         rom_handler.bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
-            <Self as Instruction<F>>::OPCODE,
+            <Self as Instruction<E>>::OPCODE,
         );
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
@@ -178,8 +178,9 @@ mod test {
     use ark_std::test_rng;
     use core::ops::Range;
     use ff::Field;
+    use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
-    use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
+    use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
     use simple_frontend::structs::CellId;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
@@ -322,9 +323,9 @@ mod test {
             [range_values.as_slice(), borrow.as_slice()].concat(),
         );
         let circuit_witness_challenges = vec![
-            Goldilocks::from(2),
-            Goldilocks::from(2),
-            Goldilocks::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
         ];
 
         let _circuit_witness = test_opcode_circuit(
@@ -336,32 +337,32 @@ mod test {
         );
     }
 
-    fn bench_gt_instruction_helper<F: SmallField>(instance_num_vars: usize) {
+    fn bench_gt_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
-            SingerCircuitBuilder::<F>::new(chip_challenges).expect("circuit builder failed");
-        let mut singer_builder = SingerGraphBuilder::<F>::new();
+            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
         let size = GtInstruction::phase0_size();
-        let phase0: CircuitWiresIn<F::BaseField> = vec![LayerWitness {
+        let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
                 .map(|_| {
                     (0..size)
-                        .map(|_| F::BaseField::random(&mut rng))
+                        .map(|_| E::BaseField::random(&mut rng))
                         .collect_vec()
                 })
                 .collect_vec(),
         }];
 
-        let real_challenges = vec![F::random(&mut rng), F::random(&mut rng)];
+        let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 
         let timer = Instant::now();
 
         let _ = GtInstruction::construct_graph_and_witness(
             &mut singer_builder.graph_builder,
             &mut singer_builder.chip_builder,
-            &circuit_builder.insts_circuits[<GtInstruction as Instruction<F>>::OPCODE as usize],
+            &circuit_builder.insts_circuits[<GtInstruction as Instruction<E>>::OPCODE as usize],
             vec![phase0],
             &real_challenges,
             1 << instance_num_vars,
@@ -377,7 +378,7 @@ mod test {
             timer.elapsed().as_secs_f64()
         );
 
-        let point = vec![F::random(&mut rng), F::random(&mut rng)];
+        let point = vec![E::random(&mut rng), E::random(&mut rng)];
         let target_evals = graph.target_evals(&wit, &point);
 
         let mut prover_transcript = &mut Transcript::new(b"Singer");

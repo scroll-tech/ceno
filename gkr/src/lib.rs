@@ -2,8 +2,12 @@
 
 mod circuit;
 pub mod error;
+pub mod gadgets;
+pub mod macros;
 mod prover;
 pub mod structs;
+#[cfg(feature = "unsafe")]
+pub mod unsafe_utils;
 pub mod utils;
 mod verifier;
 

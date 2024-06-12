@@ -1,5 +1,5 @@
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chips::IntoEnumIterator,
@@ -17,14 +17,14 @@ use crate::{
 
 pub struct JumpInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for JumpInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for JumpInstruction {
     type InstType = Self;
 }
 
-impl<F: SmallField> Instruction<F> for JumpInstruction {
+impl<E: ExtensionField> Instruction<E> for JumpInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMP;
     const NAME: &'static str = "JUMP";
-    fn construct_circuit(_: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+    fn construct_circuit(_: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         // From predesessor instruction
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);

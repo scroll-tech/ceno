@@ -1,5 +1,5 @@
+use ff_ext::ExtensionField;
 use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
-use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use std::mem;
 use transcript::Transcript;
@@ -12,13 +12,13 @@ use crate::{
     },
 };
 
-impl<F: SmallField> IOPProverState<F> {
+impl<E: ExtensionField> IOPProverState<E> {
     pub fn prove(
-        circuit: &CircuitGraph<F>,
-        circuit_witness: &CircuitGraphWitness<F::BaseField>,
-        target_evals: &TargetEvaluations<F>,
-        transcript: &mut Transcript<F>,
-    ) -> Result<IOPProof<F>, GKRGraphError> {
+        circuit: &CircuitGraph<E>,
+        circuit_witness: &CircuitGraphWitness<E::BaseField>,
+        target_evals: &TargetEvaluations<E>,
+        transcript: &mut Transcript<E>,
+    ) -> Result<IOPProof<E>, GKRGraphError> {
         assert_eq!(target_evals.0.len(), circuit.targets.len());
 
         let mut output_evals = vec![vec![]; circuit.nodes.len()];
@@ -41,6 +41,7 @@ impl<F: SmallField> IOPProverState<F> {
                     witness,
                     mem::take(&mut output_evals[node.id]),
                     mem::take(&mut wit_out_evals[node.id]),
+                    1,
                     transcript,
                 );
                 println!(
@@ -69,8 +70,8 @@ impl<F: SmallField> IOPProverState<F> {
                                 PredType::PredWire(_) => point_and_eval.point.clone(),
                                 PredType::PredWireDup(out) => {
                                     let node_id = match out {
-                                        NodeOutputType::OutputLayer(id) => *id,
-                                        NodeOutputType::WireOut(id, _) => *id,
+                                        NodeOutputType::OutputLayer(id) => id,
+                                        NodeOutputType::WireOut(id, _) => id,
                                     };
                                     // Suppose the new point is
                                     // [single_instance_slice ||
@@ -78,8 +79,9 @@ impl<F: SmallField> IOPProverState<F> {
                                     // is [single_instance_slices ||
                                     // new_instance_index_slices[(new_instance_num_vars
                                     // - old_instance_num_vars)..]]
-                                    let old_instance_num_vars =
-                                        circuit_witness.node_witnesses[node_id].instance_num_vars();
+                                    let old_instance_num_vars = circuit_witness.node_witnesses
+                                        [*node_id]
+                                        .instance_num_vars();
                                     let new_instance_num_vars = witness.instance_num_vars();
                                     let num_vars =
                                         point_and_eval.point.len() - new_instance_num_vars;

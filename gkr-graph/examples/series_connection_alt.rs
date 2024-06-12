@@ -1,4 +1,5 @@
 use ff::Field;
+use ff_ext::ExtensionField;
 use gkr::{
     structs::{Circuit, LayerWitness, PointAndEval},
     utils::MultilinearExtensionFromVectors,
@@ -10,13 +11,16 @@ use gkr_graph::{
         PredType, TargetEvaluations,
     },
 };
-use goldilocks::{Goldilocks, GoldilocksExt2, SmallField};
+use goldilocks::{Goldilocks, GoldilocksExt2};
 use simple_frontend::structs::{ChallengeId, CircuitBuilder, MixedCell};
 use std::sync::Arc;
 use transcript::Transcript;
 
-fn construct_input<F: SmallField>(input_size: usize, challenge: ChallengeId) -> Arc<Circuit<F>> {
-    let mut circuit_builder = CircuitBuilder::<F>::new();
+fn construct_input<E: ExtensionField>(
+    input_size: usize,
+    challenge: ChallengeId,
+) -> Arc<Circuit<E>> {
+    let mut circuit_builder = CircuitBuilder::<E>::new();
     let (_, inputs) = circuit_builder.create_witness_in(input_size);
     let (_, lookup_inputs) = circuit_builder.create_ext_witness_out(input_size);
 
@@ -30,12 +34,12 @@ fn construct_input<F: SmallField>(input_size: usize, challenge: ChallengeId) -> 
 
 /// Construct a selector for n_instances and each instance contains `num`
 /// items. `num` must be a power of 2.
-pub(crate) fn construct_prefix_selector<F: SmallField>(
+pub(crate) fn construct_prefix_selector<E: ExtensionField>(
     n_instances: usize,
     num: usize,
-) -> Arc<Circuit<F>> {
+) -> Arc<Circuit<E>> {
     assert_eq!(num, num.next_power_of_two());
-    let mut circuit_builder = CircuitBuilder::<F>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::new();
     let _ = circuit_builder.create_constant_in(n_instances * num, 1);
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))
@@ -46,18 +50,18 @@ pub(crate) fn construct_prefix_selector<F: SmallField>(
 /// Wire in 0: 2 extension field elements.
 /// Wire in 1: 2-bit selector.
 /// output layer: the denominator and the numerator.
-pub(crate) fn construct_inv_sum<F: SmallField>() -> Arc<Circuit<F>> {
-    let mut circuit_builder = CircuitBuilder::<F>::new();
+pub(crate) fn construct_inv_sum<E: ExtensionField>() -> Arc<Circuit<E>> {
+    let mut circuit_builder = CircuitBuilder::<E>::new();
     let (_input_id, input) = circuit_builder.create_ext_witness_in(2);
     let (_cond_id, cond) = circuit_builder.create_witness_in(2);
     let (_, output) = circuit_builder.create_ext_witness_out(2);
     // selector denominator 1 or input[0] or input[0] * input[1]
     let den_mul = circuit_builder.create_ext_cell();
-    circuit_builder.mul2_ext(&den_mul, &input[0], &input[1], F::BaseField::ONE);
+    circuit_builder.mul2_ext(&den_mul, &input[0], &input[1], E::BaseField::ONE);
     let tmp = circuit_builder.create_ext_cell();
     circuit_builder.sel_mixed_and_ext(
         &tmp,
-        &MixedCell::Constant(F::BaseField::ONE),
+        &MixedCell::Constant(E::BaseField::ONE),
         &input[0],
         cond[0],
     );
@@ -65,8 +69,8 @@ pub(crate) fn construct_inv_sum<F: SmallField>() -> Arc<Circuit<F>> {
 
     // select the numerator 0 or 1 or input[0] + input[1]
     let den_add = circuit_builder.create_ext_cell();
-    circuit_builder.add_ext(&den_add, &input[0], F::BaseField::ONE);
-    circuit_builder.add_ext(&den_add, &input[0], F::BaseField::ONE);
+    circuit_builder.add_ext(&den_add, &input[0], E::BaseField::ONE);
+    circuit_builder.add_ext(&den_add, &input[0], E::BaseField::ONE);
     circuit_builder.sel_mixed_and_ext(&output[1], &cond[0].into(), &den_add, cond[1]);
 
     circuit_builder.configure();
@@ -79,8 +83,8 @@ pub(crate) fn construct_inv_sum<F: SmallField>() -> Arc<Circuit<F>> {
 /// Wire in 1: numerators, 2 extensuin field elements.
 /// Wire out 0: the denominator.
 /// Wire out 1: the numerator.
-pub(crate) fn construct_frac_sum_inner<F: SmallField>() -> Arc<Circuit<F>> {
-    let mut circuit_builder = CircuitBuilder::<F>::new();
+pub(crate) fn construct_frac_sum_inner<E: ExtensionField>() -> Arc<Circuit<E>> {
+    let mut circuit_builder = CircuitBuilder::<E>::new();
     let (_, input) = circuit_builder.create_ext_witness_in(4);
     let (_, output) = circuit_builder.create_ext_witness_out(2);
     // denominator
@@ -88,7 +92,7 @@ pub(crate) fn construct_frac_sum_inner<F: SmallField>() -> Arc<Circuit<F>> {
         &output[0], // output_den
         &input[0],  // input_den[0]
         &input[2],  // input_den[1]
-        F::BaseField::ONE,
+        E::BaseField::ONE,
     );
 
     // numerator
@@ -96,13 +100,13 @@ pub(crate) fn construct_frac_sum_inner<F: SmallField>() -> Arc<Circuit<F>> {
         &output[1], // output_num
         &input[0],  // input_den[0]
         &input[3],  // input_num[1]
-        F::BaseField::ONE,
+        E::BaseField::ONE,
     );
     circuit_builder.mul2_ext(
         &output[1], // output_num
         &input[2],  // input_den[1]
         &input[1],  // input_num[0]
-        F::BaseField::ONE,
+        E::BaseField::ONE,
     );
 
     circuit_builder.configure();

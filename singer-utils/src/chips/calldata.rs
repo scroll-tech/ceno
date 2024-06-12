@@ -7,17 +7,15 @@ use crate::{
 };
 
 use super::ChipCircuitGadgets;
-use gkr::{
-    structs::{Circuit, LayerWitness},
-    utils::ceil_log2,
-};
+use ff_ext::ExtensionField;
+use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::CircuitBuilder;
+use sumcheck::util::ceil_log2;
 
-fn construct_circuit<F: SmallField>(challenges: &ChipChallenges) -> Arc<Circuit<F>> {
-    let mut circuit_builder = CircuitBuilder::<F>::new();
+fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
+    let mut circuit_builder = CircuitBuilder::<E>::new();
     let (_, id_cells) = circuit_builder.create_witness_in(UInt64::N_OPRAND_CELLS);
     let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
     let mut rom_handler = ROMHandler::new(&challenges);
@@ -30,11 +28,11 @@ fn construct_circuit<F: SmallField>(challenges: &ChipChallenges) -> Arc<Circuit<
 
 /// Add calldata table circuit and witness to the circuit graph. Return node id
 /// and lookup instance log size.
-pub(crate) fn construct_calldata_table_and_witness<F: SmallField>(
-    builder: &mut CircuitGraphBuilder<F>,
+pub(crate) fn construct_calldata_table_and_witness<E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<E>,
     program_input: &[u8],
     challenges: &ChipChallenges,
-    real_challenges: &[F],
+    real_challenges: &[E],
 ) -> Result<(PredType, PredType, usize), UtilError> {
     let calldata_circuit = construct_circuit(challenges);
     let selector = ChipCircuitGadgets::construct_prefix_selector(program_input.len(), 1);
@@ -50,12 +48,12 @@ pub(crate) fn construct_calldata_table_and_witness<F: SmallField>(
 
     let calldata = program_input
         .iter()
-        .map(|x| F::BaseField::from(*x as u64))
+        .map(|x| E::BaseField::from(*x as u64))
         .collect_vec();
     let wits_in = vec![
         LayerWitness {
             instances: (0..calldata.len())
-                .map(|x| vec![F::BaseField::from(x as u64)])
+                .map(|x| vec![E::BaseField::from(x as u64)])
                 .collect_vec(),
         },
         LayerWitness {
@@ -90,8 +88,8 @@ pub(crate) fn construct_calldata_table_and_witness<F: SmallField>(
 
 /// Add calldata table circuit to the circuit graph. Return node id and lookup
 /// instance log size.
-pub(crate) fn construct_calldata_table<F: SmallField>(
-    builder: &mut CircuitGraphBuilder<F>,
+pub(crate) fn construct_calldata_table<E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<E>,
     program_input_len: usize,
     challenges: &ChipChallenges,
 ) -> Result<(PredType, PredType, usize), UtilError> {

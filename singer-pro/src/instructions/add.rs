@@ -1,5 +1,5 @@
+use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
-use goldilocks::SmallField;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
@@ -22,7 +22,7 @@ use super::{Instruction, InstructionGraph};
 
 pub struct AddInstruction;
 
-impl<F: SmallField> InstructionGraph<F> for AddInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for AddInstruction {
     type InstType = Self;
 }
 
@@ -34,10 +34,10 @@ register_witness!(
     }
 );
 
-impl<F: SmallField> Instruction<F> for AddInstruction {
+impl<E: ExtensionField> Instruction<E> for AddInstruction {
     const OPCODE: OpcodeType = OpcodeType::ADD;
     const NAME: &'static str = "ADD";
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<F>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From witness

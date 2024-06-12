@@ -1,5 +1,5 @@
 use ark_std::{end_timer, start_timer};
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
 use std::{marker::PhantomData, mem};
@@ -13,12 +13,12 @@ use crate::{
 
 use super::SumcheckState;
 
-impl<F: SmallField> IOPVerifierState<F> {
+impl<E: ExtensionField> IOPVerifierState<E> {
     pub(super) fn verify_and_update_state_phase1_step1(
         &mut self,
-        circuit: &Circuit<F>,
-        step_msg: IOPProverStepMessage<F>,
-        transcript: &mut Transcript<F>,
+        circuit: &Circuit<E>,
+        step_msg: IOPProverStepMessage<E>,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 1 step 1");
         let alpha = transcript
@@ -28,7 +28,7 @@ impl<F: SmallField> IOPVerifierState<F> {
             + self.subset_point_and_evals[self.layer_id as usize].len()
             + 1;
         let alpha_pows = {
-            let mut alpha_pows = vec![F::ONE; total_length];
+            let mut alpha_pows = vec![E::ONE; total_length];
             for i in 0..total_length.saturating_sub(1) {
                 alpha_pows[i + 1] = alpha_pows[i] * alpha;
             }
@@ -40,7 +40,7 @@ impl<F: SmallField> IOPVerifierState<F> {
 
         // sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
         let mut sigma_1 = izip!(self.to_next_phase_point_and_evals.iter(), alpha_pows.iter())
-            .fold(F::ZERO, |acc, (point_and_eval, alpha_pow)| {
+            .fold(E::ZERO, |acc, (point_and_eval, alpha_pow)| {
                 acc + point_and_eval.eval * alpha_pow
             });
         sigma_1 += izip!(
@@ -49,7 +49,7 @@ impl<F: SmallField> IOPVerifierState<F> {
                 .iter()
                 .skip(self.to_next_phase_point_and_evals.len())
         )
-        .fold(F::ZERO, |acc, ((_, point_and_eval), alpha_pow)| {
+        .fold(E::ZERO, |acc, ((_, point_and_eval), alpha_pow)| {
             acc + point_and_eval.eval * alpha_pow
         });
         // Sumcheck 1: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
@@ -93,7 +93,7 @@ impl<F: SmallField> IOPVerifierState<F> {
         .collect_vec();
 
         let got_value_1 = izip!(step_msg.sumcheck_eval_values.iter(), self.g1_values.iter())
-            .fold(F::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
+            .fold(E::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
         end_timer!(timer);
 
         if claim_1.expected_evaluation != got_value_1 {
@@ -108,9 +108,9 @@ impl<F: SmallField> IOPVerifierState<F> {
 
     pub(super) fn verify_and_update_state_phase1_step2(
         &mut self,
-        _: &Circuit<F>,
-        step_msg: IOPProverStepMessage<F>,
-        transcript: &mut Transcript<F>,
+        _: &Circuit<E>,
+        step_msg: IOPProverStepMessage<E>,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 1 step 2");
         let hi_num_vars = self.instance_num_vars;
@@ -144,7 +144,7 @@ impl<F: SmallField> IOPVerifierState<F> {
                 let point_lo_num_vars = point.len() - hi_num_vars;
                 *g1_value * eq_eval(&point[point_lo_num_vars..], &claim2_point)
             })
-            .fold(F::ZERO, |acc, value| acc + value);
+            .fold(E::ZERO, |acc, value| acc + value);
 
         let got_value_2 = f2_value * g2_value;
 

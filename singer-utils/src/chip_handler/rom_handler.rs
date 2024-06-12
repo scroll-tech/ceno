@@ -1,12 +1,12 @@
 use ff::Field;
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell, WitnessId};
 
 use crate::structs::{ChipChallenges, ROMHandler};
 
 use super::ROMOperations;
 
-impl<Ext: SmallField> ROMHandler<Ext> {
+impl<Ext: ExtensionField> ROMHandler<Ext> {
     pub fn new(challenge: &ChipChallenges) -> Self {
         Self {
             records: Vec::new(),
@@ -15,7 +15,7 @@ impl<Ext: SmallField> ROMHandler<Ext> {
     }
 }
 
-impl<Ext: SmallField> ROMOperations<Ext> for ROMHandler<Ext> {
+impl<Ext: ExtensionField> ROMOperations<Ext> for ROMHandler<Ext> {
     fn rom_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

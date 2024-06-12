@@ -1,9 +1,10 @@
 use ff::Field;
-use gkr::utils::ceil_log2;
+use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 use std::marker::PhantomData;
+use sumcheck::util::ceil_log2;
 
 use crate::{constants::RANGE_CHIP_BIT_WIDTH, error::UtilError, structs::UInt};
 
@@ -48,8 +49,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         &self.values
     }
 
-    pub fn from_range_values<F: SmallField>(
-        circuit_builder: &mut CircuitBuilder<F>,
+    pub fn from_range_values<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
         range_values: &[CellId],
     ) -> Result<Self, UtilError> {
         let mut values = if C <= M {
@@ -63,8 +64,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Self::try_from(values)
     }
 
-    pub fn from_bytes_big_endien<F: SmallField>(
-        circuit_builder: &mut CircuitBuilder<F>,
+    pub fn from_bytes_big_endien<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[CellId],
     ) -> Result<Self, UtilError> {
         let mut values = if C <= M {
@@ -78,18 +79,22 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Self::try_from(values)
     }
 
-    pub fn assert_eq<F: SmallField>(&self, circuit_builder: &mut CircuitBuilder<F>, other: &Self) {
+    pub fn assert_eq<E: ExtensionField>(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        other: &Self,
+    ) {
         for i in 0..self.values.len() {
             let diff = circuit_builder.create_cell();
-            circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
-            circuit_builder.add(diff, other.values[i], -F::BaseField::ONE);
+            circuit_builder.add(diff, self.values[i], E::BaseField::ONE);
+            circuit_builder.add(diff, other.values[i], -E::BaseField::ONE);
             circuit_builder.assert_const(diff, 0);
         }
     }
 
-    pub fn assert_eq_range_values<F: SmallField>(
+    pub fn assert_eq_range_values<E: ExtensionField>(
         &self,
-        circuit_builder: &mut CircuitBuilder<F>,
+        circuit_builder: &mut CircuitBuilder<E>,
         range_values: &[CellId],
     ) {
         let values = if C <= M {
@@ -100,8 +105,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let length = self.values.len().min(values.len());
         for i in 0..length {
             let diff = circuit_builder.create_cell();
-            circuit_builder.add(diff, self.values[i], F::BaseField::ONE);
-            circuit_builder.add(diff, values[i], -F::BaseField::ONE);
+            circuit_builder.add(diff, self.values[i], E::BaseField::ONE);
+            circuit_builder.add(diff, values[i], -E::BaseField::ONE);
             circuit_builder.assert_const(diff, 0);
         }
         for i in length..values.len() {
@@ -145,8 +150,8 @@ pub struct UIntCmp<UInt> {
 /// `BIG_BIT_WIDTH` % `SMALL_BIT_WIDTH` == 0 because we assume `small_values`
 /// can be splitted into chunks with size ceil(BIG_BIT_WIDTH / SMALL_BIT_WIDTH).
 /// Each chunk is converted to a value with BIG_BIT_WIDTH bits.
-fn convert_decomp<F: SmallField>(
-    circuit_builder: &mut CircuitBuilder<F>,
+fn convert_decomp<E: ExtensionField>(
+    circuit_builder: &mut CircuitBuilder<E>,
     small_values: &[CellId],
     small_bit_width: usize,
     big_bit_width: usize,
@@ -168,7 +173,7 @@ fn convert_decomp<F: SmallField>(
                 circuit_builder.add(
                     tmp,
                     small_values[k],
-                    F::BaseField::from((1 as u64) << (k - j) * small_bit_width),
+                    E::BaseField::from((1 as u64) << (k - j) * small_bit_width),
                 );
             }
             tmp
@@ -183,13 +188,13 @@ mod test {
 
     use super::UInt;
     use gkr::structs::{Circuit, CircuitWitness};
-    use goldilocks::Goldilocks;
+    use goldilocks::{Goldilocks, GoldilocksExt2};
     use simple_frontend::structs::CircuitBuilder;
 
     #[test]
     fn test_convert_decomp() {
         // test case 1
-        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let big_bit_width = 3;
         let small_bit_width = 2;
         let (small_values_wire_in_id, small_values) = circuit_builder.create_witness_in(31);
@@ -209,7 +214,7 @@ mod test {
             vec![Goldilocks::from(1u64), Goldilocks::from(1u64)];
         wires_in[small_values_wire_in_id as usize].extend(vec![Goldilocks::from(0u64); 29]);
         let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2)];
+            let challenges = vec![GoldilocksExt2::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
             circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness
@@ -224,7 +229,7 @@ mod test {
             assert_eq!(result_values.instances[0][i], Goldilocks::from(0u64));
         }
         // test case 2
-        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let big_bit_width = 32;
         let small_bit_width = 16;
         let (small_values_wire_in_id, small_values) = circuit_builder.create_witness_in(4);
@@ -247,7 +252,7 @@ mod test {
             Goldilocks::from(0u64),
         ];
         let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2)];
+            let challenges = vec![GoldilocksExt2::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
             circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness
@@ -265,7 +270,7 @@ mod test {
 
     #[test]
     fn test_from_range_values() {
-        let mut circuit_builder = CircuitBuilder::<Goldilocks>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let (range_values_wire_in_id, range_values) = circuit_builder.create_witness_in(16);
         let range_value =
             UInt::<256, 32>::from_range_values(&mut circuit_builder, &range_values).unwrap();
@@ -293,7 +298,7 @@ mod test {
             Goldilocks::from(0u64),
         ];
         let circuit_witness = {
-            let challenges = vec![Goldilocks::from(2)];
+            let challenges = vec![GoldilocksExt2::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
             circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness
