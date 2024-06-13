@@ -25,7 +25,7 @@ pub(crate) fn construct_calldata_table_and_witness<E: ExtensionField>(
 ) -> Result<(PredType, PredType, usize), UtilError> {
     let mut circuit_builder = CircuitBuilder::<E>::new();
     let (_, id_cells) = circuit_builder.create_witness_in(1);
-    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
+    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
     let rlc = circuit_builder.create_ext_cell();
     let mut items = vec![MixedCell::Constant(E::BaseField::from(
@@ -65,9 +65,9 @@ pub(crate) fn construct_calldata_table_and_witness<E: ExtensionField>(
         },
         LayerWitness {
             instances: (0..calldata.len())
-                .step_by(StackUInt::N_OPRAND_CELLS)
+                .step_by(StackUInt::N_OPERAND_CELLS)
                 .map(|i| {
-                    calldata[i..(i + StackUInt::N_OPRAND_CELLS).min(calldata.len())]
+                    calldata[i..(i + StackUInt::N_OPERAND_CELLS).min(calldata.len())]
                         .iter()
                         .cloned()
                         .rev()
@@ -102,7 +102,7 @@ pub(crate) fn construct_calldata_table<E: ExtensionField>(
 ) -> Result<(PredType, PredType, usize), UtilError> {
     let mut circuit_builder = CircuitBuilder::<E>::new();
     let (_, id_cells) = circuit_builder.create_witness_in(1);
-    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
+    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
     let rlc = circuit_builder.create_ext_cell();
     let mut items = vec![MixedCell::Constant(E::BaseField::from(

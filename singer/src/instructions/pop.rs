@@ -11,7 +11,6 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 
@@ -27,17 +26,17 @@ impl<E: ExtensionField> InstructionGraph<E> for PopInstruction {
 register_witness!(
     PopInstruction,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
 
-        old_stack_ts => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
-        stack_values => StackUInt::N_OPRAND_CELLS
+        old_stack_ts => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt => TSUInt::N_WITNESS_CELLS,
+        stack_values => StackUInt::N_OPERAND_CELLS
     }
 );
 
@@ -86,7 +85,7 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
 
         // Pop rlc from stack
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts,

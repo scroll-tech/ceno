@@ -87,7 +87,7 @@ pub const fn const_min(a: usize, b: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::uint_new::util::{const_min, convert_decomp, pad_cells};
+    use crate::uint::util::{const_min, convert_decomp, pad_cells};
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;

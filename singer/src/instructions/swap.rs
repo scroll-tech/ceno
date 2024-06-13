@@ -11,7 +11,6 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 
@@ -27,21 +26,21 @@ impl<E: ExtensionField, const N: usize> InstructionGraph<E> for SwapInstruction<
 register_witness!(
     SwapInstruction<N>,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
 
-        old_stack_ts_1 => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt_1 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-        old_stack_ts_n_plus_1 => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt_n_plus_1 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-        stack_values_1 => StackUInt::N_OPRAND_CELLS,
-        stack_values_n_plus_1 => StackUInt::N_OPRAND_CELLS
+        old_stack_ts_1 => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt_1 => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_n_plus_1 => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt_n_plus_1 => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        stack_values_1 => StackUInt::N_OPERAND_CELLS,
+        stack_values_n_plus_1 => StackUInt::N_OPERAND_CELLS
     }
 );
 
@@ -104,7 +103,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
 
         // Pop rlc of stack[top - (N + 1)] from stack
         let old_stack_ts_n_plus_1 = (&phase0[Self::phase0_old_stack_ts_n_plus_1()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_n_plus_1,
@@ -121,7 +120,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
 
         // Pop rlc of stack[top - 1] from stack
         let old_stack_ts_1 = (&phase0[Self::phase0_old_stack_ts_1()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_1,

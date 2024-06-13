@@ -13,7 +13,6 @@ use singer_utils::{
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
 };
 use std::{mem, sync::Arc};
 
@@ -140,21 +139,21 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
 register_witness!(
     MstoreInstruction,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        memory_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        memory_ts_add => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
 
-        offset => StackUInt::N_OPRAND_CELLS,
+        offset => StackUInt::N_OPERAND_CELLS,
         mem_bytes => EVM_STACK_BYTE_WIDTH,
-        old_stack_ts_offset => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt_offset => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-        old_stack_ts_value => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt_value => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS
+        old_stack_ts_offset => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt_offset => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_value => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt_value => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS
     }
 );
 
@@ -211,7 +210,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         // Pop offset from stack
         let offset = StackUInt::try_from(&phase0[Self::phase0_offset()])?;
         let old_stack_ts_offset = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_offset()])?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_offset,
@@ -229,9 +228,9 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
         rom_handler.range_check_bytes(&mut circuit_builder, mem_bytes)?;
 
-        let mem_value = StackUInt::from_bytes_big_endien(&mut circuit_builder, &mem_bytes)?;
+        let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
         let old_stack_ts_value = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_value()])?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_value,
@@ -290,17 +289,17 @@ pub struct MstoreAccessory;
 register_witness!(
     MstoreAccessory,
     pred_dup {
-        memory_ts => TSUInt::N_OPRAND_CELLS,
-        offset => StackUInt::N_OPRAND_CELLS
+        memory_ts => TSUInt::N_OPERAND_CELLS,
+        offset => StackUInt::N_OPERAND_CELLS
     },
     pred_ooo {
         mem_bytes => 1
     },
     phase0 {
-        old_memory_ts => TSUInt::N_OPRAND_CELLS,
-        old_memory_ts_lt =>  UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_memory_ts => TSUInt::N_OPERAND_CELLS,
+        old_memory_ts_lt =>  TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
 
-        offset_add_delta => UIntAddSub::<StackUInt>::N_WITNESS_CELLS,
+        offset_add_delta => StackUInt::N_WITNESS_CELLS,
         prev_mem_bytes => 1
     }
 );
@@ -327,14 +326,14 @@ impl<E: ExtensionField> Instruction<E> for MstoreAccessory {
         let offset = StackUInt::try_from(&pred_dup[Self::pred_dup_offset()])?;
         let offset_add_delta = &phase0[Self::phase0_offset_add_delta()];
         let delta = circuit_builder.create_counter_in(0)[0];
-        let offset_plus_delta = UIntAddSub::<StackUInt>::add_small(
+        let offset_plus_delta = StackUInt::add_small(
             &mut circuit_builder,
             &mut rom_handler,
             &offset,
             delta,
             offset_add_delta,
         )?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_memory_ts,

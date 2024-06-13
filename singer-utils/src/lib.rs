@@ -5,8 +5,8 @@ pub mod chips;
 pub mod constants;
 pub mod error;
 pub mod structs;
+// pub mod uint_old;
 pub mod uint;
-mod uint_new;
 
 #[macro_use]
 pub mod macros;

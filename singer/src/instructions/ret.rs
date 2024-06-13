@@ -13,7 +13,6 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::UIntAddSub,
 };
 use std::{mem, sync::Arc};
 
@@ -262,17 +261,17 @@ impl<E: ExtensionField> InstructionGraph<E> for ReturnInstruction {
 register_witness!(
     ReturnInstruction,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        old_stack_ts0 => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts1 => TSUInt::N_OPRAND_CELLS,
+        old_stack_ts0 => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts1 => TSUInt::N_OPERAND_CELLS,
 
-        offset => StackUInt::N_OPRAND_CELLS,
-        mem_length => StackUInt::N_OPRAND_CELLS
+        offset => StackUInt::N_OPERAND_CELLS,
+        mem_length => StackUInt::N_OPERAND_CELLS
     }
 );
 
@@ -339,7 +338,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
 
         // Copy length to the target wire.
         let (target_wire_id, target) =
-            circuit_builder.create_witness_out(StackUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_out(StackUInt::N_OPERAND_CELLS);
         let length = length.values();
         for i in 1..length.len() {
             circuit_builder.assert_const(length[i], 0);
@@ -369,15 +368,15 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
 register_witness!(
     ReturnPublicOutLoad,
     pred {
-        offset => StackUInt::N_OPRAND_CELLS
+        offset => StackUInt::N_OPERAND_CELLS
     },
     public_io {
         byte => 1
     },
     phase0 {
-        old_memory_ts => TSUInt::N_OPRAND_CELLS,
+        old_memory_ts => TSUInt::N_OPERAND_CELLS,
 
-        offset_add => UIntAddSub::<StackUInt>::N_WITNESS_CELLS
+        offset_add => StackUInt::N_WITNESS_CELLS
     }
 );
 
@@ -393,7 +392,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnPublicOutLoad {
         let delta = circuit_builder.create_counter_in(0);
         let offset = StackUInt::try_from(&pred[Self::pred_offset()])?;
         let offset_add_delta_witness = &phase0[Self::phase0_offset_add()];
-        let new_offset = UIntAddSub::<StackUInt>::add_small(
+        let new_offset = StackUInt::add_small(
             &mut circuit_builder,
             &mut rom_handler,
             &offset,
@@ -433,8 +432,8 @@ register_witness!(
     ReturnRestMemLoad,
     phase0 {
         mem_byte => 1,
-        offset => StackUInt::N_OPRAND_CELLS,
-        old_memory_ts => TSUInt::N_OPRAND_CELLS
+        offset => StackUInt::N_OPERAND_CELLS,
+        old_memory_ts => TSUInt::N_OPERAND_CELLS
     }
 );
 
@@ -475,7 +474,7 @@ register_witness!(
     ReturnRestMemStore,
     phase0 {
         mem_byte => 1,
-        offset => StackUInt::N_OPRAND_CELLS
+        offset => StackUInt::N_OPERAND_CELLS
     }
 );
 
@@ -488,7 +487,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnRestMemStore {
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
         let mem_byte = phase0[Self::phase0_mem_byte().start];
-        let memory_ts = circuit_builder.create_cells(StackUInt::N_OPRAND_CELLS);
+        let memory_ts = circuit_builder.create_cells(StackUInt::N_OPERAND_CELLS);
         ram_handler.oam_store(&mut circuit_builder, offset, &memory_ts, &[mem_byte]);
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
@@ -512,8 +511,8 @@ pub struct ReturnRestStackPop;
 register_witness!(
     ReturnRestStackPop,
     phase0 {
-        old_stack_ts => TSUInt::N_OPRAND_CELLS,
-        stack_values => StackUInt::N_OPRAND_CELLS
+        old_stack_ts => TSUInt::N_OPERAND_CELLS,
+        stack_values => StackUInt::N_OPERAND_CELLS
     }
 );
 

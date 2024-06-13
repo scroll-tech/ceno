@@ -1,9 +1,11 @@
 use crate::chip_handler::RangeChipOperations;
 use crate::error::UtilError;
-use crate::uint_new::uint::UInt;
+use crate::uint::uint::UInt;
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
+
+// TODO: this functions should use self, better UI (refactor for this)
 
 // TODO: test
 // TODO: reconfirm logic
@@ -69,7 +71,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        // TODO: uncomment this once you change to new uint
+        // TODO: uncomment this once you change to new uint_old
         // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
         todo!()
     }
@@ -115,7 +117,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
-        // TODO: uncomment this once you change to new uint
+        // TODO: uncomment this once you change to new uint_old
         // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
         todo!()
     }
@@ -242,7 +244,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let borrow = Self::extract_borrow(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::sub_unsafe(circuit_builder, minuend, subtrahend, borrow)?;
-        // TODO: uncomment this once you change to new uint
+        // TODO: uncomment this once you change to new uint_old
         // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
         todo!()
     }

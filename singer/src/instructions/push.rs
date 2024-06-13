@@ -11,7 +11,6 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::UIntAddSub,
 };
 use std::sync::Arc;
 
@@ -28,14 +27,14 @@ impl<E: ExtensionField, const N: usize> InstructionGraph<E> for PushInstruction<
 register_witness!(
     PushInstruction<N>,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add_i_plus_1 => N * UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        pc_add_i_plus_1 => N * PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
 
         stack_bytes => N
     }
@@ -97,7 +96,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
         rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr)?;
 
         let stack_bytes = &phase0[Self::phase0_stack_bytes()];
-        let stack_values = StackUInt::from_bytes_big_endien(&mut circuit_builder, stack_bytes)?;
+        let stack_values = StackUInt::from_bytes_big_endian(&mut circuit_builder, stack_bytes)?;
         // Push value to stack
         ram_handler.stack_push(
             &mut circuit_builder,
@@ -109,7 +108,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
         // Bytecode check for (pc, PUSH{N}), (pc + 1, byte[0]), ..., (pc + N, byte[N - 1])
         rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
         for (i, pc_add_i_plus_1) in phase0[Self::phase0_pc_add_i_plus_1()]
-            .chunks(UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
+            .chunks(PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
             .enumerate()
         {
             let next_pc =

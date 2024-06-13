@@ -16,7 +16,7 @@ pub mod cmp;
 impl<const M: usize, const C: usize> TryFrom<&[usize]> for UInt<M, C> {
     type Error = UtilError;
     fn try_from(values: &[usize]) -> Result<Self, Self::Error> {
-        if values.len() != Self::N_OPRAND_CELLS {
+        if values.len() != Self::N_OPERAND_CELLS {
             // TODO: this will be replaced soon
             return Err(UtilError::UIntError("placeholder".to_string()));
         }
@@ -35,14 +35,14 @@ impl<const M: usize, const C: usize> TryFrom<Vec<usize>> for UInt<M, C> {
 }
 
 impl<const M: usize, const C: usize> UInt<M, C> {
-    pub const N_OPRAND_CELLS: usize = (M + C - 1) / C;
+    pub const N_OPERAND_CELLS: usize = (M + C - 1) / C;
 
-    const N_CARRY_CELLS: usize = Self::N_OPRAND_CELLS;
-    const N_CARRY_NO_OVERFLOW_CELLS: usize = Self::N_OPRAND_CELLS - 1;
+    const N_CARRY_CELLS: usize = Self::N_OPERAND_CELLS;
+    const N_CARRY_NO_OVERFLOW_CELLS: usize = Self::N_OPERAND_CELLS - 1;
     pub const N_RANGE_CHECK_CELLS: usize =
-        Self::N_OPRAND_CELLS * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
+        Self::N_OPERAND_CELLS * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
     pub const N_RANGE_CHECK_NO_OVERFLOW_CELLS: usize =
-        (Self::N_OPRAND_CELLS - 1) * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
+        (Self::N_OPERAND_CELLS - 1) * (C + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
 
     pub fn values(&self) -> &[CellId] {
         &self.values
@@ -57,7 +57,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         } else {
             convert_decomp(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, M, true)
         };
-        while values.len() < Self::N_OPRAND_CELLS {
+        while values.len() < Self::N_OPERAND_CELLS {
             values.push(circuit_builder.create_cell());
         }
         Self::try_from(values)

@@ -11,7 +11,6 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt, UInt64},
-    uint::{UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 
@@ -28,20 +27,20 @@ pub struct CalldataloadInstruction;
 register_witness!(
     CalldataloadInstruction,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
-        ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
+        ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
 
-        data => StackUInt::N_OPRAND_CELLS,
-        offset => UInt64::N_OPRAND_CELLS,
-        old_stack_ts => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS
+        data => StackUInt::N_OPERAND_CELLS,
+        offset => UInt64::N_OPERAND_CELLS,
+        old_stack_ts => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS
     }
 );
 
@@ -106,7 +105,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
             old_stack_ts.values(),
             offset,
         );
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts,

@@ -8,7 +8,6 @@ use singer_utils::{
     chips::{IntoEnumIterator, SingerChipBuilder},
     register_witness,
     structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::UIntAddSub,
 };
 use std::{mem, sync::Arc};
 
@@ -76,8 +75,8 @@ register_witness!(
         byte => 1
     },
     phase0 {
-        old_memory_ts => TSUInt::N_OPRAND_CELLS,
-        offset_add => UIntAddSub::<StackUInt>::N_WITNESS_CELLS
+        old_memory_ts => TSUInt::N_OPERAND_CELLS,
+        offset_add => StackUInt::N_WITNESS_CELLS
     }
 );
 
@@ -92,8 +91,8 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
-        let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
+        let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
         let mut rom_handler = ROMHandler::new(&challenges);
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -102,7 +101,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let delta = circuit_builder.create_counter_in(0)[0];
         let offset = StackUInt::try_from(offset.as_slice())?;
         let offset_add_delta = &phase0[Self::phase0_offset_add()];
-        let offset_plus_delta = UIntAddSub::<StackUInt>::add_small(
+        let offset_plus_delta = StackUInt::add_small(
             &mut circuit_builder,
             &mut rom_handler,
             &offset,
@@ -124,7 +123,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
 
         // To successor instruction
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, memory_ts.values());
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);

@@ -1,12 +1,13 @@
 use crate::constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH};
 use crate::error::UtilError;
-use crate::uint_new::util::{convert_decomp, pad_cells};
+use crate::uint::util::{convert_decomp, pad_cells};
 use ff_ext::ExtensionField;
 use gkr::utils::ceil_log2;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
+#[derive(Clone)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
 pub struct UInt<const M: usize, const C: usize> {
@@ -137,7 +138,7 @@ impl<const M: usize, const C: usize> TryFrom<&[CellId]> for UInt<M, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::uint_new::uint::UInt;
+    use crate::uint::uint::UInt;
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;

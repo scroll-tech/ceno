@@ -1,4 +1,4 @@
-use crate::uint_new::uint::UInt;
+use crate::uint::uint::UInt;
 use simple_frontend::structs::CellId;
 
 // TODO: test
@@ -17,8 +17,20 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     // TODO: add documentation
+    // TODO: why do we need this
+    pub fn extract_unsafe_carry(witness: &[CellId]) -> &[CellId] {
+        witness
+    }
+
+    // TODO: add documentation
     pub fn extract_borrow(witness: &[CellId]) -> &[CellId] {
         &witness[Self::N_RANGE_CELLS..]
+    }
+
+    // TODO: add documentation
+    // TODO: why do we need this
+    pub fn extract_unsafe_borrow(witness: &[CellId]) -> &[CellId] {
+        witness
     }
 
     // TODO: add documentation

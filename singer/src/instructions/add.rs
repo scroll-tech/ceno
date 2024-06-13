@@ -11,7 +11,6 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 
@@ -28,23 +27,23 @@ impl<E: ExtensionField> InstructionGraph<E> for AddInstruction {
 register_witness!(
     AddInstruction,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
 
-        old_stack_ts0 => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt0 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
-        old_stack_ts1 => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt1 => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts0 => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt0 => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts1 => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt1 => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
 
-        addend_0 => StackUInt::N_OPRAND_CELLS,
-        addend_1 => StackUInt::N_OPRAND_CELLS,
-        instruction_add => UIntAddSub::<StackUInt>::N_WITNESS_CELLS
+        addend_0 => StackUInt::N_OPERAND_CELLS,
+        addend_1 => StackUInt::N_OPERAND_CELLS,
+        instruction_add => StackUInt::N_WITNESS_CELLS
     }
 );
 
@@ -97,7 +96,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         // Execution result = addend0 + addend1, with carry.
         let addend_0 = (&phase0[Self::phase0_addend_0()]).try_into()?;
         let addend_1 = (&phase0[Self::phase0_addend_1()]).try_into()?;
-        let result = UIntAddSub::<StackUInt>::add(
+        let result = StackUInt::add(
             &mut circuit_builder,
             &mut rom_handler,
             &addend_0,
@@ -113,7 +112,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
 
         // Pop two values from stack
         let old_stack_ts0 = (&phase0[Self::phase0_old_stack_ts0()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts0,
@@ -128,7 +127,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         );
 
         let old_stack_ts1 = (&phase0[Self::phase0_old_stack_ts1()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts1,

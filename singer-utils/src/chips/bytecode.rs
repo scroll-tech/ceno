@@ -25,7 +25,7 @@ pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
     real_challenges: &[E],
 ) -> Result<(PredType, PredType, usize), UtilError> {
     let mut circuit_builder = CircuitBuilder::<E>::new();
-    let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
+    let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPERAND_CELLS);
     let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
     let rlc = circuit_builder.create_ext_cell();
@@ -93,7 +93,7 @@ pub(crate) fn construct_bytecode_table<E: ExtensionField>(
     challenges: &ChipChallenges,
 ) -> Result<(PredType, PredType, usize), UtilError> {
     let mut circuit_builder = CircuitBuilder::<E>::new();
-    let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
+    let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPERAND_CELLS);
     let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
     let rlc = circuit_builder.create_ext_cell();

@@ -13,7 +13,6 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
-    uint::UIntCmp,
 };
 
 use crate::error::ZKVMError;
@@ -29,16 +28,16 @@ impl<E: ExtensionField> InstructionGraph<E> for JumpInstruction {
 register_witness!(
     JumpInstruction,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        next_pc => PCUInt::N_OPRAND_CELLS,
+        next_pc => PCUInt::N_OPERAND_CELLS,
 
-        old_stack_ts => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS
+        old_stack_ts => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt => TSUInt::N_WITNESS_CELLS
     }
 );
 
@@ -76,7 +75,7 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
 
         let next_pc = &phase0[Self::phase0_next_pc()];
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts,
