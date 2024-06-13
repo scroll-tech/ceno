@@ -775,6 +775,7 @@ fn prove_and_verify<Ext: ExtensionField>(
         &circuit_wits,
         out_point_and_evals.clone(),
         wit_out_point_and_evals.clone(),
+        1,
         &mut prover_transcript,
     );
 

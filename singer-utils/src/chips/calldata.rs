@@ -7,13 +7,11 @@ use crate::{
 
 use super::ChipCircuitGadgets;
 use ff_ext::ExtensionField;
-use gkr::{
-    structs::{Circuit, LayerWitness},
-    utils::ceil_log2,
-};
+use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use sumcheck::util::ceil_log2;
 
 /// Add calldata table circuit and witness to the circuit graph. Return node id
 /// and lookup instance log size.

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ark_std::{end_timer, start_timer};
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -11,6 +13,7 @@ use transcript::Transcript;
 use crate::{
     circuit::EvaluateConstant,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
+    utils::MultilinearExtensionFromVectors,
 };
 
 use super::SumcheckState;
@@ -48,8 +51,11 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let f1_g1 = || {
             // f1(x1) = layers[i + 1](rt || x1)
-            let f1 =
-                self.phase2_next_layer_polys[self.layer_id as usize].fix_high_variables(&hi_point);
+            let layer_in_vec = circuit_witness.layers[self.layer_id as usize + 1]
+                .instances
+                .as_slice();
+            let mut f1 = layer_in_vec.mle(lo_in_num_vars, hi_num_vars);
+            Arc::make_mut(&mut f1).fix_high_variables_in_place(&hi_point);
 
             // g1(x1) = add(ry, x1)
             let g1 = {
@@ -59,7 +65,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                 });
                 DenseMultilinearExtension::from_evaluations_ext_vec(lo_in_num_vars, g1)
             };
-            (vec![f1.into()], vec![g1.into()])
+            (vec![f1], vec![g1.into()])
         };
 
         let (mut f1_vec, mut g1_vec) = f1_g1();
@@ -107,7 +113,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             virtual_poly_1.merge(&tmp);
         }
 
-        let (sumcheck_proof_1, prover_state) = SumcheckState::prove(virtual_poly_1, transcript);
+        let (sumcheck_proof_1, prover_state) =
+            SumcheckState::prove_parallel(virtual_poly_1, transcript);
         let eval_point_1 = sumcheck_proof_1.point.clone();
         let (f1_vec, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()

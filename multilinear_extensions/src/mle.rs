@@ -1,7 +1,7 @@
 use std::{borrow::Cow, mem, sync::Arc};
 
 use crate::op_mle;
-use ark_std::{end_timer, rand::RngCore, start_timer};
+use ark_std::{end_timer, iterable::Iterable, rand::RngCore, start_timer};
 use core::hash::Hash;
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -98,7 +98,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             point.len(),
             "MLE size does not match the point"
         );
-        let mle = self.fix_variables(point);
+        let mle = self.fix_variables_parallel(point);
         op_mle!(mle, |f| f[0], |v| E::from(v))
     }
 
@@ -121,10 +121,8 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
                         Cow::Owned(DenseMultilinearExtension::from_evaluations_ext_vec(
                             self.num_vars - 1,
                             evaluations
-                                .par_iter()
                                 .chunks(2)
-                                .with_min_len(64)
-                                .map(|buf| *point * (*buf[1] - *buf[0]) + *buf[0])
+                                .map(|buf| *point * (buf[1] - buf[0]) + buf[0])
                                 .collect(),
                         ))
                     });
@@ -135,41 +133,33 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         assert!(poly.num_vars == self.num_vars - partial_point.len(),);
         poly.into_owned()
     }
-
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` in place
     pub fn fix_variables_in_place(&mut self, partial_point: &[E]) {
         // TODO: return error.
         assert!(
             partial_point.len() <= self.num_vars,
-            "invalid size of partial point"
+            "partial point len {} >= num_vars {}",
+            partial_point.len(),
+            self.num_vars
         );
         let nv = self.num_vars;
         // evaluate single variable of partial point from left to right
         for (i, point) in partial_point.iter().enumerate() {
-            let max_log2_size = nv - i;
             // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
             match &mut self.evaluations {
                 FieldType::Base(evaluations) => {
                     let evaluations_ext = evaluations
-                        .par_iter()
                         .chunks(2)
-                        .with_min_len(64)
-                        .map(|buf| *point * (*buf[1] - *buf[0]) + *buf[0])
+                        .map(|buf| *point * (buf[1] - buf[0]) + buf[0])
                         .collect();
                     let _ = mem::replace(&mut self.evaluations, FieldType::Ext(evaluations_ext));
                 }
                 FieldType::Ext(evaluations) => {
-                    evaluations
-                        .par_iter_mut()
-                        .chunks(2)
-                        .with_min_len(64)
-                        .for_each(|mut buf| *buf[0] = *buf[0] + (*buf[1] - *buf[0]) * point);
-
-                    // sequentially update buf[b1, b2,..bt] = buf[b1, b2,..bt, 0]
-                    for index in 0..1 << (max_log2_size - 1) {
-                        evaluations[index] = evaluations[index << 1];
-                    }
+                    (0..evaluations.len()).step_by(2).for_each(|b| {
+                        evaluations[b >> 1] =
+                            evaluations[b] + (evaluations[b + 1] - evaluations[b]) * point
+                    });
                 }
                 FieldType::Unreachable => unreachable!(),
             };
@@ -399,6 +389,94 @@ macro_rules! commutative_op_mle_pair {
         }
     };
     (|$a:ident, $b:ident| $op:expr) => {
-        op_mles!(|$a, $b| $op, |out| out)
+        commutative_op_mle_pair!(|$a, $b| $op, |out| out)
     };
+}
+
+#[deprecated(note = "deprecated parallel version due to syncronizaion overhead")]
+impl<E: ExtensionField> DenseMultilinearExtension<E> {
+    /// Reduce the number of variables of `self` by fixing the
+    /// `partial_point.len()` variables at `partial_point`.
+    pub fn fix_variables_parallel(&self, partial_point: &[E]) -> Self {
+        // TODO: return error.
+        assert!(
+            partial_point.len() <= self.num_vars,
+            "invalid size of partial point"
+        );
+        let mut poly = Cow::Borrowed(self);
+
+        // evaluate single variable of partial point from left to right
+        // `Cow` type here to skip first evaluation vector copy
+        for point in partial_point.iter() {
+            match &mut poly {
+                poly @ Cow::Borrowed(_) => {
+                    *poly = op_mle!(self, |evaluations| {
+                        Cow::Owned(DenseMultilinearExtension::from_evaluations_ext_vec(
+                            self.num_vars - 1,
+                            evaluations
+                                .par_iter()
+                                .chunks(2)
+                                .with_min_len(64)
+                                .map(|buf| *point * (*buf[1] - *buf[0]) + *buf[0])
+                                .collect(),
+                        ))
+                    });
+                }
+                Cow::Owned(poly) => poly.fix_variables_in_place_parallel(&[*point]),
+            }
+        }
+        assert!(poly.num_vars == self.num_vars - partial_point.len(),);
+        poly.into_owned()
+    }
+
+    /// Reduce the number of variables of `self` by fixing the
+    /// `partial_point.len()` variables at `partial_point` in place
+    pub fn fix_variables_in_place_parallel(&mut self, partial_point: &[E]) {
+        // TODO: return error.
+        assert!(
+            partial_point.len() <= self.num_vars,
+            "partial point len {} >= num_vars {}",
+            partial_point.len(),
+            self.num_vars
+        );
+        let nv = self.num_vars;
+        // evaluate single variable of partial point from left to right
+        for (i, point) in partial_point.iter().enumerate() {
+            let max_log2_size = nv - i;
+            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
+            match &mut self.evaluations {
+                FieldType::Base(evaluations) => {
+                    let evaluations_ext = evaluations
+                        .par_iter()
+                        .chunks(2)
+                        .with_min_len(64)
+                        .map(|buf| *point * (*buf[1] - *buf[0]) + *buf[0])
+                        .collect();
+                    let _ = mem::replace(&mut self.evaluations, FieldType::Ext(evaluations_ext));
+                }
+                FieldType::Ext(evaluations) => {
+                    evaluations
+                        .par_iter_mut()
+                        .chunks(2)
+                        .with_min_len(64)
+                        .for_each(|mut buf| *buf[0] = *buf[0] + (*buf[1] - *buf[0]) * point);
+
+                    // sequentially update buf[b1, b2,..bt] = buf[b1, b2,..bt, 0]
+                    for index in 0..1 << (max_log2_size - 1) {
+                        evaluations[index] = evaluations[index << 1];
+                    }
+                }
+                FieldType::Unreachable => unreachable!(),
+            };
+        }
+        match &mut self.evaluations {
+            FieldType::Base(_) => unreachable!(),
+            FieldType::Ext(evaluations) => {
+                evaluations.truncate(1 << (nv - partial_point.len()));
+            }
+            FieldType::Unreachable => unreachable!(),
+        }
+
+        self.num_vars = nv - partial_point.len();
+    }
 }

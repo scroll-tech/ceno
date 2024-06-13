@@ -75,6 +75,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                         .map(|eq| *alpha_pow * eq)
                         .collect_vec();
 
+                    assert_eq!(g1_j.len(), 1 << lo_num_vars);
                     (
                         f1_j.into(),
                         DenseMultilinearExtension::from_evaluations_ext_vec(lo_num_vars, g1_j)
@@ -130,7 +131,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             virtual_poly_1
         });
 
-        let (sumcheck_proof_1, prover_state) = SumcheckState::prove(virtual_poly_1, transcript);
+        let (sumcheck_proof_1, prover_state) =
+            SumcheckState::prove_parallel(virtual_poly_1, transcript);
         let (f1, g1): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
             .into_iter()
@@ -165,7 +167,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         let span = entered_span!("f2_fix_variables");
         // f2(t) = layers[i](t || ry)
         let f2 = mem::take(&mut self.phase1_layer_polys[self.layer_id as usize])
-            .fix_variables(&self.to_next_step_point)
+            .fix_variables_parallel(&self.to_next_step_point)
             .into();
         exit_span!(span);
 
@@ -221,7 +223,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::BaseField::ONE);
         virtual_poly_2.mul_by_mle(g2.into(), E::BaseField::ONE);
 
-        let (sumcheck_proof_2, prover_state) = SumcheckState::prove(virtual_poly_2, transcript);
+        let (sumcheck_proof_2, prover_state) =
+            SumcheckState::prove_parallel(virtual_poly_2, transcript);
         let (mut f2, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
             .into_iter()

@@ -52,7 +52,7 @@ pub struct VirtualPolynomial<E: ExtensionField> {
     /// to.
     pub flattened_ml_extensions: Vec<ArcDenseMultilinearExtension<E>>,
     /// Pointers to the above poly extensions
-    raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<E>, usize>,
+    raw_pointers_lookup_table: HashMap<usize, usize>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,7 +90,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
 
     /// Creates an new virtual polynomial from a MLE and its coefficient.
     pub fn new_from_mle(mle: ArcDenseMultilinearExtension<E>, coefficient: E::BaseField) -> Self {
-        let mle_ptr: *const DenseMultilinearExtension<E> = Arc::as_ptr(&mle);
+        let mle_ptr: usize = Arc::as_ptr(&mle) as usize;
         let mut hm = HashMap::new();
         hm.insert(mle_ptr, 0);
 
@@ -133,7 +133,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
                 mle.num_vars, self.aux_info.num_variables
             );
 
-            let mle_ptr: *const DenseMultilinearExtension<E> = Arc::as_ptr(&mle);
+            let mle_ptr: usize = Arc::as_ptr(&mle) as usize;
             if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
                 indexed_product.push(*index)
             } else {
@@ -174,7 +174,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
             mle.num_vars, self.aux_info.num_variables
         );
 
-        let mle_ptr: *const DenseMultilinearExtension<E> = Arc::as_ptr(&mle);
+        let mle_ptr = Arc::as_ptr(&mle) as usize;
 
         // check if this mle already exists in the virtual polynomial
         let mle_index = match self.raw_pointers_lookup_table.get(&mle_ptr) {
@@ -320,13 +320,12 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
         let mut flattened_ml_extensions = vec![];
         let mut hm = HashMap::new();
         for mle in self.flattened_ml_extensions.iter() {
-            let mle_ptr: *const DenseMultilinearExtension<E> = Arc::as_ptr(mle);
+            let mle_ptr = Arc::as_ptr(mle) as usize;
             let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
 
             let mle_ext_field = mle.as_ref().to_ext_field();
             let mle_ext_field = Arc::new(mle_ext_field);
-            let mle_ext_field_ptr: *const DenseMultilinearExtension<E> =
-                Arc::as_ptr(&mle_ext_field);
+            let mle_ext_field_ptr = Arc::as_ptr(&mle_ext_field) as usize;
             flattened_ml_extensions.push(mle_ext_field);
             hm.insert(mle_ext_field_ptr, *index);
         }
@@ -352,6 +351,73 @@ pub fn eq_eval<F: PrimeField>(x: &[F], y: &[F]) -> F {
     }
     end_timer!(start);
     res
+}
+
+/// This function build the eq(x, r) polynomial for any given r.
+///
+/// Evaluate
+///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
+/// over r, which is
+///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
+pub fn build_eq_x_r_sequential<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
+    let evals = build_eq_x_r_vec_sequential(r);
+    let mle = DenseMultilinearExtension::from_evaluations_ext_vec(r.len(), evals);
+
+    mle.into()
+}
+/// This function build the eq(x, r) polynomial for any given r, and output the
+/// evaluation of eq(x, r) in its vector form.
+///
+/// Evaluate
+///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
+/// over r, which is
+///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
+
+#[tracing::instrument(skip_all, name = "multilinear_extensions::build_eq_x_r_vec_sequential")]
+pub fn build_eq_x_r_vec_sequential<E: ExtensionField>(r: &[E]) -> Vec<E> {
+    // avoid unnecessary allocation
+    if r.is_empty() {
+        return vec![E::ONE];
+    }
+    // we build eq(x,r) from its evaluations
+    // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
+    // for example, with num_vars = 4, x is a binary vector of 4, then
+    //  0 0 0 0 -> (1-r0)   * (1-r1)    * (1-r2)    * (1-r3)
+    //  1 0 0 0 -> r0       * (1-r1)    * (1-r2)    * (1-r3)
+    //  0 1 0 0 -> (1-r0)   * r1        * (1-r2)    * (1-r3)
+    //  1 1 0 0 -> r0       * r1        * (1-r2)    * (1-r3)
+    //  ....
+    //  1 1 1 1 -> r0       * r1        * r2        * r3
+    // we will need 2^num_var evaluations
+
+    let mut evals = vec![E::ZERO; 1 << r.len()];
+    build_eq_x_r_helper_sequential(r, &mut evals);
+
+    evals
+}
+
+/// A helper function to build eq(x, r) via dynamic programing tricks.
+/// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
+fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut Vec<E>) {
+    buf[0] = E::ONE;
+    if r.is_empty() {
+        buf.resize(1, E::ZERO);
+        return;
+    }
+    for (i, r) in r.iter().rev().enumerate() {
+        let next_size = 1 << (i + 1);
+        // suppose at the previous step we processed buf [0..size]
+        // for the current step we are populating new buf[0..2*size]
+        // for j travese 0..size
+        // buf[2*j + 1] = r * buf[j]
+        // buf[2*j] = (1 - r) * buf[j]
+        (0..next_size).step_by(2).rev().for_each(|index| {
+            let prev_val = buf[index >> 1];
+            let tmp = *r * prev_val;
+            buf[index + 1] = tmp;
+            buf[index] = prev_val - tmp;
+        });
+    }
 }
 
 /// This function build the eq(x, r) polynomial for any given r.

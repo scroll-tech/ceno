@@ -3,13 +3,14 @@ use ff_ext::ExtensionField;
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, VPAuxInfo};
 use std::mem;
+use sumcheck::util::ceil_log2;
 use transcript::Transcript;
 
 use crate::{
     circuit::EvaluateGateCIn,
     error::GKRError,
     structs::{Circuit, IOPProverStepMessage, IOPVerifierState, PointAndEval},
-    utils::{ceil_log2, counter_eval, i64_to_field, segment_eval_greater_than},
+    utils::{counter_eval, i64_to_field, segment_eval_greater_than},
 };
 
 use super::SumcheckState;

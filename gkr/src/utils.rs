@@ -1,9 +1,11 @@
 use ff::Field;
 use ff_ext::ExtensionField;
+use rayon::{iter::ParallelIterator, slice::ParallelSlice};
+use sumcheck::util::{ceil_log2, is_power_of_2};
 
 use std::{iter, sync::Arc};
 
-use ark_std::{end_timer, start_timer};
+use ark_std::{end_timer, iterable::Iterable, start_timer};
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension};
@@ -14,13 +16,6 @@ pub fn i64_to_field<F: SmallField>(x: i64) -> F {
     } else {
         -F::from((-x) as u64)
     }
-}
-
-pub fn ceil_log2(x: usize) -> usize {
-    assert!(x > 0, "ceil_log2: x must be positive");
-    // Calculate the number of bits in usize
-    let usize_bits = std::mem::size_of::<usize>() * 8;
-    usize_bits - (x - 1).leading_zeros() as usize
 }
 
 /// This is to compute a segment indicator. Specifically, it is an MLE of the
@@ -194,11 +189,57 @@ pub fn tensor_product<F: SmallField>(a: &[F], b: &[F]) -> Vec<F> {
 
 pub trait MultilinearExtensionFromVectors<E: ExtensionField> {
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> ArcDenseMultilinearExtension<E>;
+    fn mle_with_meta(
+        &self,
+        lo_num_vars: usize,
+        hi_num_vars: usize,
+        multi_threads_meta: (usize, usize),
+    ) -> ArcDenseMultilinearExtension<E>;
     fn original_mle(&self) -> ArcDenseMultilinearExtension<E>;
 }
 
 impl<E: ExtensionField> MultilinearExtensionFromVectors<E> for &[Vec<E::BaseField>] {
+    fn mle_with_meta(
+        &self,
+        lo_num_vars: usize,
+        hi_num_vars: usize,
+        multi_threads_meta: (usize, usize),
+    ) -> ArcDenseMultilinearExtension<E> {
+        let (thread_id, max_thread_id) = multi_threads_meta;
+        let log2_max_thread_id = ceil_log2(max_thread_id);
+        assert!(log2_max_thread_id <= hi_num_vars);
+        assert!(
+            is_power_of_2(self.len()),
+            "not supporting non-power of 2 vector len {} ",
+            self.len()
+        );
+
+        let num_instances_per_thread = 1 << (hi_num_vars - log2_max_thread_id);
+        let vector_len_per_thread = 1 << (hi_num_vars - log2_max_thread_id + lo_num_vars);
+
+        let mle = DenseMultilinearExtension::from_evaluations_vec(
+            hi_num_vars - log2_max_thread_id + lo_num_vars,
+            self.iter()
+                .skip(thread_id * num_instances_per_thread)
+                .flat_map(|instance| {
+                    instance
+                        .iter()
+                        .cloned()
+                        .chain(iter::repeat(E::BaseField::ZERO))
+                        .take(1 << lo_num_vars)
+                })
+                .take(vector_len_per_thread)
+                .collect_vec(),
+        );
+        assert!(mle.evaluations.len() == vector_len_per_thread);
+        mle.into()
+    }
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> ArcDenseMultilinearExtension<E> {
+        assert!(
+            is_power_of_2(self.len()),
+            "not supporting non-power of 2 vector len {} ",
+            self.len()
+        );
         Arc::new(DenseMultilinearExtension::from_evaluations_vec(
             lo_num_vars + hi_num_vars,
             self.iter()
@@ -209,7 +250,6 @@ impl<E: ExtensionField> MultilinearExtensionFromVectors<E> for &[Vec<E::BaseFiel
                         .chain(iter::repeat(E::BaseField::ZERO))
                         .take(1 << lo_num_vars)
                 })
-                .chain(iter::repeat(E::BaseField::ZERO))
                 .take(1 << (lo_num_vars + hi_num_vars))
                 .collect_vec(),
         ))

@@ -1,14 +1,12 @@
 use std::{mem, sync::Arc};
 
 use ff_ext::ExtensionField;
-use gkr::{
-    structs::{Circuit, LayerWitness},
-    utils::ceil_log2,
-};
+use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use simple_frontend::structs::WitnessId;
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use sumcheck::util::ceil_log2;
 
 use crate::{
     constants::RANGE_CHIP_BIT_WIDTH,

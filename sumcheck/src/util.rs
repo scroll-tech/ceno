@@ -2,14 +2,20 @@ use std::{
     array,
     cmp::max,
     iter::Sum,
+    mem,
     ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign},
+    sync::Arc,
 };
 
 use ark_std::{end_timer, start_timer};
 use ff::PrimeField;
+use ff_ext::ExtensionField;
+use multilinear_extensions::{mle::FieldType, virtual_poly::VirtualPolynomial};
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
 
-pub(crate) fn barycentric_weights<F: PrimeField>(points: &[F]) -> Vec<F> {
+use crate::structs::IOPProverState;
+
+pub fn barycentric_weights<F: PrimeField>(points: &[F]) -> Vec<F> {
     let mut weights = points
         .iter()
         .enumerate()
@@ -172,6 +178,50 @@ fn field_factorial<F: PrimeField>(a: usize) -> F {
         res *= F::from(i as u64);
     }
     res
+}
+
+/// log2 ceil of x
+pub fn ceil_log2(x: usize) -> usize {
+    assert!(x > 0, "ceil_log2: x must be positive");
+    // Calculate the number of bits in usize
+    let usize_bits = std::mem::size_of::<usize>() * 8;
+    usize_bits - (x - 1).leading_zeros() as usize
+}
+
+pub fn is_power_of_2(x: usize) -> bool {
+    (x != 0) && ((x & (x - 1)) == 0)
+}
+
+pub(crate) fn merge_sumcheck_polys<E: ExtensionField>(
+    prover_states: &Vec<IOPProverState<E>>,
+    max_thread_id: usize,
+) -> VirtualPolynomial<E> {
+    let log2_max_thread_id = ceil_log2(max_thread_id);
+    let mut poly = prover_states[0].poly.clone(); // giving only one evaluation left, this clone is low cost.
+    poly.aux_info.num_variables = log2_max_thread_id; // size_log2 variates sumcheck
+    for i in 0..poly.flattened_ml_extensions.len() {
+        let ml_ext = Arc::make_mut(&mut poly.flattened_ml_extensions[i]);
+        let _ = mem::replace(&mut ml_ext.evaluations, {
+            let evaluations = prover_states
+                .iter()
+                .enumerate()
+                .map(|(_, prover_state)| {
+                    if let FieldType::Ext(evaluations) =
+                        &prover_state.poly.flattened_ml_extensions[i].evaluations
+                    {
+                        assert!(evaluations.len() == 1);
+                        evaluations[0]
+                    } else {
+                        unreachable!()
+                    }
+                })
+                .collect::<Vec<E>>();
+            assert!(evaluations.len() == max_thread_id);
+            FieldType::Ext(evaluations)
+        });
+        ml_ext.num_vars = log2_max_thread_id;
+    }
+    poly
 }
 
 #[derive(Clone, Copy, Debug)]

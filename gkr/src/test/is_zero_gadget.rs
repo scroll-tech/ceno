@@ -142,6 +142,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
         &circuit_witness,
         vec![],
         prover_wires_out_evals,
+        1,
         &mut prover_transcript,
     );
     let proof_time: Duration = start.elapsed();
@@ -299,6 +300,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
         &circuit_witness,
         vec![],
         prover_wires_out_evals,
+        1,
         &mut prover_transcript,
     );
     let proof_time: Duration = start.elapsed();

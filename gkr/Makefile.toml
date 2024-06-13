@@ -12,6 +12,6 @@ command = "cargo"
 args = ["run", "--package", "gkr", "--release", "--features", "parallel", "--example", "keccak256"]
 
 [tasks.gkr_example_flamegraph]
-env = { "RUST_LOG" = "debug"}
+env = { "RUST_LOG" = "debug", "RAYON_NUM_THREADS" = "1"}
 command = "cargo"
 args = ["run", "--package", "gkr", "--release", "--features", "parallel", "--example", "keccak256"]

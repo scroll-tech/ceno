@@ -5,10 +5,11 @@ use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::mle::ArcDenseMultilinearExtension;
 use simple_frontend::structs::{ChallengeConst, ConstantType, LayerId};
+use sumcheck::util::ceil_log2;
 
 use crate::{
     structs::{Circuit, CircuitWitness, LayerWitness},
-    utils::{ceil_log2, i64_to_field, MultilinearExtensionFromVectors},
+    utils::{i64_to_field, MultilinearExtensionFromVectors},
 };
 
 use super::EvaluateConstant;
@@ -401,11 +402,16 @@ impl<F: SmallField> CircuitWitness<F> {
         &self,
         layer_id: LayerId,
         single_num_vars: usize,
+        multi_threads_meta: (usize, usize),
     ) -> ArcDenseMultilinearExtension<Ext> {
         self.layers[layer_id as usize]
             .instances
             .as_slice()
-            .mle(single_num_vars, self.instance_num_vars())
+            .mle_with_meta(
+                single_num_vars,
+                self.instance_num_vars(),
+                multi_threads_meta,
+            )
     }
 }
 
