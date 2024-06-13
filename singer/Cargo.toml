@@ -40,7 +40,7 @@ test-dbg = []
 dbg-add-opcode = []
 
 [[bench]]
-name = "op_add"
+name = "add"
 harness = false
 
 [profile.bench]
