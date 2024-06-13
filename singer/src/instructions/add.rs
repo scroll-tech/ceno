@@ -404,7 +404,7 @@ mod test {
         let mut prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript)
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
             .expect("prove failed");
         println!(
             "AddInstruction::prove, instance_num_vars = {}, time = {}",

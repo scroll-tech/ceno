@@ -348,7 +348,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         }
         circuit_builder.add(target[0], length[0], E::BaseField::ONE);
 
-        println!("target: {:?}", target);
+        // println!("target: {:?}", target);
 
         // Copy offset to wires of public output load circuit.
         let (pub_out_wire_id, pub_out) =
@@ -357,7 +357,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let offset = offset.values();
         add_assign_each_cell(&mut circuit_builder, pub_out_offset, offset);
 
-        println!("pub_out: {:?}", pub_out);
+        // println!("pub_out: {:?}", pub_out);
 
         circuit_builder.configure();
 

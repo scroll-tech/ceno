@@ -207,7 +207,12 @@ impl<E: ExtensionField> MultilinearExtensionFromVectors<E> for &[Vec<E::BaseFiel
     ) -> ArcDenseMultilinearExtension<E> {
         let (thread_id, max_thread_id) = multi_threads_meta;
         let log2_max_thread_id = ceil_log2(max_thread_id);
-        assert!(log2_max_thread_id <= hi_num_vars);
+        assert!(
+            log2_max_thread_id <= hi_num_vars,
+            "log2_max_thread_id {} > hi_num_vars {}",
+            log2_max_thread_id,
+            hi_num_vars
+        );
         let num_instances_per_unit = 1 << (hi_num_vars - log2_max_thread_id);
         let num_instances_per_unit_size = 1 << (hi_num_vars - log2_max_thread_id + lo_num_vars);
 

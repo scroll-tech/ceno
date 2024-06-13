@@ -44,8 +44,8 @@ pub mod calldataload;
 #[derive(Clone, Debug)]
 pub struct SingerCircuitBuilder<E: ExtensionField> {
     /// Opcode circuits
-    pub(crate) insts_circuits: [Vec<InstCircuit<E>>; 256],
-    pub(crate) challenges: ChipChallenges,
+    pub insts_circuits: [Vec<InstCircuit<E>>; 256],
+    pub challenges: ChipChallenges,
 }
 
 impl<E: ExtensionField> SingerCircuitBuilder<E> {
@@ -192,14 +192,14 @@ pub struct InstCircuitLayout {
     pub(crate) pred_ooo_wire_id: Option<WitnessId>,
 }
 
-pub(crate) trait Instruction<E: ExtensionField> {
+pub trait Instruction<E: ExtensionField> {
     const OPCODE: OpcodeType;
     const NAME: &'static str;
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError>;
 }
 
 /// Construct the part of the circuit graph for an instruction.
-pub(crate) trait InstructionGraph<E: ExtensionField> {
+pub trait InstructionGraph<E: ExtensionField> {
     type InstType: Instruction<E>;
 
     /// Construct instruction circuits and its extensions. Mostly there is no

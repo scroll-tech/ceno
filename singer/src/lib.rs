@@ -35,9 +35,9 @@ mod utils;
 /// records. `public_output_size` is the wire id stores the size of public
 /// output.
 pub struct SingerGraphBuilder<E: ExtensionField> {
-    graph_builder: CircuitGraphBuilder<E>,
-    chip_builder: SingerChipBuilder<E>,
-    public_output_size: Option<NodeOutputType>,
+    pub graph_builder: CircuitGraphBuilder<E>,
+    pub chip_builder: SingerChipBuilder<E>,
+    pub public_output_size: Option<NodeOutputType>,
 }
 
 impl<E: ExtensionField> SingerGraphBuilder<E> {
@@ -240,7 +240,7 @@ pub struct SingerAuxInfo {
 }
 
 // Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
-pub(crate) type CircuitWiresIn<F> = Vec<LayerWitness<F>>;
+pub type CircuitWiresIn<F> = Vec<LayerWitness<F>>;
 
 #[derive(Clone, Debug, Default)]
 pub struct InstWiresIn<F: SmallField> {

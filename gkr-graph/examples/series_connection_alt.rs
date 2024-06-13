@@ -246,6 +246,7 @@ fn main() -> Result<(), GKRGraphError> {
         &circuit_witness,
         &TargetEvaluations(vec![PointAndEval::new(output_point, output_eval)]),
         &mut prover_transcript,
+        1,
     )?;
 
     // =============
