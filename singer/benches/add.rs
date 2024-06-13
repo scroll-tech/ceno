@@ -13,7 +13,6 @@ use gkr::structs::LayerWitness;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 
-// cargo bench --bench keccak256 --features parallel --features flamegraph --package gkr -- --profile-time <secs>
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
     criterion_group! {
