@@ -1,6 +1,3 @@
-// TODO: document module
-//  mostly holds comparison methods on the uint_old type
-
 use crate::chip_handler::RangeChipOperations;
 use crate::error::UtilError;
 use crate::uint::uint::UInt;
@@ -8,11 +5,10 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
+// TODO: make this take in self
+
 impl<const M: usize, const C: usize> UInt<M, C> {
-    // TODO: what should this do?
-    // operand_0 < operand_1
-    // this isn't really checking for less than, more like creating the necessary data needed for less than check
-    // TODO: change name
+    /// Generates the required information for asserting lt and leq
     pub fn lt<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
@@ -20,10 +16,6 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         operand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(CellId, UInt<M, C>), UtilError> {
-        // achieves less than, by subtracting and then verifying that the result is in
-        // some range, so it's technically not correct, depends on the range values that are passed
-        // in
-        // if operand_0 is less then the borrow will be 1 for the MSB
         let borrow = Self::extract_borrow(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_diff = Self::sub_unsafe(circuit_builder, operand_0, operand_1, borrow)?;
@@ -34,16 +26,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             Some(&range_values),
         )?;
 
+        // if operand_0 < operand_1, the last borrow should equal 1
         if borrow.len() == Self::N_CARRY_CELLS {
             Ok((borrow[Self::N_CARRY_CELLS - 1], diff))
         } else {
-            // TODO: if we reach here then definitiely not lt
             Ok((circuit_builder.create_cell(), diff))
         }
     }
 
-    // TODO: add documentation
-    //  describe logic
+    /// Asserts that operand_0 < operand_1
     pub fn assert_lt<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
@@ -62,7 +53,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(())
     }
 
-    // TODO: add documentation
+    /// Asserts that operand_0 <= operand_1
     pub fn assert_leq<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
@@ -78,21 +69,18 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             witness,
         )?;
 
-        // what will be the content of borrow and diif is less than?
-        // borrow will be 1 and diff will be diff
-        // what will be the content if equal
-        // borrow will be 0 and diff should be 0
-        // how do we ensure that it's only that case that works?
-
-        // if borrow = 0 return diff
-        // if borrow = 1 return 0
-        // does this hold across all values?
+        // we have two scenarios
+        // 1. eq
+        //    in this case, borrow = 0 and diff = [0, ..., 0]
+        // 2. lt
+        //    in this case, borrow = 1 and diff = [..field_elements..]
+        // we check for both cases with the following
+        // if borrow == 0 return diff else return 0
+        // then assert that the returned item = 0
 
         let diff_values = diff.values();
         for d in diff_values.iter() {
             let s = circuit_builder.create_cell();
-            // if borrow == 0 return diff else return 0
-            // TODO: explain this
             circuit_builder.sel_mixed(
                 s,
                 (*d).into(),
@@ -105,8 +93,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(())
     }
 
-    // TODO: add documentation (shuffle)
-    // TODO: document the steps
+    /// Asserts that two `UInt<M, C>` instances represent equal value
     pub fn assert_eq<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         operand_0: &UInt<M, C>,
@@ -123,7 +110,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(())
     }
 
-    // TODO: add documentation
+    /// Asserts that a `UInt<M, C>` instance and a set of range cells represent equal value
     pub fn assert_eq_range_values<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         operand_0: &UInt<M, C>,
