@@ -1,7 +1,20 @@
 [env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 CORE = { script = ["grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}'"] }
 RAYON_NUM_THREADS = "${CORE}"
 
 [tasks.test]
 command = "cargo"
 args = ["test", "--release", "--all", "--all-features"]
+
+[tasks.fmt-check]
+command = "cargo"
+args = ["fmt", "--all", "--", "--check"]
+
+[tasks.fmt]
+command = "cargo"
+args = ["fmt", "--all"]
+
+[tasks.clippy]
+command = "cargo"
+args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
