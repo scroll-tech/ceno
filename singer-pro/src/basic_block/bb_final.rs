@@ -27,7 +27,7 @@ pub struct BasicBlockFinal;
 
 register_witness!(BasicBlockFinal, phase0 {
     // State in related
-    stack_ts_add => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS
+    stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
 });
 
 impl BasicBlockFinal {

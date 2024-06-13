@@ -34,7 +34,7 @@ register_witness!(
         clk => 1,
 
         pc_add_i_plus_1 => N * PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         stack_bytes => N
     }

@@ -35,7 +35,7 @@ register_multi_witness!(BasicBlockStart, phase0(n_stack_items) {
     // Stack values
     old_stack_values(n_stack_items) => StackUInt::N_OPERAND_CELLS,
     old_stack_ts(n_stack_items) => TSUInt::N_OPERAND_CELLS,
-    old_stack_ts_lt(n_stack_items) => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS
+    old_stack_ts_lt(n_stack_items) => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
 });
 
 impl BasicBlockStart {

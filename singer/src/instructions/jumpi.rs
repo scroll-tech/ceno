@@ -35,9 +35,9 @@ register_witness!(
         clk => 1,
 
         old_stack_ts_dest => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_dest_lt => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_dest_lt => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
         old_stack_ts_cond => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_cond_lt => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_cond_lt => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         dest_values => StackUInt::N_OPERAND_CELLS,
         cond_values => StackUInt::N_OPERAND_CELLS,

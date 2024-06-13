@@ -110,7 +110,7 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
 register_witness!(
     MstoreInstruction,
     phase0 {
-        memory_ts_add => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        memory_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
         mem_bytes => EVM_STACK_BYTE_WIDTH
     }
 );
@@ -216,7 +216,7 @@ register_witness!(
     },
     phase0 {
         old_memory_ts => TSUInt::N_OPERAND_CELLS,
-        old_memory_ts_lt => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_memory_ts_lt => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         offset_add_delta => StackUInt::N_WITNESS_CELLS,
         prev_mem_byte => 1

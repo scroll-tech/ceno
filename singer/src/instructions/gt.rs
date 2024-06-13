@@ -34,12 +34,12 @@ register_witness!(
         clk => 1,
 
         pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         old_stack_ts0 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt0 => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_lt0 => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
         old_stack_ts1 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt1 => TSUInt::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_lt1 => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         oprand_0 => StackUInt::N_OPERAND_CELLS,
         oprand_1 => StackUInt::N_OPERAND_CELLS,
