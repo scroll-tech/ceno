@@ -5,8 +5,6 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
-// TODO: make this take in self
-
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Generates the required information for asserting lt and leq
     pub fn lt<E: ExtensionField, H: RangeChipOperations<E>>(
