@@ -3,12 +3,8 @@ use crate::error::UtilError;
 use crate::uint::uint::UInt;
 use ff::Field;
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
+use simple_frontend::structs::{CellId, CircuitBuilder};
 
-// TODO: this functions should use self, better UI (refactor for this)
-
-// TODO: test
-// TODO: reconfirm logic
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Little-endian addition.
     /// Assumes users will check the correct range of the result themselves.
@@ -74,8 +70,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
-    // TODO: add documentation
-    // TODO: figure out how to remove duplication
+    /// Add a constant value to every cell in the `UInt<M, C>` instance
+    /// Assumes users will check the correct range of the result themselves.
     pub fn add_const_unsafe<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         addend_0: &UInt<M, C>,
@@ -104,7 +100,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(result)
     }
 
-    // TODO: add documentation
+    /// Add a constant value to every cell in the `UInt<M, C>` instance
     pub fn add_const<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
@@ -118,7 +114,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
-    // TODO: add documentation
+    /// Add a constant value to every cell in the `UInt<M, C>` instance
+    /// Assumes that addition leads to no overflow.
     pub fn add_const_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
@@ -126,15 +123,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         constant: E::BaseField,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        // TODO: confirm that carry without overflow does not affect add_const_unsafe logic
         let carry = Self::extract_carry_no_overflow(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
-    // TODO: add documentation and explanation + warning (do same for other unsafe)
-    // TODO: remove duplication
+    /// Adds a single cell value to every operand in the `UInt<M, C>` instance
+    /// Assumes users will check the correct range of the result and
+    /// guarantee addend_1 < 1 << C.
     pub fn add_small_unsafe<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         addend_0: &UInt<M, C>,
@@ -163,7 +160,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(result)
     }
 
-    // TODO: add documentation
+    /// Adds a single cell value to every operand in the `UInt<M, C>` instance
+    /// Assumes users will guarantee addend_1 < 1 << C.
     pub fn add_small<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
@@ -177,7 +175,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
-    // TODO: add documentation
+    /// Adds a single cell value to every operand in the `UInt<M, C>` instance
+    /// Assumes users will guarantee addend_1 < 1 << C.
+    /// Assumes that addition lead to no overflow.
     pub fn add_small_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
@@ -185,15 +185,14 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_1: CellId,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        // TODO: confirm no overflow size doesn't affect add_small logic
         let carry = Self::extract_carry_no_overflow(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_small_unsafe(circuit_builder, addend_0, addend_1, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
-    // TODO: add documentation
-    // minuend - subtrahend
+    /// Little endian subtraction
+    /// Assumes users will check the correct range of the result themselves.
     pub fn sub_unsafe<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         minuend: &UInt<M, C>,
@@ -204,8 +203,6 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             .create_cells(Self::N_OPERAND_CELLS)
             .try_into()?;
 
-        // we do limb by limb subtraction but we have to make use of the borrow
-        // we need to add the borrow
         for i in 0..Self::N_OPERAND_CELLS {
             let (minuend, subtrahend, result) =
                 (minuend.values[i], subtrahend.values[i], result.values[i]);
@@ -217,7 +214,6 @@ impl<const M: usize, const C: usize> UInt<M, C> {
                 circuit_builder.add(result, borrow[i], E::BaseField::from(1 << C));
             }
 
-            // TODO: confirm this logic
             if i > 0 && i - 1 < borrow.len() {
                 circuit_builder.add(result, borrow[i - 1], -E::BaseField::ONE);
             }
@@ -226,7 +222,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(result)
     }
 
-    // TODO: add documentation
+    /// Little endian subtraction
     pub fn sub<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
