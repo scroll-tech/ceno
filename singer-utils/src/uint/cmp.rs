@@ -28,21 +28,18 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let range_values = Self::extract_range_values(witness);
         let computed_diff = Self::sub_unsafe(circuit_builder, operand_0, operand_1, borrow)?;
 
-        // TODO: uncomment once you change range_check_uint
-        // let diff = range_chip_handler.range_check_uint(
-        //     circuit_builder,
-        //     &computed_diff,
-        //     Some(&range_values)
-        // )?;
-        //
-        // if borrow.len() == Self::N_CARRY_CELLS {
-        //     Ok((borrow[Self::N_CARRY_CELLS - 1], diff))
-        // } else {
-        //     // TODO: if we reach here then definitiely not lt
-        //     Ok((circuit_builder.create_cell(), diff))
-        // }
-        //
-        todo!()
+        let diff = range_chip_handler.range_check_uint(
+            circuit_builder,
+            &computed_diff,
+            Some(&range_values),
+        )?;
+
+        if borrow.len() == Self::N_CARRY_CELLS {
+            Ok((borrow[Self::N_CARRY_CELLS - 1], diff))
+        } else {
+            // TODO: if we reach here then definitiely not lt
+            Ok((circuit_builder.create_cell(), diff))
+        }
     }
 
     // TODO: add documentation

@@ -71,9 +71,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        // TODO: uncomment this once you change to new uint_old
-        // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
-        todo!()
+        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
     // TODO: add documentation
@@ -117,9 +115,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
-        // TODO: uncomment this once you change to new uint_old
-        // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
-        todo!()
+        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
     // TODO: add documentation
@@ -134,8 +130,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry_no_overflow(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
-        // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
-        todo!()
+        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
     // TODO: add documentation and explanation + warning (do same for other unsafe)
@@ -179,8 +174,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_small_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
-        todo!()
+        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
     // TODO: add documentation
@@ -195,8 +189,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry_no_overflow(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_small_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
-        todo!()
+        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
     // TODO: add documentation
@@ -244,8 +237,6 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let borrow = Self::extract_borrow(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::sub_unsafe(circuit_builder, minuend, subtrahend, borrow)?;
-        // TODO: uncomment this once you change to new uint_old
-        // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
-        todo!()
+        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 }
