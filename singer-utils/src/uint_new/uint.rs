@@ -2,6 +2,9 @@ use crate::constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH};
 use crate::error::UtilError;
 use crate::uint_new::util::{convert_decomp, pad_cells};
 use ff_ext::ExtensionField;
+use gkr::utils::ceil_log2;
+use goldilocks::SmallField;
+use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
@@ -79,6 +82,28 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         // TODO: is this safe, do we need to ensure that the padded cells are always 0?
         pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
         values.try_into()
+    }
+
+    /// Generate (0, 1, ...,  size)
+    // TODO: refactor, move and test
+    pub fn counter_vector<F: SmallField>(size: usize) -> Vec<F> {
+        let num_vars = ceil_log2(size);
+        let tensor = |a: &[F], b: Vec<F>| {
+            let mut res = vec![F::ZERO; a.len() * b.len()];
+            for i in 0..b.len() {
+                for j in 0..a.len() {
+                    res[i * a.len() + j] = b[i] * a[j];
+                }
+            }
+            res
+        };
+        let counter = (0..(1 << C)).map(|x| F::from(x as u64)).collect_vec();
+        let (di, mo) = (num_vars / C, num_vars % C);
+        let mut res = (0..(1 << mo)).map(|x| F::from(x as u64)).collect_vec();
+        for _ in 0..di {
+            res = tensor(&counter, res);
+        }
+        res
     }
 }
 

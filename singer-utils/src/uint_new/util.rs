@@ -1,5 +1,8 @@
 use crate::error::UtilError;
 use ff_ext::ExtensionField;
+use gkr::utils::ceil_log2;
+use goldilocks::SmallField;
+use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
 /// Given some data represented by n small cells of size s
