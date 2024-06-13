@@ -196,4 +196,54 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
         todo!()
     }
+
+    // TODO: add documentation
+    // minuend - subtrahend
+    pub fn sub_unsafe<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        minuend: &UInt<M, C>,
+        subtrahend: &UInt<M, C>,
+        borrow: &[CellId],
+    ) -> Result<UInt<M, C>, UtilError> {
+        let result: UInt<M, C> = circuit_builder
+            .create_cells(Self::N_OPERAND_CELLS)
+            .try_into()?;
+
+        // we do limb by limb subtraction but we have to make use of the borrow
+        // we need to add the borrow
+        for i in 0..Self::N_OPERAND_CELLS {
+            let (minuend, subtrahend, result) =
+                (minuend.values[i], subtrahend.values[i], result.values[i]);
+
+            circuit_builder.add(result, minuend, E::BaseField::ONE);
+            circuit_builder.add(result, subtrahend, -E::BaseField::ONE);
+
+            if i < borrow.len() {
+                circuit_builder.add(result, borrow[i], E::BaseField::from(1 << C));
+            }
+
+            // TODO: confirm this logic
+            if i > 0 && i - 1 < borrow.len() {
+                circuit_builder.add(result, borrow[i - 1], -E::BaseField::ONE);
+            }
+        }
+
+        Ok(result)
+    }
+
+    // TODO: add documentation
+    pub fn sub<E: ExtensionField, H: RangeChipOperations<E>>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        range_chip_handler: &mut H,
+        minuend: &UInt<M, C>,
+        subtrahend: &UInt<M, C>,
+        witness: &[CellId],
+    ) -> Result<UInt<M, C>, UtilError> {
+        let borrow = Self::extract_borrow(witness);
+        let range_values = Self::extract_range_values(witness);
+        let computed_result = Self::sub_unsafe(circuit_builder, minuend, subtrahend, borrow)?;
+        // TODO: uncomment this once you change to new uint
+        // range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        todo!()
+    }
 }

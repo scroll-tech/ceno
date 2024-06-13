@@ -12,13 +12,18 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     // TODO: add documentation
-    pub fn extract_range_values(witness: &[CellId]) -> &[CellId] {
-        &witness[..Self::N_RANGE_CELLS]
+    pub fn extract_carry_no_overflow(witness: &[CellId]) -> &[CellId] {
+        &witness[Self::N_RANGE_CELLS_NO_OVERFLOW..]
     }
 
     // TODO: add documentation
-    pub fn extract_carry_no_overflow(witness: &[CellId]) -> &[CellId] {
-        &witness[Self::N_RANGE_CELLS_NO_OVERFLOW..]
+    pub fn extract_borrow(witness: &[CellId]) -> &[CellId] {
+        &witness[Self::N_RANGE_CELLS..]
+    }
+
+    // TODO: add documentation
+    pub fn extract_range_values(witness: &[CellId]) -> &[CellId] {
+        &witness[..Self::N_RANGE_CELLS]
     }
 
     // TODO: add documentation

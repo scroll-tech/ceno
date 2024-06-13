@@ -1,4 +1,4 @@
-mod add;
+mod arithmetic;
 mod cmp;
 mod constants;
 mod uint;

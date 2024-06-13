@@ -14,13 +14,13 @@ pub struct UInt<const M: usize, const C: usize> {
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Return the `UInt` underlying cell id's
-    fn values(&self) -> &[CellId] {
+    pub fn values(&self) -> &[CellId] {
         &self.values
     }
 
     /// Builds a `UInt` instance from a set of cells that represent `RANGE_VALUES`
     /// assumes range_values are represented in little endian form
-    fn from_range_values<E: ExtensionField>(
+    pub fn from_range_values<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_values: &[CellId],
     ) -> Result<Self, UtilError> {
@@ -33,7 +33,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Builds a `UInt` instance from a set of cells that represent big-endian `BYTE_VALUES`
-    fn from_bytes_big_endian<E: ExtensionField>(
+    pub fn from_bytes_big_endian<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[CellId],
     ) -> Result<Self, UtilError> {
@@ -41,7 +41,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Builds a `UInt` instance from a set of cells that represent little-endian `BYTE_VALUES`
-    fn from_bytes_little_endian<E: ExtensionField>(
+    pub fn from_bytes_little_endian<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[CellId],
     ) -> Result<Self, UtilError> {
@@ -49,7 +49,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Builds a `UInt` instance from a set of cells that represent `BYTE_VALUES`
-    fn from_bytes<E: ExtensionField>(
+    pub fn from_bytes<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[CellId],
         is_little_endian: bool,
