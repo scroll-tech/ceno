@@ -533,4 +533,78 @@ mod tests {
                 .collect_vec()
         );
     }
+
+    #[test]
+    fn test_sub_unsafe() {
+        // A - B
+        // big endian and represented as field elements
+        //           9  |  20  |  26  | 30
+        //           5  |  30  |  28  | 10
+        // result    3  |  21  |  30  | 20
+        // borrow    0  |   1  |   1  |  0
+
+        // build the circuit
+        type UInt20 = UInt<20, 5>;
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+
+        // input wires
+        // minuend, subtrahend, borrow
+        let (minuend_id, minuend_cells) =
+            circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        let (subtrahend_id, subtrahend_cells) =
+            circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        // |Carry| == |Borrow|
+        let (borrow_id, borrow_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+
+        let minuend = UInt20::try_from(minuend_cells).expect("should build uint");
+        let subtrahend = UInt20::try_from(subtrahend_cells).expect("should build uint");
+
+        // update the circuit builder
+        let result =
+            UInt20::sub_unsafe(&mut circuit_builder, &minuend, &subtrahend, &borrow_cells).unwrap();
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+
+        // generate witness
+        // calling rev() to make things little endian representation
+        let minuend_witness = vec![9, 20, 26, 30]
+            .into_iter()
+            .rev()
+            .map(|v| Goldilocks::from(v))
+            .collect_vec();
+        let subtrahend_witness = vec![5, 30, 28, 10]
+            .into_iter()
+            .rev()
+            .map(|v| Goldilocks::from(v))
+            .collect();
+        let borrow_witness = vec![0, 1, 1, 0]
+            .into_iter()
+            .rev()
+            .map(|v| Goldilocks::from(v))
+            .collect_vec();
+
+        let mut wires_in = vec![vec![]; circuit.n_witness_in];
+        wires_in[minuend_id as usize] = minuend_witness;
+        wires_in[subtrahend_id as usize] = subtrahend_witness;
+        wires_in[borrow_id as usize] = borrow_witness;
+
+        let circuit_witness = {
+            let challenges = vec![GoldilocksExt2::from(2)];
+            let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
+            circuit_witness.add_instance(&circuit, wires_in);
+            circuit_witness
+        };
+
+        circuit_witness.check_correctness(&circuit);
+
+        // check the result correctness
+        let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
+        assert_eq!(
+            result_values,
+            [20, 30, 21, 3]
+                .into_iter()
+                .map(|v| Goldilocks::from(v))
+                .collect_vec()
+        );
+    }
 }
