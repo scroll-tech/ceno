@@ -296,7 +296,7 @@ mod tests {
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
         let (addend_1_id, addend_1_cells) =
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
-        let (carry_id, carry_cells) = circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        let (carry_id, carry_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
         let addend_1 = UInt20::try_from(addend_1_cells).expect("should build uint");
@@ -350,22 +350,75 @@ mod tests {
         );
     }
 
-    // #[test]
-    // fn test_add_constant() {
-    //     // UInt<20, 5> (4 limbs)
-    //
-    //     // A (big-endian representation)
-    //     // 01001 | 10100 | 11010 | 11110
-    //
-    //     // B (big-endian representation)
-    //     // 00101 | 01010 | 10110 | 10000
-    //
-    //     // A + B
-    //     // big endian and represented as field elements
-    //     //           9  |  20  |  26  | 30
-    //     //           5  |  10  |  22  | 16
-    //     // result   14  |  31  |  17  | 14
-    //     // carry    0   |  0   |   1  |  1
-    //
-    // }
+    #[test]
+    fn test_add_constant() {
+        // UInt<20, 5> (4 limbs)
+
+        // A + constant
+        // A = 14 | 31 | 28 | 14
+        // constant = 200
+        // big endian and represented as field elements
+        //           14 |  31  |  28  | 14
+        //              |      |      | 200
+        // result    15 |   0  |   2  | 22
+        // carry      0 |   1  |   1  |  6
+
+        type UInt20 = UInt<20, 5>;
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+
+        // input wires
+        // addend_0, carry, constant
+        let (addend_0_id, addend_0_cells) =
+            circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        let (carry_id, carry_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+
+        let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
+
+        // update circuit builder
+        let result = UInt20::add_const_unsafe(
+            &mut circuit_builder,
+            &addend_0,
+            Goldilocks::from(200),
+            &carry_cells,
+        )
+        .unwrap();
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+
+        // generate witness
+        // calling rev() to make things little endian representation
+        let addend_0_witness = vec![14, 31, 28, 14]
+            .into_iter()
+            .rev()
+            .map(|v| Goldilocks::from(v))
+            .collect_vec();
+        let carry_witness = vec![0, 1, 1, 6]
+            .into_iter()
+            .rev()
+            .map(|v| Goldilocks::from(v))
+            .collect_vec();
+
+        let mut wires_in = vec![vec![]; circuit.n_witness_in];
+        wires_in[addend_0_id as usize] = addend_0_witness;
+        wires_in[carry_id as usize] = carry_witness;
+
+        let circuit_witness = {
+            let challenges = vec![GoldilocksExt2::from(2)];
+            let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
+            circuit_witness.add_instance(&circuit, wires_in);
+            circuit_witness
+        };
+
+        circuit_witness.check_correctness(&circuit);
+
+        // check the result correctness
+        let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
+        assert_eq!(
+            result_values,
+            [22, 2, 0, 15]
+                .into_iter()
+                .map(|v| Goldilocks::from(v))
+                .collect_vec()
+        );
+    }
 }
