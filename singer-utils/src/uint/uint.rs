@@ -2,10 +2,10 @@ use crate::constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH};
 use crate::error::UtilError;
 use crate::uint::util::{convert_decomp, pad_cells};
 use ff_ext::ExtensionField;
-use gkr::utils::ceil_log2;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
+use sumcheck::util::ceil_log2;
 
 #[derive(Clone)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.

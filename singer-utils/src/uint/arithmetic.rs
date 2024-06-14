@@ -3,7 +3,7 @@ use crate::error::UtilError;
 use crate::uint::uint::UInt;
 use ff::Field;
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{CellId, CircuitBuilder};
+use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Little-endian addition.
@@ -41,16 +41,10 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         for i in 0..Self::N_OPERAND_CELLS {
             let (a, b, result) = (addend_0.values[i], addend_1.values[i], result.values[i]);
 
+            // result = a + b - overflow_carry + last_carry
             circuit_builder.add(result, a, E::BaseField::ONE);
             circuit_builder.add(result, b, E::BaseField::ONE);
-
-            if i < carry.len() {
-                circuit_builder.add(result, carry[i], -E::BaseField::from(1 << C));
-            }
-
-            if i > 0 && i - 1 < carry.len() {
-                circuit_builder.add(result, carry[i - 1], E::BaseField::ONE);
-            }
+            Self::handle_carry(result, circuit_builder, i, carry);
         }
 
         Ok(result)
@@ -70,7 +64,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
-    /// Add a constant value to every cell in the `UInt<M, C>` instance
+    /// Add a constant value to a `UInt<M, C>` instance
     /// Assumes users will check the correct range of the result themselves.
     pub fn add_const_unsafe<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
@@ -82,19 +76,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             .create_cells(Self::N_OPERAND_CELLS)
             .try_into()?;
 
+        // add constant to the first limb
+        circuit_builder.add_const(result.values[0], constant);
+
+        // cascade carry
         for i in 0..Self::N_OPERAND_CELLS {
             let (a, result) = (addend_0.values[i], result.values[i]);
 
             circuit_builder.add(result, a, E::BaseField::ONE);
-            circuit_builder.add_const(result, constant);
-
-            if i < carry.len() {
-                circuit_builder.add(result, carry[i], -E::BaseField::from(1 << C));
-            }
-
-            if i > 0 && i - 1 < carry.len() {
-                circuit_builder.add(result, carry[i - 1], E::BaseField::ONE);
-            }
+            Self::handle_carry(result, circuit_builder, i, carry);
         }
 
         Ok(result)
@@ -142,19 +132,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             .create_cells(Self::N_OPERAND_CELLS)
             .try_into()?;
 
+        // add small_value to the first limb
+        circuit_builder.add(result.values[0], addend_1, E::BaseField::ONE);
+
+        // cascade carry
         for i in 0..Self::N_OPERAND_CELLS {
             let (a, result) = (addend_0.values[i], result.values[i]);
 
             circuit_builder.add(result, a, E::BaseField::ONE);
-            circuit_builder.add(result, addend_1, E::BaseField::ONE);
-
-            if i < carry.len() {
-                circuit_builder.add(result, carry[i], -E::BaseField::from(1 << C));
-            }
-
-            if i > 0 && i - 1 < carry.len() {
-                circuit_builder.add(result, carry[i - 1], E::BaseField::ONE);
-            }
+            Self::handle_carry(result, circuit_builder, i, carry);
         }
 
         Ok(result)
@@ -234,5 +220,43 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::sub_unsafe(circuit_builder, minuend, subtrahend, borrow)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+    }
+
+    /// Modify addition result based on carry instructions
+    fn handle_carry<E: ExtensionField>(
+        result_cell_id: CellId,
+        circuit_builder: &mut CircuitBuilder<E>,
+        limb_index: usize,
+        carry: &[CellId],
+    ) {
+        // overflow carry
+        // represents the portion of the result that should move to the next operation
+        // inorder to keep the value <= C bits
+        // carry[i] = addend_0[i] + addend_1[i] % 2^C
+
+        // last carry
+        // represents the carry that was passed from the previous operation
+        // this carry should be added to the current result
+        // carry[i - 1] = addend_0[i - 1] + addend_1[i - 1] % 2^C
+
+        if limb_index > carry.len() {
+            return;
+        }
+
+        // handle overflow carry
+        // we need to subtract the carry value from the current result
+        if limb_index < carry.len() {
+            circuit_builder.add(
+                result_cell_id,
+                carry[limb_index],
+                -E::BaseField::from(1 << C),
+            );
+        }
+
+        // handle last operation carry
+        // we need to add this to the current result
+        if limb_index > 0 {
+            circuit_builder.add(result_cell_id, carry[limb_index - 1], E::BaseField::ONE);
+        }
     }
 }
