@@ -48,12 +48,6 @@ pub struct ROMHandler<Ext: ExtensionField> {
     pub(crate) challenge: ChipChallenges,
 }
 
-// /// Unsigned integer with `M` bits. C denotes the cell bit width.
-// #[derive(Clone, Debug)]
-// pub struct UInt<const M: usize, const C: usize> {
-//     pub(crate) values: Vec<CellId>,
-// }
-
 pub type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
 pub type PCUInt = UInt64;
 pub type TSUInt = UInt<56, 56>;
