@@ -196,13 +196,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             circuit_builder.add(result, minuend, E::BaseField::ONE);
             circuit_builder.add(result, subtrahend, -E::BaseField::ONE);
 
-            if i < borrow.len() {
-                circuit_builder.add(result, borrow[i], E::BaseField::from(1 << C));
-            }
-
-            if i > 0 && i - 1 < borrow.len() {
-                circuit_builder.add(result, borrow[i - 1], -E::BaseField::ONE);
-            }
+            Self::handle_borrow(result, circuit_builder, i, borrow);
         }
 
         Ok(result)
@@ -257,6 +251,46 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         // we need to add this to the current result
         if limb_index > 0 {
             circuit_builder.add(result_cell_id, carry[limb_index - 1], E::BaseField::ONE);
+        }
+    }
+
+    /// Modify subtraction result based on borrow instructions
+    fn handle_borrow<E: ExtensionField>(
+        result_cell_id: CellId,
+        circuit_builder: &mut CircuitBuilder<E>,
+        limb_index: usize,
+        borrow: &[CellId],
+    ) {
+        // borrow
+        // represents the portion of the result that should move from the
+        // next operation to the current operation i.e. reduce the result
+        // of the operation to come
+        // this should be added to the current result
+        // = borrow[i]
+
+        // last borrow
+        // represents the portion of the current result that was moved during
+        // the previous computation
+        // this should be removed from the current result
+
+        if limb_index > borrow.len() {
+            return;
+        }
+
+        // handle borrow
+        // we need to add borrow units of C to the result
+        if limb_index < borrow.len() {
+            circuit_builder.add(
+                result_cell_id,
+                borrow[limb_index],
+                E::BaseField::from(1 << C),
+            );
+        }
+
+        // handle last borrow
+        // we need to remove this from the current result
+        if limb_index > 0 {
+            circuit_builder.add(result_cell_id, borrow[limb_index - 1], -E::BaseField::ONE);
         }
     }
 }
