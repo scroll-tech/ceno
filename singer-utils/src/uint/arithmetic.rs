@@ -90,7 +90,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(result)
     }
 
-    /// Add a constant value to every cell in the `UInt<M, C>` instance
+    /// Add a constant value to a `UInt<M, C>` instance
     pub fn add_const<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
@@ -104,7 +104,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
-    /// Add a constant value to every cell in the `UInt<M, C>` instance
+    /// Add a constant value to a `UInt<M, C>` instance
     /// Assumes that addition leads to no overflow.
     pub fn add_const_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
@@ -119,7 +119,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
-    /// Adds a single cell value to every operand in the `UInt<M, C>` instance
+    /// Adds a single cell value to a `UInt<M, C>` instance
     /// Assumes users will check the correct range of the result and
     /// guarantee addend_1 < 1 << C.
     pub fn add_small_unsafe<E: ExtensionField>(
@@ -146,7 +146,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(result)
     }
 
-    /// Adds a single cell value to every operand in the `UInt<M, C>` instance
+    /// Adds a single cell value to a `UInt<M, C>` instance
     /// Assumes users will guarantee addend_1 < 1 << C.
     pub fn add_small<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
@@ -161,7 +161,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
-    /// Adds a single cell value to every operand in the `UInt<M, C>` instance
+    /// Adds a single cell value to a `UInt<M, C>` instance
     /// Assumes users will guarantee addend_1 < 1 << C.
     /// Assumes that addition lead to no overflow.
     pub fn add_small_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
