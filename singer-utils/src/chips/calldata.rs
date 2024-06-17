@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use crate::{
+    chip_handler::{CalldataChipOperations, ROMOperations},
     error::UtilError,
-    structs::{ChipChallenges, ROMType, StackUInt},
+    structs::{ChipChallenges, ROMHandler, StackUInt, UInt64},
 };
 
 use super::ChipCircuitGadgets;
@@ -10,8 +11,20 @@ use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
-use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use simple_frontend::structs::CircuitBuilder;
 use sumcheck::util::ceil_log2;
+
+fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
+    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let (_, id_cells) = circuit_builder.create_witness_in(UInt64::N_OPERAND_CELLS);
+    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+    let mut rom_handler = ROMHandler::new(&challenges);
+    rom_handler.calldataload(&mut circuit_builder, &id_cells, &calldata_cells);
+    let _ = rom_handler.finalize(&mut circuit_builder);
+
+    circuit_builder.configure();
+    Arc::new(Circuit::new(&circuit_builder))
+}
 
 /// Add calldata table circuit and witness to the circuit graph. Return node id
 /// and lookup instance log size.
@@ -21,25 +34,7 @@ pub(crate) fn construct_calldata_table_and_witness<E: ExtensionField>(
     challenges: &ChipChallenges,
     real_challenges: &[E],
 ) -> Result<(PredType, PredType, usize), UtilError> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
-    let (_, id_cells) = circuit_builder.create_witness_in(1);
-    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
-
-    let rlc = circuit_builder.create_ext_cell();
-    let mut items = vec![MixedCell::Constant(E::BaseField::from(
-        ROMType::Calldata as u64,
-    ))];
-    items.extend(id_cells.iter().map(|x| MixedCell::Cell(*x)).collect_vec());
-    items.extend(
-        calldata_cells
-            .iter()
-            .map(|x| MixedCell::Cell(*x))
-            .collect_vec(),
-    );
-    circuit_builder.rlc_mixed(&rlc, &items, challenges.calldata());
-
-    circuit_builder.configure();
-    let calldata_circuit = Arc::new(Circuit::new(&circuit_builder));
+    let calldata_circuit = construct_circuit(challenges);
     let selector = ChipCircuitGadgets::construct_prefix_selector(program_input.len(), 1);
 
     let selector_node_id = builder.add_node_with_witness(
@@ -98,25 +93,7 @@ pub(crate) fn construct_calldata_table<E: ExtensionField>(
     program_input_len: usize,
     challenges: &ChipChallenges,
 ) -> Result<(PredType, PredType, usize), UtilError> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
-    let (_, id_cells) = circuit_builder.create_witness_in(1);
-    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
-
-    let rlc = circuit_builder.create_ext_cell();
-    let mut items = vec![MixedCell::Constant(E::BaseField::from(
-        ROMType::Calldata as u64,
-    ))];
-    items.extend(id_cells.iter().map(|x| MixedCell::Cell(*x)).collect_vec());
-    items.extend(
-        calldata_cells
-            .iter()
-            .map(|x| MixedCell::Cell(*x))
-            .collect_vec(),
-    );
-    circuit_builder.rlc_mixed(&rlc, &items, challenges.calldata());
-
-    circuit_builder.configure();
-    let calldata_circuit = Arc::new(Circuit::new(&circuit_builder));
+    let calldata_circuit = construct_circuit(challenges);
     let selector = ChipCircuitGadgets::construct_prefix_selector(program_input_len, 1);
 
     let selector_node_id =

@@ -40,14 +40,15 @@ register_witness!(
     }
 );
 
-impl<const N: usize> PushInstruction<N> {
+impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
     const OPCODE: OpcodeType = match N {
         1 => OpcodeType::PUSH1,
         _ => unimplemented!(),
     };
-}
-
-impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
+    const NAME: &'static str = match N {
+        1 => "PUSH1",
+        _ => unimplemented!(),
+    };
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -106,7 +107,11 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
         );
 
         // Bytecode check for (pc, PUSH{N}), (pc + 1, byte[0]), ..., (pc + N, byte[N - 1])
-        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
+        rom_handler.bytecode_with_pc_opcode(
+            &mut circuit_builder,
+            pc.values(),
+            <Self as Instruction<E>>::OPCODE,
+        );
         for (i, pc_add_i_plus_1) in phase0[Self::phase0_pc_add_i_plus_1()]
             .chunks(PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
             .enumerate()
@@ -134,5 +139,184 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
                 ..Default::default()
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use ark_std::test_rng;
+    use core::ops::Range;
+    use ff::Field;
+    use ff_ext::ExtensionField;
+    use gkr::structs::LayerWitness;
+    use goldilocks::{Goldilocks, GoldilocksExt2};
+    use itertools::Itertools;
+    use simple_frontend::structs::CellId;
+    use std::collections::BTreeMap;
+    use std::time::Instant;
+    use transcript::Transcript;
+
+    use crate::instructions::{
+        ChipChallenges, Instruction, InstructionGraph, PushInstruction, SingerCircuitBuilder,
+    };
+    use crate::scheme::GKRGraphProverState;
+    use crate::test::test_opcode_circuit;
+    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
+
+    impl<const N: usize> PushInstruction<N> {
+        #[inline]
+        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+            let mut map = BTreeMap::new();
+            map.insert("phase0_pc".to_string(), Self::phase0_pc());
+            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
+            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
+            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
+            map.insert("phase0_clk".to_string(), Self::phase0_clk());
+            map.insert(
+                "phase0_pc_add_i_plus_1".to_string(),
+                Self::phase0_pc_add_i_plus_1(),
+            );
+            map.insert(
+                "phase0_stack_ts_add".to_string(),
+                Self::phase0_stack_ts_add(),
+            );
+            map.insert("phase0_stack_bytes".to_string(), Self::phase0_stack_bytes());
+
+            map
+        }
+    }
+
+    #[test]
+    fn test_push1_construct_circuit() {
+        let challenges = ChipChallenges::default();
+
+        let phase0_idx_map = PushInstruction::<1>::phase0_idxes_map();
+        let phase0_witness_size = PushInstruction::<1>::phase0_size();
+
+        #[cfg(feature = "witness-count")]
+        {
+            println!("PUSH1 {:?}", &phase0_idx_map);
+            println!("PUSH1 witness_size = {:?}", phase0_witness_size);
+        }
+        // initialize general test inputs associated with push1
+        let inst_circuit = PushInstruction::<1>::construct_circuit(challenges).unwrap();
+
+        #[cfg(feature = "test-dbg")]
+        println!("{:?}", inst_circuit);
+
+        let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
+        phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_stack_top".to_string(),
+            vec![Goldilocks::from(100u64)],
+        );
+        phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_pc_add_i_plus_1".to_string(),
+            vec![], // carry is 0, may test carry using larger values in PCUInt
+        );
+        phase0_values_map.insert(
+            "phase0_stack_ts_add".to_string(),
+            vec![
+                Goldilocks::from(2u64), // first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+                // no place for carry
+            ],
+        );
+        phase0_values_map.insert(
+            "phase0_stack_bytes".to_string(),
+            vec![
+                Goldilocks::from(0u64),
+                Goldilocks::from(1u64),
+                Goldilocks::from(2u64),
+                Goldilocks::from(3u64),
+                Goldilocks::from(4u64),
+                Goldilocks::from(5u64),
+                Goldilocks::from(6u64),
+                Goldilocks::from(7u64),
+            ],
+        );
+
+        let circuit_witness_challenges = vec![
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(2),
+        ];
+
+        let _circuit_witness = test_opcode_circuit(
+            &inst_circuit,
+            &phase0_idx_map,
+            phase0_witness_size,
+            &phase0_values_map,
+            circuit_witness_challenges,
+        );
+    }
+
+    fn bench_push_instruction_helper<E: ExtensionField, const N: usize>(instance_num_vars: usize) {
+        let chip_challenges = ChipChallenges::default();
+        let circuit_builder =
+            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let mut singer_builder = SingerGraphBuilder::<E>::new();
+
+        let mut rng = test_rng();
+        let size = PushInstruction::<N>::phase0_size();
+        let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
+            instances: (0..(1 << instance_num_vars))
+                .map(|_| {
+                    (0..size)
+                        .map(|_| E::BaseField::random(&mut rng))
+                        .collect_vec()
+                })
+                .collect_vec(),
+        }];
+
+        let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
+
+        let timer = Instant::now();
+
+        let _ = PushInstruction::<N>::construct_graph_and_witness(
+            &mut singer_builder.graph_builder,
+            &mut singer_builder.chip_builder,
+            &circuit_builder.insts_circuits
+                [<PushInstruction<N> as Instruction<E>>::OPCODE as usize],
+            vec![phase0],
+            &real_challenges,
+            1 << instance_num_vars,
+            &SingerParams::default(),
+        )
+        .expect("gkr graph construction failed");
+
+        let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
+
+        println!(
+            "Push{}Instruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
+            N,
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
+
+        let point = vec![E::random(&mut rng), E::random(&mut rng)];
+        let target_evals = graph.target_evals(&wit, &point);
+
+        let mut prover_transcript = &mut Transcript::new(b"Singer");
+
+        let timer = Instant::now();
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
+            .expect("prove failed");
+        println!(
+            "Push{}Instruction::prove, instance_num_vars = {}, time = {}",
+            N,
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
+    }
+
+    #[test]
+    fn bench_push1_instruction() {
+        bench_push_instruction_helper::<GoldilocksExt2, 1>(10);
     }
 }

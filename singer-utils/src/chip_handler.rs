@@ -65,6 +65,8 @@ pub trait RangeChipOperations<Ext: ExtensionField>: ROMOperations<Ext> {
         circuit_builder: &mut CircuitBuilder<Ext>,
         bytes: &[CellId],
     ) -> Result<(), UtilError>;
+
+    fn range_check_table_item(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, item: CellId);
 }
 
 pub trait MemoryChipOperations<Ext: ExtensionField>: RAMOperations<Ext> {
@@ -233,25 +235,10 @@ impl ChipChallenges {
             record_item_rlc,
         }
     }
-    pub fn bytecode(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn stack(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn global_state(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn mem(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn range(&self) -> ChallengeId {
-        self.record_rlc
-    }
-    pub fn calldata(&self) -> ChallengeId {
-        self.record_rlc
-    }
     pub fn record_item_rlc(&self) -> ChallengeId {
         self.record_item_rlc
+    }
+    pub fn record_rlc(&self) -> ChallengeId {
+        self.record_rlc
     }
 }

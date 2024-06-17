@@ -77,7 +77,7 @@ pub fn prove<E: ExtensionField>(
 
     let target_evals = vm_circuit.0.target_evals(&vm_witness.0, &point);
     let gkr_phase_proof =
-        GKRGraphProverState::prove(&vm_circuit.0, &vm_witness.0, &target_evals, transcript)?;
+        GKRGraphProverState::prove(&vm_circuit.0, &vm_witness.0, &target_evals, transcript, 1)?;
     Ok((
         SingerProof {
             gkr_phase_proof,

@@ -3,6 +3,7 @@ use gkr::structs::Circuit;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chips::IntoEnumIterator,
+    constants::OpcodeType,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
 use std::sync::Arc;
@@ -21,6 +22,8 @@ impl<E: ExtensionField> InstructionGraph<E> for JumpInstruction {
 }
 
 impl<E: ExtensionField> Instruction<E> for JumpInstruction {
+    const OPCODE: OpcodeType = OpcodeType::JUMP;
+    const NAME: &'static str = "JUMP";
     fn construct_circuit(_: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         // From predesessor instruction

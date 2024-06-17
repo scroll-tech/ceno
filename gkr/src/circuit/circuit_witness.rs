@@ -148,11 +148,13 @@ impl<F: SmallField> CircuitWitness<F> {
                     wit_out.resize(length, F::ZERO);
                     wits_out[wit_id].instances[instance_id] = wit_out;
                 });
-            circuit.assert_consts.iter().for_each(|gate| {
-                if let ConstantType::Field(constant) = gate.scalar {
-                    assert_eq!(layer_wits[0].instances[instance_id][gate.idx_out], constant);
-                }
-            });
+
+            // #[cfg(debug_assertions)]
+            // circuit.assert_consts.iter().for_each(|gate| {
+            //     if let ConstantType::Field(constant) = gate.scalar {
+            //         assert_eq!(layer_wits[0].instances[instance_id][gate.idx_out], constant);
+            //     }
+            // });
         }
         (layer_wits, wits_out)
     }

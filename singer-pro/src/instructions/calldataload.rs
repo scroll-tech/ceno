@@ -5,6 +5,7 @@ use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{CalldataChipOperations, ROMOperations},
     chips::IntoEnumIterator,
+    constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt, UInt64},
 };
@@ -32,6 +33,8 @@ register_witness!(
 );
 
 impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
+    const OPCODE: OpcodeType = OpcodeType::CALLDATALOAD;
+    const NAME: &'static str = "CALLDATALOAD";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 

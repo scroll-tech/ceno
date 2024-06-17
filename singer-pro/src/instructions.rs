@@ -3,7 +3,7 @@ use std::{collections::HashMap, mem};
 use ff_ext::ExtensionField;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
-use singer_utils::{chips::SingerChipBuilder, structs::ChipChallenges};
+use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType, structs::ChipChallenges};
 
 use crate::{
     component::{AccessoryCircuit, InstCircuit},
@@ -127,6 +127,8 @@ pub(crate) fn construct_inst_graph<E: ExtensionField>(
 }
 
 pub(crate) trait Instruction<E: ExtensionField> {
+    const OPCODE: OpcodeType;
+    const NAME: &'static str;
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError>;
 }
 
@@ -157,7 +159,7 @@ pub(crate) trait InstructionGraph<E: ExtensionField> {
         _params: &SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
         let node_id = graph_builder.add_node_with_witness(
-            stringify!(Self::InstType),
+            <Self::InstType as Instruction<E>>::NAME,
             &inst_circuit.circuit,
             preds,
             real_challenges.to_vec(),
@@ -193,8 +195,11 @@ pub(crate) trait InstructionGraph<E: ExtensionField> {
         real_n_instances: usize,
         _params: &SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
-        let node_id =
-            graph_builder.add_node(stringify!(Self::InstType), &inst_circuit.circuit, preds)?;
+        let node_id = graph_builder.add_node(
+            <Self::InstType as Instruction<E>>::NAME,
+            &inst_circuit.circuit,
+            preds,
+        )?;
         let stack = inst_circuit
             .layout
             .to_succ_inst

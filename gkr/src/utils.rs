@@ -1,6 +1,5 @@
 use ff::Field;
 use ff_ext::ExtensionField;
-use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use sumcheck::util::{ceil_log2, is_power_of_2};
 
 use std::{iter, sync::Arc};

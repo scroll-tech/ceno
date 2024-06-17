@@ -49,11 +49,9 @@ register_witness!(
     }
 );
 
-impl JumpiInstruction {
-    const OPCODE: OpcodeType = OpcodeType::JUMPI;
-}
-
 impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
+    const OPCODE: OpcodeType = OpcodeType::JUMPI;
+    const NAME: &'static str = "JUMPI";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -155,7 +153,11 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         );
 
         // Bytecode check for (pc, jumpi)
-        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), Self::OPCODE);
+        rom_handler.bytecode_with_pc_opcode(
+            &mut circuit_builder,
+            pc.values(),
+            <Self as Instruction<E>>::OPCODE,
+        );
 
         // If cond_non_zero, next_opcode = JUMPDEST, otherwise, opcode = pc + 1 opcode
         let pc_plus_1_opcode = phase0[Self::phase0_pc_plus_1_opcode().start];

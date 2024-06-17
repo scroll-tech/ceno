@@ -24,11 +24,14 @@ impl<Ext: ExtensionField> OAMOperations<Ext> for RAMHandler<Ext> {
         key: &[CellId],
         value: &[CellId],
     ) {
-        let out = circuit_builder.create_ext_cell();
+        let item_rlc = circuit_builder.create_ext_cell();
         let mut items = old_ts.to_vec();
         items.extend(key.to_vec());
         items.extend(value.to_vec());
-        circuit_builder.rlc(&out, &items, self.challenge.record_rlc);
+        circuit_builder.rlc(&item_rlc, &items, self.challenge.record_item_rlc());
+
+        let out = circuit_builder.create_ext_cell();
+        circuit_builder.rlc_ext(&out, &[item_rlc], self.challenge.record_rlc());
         self.rd_records.push(out);
     }
 
@@ -39,11 +42,14 @@ impl<Ext: ExtensionField> OAMOperations<Ext> for RAMHandler<Ext> {
         key: &[MixedCell<Ext>],
         value: &[MixedCell<Ext>],
     ) {
-        let out = circuit_builder.create_ext_cell();
+        let item_rlc = circuit_builder.create_ext_cell();
         let mut items = old_ts.to_vec();
         items.extend(key.to_vec());
         items.extend(value.to_vec());
-        circuit_builder.rlc_mixed(&out, &items, self.challenge.record_rlc);
+        circuit_builder.rlc_mixed(&item_rlc, &items, self.challenge.record_item_rlc());
+
+        let out = circuit_builder.create_ext_cell();
+        circuit_builder.rlc_ext(&out, &[item_rlc], self.challenge.record_rlc());
         self.rd_records.push(out);
     }
 
@@ -54,11 +60,14 @@ impl<Ext: ExtensionField> OAMOperations<Ext> for RAMHandler<Ext> {
         key: &[CellId],
         value: &[CellId],
     ) {
-        let out = circuit_builder.create_ext_cell();
+        let item_rlc = circuit_builder.create_ext_cell();
         let mut items = cur_ts.to_vec();
         items.extend(key.to_vec());
         items.extend(value.to_vec());
-        circuit_builder.rlc(&out, &items, self.challenge.record_rlc);
+        circuit_builder.rlc(&item_rlc, &items, self.challenge.record_item_rlc());
+
+        let out = circuit_builder.create_ext_cell();
+        circuit_builder.rlc_ext(&out, &[item_rlc], self.challenge.record_rlc());
         self.wt_records.push(out);
     }
 
@@ -69,11 +78,14 @@ impl<Ext: ExtensionField> OAMOperations<Ext> for RAMHandler<Ext> {
         key: &[MixedCell<Ext>],
         value: &[MixedCell<Ext>],
     ) {
-        let out = circuit_builder.create_ext_cell();
+        let item_rlc = circuit_builder.create_ext_cell();
         let mut items = cur_ts.to_vec();
         items.extend(key.to_vec());
         items.extend(value.to_vec());
-        circuit_builder.rlc_mixed(&out, &items, self.challenge.record_rlc);
+        circuit_builder.rlc_mixed(&item_rlc, &items, self.challenge.record_item_rlc());
+
+        let out = circuit_builder.create_ext_cell();
+        circuit_builder.rlc_ext(&out, &[item_rlc], self.challenge.record_rlc());
         self.wt_records.push(out);
     }
 

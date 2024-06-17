@@ -3,13 +3,26 @@ use std::sync::Arc;
 use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use simple_frontend::structs::CircuitBuilder;
 
 use crate::{
+    chip_handler::{ROMOperations, RangeChipOperations},
     constants::RANGE_CHIP_BIT_WIDTH,
     error::UtilError,
-    structs::{ChipChallenges, ROMType},
+    structs::{ChipChallenges, ROMHandler},
 };
+
+fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
+    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let cells = circuit_builder.create_counter_in(0);
+
+    let mut rom_handler = ROMHandler::new(&challenges);
+    rom_handler.range_check_table_item(&mut circuit_builder, cells[0]);
+    let _ = rom_handler.finalize(&mut circuit_builder);
+
+    circuit_builder.configure();
+    Arc::new(Circuit::new(&circuit_builder))
+}
 
 /// Add range table circuit and witness to the circuit graph. Return node id and
 /// lookup instance log size.
@@ -19,16 +32,7 @@ pub(crate) fn construct_range_table_and_witness<E: ExtensionField>(
     challenges: &ChipChallenges,
     real_challenges: &[E],
 ) -> Result<(PredType, usize), UtilError> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
-    let cells = circuit_builder.create_counter_in(0);
-    let items = [
-        MixedCell::Constant(E::BaseField::from(ROMType::Range as u64)),
-        MixedCell::Cell(cells[0]),
-    ];
-    let rlc = circuit_builder.create_ext_cell();
-    circuit_builder.rlc_mixed(&rlc, &items, challenges.range());
-    circuit_builder.configure();
-    let range_circuit = Arc::new(Circuit::new(&circuit_builder));
+    let range_circuit = construct_circuit(challenges);
 
     let table_node_id = builder.add_node_with_witness(
         "range table circuit",
@@ -51,16 +55,7 @@ pub(crate) fn construct_range_table<E: ExtensionField>(
     bit_with: usize,
     challenges: &ChipChallenges,
 ) -> Result<(PredType, usize), UtilError> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
-    let cells = circuit_builder.create_counter_in(0);
-    let items = [
-        MixedCell::Constant(E::BaseField::from(ROMType::Range as u64)),
-        MixedCell::Cell(cells[0]),
-    ];
-    let rlc = circuit_builder.create_ext_cell();
-    circuit_builder.rlc_mixed(&rlc, &items, challenges.range());
-    circuit_builder.configure();
-    let range_circuit = Arc::new(Circuit::new(&circuit_builder));
+    let range_circuit = construct_circuit(challenges);
 
     let table_node_id = builder.add_node("range table circuit", &range_circuit, vec![])?;
     Ok((

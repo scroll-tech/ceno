@@ -11,7 +11,7 @@ use singer_utils::{
     },
     chips::IntoEnumIterator,
     register_witness,
-    structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, TSUInt},
+    structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
 };
 use std::sync::Arc;
 
@@ -90,7 +90,8 @@ impl BasicBlockFinal {
         let stack_operand_ids = stack_top_offsets
             .iter()
             .map(|offset| {
-                let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_witness_in(1);
+                let (stack_from_insts_id, stack_from_insts) =
+                    circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
                 ram_handler.stack_push(
                     &mut circuit_builder,
                     stack_top_expr.add(i64_to_base_field::<E>(*offset)),

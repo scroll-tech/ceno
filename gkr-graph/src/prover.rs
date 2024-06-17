@@ -18,6 +18,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         circuit_witness: &CircuitGraphWitness<E::BaseField>,
         target_evals: &TargetEvaluations<E>,
         transcript: &mut Transcript<E>,
+        expected_max_thread_id: usize,
     ) -> Result<IOPProof<E>, GKRGraphError> {
         assert_eq!(target_evals.0.len(), circuit.targets.len());
 
@@ -35,14 +36,25 @@ impl<E: ExtensionField> IOPProverState<E> {
         let gkr_proofs = izip!(&circuit.nodes, &circuit_witness.node_witnesses)
             .rev()
             .map(|(node, witness)| {
+                // println!("expected_max_thread_id {:?}", expected_max_thread_id);
+                let max_thread_id = witness.n_instances().min(expected_max_thread_id);
+                // println!("max_thread_id {:?}", max_thread_id);
+                let timer = std::time::Instant::now();
                 let (proof, input_claim) = GKRProverState::prove_parallel(
                     &node.circuit,
                     witness,
                     mem::take(&mut output_evals[node.id]),
                     mem::take(&mut wit_out_evals[node.id]),
-                    1,
+                    max_thread_id,
                     transcript,
                 );
+                // println!(
+                //     "Proving node {}, label {}, num_instances:{}, took {}s",
+                //     node.id,
+                //     node.label,
+                //     witness.instance_num_vars(),
+                //     timer.elapsed().as_secs_f64()
+                // );
 
                 izip!(&node.preds, input_claim.point_and_evals)
                     .enumerate()

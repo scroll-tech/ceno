@@ -6,6 +6,7 @@ use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{OAMOperations, ROMOperations},
     chips::{IntoEnumIterator, SingerChipBuilder},
+    constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
 };
@@ -45,7 +46,7 @@ impl<E: ExtensionField> InstructionGraph<E> for ReturnInstruction {
 
         // Add the instruction circuit to the graph.
         let node_id = graph_builder.add_node_with_witness(
-            stringify!(ReturnInstruction),
+            <ReturnInstruction as Instruction<E>>::NAME,
             &inst_circuit.circuit,
             preds,
             real_challenges.to_vec(),
@@ -59,6 +60,39 @@ impl<E: ExtensionField> InstructionGraph<E> for ReturnInstruction {
             &inst_circuit.layout.to_chip_ids,
             real_challenges,
             params.n_public_output_bytes,
+        )?;
+
+        if let PredType::PredWire(out) = public_output_size {
+            Ok((vec![node_id], vec![], Some(out)))
+        } else {
+            Err(ZKVMError::CircuitError)
+        }
+    }
+
+    fn construct_graph(
+        graph_builder: &mut CircuitGraphBuilder<E>,
+        chip_builder: &mut SingerChipBuilder<E>,
+        inst_circuit: &InstCircuit<E>,
+        _acc_circuits: &[AccessoryCircuit<E>],
+        preds: Vec<PredType>,
+        real_n_instances: usize,
+        _: &SingerParams,
+    ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
+        let public_output_size =
+            preds[inst_circuit.layout.from_pred_inst.stack_operand_ids[1] as usize].clone();
+
+        // Add the instruction circuit to the graph.
+        let node_id = graph_builder.add_node(
+            <ReturnInstruction as Instruction<E>>::NAME,
+            &inst_circuit.circuit,
+            preds,
+        )?;
+
+        chip_builder.construct_chip_check_graph(
+            graph_builder,
+            node_id,
+            &inst_circuit.layout.to_chip_ids,
+            real_n_instances,
         )?;
 
         if let PredType::PredWire(out) = public_output_size {
@@ -81,6 +115,8 @@ register_witness!(
 );
 
 impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
+    const OPCODE: OpcodeType = OpcodeType::RETURN;
+    const NAME: &'static str = "RETURN";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 

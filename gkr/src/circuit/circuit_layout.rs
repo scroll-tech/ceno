@@ -1,4 +1,4 @@
-use core::fmt;
+use core::{fmt, panic};
 use std::collections::{BTreeMap, HashMap};
 
 use ff_ext::ExtensionField;
@@ -247,6 +247,9 @@ impl<E: ExtensionField> Circuit<E> {
         let mut output_assert_const = vec![];
         for (cell_id, cell) in circuit_builder.cells.iter().enumerate() {
             if let Some(CellType::Out(out)) = cell.cell_type {
+                if cell.layer.is_none() {
+                    panic!("Output cell: {:?} should have a layer.", (cell_id, cell));
+                }
                 let old_layer_id = cell.layer.unwrap();
                 let old_wire_id = wire_ids_in_layer[cell_id];
                 match out {

@@ -9,7 +9,7 @@ use crate::{
     uint::UInt,
 };
 
-use super::RangeChipOperations;
+use super::{ROMOperations, RangeChipOperations};
 
 impl<E: ExtensionField> RangeChipOperations<E> for ROMHandler<E> {
     fn range_check_stack_top(
@@ -70,6 +70,10 @@ impl<E: ExtensionField> RangeChipOperations<E> for ROMHandler<E> {
         }
         Ok(())
     }
+
+    fn range_check_table_item(&mut self, circuit_builder: &mut CircuitBuilder<E>, item: CellId) {
+        self.rom_load(circuit_builder, &[], &[item]);
+    }
 }
 
 impl<E: ExtensionField> ROMHandler<E> {
@@ -82,10 +86,8 @@ impl<E: ExtensionField> ROMHandler<E> {
         if bit_width > RANGE_CHIP_BIT_WIDTH {
             return Err(UtilError::ChipHandlerError);
         }
-        let out = circuit_builder.create_ext_cell();
         let items = [value.mul(E::BaseField::from(1 << (RANGE_CHIP_BIT_WIDTH - bit_width)))];
-        circuit_builder.rlc_mixed(&out, &items, self.challenge.record_rlc);
-        self.records.push(out);
+        self.rom_load_mixed(circuit_builder, &[], &items);
         Ok(())
     }
 }
@@ -116,13 +118,13 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
     ) -> Result<TSUInt, UtilError> {
         // TODO: why safe but with unsafe carry
         // TODO: there must be a bug here
-        let carry = TSUInt::extract_unsafe_carry(witness);
+        // let carry = TSUInt::extract_unsafe_carry(witness);
         TSUInt::add_const(
             circuit_builder,
             self,
             &ts,
             i64_to_base_field::<Ext>(constant),
-            carry,
+            witness,
         )
     }
 

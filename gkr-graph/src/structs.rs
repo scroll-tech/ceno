@@ -22,7 +22,7 @@ pub struct IOPVerifierState<E: ExtensionField> {
     marker: PhantomData<E>,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum NodeInputType {
     WireIn(usize, WitnessId),
 }
@@ -43,6 +43,7 @@ pub enum PredType {
     PredWireDup(NodeOutputType),
 }
 
+#[derive(Clone, Debug)]
 pub struct CircuitNode<E: ExtensionField> {
     pub(crate) id: usize,
     pub(crate) label: &'static str,
@@ -51,7 +52,7 @@ pub struct CircuitNode<E: ExtensionField> {
     pub(crate) preds: Vec<PredType>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CircuitGraph<E: ExtensionField> {
     pub(crate) nodes: Vec<CircuitNode<E>>,
     pub(crate) targets: Vec<NodeOutputType>,

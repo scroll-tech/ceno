@@ -22,9 +22,12 @@ impl<Ext: ExtensionField> ROMOperations<Ext> for ROMHandler<Ext> {
         key: &[CellId],
         value: &[CellId],
     ) {
-        let out = circuit_builder.create_ext_cell();
+        let item_rlc = circuit_builder.create_ext_cell();
         let items = [key.to_vec(), value.to_vec()].concat();
-        circuit_builder.rlc(&out, &items, self.challenge.record_rlc);
+        circuit_builder.rlc(&item_rlc, &items, self.challenge.record_item_rlc());
+
+        let out = circuit_builder.create_ext_cell();
+        circuit_builder.rlc_ext(&out, &[item_rlc], self.challenge.record_rlc());
         self.records.push(out);
     }
 
@@ -34,9 +37,12 @@ impl<Ext: ExtensionField> ROMOperations<Ext> for ROMHandler<Ext> {
         key: &[MixedCell<Ext>],
         value: &[MixedCell<Ext>],
     ) {
-        let out = circuit_builder.create_ext_cell();
+        let item_rlc = circuit_builder.create_ext_cell();
         let items = [key.to_vec(), value.to_vec()].concat();
-        circuit_builder.rlc_mixed(&out, &items, self.challenge.record_rlc);
+        circuit_builder.rlc_mixed(&item_rlc, &items, self.challenge.record_item_rlc());
+
+        let out = circuit_builder.create_ext_cell();
+        circuit_builder.rlc_ext(&out, &[item_rlc], self.challenge.record_rlc());
         self.records.push(out);
     }
 

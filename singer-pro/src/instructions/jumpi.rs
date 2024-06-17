@@ -38,6 +38,8 @@ register_witness!(
 );
 
 impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
+    const OPCODE: OpcodeType = OpcodeType::JUMPI;
+    const NAME: &'static str = "JUMPI";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 

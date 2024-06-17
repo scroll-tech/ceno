@@ -1256,6 +1256,9 @@ name = "singer"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "cfg-if",
+ "const_env",
+ "criterion",
  "ff",
  "ff_ext",
  "gkr",
@@ -1265,6 +1268,7 @@ dependencies = [
  "mpcs",
  "multilinear_extensions",
  "paste",
+ "pprof",
  "rayon",
  "serde",
  "simple-frontend",
@@ -1299,6 +1303,7 @@ dependencies = [
 name = "singer-utils"
 version = "0.1.0"
 dependencies = [
+ "ark-std",
  "ff",
  "ff_ext",
  "gkr",
@@ -1309,6 +1314,7 @@ dependencies = [
  "strum 0.26.1",
  "strum_macros 0.26.1",
  "sumcheck",
+ "transcript",
 ]
 
 [[package]]

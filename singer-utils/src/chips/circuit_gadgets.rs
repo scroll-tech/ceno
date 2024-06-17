@@ -70,7 +70,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
         let mut circuit_builder = CircuitBuilder::<E>::new();
         let (input_id, input) = circuit_builder.create_ext_witness_in(2);
         let (cond_id, cond) = circuit_builder.create_witness_in(2);
-        let (_, output) = circuit_builder.create_ext_witness_out(2);
+        let output = circuit_builder.create_ext_cells(2);
         // selector denominator 1 or input[0] or input[0] * input[1]
         let den_mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&den_mul, &input[0], &input[1], E::BaseField::ONE);
@@ -109,7 +109,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
         let (input_den_id, input_den) = circuit_builder.create_ext_witness_in(2);
         let (input_num_id, input_num) = circuit_builder.create_witness_in(2);
         let (cond_id, cond) = circuit_builder.create_witness_in(2);
-        let (_, output) = circuit_builder.create_ext_witness_out(2);
+        let output = circuit_builder.create_ext_cells(2);
         // selector denominator, 1 or input_den[0] or input_den[0] * input_den[1]
         let den_mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&den_mul, &input_den[0], &input_den[1], E::BaseField::ONE);
@@ -154,7 +154,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
         let mut circuit_builder = CircuitBuilder::<E>::new();
         let (input_den_id, input_den) = circuit_builder.create_ext_witness_in(2);
         let (input_num_id, input_num) = circuit_builder.create_witness_in(2);
-        let (_, output) = circuit_builder.create_ext_witness_out(2);
+        let output = circuit_builder.create_ext_cells(2);
         // denominator
         circuit_builder.mul2_ext(
             &output[0], // output_den
@@ -194,7 +194,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
     pub(crate) fn construct_frac_sum_inner() -> Arc<Circuit<E>> {
         let mut circuit_builder = CircuitBuilder::<E>::new();
         let (_, input) = circuit_builder.create_ext_witness_in(4);
-        let (_, output) = circuit_builder.create_ext_witness_out(2);
+        let output = circuit_builder.create_ext_cells(2);
         // denominator
         circuit_builder.mul2_ext(
             &output[0], // output_den
@@ -226,7 +226,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
         let mut circuit_builder = CircuitBuilder::<E>::new();
         let (input_id, input) = circuit_builder.create_ext_witness_in(2);
         let (cond_id, sel) = circuit_builder.create_witness_in(2);
-        let (_, output) = circuit_builder.create_ext_witness_out(1);
+        let output = circuit_builder.create_ext_cells(1);
         // selector elements, 1 or input[0] or input[0] * input[1]
         let mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&mul, &input[0], &input[1], E::BaseField::ONE);
@@ -251,9 +251,10 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
     pub(crate) fn construct_product_inner() -> Arc<Circuit<E>> {
         let mut circuit_builder = CircuitBuilder::<E>::new();
         let (_, input) = circuit_builder.create_ext_witness_in(2);
-        let (_, output) = circuit_builder.create_ext_witness_out(1);
+        let output = circuit_builder.create_ext_cells(1);
         circuit_builder.mul2_ext(&output[0], &input[0], &input[1], E::BaseField::ONE);
 
+        circuit_builder.configure();
         Arc::new(Circuit::new(&circuit_builder))
     }
 }

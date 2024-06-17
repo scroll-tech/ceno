@@ -67,8 +67,8 @@ macro_rules! register_multi_witness {
     (@internal $wire_name:ident($($wire_param:ident)*), $offset:expr; $name:ident($num:expr) => $length:expr $(, $rest:ident$(($rest_num:expr))? => $rest_length:expr)*) => {
         paste! {
             #[inline]
-            fn [<$wire_name _ $name>](idx: usize$(, $wire_param: usize)*) -> std::ops::Range<usize> {
-                $offset + $length * (idx - 1)..$offset + $length * idx
+            pub fn [<$wire_name _ $name>](idx: usize$(, $wire_param: usize)*) -> std::ops::Range<usize> {
+                $offset + $length * idx..$offset + $length * (idx + 1)
             }
             register_multi_witness!(@internal $wire_name($($wire_param)*), $offset + $length * $num; $($rest$(($rest_num))? => $rest_length),*);
         }
@@ -77,7 +77,7 @@ macro_rules! register_multi_witness {
     (@internal $wire_name:ident($($wire_param:ident)*), $offset:expr; $name:ident => $length:expr $(, $rest:ident$(($rest_num:expr))? => $rest_length:expr)*) => {
         paste! {
             #[inline]
-            fn [<$wire_name _ $name>]($($wire_param: usize)*) -> std::ops::Range<usize> {
+            pub fn [<$wire_name _ $name>]($($wire_param: usize)*) -> std::ops::Range<usize> {
                 $offset..$offset + $length
             }
             register_multi_witness!(@internal $wire_name($($wire_param)*), $offset + $length; $($rest$(($rest_num))? => $rest_length),*);
@@ -87,7 +87,7 @@ macro_rules! register_multi_witness {
     (@internal $wire_name:ident($($wire_param:ident)*), $offset:expr;) => {
         paste! {
             #[inline]
-            fn [<$wire_name _ size>]($($wire_param: usize)*) -> usize {
+            pub fn [<$wire_name _ size>]($($wire_param: usize)*) -> usize {
                 $offset.next_power_of_two()
             }
         }
