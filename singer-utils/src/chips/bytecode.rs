@@ -54,13 +54,7 @@ pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
                 .into_iter()
                 .map(|x| vec![x])
                 .collect_vec(),
-        },
-        LayerWitness {
-            instances: bytecode
-                .iter()
-                .map(|x| vec![E::BaseField::from(*x as u64)])
-                .collect_vec(),
-        },
+        }; 2
     ];
 
     let table_node_id = builder.add_node_with_witness(
