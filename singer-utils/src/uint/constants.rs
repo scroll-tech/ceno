@@ -1,6 +1,7 @@
 use super::uint::UInt;
 use crate::constants::RANGE_CHIP_BIT_WIDTH;
 use crate::uint::util::const_min;
+use std::marker::PhantomData;
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Determines the maximum number of bits that should be represented in each cell
@@ -57,4 +58,13 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     /// carry     =     l   m  -
     /// |Carry| = |Cells - 1|
     const N_CARRY_CELLS_NO_OVERFLOW: usize = Self::N_CARRY_CELLS - 1;
+}
+
+/// Holds addition specific constants
+struct AddSubConstants<UInt> {
+    _marker: PhantomData<UInt>,
+}
+
+impl<const M: usize, const C: usize> AddSubConstants<UInt<M, C>> {
+    // TODO: fill this as specific constants become clearer
 }

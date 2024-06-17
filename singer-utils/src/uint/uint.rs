@@ -85,7 +85,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         values.try_into()
     }
 
-    /// Generate (0, 1, ...,  size)
+    /// Generate ((0)_{2^C}, (1)_{2^C}, ..., (size - 1)_{2^C})
     // TODO: refactor, move and test
     pub fn counter_vector<F: SmallField>(size: usize) -> Vec<F> {
         let num_vars = ceil_log2(size);
