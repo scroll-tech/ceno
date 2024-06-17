@@ -121,8 +121,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     /// Adds a single cell value to a `UInt<M, C>` instance
     /// Assumes users will check the correct range of the result and
-    /// guarantee addend_1 < 1 << C.
-    pub fn add_small_unsafe<E: ExtensionField>(
+    pub fn add_cell_unsafe<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         addend_0: &UInt<M, C>,
         addend_1: CellId,
@@ -147,8 +146,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Adds a single cell value to a `UInt<M, C>` instance
-    /// Assumes users will guarantee addend_1 < 1 << C.
-    pub fn add_small<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_cell<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
         addend_0: &UInt<M, C>,
@@ -157,14 +155,13 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     ) -> Result<UInt<M, C>, UtilError> {
         let carry = Self::extract_carry(witness);
         let range_values = Self::extract_range_values(witness);
-        let computed_result = Self::add_small_unsafe(circuit_builder, addend_0, addend_1, carry)?;
+        let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
     /// Adds a single cell value to a `UInt<M, C>` instance
-    /// Assumes users will guarantee addend_1 < 1 << C.
     /// Assumes that addition lead to no overflow.
-    pub fn add_small_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_cell_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_chip_handler: &mut H,
         addend_0: &UInt<M, C>,
@@ -173,7 +170,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     ) -> Result<UInt<M, C>, UtilError> {
         let carry = Self::extract_carry_no_overflow(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
-        let computed_result = Self::add_small_unsafe(circuit_builder, addend_0, addend_1, carry)?;
+        let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
     }
 
@@ -482,7 +479,7 @@ mod tests {
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
         // update circuit builder
-        let result = UInt20::add_small_unsafe(
+        let result = UInt20::add_cell_unsafe(
             &mut circuit_builder,
             &addend_0,
             small_value_cell[0],

@@ -402,7 +402,7 @@ impl ReturnPublicOutLoad {
         let delta = circuit_builder.create_counter_in(0);
         let offset = StackUInt::try_from(&pred[Self::pred_offset()])?;
         let offset_add_delta_witness = &phase0[Self::phase0_offset_add()];
-        let new_offset = StackUInt::add_small(
+        let new_offset = StackUInt::add_cell(
             &mut circuit_builder,
             &mut rom_handler,
             &offset,

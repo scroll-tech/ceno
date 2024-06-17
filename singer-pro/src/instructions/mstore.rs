@@ -249,7 +249,7 @@ impl MstoreAccessory {
         let offset = StackUInt::try_from(&pred_dup[Self::pred_dup_offset()])?;
         let offset_add_delta = &phase0[Self::phase0_offset_add_delta()];
         let delta = circuit_builder.create_counter_in(0)[0];
-        let offset_plus_delta = StackUInt::add_small(
+        let offset_plus_delta = StackUInt::add_cell(
             &mut circuit_builder,
             &mut rom_handler,
             &offset,
