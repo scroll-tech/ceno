@@ -54,7 +54,8 @@ pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
                 .into_iter()
                 .map(|x| vec![x])
                 .collect_vec(),
-        }; 2
+        };
+        2
     ];
 
     let table_node_id = builder.add_node_with_witness(
