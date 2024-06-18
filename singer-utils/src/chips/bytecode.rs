@@ -51,9 +51,6 @@ pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
     let wits_in = vec![
         LayerWitness {
             instances: PCUInt::counter_vector::<E::BaseField>(bytecode.len().next_power_of_two())
-                .into_iter()
-                .map(|x| vec![x])
-                .collect_vec(),
         };
         2
     ];

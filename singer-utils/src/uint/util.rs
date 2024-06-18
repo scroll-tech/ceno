@@ -84,9 +84,31 @@ pub const fn const_min(a: usize, b: usize) -> usize {
     }
 }
 
+/// Assumes each limb < max_value
+/// adds 1 to the big value, while preserving the above constraint
+pub fn add_one_to_big_num<F: SmallField>(limb_modulo: F, limbs: &[F]) -> Vec<F> {
+    let mut should_add_one = true;
+    let mut result = vec![];
+
+    for limb in limbs {
+        let mut new_limb_value = limb.clone();
+        if should_add_one {
+            new_limb_value += F::ONE;
+            if new_limb_value == limb_modulo {
+                new_limb_value = F::ZERO;
+            } else {
+                should_add_one = false;
+            }
+        }
+        result.push(new_limb_value);
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::uint::util::{const_min, convert_decomp, pad_cells};
+    use crate::uint::util::{add_one_to_big_num, const_min, convert_decomp, pad_cells};
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
@@ -207,5 +229,102 @@ mod tests {
         assert_eq!(const_min(2, 3), 2);
         assert_eq!(const_min(3, 3), 3);
         assert_eq!(const_min(5, 3), 3);
+    }
+
+    #[test]
+    fn test_add_one_big_num() {
+        let limb_modulo = Goldilocks::from(2);
+
+        // 000
+        let initial_limbs = vec![Goldilocks::from(0); 3];
+
+        // 100
+        let updated_limbs = add_one_to_big_num(limb_modulo, &initial_limbs);
+        assert_eq!(
+            updated_limbs,
+            vec![
+                Goldilocks::from(1),
+                Goldilocks::from(0),
+                Goldilocks::from(0)
+            ]
+        );
+
+        // 010
+        let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
+        assert_eq!(
+            updated_limbs,
+            vec![
+                Goldilocks::from(0),
+                Goldilocks::from(1),
+                Goldilocks::from(0)
+            ]
+        );
+
+        // 110
+        let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
+        assert_eq!(
+            updated_limbs,
+            vec![
+                Goldilocks::from(1),
+                Goldilocks::from(1),
+                Goldilocks::from(0)
+            ]
+        );
+
+        // 001
+        let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
+        assert_eq!(
+            updated_limbs,
+            vec![
+                Goldilocks::from(0),
+                Goldilocks::from(0),
+                Goldilocks::from(1)
+            ]
+        );
+
+        // 101
+        let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
+        assert_eq!(
+            updated_limbs,
+            vec![
+                Goldilocks::from(1),
+                Goldilocks::from(0),
+                Goldilocks::from(1)
+            ]
+        );
+
+        // 011
+        let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
+        assert_eq!(
+            updated_limbs,
+            vec![
+                Goldilocks::from(0),
+                Goldilocks::from(1),
+                Goldilocks::from(1)
+            ]
+        );
+
+        // 111
+        let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
+        assert_eq!(
+            updated_limbs,
+            vec![
+                Goldilocks::from(1),
+                Goldilocks::from(1),
+                Goldilocks::from(1)
+            ]
+        );
+
+        // restart cycle
+        // 000
+        let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
+        assert_eq!(
+            updated_limbs,
+            vec![
+                Goldilocks::from(0),
+                Goldilocks::from(0),
+                Goldilocks::from(0)
+            ]
+        );
     }
 }

@@ -1,6 +1,6 @@
 use crate::constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH};
 use crate::error::UtilError;
-use crate::uint::util::{convert_decomp, pad_cells};
+use crate::uint::util::{add_one_to_big_num, convert_decomp, pad_cells};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -86,24 +86,17 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Generate ((0)_{2^C}, (1)_{2^C}, ..., (size - 1)_{2^C})
-    // TODO: refactor, move and test
-    pub fn counter_vector<F: SmallField>(size: usize) -> Vec<F> {
+    pub fn counter_vector<F: SmallField>(size: usize) -> Vec<Vec<F>> {
         let num_vars = ceil_log2(size);
-        let tensor = |a: &[F], b: Vec<F>| {
-            let mut res = vec![F::ZERO; a.len() * b.len()];
-            for i in 0..b.len() {
-                for j in 0..a.len() {
-                    res[i * a.len() + j] = b[i] * a[j];
-                }
-            }
-            res
-        };
-        let counter = (0..(1 << C)).map(|x| F::from(x as u64)).collect_vec();
-        let (di, mo) = (num_vars / C, num_vars % C);
-        let mut res = (0..(1 << mo)).map(|x| F::from(x as u64)).collect_vec();
-        for _ in 0..di {
-            res = tensor(&counter, res);
+        let number_of_limbs = (num_vars + C - 1) / C;
+        let cell_modulo = F::from(1 << C);
+
+        let mut res = vec![vec![F::ZERO; number_of_limbs]];
+
+        for i in 1..size {
+            res.push(add_one_to_big_num(cell_modulo, &res[i - 1]));
         }
+
         res
     }
 }
@@ -208,6 +201,60 @@ mod tests {
                 .into_iter()
                 .map(|v| Goldilocks::from(v))
                 .collect_vec()
+        );
+    }
+
+    #[test]
+    fn test_counter_vector() {
+        // each limb has 5 bits so all number from 0..3 should require only 1 limb
+        type UInt30 = UInt<30, 5>;
+        let res = UInt30::counter_vector::<Goldilocks>(3);
+        assert_eq!(
+            res,
+            vec![
+                vec![Goldilocks::from(0)],
+                vec![Goldilocks::from(1)],
+                vec![Goldilocks::from(2)]
+            ]
+        );
+
+        // each limb has a single bit, number from 0..5 should require 3 limbs each
+        type UInt50 = UInt<50, 1>;
+        let res = UInt50::counter_vector::<Goldilocks>(5);
+        assert_eq!(
+            res,
+            vec![
+                // 0
+                vec![
+                    Goldilocks::from(0),
+                    Goldilocks::from(0),
+                    Goldilocks::from(0)
+                ],
+                // 1
+                vec![
+                    Goldilocks::from(1),
+                    Goldilocks::from(0),
+                    Goldilocks::from(0)
+                ],
+                // 2
+                vec![
+                    Goldilocks::from(0),
+                    Goldilocks::from(1),
+                    Goldilocks::from(0)
+                ],
+                // 3
+                vec![
+                    Goldilocks::from(1),
+                    Goldilocks::from(1),
+                    Goldilocks::from(0)
+                ],
+                // 4
+                vec![
+                    Goldilocks::from(0),
+                    Goldilocks::from(0),
+                    Goldilocks::from(1)
+                ],
+            ]
         );
     }
 }
