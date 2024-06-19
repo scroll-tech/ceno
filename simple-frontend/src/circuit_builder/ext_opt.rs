@@ -270,7 +270,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     // ======================================
 
     /// Compute the random linear combination of `in_array` by challenge.
-    /// out = \sum_{i = 0}^{in_array.len()} challenge^i * in_array[i] + challenge^{in_array.len()}.
+    /// out = (\sum_{i = 0}^{in_array.len()} challenge^i * in_array[i]) + challenge^{in_array.len()}.
     pub fn rlc(&mut self, out: &ExtCellId<Ext>, in_array: &[CellId], challenge: ChallengeId) {
         assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
         for (i, item) in in_array.iter().enumerate() {
@@ -367,6 +367,8 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         self.add(out[1], a0b1, scalar);
     }
 
+    // TODO: what is this doing?
+    //  why is there a random 7 here, but none in add_ext_mul_challenge_3
     fn add_ext_mul_challenge_2(&mut self, out: &[CellId], in_0: &[CellId], c: ChallengeConst) {
         let a0b0 = self.create_cell();
         let in_1 = [ConstantType::Challenge(c, 0), ConstantType::Challenge(c, 1)];
@@ -378,6 +380,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         let a1b1 = self.create_cell();
         self.add_internal(a1b1, in_0[1], in_1[1]);
         self.add(out[0], a0b0, Ext::BaseField::ONE);
+        // TODO: is this a bug, should there be a random 7 here??
         self.add(out[0], a1b1, Ext::BaseField::from(7));
         self.add(out[1], a1b0, Ext::BaseField::ONE);
         self.add(out[1], a0b1, Ext::BaseField::ONE);
@@ -479,6 +482,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         self.add(out[2], a2b2, scalar);
     }
 
+    // TODO: what is this doing, why is there no random 7 here, like there is in add_ext_mul_challenge_2
     fn add_ext_mul_challenge_3(&mut self, out: &[CellId], in_0: &[CellId], c: ChallengeConst) {
         let in_1 = [
             ConstantType::Challenge(c, 0),
