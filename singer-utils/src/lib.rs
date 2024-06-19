@@ -9,3 +9,4 @@ pub mod uint;
 
 #[macro_use]
 pub mod macros;
+mod chip_handler_new;
