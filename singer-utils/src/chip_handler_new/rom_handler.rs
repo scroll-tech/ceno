@@ -4,12 +4,20 @@ use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, ExtCellId, MixedCell, WitnessId};
 
 // TODO: add documentation
-pub struct ROM<Ext: ExtensionField> {
+pub struct ROMHandler<Ext: ExtensionField> {
     records: Vec<ExtCellId<Ext>>,
     challenge: ChipChallenges,
 }
 
-impl<Ext: ExtensionField> ROM<Ext> {
+impl<Ext: ExtensionField> ROMHandler<Ext> {
+    /// Instantiate new `ROMHandler` with challenges
+    pub fn new(challenge: ChipChallenges) -> Self {
+        Self {
+            records: Vec::new(),
+            challenge
+        }
+    }
+
     // TODO: add documentation
     // TODO: can this be named read?
     fn load(
