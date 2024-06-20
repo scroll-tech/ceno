@@ -10,17 +10,16 @@ pub struct ROMHandler<Ext: ExtensionField> {
 }
 
 impl<Ext: ExtensionField> ROMHandler<Ext> {
-    /// Instantiate new `ROMHandler` with challenges
+    /// Instantiate new `ROMHandler` given chip challenge
     pub fn new(challenge: ChipChallenges) -> Self {
         Self {
             records: Vec::new(),
-            challenge
+            challenge,
         }
     }
 
     // TODO: add documentation
-    // TODO: can this be named read?
-    fn load(
+    fn read(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         key: &[CellId],
@@ -36,7 +35,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn load_mixed(
+    fn read_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         key: &[MixedCell<Ext>],
@@ -57,7 +56,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
     // then generates a witness Id for them (type out)
     // frac function is here: construct_chip_check_graph
     fn finalize(self, circuit_builder: &mut CircuitBuilder<Ext>) -> Option<(WitnessId, usize)> {
-        if self.records.len() == 0 {
+        if self.records.is_empty() {
             return None;
         }
 

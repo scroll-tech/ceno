@@ -12,5 +12,4 @@ pub struct RAMHandler<Ext: ExtensionField> {
     challenge: ChipChallenges,
 }
 
-impl<Ext: ExtensionField> RAMHandler<Ext> {
-}
+impl<Ext: ExtensionField> RAMHandler<Ext> {}
