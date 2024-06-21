@@ -440,13 +440,13 @@ impl<F: SmallField> Debug for CircuitWitness<F> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, ops::Neg};
 
     use ff::Field;
     use ff_ext::ExtensionField;
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
-    use simple_frontend::structs::{ChallengeConst, ChallengeId, CircuitBuilder};
+    use simple_frontend::structs::{ChallengeConst, ChallengeId, CircuitBuilder, ConstantType};
 
     use crate::{
         structs::{Circuit, CircuitWitness, LayerWitness},
@@ -976,5 +976,64 @@ mod test {
         circuit_wits.add_instances(&circuit, wits_in, 2);
 
         assert_eq!(circuit_wits, expect_circuit_wits);
+    }
+
+    #[test]
+    fn test_orphan_const_input() {
+        // create circuit
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+
+        let (_, leaves) = circuit_builder.create_witness_in(3);
+        let mul_0_1_res = circuit_builder.create_cell();
+
+        // 2 * 3 = 6
+        circuit_builder.mul2(
+            mul_0_1_res,
+            leaves[0],
+            leaves[1],
+            <GoldilocksExt2 as ExtensionField>::BaseField::ONE,
+        );
+
+        let (_, out) = circuit_builder.create_witness_out(2);
+        // like a bypass gate, passing 6 to output out[0]
+        circuit_builder.add(
+            out[0],
+            mul_0_1_res,
+            <GoldilocksExt2 as ExtensionField>::BaseField::ONE,
+        );
+
+        // assert const 2
+        circuit_builder.assert_const(leaves[2], 5);
+
+        // 5 + -5 = 0, put in out[1]
+        circuit_builder.add(
+            out[1],
+            leaves[2],
+            <GoldilocksExt2 as ExtensionField>::BaseField::ONE,
+        );
+        circuit_builder.add_const(
+            out[1],
+            <GoldilocksExt2 as ExtensionField>::BaseField::from(5).neg(), // -5
+        );
+
+        // assert out[1] == 0
+        circuit_builder.assert_const(out[1], 0);
+
+        circuit_builder.configure();
+        let circuit = Circuit::new(&circuit_builder);
+
+        let mut circuit_wits = CircuitWitness::new(&circuit, vec![]);
+        let witness_in = vec![LayerWitness {
+            instances: vec![vec![i64_to_field(2), i64_to_field(3), i64_to_field(5)]],
+        }];
+        circuit_wits.add_instances(&circuit, witness_in, 1);
+
+        println!("circuit_wits {:?}", circuit_wits);
+        let output_layer_witness = &circuit_wits.layers[0];
+        for gate in circuit.assert_consts.iter() {
+            if let ConstantType::Field(constant) = gate.scalar {
+                assert_eq!(output_layer_witness.instances[0][gate.idx_out], constant);
+            }
+        }
     }
 }

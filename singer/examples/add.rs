@@ -10,10 +10,6 @@ use gkr::structs::LayerWitness;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 
-const NUM_SAMPLES: usize = 10;
-#[from_env]
-const RAYON_NUM_THREADS: usize = 8;
-
 use singer::{
     instructions::{add::AddInstruction, Instruction, InstructionGraph, SingerCircuitBuilder},
     scheme::GKRGraphProverState,

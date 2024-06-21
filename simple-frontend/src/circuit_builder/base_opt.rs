@@ -143,7 +143,16 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     }
 
     pub fn assert_const(&mut self, out: CellId, constant: i64) {
-        self.mark_cells(CellType::Out(OutType::AssertConst(constant)), &[out]);
+        // check cell and if it's belong to input cell, we must create an intermediate cell
+        // and avoid edit input layer cell_type, otherwise it will be orphan cell with no fan-in.
+        let out_cell = if let Some(CellType::In(_)) = self.cells[out].cell_type {
+            let out_cell = self.create_cell();
+            self.add(out_cell, out, Ext::BaseField::ONE);
+            out_cell
+        } else {
+            out
+        };
+        self.mark_cells(CellType::Out(OutType::AssertConst(constant)), &[out_cell]);
     }
 
     pub fn add_cell_expr(&mut self, out: CellId, in_0: MixedCell<Ext>) {

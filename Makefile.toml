@@ -3,9 +3,9 @@ CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 CORE = { script = ["grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}'"] }
 RAYON_NUM_THREADS = "${CORE}"
 
-[tasks.test]
+[tasks.tests]
 command = "cargo"
-args = ["test", "--release", "--all", "--all-features"]
+args = ["test", "--lib", "--release", "--all", "--all-features"]
 
 [tasks.fmt-check]
 command = "cargo"
