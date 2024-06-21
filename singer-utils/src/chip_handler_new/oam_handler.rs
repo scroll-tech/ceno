@@ -18,7 +18,7 @@ pub struct OAMHandler<Ext: ExtensionField> {
 
 impl<Ext: ExtensionField> OAMHandler<Ext> {
     /// Instantiate new `OAMHandler` given chip challenge
-    fn new(challenge: ChipChallenges) -> Self {
+    pub fn new(challenge: ChipChallenges) -> Self {
         Self {
             read_records: Vec::new(),
             write_records: Vec::new(),
@@ -28,7 +28,7 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
 
     // TODO: add documentation
     // TODO: document what is going on here in regards to timestamp
-    fn read(
+    pub fn read(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         old_ts: &[CellId],
@@ -45,7 +45,7 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn read_mixed(
+    pub fn read_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         old_ts: &[MixedCell<Ext>],
@@ -62,7 +62,7 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn write(
+    pub fn write(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         curr_ts: &[CellId],
@@ -79,7 +79,7 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn write_mixed(
+    pub fn write_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         curr_ts: &[MixedCell<Ext>],
@@ -96,7 +96,7 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn finalize(
+    pub fn finalize(
         self,
         circuit_builder: &mut CircuitBuilder<Ext>,
     ) -> (Option<(WitnessId, usize)>, Option<(WitnessId, usize)>) {
