@@ -19,7 +19,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn read(
+    pub fn read(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         key: &[CellId],
@@ -35,7 +35,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn read_mixed(
+    pub fn read_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         key: &[MixedCell<Ext>],
@@ -55,7 +55,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
     // it seems to pad it to the next highest power of two (with empty cells)
     // then generates a witness Id for them (type out)
     // frac function is here: construct_chip_check_graph
-    fn finalize(self, circuit_builder: &mut CircuitBuilder<Ext>) -> Option<(WitnessId, usize)> {
+    pub fn finalize(self, circuit_builder: &mut CircuitBuilder<Ext>) -> Option<(WitnessId, usize)> {
         if self.records.is_empty() {
             return None;
         }
