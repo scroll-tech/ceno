@@ -10,14 +10,14 @@ pub struct RAMHandler<Ext: ExtensionField> {
 
 impl<Ext: ExtensionField> RAMHandler<Ext> {
     // TODO: add documentation
-    fn new(challenge: ChipChallenges) -> Self {
+    pub fn new(challenge: ChipChallenges) -> Self {
         Self {
             oam_handler: OAMHandler::new(challenge),
         }
     }
 
     // TODO: add documentation
-    fn read(
+    pub fn read(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         old_ts: &[CellId],
@@ -30,7 +30,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn read_mixed(
+    pub fn read_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         old_ts: &[MixedCell<Ext>],
@@ -45,7 +45,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn write(
+    pub fn write(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         old_ts: &[CellId],
@@ -61,7 +61,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn write_mixed(
+    pub fn write_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         old_ts: &[MixedCell<Ext>],
@@ -77,7 +77,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
     }
 
     // TODO: add documentation
-    fn finalize(
+    pub fn finalize(
         self,
         circuit_builder: &mut CircuitBuilder<Ext>,
     ) -> (Option<(WitnessId, usize)>, Option<(WitnessId, usize)>) {

@@ -9,6 +9,7 @@ use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 struct CalldataChip {}
 
 impl CalldataChip {
+    // TODO: rename and document
     fn load<Ext: ExtensionField>(
         &mut self,
         rom_handler: &mut ROMHandler<Ext>,
