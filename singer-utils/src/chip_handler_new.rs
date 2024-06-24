@@ -3,6 +3,7 @@
 mod bytecode;
 mod calldata;
 mod global_state;
+mod memory;
 mod oam_handler;
 mod ram_handler;
 mod rom_handler;
