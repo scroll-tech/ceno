@@ -30,7 +30,7 @@ impl BytecodeChip {
             circuit_builder,
             &key,
             &[MixedCell::Constant(Ext::BaseField::from(opcode as u64))],
-        )
+        );
     }
 
     // TODO: rename and document
