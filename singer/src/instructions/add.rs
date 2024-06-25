@@ -3,6 +3,7 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -33,17 +34,17 @@ register_witness!(
         stack_top => 1,
         clk => 1,
 
-        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         old_stack_ts0 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt0 => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_lt0 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
         old_stack_ts1 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt1 => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_lt1 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         addend_0 => StackUInt::N_OPERAND_CELLS,
         addend_1 => StackUInt::N_OPERAND_CELLS,
-        instruction_add => StackUInt::N_WITNESS_CELLS
+        instruction_add => AddSubConstants::<StackUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -188,6 +189,7 @@ mod test {
     use simple_frontend::structs::CellId;
     use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
     use singer_utils::structs::{StackUInt, TSUInt};
+    use singer_utils::uint::constants::AddSubConstants;
     use std::collections::BTreeMap;
     use std::time::Instant;
     use transcript::Transcript;

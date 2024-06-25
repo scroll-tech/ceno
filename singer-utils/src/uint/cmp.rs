@@ -1,5 +1,6 @@
 use crate::chip_handler::RangeChipOperations;
 use crate::error::UtilError;
+use crate::uint::constants::AddSubConstants;
 use crate::uint::uint::UInt;
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -25,8 +26,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         )?;
 
         // if operand_0 < operand_1, the last borrow should equal 1
-        if borrow.len() == Self::N_CARRY_CELLS {
-            Ok((borrow[Self::N_CARRY_CELLS - 1], diff))
+        if borrow.len() == AddSubConstants::<Self>::N_CARRY_CELLS {
+            Ok((borrow[AddSubConstants::<Self>::N_CARRY_CELLS - 1], diff))
         } else {
             Ok((circuit_builder.create_cell(), diff))
         }

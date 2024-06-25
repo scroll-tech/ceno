@@ -4,6 +4,7 @@ use gkr::structs::Circuit;
 use itertools::izip;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -35,16 +36,16 @@ register_witness!(
         clk => 1,
 
         old_stack_ts_dest => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_dest_lt => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_dest_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
         old_stack_ts_cond => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_cond_lt => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_cond_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         dest_values => StackUInt::N_OPERAND_CELLS,
         cond_values => StackUInt::N_OPERAND_CELLS,
         cond_values_inv => StackUInt::N_OPERAND_CELLS,
         cond_non_zero_or_inv => 1,
 
-        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
         pc_plus_1_opcode => 1
     }
 );

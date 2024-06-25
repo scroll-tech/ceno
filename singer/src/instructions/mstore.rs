@@ -4,6 +4,7 @@ use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, MemoryChipOperations, OAMOperations,
@@ -145,15 +146,15 @@ register_witness!(
         stack_top => 1,
         clk => 1,
 
-        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        memory_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        memory_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         offset => StackUInt::N_OPERAND_CELLS,
         mem_bytes => EVM_STACK_BYTE_WIDTH,
         old_stack_ts_offset => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt_offset => TSUInt::N_WITNESS_CELLS,
+        old_stack_ts_lt_offset => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
         old_stack_ts_value => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt_value => TSUInt::N_WITNESS_CELLS
+        old_stack_ts_lt_value => AddSubConstants::<TSUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -299,9 +300,9 @@ register_witness!(
     },
     phase0 {
         old_memory_ts => TSUInt::N_OPERAND_CELLS,
-        old_memory_ts_lt =>  TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_memory_ts_lt =>  AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
-        offset_add_delta => StackUInt::N_WITNESS_CELLS,
+        offset_add_delta => AddSubConstants::<StackUInt>::N_WITNESS_CELLS,
         prev_mem_bytes => 1
     }
 );

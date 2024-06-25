@@ -3,6 +3,7 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, CalldataChipOperations, GlobalStateChipOperations, OAMOperations,
@@ -34,13 +35,13 @@ register_witness!(
         stack_top => 1,
         clk => 1,
 
-        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         data => StackUInt::N_OPERAND_CELLS,
         offset => UInt64::N_OPERAND_CELLS,
         old_stack_ts => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt => TSUInt::N_WITNESS_CELLS
+        old_stack_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS
     }
 );
 

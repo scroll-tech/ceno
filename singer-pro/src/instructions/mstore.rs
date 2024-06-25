@@ -4,6 +4,7 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{MemoryChipOperations, ROMOperations, RangeChipOperations},
     chips::{IntoEnumIterator, SingerChipBuilder},
@@ -110,7 +111,7 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
 register_witness!(
     MstoreInstruction,
     phase0 {
-        memory_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        memory_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
         mem_bytes => EVM_STACK_BYTE_WIDTH
     }
 );
@@ -218,9 +219,9 @@ register_witness!(
     },
     phase0 {
         old_memory_ts => TSUInt::N_OPERAND_CELLS,
-        old_memory_ts_lt => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_memory_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
-        offset_add_delta => StackUInt::N_WITNESS_CELLS,
+        offset_add_delta => AddSubConstants::<StackUInt>::N_WITNESS_CELLS,
         prev_mem_byte => 1
     }
 );

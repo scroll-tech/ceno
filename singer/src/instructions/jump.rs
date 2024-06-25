@@ -5,6 +5,7 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -37,7 +38,7 @@ register_witness!(
         next_pc => PCUInt::N_OPERAND_CELLS,
 
         old_stack_ts => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt => TSUInt::N_WITNESS_CELLS
+        old_stack_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS
     }
 );
 

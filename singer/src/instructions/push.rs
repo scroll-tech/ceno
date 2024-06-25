@@ -3,6 +3,7 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -33,8 +34,8 @@ register_witness!(
         stack_top => 1,
         clk => 1,
 
-        pc_add_i_plus_1 => N * PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        pc_add_i_plus_1 => N * AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         stack_bytes => N
     }
@@ -113,7 +114,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
             <Self as Instruction<E>>::OPCODE,
         );
         for (i, pc_add_i_plus_1) in phase0[Self::phase0_pc_add_i_plus_1()]
-            .chunks(PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
+            .chunks(AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
             .enumerate()
         {
             let next_pc =

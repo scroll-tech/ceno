@@ -4,6 +4,7 @@ use gkr::structs::Circuit;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
@@ -27,7 +28,7 @@ pub struct BasicBlockFinal;
 
 register_witness!(BasicBlockFinal, phase0 {
     // State in related
-    stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
+    stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
 });
 
 impl BasicBlockFinal {

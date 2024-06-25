@@ -294,6 +294,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
 #[cfg(test)]
 mod tests {
+    use crate::uint::constants::AddSubConstants;
     use crate::uint::UInt;
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -327,7 +328,8 @@ mod tests {
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
         let (addend_1_id, addend_1_cells) =
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
-        let (carry_id, carry_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+        let (carry_id, carry_cells) =
+            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
         let addend_1 = UInt20::try_from(addend_1_cells).expect("should build uint");
@@ -401,7 +403,8 @@ mod tests {
         // addend_0, carry, constant
         let (addend_0_id, addend_0_cells) =
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
-        let (carry_id, carry_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+        let (carry_id, carry_cells) =
+            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
@@ -474,7 +477,8 @@ mod tests {
         let (addend_0_id, addend_0_cells) =
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
         let (small_value_id, small_value_cell) = circuit_builder.create_witness_in(1);
-        let (carry_id, carry_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+        let (carry_id, carry_cells) =
+            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
@@ -551,7 +555,8 @@ mod tests {
         let (subtrahend_id, subtrahend_cells) =
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
         // |Carry| == |Borrow|
-        let (borrow_id, borrow_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+        let (borrow_id, borrow_cells) =
+            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let minuend = UInt20::try_from(minuend_cells).expect("should build uint");
         let subtrahend = UInt20::try_from(subtrahend_cells).expect("should build uint");

@@ -1,6 +1,6 @@
 mod arithmetic;
 mod cmp;
-mod constants;
+pub mod constants;
 mod uint;
 pub use uint::UInt;
 pub mod util;
