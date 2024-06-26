@@ -223,12 +223,12 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         // overflow carry
         // represents the portion of the result that should move to the next operation
         // inorder to keep the value <= C bits
-        // carry[i] = addend_0[i] + addend_1[i] % 2^C
+        // carry[i] = (addend_0[i] + addend_1[i]) % 2^C
 
         // last carry
         // represents the carry that was passed from the previous operation
         // this carry should be added to the current result
-        // carry[i - 1] = addend_0[i - 1] + addend_1[i - 1] % 2^C
+        // carry[i - 1] = (addend_0[i - 1] + addend_1[i - 1]) % 2^C
 
         if limb_index > carry.len() {
             return;
