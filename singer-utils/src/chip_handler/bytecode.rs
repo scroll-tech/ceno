@@ -10,6 +10,7 @@ use crate::{
 use super::{BytecodeChipOperations, ROMOperations};
 
 impl<Ext: ExtensionField> BytecodeChipOperations<Ext> for ROMHandler<Ext> {
+    // verifies that the opcode at the current pc is valid??
     fn bytecode_with_pc_opcode(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
