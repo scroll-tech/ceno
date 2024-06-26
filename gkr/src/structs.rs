@@ -62,14 +62,12 @@ pub struct IOPProverState<E: ExtensionField> {
 
     /// The point to the next step.
     pub(crate) to_next_step_point: Point<E>,
-    /// layer poly for phase 1 which point to current layer
-    pub(crate) phase1_layer_polys: Vec<ArcDenseMultilinearExtension<E>>,
 
     // Especially for output phase1.
+    pub(crate) phase1_layer_poly: ArcDenseMultilinearExtension<E>,
     pub(crate) assert_point: Point<E>,
     // Especially for phase1.
     pub(crate) g1_values: Vec<E>,
-    // Especially for phase2.
 }
 
 /// Represent the verifier state for each layer in the IOP protocol.
@@ -126,7 +124,6 @@ pub(crate) enum SumcheckStepType {
     OutputPhase1Step1,
     OutputPhase1Step2,
     Phase1Step1,
-    Phase1Step2,
     Phase2Step1,
     Phase2Step2,
     Phase2Step2NoStep3,
@@ -151,11 +148,11 @@ pub struct Layer<E: ExtensionField> {
     // Gates. Should be all None if it's the input layer.
     pub(crate) add_consts: Vec<GateCIn<ConstantType<E>>>,
     pub(crate) adds: Vec<Gate1In<ConstantType<E>>>,
-    pub(crate) adds_fanin_mapping: [BTreeMap<CellId, Vec<Gate1In<ConstantType<E>>>>; 1], // grouping for 1 fanins
+    pub(crate) adds_fanin_mapping: [BTreeMap<CellId, Vec<Gate1In<ConstantType<E>>>>; 1], /* grouping for 1 fanins */
     pub(crate) mul2s: Vec<Gate2In<ConstantType<E>>>,
-    pub(crate) mul2s_fanin_mapping: [BTreeMap<CellId, Vec<Gate2In<ConstantType<E>>>>; 2], // grouping for 2 fanins
+    pub(crate) mul2s_fanin_mapping: [BTreeMap<CellId, Vec<Gate2In<ConstantType<E>>>>; 2], /* grouping for 2 fanins */
     pub(crate) mul3s: Vec<Gate3In<ConstantType<E>>>,
-    pub(crate) mul3s_fanin_mapping: [BTreeMap<CellId, Vec<Gate3In<ConstantType<E>>>>; 3], // grouping for 3 fanins
+    pub(crate) mul3s_fanin_mapping: [BTreeMap<CellId, Vec<Gate3In<ConstantType<E>>>>; 3], /* grouping for 3 fanins */
 
     /// The corresponding wires copied from this layer to later layers. It is
     /// (later layer id -> current wire id to be copied). It stores the non-zero
@@ -201,7 +198,7 @@ pub struct Circuit<E: ExtensionField> {
     pub paste_from_wits_in: Vec<(CellId, CellId)>,
     /// The endpoints in the input layer copied from counter.
     pub paste_from_counter_in: Vec<(usize, (CellId, CellId))>,
-    /// The endpoints in the output layer copied to each output witness.
+    /// The endpoints in the input layer copied from constants
     pub paste_from_consts_in: Vec<(i64, (CellId, CellId))>,
     /// The wires copied to the output witness
     pub copy_to_wits_out: Vec<Vec<CellId>>,

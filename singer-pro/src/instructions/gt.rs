@@ -10,7 +10,7 @@ use singer_utils::{
     register_witness,
     structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt},
 };
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},

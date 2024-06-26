@@ -45,8 +45,8 @@ macro_rules! prepare_stepx_g_fn {
 // The number of terms depends on the gate.
 // Here is an example of degree 3:
 // layers[i](rt || ry) = \sum_{s1}( \sum_{s2}( \sum_{s3}( \sum_{x1}( \sum_{x2}( \sum_{x3}(
-//     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-// ) ) ) ) ) ) + sum_s1( sum_s2( sum_{x1}( sum_{x2}(
+//     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2)
+// * layers[i + 1](s3 || x3) ) ) ) ) ) ) + sum_s1( sum_s2( sum_{x1}( sum_{x2}(
 //     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2)
 // ) ) ) ) + \sum_{s1}( \sum_{x1}(
 //     eq(rt, s1) * add(ry, x1) * layers[i + 1](s1 || x1)
@@ -54,16 +54,17 @@ macro_rules! prepare_stepx_g_fn {
 //      \sum_j eq(rt, s1) paste_from[j](ry, x1) * subset[j][i](s1 || x1)
 // ) ) + add_const(ry)
 impl<E: ExtensionField> IOPProverState<E> {
-    /// Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
-    ///     sigma = layers[i](rt || ry) - add_const(ry),
+    /// Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) *
+    /// g1'_j(s1 || x1)     sigma = layers[i](rt || ry) - add_const(ry),
     ///     f1(s1 || x1) = layers[i + 1](s1 || x1)
     ///     g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
-    ///         eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-    ///     ) ) ) ) + \sum_{s2}( \sum_{x2}(
+    ///         eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i +
+    /// 1](s3 || x3)     ) ) ) ) + \sum_{s2}( \sum_{x2}(
     ///         eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
     ///     ) ) + eq(rt, s1) * add(ry, x1)
     ///     f1'^{(j)}(s1 || x1) = subset[j][i](s1 || x1)
     ///     g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
+    ///      s1 || x1 || 0, s1 || x1 || 1
     #[tracing::instrument(skip_all, name = "build_phase2_step1_sumcheck_poly")]
     pub(super) fn build_phase2_step1_sumcheck_poly(
         eq: &[Vec<E>; 1],
@@ -105,8 +106,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         let f1 = phase2_next_layer_polys_v2.clone();
 
         // g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
-        //     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-        // ) ) ) ) + \sum_{s2}( \sum_{x2}(
+        //     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i +
+        // 1](s3 || x3) ) ) ) ) + \sum_{s2}( \sum_{x2}(
         //     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
         // ) ) + eq(rt, s1) * add(ry, x1)
         let mut g1 = vec![E::ZERO; 1 << f1.num_vars];
@@ -176,7 +177,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             Vec<ArcDenseMultilinearExtension<E>>,
         ) = ([vec![f1], f1_j].concat(), [vec![g1], g1_j].concat());
 
-        // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
+        // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) *
+        // g1'_j(s1 || x1)
         let mut virtual_poly_1 = VirtualPolynomial::new(f[0].num_vars);
         for (f, g) in f.into_iter().zip(g.into_iter()) {
             let mut tmp = VirtualPolynomial::new_from_mle(f, E::BaseField::ONE);

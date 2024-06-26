@@ -10,7 +10,6 @@ use gkr::gadgets::keccak256::{keccak256_circuit, prove_keccak256, verify_keccak2
 use goldilocks::GoldilocksExt2;
 use sumcheck::util::is_power_of_2;
 
-// cargo bench --bench keccak256 --features parallel --features flamegraph --package gkr -- --profile-time <secs>
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
     criterion_group! {
@@ -48,8 +47,7 @@ fn bench_keccak256(c: &mut Criterion) {
 
             #[cfg(feature = "non_pow2_rayon_thread")]
             {
-                use sumcheck::local_thread_pool::create_local_pool_once;
-                use sumcheck::util::ceil_log2;
+                use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
                 let max_thread_id = 1 << ceil_log2(RAYON_NUM_THREADS);
                 create_local_pool_once(1 << ceil_log2(RAYON_NUM_THREADS), true);
                 max_thread_id

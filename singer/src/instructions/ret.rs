@@ -15,7 +15,7 @@ use singer_utils::{
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
 };
-use std::{mem, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 

@@ -14,7 +14,7 @@ use singer_utils::{
     register_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
 };
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     component::{BBFinalCircuit, BBFinalLayout, FromBBStart, FromPredInst, FromWitness},

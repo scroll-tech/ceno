@@ -50,52 +50,56 @@ impl<E: ExtensionField> IOPVerifierState<E> {
 
             let new_instance_num_vars = aux_info.instance_num_vars[node.id];
 
-            izip!(&node.preds, input_claim.point_and_evals).for_each(|(pred, point_and_eval)| {
-                match pred {
-                    PredType::Source => {
-                        // TODO: collect `(proof.point.clone(), *eval)` as `TargetEvaluations` for later PCS open?
-                    }
-                    PredType::PredWire(out) | PredType::PredWireDup(out) => {
-                        let old_point = match pred {
-                            PredType::PredWire(_) => point_and_eval.point.clone(),
-                            PredType::PredWireDup(out) => {
-                                let node_id = match out {
-                                    NodeOutputType::OutputLayer(id) => *id,
-                                    NodeOutputType::WireOut(id, _) => *id,
-                                };
-                                // Suppose the new point is
-                                // [single_instance_slice ||
-                                // new_instance_index_slice]. The old point
-                                // is [single_instance_slices ||
-                                // new_instance_index_slices[(new_instance_num_vars
-                                // - old_instance_num_vars)..]]
-                                let old_instance_num_vars = aux_info.instance_num_vars[node_id];
-                                let num_vars = point_and_eval.point.len() - new_instance_num_vars;
-                                [
-                                    point_and_eval.point[..num_vars].to_vec(),
-                                    point_and_eval.point[num_vars
-                                        + (new_instance_num_vars - old_instance_num_vars)..]
-                                        .to_vec(),
-                                ]
-                                .concat()
-                            }
-                            _ => unreachable!(),
-                        };
-                        match out {
-                            NodeOutputType::OutputLayer(id) => output_evals[*id]
-                                .push(PointAndEval::new_from_ref(&old_point, &point_and_eval.eval)),
-                            NodeOutputType::WireOut(id, wire_id) => {
-                                let evals = &mut wit_out_evals[*id][*wire_id as usize];
-                                assert!(
-                                    evals.point.is_empty() && evals.eval.is_zero_vartime(),
-                                    "unimplemented",
-                                );
-                                *evals = PointAndEval::new(old_point, point_and_eval.eval);
+            izip!(&node.preds, input_claim.point_and_evals).for_each(
+                |(pred_type, point_and_eval)| {
+                    match pred_type {
+                        PredType::Source => {
+                            // TODO: collect `(proof.point.clone(), *eval)` as `TargetEvaluations`
+                            // for later PCS open?
+                        }
+                        PredType::PredWire(pred_out) | PredType::PredWireDup(pred_out) => {
+                            let point = match pred_type {
+                                PredType::PredWire(_) => point_and_eval.point.clone(),
+                                PredType::PredWireDup(out) => {
+                                    let node_id = match out {
+                                        NodeOutputType::OutputLayer(id) => *id,
+                                        NodeOutputType::WireOut(id, _) => *id,
+                                    };
+                                    // Suppose the new point is
+                                    // [single_instance_slice ||
+                                    // new_instance_index_slice]. The old point
+                                    // is [single_instance_slices ||
+                                    // new_instance_index_slices[(new_instance_num_vars
+                                    // - old_instance_num_vars)..]]
+                                    let old_instance_num_vars = aux_info.instance_num_vars[node_id];
+                                    let num_vars =
+                                        point_and_eval.point.len() - new_instance_num_vars;
+                                    [
+                                        point_and_eval.point[..num_vars].to_vec(),
+                                        point_and_eval.point[num_vars
+                                            + (new_instance_num_vars - old_instance_num_vars)..]
+                                            .to_vec(),
+                                    ]
+                                    .concat()
+                                }
+                                _ => unreachable!(),
+                            };
+                            match pred_out {
+                                NodeOutputType::OutputLayer(id) => output_evals[*id]
+                                    .push(PointAndEval::new_from_ref(&point, &point_and_eval.eval)),
+                                NodeOutputType::WireOut(id, wire_id) => {
+                                    let evals = &mut wit_out_evals[*id][*wire_id as usize];
+                                    assert!(
+                                        evals.point.is_empty() && evals.eval.is_zero_vartime(),
+                                        "unimplemented",
+                                    );
+                                    *evals = PointAndEval::new(point, point_and_eval.eval);
+                                }
                             }
                         }
                     }
-                }
-            });
+                },
+            );
         }
 
         Ok(())

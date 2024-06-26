@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -12,8 +11,9 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::constants::AddSubConstants,
 };
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -161,56 +161,24 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
 #[cfg(test)]
 mod test {
     use ark_std::test_rng;
-    use core::ops::Range;
     use ff::Field;
     use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
-    use simple_frontend::structs::CellId;
-    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
-    use singer_utils::structs::TSUInt;
-    use std::collections::BTreeMap;
-    use std::time::Instant;
+    use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
+    use std::{collections::BTreeMap, time::Instant};
     use transcript::Transcript;
 
-    use crate::instructions::{
-        ChipChallenges, DupInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
+    use crate::{
+        instructions::{
+            ChipChallenges, DupInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
+        },
+        scheme::GKRGraphProverState,
+        test::{get_uint_params, test_opcode_circuit},
+        utils::u64vec,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
-    use crate::scheme::GKRGraphProverState;
-    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
-
-    impl<const N: usize> DupInstruction<N> {
-        #[inline]
-        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
-            let mut map = BTreeMap::new();
-            map.insert("phase0_pc".to_string(), Self::phase0_pc());
-            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
-            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
-            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
-            map.insert("phase0_clk".to_string(), Self::phase0_clk());
-            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
-            map.insert(
-                "phase0_stack_ts_add".to_string(),
-                Self::phase0_stack_ts_add(),
-            );
-            map.insert(
-                "phase0_stack_values".to_string(),
-                Self::phase0_stack_values(),
-            );
-            map.insert(
-                "phase0_old_stack_ts".to_string(),
-                Self::phase0_old_stack_ts(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_lt".to_string(),
-                Self::phase0_old_stack_ts_lt(),
-            );
-
-            map
-        }
-    }
 
     #[test]
     fn test_dup1_construct_circuit() {
@@ -247,7 +215,8 @@ mod test {
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
             vec![
-                Goldilocks::from(3u64), // first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
+                Goldilocks::from(3u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
+                                         * range values, stack_ts + 1 = 4 */
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
@@ -272,7 +241,7 @@ mod test {
             vec![Goldilocks::from(1u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt".to_string(),
             vec![

@@ -5,7 +5,6 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -14,7 +13,9 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
+    uint::constants::AddSubConstants,
 };
+use std::collections::BTreeMap;
 
 use crate::error::ZKVMError;
 
@@ -125,48 +126,26 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
 
 #[cfg(test)]
 mod test {
-    use crate::instructions::{ChipChallenges, Instruction, JumpInstruction};
-    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
+    use crate::{
+        instructions::{ChipChallenges, Instruction, JumpInstruction},
+        test::{get_uint_params, test_opcode_circuit},
+        utils::u64vec,
+    };
     use ark_std::test_rng;
-    use core::ops::Range;
     use ff::Field;
     use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
-    use simple_frontend::structs::CellId;
-    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
-    use singer_utils::structs::TSUInt;
-    use std::collections::BTreeMap;
-    use std::time::Instant;
+    use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
+    use std::{collections::BTreeMap, time::Instant};
     use transcript::Transcript;
 
-    use crate::instructions::{InstructionGraph, SingerCircuitBuilder};
-    use crate::scheme::GKRGraphProverState;
-    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
-
-    impl JumpInstruction {
-        #[inline]
-        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
-            let mut map = BTreeMap::new();
-            map.insert("phase0_pc".to_string(), Self::phase0_pc());
-            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
-            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
-            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
-            map.insert("phase0_clk".to_string(), Self::phase0_clk());
-            map.insert("phase0_next_pc".to_string(), Self::phase0_next_pc());
-            map.insert(
-                "phase0_old_stack_ts".to_string(),
-                Self::phase0_old_stack_ts(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_lt".to_string(),
-                Self::phase0_old_stack_ts_lt(),
-            );
-
-            map
-        }
-    }
+    use crate::{
+        instructions::{InstructionGraph, SingerCircuitBuilder},
+        scheme::GKRGraphProverState,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
+    };
 
     #[test]
     fn test_jump_construct_circuit() {
@@ -205,7 +184,7 @@ mod test {
             vec![Goldilocks::from(1u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt".to_string(),
             vec![

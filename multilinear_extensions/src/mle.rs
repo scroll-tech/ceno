@@ -8,7 +8,6 @@ use ff_ext::ExtensionField;
 use rayon::iter::IntoParallelRefIterator;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "parallel")]
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 #[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
@@ -68,12 +67,14 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         }
     }
 
-    /// Identical to [`from_evaluations_slice`], with and exception that evaluation vector is in extension field
+    /// Identical to [`from_evaluations_slice`], with and exception that evaluation vector is in
+    /// extension field
     pub fn from_evaluations_ext_slice(num_vars: usize, evaluations: &[E]) -> Self {
         Self::from_evaluations_ext_vec(num_vars, evaluations.to_vec())
     }
 
-    /// Identical to [`from_evaluations_vec`], with and exception that evaluation vector is in extension field
+    /// Identical to [`from_evaluations_vec`], with and exception that evaluation vector is in
+    /// extension field
     pub fn from_evaluations_ext_vec(num_vars: usize, evaluations: Vec<E>) -> Self {
         // assert that the number of variables matches the size of evaluations
         // TODO: return error.
@@ -146,7 +147,8 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         let nv = self.num_vars;
         // evaluate single variable of partial point from left to right
         for (i, point) in partial_point.iter().enumerate() {
-            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
+            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,
+            // b2,..bt, 1] in parallel
             match &mut self.evaluations {
                 FieldType::Base(evaluations) => {
                     let evaluations_ext = evaluations
@@ -443,7 +445,8 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         // evaluate single variable of partial point from left to right
         for (i, point) in partial_point.iter().enumerate() {
             let max_log2_size = nv - i;
-            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
+            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,
+            // b2,..bt, 1] in parallel
             match &mut self.evaluations {
                 FieldType::Base(evaluations) => {
                     let evaluations_ext = evaluations

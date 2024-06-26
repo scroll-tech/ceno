@@ -11,7 +11,7 @@ use singer_utils::{
     register_witness,
     structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
 };
-use std::{mem, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{
     component::{

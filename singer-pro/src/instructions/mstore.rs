@@ -12,7 +12,7 @@ use singer_utils::{
     structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{mem, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{
     component::{

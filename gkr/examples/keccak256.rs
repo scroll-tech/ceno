@@ -36,8 +36,7 @@ fn main() {
 
         #[cfg(feature = "non_pow2_rayon_thread")]
         {
-            use sumcheck::local_thread_pool::create_local_pool_once;
-            use sumcheck::util::ceil_log2;
+            use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
             max_thread_id = 1 << ceil_log2(max_thread_id);
             create_local_pool_once(max_thread_id, true);
         }

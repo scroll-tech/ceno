@@ -15,7 +15,7 @@ use singer_utils::{
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{mem, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 
@@ -378,7 +378,9 @@ impl MstoreAccessory {
 
 #[cfg(test)]
 mod test {
-    use crate::{instructions::InstructionGraph, scheme::GKRGraphProverState, SingerParams};
+    use crate::{
+        instructions::InstructionGraph, scheme::GKRGraphProverState, utils::u64vec, SingerParams,
+    };
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
@@ -397,50 +399,10 @@ mod test {
         CircuitWiresIn, SingerGraphBuilder,
     };
 
-    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use core::ops::Range;
+    use crate::test::{get_uint_params, test_opcode_circuit};
     use goldilocks::Goldilocks;
-    use simple_frontend::structs::CellId;
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
     use std::collections::BTreeMap;
-
-    impl MstoreInstruction {
-        #[inline]
-        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
-            let mut map = BTreeMap::new();
-
-            map.insert("phase0_pc".to_string(), Self::phase0_pc());
-            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
-            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
-            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
-            map.insert("phase0_clk".to_string(), Self::phase0_clk());
-            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
-            map.insert(
-                "phase0_memory_ts_add".to_string(),
-                Self::phase0_memory_ts_add(),
-            );
-            map.insert("phase0_offset".to_string(), Self::phase0_offset());
-            map.insert("phase0_mem_bytes".to_string(), Self::phase0_mem_bytes());
-            map.insert(
-                "phase0_old_stack_ts_offset".to_string(),
-                Self::phase0_old_stack_ts_offset(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_lt_offset".to_string(),
-                Self::phase0_old_stack_ts_lt_offset(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_value".to_string(),
-                Self::phase0_old_stack_ts_value(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_lt_value".to_string(),
-                Self::phase0_old_stack_ts_lt_value(),
-            );
-
-            map
-        }
-    }
 
     #[test]
     fn test_mstore_construct_circuit() {
@@ -491,7 +453,7 @@ mod test {
             vec![Goldilocks::from(2u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt_offset".to_string(),
             vec![
@@ -511,7 +473,7 @@ mod test {
             vec![Goldilocks::from(1u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt_value".to_string(),
             vec![

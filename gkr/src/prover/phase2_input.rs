@@ -16,6 +16,7 @@ use crate::{
     izip_parallizable,
     prover::SumcheckState,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
+    utils::MultilinearExtensionFromVectors,
 };
 
 // Prove the computation in the current layer for data parallel circuits.
@@ -65,7 +66,6 @@ impl<E: ExtensionField> IOPProverState<E> {
                     }
                     g[subset_wire_id] = eq_y_ry[new_wire_id];
                 }
-
                 (
                     {
                         let mut f = DenseMultilinearExtension::from_evaluations_vec(
@@ -133,8 +133,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             .partition(|(i, _)| i % 2 == 0);
         let eval_values_f = f_vec
             .into_iter()
-            .take(wits_in.len())
             .map(|(_, f)| f)
+            .take(wits_in.len())
             .collect_vec();
 
         self.to_next_phase_point_and_evals = izip!(paste_from_wit_in.iter(), eval_values_f.iter())
@@ -151,6 +151,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                 PointAndEval::new_from_ref(&point, &wit_in_eval)
             })
             .collect_vec();
+
         self.to_next_step_point = [&eval_point, hi_point].concat();
 
         end_timer!(timer);

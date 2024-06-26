@@ -14,7 +14,7 @@ use singer_utils::{
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
