@@ -28,11 +28,6 @@ pub struct AddSubConstants<UInt> {
 }
 
 impl<const M: usize, const C: usize> AddSubConstants<UInt<M, C>> {
-    /// The size of the witness
-    pub const N_WITNESS_CELLS: usize = UInt::<M, C>::N_RANGE_CELLS + Self::N_CARRY_CELLS;
-
-    pub const N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS: usize = Self::N_CARRY_CELLS_NO_OVERFLOW;
-
     /// Number of cells required to track carry information for the addition operation.
     /// operand_0 =     a   b  c
     /// operand_1 =     e   f  g
@@ -52,13 +47,19 @@ impl<const M: usize, const C: usize> AddSubConstants<UInt<M, C>> {
     /// |Carry| = |Cells - 1|
     const N_CARRY_CELLS_NO_OVERFLOW: usize = Self::N_CARRY_CELLS - 1;
 
-    /// The number of `RANGE_CHIP_BIT_WIDTH` cells needed to represent the carry cells, assuming
-    /// no overflow.
-    pub const N_RANGE_CELLS_IN_CARRY_NO_OVERFLOW: usize =
-        Self::N_CARRY_CELLS_NO_OVERFLOW * UInt::<M, C>::N_RANGE_CELLS_PER_CELL;
+    /// The size of the witness
+    pub const N_WITNESS_CELLS: usize = UInt::<M, C>::N_RANGE_CELLS + Self::N_CARRY_CELLS;
 
     /// The size of the witness assuming carry has no overflow
     /// |Range_values| + |Carry - 1|
     pub const N_WITNESS_CELLS_NO_CARRY_OVERFLOW: usize =
         UInt::<M, C>::N_RANGE_CELLS + Self::N_CARRY_CELLS_NO_OVERFLOW;
+
+    pub const N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS: usize = Self::N_CARRY_CELLS_NO_OVERFLOW;
+
+    /// The number of `RANGE_CHIP_BIT_WIDTH` cells needed to represent the carry cells, assuming
+    /// no overflow.
+    pub const N_RANGE_CELLS_IN_CARRY_NO_OVERFLOW: usize =
+        Self::N_CARRY_CELLS_NO_OVERFLOW * UInt::<M, C>::N_RANGE_CELLS_PER_CELL;
+
 }
