@@ -1,6 +1,7 @@
 // TODO: rename and restructure
 
 use crate::chip_handler_new::rom_handler::ROMHandler;
+use crate::chip_handler_new::util::cell_to_mixed;
 use crate::constants::OpcodeType;
 use crate::structs::ROMType;
 use ark_std::iterable::Iterable;
@@ -22,7 +23,7 @@ impl BytecodeChip {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 ROMType::Bytecode as u64,
             ))],
-            pc.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(pc),
         ]
         .concat();
 
@@ -44,7 +45,7 @@ impl BytecodeChip {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 ROMType::Bytecode as u64,
             ))],
-            pc.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(pc),
         ]
         .concat();
         rom_handler.read_mixed(circuit_builder, &key, &[byte.into()]);

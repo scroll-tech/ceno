@@ -1,4 +1,5 @@
 use crate::chip_handler_new::oam_handler::OAMHandler;
+use crate::chip_handler_new::util::cell_to_mixed;
 use crate::structs::RAMType;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -20,8 +21,8 @@ impl StackChip {
             MixedCell::Constant(Ext::BaseField::from(RAMType::Stack as u64)),
             stack_top,
         ];
-        let stack_ts = stack_ts.iter().map(|&x| MixedCell::Cell(x)).collect_vec();
-        let values = values.iter().map(|&x| MixedCell::Cell(x)).collect_vec();
+        let stack_ts = cell_to_mixed(stack_ts);
+        let values = cell_to_mixed(values);
         oam_handler.write_mixed(circuit_builder, &stack_ts, &key, &values);
     }
 
@@ -38,8 +39,8 @@ impl StackChip {
             MixedCell::Constant(Ext::BaseField::from(RAMType::Stack as u64)),
             stack_top,
         ];
-        let stack_ts = stack_ts.iter().map(|&x| MixedCell::Cell(x)).collect_vec();
-        let values = values.iter().map(|&x| MixedCell::Cell(x)).collect_vec();
+        let stack_ts = cell_to_mixed(stack_ts);
+        let values = cell_to_mixed(values);
         oam_handler.read_mixed(circuit_builder, &stack_ts, &key, &values);
     }
 }

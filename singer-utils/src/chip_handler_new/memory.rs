@@ -1,4 +1,5 @@
 use crate::chip_handler_new::ram_handler::RAMHandler;
+use crate::chip_handler_new::util::cell_to_mixed;
 use crate::structs::RAMType;
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
@@ -23,11 +24,11 @@ impl MemoryChip {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 RAMType::Memory as u64,
             ))],
-            offset.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(offset),
         ]
         .concat();
-        let old_ts = old_ts.iter().map(|&x| x.into()).collect_vec();
-        let cur_ts = cur_ts.iter().map(|&x| x.into()).collect_vec();
+        let old_ts = cell_to_mixed(old_ts);
+        let cur_ts = cell_to_mixed(cur_ts);
         ram_handler.read_mixed(circuit_builder, &old_ts, &cur_ts, &key, &[byte.into()]);
     }
 
@@ -46,11 +47,11 @@ impl MemoryChip {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 RAMType::Memory as u64,
             ))],
-            offset.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(offset),
         ]
         .concat();
-        let old_ts = old_ts.iter().map(|&x| x.into()).collect_vec();
-        let cur_ts = cur_ts.iter().map(|&x| x.into()).collect_vec();
+        let old_ts = cell_to_mixed(old_ts);
+        let cur_ts = cell_to_mixed(cur_ts);
         ram_handler.write_mixed(
             circuit_builder,
             &old_ts,

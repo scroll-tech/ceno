@@ -1,4 +1,5 @@
 use crate::chip_handler_new::rom_handler::ROMHandler;
+use crate::chip_handler_new::util::cell_to_mixed;
 use crate::structs::ROMType;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -21,9 +22,7 @@ impl CalldataChip {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 ROMType::Calldata as u64,
             ))],
-            // TODO: should be able to implement a helper method on &[CellId]
-            //  to avoid this duplicated sequence
-            offset.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(offset),
         ]
         .concat();
         let data = data.iter().map(|&x| x.into()).collect_vec();

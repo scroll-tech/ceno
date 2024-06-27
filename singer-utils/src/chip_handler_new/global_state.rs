@@ -1,5 +1,6 @@
 use crate::chip_handler_new::oam_handler::OAMHandler;
 use crate::chip_handler_new::ram_handler::RAMHandler;
+use crate::chip_handler_new::util::cell_to_mixed;
 use crate::structs::RAMType;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -25,10 +26,9 @@ impl GlobalStateChip {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 RAMType::GlobalState as u64,
             ))],
-            // TODO: implement helper method on &[CellId]
-            pc.iter().map(|&x| x.into()).collect_vec(),
-            stack_ts.iter().map(|&x| x.into()).collect_vec(),
-            memory_ts.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(pc),
+            cell_to_mixed(stack_ts),
+            cell_to_mixed(memory_ts),
             vec![stack_top.into(), clk.into()],
         ]
         .concat();
@@ -52,9 +52,9 @@ impl GlobalStateChip {
                 RAMType::GlobalState as u64,
             ))],
             // TODO: implement helper method on &[CellId]
-            pc.iter().map(|&x| x.into()).collect_vec(),
-            stack_ts.iter().map(|&x| x.into()).collect_vec(),
-            memory_ts.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(pc),
+            cell_to_mixed(stack_ts),
+            cell_to_mixed(memory_ts),
             vec![stack_top.into(), clk.into()],
         ]
         .concat();
