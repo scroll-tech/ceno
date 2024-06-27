@@ -15,7 +15,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         operand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(CellId, UInt<M, C>), UtilError> {
-        let borrow = Self::extract_borrow(witness);
+        let borrow = Self::extract_borrow_add_sub(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_diff = Self::sub_unsafe(circuit_builder, operand_0, operand_1, borrow)?;
 

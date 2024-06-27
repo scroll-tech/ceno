@@ -100,7 +100,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         witness: &[CellId],
     ) -> Result<PCUInt, UtilError> {
         // TODO: why unsafe here?
-        let carry = PCUInt::extract_unsafe_carry(witness);
+        let carry = PCUInt::extract_unsafe_carry_add_sub(witness);
         PCUInt::add_const_unsafe(
             circuit_builder,
             &pc,
