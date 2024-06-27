@@ -62,5 +62,5 @@ impl<const M: usize, const C: usize> AddSubConstants<UInt<M, C>> {
     // TODO: if guaranteed no overflow, then we don't need to range check the highest limb
     //  hence this can be (N_OPERANDS - 1) * N_RANGE_CELLS_PER_CELL
     //  update this once, range check logic doesn't assume all limbs
-    pub const N_RANGE_CELLS_IN_CARRY_NO_OVERFLOW: usize = UInt::<M, C>::N_RANGE_CELLS;
+    pub const N_RANGE_CELLS_NO_OVERFLOW: usize = UInt::<M, C>::N_RANGE_CELLS;
 }
