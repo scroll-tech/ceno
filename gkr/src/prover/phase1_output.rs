@@ -21,7 +21,8 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
 // Prove the items copied from the output layer to the output witness for data parallel circuits.
 // \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
-//     = \sum_y( \sum_j( \alpha^j (eq or copy_to[j] or assert_subset_eq)(ry_j, y) \sum_t( eq(rt_j, t) * layers[i](t || y) ) ) )
+//     = \sum_y( \sum_j( \alpha^j (eq or copy_to[j] or assert_subset_eq)(ry_j, y) \sum_t( eq(rt_j,
+// t) * layers[i](t || y) ) ) )
 impl<E: ExtensionField> IOPProverState<E> {
     /// Sumcheck 1: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
     ///     sigma = \sum_j( \alpha^j * wit_out_eval[j](rt_j || ry_j) )
@@ -134,8 +135,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         // sumcheck: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
         let mut virtual_poly_1 = VirtualPolynomial::new(lo_num_vars);
         for (f1_j, g1_j) in f1.into_iter().zip(g1.into_iter()) {
-            let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::BaseField::ONE);
-            tmp.mul_by_mle(g1_j, E::BaseField::ONE);
+            let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::ONE);
+            tmp.mul_by_mle(g1_j, E::ONE);
             virtual_poly_1.merge(&tmp);
         }
 
@@ -204,8 +205,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             });
         let g2 = DenseMultilinearExtension::from_evaluations_ext_vec(hi_num_vars, g2);
         // sumcheck: sigma = \sum_t( g2(t) * f2(t) )
-        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::BaseField::ONE);
-        virtual_poly_2.mul_by_mle(g2.into(), E::BaseField::ONE);
+        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::ONE);
+        virtual_poly_2.mul_by_mle(g2.into(), E::ONE);
 
         let (sumcheck_proof_2, prover_state) =
             SumcheckState::prove_parallel(virtual_poly_2, transcript);

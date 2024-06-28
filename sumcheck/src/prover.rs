@@ -3,13 +3,14 @@ use std::{mem, sync::Arc};
 use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
-use multilinear_extensions::{commutative_op_mle_pair, op_mle, virtual_poly::VirtualPolynomial};
+use multilinear_extensions::{
+    commutative_op_mle_pair, op_mle, op_mle_3, op_mle_4, virtual_poly::VirtualPolynomial,
+};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
 };
-use transcript::Challenge;
-use transcript::{Transcript, TranscriptSyncronized};
+use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
 #[cfg(feature = "non_pow2_rayon_thread")]
 use crate::local_thread_pool::{create_local_pool_once, LOCAL_THREAD_POOL};
@@ -26,7 +27,8 @@ use crate::{
 impl<E: ExtensionField> IOPProverState<E> {
     /// Given a virtual polynomial, generate an IOP proof.
     /// multi-threads model follow https://arxiv.org/pdf/2210.00264#page=8 "distributed sumcheck"
-    /// This is experiment features. It's preferable that we move parallel level up more to "bould_poly" so it can be more isolation
+    /// This is experiment features. It's preferable that we move parallel level up more to
+    /// "bould_poly" so it can be more isolation
     #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys")]
     pub fn prove_batch_polys(
         max_thread_id: usize,
@@ -72,7 +74,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             })
             .collect::<Vec<_>>();
 
-        // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last work thread
+        // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last work
+        // thread
         for thread_id in 0..(max_thread_id - 1) {
             let mut prover_state = Self::prover_init_with_extrapolation_aux(
                 mem::take(&mut polys[thread_id]),
@@ -357,8 +360,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                 self.poly
                     .flattened_ml_extensions
                     .iter_mut()
-                    // benchmark result indicate make_mut achieve better performange than get_mut, which can be +5% overhead
-                    // rust docs doen't explain the reason
+                    // benchmark result indicate make_mut achieve better performange than get_mut,
+                    // which can be +5% overhead rust docs doen't explain the
+                    // reason
                     .map(Arc::make_mut)
                     .for_each(|f| {
                         f.fix_variables_in_place(&[r.elements]);
@@ -417,7 +421,73 @@ impl<E: ExtensionField> IOPProverState<E> {
                         )
                         .to_vec()
                     }
-                    _ => unimplemented!("do not support degree > 2"),
+                    3 => {
+                        let (f1, f2, f3) = (
+                            &self.poly.flattened_ml_extensions[products[0]],
+                            &self.poly.flattened_ml_extensions[products[1]],
+                            &self.poly.flattened_ml_extensions[products[2]],
+                        );
+                        op_mle_3!(|f1, f2, f3| (0..f1.len())
+                            .into_iter()
+                            .step_by(2)
+                            .map(|b| {
+                                // f = c x + d
+                                let c1 = f1[b + 1] - f1[b];
+                                let c2 = f2[b + 1] - f2[b];
+                                let c3 = f3[b + 1] - f3[b];
+                                AdditiveArray([
+                                    f1[b] * f2[b] * f3[b],
+                                    f1[b + 1] * f2[b + 1] * f3[b + 1],
+                                    (c1 + f1[b + 1]) * (c2 + f2[b + 1]) * (c3 + f3[b + 1]),
+                                    (c1 + c1 + f1[b + 1])
+                                        * (c2 + c2 + f2[b + 1])
+                                        * (c3 + c3 + f3[b + 1]),
+                                ])
+                            })
+                            .sum::<AdditiveArray<_, 4>>())
+                        .to_vec()
+                    }
+                    4 => {
+                        let (f1, f2, f3, f4) = (
+                            &self.poly.flattened_ml_extensions[products[0]],
+                            &self.poly.flattened_ml_extensions[products[1]],
+                            &self.poly.flattened_ml_extensions[products[2]],
+                            &self.poly.flattened_ml_extensions[products[3]],
+                        );
+                        op_mle_4!(|f1, f2, f3, f4| (0..f1.len())
+                            .into_iter()
+                            .step_by(2)
+                            .map(|b| {
+                                // f = c x + d
+                                let c1 = f1[b + 1] - f1[b];
+                                let c2 = f2[b + 1] - f2[b];
+                                let c3 = f3[b + 1] - f3[b];
+                                let c4 = f4[b + 1] - f4[b];
+                                let double_c1 = c1 + c1;
+                                let double_c2 = c2 + c2;
+                                let double_c3 = c3 + c3;
+                                let double_c4 = c4 + c4;
+                                AdditiveArray([
+                                    f1[b] * f2[b] * f3[b] * f4[b],
+                                    f1[b + 1] * f2[b + 1] * f3[b + 1] * f4[b + 1],
+                                    (c1 + f1[b + 1])
+                                        * (c2 + f2[b + 1])
+                                        * (c3 + f3[b + 1])
+                                        * (c4 + f4[b + 1]),
+                                    (double_c1 + f1[b + 1])
+                                        * (double_c2 + f2[b + 1])
+                                        * (double_c3 + f3[b + 1])
+                                        * (double_c4 + f4[b + 1]),
+                                    (c1 + double_c1 + f1[b + 1])
+                                        * (c2 + double_c2 + f2[b + 1])
+                                        * (c3 + double_c3 + f3[b + 1])
+                                        * (c4 + double_c4 + f4[b + 1]),
+                                ])
+                            })
+                            .sum::<AdditiveArray<_, 5>>())
+                        .to_vec()
+                    }
+                    _ => unreachable!(),
                 };
                 exit_span!(span);
                 sum.iter_mut().for_each(|sum| *sum *= coefficient);
@@ -623,8 +693,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                 self.poly
                     .flattened_ml_extensions
                     .par_iter_mut()
-                    // benchmark result indicate make_mut achieve better performange than get_mut, which can be +5% overhead
-                    // rust docs doen't explain the reason
+                    // benchmark result indicate make_mut achieve better performange than get_mut,
+                    // which can be +5% overhead rust docs doen't explain the
+                    // reason
                     .map(Arc::make_mut)
                     .for_each(|f| {
                         f.fix_variables_in_place_parallel(&[r.elements]);

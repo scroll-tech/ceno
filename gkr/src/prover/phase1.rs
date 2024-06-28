@@ -124,8 +124,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         let virtual_poly_1 = tracing_span!("virtual_poly").in_scope(|| {
             let mut virtual_poly_1 = VirtualPolynomial::new(lo_num_vars);
             for (f1_j, g1_j) in f1.into_iter().zip(g1.into_iter()) {
-                let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::BaseField::ONE);
-                tmp.mul_by_mle(g1_j, E::BaseField::ONE);
+                let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::ONE);
+                tmp.mul_by_mle(g1_j, E::ONE);
                 virtual_poly_1.merge(&tmp);
             }
             virtual_poly_1
@@ -205,7 +205,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         #[cfg(not(feature = "parallel"))]
         let g2 = DenseMultilinearExtension::from_evaluations_ext_vec(hi_num_vars, g2);
 
-        // When rayon is used, the `fold` operation results in a iterator of `Vec<F>` rather than a single `Vec<F>`. In this case, we simply need to sum them.
+        // When rayon is used, the `fold` operation results in a iterator of `Vec<F>` rather than a
+        // single `Vec<F>`. In this case, we simply need to sum them.
         #[cfg(feature = "parallel")]
         let g2 = DenseMultilinearExtension::from_evaluations_ext_vec(
             hi_num_vars,
@@ -220,8 +221,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         exit_span!(span);
 
         // sumcheck: sigma = \sum_t( \sum_j( g2^{(j)}(t) ) ) * f2(t)
-        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::BaseField::ONE);
-        virtual_poly_2.mul_by_mle(g2.into(), E::BaseField::ONE);
+        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::ONE);
+        virtual_poly_2.mul_by_mle(g2.into(), E::ONE);
 
         let (sumcheck_proof_2, prover_state) =
             SumcheckState::prove_parallel(virtual_poly_2, transcript);

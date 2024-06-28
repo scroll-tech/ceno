@@ -41,7 +41,7 @@ fn test_virtual_polynomial_mul_by_mle() {
             let (a, _a_sum) = VirtualPolynomial::<E>::random(nv, (2, 3), num_products, &mut rng);
             let (b, _b_sum) = DenseMultilinearExtension::<E>::random_mle_list(nv, 1, &mut rng);
             let b_mle = b[0].clone();
-            let coeff = <E as ExtensionField>::BaseField::random(&mut rng);
+            let coeff = E::random(&mut rng);
             let b_vp = VirtualPolynomial::new_from_mle(b_mle.clone(), coeff);
 
             let mut c = a.clone();

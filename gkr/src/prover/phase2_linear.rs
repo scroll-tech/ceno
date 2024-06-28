@@ -108,8 +108,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         // sumcheck: sigma = \sum_{x1} f1(x1) * g1(x1) + \sum_j f1'_j(x1) * g1'_j(x1)
         let mut virtual_poly_1 = VirtualPolynomial::new(lo_in_num_vars);
         for (f1_j, g1_j) in izip!(f1_vec.into_iter(), g1_vec.into_iter()) {
-            let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::BaseField::ONE);
-            tmp.mul_by_mle(g1_j, E::BaseField::ONE);
+            let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::ONE);
+            tmp.mul_by_mle(g1_j, E::ONE);
             virtual_poly_1.merge(&tmp);
         }
 

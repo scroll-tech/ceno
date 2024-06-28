@@ -1,18 +1,17 @@
-use std::cmp::max;
-use std::mem;
-use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use std::{cmp::max, collections::HashMap, marker::PhantomData, mem, sync::Arc};
 
-use crate::mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension};
-use crate::util::bit_decompose;
-use ark_std::rand::Rng;
-use ark_std::{end_timer, start_timer};
-use ff::Field;
-use ff::PrimeField;
+use crate::{
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
+    util::bit_decompose,
+};
+use ark_std::{end_timer, rand::Rng, start_timer};
+use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
-use rayon::iter::IntoParallelIterator;
-use rayon::iter::IntoParallelRefIterator;
-use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
-use rayon::slice::ParallelSliceMut;
+use rayon::{
+    iter::{IntoParallelIterator, IntoParallelRefIterator},
+    prelude::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use serde::{Deserialize, Serialize};
 
 #[rustfmt::skip]
@@ -47,7 +46,7 @@ pub struct VirtualPolynomial<E: ExtensionField> {
     /// Aux information about the multilinear polynomial
     pub aux_info: VPAuxInfo<E>,
     /// list of reference to products (as usize) of multilinear extension
-    pub products: Vec<(E::BaseField, Vec<usize>)>,
+    pub products: Vec<(E, Vec<usize>)>,
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
     pub flattened_ml_extensions: Vec<ArcDenseMultilinearExtension<E>>,
@@ -89,7 +88,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     }
 
     /// Creates an new virtual polynomial from a MLE and its coefficient.
-    pub fn new_from_mle(mle: ArcDenseMultilinearExtension<E>, coefficient: E::BaseField) -> Self {
+    pub fn new_from_mle(mle: ArcDenseMultilinearExtension<E>, coefficient: E) -> Self {
         let mle_ptr: usize = Arc::as_ptr(&mle) as usize;
         let mut hm = HashMap::new();
         hm.insert(mle_ptr, 0);
@@ -114,11 +113,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
     /// `coefficient`.
-    pub fn add_mle_list(
-        &mut self,
-        mle_list: Vec<ArcDenseMultilinearExtension<E>>,
-        coefficient: E::BaseField,
-    ) {
+    pub fn add_mle_list(&mut self, mle_list: Vec<ArcDenseMultilinearExtension<E>>, coefficient: E) {
         let mle_list: Vec<ArcDenseMultilinearExtension<E>> = mle_list.into_iter().collect();
         let mut indexed_product = Vec::with_capacity(mle_list.len());
 
@@ -165,7 +160,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     /// - multiple each product by MLE and its coefficient.
     /// Returns an error if the MLE has a different `num_vars` from self.
     #[tracing::instrument(skip_all, name = "mul_by_mle")]
-    pub fn mul_by_mle(&mut self, mle: ArcDenseMultilinearExtension<E>, coefficient: E::BaseField) {
+    pub fn mul_by_mle(&mut self, mle: ArcDenseMultilinearExtension<E>, coefficient: E) {
         let start = start_timer!(|| "mul by mle");
 
         assert_eq!(
@@ -244,7 +239,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
                 rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
             let (product, product_sum) =
                 DenseMultilinearExtension::random_mle_list(nv, num_multiplicands, rng);
-            let coefficient = E::BaseField::random(&mut rng);
+            let coefficient = E::random(&mut rng);
             poly.add_mle_list(product, coefficient);
             sum += product_sum * coefficient;
         }
@@ -267,7 +262,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
                 rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
             let product =
                 DenseMultilinearExtension::random_zero_mle_list(nv, num_multiplicands, rng);
-            let coefficient = E::BaseField::random(&mut rng);
+            let coefficient = E::random(&mut rng);
             poly.add_mle_list(product, coefficient);
         }
 
@@ -293,7 +288,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
 
         let eq_x_r = build_eq_x_r(r);
         let mut res = self.clone();
-        res.mul_by_mle(eq_x_r, E::BaseField::ONE);
+        res.mul_by_mle(eq_x_r, E::ONE);
 
         end_timer!(start);
         res

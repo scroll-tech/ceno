@@ -34,8 +34,8 @@ fn prepare_input<E: ExtensionField>(
     let g1: Arc<DenseMultilinearExtension<E>> =
         DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
 
-    let mut virtual_poly_1 = VirtualPolynomial::new_from_mle(f1.clone(), E::BaseField::ONE);
-    virtual_poly_1.mul_by_mle(g1.clone(), <E as ff_ext::ExtensionField>::BaseField::ONE);
+    let mut virtual_poly_1 = VirtualPolynomial::new_from_mle(f1.clone(), E::ONE);
+    virtual_poly_1.mul_by_mle(g1.clone(), E::ONE);
 
     let mut virtual_poly_f1: Vec<VirtualPolynomial<E>> = match &f1.evaluations {
         multilinear_extensions::mle::FieldType::Base(evaluations) => evaluations
@@ -44,7 +44,7 @@ fn prepare_input<E: ExtensionField>(
                 DenseMultilinearExtension::<E>::from_evaluations_vec(nv - size_log2, chunk.to_vec())
                     .into()
             })
-            .map(|mle| VirtualPolynomial::new_from_mle(mle, E::BaseField::ONE))
+            .map(|mle| VirtualPolynomial::new_from_mle(mle, E::ONE))
             .collect_vec(),
         _ => unreachable!(),
     };
@@ -70,7 +70,7 @@ fn prepare_input<E: ExtensionField>(
     virtual_poly_f1
         .iter_mut()
         .zip(poly_g1.iter())
-        .for_each(|(f1, g1)| f1.mul_by_mle(g1.clone(), E::BaseField::ONE));
+        .for_each(|(f1, g1)| f1.mul_by_mle(g1.clone(), E::ONE));
     (
         asserted_sum,
         virtual_poly_1,

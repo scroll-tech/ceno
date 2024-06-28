@@ -45,8 +45,8 @@ macro_rules! prepare_stepx_g_fn {
 // The number of terms depends on the gate.
 // Here is an example of degree 3:
 // layers[i](rt || ry) = \sum_{s1}( \sum_{s2}( \sum_{s3}( \sum_{x1}( \sum_{x2}( \sum_{x3}(
-//     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-// ) ) ) ) ) ) + sum_s1( sum_s2( sum_{x1}( sum_{x2}(
+//     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2)
+// * layers[i + 1](s3 || x3) ) ) ) ) ) ) + sum_s1( sum_s2( sum_{x1}( sum_{x2}(
 //     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2)
 // ) ) ) ) + \sum_{s1}( \sum_{x1}(
 //     eq(rt, s1) * add(ry, x1) * layers[i + 1](s1 || x1)
@@ -54,12 +54,12 @@ macro_rules! prepare_stepx_g_fn {
 //      \sum_j eq(rt, s1) paste_from[j](ry, x1) * subset[j][i](s1 || x1)
 // ) ) + add_const(ry)
 impl<E: ExtensionField> IOPProverState<E> {
-    /// Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
-    ///     sigma = layers[i](rt || ry) - add_const(ry),
+    /// Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) *
+    /// g1'_j(s1 || x1)     sigma = layers[i](rt || ry) - add_const(ry),
     ///     f1(s1 || x1) = layers[i + 1](s1 || x1)
     ///     g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
-    ///         eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-    ///     ) ) ) ) + \sum_{s2}( \sum_{x2}(
+    ///         eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i +
+    /// 1](s3 || x3)     ) ) ) ) + \sum_{s2}( \sum_{x2}(
     ///         eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
     ///     ) ) + eq(rt, s1) * add(ry, x1)
     ///     f1'^{(j)}(s1 || x1) = subset[j][i](s1 || x1)
@@ -105,8 +105,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         let f1 = phase2_next_layer_polys_v2.clone();
 
         // g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
-        //     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-        // ) ) ) ) + \sum_{s2}( \sum_{x2}(
+        //     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i +
+        // 1](s3 || x3) ) ) ) ) + \sum_{s2}( \sum_{x2}(
         //     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
         // ) ) + eq(rt, s1) * add(ry, x1)
         let mut g1 = vec![E::ZERO; 1 << f1.num_vars];
@@ -176,11 +176,12 @@ impl<E: ExtensionField> IOPProverState<E> {
             Vec<ArcDenseMultilinearExtension<E>>,
         ) = ([vec![f1], f1_j].concat(), [vec![g1], g1_j].concat());
 
-        // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
+        // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) *
+        // g1'_j(s1 || x1)
         let mut virtual_poly_1 = VirtualPolynomial::new(f[0].num_vars);
         for (f, g) in f.into_iter().zip(g.into_iter()) {
-            let mut tmp = VirtualPolynomial::new_from_mle(f, E::BaseField::ONE);
-            tmp.mul_by_mle(g, E::BaseField::ONE);
+            let mut tmp = VirtualPolynomial::new_from_mle(f, E::ONE);
+            tmp.mul_by_mle(g, E::ONE);
             virtual_poly_1.merge(&tmp);
         }
         end_timer!(timer);
@@ -297,8 +298,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         end_timer!(timer);
 
         // sumcheck: sigma = \sum_{s2 || x2} f2(s2 || x2) * g2(s2 || x2)
-        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::BaseField::ONE);
-        virtual_poly_2.mul_by_mle(g2, E::BaseField::ONE);
+        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::ONE);
+        virtual_poly_2.mul_by_mle(g2, E::ONE);
         virtual_poly_2
     }
 
@@ -381,8 +382,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             DenseMultilinearExtension::from_evaluations_ext_vec(f3.num_vars, g3).into()
         };
 
-        let mut virtual_poly_3 = VirtualPolynomial::new_from_mle(f3, E::BaseField::ONE);
-        virtual_poly_3.mul_by_mle(g3, E::BaseField::ONE);
+        let mut virtual_poly_3 = VirtualPolynomial::new_from_mle(f3, E::ONE);
+        virtual_poly_3.mul_by_mle(g3, E::ONE);
 
         exit_span!(span);
         end_timer!(timer);

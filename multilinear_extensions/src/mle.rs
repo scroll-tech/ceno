@@ -68,12 +68,14 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         }
     }
 
-    /// Identical to [`from_evaluations_slice`], with and exception that evaluation vector is in extension field
+    /// Identical to [`from_evaluations_slice`], with and exception that evaluation vector is in
+    /// extension field
     pub fn from_evaluations_ext_slice(num_vars: usize, evaluations: &[E]) -> Self {
         Self::from_evaluations_ext_vec(num_vars, evaluations.to_vec())
     }
 
-    /// Identical to [`from_evaluations_vec`], with and exception that evaluation vector is in extension field
+    /// Identical to [`from_evaluations_vec`], with and exception that evaluation vector is in
+    /// extension field
     pub fn from_evaluations_ext_vec(num_vars: usize, evaluations: Vec<E>) -> Self {
         // assert that the number of variables matches the size of evaluations
         // TODO: return error.
@@ -146,7 +148,8 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         let nv = self.num_vars;
         // evaluate single variable of partial point from left to right
         for (i, point) in partial_point.iter().enumerate() {
-            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
+            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,
+            // b2,..bt, 1] in parallel
             match &mut self.evaluations {
                 FieldType::Base(evaluations) => {
                     let evaluations_ext = evaluations
@@ -393,6 +396,94 @@ macro_rules! commutative_op_mle_pair {
     };
 }
 
+#[macro_export]
+macro_rules! op_mle_3 {
+    (|$f1:ident, $f2:ident, $f3:ident| $op:expr) => {
+        match (&$f1.evaluations, &$f2.evaluations, &$f3.evaluations) {
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = f1;
+                let $f2 = f2;
+                let $f3 = f3;
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Ext(f3),
+            ) => {
+                let $f1 = f1;
+                let $f2 = f2;
+                let $f3 = f3;
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = f1;
+                let $f2 = f2;
+                let $f3 = f3;
+                $op
+            }
+            _ => unreachable!(),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! op_mle_4 {
+    (|$f1:ident, $f2:ident, $f3:ident, $f4:ident| $op:expr) => {
+        match (
+            &$f1.evaluations,
+            &$f2.evaluations,
+            &$f3.evaluations,
+            &$f4.evaluations,
+        ) {
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+                $crate::mle::FieldType::Base(f4),
+            ) => {
+                let $f1 = f1;
+                let $f2 = f2;
+                let $f3 = f3;
+                let $f4 = f4;
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Base(f3),
+                $crate::mle::FieldType::Base(f4),
+            ) => {
+                let $f1 = f1;
+                let $f2 = f2;
+                let $f3 = f3;
+                let $f4 = f4;
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Ext(f3),
+                $crate::mle::FieldType::Ext(f4),
+            ) => {
+                let $f1 = f1;
+                let $f2 = f2;
+                let $f3 = f3;
+                let $f4 = f4;
+                $op
+            }
+            _ => unreachable!(),
+        }
+    };
+}
 #[deprecated(note = "deprecated parallel version due to syncronizaion overhead")]
 impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// Reduce the number of variables of `self` by fixing the
@@ -443,7 +534,8 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         // evaluate single variable of partial point from left to right
         for (i, point) in partial_point.iter().enumerate() {
             let max_log2_size = nv - i;
-            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
+            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,
+            // b2,..bt, 1] in parallel
             match &mut self.evaluations {
                 FieldType::Base(evaluations) => {
                     let evaluations_ext = evaluations
