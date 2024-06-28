@@ -28,7 +28,7 @@ pub struct CalldataloadInstruction;
 register_witness!(
     CalldataloadInstruction,
     phase0 {
-        data => StackUInt::N_OPERAND_CELLS
+        data => StackUInt::N_OPRAND_CELLS
     }
 );
 
@@ -41,8 +41,8 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         // From witness
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
-        let (offset_id, offset) = circuit_builder.create_witness_in(UInt64::N_OPERAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (offset_id, offset) = circuit_builder.create_witness_in(UInt64::N_OPRAND_CELLS);
 
         let mut rom_handler = ROMHandler::new(&challenges);
 
@@ -54,7 +54,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         let (data_copy_id, data_copy) = circuit_builder.create_witness_out(data.len());
         add_assign_each_cell(&mut circuit_builder, &data_copy, &data);
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips

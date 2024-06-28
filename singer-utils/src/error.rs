@@ -4,8 +4,7 @@ use gkr_graph::error::GKRGraphError;
 pub enum UtilError {
     ChipError,
     ChipHandlerError,
-    // TODO: consider splitting this into smaller errors
-    UIntError(String),
+    UIntError,
     GKRGraphError(GKRGraphError),
 }
 

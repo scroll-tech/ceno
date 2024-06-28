@@ -4,13 +4,13 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{MemoryChipOperations, ROMOperations, RangeChipOperations},
     chips::{IntoEnumIterator, SingerChipBuilder},
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
     structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::{UIntAddSub, UIntCmp},
 };
 use std::{mem, sync::Arc};
 
@@ -111,7 +111,7 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
 register_witness!(
     MstoreInstruction,
     phase0 {
-        memory_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        memory_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
         mem_bytes => EVM_STACK_BYTE_WIDTH
     }
 );
@@ -125,10 +125,10 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
-        let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
         let (mem_value_id, mem_values) =
-            circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+            circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
         let mut rom_handler = ROMHandler::new(&challenges);
 
@@ -150,8 +150,8 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         let mem_values = StackUInt::try_from(mem_values.as_slice())?;
         let mem_values_from_bytes =
-            StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
-        StackUInt::assert_eq(&mut circuit_builder, &mem_values_from_bytes, &mem_values)?;
+            StackUInt::from_bytes_big_endien(&mut circuit_builder, &mem_bytes)?;
+        UIntCmp::<StackUInt>::assert_eq(&mut circuit_builder, &mem_values_from_bytes, &mem_values)?;
 
         // To chips.
         let rom_id = rom_handler.finalize(&mut circuit_builder);
@@ -211,17 +211,17 @@ pub struct MstoreAccessory;
 register_witness!(
     MstoreAccessory,
     pred_dup {
-        memory_ts => TSUInt::N_OPERAND_CELLS,
-        offset => StackUInt::N_OPERAND_CELLS
+        memory_ts => TSUInt::N_OPRAND_CELLS,
+        offset => StackUInt::N_OPRAND_CELLS
     },
     pred_ooo {
         mem_byte => 1
     },
     phase0 {
-        old_memory_ts => TSUInt::N_OPERAND_CELLS,
-        old_memory_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_memory_ts => TSUInt::N_OPRAND_CELLS,
+        old_memory_ts_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
-        offset_add_delta => AddSubConstants::<StackUInt>::N_WITNESS_CELLS,
+        offset_add_delta => UIntAddSub::<StackUInt>::N_WITNESS_CELLS,
         prev_mem_byte => 1
     }
 );
@@ -250,14 +250,14 @@ impl MstoreAccessory {
         let offset = StackUInt::try_from(&pred_dup[Self::pred_dup_offset()])?;
         let offset_add_delta = &phase0[Self::phase0_offset_add_delta()];
         let delta = circuit_builder.create_counter_in(0)[0];
-        let offset_plus_delta = StackUInt::add_cell(
+        let offset_plus_delta = UIntAddSub::<StackUInt>::add_small(
             &mut circuit_builder,
             &mut rom_handler,
             &offset,
             delta,
             offset_add_delta,
         )?;
-        TSUInt::assert_lt(
+        UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_memory_ts,

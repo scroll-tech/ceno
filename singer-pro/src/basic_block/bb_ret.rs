@@ -46,7 +46,7 @@ impl BasicBlockReturn {
         let n_stack_items = stack_top_offsets.len();
 
         // From BB Start
-        let (stack_ts_id, stack_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
+        let (stack_ts_id, stack_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
         let (stack_top_id, stack_top) = circuit_builder.create_witness_in(1);
         let (clk_id, _) = circuit_builder.create_witness_in(1);
 
@@ -62,7 +62,7 @@ impl BasicBlockReturn {
         rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // From predesessor instruction
-        let (memory_ts_id, _) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
+        let (memory_ts_id, _) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
         let stack_operand_ids = stack_top_offsets
             .iter()
             .map(|offset| {
@@ -113,8 +113,8 @@ register_witness!(
     BBReturnRestMemLoad,
     phase0 {
         mem_byte => 1,
-        old_memory_ts => TSUInt::N_OPERAND_CELLS,
-        offset => StackUInt::N_OPERAND_CELLS
+        old_memory_ts => TSUInt::N_OPRAND_CELLS,
+        offset => StackUInt::N_OPRAND_CELLS
     }
 );
 
@@ -160,7 +160,7 @@ register_witness!(
     BBReturnRestMemStore,
     phase0 {
         mem_byte => 1,
-        offset => StackUInt::N_OPERAND_CELLS
+        offset => StackUInt::N_OPRAND_CELLS
     }
 );
 
@@ -176,7 +176,7 @@ impl BBReturnRestMemStore {
         let offset = &phase0[Self::phase0_offset()];
         let mem_byte = phase0[Self::phase0_mem_byte().start];
         // memory_ts is zero.
-        let memory_ts = circuit_builder.create_cells(StackUInt::N_OPERAND_CELLS);
+        let memory_ts = circuit_builder.create_cells(StackUInt::N_OPRAND_CELLS);
         ram_handler.oam_store(&mut circuit_builder, offset, &memory_ts, &[mem_byte]);
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
@@ -206,8 +206,8 @@ pub struct BBReturnRestStackPop;
 register_witness!(
     BBReturnRestStackPop,
     phase0 {
-        old_stack_ts => TSUInt::N_OPERAND_CELLS,
-        stack_values => StackUInt::N_OPERAND_CELLS
+        old_stack_ts => TSUInt::N_OPRAND_CELLS,
+        stack_values => StackUInt::N_OPRAND_CELLS
     }
 );
 

@@ -4,7 +4,6 @@ use gkr::structs::Circuit;
 use itertools::izip;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -13,6 +12,7 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::{UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 
@@ -29,23 +29,23 @@ impl<E: ExtensionField> InstructionGraph<E> for JumpiInstruction {
 register_witness!(
     JumpiInstruction,
     phase0 {
-        pc => PCUInt::N_OPERAND_CELLS ,
-        stack_ts => TSUInt::N_OPERAND_CELLS,
-        memory_ts => TSUInt::N_OPERAND_CELLS,
+        pc => PCUInt::N_OPRAND_CELLS ,
+        stack_ts => TSUInt::N_OPRAND_CELLS,
+        memory_ts => TSUInt::N_OPRAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        old_stack_ts_dest => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_dest_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
-        old_stack_ts_cond => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_cond_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_dest => TSUInt::N_OPRAND_CELLS,
+        old_stack_ts_dest_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_stack_ts_cond => TSUInt::N_OPRAND_CELLS,
+        old_stack_ts_cond_lt => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
-        dest_values => StackUInt::N_OPERAND_CELLS,
-        cond_values => StackUInt::N_OPERAND_CELLS,
-        cond_values_inv => StackUInt::N_OPERAND_CELLS,
+        dest_values => StackUInt::N_OPRAND_CELLS,
+        cond_values => StackUInt::N_OPRAND_CELLS,
+        cond_values_inv => StackUInt::N_OPRAND_CELLS,
         cond_non_zero_or_inv => 1,
 
-        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
         pc_plus_1_opcode => 1
     }
 );
@@ -87,7 +87,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         let dest_stack_addr = stack_top_expr.sub(E::BaseField::ONE);
 
         let old_stack_ts_dest = (&phase0[Self::phase0_old_stack_ts_dest()]).try_into()?;
-        TSUInt::assert_lt(
+        UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_dest,
@@ -104,7 +104,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         // Pop the condition from stack.
         let cond_values = &phase0[Self::phase0_cond_values()];
         let old_stack_ts_cond = (&phase0[Self::phase0_old_stack_ts_cond()]).try_into()?;
-        TSUInt::assert_lt(
+        UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_cond,
@@ -138,8 +138,8 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         let pc_add_1 = &phase0[Self::phase0_pc_add()];
         let pc_plus_1 = ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, pc_add_1)?;
         let pc_plus_1 = pc_plus_1.values();
-        let next_pc = circuit_builder.create_cells(PCUInt::N_OPERAND_CELLS);
-        for i in 0..PCUInt::N_OPERAND_CELLS {
+        let next_pc = circuit_builder.create_cells(PCUInt::N_OPRAND_CELLS);
+        for i in 0..PCUInt::N_OPRAND_CELLS {
             circuit_builder.select(next_pc[i], pc_plus_1[i], dest_values[i], cond_non_zero);
         }
 
