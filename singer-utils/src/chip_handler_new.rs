@@ -6,6 +6,7 @@ mod global_state;
 mod memory;
 mod oam_handler;
 mod ram_handler;
+mod range;
 mod rom_handler;
 mod stack;
 mod util;
