@@ -80,6 +80,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             Self::MAX_CELL_BIT_WIDTH,
             is_little_endian,
         )?;
+        debug_assert!(values.len() <= Self::N_OPERAND_CELLS);
         // TODO: is this safe, do we need to ensure that the padded cells are always 0?
         pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
         values.try_into()
