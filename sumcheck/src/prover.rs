@@ -427,24 +427,27 @@ impl<E: ExtensionField> IOPProverState<E> {
                             &self.poly.flattened_ml_extensions[products[1]],
                             &self.poly.flattened_ml_extensions[products[2]],
                         );
-                        op_mle_3!(|f1, f2, f3| (0..f1.len())
-                            .into_iter()
-                            .step_by(2)
-                            .map(|b| {
-                                // f = c x + d
-                                let c1 = f1[b + 1] - f1[b];
-                                let c2 = f2[b + 1] - f2[b];
-                                let c3 = f3[b + 1] - f3[b];
-                                AdditiveArray([
-                                    f1[b] * f2[b] * f3[b],
-                                    f1[b + 1] * f2[b + 1] * f3[b + 1],
-                                    (c1 + f1[b + 1]) * (c2 + f2[b + 1]) * (c3 + f3[b + 1]),
-                                    (c1 + c1 + f1[b + 1])
-                                        * (c2 + c2 + f2[b + 1])
-                                        * (c3 + c3 + f3[b + 1]),
-                                ])
-                            })
-                            .sum::<AdditiveArray<_, 4>>())
+                        op_mle_3!(
+                            |f1, f2, f3| (0..f1.len())
+                                .into_iter()
+                                .step_by(2)
+                                .map(|b| {
+                                    // f = c x + d
+                                    let c1 = f1[b + 1] - f1[b];
+                                    let c2 = f2[b + 1] - f2[b];
+                                    let c3 = f3[b + 1] - f3[b];
+                                    AdditiveArray([
+                                        f1[b] * f2[b] * f3[b],
+                                        f1[b + 1] * f2[b + 1] * f3[b + 1],
+                                        (c1 + f1[b + 1]) * (c2 + f2[b + 1]) * (c3 + f3[b + 1]),
+                                        (c1 + c1 + f1[b + 1])
+                                            * (c2 + c2 + f2[b + 1])
+                                            * (c3 + c3 + f3[b + 1]),
+                                    ])
+                                })
+                                .sum::<AdditiveArray<_, 4>>(),
+                            |sum| AdditiveArray(sum.0.map(E::from))
+                        )
                         .to_vec()
                     }
                     4 => {
@@ -454,37 +457,40 @@ impl<E: ExtensionField> IOPProverState<E> {
                             &self.poly.flattened_ml_extensions[products[2]],
                             &self.poly.flattened_ml_extensions[products[3]],
                         );
-                        op_mle_4!(|f1, f2, f3, f4| (0..f1.len())
-                            .into_iter()
-                            .step_by(2)
-                            .map(|b| {
-                                // f = c x + d
-                                let c1 = f1[b + 1] - f1[b];
-                                let c2 = f2[b + 1] - f2[b];
-                                let c3 = f3[b + 1] - f3[b];
-                                let c4 = f4[b + 1] - f4[b];
-                                let double_c1 = c1 + c1;
-                                let double_c2 = c2 + c2;
-                                let double_c3 = c3 + c3;
-                                let double_c4 = c4 + c4;
-                                AdditiveArray([
-                                    f1[b] * f2[b] * f3[b] * f4[b],
-                                    f1[b + 1] * f2[b + 1] * f3[b + 1] * f4[b + 1],
-                                    (c1 + f1[b + 1])
-                                        * (c2 + f2[b + 1])
-                                        * (c3 + f3[b + 1])
-                                        * (c4 + f4[b + 1]),
-                                    (double_c1 + f1[b + 1])
-                                        * (double_c2 + f2[b + 1])
-                                        * (double_c3 + f3[b + 1])
-                                        * (double_c4 + f4[b + 1]),
-                                    (c1 + double_c1 + f1[b + 1])
-                                        * (c2 + double_c2 + f2[b + 1])
-                                        * (c3 + double_c3 + f3[b + 1])
-                                        * (c4 + double_c4 + f4[b + 1]),
-                                ])
-                            })
-                            .sum::<AdditiveArray<_, 5>>())
+                        op_mle_4!(
+                            |f1, f2, f3, f4| (0..f1.len())
+                                .into_iter()
+                                .step_by(2)
+                                .map(|b| {
+                                    // f = c x + d
+                                    let c1 = f1[b + 1] - f1[b];
+                                    let c2 = f2[b + 1] - f2[b];
+                                    let c3 = f3[b + 1] - f3[b];
+                                    let c4 = f4[b + 1] - f4[b];
+                                    let double_c1 = c1 + c1;
+                                    let double_c2 = c2 + c2;
+                                    let double_c3 = c3 + c3;
+                                    let double_c4 = c4 + c4;
+                                    AdditiveArray([
+                                        f1[b] * f2[b] * f3[b] * f4[b],
+                                        f1[b + 1] * f2[b + 1] * f3[b + 1] * f4[b + 1],
+                                        (c1 + f1[b + 1])
+                                            * (c2 + f2[b + 1])
+                                            * (c3 + f3[b + 1])
+                                            * (c4 + f4[b + 1]),
+                                        (double_c1 + f1[b + 1])
+                                            * (double_c2 + f2[b + 1])
+                                            * (double_c3 + f3[b + 1])
+                                            * (double_c4 + f4[b + 1]),
+                                        (c1 + double_c1 + f1[b + 1])
+                                            * (c2 + double_c2 + f2[b + 1])
+                                            * (c3 + double_c3 + f3[b + 1])
+                                            * (c4 + double_c4 + f4[b + 1]),
+                                    ])
+                                })
+                                .sum::<AdditiveArray<_, 5>>(),
+                            |sum| AdditiveArray(sum.0.map(E::from))
+                        )
                         .to_vec()
                     }
                     _ => unreachable!(),

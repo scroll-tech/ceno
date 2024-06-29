@@ -54,7 +54,7 @@ const RC: [u64; ROUNDS] = [
 type MLEVec<F> = Vec<F>;
 
 fn alpha_pows<E: ExtensionField>(size: usize, transcript: &mut Transcript<E>) -> Vec<E> {
-    println!("alpha_pow");
+    // println!("alpha_pow");
     let alpha = transcript
         .get_and_append_challenge(b"combine subset evals")
         .elements;
@@ -77,7 +77,7 @@ macro_rules! define_split_eval {
             evals: &[&[E; 1 $( * $N )*]],
             transcript: &mut Transcript<E>,
         ) -> (Point<E>, Vec<E>) {
-            println!("split_$N");
+            // println!("split_$N");
             $(
                 assert!( $N <= (1 << $B));
             )*
@@ -137,7 +137,7 @@ macro_rules! define_prove_merge {
             b_point: &Point<E>,
             a: &[Arc<MLEVec<E::BaseField>>; 1 $(* $N )*],
         ) -> (Point<E>, [E; 1 $( * $N )*]) {
-            println!("merge_$N");
+            // println!("merge_$N");
             $(
                 assert!($N <= 1 << $B);
             )*
@@ -160,7 +160,7 @@ define_prove_merge!(prove_merge_3, [N3, N2, N1], [B3, B2, B1]);
 
 // TODO: PI and RHO should be transposed but I haven't done it.
 fn rho_and_pi<T: Copy>(state: &mut [T; 64 * 25]) {
-    println!("rho_and_pi");
+    // println!("rho_and_pi");
     let mut last: [T; 64] = array::from_fn(|k| state[k * 25 + 10]);
     for x in 0..24 {
         let tmp = last;
@@ -189,13 +189,14 @@ fn compute_rho_and_pi<T: Default>(state: &mut [T; 64 * 25]) {
 
 /// rotate_left([[E; 5 x 5]; 64])
 fn rotate<E: ExtensionField>(evals: &[E; 64]) -> [E; 64] {
-    println!("rotate");
+    // println!("rotate");
     let mut evals = evals.clone();
     evals.rotate_left(1);
     evals
 }
 
 /// copy a to be multiple b's
+/// alpha^i * b_i(z_i) = \sum_x (alpha^i eq(z_i, x)) b(x)
 fn prove_copy<E: ExtensionField>(
     max_thread_id: usize,
     inst_num_vars: usize,
@@ -203,7 +204,7 @@ fn prove_copy<E: ExtensionField>(
     a: &Arc<MLEVec<E::BaseField>>,
     transcript: &mut Transcript<E>,
 ) -> (IOPProof<E>, Point<E>, E) {
-    println!("prove_copy");
+    // println!("prove_copy");
     let b_eqs = b_points
         .iter()
         .map(|b_point| build_eq_x_r_vec(&b_point))
@@ -214,6 +215,13 @@ fn prove_copy<E: ExtensionField>(
     let thread_nv = ceil_log2(thread_size);
 
     let alpha_pows = alpha_pows(b_points.len(), transcript);
+    let b_eq = (0..b_eqs[0].len())
+        .map(|i| {
+            izip!(&b_eqs, &alpha_pows)
+                .map(|(b, alpha)| b[i] * alpha)
+                .sum::<E>()
+        })
+        .collect_vec();
     let virtual_polys = (0..max_thread_id)
         .map(|thread_id| {
             let fa = Arc::new(DenseMultilinearExtension::<E>::from_evaluations_slice(
@@ -221,13 +229,11 @@ fn prove_copy<E: ExtensionField>(
                 &a[thread_id * thread_size..(thread_id + 1) * thread_size],
             ));
             let mut virtual_poly = VirtualPolynomial::new(thread_nv);
-            izip!(&b_eqs, &alpha_pows).for_each(|(b_eq, rc)| {
-                let fb_eq = Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
-                    thread_nv,
-                    &b_eq[thread_id * thread_size..(thread_id + 1) * thread_size],
-                ));
-                virtual_poly.add_mle_list(vec![fa.clone(), fb_eq.clone()], *rc);
-            });
+            let fb_eq = Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
+                thread_nv,
+                &b_eq[thread_id * thread_size..(thread_id + 1) * thread_size],
+            ));
+            virtual_poly.add_mle_list(vec![fa.clone(), fb_eq.clone()], E::ONE);
             virtual_poly
         })
         .collect();
@@ -242,7 +248,7 @@ fn prove_copy<E: ExtensionField>(
     (proof, point, evals[0])
 }
 
-fn xor3<E: ExtensionField>(
+fn wrong_xor3<E: ExtensionField>(
     virtual_poly: &mut VirtualPolynomial<E>,
     feq: &ArcDenseMultilinearExtension<E>,
     fa: ArcDenseMultilinearExtension<E>,
@@ -256,15 +262,37 @@ fn xor3<E: ExtensionField>(
         vec![feq.clone(), fa.clone(), fb.clone(), fc.clone()],
         rc * (two.double()),
     );
-    virtual_poly.add_mle_list(vec![feq.clone(), fa.clone(), fc.clone()], -rc * two);
-    virtual_poly.add_mle_list(vec![feq.clone(), fb.clone(), fc.clone()], -rc * two);
-    virtual_poly.add_mle_list(vec![feq.clone(), fa.clone(), fb.clone()], -rc * two);
+    virtual_poly.add_mle_list(vec![fa.clone(), fc.clone()], -rc * two);
+    virtual_poly.add_mle_list(vec![fb.clone(), fc.clone()], -rc * two);
+    virtual_poly.add_mle_list(vec![fa.clone(), fb.clone()], -rc * two);
     virtual_poly.add_mle_list(vec![fa], rc);
     virtual_poly.add_mle_list(vec![fb], rc);
     virtual_poly.add_mle_list(vec![fc], rc);
 }
 
-fn xor2<E: ExtensionField>(
+fn wrong_wrong_xor3<E: ExtensionField>(
+    virtual_poly: &mut VirtualPolynomial<E>,
+    feq: &ArcDenseMultilinearExtension<E>,
+    fa: ArcDenseMultilinearExtension<E>,
+    fb: ArcDenseMultilinearExtension<E>,
+    fc: ArcDenseMultilinearExtension<E>,
+    rc: E,
+) {
+    let two = E::BaseField::from(2);
+    // (x0 + x1 + x2) - 2x0x2 - 2x1x2 - 2x0x1 + 4x0x1x2
+    virtual_poly.add_mle_list(
+        vec![fa.clone(), fb.clone(), fc.clone()],
+        rc * (two.double()),
+    );
+    virtual_poly.add_mle_list(vec![fa.clone(), fc.clone()], -rc * two);
+    virtual_poly.add_mle_list(vec![fb.clone(), fc.clone()], -rc * two);
+    virtual_poly.add_mle_list(vec![fa.clone(), fb.clone()], -rc * two);
+    virtual_poly.add_mle_list(vec![fa], rc);
+    virtual_poly.add_mle_list(vec![fb], rc);
+    virtual_poly.add_mle_list(vec![fc], rc);
+}
+
+fn wrong_xor2<E: ExtensionField>(
     virtual_poly: &mut VirtualPolynomial<E>,
     feq: &ArcDenseMultilinearExtension<E>,
     fa: ArcDenseMultilinearExtension<E>,
@@ -278,13 +306,27 @@ fn xor2<E: ExtensionField>(
     virtual_poly.add_mle_list(vec![fb], rc);
 }
 
+fn wrong_wrong_xor2<E: ExtensionField>(
+    virtual_poly: &mut VirtualPolynomial<E>,
+    feq: &ArcDenseMultilinearExtension<E>,
+    fa: ArcDenseMultilinearExtension<E>,
+    fb: ArcDenseMultilinearExtension<E>,
+    rc: E,
+) {
+    let two = E::BaseField::from(2);
+    // (x0 + x1) - 2x0x1
+    virtual_poly.add_mle_list(vec![fa.clone(), fb.clone()], -rc * two);
+    virtual_poly.add_mle_list(vec![fa], rc);
+    virtual_poly.add_mle_list(vec![fb], rc);
+}
+
 /// This sumcheck including the following equations:
 ///         2     3     6     ...
-///     - d(z0 || z1 || z3 || ...) = \sum_{x3} eq(z3, x3) \sum_i eq(z1 , i)(
-///         + eq(z0, 0) xor3(x_1[0](x3), x_1[1](x3), x_1[2](x3)),
-///         + eq(z0, 1) xor3(x_1[3](x3), x_1[4](x3), x_5[0](x3)),
-///         + eq(z0, 2) xor2(x_5[1](x3), x_5[2](x3)),
-///         + eq(z0, 3) xor2(x_5[3](x3), x_5[4](x3))
+///     - d(z0 || z1 || z3 || ...) = \sum_i eq(z1 , i)( \sum_{x3} eq(z3, x3)(
+///         + eq(z0, 0) xor3(x_{i + 1}[0](x3), x_{i + 1}[1](x3), x_{i + 1}[2](x3)),
+///         + eq(z0, 1) xor3(x_{i + 1}[3](x3), x_{i + 1}[4](x3), x_{i + 4}[0](x3)),
+///         + eq(z0, 2) xor2(x_{i + 4}[1](x3), x_{i + 4}[2](x3)),
+///         + eq(z0, 3) xor2(x_{i + 4}[3](x3), x_{i + 4}[4](x3)))
 ///     ),
 fn prove_xor3_and_xor2<E: ExtensionField>(
     max_thread_id: usize,
@@ -294,7 +336,7 @@ fn prove_xor3_and_xor2<E: ExtensionField>(
     x_rot: &[Arc<MLEVec<E::BaseField>>; 25],
     transcript: &mut Transcript<E>,
 ) -> (IOPProof<E>, Point<E>, [E; 25], [E; 25]) {
-    println!("prove_xor3_and_xor2");
+    // println!("prove_xor3_and_xor2");
     let num_vars = inst_num_vars + 6;
     let point_z3 = &d_point[5..];
     let eq = build_eq_x_r_vec(point_z3);
@@ -324,7 +366,7 @@ fn prove_xor3_and_xor2<E: ExtensionField>(
                 ))
             });
             for i in 0..5 {
-                xor3(
+                wrong_xor3(
                     &mut virtual_poly,
                     &feq,
                     fx[0 * 5 + (i + 1) % 5].clone(),
@@ -332,7 +374,7 @@ fn prove_xor3_and_xor2<E: ExtensionField>(
                     fx[2 * 5 + (i + 1) % 5].clone(),
                     rc_vec[i * 4 + 0],
                 );
-                xor3(
+                wrong_wrong_xor3(
                     &mut virtual_poly,
                     &feq,
                     fx[3 * 5 + (i + 1) % 5].clone(),
@@ -340,14 +382,14 @@ fn prove_xor3_and_xor2<E: ExtensionField>(
                     fx_rot[0 * 5 + (i + 4) % 5].clone(),
                     rc_vec[i * 4 + 1],
                 );
-                xor2(
+                wrong_xor2(
                     &mut virtual_poly,
                     &feq,
                     fx_rot[1 * 5 + (i + 4) % 5].clone(),
                     fx_rot[2 * 5 + (i + 4) % 5].clone(),
                     rc_vec[i * 4 + 2],
                 );
-                xor2(
+                wrong_wrong_xor2(
                     &mut virtual_poly,
                     &feq,
                     fx_rot[3 * 5 + (i + 4) % 5].clone(),
@@ -405,7 +447,7 @@ fn prove_xor2<E: ExtensionField>(
     b: &Arc<MLEVec<E::BaseField>>,
     transcript: &mut Transcript<E>,
 ) -> (IOPProof<E>, Point<E>, [E; 2]) {
-    println!("prove_xor2");
+    // println!("prove_xor2");
     let num_vars = c_point.len();
     let eq = build_eq_x_r_vec(&c_point);
     let max_thread_id = max_thread_id.min(1 << num_vars);
@@ -427,7 +469,7 @@ fn prove_xor2<E: ExtensionField>(
                 &b[thread_id * thread_size..(thread_id + 1) * thread_size],
             ));
             let mut virtual_poly = VirtualPolynomial::new_from_mle(fa.clone(), E::ONE);
-            xor2(&mut virtual_poly, &feq, fa, fb, E::ONE);
+            wrong_xor2(&mut virtual_poly, &feq, fa, fb, E::ONE);
             virtual_poly
         })
         .collect_vec();
@@ -454,7 +496,7 @@ fn prove_xor3<E: ExtensionField>(
     c: &Arc<MLEVec<E::BaseField>>,
     transcript: &mut Transcript<E>,
 ) -> (IOPProof<E>, Point<E>, Point<E>, [E; 3]) {
-    println!("prove_xor3");
+    // println!("prove_xor3");
     let num_vars = d_point.len() - 3;
     let point = chain![&d_point[0..3], &d_point[6..]] // x || word || inst
         .cloned()
@@ -501,7 +543,7 @@ fn prove_xor3<E: ExtensionField>(
                 &c[thread_id * thread_size..(thread_id + 1) * thread_size],
             ));
             let mut virtual_poly = VirtualPolynomial::new_from_mle(fa.clone(), E::ONE);
-            xor3(&mut virtual_poly, &feq, fa, fb, fc, E::ONE);
+            wrong_xor3(&mut virtual_poly, &feq, fa, fb, fc, E::ONE);
             virtual_poly
         })
         .collect_vec();
@@ -533,7 +575,7 @@ fn prove_xor3<E: ExtensionField>(
 /// (1-x0)*(1-x1)*(x2) + x0(1-x1)(1-x2) + x0x1(1-x2) + x0x1x2
 /// = x2 - x0x2 - x1x2 + x0x1x2 + x0 - x0x1 - x0x2 + x0x1x2 + x0x1 - x0x1x2 + x0x1x2
 /// = (x0 + x2) - 2x0x2 - x1x2 + 2x0x1x2
-fn chi<E: ExtensionField>(
+fn wrong_chi<E: ExtensionField>(
     virtual_poly: &mut VirtualPolynomial<E>,
     feq: &ArcDenseMultilinearExtension<E>,
     fa: ArcDenseMultilinearExtension<E>,
@@ -547,8 +589,8 @@ fn chi<E: ExtensionField>(
         vec![feq.clone(), fa.clone(), fb.clone(), fc.clone()],
         rc * two,
     );
-    virtual_poly.add_mle_list(vec![feq.clone(), fa.clone(), fc.clone()], -rc * two);
-    virtual_poly.add_mle_list(vec![feq.clone(), fb, fc.clone()], -rc);
+    virtual_poly.add_mle_list(vec![fa.clone(), fc.clone()], -rc * two);
+    virtual_poly.add_mle_list(vec![fb, fc.clone()], -rc);
     virtual_poly.add_mle_list(vec![fa], rc);
     virtual_poly.add_mle_list(vec![fc], rc);
 }
@@ -568,7 +610,7 @@ fn prove_chi<E: ExtensionField>(
     x: &[Arc<MLEVec<E::BaseField>>; 5],
     transcript: &mut Transcript<E>,
 ) -> (IOPProof<E>, Point<E>, [E; 5]) {
-    println!("prove_chi");
+    // println!("prove_chi");
     let num_vars = d_point.len() - 3;
     let point = d_point[3..].to_vec();
     let eq = build_eq_x_r_vec(&point);
@@ -591,7 +633,7 @@ fn prove_chi<E: ExtensionField>(
             });
             let mut virtual_poly = VirtualPolynomial::new(thread_nv);
             izip!((0..5), &rc_s).for_each(|(i, rc)| {
-                chi(
+                wrong_chi(
                     &mut virtual_poly,
                     &feq,
                     fx_s[i].clone(),
@@ -619,7 +661,7 @@ fn prove_chi<E: ExtensionField>(
 }
 
 fn xor_const<E: ExtensionField>(d_point: &Point<E>, d_evals: E, constant: E::BaseField) -> E {
-    println!("xor_const");
+    // println!("xor_const");
     d_evals - eq_eval(&d_point[..3], &[E::ZERO; 3]) * constant
 }
 
@@ -719,9 +761,9 @@ fn prove_keccak_f<E: ExtensionField>(
         split_eval_1::<_, 64, 6, 6>(&after_rot_point, &[&before_rot_evals], transcript);
 
     // sumcheck: prove_copy
-    println!("A.len: {}", xor3_point_0.len());
-    println!("B.len: {}", before_rot_point.len());
-    println!("C.len: {}", x_rot_point.len());
+    // println!("A.len: {}", xor3_point_0.len());
+    // println!("B.len: {}", before_rot_point.len());
+    // println!("C.len: {}", x_rot_point.len());
     let a = &wit[7][0];
     prove_copy(
         max_thread_id,

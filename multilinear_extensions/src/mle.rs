@@ -398,8 +398,19 @@ macro_rules! commutative_op_mle_pair {
 
 #[macro_export]
 macro_rules! op_mle_3 {
-    (|$f1:ident, $f2:ident, $f3:ident| $op:expr) => {
+    (|$f1:ident, $f2:ident, $f3:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$f1.evaluations, &$f2.evaluations, &$f3.evaluations) {
+            (
+                $crate::mle::FieldType::Base(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = f1;
+                let $f2 = f2;
+                let $f3 = f3;
+                let $bb_out = $op;
+                $op_bb_out
+            }
             (
                 $crate::mle::FieldType::Ext(f1),
                 $crate::mle::FieldType::Base(f2),
@@ -437,13 +448,26 @@ macro_rules! op_mle_3 {
 
 #[macro_export]
 macro_rules! op_mle_4 {
-    (|$f1:ident, $f2:ident, $f3:ident, $f4:ident| $op:expr) => {
+    (|$f1:ident, $f2:ident, $f3:ident, $f4:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
         match (
             &$f1.evaluations,
             &$f2.evaluations,
             &$f3.evaluations,
             &$f4.evaluations,
         ) {
+            (
+                $crate::mle::FieldType::Base(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+                $crate::mle::FieldType::Base(f4),
+            ) => {
+                let $f1 = f1;
+                let $f2 = f2;
+                let $f3 = f3;
+                let $f4 = f4;
+                let $bb_out = $op;
+                $op_bb_out
+            }
             (
                 $crate::mle::FieldType::Ext(f1),
                 $crate::mle::FieldType::Base(f2),

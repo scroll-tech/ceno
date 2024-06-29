@@ -1,7 +1,7 @@
 #![allow(clippy::manual_memcpy)]
 #![allow(clippy::needless_range_loop)]
 
-use std::env;
+use std::{array, env, iter, mem, sync::Arc, time::Instant};
 
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -36,8 +36,7 @@ fn main() {
 
         #[cfg(feature = "non_pow2_rayon_thread")]
         {
-            use sumcheck::local_thread_pool::create_local_pool_once;
-            use sumcheck::util::ceil_log2;
+            use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
             max_thread_id = 1 << ceil_log2(max_thread_id);
             create_local_pool_once(max_thread_id, true);
         }
@@ -93,12 +92,15 @@ fn main() {
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    for log2_n in 0..12 {
-        let Some((proof, output_mle)) =
-            prove_keccak256::<GoldilocksExt2>(log2_n, &circuit, (1 << log2_n).min(max_thread_id))
-        else {
-            return;
-        };
-        assert!(verify_keccak256(log2_n, output_mle, proof, &circuit).is_ok());
-    }
+    let log2_n = 12;
+    prove_keccak256::<GoldilocksExt2>(log2_n, &circuit, (1 << log2_n).min(max_thread_id));
+
+    // for log2_n in 0..12 {
+    //     let Some((proof, output_mle)) =
+    //         prove_keccak256::<GoldilocksExt2>(log2_n, &circuit, (1 << log2_n).min(max_thread_id))
+    //     else {
+    //         return;
+    //     };
+    //     assert!(verify_keccak256(log2_n, output_mle, proof, &circuit).is_ok());
+    // }
 }
