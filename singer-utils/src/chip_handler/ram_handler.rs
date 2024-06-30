@@ -97,12 +97,14 @@ impl<Ext: ExtensionField> OAMOperations<Ext> for RAMHandler<Ext> {
             if records.len() == 0 {
                 return None;
             }
+            println!("before len: {}", records.len());
             let count = records.len().next_power_of_two() - records.len();
             for _ in 0..count {
                 let out = circuit_builder.create_ext_cell();
                 circuit_builder.add_const(out.cells[0], Ext::BaseField::ONE);
                 records.push(out);
             }
+            println!("len: {}", records.len());
             Some((
                 circuit_builder.create_witness_out_from_exts(&records),
                 records.len(),

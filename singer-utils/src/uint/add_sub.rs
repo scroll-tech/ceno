@@ -103,6 +103,33 @@ impl<const M: usize, const C: usize> UIntAddSub<UInt<M, C>> {
         Ok(result)
     }
 
+    /// Little-endian addition with a constant. Assume users to check the
+    /// correct range of the result by themselves.
+    pub fn add_const_unsafe_no_overflow<Ext: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        addend_0: &UInt<M, C>,
+        constant: Ext::BaseField,
+        carry: &[CellId],
+    ) -> Result<UInt<M, C>, UtilError> {
+        let result: UInt<M, C> = circuit_builder
+            .create_cells(UInt::<M, C>::N_OPRAND_CELLS)
+            .try_into()?;
+        circuit_builder.add_const(result.values[0], constant);
+        for i in 1..result.values.len() {
+            let (a, result) = (addend_0.values[i], result.values[i]);
+            // result = addend_0 + addend_1 + last_carry - carry * (256 << BYTE_WIDTH)
+            circuit_builder.add(result, a, Ext::BaseField::ONE);
+            // It is equivalent to pad carry with 0s.
+            if i < carry.len() {
+                circuit_builder.add(result, carry[i], -Ext::BaseField::from(1 << C));
+            }
+            if i - 1 < carry.len() {
+                circuit_builder.add(result, carry[i - 1], Ext::BaseField::ONE);
+            }
+        }
+        Ok(result)
+    }
+
     /// Little-endian addition with a constant.
     pub fn add_const<Ext: ExtensionField, H: RangeChipOperations<Ext>>(
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -247,7 +274,7 @@ mod test {
         assert_eq!(result.unwrap().values(), (96..128).collect::<Vec<usize>>());
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
-        //println!("add unsafe circuit {:?}", circuit);
+        // println!("add unsafe circuit {:?}", circuit);
 
         // generate witnesses for addend_0, addend_1 and carry
         // must pad each witness to the size of N_OPERAND_CELLS
@@ -270,12 +297,12 @@ mod test {
             circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness
         };
-        //println!("{:?}", circuit_witness);
+        // println!("{:?}", circuit_witness);
         circuit_witness.check_correctness(&circuit);
 
         // check the result
         let result_values = circuit_witness.output_layer_witness_ref();
-        //println!("{:?}", result_values[0]);
+        // println!("{:?}", result_values[0]);
         assert_eq!(result_values.instances[0][0], Goldilocks::from(254u64));
         assert_eq!(result_values.instances[0][1], Goldilocks::from(254u64));
         assert_eq!(result_values.instances[0][2], Goldilocks::from(1u64));
@@ -305,7 +332,7 @@ mod test {
         assert_eq!(result.unwrap().values(), (96..128).collect::<Vec<usize>>());
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
-        //println!("add unsafe circuit {:?}", circuit);
+        // println!("add unsafe circuit {:?}", circuit);
 
         // generate witnesses for addend_0, addend_1 and carry
         // must pad each witness to the size of N_OPERAND_CELLS
@@ -328,12 +355,12 @@ mod test {
             circuit_witness.add_instance(&circuit, wires_in);
             circuit_witness
         };
-        //println!("{:?}", circuit_witness);
+        // println!("{:?}", circuit_witness);
         circuit_witness.check_correctness(&circuit);
 
         // check the result
         let result_values = circuit_witness.output_layer_witness_ref();
-        //println!("{:?}", result_values[0]);
+        // println!("{:?}", result_values[0]);
         assert_eq!(result_values.instances[0][0], Goldilocks::from(2u64));
         assert_eq!(result_values.instances[0][1], Goldilocks::from(2u64));
         assert_eq!(result_values.instances[0][2], -Goldilocks::from(1u64));

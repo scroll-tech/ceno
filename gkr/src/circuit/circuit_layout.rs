@@ -374,6 +374,10 @@ impl<E: ExtensionField> Circuit<E> {
             .collect()
     }
 
+    pub fn n_sumcheck_steps(&self) -> usize {
+        self.layers.iter().map(|l| l.n_sumcheck_steps()).sum()
+    }
+
     pub fn output_layer_ref(&self) -> &Layer<E> {
         self.layers.first().unwrap()
     }
@@ -400,6 +404,16 @@ impl<E: ExtensionField> Circuit<E> {
 }
 
 impl<E: ExtensionField> Layer<E> {
+    pub fn n_sumcheck_steps(&self) -> usize {
+        self.sumcheck_steps
+            .iter()
+            .map(|x| match x {
+                SumcheckStepType::OutputPhase1Step1 => 0,
+                SumcheckStepType::Phase1Step1 => 0,
+                _ => 1,
+            })
+            .sum()
+    }
     pub fn is_linear(&self) -> bool {
         self.mul2s.is_empty() && self.mul3s.is_empty()
     }

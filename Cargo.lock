@@ -1269,6 +1269,7 @@ dependencies = [
  "itertools 0.12.1",
  "mpcs",
  "multilinear_extensions",
+ "once_cell",
  "paste",
  "pprof",
  "rayon",
@@ -1277,6 +1278,7 @@ dependencies = [
  "singer-utils",
  "strum 0.25.0",
  "strum_macros 0.25.3",
+ "sumcheck",
  "transcript",
 ]
 

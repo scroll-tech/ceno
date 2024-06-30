@@ -35,7 +35,7 @@ register_witness!(
         clk => 1,
 
         pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        // stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
 
         old_stack_ts0 => TSUInt::N_OPRAND_CELLS,
         old_stack_ts_lt0 => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
@@ -80,7 +80,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             &mut circuit_builder,
             &stack_ts,
             1,
-            &phase0[Self::phase0_stack_ts_add()],
+            &[], // &phase0[Self::phase0_stack_ts_add()],
         )?;
 
         ram_handler.state_out(
@@ -166,6 +166,8 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
+        println!("circuit_size: {}", circuit_builder.cells.len());
+
         Ok(InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
@@ -187,18 +189,21 @@ mod test {
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
     use simple_frontend::structs::CellId;
-    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
-    use singer_utils::structs::{StackUInt, TSUInt};
-    use std::collections::BTreeMap;
-    use std::time::Instant;
+    use singer_utils::{
+        constants::RANGE_CHIP_BIT_WIDTH,
+        structs::{StackUInt, TSUInt},
+    };
+    use std::{collections::BTreeMap, time::Instant};
     use transcript::Transcript;
 
-    use crate::instructions::{
-        AddInstruction, ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder,
+    use crate::{
+        instructions::{
+            AddInstruction, ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder,
+        },
+        scheme::GKRGraphProverState,
+        test::{get_uint_params, test_opcode_circuit, u2vec},
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
-    use crate::scheme::GKRGraphProverState;
-    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
 
     impl AddInstruction {
         #[inline]
@@ -210,10 +215,10 @@ mod test {
             map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
             map.insert("phase0_clk".to_string(), Self::phase0_clk());
             map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
-            map.insert(
-                "phase0_stack_ts_add".to_string(),
-                Self::phase0_stack_ts_add(),
-            );
+            // map.insert(
+            //     "phase0_stack_ts_add".to_string(),
+            //     Self::phase0_stack_ts_add(),
+            // );
             map.insert(
                 "phase0_old_stack_ts0".to_string(),
                 Self::phase0_old_stack_ts0(),
@@ -256,9 +261,11 @@ mod test {
 
         // initialize general test inputs associated with push1
         let inst_circuit = AddInstruction::construct_circuit(challenges).unwrap();
+        println!("layer: {:?}", inst_circuit.circuit.layers.len());
+        println!("sumcheck: {:?}", inst_circuit.circuit.n_sumcheck_steps());
 
         #[cfg(feature = "test-dbg")]
-        println!("{:?}", inst_circuit);
+        println!(inst_circuit);
 
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
@@ -276,7 +283,8 @@ mod test {
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
             vec![
-                Goldilocks::from(4u64), // first TSUInt::N_RANGE_CHECK_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
+                Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CHECK_CELLS = 1*(56/16) = 4
+                                         * cells are range values, stack_ts + 1 = 4 */
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
