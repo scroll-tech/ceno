@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
@@ -12,6 +11,7 @@ use singer_utils::{
     chips::IntoEnumIterator,
     register_multi_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::UIntCmp,
 };
 use std::sync::Arc;
 
@@ -27,16 +27,16 @@ pub(crate) struct BasicBlockStart;
 
 register_multi_witness!(BasicBlockStart, phase0(n_stack_items) {
     // State in related
-    pc => PCUInt::N_OPERAND_CELLS,
-    stack_ts => TSUInt::N_OPERAND_CELLS,
-    memory_ts => TSUInt::N_OPERAND_CELLS,
+    pc => PCUInt::N_OPRAND_CELLS,
+    stack_ts => TSUInt::N_OPRAND_CELLS,
+    memory_ts => TSUInt::N_OPRAND_CELLS,
     stack_top => 1,
     clk => 1,
 
     // Stack values
-    old_stack_values(n_stack_items) => StackUInt::N_OPERAND_CELLS,
-    old_stack_ts(n_stack_items) => TSUInt::N_OPERAND_CELLS,
-    old_stack_ts_lt(n_stack_items) => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
+    old_stack_values(n_stack_items) => StackUInt::N_OPRAND_CELLS,
+    old_stack_ts(n_stack_items) => TSUInt::N_OPRAND_CELLS,
+    old_stack_ts_lt(n_stack_items) => UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS
 });
 
 impl BasicBlockStart {
@@ -83,7 +83,7 @@ impl BasicBlockStart {
         for (i, offset) in stack_top_offsets.iter().enumerate() {
             let old_stack_ts =
                 TSUInt::try_from(&phase0[Self::phase0_old_stack_ts(i, n_stack_items)])?;
-            TSUInt::assert_lt(
+            UIntCmp::<TSUInt>::assert_lt(
                 &mut circuit_builder,
                 &mut rom_handler,
                 &old_stack_ts,
@@ -102,9 +102,9 @@ impl BasicBlockStart {
         let mut stack_result_ids = Vec::with_capacity(n_stack_items);
         for i in 0..n_stack_items {
             let (stack_operand_id, stack_operand) =
-                circuit_builder.create_witness_out(StackUInt::N_OPERAND_CELLS);
+                circuit_builder.create_witness_out(StackUInt::N_OPRAND_CELLS);
             let old_stack = &phase0[Self::phase0_old_stack_values(i, n_stack_items)];
-            for j in 0..StackUInt::N_OPERAND_CELLS {
+            for j in 0..StackUInt::N_OPRAND_CELLS {
                 circuit_builder.add(stack_operand[j], old_stack[j], E::BaseField::ONE);
             }
             stack_result_ids.push(stack_operand_id);
@@ -114,7 +114,7 @@ impl BasicBlockStart {
 
         // To BB final
         let (out_stack_ts_id, out_stack_ts) =
-            circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &out_stack_ts, stack_ts.values());
         let (out_stack_top_id, out_stack_top) = circuit_builder.create_witness_out(1);
         circuit_builder.add(out_stack_top[0], stack_top, E::BaseField::ONE);

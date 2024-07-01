@@ -7,7 +7,7 @@ use gkr::utils::MultilinearExtensionFromVectors;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use simple_frontend::structs::CellId;
-use singer_utils::uint::UInt;
+use singer_utils::structs::UInt;
 use std::collections::BTreeMap;
 
 use crate::instructions::InstCircuit;

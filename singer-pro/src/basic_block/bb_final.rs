@@ -4,7 +4,6 @@ use gkr::structs::Circuit;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
@@ -13,6 +12,7 @@ use singer_utils::{
     chips::IntoEnumIterator,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::UIntAddSub,
 };
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ pub struct BasicBlockFinal;
 
 register_witness!(BasicBlockFinal, phase0 {
     // State in related
-    stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
+    stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS
 });
 
 impl BasicBlockFinal {
@@ -49,12 +49,12 @@ impl BasicBlockFinal {
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From BB start
-        let (stack_ts_id, stack_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
+        let (stack_ts_id, stack_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
         let (stack_top_id, stack_top) = circuit_builder.create_witness_in(1);
         let (clk_id, clk) = circuit_builder.create_witness_in(1);
 
         // From inst pc.
-        let (next_pc_id, next_pc) = circuit_builder.create_witness_in(PCUInt::N_OPERAND_CELLS);
+        let (next_pc_id, next_pc) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
 
         let mut ram_handler = RAMHandler::new(&challenges);
         let mut rom_handler = ROMHandler::new(&challenges);
@@ -68,7 +68,7 @@ impl BasicBlockFinal {
             stack_ts_add_witness,
         )?;
 
-        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
         let clk_expr = MixedCell::Cell(clk[0]);
         ram_handler.state_out(
@@ -92,7 +92,7 @@ impl BasicBlockFinal {
             .iter()
             .map(|offset| {
                 let (stack_from_insts_id, stack_from_insts) =
-                    circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+                    circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
                 ram_handler.stack_push(
                     &mut circuit_builder,
                     stack_top_expr.add(i64_to_base_field::<E>(*offset)),

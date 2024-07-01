@@ -2,13 +2,13 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::ROMOperations,
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt},
+    uint::UIntAddSub,
 };
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ register_witness!(
     AddInstruction,
     phase0 {
         // Witness for addend_0 + addend_1
-        instruction_add => AddSubConstants::<StackUInt>::N_WITNESS_CELLS
+        instruction_add => UIntAddSub::<StackUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -44,16 +44,16 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
-        let (addend_0_id, addend_0) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
-        let (addend_1_id, addend_1) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (addend_0_id, addend_0) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
+        let (addend_1_id, addend_1) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
         let mut rom_handler = ROMHandler::new(&challenges);
 
         // Execution result = addend0 + addend1, with carry.
         let addend_0 = addend_0.try_into()?;
         let addend_1 = addend_1.try_into()?;
-        let result = StackUInt::add(
+        let result = UIntAddSub::<StackUInt>::add(
             &mut circuit_builder,
             &mut rom_handler,
             &addend_0,
@@ -63,7 +63,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         // To successor instruction
         let stack_result_id = circuit_builder.create_witness_out_from_cells(result.values());
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips

@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -12,6 +11,7 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::{UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
 
@@ -27,21 +27,21 @@ impl<E: ExtensionField, const N: usize> InstructionGraph<E> for SwapInstruction<
 register_witness!(
     SwapInstruction<N>,
     phase0 {
-        pc => PCUInt::N_OPERAND_CELLS,
-        stack_ts => TSUInt::N_OPERAND_CELLS,
-        memory_ts => TSUInt::N_OPERAND_CELLS,
+        pc => PCUInt::N_OPRAND_CELLS,
+        stack_ts => TSUInt::N_OPRAND_CELLS,
+        memory_ts => TSUInt::N_OPRAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
-        old_stack_ts_1 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt_1 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
-        old_stack_ts_n_plus_1 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt_n_plus_1 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
-        stack_values_1 => StackUInt::N_OPERAND_CELLS,
-        stack_values_n_plus_1 => StackUInt::N_OPERAND_CELLS
+        old_stack_ts_1 => TSUInt::N_OPRAND_CELLS,
+        old_stack_ts_lt_1 => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
+        old_stack_ts_n_plus_1 => TSUInt::N_OPRAND_CELLS,
+        old_stack_ts_lt_n_plus_1 => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
+        stack_values_1 => StackUInt::N_OPRAND_CELLS,
+        stack_values_n_plus_1 => StackUInt::N_OPRAND_CELLS
     }
 );
 
@@ -107,7 +107,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
 
         // Pop rlc of stack[top - (N + 1)] from stack
         let old_stack_ts_n_plus_1 = (&phase0[Self::phase0_old_stack_ts_n_plus_1()]).try_into()?;
-        TSUInt::assert_lt(
+        UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_n_plus_1,
@@ -124,7 +124,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
 
         // Pop rlc of stack[top - 1] from stack
         let old_stack_ts_1 = (&phase0[Self::phase0_old_stack_ts_1()]).try_into()?;
-        TSUInt::assert_lt(
+        UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_1,
@@ -279,7 +279,7 @@ mod test {
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
             vec![
-                Goldilocks::from(5u64), // first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
+                Goldilocks::from(5u64), // first TSUInt::N_RANGE_CHECK_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
@@ -291,7 +291,7 @@ mod test {
             vec![Goldilocks::from(3u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt_1".to_string(),
             vec![
@@ -307,7 +307,7 @@ mod test {
             vec![Goldilocks::from(1u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 3;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt_n_plus_1".to_string(),
             vec![

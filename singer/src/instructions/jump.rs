@@ -5,7 +5,6 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -14,6 +13,7 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
+    uint::UIntCmp,
 };
 
 use crate::error::ZKVMError;
@@ -29,16 +29,16 @@ impl<E: ExtensionField> InstructionGraph<E> for JumpInstruction {
 register_witness!(
     JumpInstruction,
     phase0 {
-        pc => PCUInt::N_OPERAND_CELLS,
-        stack_ts => TSUInt::N_OPERAND_CELLS,
-        memory_ts => TSUInt::N_OPERAND_CELLS,
+        pc => PCUInt::N_OPRAND_CELLS,
+        stack_ts => TSUInt::N_OPRAND_CELLS,
+        memory_ts => TSUInt::N_OPRAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        next_pc => PCUInt::N_OPERAND_CELLS,
+        next_pc => PCUInt::N_OPRAND_CELLS,
 
-        old_stack_ts => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS
+        old_stack_ts => TSUInt::N_OPRAND_CELLS,
+        old_stack_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -74,7 +74,7 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
 
         let next_pc = &phase0[Self::phase0_next_pc()];
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
-        TSUInt::assert_lt(
+        UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts,
@@ -205,7 +205,7 @@ mod test {
             vec![Goldilocks::from(1u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt".to_string(),
             vec![

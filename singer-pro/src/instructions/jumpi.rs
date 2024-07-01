@@ -30,9 +30,9 @@ impl<E: ExtensionField> InstructionGraph<E> for JumpiInstruction {
 register_witness!(
     JumpiInstruction,
     phase0 {
-        pc_plus_1 => PCUInt::N_OPERAND_CELLS,
+        pc_plus_1 => PCUInt::N_OPRAND_CELLS,
         pc_plus_1_opcode => 1,
-        cond_values_inv => StackUInt::N_OPERAND_CELLS,
+        cond_values_inv => StackUInt::N_OPRAND_CELLS,
         cond_non_zero_or_inv => 1
     }
 );
@@ -47,10 +47,10 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // From predesessor instruction
-        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
-        let (dest_id, dest) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+        let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPRAND_CELLS);
+        let (dest_id, dest) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
         let (cond_values_id, cond_values) =
-            circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+            circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
 
         let mut rom_handler = ROMHandler::new(&challenges);
 
@@ -71,8 +71,8 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
 
         // If cond_non_zero, next_pc = dest, otherwise, pc = pc + 1
         let pc_plus_1 = &phase0[Self::phase0_pc_plus_1()];
-        let (next_pc_id, next_pc) = circuit_builder.create_witness_out(PCUInt::N_OPERAND_CELLS);
-        for i in 0..PCUInt::N_OPERAND_CELLS {
+        let (next_pc_id, next_pc) = circuit_builder.create_witness_out(PCUInt::N_OPRAND_CELLS);
+        for i in 0..PCUInt::N_OPRAND_CELLS {
             circuit_builder.select(next_pc[i], pc_plus_1[i], dest[i], cond_non_zero);
         }
 
@@ -90,7 +90,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
 
         // To successor instruction
         let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
+            circuit_builder.create_witness_out(TSUInt::N_OPRAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         let rom_id = rom_handler.finalize(&mut circuit_builder);

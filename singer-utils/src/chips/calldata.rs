@@ -16,8 +16,8 @@ use sumcheck::util::ceil_log2;
 
 fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
     let mut circuit_builder = CircuitBuilder::<E>::new();
-    let (_, id_cells) = circuit_builder.create_witness_in(UInt64::N_OPERAND_CELLS);
-    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+    let (_, id_cells) = circuit_builder.create_witness_in(UInt64::N_OPRAND_CELLS);
+    let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPRAND_CELLS);
     let mut rom_handler = ROMHandler::new(&challenges);
     rom_handler.calldataload(&mut circuit_builder, &id_cells, &calldata_cells);
     let _ = rom_handler.finalize(&mut circuit_builder);
@@ -58,9 +58,9 @@ pub(crate) fn construct_calldata_table_and_witness<E: ExtensionField>(
         },
         LayerWitness {
             instances: (0..calldata.len())
-                .step_by(StackUInt::N_OPERAND_CELLS)
+                .step_by(StackUInt::N_OPRAND_CELLS)
                 .map(|i| {
-                    calldata[i..(i + StackUInt::N_OPERAND_CELLS).min(calldata.len())]
+                    calldata[i..(i + StackUInt::N_OPRAND_CELLS).min(calldata.len())]
                         .iter()
                         .cloned()
                         .rev()
