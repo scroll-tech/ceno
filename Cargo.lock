@@ -782,6 +782,7 @@ name = "multilinear_extensions"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "criterion",
  "ff",
  "ff_ext",
  "goldilocks",

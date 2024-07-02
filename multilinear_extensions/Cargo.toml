@@ -15,5 +15,12 @@ goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "mle"
+harness = false
+
 [features]
 parallel = [ ]
