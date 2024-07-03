@@ -45,25 +45,30 @@ macro_rules! prepare_stepx_g_fn {
 // The number of terms depends on the gate.
 // Here is an example of degree 3:
 // layers[i](rt || ry) = \sum_{s1}( \sum_{s2}( \sum_{s3}( \sum_{x1}( \sum_{x2}( \sum_{x3}(
-//     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-// ) ) ) ) ) ) + sum_s1( sum_s2( sum_{x1}( sum_{x2}(
-//     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2)
+//     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2)
+// * layers[i + 1](s3 || x3) ) ) ) ) ) ) + sum_s1( sum_s2( sum_{x1}( sum_{x2}( eq(rt, s1, s2) *
+//   mul2(ry, x1, x2) * layers[i + 1](s1 || x1) * layers[i + 1](s2 || x2)
 // ) ) ) ) + \sum_{s1}( \sum_{x1}(
 //     eq(rt, s1) * add(ry, x1) * layers[i + 1](s1 || x1)
 // ) ) + \sum_{s1}( \sum_{x1}(
 //      \sum_j eq(rt, s1) paste_from[j](ry, x1) * subset[j][i](s1 || x1)
 // ) ) + add_const(ry)
 impl<E: ExtensionField> IOPProverState<E> {
-    /// Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
-    ///     sigma = layers[i](rt || ry) - add_const(ry),
+    /// Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) *
+    /// g1'_j(s1 || x1)     sigma = layers[i](rt || ry) - add_const(ry),
     ///     f1(s1 || x1) = layers[i + 1](s1 || x1)
     ///     g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
-    ///         eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-    ///     ) ) ) ) + \sum_{s2}( \sum_{x2}(
+    ///         eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i +
+    /// 1](s3 || x3)     ) ) ) ) + \sum_{s2}( \sum_{x2}(
     ///         eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
     ///     ) ) + eq(rt, s1) * add(ry, x1)
     ///     f1'^{(j)}(s1 || x1) = subset[j][i](s1 || x1)
     ///     g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
+    /// Cost estimation (M: 1 << inst_num_vars, N: sub-circuit size, k subset):
+    ///     1. Compute g1'^{(j)}(x1): NM EE + 2NM EE
+    ///     2. Sumcheck unipoly: k(2^2 - 1)NM / 2 BB + k(2^2 - 1)NM / 2 EE + k(2^2 - 1)NM / 2 EE +
+    ///        k(2^2 - 1)NM / 2 EE
+    ///     3. Sumcheck fix variable: (kNM / 2 BE + kNM / 2 EE) + (kNM / 2 EE + kNM / 2 EE)
     #[tracing::instrument(skip_all, name = "build_phase2_step1_sumcheck_poly")]
     pub(super) fn build_phase2_step1_sumcheck_poly(
         eq: &[Vec<E>; 1],
@@ -105,8 +110,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         let f1 = phase2_next_layer_polys_v2.clone();
 
         // g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
-        //     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-        // ) ) ) ) + \sum_{s2}( \sum_{x2}(
+        //     eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i +
+        // 1](s3 || x3) ) ) ) ) + \sum_{s2}( \sum_{x2}(
         //     eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
         // ) ) + eq(rt, s1) * add(ry, x1)
         let mut g1 = vec![E::ZERO; 1 << f1.num_vars];
@@ -176,7 +181,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             Vec<ArcDenseMultilinearExtension<E>>,
         ) = ([vec![f1], f1_j].concat(), [vec![g1], g1_j].concat());
 
-        // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
+        // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) *
+        // g1'_j(s1 || x1)
         let mut virtual_poly_1 = VirtualPolynomial::new(f[0].num_vars);
         for (f, g) in f.into_iter().zip(g.into_iter()) {
             let mut tmp = VirtualPolynomial::new_from_mle(f, E::BaseField::ONE);
@@ -234,6 +240,11 @@ impl<E: ExtensionField> IOPProverState<E> {
     ///     g2(s2 || x2) = \sum_{s3}( \sum_{x3}(
     ///         eq(rt, rs1, s2, s3) * mul3(ry, rx1, x2, x3) * layers[i + 1](s3 || x3)
     ///     ) ) + eq(rt, rs1, s2) * mul2(ry, rx1, x2)
+    /// Cost estimation (M: 1 << inst_num_vars, N: sub-circuit size, k subset):
+    ///     1. Compute g2(x1): NM EE + 2NM EE
+    ///     2. Sumcheck unipoly: (2^2 - 1)NM / 2 BB + (2^2 - 1)NM / 2 EE + (2^2 - 1)NM / 2 EE + (2^2
+    ///        - 1)NM / 2 EE
+    ///     3. Sumcheck fix variable: (NM / 2 BE + NM / 2 EE) + (NM / 2 EE + NM / 2 EE)
     #[tracing::instrument(skip_all, name = "build_phase2_step2_sumcheck_poly")]
     pub(super) fn build_phase2_step2_sumcheck_poly(
         layer_poly: &ArcDenseMultilinearExtension<E>,
@@ -337,6 +348,11 @@ impl<E: ExtensionField> IOPProverState<E> {
     ///     sigma = g2(rs2 || rx2) - eq(rt, rs1, rs2) * mul2(ry, rx1, rx2)
     ///     f3(s3 || x3) = layers[i + 1](s3 || x3)
     ///     g3(s3 || x3) = eq(rt, rs1, rs2, s3) * mul3(ry, rx1, rx2, x3)
+    /// Cost estimation (M: 1 << inst_num_vars, N: sub-circuit size, k subset):
+    ///     1. Compute g3(x1): NM EE + 2NM EE
+    ///     2. Sumcheck unipoly: (2^2 - 1)NM / 2 BB + (2^2 - 1)NM / 2 EE + (2^2 - 1)NM / 2 EE + (2^2
+    ///        - 1)NM / 2 EE
+    ///     3. Sumcheck fix variable: (NM / 2 BE + NM / 2 EE) + (NM / 2 EE + NM / 2 EE)
     #[tracing::instrument(skip_all, name = "build_phase2_step3_sumcheck_poly")]
     pub(super) fn build_phase2_step3_sumcheck_poly(
         layer_poly: &ArcDenseMultilinearExtension<E>,

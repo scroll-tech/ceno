@@ -29,6 +29,12 @@ impl<E: ExtensionField> IOPProverState<E> {
     ///     sigma = layers[i](rt || ry) - add_const(ry),
     ///     f1'^{(j)}(x1) = subset[j][i](rt || x1)
     ///     g1'^{(j)}(x1) = paste_from[j](ry, x1)
+    /// Cost estimation (M: 1 << inst_num_vars, N: sub-circuit size, k subset):
+    ///     1. Compute f1'^{(j)}(x1): kNM / 2 BE + kNM / 2 EE (to be optimized to NM / 2 BE + NM / 2
+    ///        + kN BE)
+    ///     2. Compute g1'^{(j)}(x1): N EE
+    ///     3. Sumcheck unipoly: 2(k(2^2 - 1)N / 2 EE + k(2^2 - 1)N / 2 EE)
+    ///     4. Sumcheck fix variable: 2(kN / 2 EE + kN / 2 EE)
     #[tracing::instrument(skip_all, name = "prove_and_update_state_input_phase2_step1")]
     pub(super) fn prove_and_update_state_input_phase2_step1(
         &mut self,

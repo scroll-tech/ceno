@@ -29,6 +29,11 @@ impl<E: ExtensionField> IOPProverState<E> {
     ///     sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
     ///     f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
     ///     g1^{(j)}(y) = \alpha^j copy_to[j](ry_j, y)
+    /// Cost estimation (M: 1 << inst_num_vars, N: sub-circuit size, k subset):
+    ///     1. Compute f1^{(j)}(y): k * (N * M / 2) BE + k * (N * M / 2) EE
+    ///     2. Compute g1^{(j)}(y): (k - 1) EE + N + kN EE
+    ///     3. Sumcheck unipoly: 2(k (2^2 - 1) N / 2 EE + k (2^2 - 1) N / 2 EE)
+    ///     4. Sumcheck fix variable: 2(kN / 2 EE + kN / 2 EE)
     #[tracing::instrument(skip_all, name = "prove_and_update_state_phase1_step1")]
     pub(super) fn prove_and_update_state_phase1_step1(
         &mut self,
@@ -154,6 +159,11 @@ impl<E: ExtensionField> IOPProverState<E> {
     ///     sigma = \sum_j( f1^{(j)}(ry) * g1^{(j)}(ry) )
     ///     f2(t) = layers[i](t || ry)
     ///     g2^{(j)}(t) = \alpha^j copy_to[j](ry_j, ry) eq(rt_j, t)
+    /// Cost estimation (M: 1 << inst_num_vars, N: sub-circuit size, k subset):
+    ///     1. Compute f1^{(j)}(y): (N * M / 2) BE + (N * M / 2) EE
+    ///     2. Compute g1^{(j)}(y): k(M + 1) EE
+    ///     3. Sumcheck unipoly: 2((2^2 - 1) M / 2 EE + (2^2 - 1) M / 2 EE)
+    ///     4. Sumcheck fix variable: 2(M / 2 EE + M / 2 EE)
     #[tracing::instrument(skip_all, name = "prove_and_update_state_phase1_step2")]
     pub(super) fn prove_and_update_state_phase1_step2(
         &mut self,
@@ -205,7 +215,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         #[cfg(not(feature = "parallel"))]
         let g2 = DenseMultilinearExtension::from_evaluations_ext_vec(hi_num_vars, g2);
 
-        // When rayon is used, the `fold` operation results in a iterator of `Vec<F>` rather than a single `Vec<F>`. In this case, we simply need to sum them.
+        // When rayon is used, the `fold` operation results in a iterator of `Vec<F>` rather than a
+        // single `Vec<F>`. In this case, we simply need to sum them.
         #[cfg(feature = "parallel")]
         let g2 = DenseMultilinearExtension::from_evaluations_ext_vec(
             hi_num_vars,
