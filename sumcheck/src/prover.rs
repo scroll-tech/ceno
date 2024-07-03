@@ -648,6 +648,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                 |mut products_sum, (coefficient, products)| {
                     let span = entered_span!("sum");
 
+                    // p^m(0), p^m(1), ...
                     let mut sum = match products.len() {
                         1 => {
                             let f = &self.poly.flattened_ml_extensions[products[0]];
@@ -678,8 +679,12 @@ impl<E: ExtensionField> IOPProverState<E> {
                                     .step_by(2)
                                     .with_min_len(64)
                                     .map(|b| {
+                                        // at round m,
+                                        // f^m(0,b) = f[b], g^m(0,b) = g[b]
+                                        // f^m(1,b) = f[b+1], g^m(1,b) = g[b+1]
+                                        // f^m(2,b) = 2*f[b+1]-f[b], g^m(2,b) = 2*g[b+1]-g[b]
                                         AdditiveArray([
-                                            f[b] * g[b],
+                                            f[b] * g[b], // f^m(0)*g^m(0) = \sum_b f^m(0,b)*g^m(0,b)
                                             f[b + 1] * g[b + 1],
                                             (f[b + 1] + f[b + 1] - f[b])
                                                 * (g[b + 1] + g[b + 1] - g[b]),
@@ -696,8 +701,10 @@ impl<E: ExtensionField> IOPProverState<E> {
                     sum.iter_mut().for_each(|sum| *sum *= coefficient);
 
                     let span = entered_span!("extrapolation");
+                    // from { p^m(0), p^m(1), ..., p^m(products.len()) }
+                    // extrapolate { p^m(products.len()+1), ..., p^m(max_degree) }
                     let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
-                        .into_par_iter()
+                        .into_iter()
                         .map(|i| {
                             let (points, weights) = &self.extrapolation_aux[products.len() - 1];
                             let at = E::from((products.len() + 1 + i) as u64);

@@ -15,6 +15,7 @@ use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
 
 use crate::structs::IOPProverState;
 
+// for each j, its barycentric weight = \frac{1}{ \prod_{i != j} point_j - point_i }
 pub fn barycentric_weights<F: PrimeField>(points: &[F]) -> Vec<F> {
     let mut weights = points
         .iter()
@@ -91,13 +92,19 @@ fn serial_batch_inversion_and_mul<F: PrimeField>(v: &mut [F], coeff: &F) {
     }
 }
 
+// refer to https://people.maths.ox.ac.uk/trefethen/barycentric.pdf for barycentric formula
+// p(x) = \sum f_j * (w_j / (x - x_j)) / \sum w_j / (x - x_j)
 pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F], at: &F) -> F {
     let (coeffs, sum_inv) = {
+        // x - x_j
         let mut coeffs = points.iter().map(|point| *at - point).collect::<Vec<_>>();
+        // 1 / (x - x_j)
         batch_inversion(&mut coeffs);
         let mut sum = F::ZERO;
         coeffs.iter_mut().zip(weights).for_each(|(coeff, weight)| {
+            // w_j / (x - x_j)
             *coeff *= weight;
+            // \sum w_j / (x - x_j)
             sum += *coeff
         });
         let sum_inv = sum.invert().unwrap_or(F::ZERO);
@@ -106,8 +113,11 @@ pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F
     coeffs
         .iter()
         .zip(evals)
+        // w_j * y_j / (x - x_j)
         .map(|(coeff, eval)| *coeff * eval)
+        // \sum_j w_j * y_j / (x - x_j)
         .sum::<F>()
+        // p(x)
         * sum_inv
 }
 
