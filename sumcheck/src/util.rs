@@ -94,7 +94,7 @@ fn serial_batch_inversion_and_mul<F: PrimeField>(v: &mut [F], coeff: &F) {
 
 // refer to https://people.maths.ox.ac.uk/trefethen/barycentric.pdf for barycentric formula
 // p(x) = \sum f_j * (w_j / (x - x_j)) / \sum w_j / (x - x_j)
-pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F], at: &F) -> F {
+pub fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F], at: &F) -> F {
     let (coeffs, sum_inv) = {
         // x - x_j
         let mut coeffs = points.iter().map(|point| *at - point).collect::<Vec<_>>();

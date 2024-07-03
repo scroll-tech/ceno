@@ -30,5 +30,9 @@ criterion = { version = "0.5", features = ["html_reports"] }
 name = "devirgo_sumcheck"
 harness = false
 
+[[bench]]
+name = "eval_partial_poly"
+harness = false
+
 [features]
 non_pow2_rayon_thread = [ ]
