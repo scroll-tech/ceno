@@ -298,7 +298,7 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
+                // Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64), // current length has no cells for borrow
             ],
         );
@@ -314,7 +314,7 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
+                // Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64), // current length has no cells for borrow
             ],
         );

@@ -84,6 +84,7 @@ pub(crate) fn test_opcode_circuit<Ext: ExtensionField>(
 
     #[cfg(feature = "test-dbg")]
     println!("{:?}", circuit_witness);
+    // dbg!(&circuit_witness);
 
     circuit_witness.check_correctness(&circuit);
 
