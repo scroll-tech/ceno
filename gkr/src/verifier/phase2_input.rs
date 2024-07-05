@@ -63,6 +63,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             }
             return Ok(());
         }
+
         let lo_in_num_vars = lo_in_num_vars.unwrap();
 
         let claim = SumcheckState::verify(

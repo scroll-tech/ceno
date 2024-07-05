@@ -2,8 +2,11 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use ark_std::Zero;
 use ff_ext::ExtensionField;
-use gkr::structs::{Circuit, CircuitWitness, LayerWitness};
+use gkr::structs::{Circuit, CircuitWitness};
 use itertools::{chain, izip, Itertools};
+use multilinear_extensions::{
+    mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+};
 use simple_frontend::structs::WitnessId;
 
 use crate::{
@@ -14,7 +17,7 @@ use crate::{
     },
 };
 
-impl<E: ExtensionField> CircuitGraphBuilder<E> {
+impl<'a, E: ExtensionField> CircuitGraphBuilder<'a, E> {
     pub fn new() -> Self {
         Self {
             graph: Default::default(),
@@ -32,7 +35,7 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
         circuit: &Arc<Circuit<E>>,
         preds: Vec<PredType>,
         challenges: Vec<E>,
-        sources: Vec<LayerWitness<E::BaseField>>,
+        sources: Vec<DenseMultilinearExtension<E>>,
         num_instances: usize,
     ) -> Result<usize, GKRGraphError> {
         let id = self.graph.nodes.len();
@@ -45,74 +48,54 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
         assert!(num_instances.is_power_of_two());
         assert_eq!(sources.len(), circuit.n_witness_in);
         assert!(
-            !sources.iter().any(
-                |source| source.instances.len() != 0 && source.instances.len() != num_instances
-            ),
+            sources
+                .iter()
+                .all(|source| source.evaluations.len() % num_instances == 0),
             "node_id: {}, num_instances: {}, sources_num_instances: {:?}",
             id,
             num_instances,
             sources
                 .iter()
-                .map(|source| source.instances.len())
+                .map(|source| source.evaluations.len())
                 .collect_vec()
         );
 
         let mut witness = CircuitWitness::new(circuit, challenges);
         let wits_in = izip!(preds.iter(), sources.into_iter())
             .map(|(pred, source)| match pred {
-                PredType::Source => source,
+                PredType::Source => source.into(),
                 PredType::PredWire(out) | PredType::PredWireDup(out) => {
-                    let (id, out) = &match out {
+                    let (id, out) = match out {
                         NodeOutputType::OutputLayer(id) => (
                             *id,
-                            &self.witness.node_witnesses[*id]
+                            self.witness.node_witnesses[*id]
                                 .output_layer_witness_ref()
-                                .instances,
+                                .clone(),
                         ),
                         NodeOutputType::WireOut(id, wit_id) => (
                             *id,
-                            &self.witness.node_witnesses[*id].witness_out_ref()[*wit_id as usize]
-                                .instances,
+                            self.witness.node_witnesses[*id].witness_out_ref()[*wit_id as usize]
+                                .clone(),
                         ),
                     };
-                    let old_num_instances = self.witness.node_witnesses[*id].n_instances();
-                    // TODO find way to avoid expensive clone for wit_in
-                    let new_instances = match pred {
-                        PredType::PredWire(_) => {
-                            let new_size = (old_num_instances * out[0].len()) / num_instances;
-                            out.iter()
-                                .cloned()
-                                .flatten()
-                                .chunks(new_size)
-                                .into_iter()
-                                .map(|c| c.collect_vec())
-                                .collect_vec()
-                        }
+                    let old_num_instances = self.witness.node_witnesses[id].n_instances();
+                    let new_instances: ArcMultilinearExtension<'a, E> = match pred {
+                        PredType::PredWire(_) => out,
                         PredType::PredWireDup(_) => {
                             let num_dups = num_instances / old_num_instances;
-                            let old_size = out[0].len();
-                            out.iter()
-                                .cloned()
-                                .flat_map(|single_instance| {
-                                    single_instance
-                                        .into_iter()
-                                        .cycle()
-                                        .take(num_dups * old_size)
-                                })
-                                .chunks(old_size)
-                                .into_iter()
-                                .map(|c| c.collect_vec())
-                                .collect_vec()
+                            let new: ArcMultilinearExtension<E> =
+                                out.dup(old_num_instances, num_dups).into();
+                            new
                         }
                         _ => unreachable!(),
                     };
-                    LayerWitness {
-                        instances: new_instances,
-                    }
+                    new_instances
                 }
             })
             .collect_vec();
-        witness.add_instances(circuit, wits_in, num_instances);
+
+        witness.set_instances(circuit, wits_in, num_instances);
+        self.witness.node_witnesses.push(Arc::new(witness));
 
         self.graph.nodes.push(CircuitNode {
             id,
@@ -120,7 +103,6 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
             circuit: circuit.clone(),
             preds,
         });
-        self.witness.node_witnesses.push(witness);
 
         Ok(id)
     }
@@ -146,9 +128,7 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
     }
 
     /// Collect the information of `self.sources` and `self.targets`.
-    pub fn finalize_graph_and_witness(
-        mut self,
-    ) -> (CircuitGraph<E>, CircuitGraphWitness<E::BaseField>) {
+    pub fn finalize_graph_and_witness(mut self) -> (CircuitGraph<E>, CircuitGraphWitness<'a, E>) {
         // Generate all possible graph output
         let outs = self
             .graph
@@ -203,7 +183,7 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
     pub fn finalize_graph_and_witness_with_targets(
         mut self,
         targets: &[NodeOutputType],
-    ) -> (CircuitGraph<E>, CircuitGraphWitness<E::BaseField>) {
+    ) -> (CircuitGraph<E>, CircuitGraphWitness<'a, E>) {
         // Generate all possible graph output
         let outs = self
             .graph

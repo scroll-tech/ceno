@@ -4,7 +4,6 @@
 use crate::{
     error::GKRError,
     structs::{Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, PointAndEval},
-    utils::MultilinearExtensionFromVectors,
 };
 use ark_std::rand::{
     rngs::{OsRng, StdRng},
@@ -13,7 +12,10 @@ use ark_std::rand::{
 use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
-use multilinear_extensions::mle::ArcDenseMultilinearExtension;
+use multilinear_extensions::{
+    mle::{DenseMultilinearExtension, IntoMLE},
+    virtual_poly_v2::ArcMultilinearExtension,
+};
 use simple_frontend::structs::CircuitBuilder;
 use std::iter;
 use sumcheck::util::ceil_log2;
@@ -202,8 +204,8 @@ fn chi<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> 
 // chi_output xor constant
 // = chi_output + constant - 2*chi_output*constant
 // = c + (x0 + x2) - 2x0x2 - x1x2 + 2x0x1x2 - 2(c*x0 + c*x2 - 2c*x0*x2 - c*x1*x2 + 2*c*x0*x1*x2)
-// = x0 + x2 + c - 2*x0*x2 - x1*x2 + 2*x0*x1*x2 - 2*c*x0 - 2*c*x2 + 4*c*x0*x2 + 2*c*x1*x2 - 4*c*x0*x1*x2
-// = x0*(1-2c) + x2*(1-2c) + c + x0*x2*(-2 + 4c) + x1*x2(-1 + 2c) + x0*x1*x2(2 - 4c)
+// = x0 + x2 + c - 2*x0*x2 - x1*x2 + 2*x0*x1*x2 - 2*c*x0 - 2*c*x2 + 4*c*x0*x2 + 2*c*x1*x2 -
+// 4*c*x0*x1*x2 = x0*(1-2c) + x2*(1-2c) + c + x0*x2*(-2 + 4c) + x1*x2(-1 + 2c) + x0*x1*x2(2 - 4c)
 fn chi_and_xor_constant<'a, E: ExtensionField>(
     cb: &mut CircuitBuilder<E>,
     words: &[Word; 3],
@@ -353,8 +355,9 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
         let mut array = [Word::default(); 5];
 
         // Theta step
-        // state[x, y] = state[x, y] XOR state[x+4, 0] XOR state[x+4, 1] XOR state[x+4, 2] XOR state[x+4, 3] XOR state[x+4, 4]
-        // XOR state[x+1, 0] XOR state[x+1, 1] XOR state[x+1, 2] XOR state[x+1, 3] XOR state[x+1, 4]
+        // state[x, y] = state[x, y] XOR state[x+4, 0] XOR state[x+4, 1] XOR state[x+4, 2] XOR
+        // state[x+4, 3] XOR state[x+4, 4] XOR state[x+1, 0] XOR state[x+1, 1] XOR
+        // state[x+1, 2] XOR state[x+1, 3] XOR state[x+1, 4]
         state = THETA
             .map(|(index, inputs, rotated_input)| {
                 let input = state[index];
@@ -449,11 +452,11 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
     Circuit::new(cb)
 }
 
-pub fn prove_keccak256<E: ExtensionField>(
+pub fn prove_keccak256<'a, E: ExtensionField>(
     instance_num_vars: usize,
     circuit: &Circuit<E>,
     max_thread_id: usize,
-) -> Option<(IOPProof<E>, ArcDenseMultilinearExtension<E>)> {
+) -> Option<(IOPProof<E>, CircuitWitness<E>)> {
     assert!(
         ceil_log2(max_thread_id) <= instance_num_vars,
         "ceil_log2(N) {} > instance_num_vars {}",
@@ -463,20 +466,29 @@ pub fn prove_keccak256<E: ExtensionField>(
     // Sanity-check
     #[cfg(test)]
     {
-        let all_zero = vec![
+        use crate::structs::CircuitWitness;
+        let all_zero: Vec<DenseMultilinearExtension<E>> = vec![
             vec![E::BaseField::ZERO; 25 * 64],
             vec![E::BaseField::ZERO; 17 * 64],
-        ];
+        ]
+        .into_iter()
+        .map(|wit_in| wit_in.into_mle())
+        .collect();
         let all_one = vec![
             vec![E::BaseField::ONE; 25 * 64],
             vec![E::BaseField::ZERO; 17 * 64],
-        ];
+        ]
+        .into_iter()
+        .map(|wit_in| wit_in.into_mle())
+        .collect();
         let mut witness = CircuitWitness::new(&circuit, Vec::new());
         witness.add_instance(&circuit, all_zero);
         witness.add_instance(&circuit, all_one);
 
         izip!(
-            &witness.witness_out_ref()[0].instances,
+            witness.witness_out_ref()[0]
+                .get_base_field_vec()
+                .chunks(256),
             [[0; 25], [u64::MAX; 25]]
         )
         .for_each(|(wire_out, state)| {
@@ -501,22 +513,28 @@ pub fn prove_keccak256<E: ExtensionField>(
     let mut witness = CircuitWitness::new(&circuit, Vec::new());
     for _ in 0..1 << instance_num_vars {
         let [rand_state, rand_input] = [25 * 64, 17 * 64].map(|n| {
-            iter::repeat_with(|| rng.gen_bool(0.5) as u64)
+            let mut data = vec![E::BaseField::ZERO; 1 << ceil_log2(n)];
+            data.iter_mut()
                 .take(n)
-                .map(E::BaseField::from)
-                .collect_vec()
+                .for_each(|d| *d = E::BaseField::from(rng.gen_bool(0.5) as u64));
+            data
         });
-        witness.add_instance(&circuit, vec![rand_state, rand_input]);
+        witness.add_instance(
+            &circuit,
+            vec![
+                DenseMultilinearExtension::from_evaluations_vec(
+                    ceil_log2(rand_state.len()),
+                    rand_state,
+                ),
+                DenseMultilinearExtension::from_evaluations_vec(
+                    ceil_log2(rand_input.len()),
+                    rand_input,
+                ),
+            ],
+        );
     }
 
-    let lo_num_vars = witness.witness_out_ref()[0].instances[0]
-        .len()
-        .next_power_of_two()
-        .ilog2() as usize;
-    let output_mle = witness.witness_out_ref()[0]
-        .instances
-        .as_slice()
-        .mle(lo_num_vars, instance_num_vars);
+    let output_mle = &witness.witness_out_ref()[0];
 
     let mut prover_transcript = Transcript::<E>::new(b"test");
     let output_point = iter::repeat_with(|| {
@@ -524,7 +542,7 @@ pub fn prove_keccak256<E: ExtensionField>(
             .get_and_append_challenge(b"output point")
             .elements
     })
-    .take(output_mle.num_vars)
+    .take(output_mle.num_vars())
     .collect_vec();
     let output_eval = output_mle.evaluate(&output_point);
 
@@ -538,12 +556,12 @@ pub fn prove_keccak256<E: ExtensionField>(
         &mut prover_transcript,
     );
     println!("{}: {:?}", 1 << instance_num_vars, start.elapsed());
-    Some((proof, output_mle))
+    Some((proof, witness))
 }
 
 pub fn verify_keccak256<E: ExtensionField>(
     instance_num_vars: usize,
-    output_mle: ArcDenseMultilinearExtension<E>,
+    output_mle: &ArcMultilinearExtension<E>,
     proof: IOPProof<E>,
     circuit: &Circuit<E>,
 ) -> Result<GKRInputClaims<E>, GKRError> {
@@ -553,7 +571,7 @@ pub fn verify_keccak256<E: ExtensionField>(
             .get_and_append_challenge(b"output point")
             .elements
     })
-    .take(output_mle.num_vars)
+    .take(output_mle.num_vars())
     .collect_vec();
     let output_eval = output_mle.evaluate(&output_point);
     crate::structs::IOPVerifierState::verify_parallel(

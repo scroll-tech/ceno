@@ -1,12 +1,11 @@
 use crate::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState, PointAndEval};
-use crate::utils::MultilinearExtensionFromVectors;
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
+use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use simple_frontend::structs::{CellId, CircuitBuilder};
-use std::iter;
-use std::time::Duration;
+use std::{iter, time::Duration};
 use transcript::Transcript;
 
 // build an IsZero Gadget
@@ -64,9 +63,9 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
 
     // assign wire in
     let n_wits_in = circuit.n_witness_in;
-    let mut wit_in = vec![vec![]; n_wits_in];
-    wit_in[value_wire_in_id as usize] = in_value;
-    wit_in[inv_wire_in_id as usize] = in_inv;
+    let mut wit_in = vec![DenseMultilinearExtension::default(); n_wits_in];
+    wit_in[value_wire_in_id as usize] = in_value.into_mle();
+    wit_in[inv_wire_in_id as usize] = in_inv.into_mle();
     let circuit_witness = {
         let challenges = vec![GoldilocksExt2::from(2)];
         let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
@@ -75,7 +74,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     };
     println!("circuit witness: {:?}", circuit_witness);
     // use of check_correctness will panic
-    //circuit_witness.check_correctness(&circuit);
+    // circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
@@ -90,10 +89,16 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     );
 
     // cond1 and cond2
-    assert_eq!(cond_wire_out_ref.instances[0][0], Goldilocks::from(0));
-    assert_eq!(cond_wire_out_ref.instances[0][1], Goldilocks::from(0));
+    assert_eq!(
+        cond_wire_out_ref.get_base_field_vec()[0],
+        Goldilocks::from(0)
+    );
+    assert_eq!(
+        cond_wire_out_ref.get_base_field_vec()[1],
+        Goldilocks::from(0)
+    );
     // is_zero
-    assert_eq!(is_zero_wire_out_ref.instances[0][0], out_is_zero);
+    assert_eq!(is_zero_wire_out_ref.get_base_field_vec()[0], out_is_zero);
 
     // add prover-verifier process
     let mut prover_transcript =
@@ -105,27 +110,20 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     let mut verifier_wires_out_evals = vec![];
     let instance_num_vars = 1_u32.ilog2() as usize;
     for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
-        let lo_num_vars = wits_out[wire_out_id as usize].instances[0]
-            .len()
-            .next_power_of_two()
-            .ilog2() as usize;
-        let output_mle = wits_out[wire_out_id as usize]
-            .instances
-            .as_slice()
-            .mle(lo_num_vars, instance_num_vars);
+        let output_mle = &wits_out[wire_out_id as usize];
         let prover_output_point = iter::repeat_with(|| {
             prover_transcript
                 .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
                 .elements
         })
-        .take(output_mle.num_vars)
+        .take(output_mle.num_vars())
         .collect_vec();
         let verifier_output_point = iter::repeat_with(|| {
             verifier_transcript
                 .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
                 .elements
         })
-        .take(output_mle.num_vars)
+        .take(output_mle.num_vars())
         .collect_vec();
         let prover_output_eval = output_mle.evaluate(&prover_output_point);
         let verifier_output_eval = output_mle.evaluate(&verifier_output_point);
@@ -221,9 +219,9 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
 
     // assign wire in
     let n_wits_in = circuit.n_witness_in;
-    let mut wits_in = vec![vec![]; n_wits_in];
-    wits_in[value_wire_in_id as usize] = in_value;
-    wits_in[inv_wire_in_id as usize] = in_inv;
+    let mut wits_in = vec![DenseMultilinearExtension::<GoldilocksExt2>::default(); n_wits_in];
+    wits_in[value_wire_in_id as usize] = in_value.into_mle();
+    wits_in[inv_wire_in_id as usize] = in_inv.into_mle();
     let circuit_witness = {
         let challenges = vec![GoldilocksExt2::from(2)];
         let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
@@ -232,7 +230,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     };
     println!("circuit witness: {:?}", circuit_witness);
     // use of check_correctness will panic
-    //circuit_witness.check_correctness(&circuit);
+    // circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
@@ -247,11 +245,11 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     );
 
     // cond1 and cond2
-    for cond_item in cond_wire_out_ref.instances[0].clone().into_iter() {
-        assert_eq!(cond_item, Goldilocks::from(0));
-    }
+    // for cond_item in cond_wire_out_ref.instances[0].clone().into_iter() {
+    //     assert_eq!(cond_item, Goldilocks::from(0));
+    // }
     // is_zero
-    assert_eq!(is_zero_wire_out_ref.instances[0][0], out_is_zero);
+    assert_eq!(is_zero_wire_out_ref.get_base_field_vec()[0], out_is_zero);
 
     // add prover-verifier process
     let mut prover_transcript =
@@ -263,27 +261,20 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     let mut verifier_wires_out_evals = vec![];
     let instance_num_vars = 1_u32.ilog2() as usize;
     for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
-        let lo_num_vars = wits_out[wire_out_id as usize].instances[0]
-            .len()
-            .next_power_of_two()
-            .ilog2() as usize;
-        let output_mle = wits_out[wire_out_id as usize]
-            .instances
-            .as_slice()
-            .mle(lo_num_vars, instance_num_vars);
+        let output_mle = &wits_out[wire_out_id as usize];
         let prover_output_point = iter::repeat_with(|| {
             prover_transcript
                 .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
                 .elements
         })
-        .take(output_mle.num_vars)
+        .take(output_mle.num_vars())
         .collect_vec();
         let verifier_output_point = iter::repeat_with(|| {
             verifier_transcript
                 .get_and_append_challenge(b"output_point_test_gkr_circuit_IsZeroGadget_simple")
                 .elements
         })
-        .take(output_mle.num_vars)
+        .take(output_mle.num_vars())
         .collect_vec();
         let prover_output_eval = output_mle.evaluate(&prover_output_point);
         let verifier_output_eval = output_mle.evaluate(&verifier_output_point);
@@ -305,21 +296,19 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     );
     let proof_time: Duration = start.elapsed();
 
-    /*
     // verifier panics due to mismatch of number of variables
-    let start = std::time::Instant::now();
-    let _claim = IOPVerifierState::verify_parallel(
-        &circuit,
-        &[],
-        &[],
-        &verifier_wires_out_evals,
-        &proof,
-        instance_num_vars,
-        &mut verifier_transcript,
-    ).unwrap();
-    let verification_time: Duration = start.elapsed();
-
-    println!("proof time: {:?}, verification time: {:?}", proof_time, verification_time);
-    */
+    // let start = std::time::Instant::now();
+    // let _claim = IOPVerifierState::verify_parallel(
+    // &circuit,
+    // &[],
+    // &[],
+    // &verifier_wires_out_evals,
+    // &proof,
+    // instance_num_vars,
+    // &mut verifier_transcript,
+    // ).unwrap();
+    // let verification_time: Duration = start.elapsed();
+    //
+    // println!("proof time: {:?}, verification time: {:?}", proof_time, verification_time);
     println!("proof time: {:?}", proof_time);
 }

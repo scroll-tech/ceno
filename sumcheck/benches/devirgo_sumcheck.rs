@@ -13,7 +13,7 @@ use sumcheck::{structs::IOPProverState, util::ceil_log2};
 use goldilocks::GoldilocksExt2;
 use multilinear_extensions::{
     commutative_op_mle_pair,
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::VirtualPolynomial,
 };
 use transcript::Transcript;

@@ -41,11 +41,11 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                 .as_slice()
                 .eval(&self.eq_y_ry, &self.challenges);
 
-        // Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
-        //     f1(s1 || x1) = layers[i + 1](s1 || x1)
-        //     g1(s1 || x1) = \sum_{s2}( \sum_{s3}( \sum_{x2}( \sum_{x3}(
-        //         eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i + 1](s2 || x2) * layers[i + 1](s3 || x3)
-        //     ) ) ) ) + \sum_{s2}( \sum_{x2}(
+        // Sumcheck 1: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1)
+        // * g1'_j(s1 || x1)     f1(s1 || x1) = layers[i + 1](s1 || x1) g1(s1 || x1) = \sum_{s2}(
+        //   \sum_{s3}( \sum_{x2}( \sum_{x3}( eq(rt, s1, s2, s3) * mul3(ry, x1, x2, x3) * layers[i +
+        //   1](s2 || x2) * layers[i +
+        // 1](s3 || x3)     ) ) ) ) + \sum_{s2}( \sum_{x2}(
         //         eq(rt, s1, s2) * mul2(ry, x1, x2) * layers[i + 1](s2 || x2)
         //     ) ) + eq(rt, s1) * add(ry, x1)
         //     f1'^{(j)}(s1 || x1) = subset[j][i](s1 || x1)

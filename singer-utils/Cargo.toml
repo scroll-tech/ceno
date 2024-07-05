@@ -20,3 +20,4 @@ sumcheck = { version = "0.1.0", path = "../sumcheck" }
 strum = "0.26.1"
 strum_macros = "0.26.1"
 transcript = { version = "0.1.0", path = "../transcript" }
+multilinear_extensions = { path = "../multilinear_extensions", features = [ "parallel"] }

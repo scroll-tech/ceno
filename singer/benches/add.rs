@@ -8,7 +8,6 @@ use const_env::from_env;
 use criterion::*;
 
 use ff_ext::{ff::Field, ExtensionField};
-use gkr::structs::LayerWitness;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 
@@ -51,7 +50,9 @@ fn bench_add(c: &mut Criterion) {
         if !is_power_of_2(RAYON_NUM_THREADS) {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
             {
-                panic!("add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool");
+                panic!(
+                    "add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool"
+                );
             }
 
             #[cfg(feature = "non_pow2_rayon_thread")]
@@ -87,8 +88,7 @@ fn bench_add(c: &mut Criterion) {
                     },
            |(mut rng,mut singer_builder, real_challenges)| {
                         let size = AddInstruction::phase0_size();
-                        let phase0: CircuitWiresIn<<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField> = vec![LayerWitness {
-                            instances: (0..(1 << instance_num_vars))
+                        let phase0: CircuitWiresIn<GoldilocksExt2> = vec![(0..(1 << instance_num_vars))
                                 .map(|_| {
                                     (0..size)
                                         .map(|_| {
@@ -98,8 +98,8 @@ fn bench_add(c: &mut Criterion) {
                                         })
                                         .collect_vec()
                                 })
-                                .collect_vec(),
-                        }];
+                                .collect_vec().into(),
+                        ];
 
 
                         let timer = Instant::now();

@@ -1,7 +1,7 @@
 use std::{cmp::max, collections::HashMap, marker::PhantomData, mem, sync::Arc};
 
 use crate::{
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
     util::bit_decompose,
 };
 use ark_std::{end_timer, rand::Rng, start_timer};

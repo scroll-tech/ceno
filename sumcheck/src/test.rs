@@ -4,7 +4,7 @@ use ark_std::{rand::RngCore, test_rng};
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
-use multilinear_extensions::virtual_poly::VirtualPolynomial;
+use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::VirtualPolynomial};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::Transcript;
 

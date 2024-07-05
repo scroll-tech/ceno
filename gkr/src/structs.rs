@@ -5,7 +5,9 @@ use std::{
 
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use multilinear_extensions::mle::ArcDenseMultilinearExtension;
+use multilinear_extensions::{
+    mle::ArcDenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+};
 use serde::{Deserialize, Serialize, Serializer};
 use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId};
 
@@ -64,10 +66,7 @@ pub struct IOPProverState<E: ExtensionField> {
     pub(crate) to_next_step_point: Point<E>,
 
     // Especially for output phase1.
-    pub(crate) phase1_layer_poly: ArcDenseMultilinearExtension<E>,
     pub(crate) assert_point: Point<E>,
-    // Especially for phase1.
-    pub(crate) g1_values: Vec<E>,
 }
 
 /// Represent the verifier state for each layer in the IOP protocol.
@@ -86,8 +85,6 @@ pub struct IOPVerifierState<E: ExtensionField> {
 
     // Especially for output phase1.
     pub(crate) assert_point: Point<E>,
-    // Especially for phase1.
-    pub(crate) g1_values: Vec<E>,
     // Especially for phase2.
     pub(crate) out_point: Point<E>,
     pub(crate) eq_y_ry: Vec<E>,
@@ -122,7 +119,6 @@ pub struct GKRInputClaims<E: ExtensionField> {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub(crate) enum SumcheckStepType {
     OutputPhase1Step1,
-    OutputPhase1Step2,
     Phase1Step1,
     Phase2Step1,
     Phase2Step2,
@@ -229,16 +225,16 @@ impl<C, const FAN_IN: usize> Serialize for Gate<C, FAN_IN> {
     }
 }
 
-#[derive(Clone, PartialEq, Serialize)]
-pub struct CircuitWitness<F: SmallField> {
-    /// Three vectors denote 1. layer_id, 2. instance_id, 3. wire_id.
-    pub(crate) layers: Vec<LayerWitness<F>>,
-    /// 1. wires_in id, 2. instance_id, 3. wire_id.
-    pub(crate) witness_in: Vec<LayerWitness<F>>,
-    /// 1. wires_in id, 2. instance_id, 3. wire_id.
-    pub(crate) witness_out: Vec<LayerWitness<F>>,
+#[derive(Clone)]
+pub struct CircuitWitness<'a, E: ExtensionField> {
+    /// Three vectors denote 1. layer_id, 2. instance_id || wire_id.
+    pub(crate) layers: Vec<ArcMultilinearExtension<'a, E>>,
+    /// Three vectors denote 1. wires_in id, 2. instance_id || wire_id.
+    pub(crate) witness_in: Vec<ArcMultilinearExtension<'a, E>>,
+    /// Three vectors denote 1. wires_out id, 2. instance_id || wire_id.
+    pub(crate) witness_out: Vec<ArcMultilinearExtension<'a, E>>,
     /// Challenges
-    pub(crate) challenges: HashMap<ChallengeConst, Vec<F>>,
+    pub(crate) challenges: HashMap<ChallengeConst, Vec<E::BaseField>>,
     /// The number of instances for the same sub-circuit.
     pub(crate) n_instances: usize,
 }
