@@ -1,8 +1,7 @@
-use std::mem;
-
 use ff_ext::ExtensionField;
 use gkr_graph::structs::{CircuitGraphAuxInfo, NodeOutputType};
 use itertools::Itertools;
+use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use transcript::Transcript;
 
 use crate::{
@@ -11,12 +10,19 @@ use crate::{
 
 use super::{GKRGraphProverState, SingerProof};
 
-pub fn prove<E: ExtensionField>(
+pub fn prove<'a, E: ExtensionField>(
     vm_circuit: &SingerCircuit<E>,
-    vm_witness: &SingerWitness<E::BaseField>,
+    vm_witness: &SingerWitness<'a, E>,
     vm_out_id: &SingerWiresOutID,
     transcript: &mut Transcript<E>,
-) -> Result<(SingerProof<E>, CircuitGraphAuxInfo), ZKVMError> {
+) -> Result<
+    (
+        SingerProof<E>,
+        CircuitGraphAuxInfo,
+        SingerWiresOutValues<'a, E>,
+    ),
+    ZKVMError,
+> {
     // TODO: Add PCS.
     let point = (0..2 * <E as ExtensionField>::DEGREE)
         .map(|_| {
@@ -27,27 +33,18 @@ pub fn prove<E: ExtensionField>(
         .collect_vec();
 
     let singer_out_evals = {
-        let target_wits = |node_out_ids: &[NodeOutputType]| {
+        let target_wits = |node_out_ids: &[NodeOutputType]| -> Vec<ArcMultilinearExtension<E>> {
             node_out_ids
                 .iter()
-                .map(|node| {
-                    match node {
-                        NodeOutputType::OutputLayer(node_id) => vm_witness.0.node_witnesses
-                            [*node_id as usize]
-                            .output_layer_witness_ref()
-                            .instances
-                            .iter()
-                            .cloned()
-                            .flatten(),
-                        NodeOutputType::WireOut(node_id, wit_id) => vm_witness.0.node_witnesses
-                            [*node_id as usize]
-                            .witness_out_ref()[*wit_id as usize]
-                            .instances
-                            .iter()
-                            .cloned()
-                            .flatten(),
-                    }
-                    .collect_vec()
+                .map(|node| match node {
+                    NodeOutputType::OutputLayer(node_id) => vm_witness.0.node_witnesses
+                        [*node_id as usize]
+                        .output_layer_witness_ref()
+                        .clone(),
+                    NodeOutputType::WireOut(node_id, wit_id) => vm_witness.0.node_witnesses
+                        [*node_id as usize]
+                        .witness_out_ref()[*wit_id as usize]
+                        .clone(),
                 })
                 .collect_vec()
         };
@@ -62,7 +59,7 @@ pub fn prove<E: ExtensionField>(
             rom_table,
             public_output_size: vm_out_id
                 .public_output_size
-                .map(|node| mem::take(&mut target_wits(&[node])[0])),
+                .map(|node| target_wits(&[node])[0].clone()),
         }
     };
 
@@ -78,11 +75,5 @@ pub fn prove<E: ExtensionField>(
     let target_evals = vm_circuit.0.target_evals(&vm_witness.0, &point);
     let gkr_phase_proof =
         GKRGraphProverState::prove(&vm_circuit.0, &vm_witness.0, &target_evals, transcript, 1)?;
-    Ok((
-        SingerProof {
-            gkr_phase_proof,
-            singer_out_evals,
-        },
-        aux_info,
-    ))
+    Ok((SingerProof { gkr_phase_proof }, aux_info, singer_out_evals))
 }

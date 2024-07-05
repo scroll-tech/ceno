@@ -8,3 +8,12 @@ pub fn bit_decompose(input: u64, num_var: usize) -> Vec<bool> {
     }
     res
 }
+
+// TODO avoid duplicate implementation with sumcheck package
+/// log2 ceil of x
+pub fn ceil_log2(x: usize) -> usize {
+    assert!(x > 0, "ceil_log2: x must be positive");
+    // Calculate the number of bits in usize
+    let usize_bits = std::mem::size_of::<usize>() * 8;
+    usize_bits - (x - 1).leading_zeros() as usize
+}

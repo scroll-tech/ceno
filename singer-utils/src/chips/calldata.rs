@@ -7,10 +7,12 @@ use crate::{
 
 use super::ChipCircuitGadgets;
 use crate::chip_handler::{calldata::CalldataChip, rom_handler::ROMHandler, ChipHandler};
+use ff::Field;
 use ff_ext::ExtensionField;
-use gkr::structs::{Circuit, LayerWitness};
+use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 use simple_frontend::structs::CircuitBuilder;
 use sumcheck::util::ceil_log2;
 
@@ -58,23 +60,29 @@ pub(crate) fn construct_calldata_table_and_witness<E: ExtensionField>(
         .iter()
         .map(|x| E::BaseField::from(*x as u64))
         .collect_vec();
+
     let wits_in = vec![
-        LayerWitness {
-            instances: (0..calldata.len())
-                .map(|x| vec![E::BaseField::from(x as u64)])
-                .collect_vec(),
+        {
+            let len = calldata.len().next_power_of_two();
+            DenseMultilinearExtension::from_evaluations_vec(
+                ceil_log2(len),
+                (0..len).map(|x| E::BaseField::from(x as u64)).collect_vec(),
+            )
         },
-        LayerWitness {
-            instances: (0..calldata.len())
+        {
+            let len = calldata.len().next_power_of_two();
+            let mut calldata = (0..calldata.len())
                 .step_by(StackUInt::N_OPERAND_CELLS)
-                .map(|i| {
+                .flat_map(|i| {
                     calldata[i..(i + StackUInt::N_OPERAND_CELLS).min(calldata.len())]
                         .iter()
                         .cloned()
                         .rev()
                         .collect_vec()
                 })
-                .collect_vec(),
+                .collect_vec();
+            calldata.resize(len, E::BaseField::ZERO);
+            DenseMultilinearExtension::from_evaluations_vec(ceil_log2(len), calldata)
         },
     ];
 

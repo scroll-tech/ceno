@@ -1,7 +1,5 @@
 use ff_ext::ExtensionField;
 
-use crate::SingerWiresOutValues;
-
 // TODO: to be changed to a real PCS scheme.
 type BatchedPCSProof<F> = Vec<Vec<F>>;
 type Commitment<F> = Vec<F>;
@@ -25,5 +23,4 @@ pub struct SingerProof<E: ExtensionField> {
     // commitment_phase_proof: CommitPhaseProof<F>,
     gkr_phase_proof: GKRGraphProof<E>,
     // open_phase_proof: OpenPhaseProof<F>,
-    singer_out_evals: SingerWiresOutValues<E::BaseField>,
 }

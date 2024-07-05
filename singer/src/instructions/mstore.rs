@@ -39,7 +39,7 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
         graph_builder: &mut CircuitGraphBuilder<E>,
         chip_builder: &mut SingerChipBuilder<E>,
         inst_circuits: &[InstCircuit<E>],
-        mut sources: Vec<CircuitWiresIn<E::BaseField>>,
+        mut sources: Vec<CircuitWiresIn<E>>,
         real_challenges: &[E],
         real_n_instances: usize,
         _: &SingerParams,
@@ -390,9 +390,9 @@ mod test {
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
-    use gkr::structs::LayerWitness;
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
+    use multilinear_extensions::mle::DenseMultilinearExtension;
     use singer_utils::structs::ChipChallenges;
     use std::time::Instant;
     use transcript::Transcript;
@@ -513,28 +513,28 @@ mod test {
 
         let mut rng = test_rng();
         let inst_phase0_size = MstoreInstruction::phase0_size();
-        let inst_wit: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
-            instances: (0..(1 << instance_num_vars))
+        let inst_wit: CircuitWiresIn<E> = vec![
+            (0..(1 << instance_num_vars))
                 .map(|_| {
                     (0..inst_phase0_size)
                         .map(|_| E::BaseField::random(&mut rng))
                         .collect_vec()
                 })
-                .collect_vec(),
-        }];
+                .collect_vec()
+                .into(),
+        ];
         let acc_phase0_size = MstoreAccessory::phase0_size();
-        let acc_wit: CircuitWiresIn<E::BaseField> = vec![
-            LayerWitness { instances: vec![] },
-            LayerWitness { instances: vec![] },
-            LayerWitness {
-                instances: (0..(1 << instance_num_vars) * 32)
-                    .map(|_| {
-                        (0..acc_phase0_size)
-                            .map(|_| E::BaseField::random(&mut rng))
-                            .collect_vec()
-                    })
-                    .collect_vec(),
-            },
+        let acc_wit: CircuitWiresIn<E> = vec![
+            DenseMultilinearExtension::default(),
+            DenseMultilinearExtension::default(),
+            (0..(1 << instance_num_vars) * 32)
+                .map(|_| {
+                    (0..acc_phase0_size)
+                        .map(|_| E::BaseField::random(&mut rng))
+                        .collect_vec()
+                })
+                .collect_vec()
+                .into(),
         ];
 
         let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];

@@ -7,7 +7,7 @@ use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::VirtualPolynomial,
 };
 use sumcheck::{

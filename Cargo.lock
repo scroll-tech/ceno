@@ -1637,6 +1637,7 @@ dependencies = [
  "gkr-graph",
  "goldilocks",
  "itertools 0.12.1",
+ "multilinear_extensions",
  "simple-frontend",
  "strum 0.26.1",
  "strum_macros 0.26.1",

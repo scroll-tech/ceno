@@ -2,7 +2,7 @@ use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
-use std::{iter, marker::PhantomData, mem};
+use std::{iter, marker::PhantomData};
 use transcript::Transcript;
 
 use crate::{
@@ -39,11 +39,8 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         let lo_num_vars = circuit.layers[self.layer_id as usize].num_vars;
         let hi_num_vars = self.instance_num_vars;
 
-        // TODO: Double check the soundness here.
-        let assert_eq_yj_ryj = build_eq_x_r_vec(&self.assert_point[..lo_num_vars]);
-
-        let mut sigma_1 = E::ZERO;
-        sigma_1 += izip!(self.to_next_phase_point_and_evals.iter(), alpha_pows.iter())
+        // sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
+        let mut sigma_1 = izip!(self.to_next_phase_point_and_evals.iter(), alpha_pows.iter())
             .fold(E::ZERO, |acc, (point_and_eval, alpha_pow)| {
                 acc + point_and_eval.eval * alpha_pow
             });
@@ -56,33 +53,50 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         .fold(E::ZERO, |acc, ((_, point_and_eval), alpha_pow)| {
             acc + point_and_eval.eval * alpha_pow
         });
+
+        let assert_eq_yj_ryj = build_eq_x_r_vec(&self.assert_point[..lo_num_vars]);
         sigma_1 += circuit
             .assert_consts
             .as_slice()
             .eval(&assert_eq_yj_ryj, &self.challenges)
             * alpha_pows.last().unwrap();
 
-        // Sumcheck 1: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
-        //     f1^{(j)}(y) = layers[i](rt_j || y)
-        //     g1^{(j)}(y) = \alpha^j copy_to_wits_out[j](ry_j, y)
-        //                     or \alpha^j assert_subset_eq[j](ry, y)
+        // Sumcheck: sigma = \sum_{t || y}( \sum_j f1^{(j)}( t || y) * g1^{(j)}(t || y) )
+        // f1^{(j)}(y) = layers[i](t || y)
+        // g1^{(j)}(t || y) = \alpha^j * eq(rt_j, t) * eq(ry_j, y)
+        // g1^{(j)}(t || y) = \alpha^j * eq(rt_j, t) * copy_to[j](ry_j, y)
+        // g1^{(j)}(t || y) = \alpha^j * eq(rt_j, t) * assert_subset_eq(ry, y)
         let claim_1 = SumcheckState::verify(
             sigma_1,
             &step_msg.sumcheck_proof,
             &VPAuxInfo {
                 max_degree: 2,
-                num_variables: lo_num_vars,
+                num_variables: lo_num_vars + hi_num_vars,
                 phantom: PhantomData,
             },
             transcript,
         );
+
         let claim1_point = claim_1.point.iter().map(|x| x.elements).collect_vec();
-        let eq_y_ry = build_eq_x_r_vec(&claim1_point);
-        self.g1_values = chain![
+        let claim1_point_lo_num_vars = claim1_point.len() - hi_num_vars;
+        let eq_y_ry = build_eq_x_r_vec(&claim1_point[..claim1_point_lo_num_vars]);
+
+        assert_eq!(step_msg.sumcheck_eval_values.len(), 1);
+        let f_value = step_msg.sumcheck_eval_values[0];
+
+        let g_value: E = chain![
             izip!(self.to_next_phase_point_and_evals.iter(), alpha_pows.iter()).map(
                 |(point_and_eval, alpha_pow)| {
                     let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
-                    eq_eval(&point_and_eval.point[..point_lo_num_vars], &claim1_point) * alpha_pow
+                    let eq_t = eq_eval(
+                        &point_and_eval.point[point_lo_num_vars..],
+                        &claim1_point[(claim1_point.len() - hi_num_vars)..],
+                    );
+                    let eq_y = eq_eval(
+                        &point_and_eval.point[..point_lo_num_vars],
+                        &claim1_point[..point_lo_num_vars],
+                    );
+                    eq_t * eq_y * alpha_pow
                 }
             ),
             izip!(
@@ -94,93 +108,36 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             )
             .map(|(copy_to, (_, point_and_eval), alpha_pow)| {
                 let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                let eq_t = eq_eval(
+                    &point_and_eval.point[point_lo_num_vars..],
+                    &claim1_point[(claim1_point.len() - hi_num_vars)..],
+                );
                 let eq_yj_ryj = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
-                copy_to.as_slice().eval_row_first(&eq_yj_ryj, &eq_y_ry) * alpha_pow
+                eq_t * copy_to.as_slice().eval_row_first(&eq_yj_ryj, &eq_y_ry) * alpha_pow
             }),
             iter::once(
-                circuit
+                eq_eval(
+                    &self.assert_point[lo_num_vars..][..hi_num_vars],
+                    &claim1_point[(claim1_point.len() - hi_num_vars)..][..hi_num_vars],
+                ) * circuit
                     .assert_consts
                     .as_slice()
                     .eval_subset_eq(&assert_eq_yj_ryj, &eq_y_ry)
                     * alpha_pows.last().unwrap()
             )
         ]
-        .collect_vec();
+        .sum();
 
-        let f1_values = step_msg.sumcheck_eval_values.to_vec();
-        let got_value_1 = f1_values
-            .iter()
-            .zip(self.g1_values.iter())
-            .fold(E::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
+        let got_value = f_value * g_value;
 
         end_timer!(timer);
-        if claim_1.expected_evaluation != got_value_1 {
-            return Err(GKRError::VerifyError("output phase1 step1 failed"));
+        if claim_1.expected_evaluation != got_value {
+            return Err(GKRError::VerifyError("phase1 output step1 failed"));
         }
+        self.to_next_step_point_and_eval = PointAndEval::new_from_ref(&claim1_point, &f_value);
+        self.to_next_phase_point_and_evals = vec![self.to_next_step_point_and_eval.clone()];
 
-        self.to_next_step_point_and_eval =
-            PointAndEval::new(claim1_point, claim_1.expected_evaluation);
-
-        Ok(())
-    }
-
-    pub(super) fn verify_and_update_state_output_phase1_step2(
-        &mut self,
-        _: &Circuit<E>,
-        step_msg: IOPProverStepMessage<E>,
-        transcript: &mut Transcript<E>,
-    ) -> Result<(), GKRError> {
-        let timer = start_timer!(|| "Verifier sumcheck phase 1 step 2");
-        let hi_num_vars = self.instance_num_vars;
-
-        // Sumcheck 2: sigma = \sum_t( \sum_j( g2^{(j)}(t) ) ) * f2(t)
-        //     f2(t) = layers[i](t || ry)
-        //     g2^{(j)}(t) = \alpha^j copy_to[j](ry_j, r_y) eq(rt_j, t)
-        let claim_2 = SumcheckState::verify(
-            self.to_next_step_point_and_eval.eval,
-            &step_msg.sumcheck_proof,
-            &VPAuxInfo {
-                max_degree: 2,
-                num_variables: hi_num_vars,
-                phantom: PhantomData,
-            },
-            transcript,
-        );
-        let claim2_point = claim_2.point.iter().map(|x| x.elements).collect_vec();
-
-        let output_points = chain![
-            self.to_next_phase_point_and_evals.iter().map(|x| &x.point),
-            self.subset_point_and_evals[self.layer_id as usize]
-                .iter()
-                .map(|x| &x.1.point),
-            iter::once(&self.assert_point),
-        ];
-        let f2_value = step_msg.sumcheck_eval_values[0];
-        let g2_value = output_points
-            .zip(self.g1_values.iter())
-            .map(|(point, g1_value)| {
-                let point_lo_num_vars = point.len() - hi_num_vars;
-                *g1_value * eq_eval(&point[point_lo_num_vars..], &claim2_point)
-            })
-            .fold(E::ZERO, |acc, value| acc + value);
-
-        let got_value_2 = f2_value * g2_value;
-
-        end_timer!(timer);
-        if claim_2.expected_evaluation != got_value_2 {
-            return Err(GKRError::VerifyError("output phase1 step2 failed"));
-        }
-
-        self.to_next_step_point_and_eval = PointAndEval::new(
-            [
-                mem::take(&mut self.to_next_step_point_and_eval.point),
-                claim2_point,
-            ]
-            .concat(),
-            f2_value,
-        );
         self.subset_point_and_evals[self.layer_id as usize].clear();
-
         Ok(())
     }
 }

@@ -392,7 +392,10 @@ mod test {
     use ff::Field;
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
-    use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::build_eq_x_r_vec};
+    use multilinear_extensions::{
+        mle::{DenseMultilinearExtension, MultilinearExtension},
+        virtual_poly::build_eq_x_r_vec,
+    };
 
     #[test]
     fn test_ceil_log2() {

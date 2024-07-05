@@ -10,10 +10,15 @@ use std::{
 use ark_std::{end_timer, start_timer};
 use ff::PrimeField;
 use ff_ext::ExtensionField;
-use multilinear_extensions::{mle::FieldType, virtual_poly::VirtualPolynomial};
+use multilinear_extensions::{
+    mle::{DenseMultilinearExtension, FieldType},
+    op_mle,
+    virtual_poly::VirtualPolynomial,
+    virtual_poly_v2::VirtualPolynomialV2,
+};
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
 
-use crate::structs::IOPProverState;
+use crate::structs::{IOPProverState, IOPProverStateV2};
 
 pub fn barycentric_weights<F: PrimeField>(points: &[F]) -> Vec<F> {
     let mut weights = points
@@ -150,9 +155,9 @@ pub(crate) fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
     //
     // that is, we only need to store
     // - the last denom for i = len-1, and
-    // - the ratio between current step and fhe last step, which is the product of
-    //   (len-i) / i from all previous steps and we store this product as a fraction
-    //   number to reduce field divisions.
+    // - the ratio between current step and fhe last step, which is the product of (len-i) / i from
+    //   all previous steps and we store this product as a fraction number to reduce field
+    //   divisions.
 
     let mut denom_up = field_factorial::<F>(len - 1);
     let mut denom_down = F::ONE;
@@ -220,6 +225,37 @@ pub(crate) fn merge_sumcheck_polys<E: ExtensionField>(
             FieldType::Ext(evaluations)
         });
         ml_ext.num_vars = log2_max_thread_id;
+    }
+    poly
+}
+
+pub(crate) fn merge_sumcheck_polys_v2<'a, E: ExtensionField>(
+    prover_states: &Vec<IOPProverStateV2<'a, E>>,
+    max_thread_id: usize,
+) -> VirtualPolynomialV2<'a, E> {
+    let log2_max_thread_id = ceil_log2(max_thread_id);
+    let mut poly = prover_states[0].poly.clone(); // giving only one evaluation left, this clone is low cost.
+    poly.aux_info.num_variables = log2_max_thread_id; // size_log2 variates sumcheck
+    for i in 0..poly.flattened_ml_extensions.len() {
+        let ml_ext = DenseMultilinearExtension::from_evaluations_ext_vec(
+            log2_max_thread_id,
+            prover_states
+                .iter()
+                .enumerate()
+                .map(|(_, prover_state)| {
+                    let mle = &prover_state.poly.flattened_ml_extensions[i];
+                    op_mle!(
+                        mle,
+                        |f| {
+                            assert!(f.len() == 1);
+                            f[0]
+                        },
+                        |_v| unreachable!()
+                    )
+                })
+                .collect::<Vec<E>>(),
+        );
+        poly.flattened_ml_extensions[i] = Arc::new(ml_ext);
     }
     poly
 }

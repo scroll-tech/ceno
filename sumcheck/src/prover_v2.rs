@@ -4,11 +4,15 @@ use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
-    commutative_op_mle_pair, mle::MultilinearExtension, op_mle, virtual_poly::VirtualPolynomial,
+    commutative_op_mle_pair,
+    mle::{DenseMultilinearExtension, MultilinearExtension},
+    op_mle,
+    virtual_poly_v2::VirtualPolynomialV2,
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
+    Scope,
 };
 use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
@@ -17,14 +21,14 @@ use crate::local_thread_pool::{create_local_pool_once, LOCAL_THREAD_POOL};
 
 use crate::{
     entered_span, exit_span,
-    structs::{IOPProof, IOPProverMessage, IOPProverState},
+    structs::{IOPProof, IOPProverMessage, IOPProverStateV2},
     util::{
-        barycentric_weights, ceil_log2, extrapolate, merge_sumcheck_polys, AdditiveArray,
+        barycentric_weights, ceil_log2, extrapolate, merge_sumcheck_polys_v2, AdditiveArray,
         AdditiveVec,
     },
 };
 
-impl<E: ExtensionField> IOPProverState<E> {
+impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.
     /// multi-threads model follow https://arxiv.org/pdf/2210.00264#page=8 "distributed sumcheck"
     /// This is experiment features. It's preferable that we move parallel level up more to
@@ -32,9 +36,9 @@ impl<E: ExtensionField> IOPProverState<E> {
     #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys")]
     pub fn prove_batch_polys(
         max_thread_id: usize,
-        mut polys: Vec<VirtualPolynomial<E>>,
+        mut polys: Vec<VirtualPolynomialV2<'a, E>>,
         transcript: &mut Transcript<E>,
-    ) -> (IOPProof<E>, IOPProverState<E>) {
+    ) -> (IOPProof<E>, IOPProverStateV2<'a, E>) {
         assert!(!polys.is_empty());
         assert_eq!(polys.len(), max_thread_id);
 
@@ -52,7 +56,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         if num_variables == 0 {
             return (
                 IOPProof::default(),
-                IOPProverState {
+                IOPProverStateV2 {
                     poly: polys[0].clone(),
                     ..Default::default()
                 },
@@ -74,9 +78,58 @@ impl<E: ExtensionField> IOPProverState<E> {
             })
             .collect::<Vec<_>>();
 
-        // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last work
-        // thread
-        for thread_id in 0..(max_thread_id - 1) {
+        // rayon::in_place_scope(
+        // let (mut prover_states, mut prover_msgs) = rayon::in_place_scope(
+        let scoped_fn = |s: &Scope<'a>| {
+            // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last
+            // work thread
+            for thread_id in 0..(max_thread_id - 1) {
+                let mut prover_state = Self::prover_init_with_extrapolation_aux(
+                    mem::take(&mut polys[thread_id]),
+                    extrapolation_aux.clone(),
+                );
+                let tx_prover_state = tx_prover_state.clone();
+                let mut thread_based_transcript = thread_based_transcript.clone();
+
+                s.spawn(move |_| {
+                    let mut challenge = None;
+                    let span = entered_span!("prove_rounds");
+                    for _ in 0..num_variables {
+                        let prover_msg = IOPProverStateV2::prove_round_and_update_state(
+                            &mut prover_state,
+                            &challenge,
+                        );
+                        thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
+
+                        challenge = Some(
+                            thread_based_transcript.get_and_append_challenge(b"Internal round"),
+                        );
+                        thread_based_transcript.commit_rolling();
+                    }
+                    exit_span!(span);
+                    // pushing the last challenge point to the state
+                    if let Some(p) = challenge {
+                        prover_state.challenges.push(p);
+                        // fix last challenge to collect final evaluation
+                        prover_state
+                            .poly
+                            .flattened_ml_extensions
+                            .iter_mut()
+                            .for_each(|mle| {
+                                let mle = Arc::get_mut(mle).unwrap();
+                                mle.fix_variables_in_place(&[p.elements]);
+                            });
+                        tx_prover_state
+                            .send(Some((thread_id, prover_state)))
+                            .unwrap();
+                    } else {
+                        tx_prover_state.send(None).unwrap();
+                    }
+                });
+            }
+
+            let mut prover_msgs = Vec::with_capacity(num_variables);
+            let thread_id = max_thread_id - 1;
             let mut prover_state = Self::prover_init_with_extrapolation_aux(
                 mem::take(&mut polys[thread_id]),
                 extrapolation_aux.clone(),
@@ -84,141 +137,109 @@ impl<E: ExtensionField> IOPProverState<E> {
             let tx_prover_state = tx_prover_state.clone();
             let mut thread_based_transcript = thread_based_transcript.clone();
 
-            let spawn_task = move || {
-                let mut challenge = None;
-                let span = entered_span!("prove_rounds");
-                for _ in 0..num_variables {
-                    let prover_msg =
-                        IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
-                    thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
+            let span = entered_span!("main_thread_prove_rounds");
+            // main thread also be one worker thread
+            // NOTE inline main thread flow with worker thread to improve efficiency
+            // refactor to shared closure cause to 5% throuput drop
+            let mut challenge = None;
+            for _ in 0..num_variables {
+                let prover_msg =
+                    IOPProverStateV2::prove_round_and_update_state(&mut prover_state, &challenge);
+                thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
-                    challenge =
-                        Some(thread_based_transcript.get_and_append_challenge(b"Internal round"));
-                    thread_based_transcript.commit_rolling();
-                }
-                exit_span!(span);
-                // pushing the last challenge point to the state
-                if let Some(p) = challenge {
-                    prover_state.challenges.push(p);
-                    // fix last challenge to collect final evaluation
-                    prover_state
-                        .poly
-                        .flattened_ml_extensions
-                        .iter_mut()
-                        .for_each(|mle| {
-                            let mle = Arc::make_mut(mle);
-                            mle.fix_variables_in_place(&[p.elements]);
-                        });
-                    tx_prover_state
-                        .send(Some((thread_id, prover_state)))
-                        .unwrap();
-                } else {
-                    tx_prover_state.send(None).unwrap();
-                }
-            };
+                // for each round, we must collect #SIZE prover message
+                let mut evaluations = AdditiveVec::new(max_degree + 1);
 
-            // create local thread pool if global rayon pool size < max_thread_id
-            // this usually cause by global pool size not power of 2.
-            if rayon::current_num_threads() >= max_thread_id {
-                rayon::spawn(spawn_task);
-            } else {
-                #[cfg(not(feature = "non_pow2_rayon_thread"))]
-                {
-                    panic!(
-                        "rayon global thread pool size {} mismatch with desired poly size {}, add --features non_pow2_rayon_thread",
-                        rayon::current_num_threads(),
-                        polys.len()
-                    );
+                // sum for all round poly evaluations vector
+                for _ in 0..max_thread_id {
+                    let round_poly_coeffs = thread_based_transcript.read_field_element_exts();
+                    evaluations += AdditiveVec(round_poly_coeffs);
                 }
 
-                #[cfg(feature = "non_pow2_rayon_thread")]
-                unsafe {
-                    create_local_pool_once(max_thread_id, true);
+                let span = entered_span!("main_thread_get_challenge");
+                transcript.append_field_element_exts(&evaluations.0);
 
-                    if let Some(pool) = LOCAL_THREAD_POOL.as_ref() {
-                        pool.spawn(spawn_task)
-                    } else {
-                        panic!("empty local pool")
-                    }
-                }
-            }
-        }
-
-        let mut prover_msgs = Vec::with_capacity(num_variables);
-        let thread_id = max_thread_id - 1;
-        let mut prover_state = Self::prover_init_with_extrapolation_aux(
-            mem::take(&mut polys[thread_id]),
-            extrapolation_aux.clone(),
-        );
-        let tx_prover_state = tx_prover_state.clone();
-        let mut thread_based_transcript = thread_based_transcript.clone();
-
-        let span = entered_span!("main_thread_prove_rounds");
-        // main thread also be one worker thread
-        // NOTE inline main thread flow with worker thread to improve efficiency
-        // refactor to shared closure cause to 5% throuput drop
-        let mut challenge = None;
-        for _ in 0..num_variables {
-            let prover_msg =
-                IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
-            thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
-
-            // for each round, we must collect #SIZE prover message
-            let mut evaluations = AdditiveVec::new(max_degree + 1);
-
-            // sum for all round poly evaluations vector
-            for _ in 0..max_thread_id {
-                let round_poly_coeffs = thread_based_transcript.read_field_element_exts();
-                evaluations += AdditiveVec(round_poly_coeffs);
-            }
-
-            let span = entered_span!("main_thread_get_challenge");
-            transcript.append_field_element_exts(&evaluations.0);
-
-            let next_challenge = transcript.get_and_append_challenge(b"Internal round");
-            (0..max_thread_id).for_each(|_| {
-                thread_based_transcript.send_challenge(next_challenge.elements);
-            });
-
-            exit_span!(span);
-
-            prover_msgs.push(IOPProverMessage {
-                evaluations: evaluations.0,
-            });
-
-            challenge = Some(thread_based_transcript.get_and_append_challenge(b"Internal round"));
-            thread_based_transcript.commit_rolling();
-        }
-        exit_span!(span);
-        // pushing the last challenge point to the state
-        if let Some(p) = challenge {
-            prover_state.challenges.push(p);
-            // fix last challenge to collect final evaluation
-            prover_state
-                .poly
-                .flattened_ml_extensions
-                .iter_mut()
-                .for_each(|mle| {
-                    let mle = Arc::make_mut(mle);
-                    mle.fix_variables_in_place(&[p.elements]);
+                let next_challenge = transcript.get_and_append_challenge(b"Internal round");
+                (0..max_thread_id).for_each(|_| {
+                    thread_based_transcript.send_challenge(next_challenge.elements);
                 });
-            tx_prover_state
-                .send(Some((thread_id, prover_state)))
-                .unwrap();
-        } else {
-            tx_prover_state.send(None).unwrap();
-        }
 
-        let mut prover_states = (0..max_thread_id)
-            .map(|_| IOPProverState::default())
-            .collect::<Vec<_>>();
-        for _ in 0..max_thread_id {
-            if let Some((index, prover_msg)) = rx_prover_state.recv().unwrap() {
-                prover_states[index] = prover_msg
-            } else {
-                println!("got empty msg, which is normal if virtual poly is constant function")
+                exit_span!(span);
+
+                prover_msgs.push(IOPProverMessage {
+                    evaluations: evaluations.0,
+                });
+
+                challenge =
+                    Some(thread_based_transcript.get_and_append_challenge(b"Internal round"));
+                thread_based_transcript.commit_rolling();
             }
-        }
+            exit_span!(span);
+            // pushing the last challenge point to the state
+            if let Some(p) = challenge {
+                prover_state.challenges.push(p);
+                // fix last challenge to collect final evaluation
+                prover_state
+                    .poly
+                    .flattened_ml_extensions
+                    .iter_mut()
+                    .for_each(|mle| {
+                        if num_variables == 1 {
+                            // first time fix variable should be create new instance
+                            *mle = mle.fix_variables(&[p.elements]).into();
+                        } else {
+                            let mle = Arc::get_mut(mle).unwrap();
+                            mle.fix_variables_in_place(&[p.elements]);
+                        }
+                    });
+                tx_prover_state
+                    .send(Some((thread_id, prover_state)))
+                    .unwrap();
+            } else {
+                tx_prover_state.send(None).unwrap();
+            }
+
+            let mut prover_states = (0..max_thread_id)
+                .map(|_| IOPProverStateV2::default())
+                .collect::<Vec<_>>();
+            for _ in 0..max_thread_id {
+                if let Some((index, prover_msg)) = rx_prover_state.recv().unwrap() {
+                    prover_states[index] = prover_msg
+                } else {
+                    println!("got empty msg, which is normal if virtual poly is constant function")
+                }
+            }
+
+            (prover_states, prover_msgs)
+        };
+
+        // create local thread pool if global rayon pool size < max_thread_id
+        // this usually cause by global pool size not power of 2.
+        let (mut prover_states, mut prover_msgs) = if rayon::current_num_threads() >= max_thread_id
+        {
+            rayon::in_place_scope(scoped_fn)
+        } else {
+            #[cfg(not(feature = "non_pow2_rayon_thread"))]
+            {
+                panic!(
+                    "rayon global thread pool size {} mismatch with desired poly size {}, add
+            --features non_pow2_rayon_thread",
+                    rayon::current_num_threads(),
+                    polys.len()
+                );
+            }
+
+            #[cfg(feature = "non_pow2_rayon_thread")]
+            unsafe {
+                create_local_pool_once(max_thread_id, true);
+
+                if let Some(pool) = LOCAL_THREAD_POOL.as_ref() {
+                    pool.scope(scoped_fn)
+                } else {
+                    panic!("empty local pool")
+                }
+            }
+        };
 
         if log2_max_thread_id == 0 {
             let prover_state = mem::take(&mut prover_states[0]);
@@ -237,7 +258,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         }
 
         // second stage sumcheck
-        let poly = merge_sumcheck_polys(&prover_states, max_thread_id);
+        let poly = merge_sumcheck_polys_v2(&prover_states, max_thread_id);
         let mut prover_state =
             Self::prover_init_with_extrapolation_aux(poly, extrapolation_aux.clone());
 
@@ -245,7 +266,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         let span = entered_span!("prove_rounds_stage2");
         for _ in 0..log2_max_thread_id {
             let prover_msg =
-                IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
+                IOPProverStateV2::prove_round_and_update_state(&mut prover_state, &challenge);
 
             prover_msg
                 .evaluations
@@ -264,10 +285,16 @@ impl<E: ExtensionField> IOPProverState<E> {
             prover_state
                 .poly
                 .flattened_ml_extensions
-                .par_iter_mut()
-                .for_each(|mle| {
-                    Arc::make_mut(mle).fix_variables_in_place(&[p.elements]);
-                });
+                .iter_mut()
+                .for_each(
+                    |mle: &mut Arc<
+                        dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>,
+                    >| {
+                        Arc::get_mut(mle)
+                            .unwrap()
+                            .fix_variables_in_place(&[p.elements]);
+                    },
+                );
         };
         exit_span!(span);
 
@@ -292,7 +319,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
     pub fn prover_init_with_extrapolation_aux(
-        polynomial: VirtualPolynomial<E>,
+        polynomial: VirtualPolynomialV2<'a, E>,
         extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
     ) -> Self {
         let start = start_timer!(|| "sum check prover init");
@@ -356,10 +383,9 @@ impl<E: ExtensionField> IOPProverState<E> {
             let r = self.challenges[self.round - 1];
 
             if self.challenges.len() == 1 {
-                self.poly
-                    .flattened_ml_extensions
-                    .iter_mut()
-                    .for_each(|f| *f = Arc::new(f.fix_variables(&[r.elements])));
+                self.poly.flattened_ml_extensions.iter_mut().for_each(|f| {
+                    *f = Arc::new(f.fix_variables(&[r.elements]));
+                });
             } else {
                 self.poly
                     .flattened_ml_extensions
@@ -367,9 +393,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                     // benchmark result indicate make_mut achieve better performange than get_mut,
                     // which can be +5% overhead rust docs doen't explain the
                     // reason
-                    .map(Arc::make_mut)
+                    .map(Arc::get_mut)
                     .for_each(|f| {
-                        f.fix_variables_in_place(&[r.elements]);
+                        f.unwrap().fix_variables_in_place(&[r.elements]);
                     });
             }
         }
@@ -463,9 +489,9 @@ impl<E: ExtensionField> IOPProverState<E> {
             .iter()
             .map(|mle| {
                 assert!(
-                    mle.evaluations.len() == 1,
+                    mle.evaluations().len() == 1,
                     "mle.evaluations.len() {} != 1, must be called after prove_round_and_update_state",
-                    mle.evaluations.len(),
+                    mle.evaluations().len(),
                 );
                 op_mle! {
                     |mle| mle[0],
@@ -478,20 +504,20 @@ impl<E: ExtensionField> IOPProverState<E> {
 
 /// parallel version
 #[deprecated(note = "deprecated parallel version due to syncronizaion overhead")]
-impl<E: ExtensionField> IOPProverState<E> {
+impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.
     #[tracing::instrument(skip_all, name = "sumcheck::prove_parallel")]
     pub fn prove_parallel(
-        poly: VirtualPolynomial<E>,
+        poly: VirtualPolynomialV2<'a, E>,
         transcript: &mut Transcript<E>,
-    ) -> (IOPProof<E>, IOPProverState<E>) {
+    ) -> (IOPProof<E>, IOPProverStateV2<'a, E>) {
         let (num_variables, max_degree) = (poly.aux_info.num_variables, poly.aux_info.max_degree);
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
             return (
                 IOPProof::default(),
-                IOPProverState {
+                IOPProverStateV2 {
                     poly: poly,
                     ..Default::default()
                 },
@@ -507,7 +533,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         let mut prover_msgs = Vec::with_capacity(num_variables);
         let span = entered_span!("prove_rounds");
         for _ in 0..num_variables {
-            let prover_msg = IOPProverState::prove_round_and_update_state_parallel(
+            let prover_msg = IOPProverStateV2::prove_round_and_update_state_parallel(
                 &mut prover_state,
                 &challenge,
             );
@@ -534,7 +560,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                 .flattened_ml_extensions
                 .par_iter_mut()
                 .for_each(|mle| {
-                    Arc::make_mut(mle).fix_variables_in_place_parallel(&[p.elements]);
+                    Arc::get_mut(mle)
+                        .unwrap()
+                        .fix_variables_in_place_parallel(&[p.elements]);
                 });
         };
         exit_span!(span);
@@ -557,7 +585,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
-    pub(crate) fn prover_init_parallel(polynomial: VirtualPolynomial<E>) -> Self {
+    pub(crate) fn prover_init_parallel(polynomial: VirtualPolynomialV2<'a, E>) -> Self {
         let start = start_timer!(|| "sum check prover init");
         assert_ne!(
             polynomial.aux_info.num_variables, 0,
@@ -625,7 +653,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                 self.poly
                     .flattened_ml_extensions
                     .par_iter_mut()
-                    .for_each(|f| *f = f.fix_variables_parallel(&[r.elements]).into());
+                    .for_each(|f| {
+                        *f = Arc::new(f.fix_variables_parallel(&[r.elements]));
+                    });
             } else {
                 self.poly
                     .flattened_ml_extensions
@@ -633,9 +663,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                     // benchmark result indicate make_mut achieve better performange than get_mut,
                     // which can be +5% overhead rust docs doen't explain the
                     // reason
-                    .map(Arc::make_mut)
+                    .map(Arc::get_mut)
                     .for_each(|f| {
-                        f.fix_variables_in_place_parallel(&[r.elements]);
+                        f.unwrap().fix_variables_in_place_parallel(&[r.elements]);
                     });
             }
         }

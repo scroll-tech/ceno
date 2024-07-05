@@ -8,8 +8,7 @@ use transcript::Transcript;
 use crate::{
     error::GKRError,
     structs::{
-        Circuit, GKRInputClaims, IOPProof, IOPProverStepMessage, IOPVerifierState, PointAndEval,
-        SumcheckStepType,
+        Circuit, GKRInputClaims, IOPProof, IOPVerifierState, PointAndEval, SumcheckStepType,
     },
 };
 
@@ -56,10 +55,6 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                 match step {
                     SumcheckStepType::OutputPhase1Step1 => verifier_state
                         .verify_and_update_state_output_phase1_step1(
-                            circuit, step_proof, transcript,
-                        )?,
-                    SumcheckStepType::OutputPhase1Step2 => verifier_state
-                        .verify_and_update_state_output_phase1_step2(
                             circuit, step_proof, transcript,
                         )?,
                     SumcheckStepType::Phase1Step1 => verifier_state
@@ -133,7 +128,6 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             assert_point,
             // Default
             layer_id: 0,
-            g1_values: vec![],
             out_point: vec![],
             eq_y_ry: vec![],
             eq_x1_rx1: vec![],

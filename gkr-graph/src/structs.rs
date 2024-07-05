@@ -1,6 +1,5 @@
 use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, CircuitWitness, PointAndEval};
-use goldilocks::SmallField;
 use simple_frontend::structs::WitnessId;
 use std::{marker::PhantomData, sync::Arc};
 
@@ -60,13 +59,13 @@ pub struct CircuitGraph<E: ExtensionField> {
 }
 
 #[derive(Default)]
-pub struct CircuitGraphWitness<F: SmallField> {
-    pub node_witnesses: Vec<CircuitWitness<F>>,
+pub struct CircuitGraphWitness<'a, E: ExtensionField> {
+    pub node_witnesses: Vec<Arc<CircuitWitness<'a, E>>>,
 }
 
-pub struct CircuitGraphBuilder<E: ExtensionField> {
+pub struct CircuitGraphBuilder<'a, E: ExtensionField> {
     pub(crate) graph: CircuitGraph<E>,
-    pub(crate) witness: CircuitGraphWitness<E::BaseField>,
+    pub(crate) witness: CircuitGraphWitness<'a, E>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -75,5 +74,5 @@ pub struct CircuitGraphAuxInfo {
 }
 
 /// Evaluations corresponds to the circuit targets.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TargetEvaluations<F>(pub Vec<PointAndEval<F>>);

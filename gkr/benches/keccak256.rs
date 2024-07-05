@@ -42,7 +42,9 @@ fn bench_keccak256(c: &mut Criterion) {
         if !is_power_of_2(RAYON_NUM_THREADS) {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
             {
-                panic!("add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool");
+                panic!(
+                    "add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool"
+                );
             }
 
             #[cfg(feature = "non_pow2_rayon_thread")]
@@ -59,10 +61,10 @@ fn bench_keccak256(c: &mut Criterion) {
 
     let circuit = keccak256_circuit::<GoldilocksExt2>();
 
-    let Some((proof, output_mle)) = prove_keccak256(1, &circuit, 1) else {
+    let Some((proof, witness)) = prove_keccak256(1, &circuit, 1) else {
         return;
     };
-    assert!(verify_keccak256(1, output_mle, proof, &circuit).is_ok());
+    assert!(verify_keccak256(1, &witness.witness_out_ref()[0], proof, &circuit).is_ok());
 
     for log2_n in 0..10 {
         // expand more input size once runtime is acceptable

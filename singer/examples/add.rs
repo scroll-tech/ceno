@@ -2,7 +2,6 @@ use std::{collections::BTreeMap, time::Instant};
 
 use ark_std::test_rng;
 use ff_ext::{ff::Field, ExtensionField};
-use gkr::structs::LayerWitness;
 use gkr_graph::structs::CircuitGraphAuxInfo;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
@@ -111,7 +110,7 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
 }
 fn main() {
     let max_thread_id = 8;
-    let instance_num_vars = 11;
+    let instance_num_vars = 13;
     type E = GoldilocksExt2;
     let chip_challenges = ChipChallenges::default();
     let circuit_builder =
@@ -141,12 +140,12 @@ fn main() {
         }
     }
 
-    let phase0: CircuitWiresIn<<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField> =
-        vec![LayerWitness {
-            instances: (0..(1 << instance_num_vars))
-                .map(|_| single_witness_in.clone())
-                .collect_vec(),
-        }];
+    let phase0: CircuitWiresIn<GoldilocksExt2> = vec![
+        (0..(1 << instance_num_vars))
+            .map(|_| single_witness_in.clone())
+            .collect_vec()
+            .into(),
+    ];
 
     let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 

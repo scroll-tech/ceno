@@ -145,7 +145,6 @@ mod test {
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
-    use gkr::structs::LayerWitness;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
@@ -230,15 +229,16 @@ mod test {
 
         let mut rng = test_rng();
         let size = JumpInstruction::phase0_size();
-        let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
-            instances: (0..(1 << instance_num_vars))
+        let phase0: CircuitWiresIn<E> = vec![
+            (0..(1 << instance_num_vars))
                 .map(|_| {
                     (0..size)
                         .map(|_| E::BaseField::random(&mut rng))
                         .collect_vec()
                 })
-                .collect_vec(),
-        }];
+                .collect_vec()
+                .into(),
+        ];
 
         let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 
