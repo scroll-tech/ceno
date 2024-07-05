@@ -3,14 +3,13 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::{
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, FieldType},
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
 use std::{iter, mem, sync::Arc};
 use transcript::Transcript;
 
 use crate::{
-    circuit::EvaluateConstant,
     izip_parallizable,
     prover::SumcheckState,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
@@ -22,8 +21,7 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
 // Prove the items copied from the output layer to the output witness for data parallel circuits.
 // \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
-//     = \sum_y( \sum_j( \alpha^j (eq or copy_to[j] or assert_subset_eq)(ry_j, y) \sum_t( eq(rt_j,
-// t) * layers[i](t || y) ) ) )
+//     = \sum_y( \sum_j( \alpha^j (eq or copy_to[j] or assert_subset_eq)(ry_j, y) \sum_t( eq(rt_j, t) * layers[i](t || y) ) ) )
 impl<E: ExtensionField> IOPProverState<E> {
     /// Sumcheck 1: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
     ///     sigma = \sum_j( \alpha^j * wit_out_eval[j](rt_j || ry_j) )

@@ -94,6 +94,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     .enumerate()
                     .for_each(|(wire_id, (pred_type, point_and_eval))| match pred_type {
                         PredType::Source => {
+                            // sanity check for input poly evaluation
                             if cfg!(debug_assertions) {
                                 let input_layer_poly =  witness.witness_in_ref()[wire_id]
                                     .instances

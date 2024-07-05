@@ -20,8 +20,7 @@ pub fn i64_to_field<F: SmallField>(x: i64) -> F {
 /// This is to compute a segment indicator. Specifically, it is an MLE of the
 /// following vector:
 ///     segment_{\mathbf{x}}
-///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i b_i + (1 - x_i)(1 -
-/// b_i))
+///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i b_i + (1 - x_i)(1 - b_i))
 pub(crate) fn segment_eval_greater_than<E: ExtensionField>(min_idx: usize, a: &[E]) -> E {
     let running_product2 = {
         let mut running_product = vec![E::ZERO; a.len() + 1];
@@ -51,8 +50,7 @@ pub(crate) fn segment_eval_greater_than<E: ExtensionField>(min_idx: usize, a: &[
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
 /// (min_idx, 2^n]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})
-///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 -
-/// y_i)(1 - b_i))
+///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
 #[allow(dead_code)]
 pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[F]) -> F {
     assert!(a.len() >= b.len());
@@ -99,8 +97,7 @@ pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
 /// [0, max_idx]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})
-///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 -
-/// b_i))
+///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
 pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &[E], b: &[E]) -> E {
     assert!(a.len() >= b.len());
     // Compute running product of ( x_i y_i + (1 - x_i)(1 - y_i) )_{0 <= i <= n}

@@ -23,8 +23,10 @@ mod utils;
 
 // Process sketch:
 // 1. Construct instruction circuits and circuit gadgets => circuit gadgets
-// 2. (bytecode + input) => Run revm interpreter, generate all wires in 2.1 phase 0 wire in +
-//    commitment 2.2 phase 1 wire in + commitment 2.3 phase 2 wire in + commitment
+// 2. (bytecode + input) => Run revm interpreter, generate all wires in
+//      2.1 phase 0 wire in + commitment
+//      2.2 phase 1 wire in + commitment
+//      2.3 phase 2 wire in + commitment
 // 3. (circuit gadgets + wires in) => gkr graph + gkr witness
 // 4. (gkr graph + gkr witness) => (gkr proof + point)
 // 5. (commitments + point) => pcs proof
