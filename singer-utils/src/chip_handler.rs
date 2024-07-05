@@ -13,6 +13,7 @@ pub mod global_state;
 pub mod memory;
 pub mod ram_handler;
 pub mod range;
+pub mod register;
 pub mod rom_handler;
 pub mod stack;
 
@@ -46,6 +47,24 @@ pub trait StackChipOperations<Ext: ExtensionField>: OAMOperations<Ext> {
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
         stack_ts: &[CellId],
+        values: &[CellId],
+    );
+}
+
+pub trait RegisterChipOperations<Ext: ExtensionField>: OAMOperations<Ext> {
+    fn register_read(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        register_id: &[CellId],
+        timestamp: &[CellId],
+        values: &[CellId],
+    );
+
+    fn register_store(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        register_id: &[CellId],
+        timestamp: &[CellId],
         values: &[CellId],
     );
 }

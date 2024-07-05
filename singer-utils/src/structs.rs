@@ -9,6 +9,7 @@ pub enum RAMType {
     Stack,
     Memory,
     GlobalState,
+    Register,
 }
 
 #[derive(Clone, Debug, Copy, EnumIter)]
@@ -56,3 +57,4 @@ pub type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
 pub type PCUInt = UInt64;
 pub type TSUInt = UInt<56, 56>;
 pub type StackUInt = UInt<{ EVM_STACK_BIT_WIDTH as usize }, { VALUE_BIT_WIDTH as usize }>;
+pub type RegisterUInt = UInt64;

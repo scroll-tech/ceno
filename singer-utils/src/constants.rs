@@ -27,4 +27,25 @@ pub enum OpcodeType {
     SWAP2 = 0x91,
     SWAP4 = 0x93,
     RETURN = 0xf3,
+
+    // risc-v
+    RV_ADD = 0x33,
 }
+
+// l
+
+// impl RV64Opcode {
+//     // Type R
+//     pub const ADD: RV64Opcode = RV64Opcode::R;
+//     pub const SUB: RV64Opcode = RV64Opcode::R;
+//     pub const SLL: RV64Opcode = RV64Opcode::R;
+//     pub const SLT: RV64Opcode = RV64Opcode::R;
+//     pub const SLTU: RV64Opcode = RV64Opcode::R;
+//     pub const XOR: RV64Opcode = RV64Opcode::R;
+//     pub const SRL: RV64Opcode = RV64Opcode::R;
+//     pub const SRA: RV64Opcode = RV64Opcode::R;
+//     pub const OR: RV64Opcode = RV64Opcode::R;
+//     pub const AND: RV64Opcode = RV64Opcode::R;
+//     // Type I
+//     pub const ADDI: RV64Opcode = RV64Opcode::I_ARITH;
+// }

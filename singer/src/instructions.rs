@@ -14,7 +14,7 @@ use self::{
     add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
     gt::GtInstruction, jump::JumpInstruction, jumpdest::JumpdestInstruction,
     jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
-    ret::ReturnInstruction, swap::SwapInstruction,
+    ret::ReturnInstruction, riscv_add::RVAddInstruction, swap::SwapInstruction,
 };
 
 // arithmetic
@@ -40,6 +40,9 @@ pub mod mstore;
 
 // system
 pub mod calldataload;
+
+// riscv
+pub mod riscv_add;
 
 #[derive(Clone, Debug)]
 pub struct SingerCircuitBuilder<E: ExtensionField> {
