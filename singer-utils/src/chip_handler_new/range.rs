@@ -74,6 +74,10 @@ impl RangeChip {
         uint: &UInt<M, C>,
         range_value_witness: Option<&[CellId]>
     ) -> Result<UInt<M, C>, UtilError> {
+        // TODO: make an explicit type for range_value_witness that explain it's structure
+
+        // the goal of this function is to verify that the values in a uint cell are
+
         todo!()
     }
 }
