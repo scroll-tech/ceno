@@ -3,6 +3,7 @@ use crate::chip_handler_new::util::cell_to_mixed;
 use crate::constants::{RANGE_CHIP_BIT_WIDTH, STACK_TOP_BIT_WIDTH};
 use crate::error::UtilError;
 use crate::uint::UInt;
+use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::io::Read;
@@ -18,11 +19,13 @@ impl RangeChip {
         value: MixedCell<Ext>,
         bit_width: usize,
     ) -> Result<(), UtilError> {
-        if bit_width > RANGE_CHIP_BIT_WIDTH{
+        if bit_width > RANGE_CHIP_BIT_WIDTH {
             return Err(UtilError::ChipHandlerError);
         }
 
-        let items = [value.mul(Ext::BaseField::from(1 << (RANGE_CHIP_BIT_WIDTH - bit_width)))];
+        let items = [value.mul(Ext::BaseField::from(
+            1 << (RANGE_CHIP_BIT_WIDTH - bit_width),
+        ))];
         rom_handler.read_mixed(circuit_builder, &[], &items);
         Ok(())
     }
@@ -30,7 +33,7 @@ impl RangeChip {
     // range check helper functions
 
     // TODO: document
-    pub fn check_stack_top<Ext: ExtensionField>(
+    pub fn range_check_stack_top<Ext: ExtensionField>(
         &mut self,
         rom_handler: &mut ROMHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -144,5 +147,25 @@ impl RangeChip {
         } else {
             Err(UtilError::ChipHandlerError)
         }
+    }
+
+    // TODO: document
+    pub fn non_zero<Ext: ExtensionField>(
+        &mut self,
+        rom_handler: &mut ROMHandler<Ext>,
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        val: CellId,
+        wit: CellId,
+    ) -> Result<CellId, UtilError> {
+        let prod = circuit_builder.create_cell();
+        circuit_builder.mul2(prod, val, wit, Ext::BaseField::ONE);
+        self.small_range_check(rom_handler, circuit_builder, prod.into(), 1)?;
+
+        let statement = circuit_builder.create_cell();
+        // If val != 0, then prod = 1. => assert!( val (prod - 1) = 0 )
+        circuit_builder.mul2(statement, val, prod, Ext::BaseField::ONE);
+        circuit_builder.add(statement, val, -Ext::BaseField::ONE);
+        circuit_builder.assert_const(statement, 0);
+        Ok(prod)
     }
 }
