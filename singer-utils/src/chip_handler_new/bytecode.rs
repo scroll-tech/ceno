@@ -8,13 +8,17 @@ use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder, MixedCell};
+use std::cell::RefCell;
+use std::rc::Rc;
 
-struct BytecodeChip {}
+struct BytecodeChip<Ext: ExtensionField> {
+    rom_handler: Rc<RefCell<ROMHandler<Ext>>>,
+}
 
-impl BytecodeChip {
+impl<Ext: ExtensionField> BytecodeChip<Ext> {
     // TODO: rename and document
-    fn bytecode_with_pc_opcode<Ext: ExtensionField>(
-        rom_handler: &mut ROMHandler<Ext>,
+    fn bytecode_with_pc_opcode(
+        &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         opcode: OpcodeType,
@@ -27,7 +31,7 @@ impl BytecodeChip {
         ]
         .concat();
 
-        rom_handler.read_mixed(
+        self.rom_handler.borrow_mut().read_mixed(
             circuit_builder,
             &key,
             &[MixedCell::Constant(Ext::BaseField::from(opcode as u64))],
@@ -35,8 +39,8 @@ impl BytecodeChip {
     }
 
     // TODO: rename and document
-    fn bytecode_with_pc_byte<Ext: ExtensionField>(
-        rom_handler: &mut ROMHandler<Ext>,
+    fn bytecode_with_pc_byte(
+        &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         byte: CellId,
@@ -48,6 +52,8 @@ impl BytecodeChip {
             cell_to_mixed(pc),
         ]
         .concat();
-        rom_handler.read_mixed(circuit_builder, &key, &[byte.into()]);
+        self.rom_handler
+            .borrow_mut()
+            .read_mixed(circuit_builder, &key, &[byte.into()]);
     }
 }
