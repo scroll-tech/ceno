@@ -94,7 +94,6 @@ impl RangeChip {
                     // index == 0 represents the least significant cell (cells are represented in little endian).
                     // if n represents the total number of cells, n - 1 cells take full width
                     // maximum_value for this cell = total_bits - (n - 1) * full_cell_width
-                    // TODO: potential bug here, operand cells might be computed wrongly
                     M - ((UInt::<M, C>::N_OPERAND_CELLS - 1) * uint_cell_width)
                 } else {
                     // the maximum value for every cell other than the least significant cell is
@@ -125,7 +124,6 @@ impl RangeChip {
             let n_range_cells_per_cell =
                 (uint_cell_width + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
 
-            // TODO: do we need a debug assert for the length of the range cells???
             debug_assert!(range_values.len() % n_range_cells_per_cell == 0);
 
             for range_cells in range_values.chunks(n_range_cells_per_cell) {
