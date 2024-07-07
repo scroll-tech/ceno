@@ -6,15 +6,18 @@ use crate::uint::UInt;
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
+use std::cell::RefCell;
 use std::io::Read;
+use std::rc::Rc;
 
-struct RangeChip {}
+struct RangeChip<Ext: ExtensionField> {
+    rom_handler: Rc<RefCell<ROMHandler<Ext>>>,
+}
 
-impl RangeChip {
+impl<Ext: ExtensionField> RangeChip<Ext> {
     // TODO: document
-    pub fn small_range_check<Ext: ExtensionField>(
+    pub fn small_range_check(
         &mut self,
-        rom_handler: &mut ROMHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         value: MixedCell<Ext>,
         bit_width: usize,
@@ -26,52 +29,52 @@ impl RangeChip {
         let items = [value.mul(Ext::BaseField::from(
             1 << (RANGE_CHIP_BIT_WIDTH - bit_width),
         ))];
-        rom_handler.read_mixed(circuit_builder, &[], &items);
+        self.rom_handler
+            .borrow_mut()
+            .read_mixed(circuit_builder, &[], &items);
         Ok(())
     }
 
     // range check helper functions
 
     // TODO: document
-    pub fn range_check_stack_top<Ext: ExtensionField>(
+    pub fn range_check_stack_top(
         &mut self,
-        rom_handler: &mut ROMHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
     ) -> Result<(), UtilError> {
-        self.small_range_check(rom_handler, circuit_builder, stack_top, STACK_TOP_BIT_WIDTH)
+        self.small_range_check(circuit_builder, stack_top, STACK_TOP_BIT_WIDTH)
     }
 
     // TODO: document
-    pub fn range_check_bytes<Ext: ExtensionField>(
+    pub fn range_check_bytes(
         &mut self,
-        rom_handler: &mut ROMHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         bytes: &[CellId],
     ) -> Result<(), UtilError> {
         let bytes = cell_to_mixed(bytes);
         for byte in bytes {
-            self.small_range_check(rom_handler, circuit_builder, byte, 8)?
+            self.small_range_check(circuit_builder, byte, 8)?
         }
         Ok(())
     }
 
     // TODO: document
-    pub fn range_check_table_item<Ext: ExtensionField>(
+    pub fn range_check_table_item(
         &mut self,
-        rom_handler: &mut ROMHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         item: CellId,
     ) {
-        rom_handler.read(circuit_builder, &[], &[item])
+        self.rom_handler
+            .borrow_mut()
+            .read(circuit_builder, &[], &[item])
     }
 
     /// Ensures that the value represented in a `UInt<M, C>` (as field elements)
     /// matches its definition.
     /// i.e. total_represented_value <= M and each value represented per cell <= max_cell_width
-    pub fn range_check_uint<const M: usize, const C: usize, Ext: ExtensionField>(
+    pub fn range_check_uint<const M: usize, const C: usize>(
         &mut self,
-        rom_handler: &mut ROMHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         uint: &UInt<M, C>,
         range_value_witness: Option<&[CellId]>,
@@ -97,12 +100,7 @@ impl RangeChip {
                 };
 
                 // perform range check on cell
-                self.small_range_check(
-                    rom_handler,
-                    circuit_builder,
-                    (*cell).into(),
-                    range_check_width,
-                )?;
+                self.small_range_check(circuit_builder, (*cell).into(), range_check_width)?;
             }
             return Ok(uint.clone());
         }
@@ -126,7 +124,6 @@ impl RangeChip {
                 // hence the first n - 1 range cells should take full width
                 for i in 0..(n_range_cells_per_cell - 1) {
                     self.small_range_check(
-                        rom_handler,
                         circuit_builder,
                         range_cells[i].into(),
                         RANGE_CHIP_BIT_WIDTH,
@@ -136,7 +133,6 @@ impl RangeChip {
                 // the last range cell represents the least significant range cell
                 // hence we truncate the max_value accordingly
                 self.small_range_check(
-                    rom_handler,
                     circuit_builder,
                     range_cells[n_range_cells_per_cell - 1].into(),
                     uint_cell_width - ((n_range_cells_per_cell - 1) * RANGE_CHIP_BIT_WIDTH),
@@ -150,7 +146,7 @@ impl RangeChip {
     }
 
     // TODO: document
-    pub fn non_zero<Ext: ExtensionField>(
+    pub fn non_zero(
         &mut self,
         rom_handler: &mut ROMHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -159,7 +155,7 @@ impl RangeChip {
     ) -> Result<CellId, UtilError> {
         let prod = circuit_builder.create_cell();
         circuit_builder.mul2(prod, val, wit, Ext::BaseField::ONE);
-        self.small_range_check(rom_handler, circuit_builder, prod.into(), 1)?;
+        self.small_range_check(circuit_builder, prod.into(), 1)?;
 
         let statement = circuit_builder.create_cell();
         // If val != 0, then prod = 1. => assert!( val (prod - 1) = 0 )
