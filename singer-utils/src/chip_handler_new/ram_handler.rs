@@ -5,6 +5,7 @@ use simple_frontend::structs::{CellId, CellType, CircuitBuilder, ExtCellId, Mixe
 
 // TODO: add documentation
 pub struct RAMHandler<Ext: ExtensionField> {
+    // TODO: should this also have interior mutability
     oam_handler: OAMHandler<Ext>,
 }
 
