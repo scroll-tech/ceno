@@ -1,19 +1,21 @@
 use crate::chip_handler_new::oam_handler::OAMHandler;
-use crate::chip_handler_new::ram_handler::RAMHandler;
 use crate::chip_handler_new::util::cell_to_mixed;
 use crate::structs::RAMType;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder, MixedCell};
+use std::cell::RefCell;
+use std::rc::Rc;
 
-struct GlobalStateChip {}
+struct GlobalStateChip<Ext: ExtensionField> {
+    oam_handler: Rc<RefCell<OAMHandler<Ext>>>,
+}
 
 // TODO: rather than giving access to the oam handler, we can allow access for the ram internal oam handler
-impl GlobalStateChip {
+impl<Ext: ExtensionField> GlobalStateChip<Ext> {
     // TODO: rename and document
-    fn state_in<Ext: ExtensionField>(
-        &mut self,
-        oam_handler: &mut OAMHandler<Ext>,
+    fn state_in(
+        &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         stack_ts: &[CellId],
@@ -33,13 +35,14 @@ impl GlobalStateChip {
         ]
         .concat();
 
-        oam_handler.read_mixed(circuit_builder, &[], &key, &[]);
+        self.oam_handler
+            .borrow_mut()
+            .read_mixed(circuit_builder, &[], &key, &[]);
     }
 
     // TODO: rename and document
-    fn state_out<Ext: ExtensionField>(
-        &mut self,
-        oam_handler: &mut OAMHandler<Ext>,
+    fn state_out(
+        &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         stack_ts: &[CellId],
@@ -59,6 +62,8 @@ impl GlobalStateChip {
         ]
         .concat();
 
-        oam_handler.write_mixed(circuit_builder, &[], &key, &[]);
+        self.oam_handler
+            .borrow_mut()
+            .write_mixed(circuit_builder, &[], &key, &[]);
     }
 }

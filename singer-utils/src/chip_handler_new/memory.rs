@@ -5,15 +5,18 @@ use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
+use std::cell::RefCell;
+use std::rc::Rc;
 
-struct MemoryChip {}
+struct MemoryChip<Ext: ExtensionField> {
+    ram_handler: Rc<RefCell<RAMHandler<Ext>>>,
+}
 
-impl MemoryChip {
+impl<Ext: ExtensionField> MemoryChip<Ext> {
     // TODO: rename and document
     // TODO: should that really be called byte?
-    fn read<Ext: ExtensionField>(
-        &mut self,
-        ram_handler: &mut RAMHandler<Ext>,
+    fn read(
+        &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],
         old_ts: &[CellId],
@@ -29,13 +32,18 @@ impl MemoryChip {
         .concat();
         let old_ts = cell_to_mixed(old_ts);
         let cur_ts = cell_to_mixed(cur_ts);
-        ram_handler.read_mixed(circuit_builder, &old_ts, &cur_ts, &key, &[byte.into()]);
+        self.ram_handler.borrow_mut().read_mixed(
+            circuit_builder,
+            &old_ts,
+            &cur_ts,
+            &key,
+            &[byte.into()],
+        );
     }
 
     // TODO: rename and document
-    fn write<Ext: ExtensionField>(
-        &mut self,
-        ram_handler: &mut RAMHandler<Ext>,
+    fn write(
+        &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],
         old_ts: &[CellId],
@@ -52,7 +60,7 @@ impl MemoryChip {
         .concat();
         let old_ts = cell_to_mixed(old_ts);
         let cur_ts = cell_to_mixed(cur_ts);
-        ram_handler.write_mixed(
+        self.ram_handler.borrow_mut().write_mixed(
             circuit_builder,
             &old_ts,
             &cur_ts,
