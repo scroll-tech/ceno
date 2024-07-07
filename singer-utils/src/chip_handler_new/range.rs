@@ -7,17 +7,9 @@ use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::io::Read;
 
-struct RangeChip {
-    // TODO: we probably don't need this (can lead to consistency issues)
-    chip_bit_width: usize,
-}
+struct RangeChip {}
 
 impl RangeChip {
-    // TODO: document
-    pub fn new(chip_bit_width: usize) -> Self {
-        Self { chip_bit_width }
-    }
-
     // TODO: document
     pub fn small_range_check<Ext: ExtensionField>(
         &mut self,
@@ -26,11 +18,11 @@ impl RangeChip {
         value: MixedCell<Ext>,
         bit_width: usize,
     ) -> Result<(), UtilError> {
-        if bit_width > self.chip_bit_width {
+        if bit_width > RANGE_CHIP_BIT_WIDTH{
             return Err(UtilError::ChipHandlerError);
         }
 
-        let items = [value.mul(Ext::BaseField::from(1 << (self.chip_bit_width - bit_width)))];
+        let items = [value.mul(Ext::BaseField::from(1 << (RANGE_CHIP_BIT_WIDTH - bit_width)))];
         rom_handler.read_mixed(circuit_builder, &[], &items);
         Ok(())
     }
