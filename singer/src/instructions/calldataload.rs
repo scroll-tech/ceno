@@ -87,8 +87,8 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         );
 
         let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        let next_stack_ts = rom_handler.add_ts_with_const(
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        let next_stack_ts = range_chip.add_ts_with_const(
             &mut circuit_builder,
             &stack_ts,
             1,

@@ -60,7 +60,7 @@ impl BasicBlockFinal {
 
         let stack_ts = TSUInt::try_from(stack_ts)?;
         let stack_ts_add_witness = &phase0[Self::phase0_stack_ts_add()];
-        let next_stack_ts = rom_handler.add_ts_with_const(
+        let next_stack_ts = range_chip.add_ts_with_const(
             &mut circuit_builder,
             &stack_ts,
             1,

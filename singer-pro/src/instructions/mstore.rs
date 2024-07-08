@@ -133,7 +133,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         // Update memory timestamp.
         let memory_ts = TSUInt::try_from(memory_ts.as_slice())?;
-        let next_memory_ts = rom_handler.add_ts_with_const(
+        let next_memory_ts = range_chip.add_ts_with_const(
             &mut circuit_builder,
             &memory_ts,
             1,

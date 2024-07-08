@@ -9,6 +9,7 @@ use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::cell::RefCell;
 use std::io::Read;
 use std::rc::Rc;
+use crate::structs::{PCUInt, TSUInt};
 
 pub struct RangeChip<Ext: ExtensionField> {
     rom_handler: Rc<RefCell<ROMHandler<Ext>>>,
@@ -167,5 +168,44 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         circuit_builder.add(statement, val, -Ext::BaseField::ONE);
         circuit_builder.assert_const(statement, 0);
         Ok(prod)
+    }
+
+    pub fn add_pc_const(
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        pc: &PCUInt,
+        constant: i64,
+        witness: &[CellId],
+    ) -> Result<PCUInt, UtilError> {
+        let carry = PCUInt::extract_unsafe_carry(witness);
+        PCUInt::add_const_unsafe(
+            circuit_builder,
+            &pc,
+            i64_to_base_field::<Ext>(constant),
+            carry,
+        )
+    }
+
+    pub fn add_ts_with_const(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        ts: &TSUInt,
+        constant: i64,
+        witness: &[CellId],
+    ) -> Result<TSUInt, UtilError> {
+        TSUInt::add_const(
+            circuit_builder,
+            self,
+            &ts,
+            i64_to_base_field::<Ext>(constant),
+            witness,
+        )
+    }
+}
+
+fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
+    if x >= 0 {
+        E::BaseField::from(x as u64)
+    } else {
+        -E::BaseField::from((-x) as u64)
     }
 }

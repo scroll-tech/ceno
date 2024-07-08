@@ -74,7 +74,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         );
 
         let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
         global_state_chip.state_out(
             &mut circuit_builder,
             next_pc.values(),

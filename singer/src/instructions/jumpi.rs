@@ -148,7 +148,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
 
         // If cond_non_zero, next_pc = dest, otherwise, pc = pc + 1
         let pc_add_1 = &phase0[Self::phase0_pc_add()];
-        let pc_plus_1 = ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, pc_add_1)?;
+        let pc_plus_1 = RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, pc_add_1)?;
         let pc_plus_1 = pc_plus_1.values();
         let next_pc = circuit_builder.create_cells(PCUInt::N_OPERAND_CELLS);
         for i in 0..PCUInt::N_OPERAND_CELLS {

@@ -84,13 +84,13 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
             stack_top,
             clk,
         );
-        let next_pc = ROMHandler::add_pc_const(
+        let next_pc = RangeChip::add_pc_const(
             &mut circuit_builder,
             &pc,
             N as i64 + 1,
             &phase0[Self::phase0_pc_add_i_plus_1()],
         )?;
-        let next_stack_ts = rom_handler.add_ts_with_const(
+        let next_stack_ts = range_chip.add_ts_with_const(
             &mut circuit_builder,
             &stack_ts,
             1,
@@ -130,7 +130,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
             .enumerate()
         {
             let next_pc =
-                ROMHandler::add_pc_const(&mut circuit_builder, &pc, i as i64 + 1, pc_add_i_plus_1)?;
+                RangeChip::add_pc_const(&mut circuit_builder, &pc, i as i64 + 1, pc_add_i_plus_1)?;
             bytecode_chip.bytecode_with_pc_byte(
                 &mut circuit_builder,
                 next_pc.values(),
