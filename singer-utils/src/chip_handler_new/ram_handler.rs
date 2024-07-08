@@ -1,20 +1,18 @@
 use crate::chip_handler_new::oam_handler::OAMHandler;
-use crate::structs::ChipChallenges;
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{CellId, CellType, CircuitBuilder, ExtCellId, MixedCell, WitnessId};
+use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell, WitnessId};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 // TODO: add documentation
 pub struct RAMHandler<Ext: ExtensionField> {
-    // TODO: should this also have interior mutability
-    oam_handler: OAMHandler<Ext>,
+    oam_handler: Rc<RefCell<OAMHandler<Ext>>>,
 }
 
 impl<Ext: ExtensionField> RAMHandler<Ext> {
     // TODO: add documentation
-    pub fn new(challenge: ChipChallenges) -> Self {
-        Self {
-            oam_handler: OAMHandler::new(challenge),
-        }
+    pub fn new(oam_handler: Rc<RefCell<OAMHandler<Ext>>>) -> Self {
+        Self { oam_handler }
     }
 
     // TODO: add documentation
@@ -26,8 +24,12 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         key: &[CellId],
         value: &[CellId],
     ) {
-        self.oam_handler.read(circuit_builder, old_ts, key, value);
-        self.oam_handler.write(circuit_builder, cur_ts, key, value);
+        self.oam_handler
+            .borrow_mut()
+            .read(circuit_builder, old_ts, key, value);
+        self.oam_handler
+            .borrow_mut()
+            .write(circuit_builder, cur_ts, key, value);
     }
 
     // TODO: add documentation
@@ -40,8 +42,10 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         value: &[MixedCell<Ext>],
     ) {
         self.oam_handler
+            .borrow_mut()
             .read_mixed(circuit_builder, old_ts, key, value);
         self.oam_handler
+            .borrow_mut()
             .write_mixed(circuit_builder, cur_ts, key, value);
     }
 
@@ -56,8 +60,10 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         cur_value: &[CellId],
     ) {
         self.oam_handler
+            .borrow_mut()
             .read(circuit_builder, old_ts, key, old_value);
         self.oam_handler
+            .borrow_mut()
             .write(circuit_builder, cur_ts, key, cur_value);
     }
 
@@ -72,8 +78,10 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         cur_value: &[MixedCell<Ext>],
     ) {
         self.oam_handler
+            .borrow_mut()
             .read_mixed(circuit_builder, old_ts, key, old_value);
         self.oam_handler
+            .borrow_mut()
             .write_mixed(circuit_builder, cur_ts, key, cur_value);
     }
 
@@ -82,6 +90,6 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         self,
         circuit_builder: &mut CircuitBuilder<Ext>,
     ) -> (Option<(WitnessId, usize)>, Option<(WitnessId, usize)>) {
-        self.oam_handler.finalize(circuit_builder)
+        self.oam_handler.borrow_mut().finalize(circuit_builder)
     }
 }

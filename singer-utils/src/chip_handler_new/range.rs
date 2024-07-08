@@ -148,7 +148,6 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
     // TODO: document
     pub fn non_zero(
         &mut self,
-        rom_handler: &mut ROMHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         val: CellId,
         wit: CellId,

@@ -97,11 +97,12 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
 
     // TODO: add documentation
     pub fn finalize(
-        self,
+        &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
     ) -> (Option<(WitnessId, usize)>, Option<(WitnessId, usize)>) {
-        let mut read_records = self.read_records;
-        let mut write_records = self.write_records;
+        // TODO: remove interior mutability (simplify this logic)
+        let mut read_records = self.read_records.clone();
+        let mut write_records = self.write_records.clone();
 
         let read_record_output =
             pad_and_generate_output_witness(circuit_builder, &mut read_records);

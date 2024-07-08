@@ -2,7 +2,6 @@ use crate::chip_handler_new::oam_handler::OAMHandler;
 use crate::chip_handler_new::util::cell_to_mixed;
 use crate::structs::RAMType;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::cell::RefCell;
 use std::rc::Rc;
