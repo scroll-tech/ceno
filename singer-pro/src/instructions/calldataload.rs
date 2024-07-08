@@ -2,16 +2,12 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
-use singer_utils::chip_handler::bytecode::BytecodeChip;
 use singer_utils::chip_handler::calldata::CalldataChip;
-use singer_utils::chip_handler::global_state::GlobalStateChip;
-use singer_utils::chip_handler::range::RangeChip;
-use singer_utils::chip_handler::stack::StackChip;
 use singer_utils::{
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
-    structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt, UInt64},
+    structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt, UInt64},
 };
 use std::cell::RefCell;
 use std::rc::Rc;
