@@ -4,18 +4,15 @@ use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell, WitnessId};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// TODO: add documentation
 pub struct RAMHandler<Ext: ExtensionField> {
     oam_handler: Rc<RefCell<OAMHandler<Ext>>>,
 }
 
 impl<Ext: ExtensionField> RAMHandler<Ext> {
-    // TODO: add documentation
     pub fn new(oam_handler: Rc<RefCell<OAMHandler<Ext>>>) -> Self {
         Self { oam_handler }
     }
 
-    // TODO: add documentation
     pub fn read(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -32,7 +29,6 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
             .write(circuit_builder, cur_ts, key, value);
     }
 
-    // TODO: add documentation
     pub fn read_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -49,7 +45,6 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
             .write_mixed(circuit_builder, cur_ts, key, value);
     }
 
-    // TODO: add documentation
     pub fn write(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -67,7 +62,6 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
             .write(circuit_builder, cur_ts, key, cur_value);
     }
 
-    // TODO: add documentation
     pub fn write_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -85,7 +79,6 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
             .write_mixed(circuit_builder, cur_ts, key, cur_value);
     }
 
-    // TODO: add documentation
     pub fn finalize(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

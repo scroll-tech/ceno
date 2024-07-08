@@ -16,12 +16,10 @@ pub struct RangeChip<Ext: ExtensionField> {
 }
 
 impl<Ext: ExtensionField> RangeChip<Ext> {
-    // TODO: document
     pub fn new(rom_handler: Rc<RefCell<ROMHandler<Ext>>>) -> Self {
         Self { rom_handler }
     }
 
-    // TODO: document
     pub fn small_range_check(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -41,9 +39,6 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         Ok(())
     }
 
-    // range check helper functions
-
-    // TODO: document
     pub fn range_check_stack_top(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -52,7 +47,6 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         self.small_range_check(circuit_builder, stack_top, STACK_TOP_BIT_WIDTH)
     }
 
-    // TODO: document
     pub fn range_check_bytes(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -65,7 +59,6 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         Ok(())
     }
 
-    // TODO: document
     pub fn range_check_table_item(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -151,7 +144,6 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         }
     }
 
-    // TODO: document
     pub fn non_zero(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

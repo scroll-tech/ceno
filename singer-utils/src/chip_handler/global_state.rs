@@ -11,14 +11,11 @@ pub struct GlobalStateChip<Ext: ExtensionField> {
     oam_handler: Rc<RefCell<OAMHandler<Ext>>>,
 }
 
-// TODO: rather than giving access to the oam handler, we can allow access for the ram internal oam handler
 impl<Ext: ExtensionField> GlobalStateChip<Ext> {
-    // TODO: document
     pub fn new(oam_handler: Rc<RefCell<OAMHandler<Ext>>>) -> Self {
         Self { oam_handler }
     }
 
-    // TODO: rename and document
     pub fn state_in(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -28,7 +25,6 @@ impl<Ext: ExtensionField> GlobalStateChip<Ext> {
         stack_top: CellId,
         clk: CellId,
     ) {
-        // TODO: can make a structure that does concat automatically to make things neater
         let key = [
             vec![MixedCell::Constant(Ext::BaseField::from(
                 RAMType::GlobalState as u64,
@@ -45,7 +41,6 @@ impl<Ext: ExtensionField> GlobalStateChip<Ext> {
             .read_mixed(circuit_builder, &[], &key, &[]);
     }
 
-    // TODO: rename and document
     pub fn state_out(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,

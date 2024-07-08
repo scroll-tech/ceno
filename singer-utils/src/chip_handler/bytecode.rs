@@ -16,12 +16,10 @@ pub struct BytecodeChip<Ext: ExtensionField> {
 }
 
 impl<Ext: ExtensionField> BytecodeChip<Ext> {
-    // TODO: document
     pub fn new(rom_handler: Rc<RefCell<ROMHandler<Ext>>>) -> Self {
         Self { rom_handler }
     }
 
-    // TODO: rename and document
     pub fn bytecode_with_pc_opcode(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -43,7 +41,6 @@ impl<Ext: ExtensionField> BytecodeChip<Ext> {
         );
     }
 
-    // TODO: rename and document
     pub fn bytecode_with_pc_byte(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,

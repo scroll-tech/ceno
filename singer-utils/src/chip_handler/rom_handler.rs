@@ -3,7 +3,6 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, ExtCellId, MixedCell, WitnessId};
 
-// TODO: add documentation
 pub struct ROMHandler<Ext: ExtensionField> {
     records: Vec<ExtCellId<Ext>>,
     challenge: ChipChallenges,
@@ -18,7 +17,6 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         }
     }
 
-    // TODO: add documentation
     pub fn read(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -34,7 +32,6 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         self.records.push(out);
     }
 
-    // TODO: add documentation
     pub fn read_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -50,11 +47,6 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         self.records.push(out);
     }
 
-    // TODO: add documentation
-    // what is this supposed to return??
-    // it seems to pad it to the next highest power of two (with empty cells)
-    // then generates a witness Id for them (type out)
-    // frac function is here: construct_chip_check_graph
     pub fn finalize(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

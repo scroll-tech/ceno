@@ -12,12 +12,10 @@ pub struct CalldataChip<Ext: ExtensionField> {
 }
 
 impl<Ext: ExtensionField> CalldataChip<Ext> {
-    // TODO: document
     pub fn new(rom_handler: Rc<RefCell<ROMHandler<Ext>>>) -> Self {
         Self { rom_handler }
     }
 
-    // TODO: rename and document
     pub fn load(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,

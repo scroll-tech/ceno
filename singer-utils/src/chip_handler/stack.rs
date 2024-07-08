@@ -11,12 +11,10 @@ pub struct StackChip<Ext: ExtensionField> {
 }
 
 impl<Ext: ExtensionField> StackChip<Ext> {
-    // TODO: document
     pub fn new(oam_handler: Rc<RefCell<OAMHandler<Ext>>>) -> Self {
         Self { oam_handler }
     }
 
-    // TODO: rename and document
     pub fn push(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -35,7 +33,6 @@ impl<Ext: ExtensionField> StackChip<Ext> {
             .write_mixed(circuit_builder, &stack_ts, &key, &values);
     }
 
-    // TODO: rename and document
     pub fn pop(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,

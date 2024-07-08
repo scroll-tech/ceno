@@ -3,18 +3,11 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder, ExtCellId, MixedCell, WitnessId};
 
-// TODO: module wide documentation on process / expected process
-//  confirm if this is the right place to insert this (as actual checking logic is not handled here)
-
-// TODO: add documentation
-//  figure out full name meaning
 pub struct OAMHandler<Ext: ExtensionField> {
     read_records: Vec<ExtCellId<Ext>>,
     write_records: Vec<ExtCellId<Ext>>,
     challenge: ChipChallenges,
 }
-
-// TODO: verify the parameters
 
 impl<Ext: ExtensionField> OAMHandler<Ext> {
     /// Instantiate new `OAMHandler` given chip challenge
@@ -26,8 +19,6 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
         }
     }
 
-    // TODO: add documentation
-    // TODO: document what is going on here in regards to timestamp
     pub fn read(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -44,7 +35,6 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
         self.read_records.push(out);
     }
 
-    // TODO: add documentation
     pub fn read_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -61,7 +51,6 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
         self.read_records.push(out);
     }
 
-    // TODO: add documentation
     pub fn write(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -78,7 +67,6 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
         self.write_records.push(out);
     }
 
-    // TODO: add documentation
     pub fn write_mixed(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -95,7 +83,6 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
         self.write_records.push(out);
     }
 
-    // TODO: add documentation
     pub fn finalize(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -113,7 +100,6 @@ impl<Ext: ExtensionField> OAMHandler<Ext> {
     }
 }
 
-// TODO: add documentation
 fn pad_and_generate_output_witness<Ext: ExtensionField>(
     circuit_builder: &mut CircuitBuilder<Ext>,
     records: &mut Vec<ExtCellId<Ext>>,
@@ -129,7 +115,6 @@ fn pad_and_generate_output_witness<Ext: ExtensionField>(
     }
 }
 
-// TODO: add documentation
 fn pad_with_one<Ext: ExtensionField>(
     circuit_builder: &mut CircuitBuilder<Ext>,
     records: &mut Vec<ExtCellId<Ext>>,
