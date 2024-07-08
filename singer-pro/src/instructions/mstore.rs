@@ -4,13 +4,22 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
+use singer_utils::chip_handler::bytecode::BytecodeChip;
+use singer_utils::chip_handler::global_state::GlobalStateChip;
+use singer_utils::chip_handler::memory::MemoryChip;
+use singer_utils::chip_handler::oam_handler::OAMHandler;
+use singer_utils::chip_handler::ram_handler::RAMHandler;
+use singer_utils::chip_handler::range::RangeChip;
+use singer_utils::chip_handler::rom_handler::ROMHandler;
+use singer_utils::chip_handler::stack::StackChip;
 use singer_utils::{
-    chip_handler::{MemoryChipOperations, ROMOperations, RangeChipOperations},
     chips::{IntoEnumIterator, SingerChipBuilder},
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
-    structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::{mem, sync::Arc};
 
 use crate::{
@@ -129,7 +138,10 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let (mem_value_id, mem_values) =
             circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-        let mut rom_handler = ROMHandler::new(&challenges);
+        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
+
+        // instantiate chips
+        let mut range_chip = RangeChip::new(rom_handler.clone());
 
         // Update memory timestamp.
         let memory_ts = TSUInt::try_from(memory_ts.as_slice())?;
@@ -145,7 +157,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         // Pop mem_bytes from stack
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
-        rom_handler.range_check_bytes(&mut circuit_builder, mem_bytes)?;
+        range_chip.range_check_bytes(&mut circuit_builder, mem_bytes)?;
 
         let mem_values = StackUInt::try_from(mem_values.as_slice())?;
         let mem_values_from_bytes =
@@ -153,7 +165,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         StackUInt::assert_eq(&mut circuit_builder, &mem_values_from_bytes, &mem_values)?;
 
         // To chips.
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
@@ -238,8 +250,13 @@ impl MstoreAccessory {
         // From witness.
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut ram_handler = RAMHandler::new(&challenges);
-        let mut rom_handler = ROMHandler::new(&challenges);
+        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
+        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+
+        // instantiate chips
+        let mut range_chip = RangeChip::new(rom_handler.clone());
+        let memory_chip = MemoryChip::new(ram_handler.clone());
 
         // Compute offset, offset + 1, ..., offset + EVM_STACK_BYTE_WIDTH - 1.
         // Load previous memory bytes.
@@ -251,14 +268,14 @@ impl MstoreAccessory {
         let delta = circuit_builder.create_counter_in(0)[0];
         let offset_plus_delta = StackUInt::add_cell(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut range_chip,
             &offset,
             delta,
             offset_add_delta,
         )?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut range_chip,
             &old_memory_ts,
             &memory_ts,
             old_memory_ts_lt,
@@ -266,7 +283,7 @@ impl MstoreAccessory {
 
         let mem_byte = pred_ooo[Self::pred_ooo_mem_byte().start];
         let prev_mem_byte = phase0[Self::phase0_prev_mem_byte().start];
-        ram_handler.mem_store(
+        memory_chip.write(
             &mut circuit_builder,
             offset_plus_delta.values(),
             old_memory_ts.values(),
@@ -275,7 +292,7 @@ impl MstoreAccessory {
             mem_byte,
         );
 
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];

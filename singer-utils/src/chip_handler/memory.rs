@@ -15,9 +15,7 @@ pub struct MemoryChip<Ext: ExtensionField> {
 impl<Ext: ExtensionField> MemoryChip<Ext> {
     // TODO: document
     pub fn new(ram_handler: Rc<RefCell<RAMHandler<Ext>>>) -> Self {
-        Self {
-            ram_handler
-        }
+        Self { ram_handler }
     }
 
     // TODO: rename and document

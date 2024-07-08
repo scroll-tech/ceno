@@ -3,12 +3,20 @@ use gkr::structs::Circuit;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::chip_handler::bytecode::BytecodeChip;
+use singer_utils::chip_handler::global_state::GlobalStateChip;
+use singer_utils::chip_handler::oam_handler::OAMHandler;
+use singer_utils::chip_handler::ram_handler::RAMHandler;
+use singer_utils::chip_handler::range::RangeChip;
+use singer_utils::chip_handler::rom_handler::ROMHandler;
+use singer_utils::chip_handler::stack::StackChip;
 use singer_utils::{
-    chip_handler::{OAMOperations, ROMOperations, RangeChipOperations, StackChipOperations},
     chips::IntoEnumIterator,
     register_witness,
-    structs::{ChipChallenges, InstOutChipType, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::{
@@ -50,16 +58,21 @@ impl BasicBlockReturn {
         let (stack_top_id, stack_top) = circuit_builder.create_witness_in(1);
         let (clk_id, _) = circuit_builder.create_witness_in(1);
 
-        let mut ram_handler = RAMHandler::new(&challenges);
-        let mut rom_handler = ROMHandler::new(&challenges);
+        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
+        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+
+        // instantiate chips
+        let mut range_chip = RangeChip::new(rom_handler.clone());
+        let stack_chip = StackChip::new(oam_handler.clone());
 
         // Check the of stack_top + offset.
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
         let stack_top_l = stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[0]));
-        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
+        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
         let stack_top_r =
             stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[n_stack_items - 1]));
-        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
+        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // From predesessor instruction
         let (memory_ts_id, _) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
@@ -67,7 +80,7 @@ impl BasicBlockReturn {
             .iter()
             .map(|offset| {
                 let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_witness_in(1);
-                ram_handler.stack_push(
+                stack_chip.push(
                     &mut circuit_builder,
                     stack_top_expr.add(i64_to_base_field::<E>(*offset)),
                     &stack_ts,
@@ -78,8 +91,8 @@ impl BasicBlockReturn {
             .collect_vec();
 
         // To chips.
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
+        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
@@ -124,15 +137,19 @@ impl BBReturnRestMemLoad {
     ) -> Result<AccessoryCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut ram_handler = RAMHandler::new(&challenges);
+
+        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
         let mem_byte = phase0[Self::phase0_mem_byte().start];
         let old_memory_ts = &phase0[Self::phase0_old_memory_ts()];
-        ram_handler.oam_load(&mut circuit_builder, offset, old_memory_ts, &[mem_byte]);
+        oam_handler
+            .borrow_mut()
+            .read(&mut circuit_builder, offset, old_memory_ts, &[mem_byte]);
 
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
@@ -170,16 +187,20 @@ impl BBReturnRestMemStore {
     ) -> Result<AccessoryCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut ram_handler = RAMHandler::new(&challenges);
+
+        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
         let mem_byte = phase0[Self::phase0_mem_byte().start];
         // memory_ts is zero.
         let memory_ts = circuit_builder.create_cells(StackUInt::N_OPERAND_CELLS);
-        ram_handler.oam_store(&mut circuit_builder, offset, &memory_ts, &[mem_byte]);
+        oam_handler
+            .borrow_mut()
+            .write(&mut circuit_builder, offset, &memory_ts, &[mem_byte]);
 
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
@@ -217,20 +238,25 @@ impl BBReturnRestStackPop {
     ) -> Result<AccessoryCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut ram_handler = RAMHandler::new(&challenges);
+
+        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+
+        // instantiate chips
+        let stack_chip = StackChip::new(oam_handler.clone());
 
         // Pop from stack
         let stack_top = circuit_builder.create_counter_in(0);
         let stack_values = &phase0[Self::phase0_stack_values()];
         let old_stack_ts = &phase0[Self::phase0_old_stack_ts()];
-        ram_handler.stack_pop(
+        stack_chip.pop(
             &mut circuit_builder,
             stack_top[0].into(),
             old_stack_ts,
             stack_values,
         );
 
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];

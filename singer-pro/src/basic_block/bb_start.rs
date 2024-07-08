@@ -3,15 +3,19 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::chip_handler::global_state::GlobalStateChip;
+use singer_utils::chip_handler::oam_handler::OAMHandler;
+use singer_utils::chip_handler::ram_handler::RAMHandler;
+use singer_utils::chip_handler::range::RangeChip;
+use singer_utils::chip_handler::rom_handler::ROMHandler;
+use singer_utils::chip_handler::stack::StackChip;
 use singer_utils::{
-    chip_handler::{
-        GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
-        StackChipOperations,
-    },
     chips::IntoEnumIterator,
     register_multi_witness,
-    structs::{ChipChallenges, InstOutChipType, PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    structs::{ChipChallenges, InstOutChipType, PCUInt, StackUInt, TSUInt},
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::{
@@ -51,8 +55,14 @@ impl BasicBlockStart {
         let (phase0_wire_id, phase0) =
             circuit_builder.create_witness_in(Self::phase0_size(n_stack_items));
 
-        let mut ram_handler = RAMHandler::new(&challenges);
-        let mut rom_handler = ROMHandler::new(&challenges);
+        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
+        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+
+        // instantiate chips
+        let global_state_chip = GlobalStateChip::new(oam_handler.clone());
+        let mut range_chip = RangeChip::new(rom_handler.clone());
+        let stack_chip = StackChip::new(oam_handler.clone());
 
         // State update
         let pc = &phase0[Self::phase0_pc(n_stack_items)];
@@ -61,7 +71,7 @@ impl BasicBlockStart {
         let stack_top = phase0[Self::phase0_stack_top(n_stack_items).start];
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk(n_stack_items).start];
-        ram_handler.state_in(
+        global_state_chip.state_in(
             &mut circuit_builder,
             pc,
             stack_ts,
@@ -72,10 +82,10 @@ impl BasicBlockStart {
 
         // Check the of stack_top + offset.
         let stack_top_l = stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[0]));
-        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
+        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
         let stack_top_r =
             stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[n_stack_items - 1]));
-        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
+        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // pop all elements from the stack.
         let stack_ts = TSUInt::try_from(stack_ts)?;
@@ -84,12 +94,12 @@ impl BasicBlockStart {
                 TSUInt::try_from(&phase0[Self::phase0_old_stack_ts(i, n_stack_items)])?;
             TSUInt::assert_lt(
                 &mut circuit_builder,
-                &mut rom_handler,
+                &mut range_chip,
                 &old_stack_ts,
                 &stack_ts,
                 &phase0[Self::phase0_old_stack_ts_lt(i, n_stack_items)],
             )?;
-            ram_handler.stack_pop(
+            stack_chip.pop(
                 &mut circuit_builder,
                 stack_top_expr.add(i64_to_base_field::<E>(*offset)),
                 old_stack_ts.values(),
@@ -121,8 +131,8 @@ impl BasicBlockStart {
         circuit_builder.add(out_clk[0], clk, E::BaseField::ONE);
 
         // To chips
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
+        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];

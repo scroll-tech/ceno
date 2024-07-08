@@ -2,13 +2,19 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
+use singer_utils::chip_handler::bytecode::BytecodeChip;
+use singer_utils::chip_handler::global_state::GlobalStateChip;
+use singer_utils::chip_handler::range::RangeChip;
+use singer_utils::chip_handler::rom_handler::ROMHandler;
+use singer_utils::chip_handler::stack::StackChip;
 use singer_utils::{
-    chip_handler::ROMOperations,
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
-    structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt},
+    structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::{
@@ -47,14 +53,17 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         let (addend_0_id, addend_0) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
         let (addend_1_id, addend_1) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-        let mut rom_handler = ROMHandler::new(&challenges);
+        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
+
+        // instantiate chips
+        let mut range_chip = RangeChip::new(rom_handler.clone());
 
         // Execution result = addend0 + addend1, with carry.
         let addend_0 = addend_0.try_into()?;
         let addend_1 = addend_1.try_into()?;
         let result = StackUInt::add(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut range_chip,
             &addend_0,
             &addend_1,
             &phase0[Self::phase0_instruction_add()],
@@ -66,7 +75,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];

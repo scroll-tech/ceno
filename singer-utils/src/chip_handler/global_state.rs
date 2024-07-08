@@ -15,9 +15,7 @@ pub struct GlobalStateChip<Ext: ExtensionField> {
 impl<Ext: ExtensionField> GlobalStateChip<Ext> {
     // TODO: document
     pub fn new(oam_handler: Rc<RefCell<OAMHandler<Ext>>>) -> Self {
-        Self {
-            oam_handler
-        }
+        Self { oam_handler }
     }
 
     // TODO: rename and document
