@@ -1,14 +1,19 @@
+use crate::chip_handler::oam_handler::OAMHandler;
+use crate::chip_handler::util::cell_to_mixed;
+use crate::structs::RAMType;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
+use std::cell::RefCell;
+use std::rc::Rc;
 
-use crate::structs::{RAMHandler, RAMType};
+struct StackChip<Ext: ExtensionField> {
+    oam_handler: Rc<RefCell<OAMHandler<Ext>>>,
+}
 
-use super::{OAMOperations, StackChipOperations};
-
-impl<Ext: ExtensionField> StackChipOperations<Ext> for RAMHandler<Ext> {
-    fn stack_push(
-        &mut self,
+impl<Ext: ExtensionField> StackChip<Ext> {
+    // TODO: rename and document
+    fn push(
+        &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
         stack_ts: &[CellId],
@@ -18,13 +23,16 @@ impl<Ext: ExtensionField> StackChipOperations<Ext> for RAMHandler<Ext> {
             MixedCell::Constant(Ext::BaseField::from(RAMType::Stack as u64)),
             stack_top,
         ];
-        let stack_ts = stack_ts.iter().map(|&x| MixedCell::Cell(x)).collect_vec();
-        let values = values.iter().map(|&x| MixedCell::Cell(x)).collect_vec();
-        self.oam_store_mixed(circuit_builder, &stack_ts, &key, &values);
+        let stack_ts = cell_to_mixed(stack_ts);
+        let values = cell_to_mixed(values);
+        self.oam_handler
+            .borrow_mut()
+            .write_mixed(circuit_builder, &stack_ts, &key, &values);
     }
 
-    fn stack_pop(
-        &mut self,
+    // TODO: rename and document
+    fn pop(
+        &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
         stack_ts: &[CellId],
@@ -34,8 +42,10 @@ impl<Ext: ExtensionField> StackChipOperations<Ext> for RAMHandler<Ext> {
             MixedCell::Constant(Ext::BaseField::from(RAMType::Stack as u64)),
             stack_top,
         ];
-        let stack_ts = stack_ts.iter().map(|&x| MixedCell::Cell(x)).collect_vec();
-        let values = values.iter().map(|&x| MixedCell::Cell(x)).collect_vec();
-        self.oam_load_mixed(circuit_builder, &stack_ts, &key, &values);
+        let stack_ts = cell_to_mixed(stack_ts);
+        let values = cell_to_mixed(values);
+        self.oam_handler
+            .borrow_mut()
+            .read_mixed(circuit_builder, &stack_ts, &key, &values);
     }
 }

@@ -1,14 +1,25 @@
+use crate::chip_handler::rom_handler::ROMHandler;
+use crate::chip_handler::util::cell_to_mixed;
+use crate::structs::ROMType;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
+use std::cell::RefCell;
+use std::rc::Rc;
 
-use crate::structs::{ROMHandler, ROMType};
+pub struct CalldataChip<Ext: ExtensionField> {
+    rom_handler: Rc<RefCell<ROMHandler<Ext>>>,
+}
 
-use super::{CalldataChipOperations, ROMOperations};
+impl<Ext: ExtensionField> CalldataChip<Ext> {
+    // TODO: document
+    pub fn new(rom_handler: Rc<RefCell<ROMHandler<Ext>>>) -> Self {
+        Self { rom_handler }
+    }
 
-impl<Ext: ExtensionField> CalldataChipOperations<Ext> for ROMHandler<Ext> {
-    fn calldataload(
-        &mut self,
+    // TODO: rename and document
+    pub fn load(
+        &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],
         data: &[CellId],
@@ -17,10 +28,12 @@ impl<Ext: ExtensionField> CalldataChipOperations<Ext> for ROMHandler<Ext> {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 ROMType::Calldata as u64,
             ))],
-            offset.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(offset),
         ]
         .concat();
         let data = data.iter().map(|&x| x.into()).collect_vec();
-        self.rom_load_mixed(circuit_builder, &key, &data);
+        self.rom_handler
+            .borrow_mut()
+            .read_mixed(circuit_builder, &key, &data);
     }
 }

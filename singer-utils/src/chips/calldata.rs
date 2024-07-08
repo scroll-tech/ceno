@@ -1,12 +1,15 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::{
-    chip_handler::{CalldataChipOperations, ROMOperations},
     error::UtilError,
-    structs::{ChipChallenges, ROMHandler, StackUInt, UInt64},
+    structs::{ChipChallenges, StackUInt, UInt64},
 };
 
 use super::ChipCircuitGadgets;
+use crate::chip_handler::calldata::CalldataChip;
+use crate::chip_handler::rom_handler::ROMHandler;
 use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
@@ -18,9 +21,12 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
     let mut circuit_builder = CircuitBuilder::<E>::new();
     let (_, id_cells) = circuit_builder.create_witness_in(UInt64::N_OPERAND_CELLS);
     let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
-    let mut rom_handler = ROMHandler::new(&challenges);
-    rom_handler.calldataload(&mut circuit_builder, &id_cells, &calldata_cells);
-    let _ = rom_handler.finalize(&mut circuit_builder);
+
+    let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
+    let calldata_chip = CalldataChip::new(rom_handler.clone());
+    calldata_chip.load(&mut circuit_builder, &id_cells, &calldata_cells);
+
+    let _ = rom_handler.borrow_mut().finalize(&mut circuit_builder);
 
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))

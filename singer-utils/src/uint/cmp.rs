@@ -1,15 +1,16 @@
-use crate::chip_handler::RangeChipOperations;
+use crate::chip_handler::range::RangeChip;
 use crate::error::UtilError;
 use crate::uint::uint::UInt;
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
+use std::ops::Range;
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Generates the required information for asserting lt and leq
-    pub fn lt<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn lt<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        range_chip_handler: &mut RangeChip<E>,
         operand_0: &UInt<M, C>,
         operand_1: &UInt<M, C>,
         witness: &[CellId],
@@ -33,9 +34,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Asserts that operand_0 < operand_1
-    pub fn assert_lt<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn assert_lt<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        range_chip_handler: &mut RangeChip<E>,
         operand_0: &UInt<M, C>,
         operand_1: &UInt<M, C>,
         witness: &[CellId],
@@ -52,9 +53,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Asserts that operand_0 <= operand_1
-    pub fn assert_leq<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn assert_leq<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        range_chip_handler: &mut RangeChip<E>,
         operand_0: &UInt<M, C>,
         operand_1: &UInt<M, C>,
         witness: &[CellId],

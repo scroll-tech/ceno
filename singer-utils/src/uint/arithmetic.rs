@@ -1,4 +1,4 @@
-use crate::chip_handler::RangeChipOperations;
+use crate::chip_handler::range::RangeChip;
 use crate::error::UtilError;
 use crate::uint::uint::UInt;
 use ff::Field;
@@ -51,9 +51,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Little-endian addition.
-    pub fn add<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        range_chip_handler: &mut RangeChip<E>,
         addend_0: &UInt<M, C>,
         addend_1: &UInt<M, C>,
         witness: &[CellId],
@@ -91,9 +91,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Add a constant value to a `UInt<M, C>` instance
-    pub fn add_const<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_const<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        range_chip_handler: &mut RangeChip<E>,
         addend_0: &UInt<M, C>,
         constant: E::BaseField,
         witness: &[CellId],
@@ -106,9 +106,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     /// Add a constant value to a `UInt<M, C>` instance
     /// Assumes that addition leads to no overflow.
-    pub fn add_const_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_const_no_overflow<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        range_chip_handler: &mut RangeChip<E>,
         addend_0: &UInt<M, C>,
         constant: E::BaseField,
         witness: &[CellId],
@@ -146,9 +146,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Adds a single cell value to a `UInt<M, C>` instance
-    pub fn add_cell<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_cell<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        range_chip_handler: &mut RangeChip<E>,
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         witness: &[CellId],
@@ -161,9 +161,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     /// Adds a single cell value to a `UInt<M, C>` instance
     /// Assumes that addition lead to no overflow.
-    pub fn add_cell_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_cell_no_overflow<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        range_chip_handler: &mut RangeChip<E>,
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         witness: &[CellId],
@@ -200,9 +200,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Little endian subtraction
-    pub fn sub<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn sub<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        range_chip_handler: &mut RangeChip<E>,
         minuend: &UInt<M, C>,
         subtrahend: &UInt<M, C>,
         witness: &[CellId],

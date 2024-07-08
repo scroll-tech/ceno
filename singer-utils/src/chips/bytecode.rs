@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use ff_ext::ExtensionField;
@@ -7,10 +9,11 @@ use itertools::Itertools;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use sumcheck::util::ceil_log2;
 
+use crate::chip_handler::bytecode::BytecodeChip;
+use crate::chip_handler::rom_handler::ROMHandler;
 use crate::{
-    chip_handler::{BytecodeChipOperations, ROMOperations},
     error::UtilError,
-    structs::{ChipChallenges, PCUInt, ROMHandler},
+    structs::{ChipChallenges, PCUInt},
 };
 
 use super::ChipCircuitGadgets;
@@ -20,9 +23,11 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
     let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPERAND_CELLS);
     let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
-    let mut rom_handler = ROMHandler::new(&challenges);
-    rom_handler.bytecode_with_pc_byte(&mut circuit_builder, &pc_cells, bytecode_cells[0]);
-    let _ = rom_handler.finalize(&mut circuit_builder);
+    let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
+    let bytecode_chip = BytecodeChip::new(rom_handler.clone());
+
+    bytecode_chip.bytecode_with_pc_byte(&mut circuit_builder, &pc_cells, bytecode_cells[0]);
+    let _ = rom_handler.borrow_mut().finalize(&mut circuit_builder);
 
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))
