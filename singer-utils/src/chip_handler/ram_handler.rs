@@ -87,7 +87,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
 
     // TODO: add documentation
     pub fn finalize(
-        self,
+        &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
     ) -> (Option<(WitnessId, usize)>, Option<(WitnessId, usize)>) {
         self.oam_handler.borrow_mut().finalize(circuit_builder)

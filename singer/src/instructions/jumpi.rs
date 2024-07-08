@@ -4,15 +4,20 @@ use gkr::structs::Circuit;
 use itertools::izip;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::chip_handler::bytecode::BytecodeChip;
+use singer_utils::chip_handler::global_state::GlobalStateChip;
+use singer_utils::chip_handler::oam_handler::OAMHandler;
+use singer_utils::chip_handler::ram_handler::RAMHandler;
+use singer_utils::chip_handler::range::RangeChip;
+use singer_utils::chip_handler::rom_handler::ROMHandler;
+use singer_utils::chip_handler::stack::StackChip;
 use singer_utils::{
-    chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RangeChipOperations, StackChipOperations,
-    },
     constants::OpcodeType,
     register_witness,
-    structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    structs::{PCUInt, StackUInt, TSUInt},
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::error::ZKVMError;
@@ -55,8 +60,16 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut ram_handler = RAMHandler::new(&challenges);
-        let mut rom_handler = ROMHandler::new(&challenges);
+
+        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
+        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+
+        // instantiate chips
+        let global_state_chip = GlobalStateChip::new(oam_handler.clone());
+        let mut range_chip = RangeChip::new(rom_handler.clone());
+        let stack_chip = StackChip::new(oam_handler.clone());
+        let bytecode_chip = BytecodeChip::new(rom_handler.clone());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -66,7 +79,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        ram_handler.state_in(
+        global_state_chip.state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -76,7 +89,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         );
 
         // Range check stack_top - 2
-        rom_handler.range_check_stack_top(
+        range_chip.range_check_stack_top(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
         )?;
@@ -88,12 +101,12 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         let old_stack_ts_dest = (&phase0[Self::phase0_old_stack_ts_dest()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut range_chip,
             &old_stack_ts_dest,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_dest_lt()],
         )?;
-        ram_handler.stack_pop(
+        stack_chip.pop(
             &mut circuit_builder,
             dest_stack_addr,
             old_stack_ts_dest.values(),
@@ -105,13 +118,13 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         let old_stack_ts_cond = (&phase0[Self::phase0_old_stack_ts_cond()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut range_chip,
             &old_stack_ts_cond,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_cond_lt()],
         )?;
 
-        ram_handler.stack_pop(
+        stack_chip.pop(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
             old_stack_ts_cond.values(),
@@ -122,7 +135,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         let cond_values_inv = &phase0[Self::phase0_cond_values_inv()];
         let mut cond_values_non_zero = Vec::new();
         for (val, wit) in izip!(cond_values, cond_values_inv) {
-            cond_values_non_zero.push(rom_handler.non_zero(&mut circuit_builder, *val, *wit)?);
+            cond_values_non_zero.push(range_chip.non_zero(&mut circuit_builder, *val, *wit)?);
         }
         // cond_non_zero = [summation of cond_values_non_zero[i] != 0]
         let non_zero_or = circuit_builder.create_cell();
@@ -131,7 +144,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
             .for_each(|x| circuit_builder.add(non_zero_or, *x, E::BaseField::ONE));
         let cond_non_zero_or_inv = phase0[Self::phase0_cond_non_zero_or_inv().start];
         let cond_non_zero =
-            rom_handler.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
+            range_chip.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
 
         // If cond_non_zero, next_pc = dest, otherwise, pc = pc + 1
         let pc_add_1 = &phase0[Self::phase0_pc_add()];
@@ -143,7 +156,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         }
 
         // State out
-        ram_handler.state_out(
+        global_state_chip.state_out(
             &mut circuit_builder,
             &next_pc,
             stack_ts.values(), // Because there is no stack push.
@@ -153,7 +166,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         );
 
         // Bytecode check for (pc, jumpi)
-        rom_handler.bytecode_with_pc_opcode(
+        bytecode_chip.bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
@@ -170,10 +183,10 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         );
 
         // Bytecode check for (next_pc, next_opcode)
-        rom_handler.bytecode_with_pc_byte(&mut circuit_builder, &next_pc, next_opcode);
+        bytecode_chip.bytecode_with_pc_byte(&mut circuit_builder, &next_pc, next_opcode);
 
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
+        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];

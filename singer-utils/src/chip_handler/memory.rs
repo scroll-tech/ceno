@@ -8,14 +8,21 @@ use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-struct MemoryChip<Ext: ExtensionField> {
+pub struct MemoryChip<Ext: ExtensionField> {
     ram_handler: Rc<RefCell<RAMHandler<Ext>>>,
 }
 
 impl<Ext: ExtensionField> MemoryChip<Ext> {
+    // TODO: document
+    pub fn new(ram_handler: Rc<RefCell<RAMHandler<Ext>>>) -> Self {
+        Self {
+            ram_handler
+        }
+    }
+
     // TODO: rename and document
     // TODO: should that really be called byte?
-    fn read(
+    pub fn read(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],
@@ -42,7 +49,7 @@ impl<Ext: ExtensionField> MemoryChip<Ext> {
     }
 
     // TODO: rename and document
-    fn write(
+    pub fn write(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],

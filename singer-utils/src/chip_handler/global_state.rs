@@ -7,14 +7,21 @@ use simple_frontend::structs::{Cell, CellId, CircuitBuilder, MixedCell};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-struct GlobalStateChip<Ext: ExtensionField> {
+pub struct GlobalStateChip<Ext: ExtensionField> {
     oam_handler: Rc<RefCell<OAMHandler<Ext>>>,
 }
 
 // TODO: rather than giving access to the oam handler, we can allow access for the ram internal oam handler
 impl<Ext: ExtensionField> GlobalStateChip<Ext> {
+    // TODO: document
+    pub fn new(oam_handler: Rc<RefCell<OAMHandler<Ext>>>) -> Self {
+        Self {
+            oam_handler
+        }
+    }
+
     // TODO: rename and document
-    fn state_in(
+    pub fn state_in(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
@@ -41,7 +48,7 @@ impl<Ext: ExtensionField> GlobalStateChip<Ext> {
     }
 
     // TODO: rename and document
-    fn state_out(
+    pub fn state_out(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],

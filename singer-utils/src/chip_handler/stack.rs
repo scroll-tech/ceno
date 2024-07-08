@@ -6,13 +6,20 @@ use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-struct StackChip<Ext: ExtensionField> {
+pub struct StackChip<Ext: ExtensionField> {
     oam_handler: Rc<RefCell<OAMHandler<Ext>>>,
 }
 
 impl<Ext: ExtensionField> StackChip<Ext> {
+    // TODO: document
+    pub fn new(oam_handler: Rc<RefCell<OAMHandler<Ext>>>) -> Self {
+        Self {
+            oam_handler
+        }
+    }
+
     // TODO: rename and document
-    fn push(
+    pub fn push(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
@@ -31,7 +38,7 @@ impl<Ext: ExtensionField> StackChip<Ext> {
     }
 
     // TODO: rename and document
-    fn pop(
+    pub fn pop(
         &self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
