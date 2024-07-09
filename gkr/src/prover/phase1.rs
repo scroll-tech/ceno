@@ -20,7 +20,7 @@ use crate::{
 
 // Prove the items copied from the current layer to later layers for data parallel circuits.
 impl<E: ExtensionField> IOPProverState<E> {
-    /// Sumcheck 1: sigma = \sum_{t || y} \sum_j ( f1^{(j)}(t || y) * g1^{(j)}(t || y) )
+    /// Sumcheck 1: sigma = \sum_{t || y}(f1({t || y}) * (\sum_j g1^{(j)}({t || y})))
     ///     sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
     ///     f1^{(j)}(y) = layers[i](t || y)
     ///     g1^{(j)}(y) = \alpha^j * eq(rt_j, t) * eq(ry_j, y)
@@ -149,7 +149,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         };
         exit_span!(span);
 
-        // sumcheck: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y))
+        // sumcheck: sigma = \sum_{s || y}(f1({s || y}) * (\sum_j g1^{(j)}({s || y})))
         let span = entered_span!("virtual_poly");
         let mut virtual_poly_1 = VirtualPolynomial::new_from_mle(f1, E::BaseField::ONE);
         virtual_poly_1.mul_by_mle(g1, E::BaseField::ONE);

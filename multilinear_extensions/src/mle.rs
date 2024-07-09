@@ -147,7 +147,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         let nv = self.num_vars;
         // evaluate single variable of partial point from left to right
         for (i, point) in partial_point.iter().enumerate() {
-            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,b2,..bt, 1] in parallel
+            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
             match &mut self.evaluations {
                 FieldType::Base(evaluations) => {
                     let evaluations_ext = evaluations
@@ -444,7 +444,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         // evaluate single variable of partial point from left to right
         for (i, point) in partial_point.iter().enumerate() {
             let max_log2_size = nv - i;
-            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,b2,..bt, 1] in parallel
+            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
             match &mut self.evaluations {
                 FieldType::Base(evaluations) => {
                     let evaluations_ext = evaluations

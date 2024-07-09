@@ -53,7 +53,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             acc + point_and_eval.eval * alpha_pow
         });
 
-        // Sumcheck: sigma = \sum_{t || y}( \sum_j f1^{(j)}( t || y) * g1^{(j)}(t || y) )
+        // Sumcheck: sigma = \sum_{t || y}(f1({t || y}) * (\sum_j g1^{(j)}({t || y})))
         // f1^{(j)}(y) = layers[i](t || y)
         // g1^{(j)}(t || y) = \alpha^j * eq(rt_j, t) * eq(ry_j, y)
         // g1^{(j)}(t || y) = \alpha^j * eq(rt_j, t) * copy_to[j](ry_j, y)
