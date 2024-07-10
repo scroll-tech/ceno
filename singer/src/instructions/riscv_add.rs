@@ -336,60 +336,65 @@ mod test {
         );
     }
 
-    // fn bench_add_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
-    //     let chip_challenges = ChipChallenges::default();
-    //     let circuit_builder =
-    //         SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
-    //     let mut singer_builder = SingerGraphBuilder::<E>::new();
+    fn bench_add_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
+        let chip_challenges = ChipChallenges::default();
+        let circuit_builder =
+            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let mut singer_builder = SingerGraphBuilder::<E>::new();
 
-    //     let mut rng = test_rng();
-    //     let size = RVAddInstruction::phase0_size();
-    //     let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
-    //         instances: (0..(1 << instance_num_vars))
-    //             .map(|_| {
-    //                 (0..size)
-    //                     .map(|_| E::BaseField::random(&mut rng))
-    //                     .collect_vec()
-    //             })
-    //             .collect_vec(),
-    //     }];
+        let mut rng = test_rng();
+        let size = RVAddInstruction::phase0_size();
+        let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
+            instances: (0..(1 << instance_num_vars))
+                .map(|_| {
+                    (0..size)
+                        .map(|_| E::BaseField::random(&mut rng))
+                        .collect_vec()
+                })
+                .collect_vec(),
+        }];
 
-    //     let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
+        let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 
-    //     let timer = Instant::now();
+        let timer = Instant::now();
 
-    //     let _ = RVAddInstruction::construct_graph_and_witness(
-    //         &mut singer_builder.graph_builder,
-    //         &mut singer_builder.chip_builder,
-    //         &circuit_builder.insts_circuits[<RVAddInstruction as InstructionRV<E>>::OPCODE as
-    // usize],         vec![phase0],
-    //         &real_challenges,
-    //         1 << instance_num_vars,
-    //         &SingerParams::default(),
-    //     )
-    //     .expect("gkr graph construction failed");
+        let _ = RVAddInstruction::construct_graph_and_witness(
+            &mut singer_builder.graph_builder,
+            &mut singer_builder.chip_builder,
+            &circuit_builder.insts_circuits[<RVAddInstruction as Instruction<E>>::OPCODE as usize],
+            vec![phase0],
+            &real_challenges,
+            1 << instance_num_vars,
+            &SingerParams::default(),
+        )
+        .expect("gkr graph construction failed");
 
-    //     let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
+        let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
 
-    //     println!(
-    //         "RVAddInstruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
-    //         instance_num_vars,
-    //         timer.elapsed().as_secs_f64()
-    //     );
+        println!(
+            "RVAddInstruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
 
-    //     let point = vec![E::random(&mut rng), E::random(&mut rng)];
-    //     let target_evals = graph.target_evals(&wit, &point);
+        let point = vec![E::random(&mut rng), E::random(&mut rng)];
+        let target_evals = graph.target_evals(&wit, &point);
 
-    //     let mut prover_transcript = &mut Transcript::new(b"Singer");
+        let mut prover_transcript = &mut Transcript::new(b"Singer");
 
-    //     let timer = Instant::now();
-    //     let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript,
-    // 1) .expect("prove failed"); println!( "RVAddInstruction::prove, instance_num_vars = {}, time
-    //    = {}", instance_num_vars, timer.elapsed().as_secs_f64() );
-    // }
+        let timer = Instant::now();
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
+            .expect("prove failed");
+        println!(
+            "RVAddInstruction::prove, instance_num_vars = {}, time
+       = {}",
+            instance_num_vars,
+            timer.elapsed().as_secs_f64()
+        );
+    }
 
-    // #[test]
-    // fn bench_add_instruction() {
-    //     bench_add_instruction_helper::<GoldilocksExt2>(10);
-    // }
+    #[test]
+    fn bench_add_instruction() {
+        bench_add_instruction_helper::<GoldilocksExt2>(10);
+    }
 }
