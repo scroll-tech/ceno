@@ -37,6 +37,7 @@ register_witness!(
         rd => RegisterUInt::N_OPRAND_CELLS,
 
         next_pc => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        next_memory_ts => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
 
         // instruction operation
         addend_0 => UInt64::N_OPRAND_CELLS,
@@ -45,9 +46,9 @@ register_witness!(
 
         // register timestamps and comparison gadgets
         prev_rs1_ts => TSUInt::N_OPRAND_CELLS,
-        rs2_ts => TSUInt::N_OPRAND_CELLS,
+        prev_rs2_ts => TSUInt::N_OPRAND_CELLS,
         prev_rs1_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
-        rs2_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS
+        prev_rs2_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -65,7 +66,6 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
         let zero_cell_ids = [0];
-        let stack_top_expr = MixedCell::Cell(0);
 
         // Bytecode check for (pc, add)
         rom_handler.bytecode_with_pc_opcode(
@@ -84,25 +84,26 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
             clk,
         );
 
-        let next_pc = ROMHandler::add_pc_const(
+        let next_pc =
+            ROMHandler::increase_pc(&mut circuit_builder, &pc, &phase0[Self::phase0_next_pc()])?;
+        let next_memory_ts = rom_handler.increase_ts(
             &mut circuit_builder,
-            &pc,
-            1,
-            &phase0[Self::phase0_next_pc()],
+            &memory_ts.try_into()?,
+            &phase0[Self::phase0_next_memory_ts()],
         )?;
 
         ram_handler.state_out(
             &mut circuit_builder,
             next_pc.values(),
             &zero_cell_ids,
-            &memory_ts,
-            stack_top_expr,
+            &next_memory_ts.values(),
+            MixedCell::Cell(0),
             clk_expr.add(E::BaseField::ONE),
         );
 
         // Register timestamp range check
         let prev_rs1_ts = (&phase0[Self::phase0_prev_rs1_ts()]).try_into()?;
-        let rs2_ts = (&phase0[Self::phase0_rs2_ts()]).try_into()?;
+        let prev_rs2_ts = (&phase0[Self::phase0_prev_rs2_ts()]).try_into()?;
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
@@ -113,9 +114,9 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
-            &rs2_ts,
+            &prev_rs2_ts,
             &memory_ts.try_into()?,
-            &phase0[Self::phase0_rs2_ts_lt()],
+            &phase0[Self::phase0_prev_rs2_ts_lt()],
         )?;
         if cfg!(feature = "dbg-opcode") {
             println!(
@@ -148,7 +149,7 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
         ram_handler.register_read(
             &mut circuit_builder,
             rs2,
-            rs2_ts.values(),
+            prev_rs2_ts.values(),
             &phase0[Self::phase0_addend_1()],
         );
         ram_handler.register_store(&mut circuit_builder, rd, memory_ts, result.values());
@@ -209,17 +210,25 @@ mod test {
             map.insert("phase0_rd".to_string(), Self::phase0_rd());
 
             map.insert("phase0_next_pc".to_string(), Self::phase0_next_pc());
+            map.insert(
+                "phase0_next_memory_ts".to_string(),
+                Self::phase0_next_memory_ts(),
+            );
+
             map.insert("phase0_addend_0".to_string(), Self::phase0_addend_0());
             map.insert("phase0_addend_1".to_string(), Self::phase0_addend_1());
             map.insert("phase0_outcome".to_string(), Self::phase0_outcome());
 
             map.insert("phase0_prev_rs1_ts".to_string(), Self::phase0_prev_rs1_ts());
-            map.insert("phase0_rs2_ts".to_string(), Self::phase0_rs2_ts());
+            map.insert("phase0_prev_rs2_ts".to_string(), Self::phase0_prev_rs2_ts());
             map.insert(
                 "phase0_prev_rs1_ts_lt".to_string(),
                 Self::phase0_prev_rs1_ts_lt(),
             );
-            map.insert("phase0_rs2_ts_lt".to_string(), Self::phase0_rs2_ts_lt());
+            map.insert(
+                "phase0_prev_rs2_ts_lt".to_string(),
+                Self::phase0_prev_rs2_ts_lt(),
+            );
 
             map
         }
@@ -249,6 +258,15 @@ mod test {
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(3u64)]);
+        phase0_values_map.insert(
+            "phase0_next_memory_ts".to_string(),
+            vec![
+                Goldilocks::from(4u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+            ],
+        );
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_next_pc".to_string(),
@@ -287,11 +305,14 @@ mod test {
                 Goldilocks::from(1u64), // borrow
             ],
         );
-        phase0_values_map.insert("phase0_rs2_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(
+            "phase0_prev_rs2_ts".to_string(),
+            vec![Goldilocks::from(1u64)],
+        );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
         let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
-            "phase0_rs2_ts_lt".to_string(),
+            "phase0_prev_rs2_ts_lt".to_string(),
             vec![
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),

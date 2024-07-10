@@ -92,6 +92,14 @@ impl<E: ExtensionField> ROMHandler<E> {
 }
 
 impl<Ext: ExtensionField> ROMHandler<Ext> {
+    pub fn increase_pc(
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        pc: &PCUInt,
+        witness: &[CellId],
+    ) -> Result<PCUInt, UtilError> {
+        ROMHandler::add_pc_const(circuit_builder, &pc, 1, witness)
+    }
+
     pub fn add_pc_const(
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &PCUInt,
@@ -107,6 +115,15 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         )
     }
 
+    pub fn increase_ts(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        ts: &TSUInt,
+        witness: &[CellId],
+    ) -> Result<TSUInt, UtilError> {
+        self.add_ts_with_const(circuit_builder, &ts, 1, witness)
+    }
+
     pub fn add_ts_with_const(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -114,7 +131,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         constant: i64,
         witness: &[CellId],
     ) -> Result<TSUInt, UtilError> {
-        //let carry = UIntAddSub::<TSUInt>::extract_unsafe_carry(witness);
+        // let carry = UIntAddSub::<TSUInt>::extract_unsafe_carry(witness);
         UIntAddSub::<TSUInt>::add_const(
             circuit_builder,
             self,
