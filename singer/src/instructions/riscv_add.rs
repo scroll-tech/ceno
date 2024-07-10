@@ -29,7 +29,6 @@ register_witness!(
     RVAddInstruction,
     phase0 {
         pc => PCUInt::N_OPRAND_CELLS,
-        register_ts => TSUInt::N_OPRAND_CELLS,
         memory_ts => TSUInt::N_OPRAND_CELLS,
         clk => 1,
 
@@ -63,7 +62,6 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
 
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
         let memory_ts = &phase0[Self::phase0_memory_ts()];
-        let register_ts = &phase0[Self::phase0_register_ts()];
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
         let zero_cell_ids = [0];
@@ -109,14 +107,14 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
             &mut circuit_builder,
             &mut rom_handler,
             &prev_rs1_ts,
-            &register_ts.try_into()?,
+            &memory_ts.try_into()?,
             &phase0[Self::phase0_prev_rs1_ts_lt()],
         )?;
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &rs2_ts,
-            &register_ts.try_into()?,
+            &memory_ts.try_into()?,
             &phase0[Self::phase0_rs2_ts_lt()],
         )?;
         if cfg!(feature = "dbg-opcode") {
@@ -153,7 +151,7 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
             rs2_ts.values(),
             &phase0[Self::phase0_addend_1()],
         );
-        ram_handler.register_store(&mut circuit_builder, rd, register_ts, result.values());
+        ram_handler.register_store(&mut circuit_builder, rd, memory_ts, result.values());
 
         // Ram/Rom finalization
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
@@ -203,7 +201,6 @@ mod test {
         fn phase0_index_map() -> BTreeMap<String, Range<CellId>> {
             let mut map = BTreeMap::new();
             map.insert("phase0_pc".to_string(), Self::phase0_pc());
-            map.insert("phase0_register_ts".to_string(), Self::phase0_register_ts());
             map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
             map.insert("phase0_clk".to_string(), Self::phase0_clk());
 
@@ -251,11 +248,7 @@ mod test {
 
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert(
-            "phase0_register_ts".to_string(),
-            vec![Goldilocks::from(3u64)],
-        );
-        phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(3u64)]);
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_next_pc".to_string(),
