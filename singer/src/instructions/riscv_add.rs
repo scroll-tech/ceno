@@ -10,7 +10,7 @@ use singer_utils::{
     },
     constants::OpcodeType,
     register_witness,
-    structs::{PCUInt, RAMHandler, ROMHandler, RegisterUInt, StackUInt, TSUInt, UInt64},
+    structs::{PCUInt, RAMHandler, ROMHandler, RegisterUInt, TSUInt, UInt64},
     uint::{UIntAddSub, UIntCmp},
 };
 use std::sync::Arc;
@@ -37,17 +37,17 @@ register_witness!(
         rs2 => RegisterUInt::N_OPRAND_CELLS,
         rd => RegisterUInt::N_OPRAND_CELLS,
 
-        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        next_pc => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
 
         // instruction operation
         addend_0 => UInt64::N_OPRAND_CELLS,
         addend_1 => UInt64::N_OPRAND_CELLS,
-        instruction_add => UIntAddSub::<UInt64>::N_WITNESS_CELLS,
+        outcome => UIntAddSub::<UInt64>::N_WITNESS_CELLS,
 
         // register timestamps and comparison gadgets
-        rs1_ts => TSUInt::N_OPRAND_CELLS,
+        prev_rs1_ts => TSUInt::N_OPRAND_CELLS,
         rs2_ts => TSUInt::N_OPRAND_CELLS,
-        rs1_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
+        prev_rs1_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
         rs2_ts_lt => UIntCmp::<TSUInt>::N_WITNESS_CELLS
     }
 );
@@ -86,8 +86,12 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
             clk,
         );
 
-        let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        let next_pc = ROMHandler::add_pc_const(
+            &mut circuit_builder,
+            &pc,
+            1,
+            &phase0[Self::phase0_next_pc()],
+        )?;
 
         ram_handler.state_out(
             &mut circuit_builder,
@@ -99,14 +103,14 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
         );
 
         // Register timestamp range check
-        let rs1_ts = (&phase0[Self::phase0_rs1_ts()]).try_into()?;
+        let prev_rs1_ts = (&phase0[Self::phase0_prev_rs1_ts()]).try_into()?;
         let rs2_ts = (&phase0[Self::phase0_rs2_ts()]).try_into()?;
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
-            &rs1_ts,
+            &prev_rs1_ts,
             &register_ts.try_into()?,
-            &phase0[Self::phase0_rs1_ts_lt()],
+            &phase0[Self::phase0_prev_rs1_ts_lt()],
         )?;
         UIntCmp::<TSUInt>::assert_lt(
             &mut circuit_builder,
@@ -117,8 +121,8 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
         )?;
         if cfg!(feature = "dbg-opcode") {
             println!(
-                "addInstCircuit::phase0_instruction_add: {:?}",
-                Self::phase0_instruction_add()
+                "addInstCircuit::phase0_outcome: {:?}",
+                Self::phase0_outcome()
             );
         }
 
@@ -130,7 +134,7 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
             &mut rom_handler,
             &addend_0,
             &addend_1,
-            &phase0[Self::phase0_instruction_add()],
+            &phase0[Self::phase0_outcome()],
         )?;
 
         // Read/Write from registers
@@ -140,14 +144,14 @@ impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
         ram_handler.register_read(
             &mut circuit_builder,
             rs1,
-            rs1_ts.values(),
-            addend_0.values(),
+            prev_rs1_ts.values(),
+            &phase0[Self::phase0_addend_0()],
         );
         ram_handler.register_read(
             &mut circuit_builder,
             rs2,
             rs2_ts.values(),
-            addend_1.values(),
+            &phase0[Self::phase0_addend_1()],
         );
         ram_handler.register_store(&mut circuit_builder, rd, register_ts, result.values());
 
@@ -180,7 +184,7 @@ mod test {
     use simple_frontend::structs::CellId;
     use singer_utils::{
         constants::RANGE_CHIP_BIT_WIDTH,
-        structs::{StackUInt, TSUInt},
+        structs::{TSUInt, UInt64},
     };
     use std::{collections::BTreeMap, time::Instant};
     use transcript::Transcript;
@@ -196,7 +200,7 @@ mod test {
 
     impl RVAddInstruction {
         #[inline]
-        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
+        fn phase0_index_map() -> BTreeMap<String, Range<CellId>> {
             let mut map = BTreeMap::new();
             map.insert("phase0_pc".to_string(), Self::phase0_pc());
             map.insert("phase0_register_ts".to_string(), Self::phase0_register_ts());
@@ -207,17 +211,17 @@ mod test {
             map.insert("phase0_rs2".to_string(), Self::phase0_rs2());
             map.insert("phase0_rd".to_string(), Self::phase0_rd());
 
-            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
+            map.insert("phase0_next_pc".to_string(), Self::phase0_next_pc());
             map.insert("phase0_addend_0".to_string(), Self::phase0_addend_0());
             map.insert("phase0_addend_1".to_string(), Self::phase0_addend_1());
-            map.insert(
-                "phase0_instruction_add".to_string(),
-                Self::phase0_instruction_add(),
-            );
+            map.insert("phase0_outcome".to_string(), Self::phase0_outcome());
 
-            map.insert("phase0_rs1_ts".to_string(), Self::phase0_rs1_ts());
+            map.insert("phase0_prev_rs1_ts".to_string(), Self::phase0_prev_rs1_ts());
             map.insert("phase0_rs2_ts".to_string(), Self::phase0_rs2_ts());
-            map.insert("phase0_rs1_ts_lt".to_string(), Self::phase0_rs1_ts_lt());
+            map.insert(
+                "phase0_prev_rs1_ts_lt".to_string(),
+                Self::phase0_prev_rs1_ts_lt(),
+            );
             map.insert("phase0_rs2_ts_lt".to_string(), Self::phase0_rs2_ts_lt());
 
             map
@@ -228,10 +232,10 @@ mod test {
     fn test_add_construct_circuit() {
         let challenges = ChipChallenges::default();
 
-        let phase0_idx_map = RVAddInstruction::phase0_idxes_map();
+        let phase0_idx_map = RVAddInstruction::phase0_index_map();
         let phase0_witness_size = RVAddInstruction::phase0_size();
 
-        if cfg!(feature = "test-dbg") {
+        if cfg!(feature = "dbg-opcode") {
             println!("ADD: {:?}", &phase0_idx_map);
             println!("ADD witness_size: {:?}", phase0_witness_size);
         }
@@ -239,8 +243,10 @@ mod test {
         // initialize general test inputs associated with push1
         let inst_circuit = RVAddInstruction::construct_circuit(challenges).unwrap();
 
-        if cfg!(feature = "test-dbg") {
-            println!("{:?}", inst_circuit);
+        if cfg!(feature = "dbg-opcode") {
+            println!("{:?}", inst_circuit.circuit.assert_consts);
+            println!("======");
+            // println!("{:?}", inst_circuit.circuit.layers);
         }
 
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
@@ -252,7 +258,7 @@ mod test {
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
-            "phase0_pc_add".to_string(),
+            "phase0_next_pc".to_string(),
             vec![], // carry is 0, may test carry using larger values in PCUInt
         );
 
@@ -261,25 +267,25 @@ mod test {
         phase0_values_map.insert("phase0_rs2".to_string(), vec![Goldilocks::from(2u64)]);
         phase0_values_map.insert("phase0_rd".to_string(), vec![Goldilocks::from(3u64)]);
 
-        let m: u64 = (1 << get_uint_params::<StackUInt>().1) - 1;
+        let m: u64 = (1 << get_uint_params::<UInt64>().1) - 1;
         phase0_values_map.insert("phase0_addend_0".to_string(), vec![Goldilocks::from(m)]);
         phase0_values_map.insert("phase0_addend_1".to_string(), vec![Goldilocks::from(1u64)]);
-        let range_values = u2vec::<{ StackUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
-        let mut wit_phase0_instruction_add: Vec<Goldilocks> = vec![];
-        for i in 0..16 {
-            wit_phase0_instruction_add.push(Goldilocks::from(range_values[i]))
+        let range_values = u2vec::<{ UInt64::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
+        let mut wit_phase0_outcome: Vec<Goldilocks> = vec![];
+        for i in 0..4 {
+            wit_phase0_outcome.push(Goldilocks::from(range_values[i]))
         }
-        wit_phase0_instruction_add.push(Goldilocks::from(1u64)); // carry is [1, 0, ...]
-        phase0_values_map.insert(
-            "phase0_instruction_add".to_string(),
-            wit_phase0_instruction_add,
-        );
+        wit_phase0_outcome.push(Goldilocks::from(1u64)); // carry is [1, 0, ...]
+        phase0_values_map.insert("phase0_outcome".to_string(), wit_phase0_outcome);
 
-        phase0_values_map.insert("phase0_rs1_ts".to_string(), vec![Goldilocks::from(2u64)]);
+        phase0_values_map.insert(
+            "phase0_prev_rs1_ts".to_string(),
+            vec![Goldilocks::from(2u64)],
+        );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
-            "phase0_rs1_ts_lt".to_string(),
+            "phase0_prev_rs1_ts_lt".to_string(),
             vec![
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
@@ -304,7 +310,7 @@ mod test {
         // The actual challenges used is:
         // challenges
         //  { ChallengeConst { challenge: 1, exp: i }: [Goldilocks(c^i)] }
-        let c = GoldilocksExt2::from(6u64);
+        let c = GoldilocksExt2::from(66u64);
         let circuit_witness_challenges = vec![c; 3];
 
         let circuit_witness = test_opcode_circuit(
