@@ -78,6 +78,7 @@ const RAYON_NUM_THREADS: usize = 8;
 
 fn main() {
     let mut prover_transcript_v1 = Transcript::<E>::new(b"test");
+    let mut prover_transcript_v1_serial = Transcript::<E>::new(b"test");
     let mut prover_transcript_v2 = Transcript::<E>::new(b"test");
 
     let (asserted_sum, virtual_poly, virtual_poly_splitted) = prepare_input(RAYON_NUM_THREADS);
@@ -113,4 +114,10 @@ fn main() {
 
     println!("v1 finish");
     assert!(sumcheck_proof_v2 == sumcheck_proof_v1);
+
+    let (sumcheck_proof_v1_serial, _) =
+        IOPProverState::<E>::prove_serial(virtual_poly.clone(), &mut prover_transcript_v1_serial);
+
+    println!("v1 serial finish");
+    assert!(sumcheck_proof_v2 == sumcheck_proof_v1_serial);
 }

@@ -424,7 +424,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
                 let span = entered_span!("extrapolation");
                 let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
-                    .into_par_iter()
+                    .into_iter()
                     .map(|i| {
                         let (points, weights) = &self.extrapolation_aux[products.len() - 1];
                         let at = E::from((products.len() + 1 + i) as u64);
@@ -447,6 +447,80 @@ impl<E: ExtensionField> IOPProverState<E> {
             evaluations: products_sum,
             ..Default::default()
         }
+    }
+
+    // The prover runs in sequential mode in the sense that we use the serial version of
+    // fix_variables and eval_partial_poly in each round of sumcheck.
+    pub fn prove_serial(
+        poly: VirtualPolynomial<E>,
+        transcript: &mut Transcript<E>,
+    ) -> (IOPProof<E>, IOPProverState<E>) {
+        let (num_variables, max_degree) = (poly.aux_info.num_variables, poly.aux_info.max_degree);
+
+        // return empty proof when target polymonial is constant
+        if num_variables == 0 {
+            return (
+                IOPProof::default(),
+                IOPProverState {
+                    poly: poly,
+                    ..Default::default()
+                },
+            );
+        }
+        let start = start_timer!(|| "sum check prove");
+
+        transcript.append_message(&num_variables.to_le_bytes());
+        transcript.append_message(&max_degree.to_le_bytes());
+
+        let mut prover_state = Self::prover_init_parallel(poly);
+        let mut challenge = None;
+        let mut prover_msgs = Vec::with_capacity(num_variables);
+        let span = entered_span!("prove_rounds");
+        for _ in 0..num_variables {
+            let prover_msg =
+                IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
+
+            prover_msg
+                .evaluations
+                .iter()
+                .for_each(|e| transcript.append_field_element_ext(e));
+
+            prover_msgs.push(prover_msg);
+            let span = entered_span!("get_challenge");
+            challenge = Some(transcript.get_and_append_challenge(b"Internal round"));
+            exit_span!(span);
+        }
+        exit_span!(span);
+
+        let span = entered_span!("after_rounds_prover_state");
+        // pushing the last challenge point to the state
+        if let Some(p) = challenge {
+            prover_state.challenges.push(p);
+            // fix last challenge to collect final evaluation
+            prover_state
+                .poly
+                .flattened_ml_extensions
+                .iter_mut()
+                .for_each(|mle| {
+                    Arc::make_mut(mle).fix_variables_in_place(&[p.elements]);
+                });
+        };
+        exit_span!(span);
+
+        end_timer!(start);
+        (
+            IOPProof {
+                // the point consists of the first elements in the challenge
+                point: prover_state
+                    .challenges
+                    .iter()
+                    .map(|challenge| challenge.elements)
+                    .collect(),
+                proofs: prover_msgs,
+                ..Default::default()
+            },
+            prover_state.into(),
+        )
     }
 
     /// collect all mle evaluation (claim) after sumcheck

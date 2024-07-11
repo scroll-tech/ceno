@@ -18,7 +18,12 @@ use multilinear_extensions::{
 };
 use transcript::Transcript;
 
-criterion_group!(benches, sumcheck_fn, devirgo_sumcheck_fn,);
+criterion_group!(
+    benches,
+    sumcheck_serial_fn,
+    sumcheck_fn,
+    devirgo_sumcheck_fn,
+);
 criterion_main!(benches);
 
 const NUM_SAMPLES: usize = 10;
@@ -84,7 +89,7 @@ const RAYON_NUM_THREADS: usize = 8;
 fn sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    for nv in 24..25 {
+    for nv in 20..25 {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("sumcheck_nv_{}", nv));
         group.sample_size(NUM_SAMPLES);
@@ -119,10 +124,48 @@ fn sumcheck_fn(c: &mut Criterion) {
     }
 }
 
+fn sumcheck_serial_fn(c: &mut Criterion) {
+    type E = GoldilocksExt2;
+
+    for nv in 20..25 {
+        // expand more input size once runtime is acceptable
+        let mut group = c.benchmark_group(format!("sumcheck_serial_nv_{}", nv));
+        group.sample_size(NUM_SAMPLES);
+
+        // Benchmark the proving time
+        group.bench_function(
+            BenchmarkId::new("prove_sumcheck", format!("sumcheck_serial_nv_{}", nv)),
+            |b| {
+                b.iter_with_setup(
+                    || {
+                        let prover_transcript = Transcript::<E>::new(b"test");
+                        let (asserted_sum, virtual_poly, virtual_poly_splitted) =
+                            { prepare_input(RAYON_NUM_THREADS, nv) };
+                        (
+                            prover_transcript,
+                            asserted_sum,
+                            virtual_poly,
+                            virtual_poly_splitted,
+                        )
+                    },
+                    |(mut prover_transcript, asserted_sum, virtual_poly, virtual_poly_splitted)| {
+                        let (sumcheck_proof_v1_serial, _) = IOPProverState::<E>::prove_serial(
+                            virtual_poly.clone(),
+                            &mut prover_transcript,
+                        );
+                    },
+                );
+            },
+        );
+
+        group.finish();
+    }
+}
+
 fn devirgo_sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    for nv in 24..25 {
+    for nv in 20..25 {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("devirgo_nv_{}", nv));
         group.sample_size(NUM_SAMPLES);
