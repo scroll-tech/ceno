@@ -14,7 +14,7 @@ use self::{
     add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
     gt::GtInstruction, jump::JumpInstruction, jumpdest::JumpdestInstruction,
     jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
-    ret::ReturnInstruction, riscv_add::RVAddInstruction, swap::SwapInstruction,
+    ret::ReturnInstruction, swap::SwapInstruction,
 };
 
 // arithmetic
@@ -41,8 +41,8 @@ pub mod mstore;
 // system
 pub mod calldataload;
 
-// riscv
-pub mod riscv_add;
+// risc-v
+pub mod riscv;
 
 #[derive(Clone, Debug)]
 pub struct SingerCircuitBuilder<E: ExtensionField> {
@@ -89,7 +89,7 @@ pub(crate) fn construct_instruction_circuits<E: ExtensionField>(
         0xF3 => ReturnInstruction::construct_circuits(challenges),
 
         // RISC-V iSA
-        0x33 => RVAddInstruction::construct_circuits(challenges),
+        0x33 => riscv::add::AddInstruction::construct_circuits(challenges),
         _ => Ok(vec![]), // TODO: Add more instructions.
     }
 }

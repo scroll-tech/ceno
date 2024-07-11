@@ -15,20 +15,20 @@ use itertools::Itertools;
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
     criterion_group! {
-      name = op_rv_add;
+      name = op_add;
       config = Criterion::default().warm_up_time(Duration::from_millis(3000)).with_profiler(pprof::criterion::PProfProfiler::new(100, pprof::criterion::Output::Flamegraph(None)));
-      targets = bench_rv_add
+      targets = bench_add
     }
   } else {
     criterion_group! {
-      name = op_rv_add;
+      name = op_add;
       config = Criterion::default().warm_up_time(Duration::from_millis(3000));
-      targets = bench_rv_add
+      targets = bench_add
     }
   }
 }
 
-criterion_main!(op_rv_add);
+criterion_main!(op_add);
 
 const NUM_SAMPLES: usize = 10;
 #[from_env]
@@ -36,7 +36,7 @@ const RAYON_NUM_THREADS: usize = 8;
 
 use singer::{
     instructions::{
-        riscv_add::RVAddInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
+        riscv::add::AddInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
     },
     scheme::GKRGraphProverState,
     CircuitWiresIn, SingerGraphBuilder, SingerParams,
@@ -48,7 +48,7 @@ pub fn is_power_of_2(x: usize) -> bool {
     (x != 0) && ((x & (x - 1)) == 0)
 }
 
-fn bench_rv_add(c: &mut Criterion) {
+fn bench_add(c: &mut Criterion) {
     let max_thread_id = {
         if !is_power_of_2(RAYON_NUM_THREADS) {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
@@ -73,7 +73,7 @@ fn bench_rv_add(c: &mut Criterion) {
 
     for instance_num_vars in 11..12 {
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("rv_add_op_{}", instance_num_vars));
+        let mut group = c.benchmark_group(format!("add_op_{}", instance_num_vars));
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
@@ -90,7 +90,7 @@ fn bench_rv_add(c: &mut Criterion) {
                     },
             | (mut rng,mut singer_builder, real_challenges)| {
 
-                let size = RVAddInstruction::phase0_size();
+                let size = AddInstruction::phase0_size();
 
                 let phase0: CircuitWiresIn<
                 <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField,
@@ -111,11 +111,11 @@ fn bench_rv_add(c: &mut Criterion) {
 
                     let timer = Instant::now();
 
-                    let _ = RVAddInstruction::construct_graph_and_witness(
+                    let _ = AddInstruction::construct_graph_and_witness(
                         &mut singer_builder.graph_builder,
                         &mut singer_builder.chip_builder,
                         &circuit_builder.insts_circuits
-                            [<RVAddInstruction as Instruction<E>>::OPCODE as usize],
+                            [<AddInstruction as Instruction<E>>::OPCODE as usize],
                         vec![phase0],
                         &real_challenges,
                         1 << instance_num_vars,

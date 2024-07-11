@@ -37,11 +37,16 @@ const_env = "0.1.2"
 [features]
 witness-count = []
 test-dbg = []
-dbg-add-opcode = []
+dbg-opcode = []
 
 [[bench]]
 name = "add"
 harness = false
+
+[[bench]]
+name = "rv_add"
+harness = false
+path = "benches/riscv/add.rs"
 
 [profile.bench]
 opt-level = 0

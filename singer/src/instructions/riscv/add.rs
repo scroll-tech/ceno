@@ -6,7 +6,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RangeChipOperations, RegisterChipOperations, StackChipOperations,
+        RegisterChipOperations,
     },
     constants::OpcodeType,
     register_witness,
@@ -17,16 +17,16 @@ use std::sync::Arc;
 
 use crate::error::ZKVMError;
 
-use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
+use super::super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
-pub struct RVAddInstruction;
+pub struct AddInstruction;
 
-impl<E: ExtensionField> InstructionGraph<E> for RVAddInstruction {
+impl<E: ExtensionField> InstructionGraph<E> for AddInstruction {
     type InstType = Self;
 }
 
 register_witness!(
-    RVAddInstruction,
+    AddInstruction,
     phase0 {
         pc => PCUInt::N_OPRAND_CELLS,
         memory_ts => TSUInt::N_OPRAND_CELLS,
@@ -52,7 +52,7 @@ register_witness!(
     }
 );
 
-impl<E: ExtensionField> Instruction<E> for RVAddInstruction {
+impl<E: ExtensionField> Instruction<E> for AddInstruction {
     const OPCODE: OpcodeType = OpcodeType::RV_ADD;
     const NAME: &'static str = "RV_ADD";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
@@ -190,14 +190,15 @@ mod test {
 
     use crate::{
         instructions::{
-            ChipChallenges, Instruction, InstructionGraph, RVAddInstruction, SingerCircuitBuilder,
+            riscv::add::AddInstruction, ChipChallenges, Instruction, InstructionGraph,
+            SingerCircuitBuilder,
         },
         scheme::GKRGraphProverState,
         test::{get_uint_params, test_opcode_circuit, u2vec},
         CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
-    impl RVAddInstruction {
+    impl AddInstruction {
         #[inline]
         fn phase0_index_map() -> BTreeMap<String, Range<CellId>> {
             let mut map = BTreeMap::new();
@@ -238,8 +239,8 @@ mod test {
     fn test_add_construct_circuit() {
         let challenges = ChipChallenges::default();
 
-        let phase0_idx_map = RVAddInstruction::phase0_index_map();
-        let phase0_witness_size = RVAddInstruction::phase0_size();
+        let phase0_idx_map = AddInstruction::phase0_index_map();
+        let phase0_witness_size = AddInstruction::phase0_size();
 
         if cfg!(feature = "dbg-opcode") {
             println!("ADD: {:?}", &phase0_idx_map);
@@ -247,7 +248,7 @@ mod test {
         }
 
         // initialize general test inputs associated with push1
-        let inst_circuit = RVAddInstruction::construct_circuit(challenges).unwrap();
+        let inst_circuit = AddInstruction::construct_circuit(challenges).unwrap();
 
         if cfg!(feature = "dbg-opcode") {
             println!("{:?}", inst_circuit.circuit.assert_consts);
@@ -343,7 +344,7 @@ mod test {
         let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
-        let size = RVAddInstruction::phase0_size();
+        let size = AddInstruction::phase0_size();
         let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
                 .map(|_| {
@@ -358,10 +359,10 @@ mod test {
 
         let timer = Instant::now();
 
-        let _ = RVAddInstruction::construct_graph_and_witness(
+        let _ = AddInstruction::construct_graph_and_witness(
             &mut singer_builder.graph_builder,
             &mut singer_builder.chip_builder,
-            &circuit_builder.insts_circuits[<RVAddInstruction as Instruction<E>>::OPCODE as usize],
+            &circuit_builder.insts_circuits[<AddInstruction as Instruction<E>>::OPCODE as usize],
             vec![phase0],
             &real_challenges,
             1 << instance_num_vars,
@@ -372,7 +373,7 @@ mod test {
         let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
 
         println!(
-            "RVAddInstruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
+            "AddInstruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
             instance_num_vars,
             timer.elapsed().as_secs_f64()
         );
@@ -386,7 +387,7 @@ mod test {
         let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
             .expect("prove failed");
         println!(
-            "RVAddInstruction::prove, instance_num_vars = {}, time
+            "AddInstruction::prove, instance_num_vars = {}, time
        = {}",
             instance_num_vars,
             timer.elapsed().as_secs_f64()
