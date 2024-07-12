@@ -88,8 +88,6 @@ pub(crate) fn construct_instruction_circuits<E: ExtensionField>(
         0x93 => SwapInstruction::<4>::construct_circuits(challenges),
         0xF3 => ReturnInstruction::construct_circuits(challenges),
 
-        // RISC-V iSA
-        0x33 => riscv::add::AddInstruction::construct_circuits(challenges),
         _ => Ok(vec![]), // TODO: Add more instructions.
     }
 }

@@ -5,11 +5,11 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RegisterChipOperations,
+        GlobalStateChipOperations, OAMOperations, ROMOperations, RegisterChipOperations,
     },
     constants::OpcodeType,
     register_witness,
+    riscv_constant::RvInstructions,
     structs::{PCUInt, RAMHandler, ROMHandler, RegisterUInt, TSUInt, UInt64},
     uint::{UIntAddSub, UIntCmp},
 };
@@ -52,9 +52,12 @@ register_witness!(
     }
 );
 
+// TODO a workaround to keep the risc-v instruction
+pub const RV_INSTRUCTION: RvInstructions = RvInstructions::ADD;
 impl<E: ExtensionField> Instruction<E> for AddInstruction {
-    const OPCODE: OpcodeType = OpcodeType::RV_ADD;
-    const NAME: &'static str = "RV_ADD";
+    // OPCODE is not used in RISC-V case, just for compatibility
+    const OPCODE: OpcodeType = OpcodeType::RISCV;
+    const NAME: &'static str = "ADD";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -68,11 +71,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         let zero_cell_ids = [0];
 
         // Bytecode check for (pc, add)
-        rom_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            pc.values(),
-            <Self as Instruction<E>>::OPCODE,
-        );
+        rom_handler.bytecode_with_pc(&mut circuit_builder, pc.values(), RV_INSTRUCTION.into());
 
         // State update
         ram_handler.state_in(
@@ -190,8 +189,8 @@ mod test {
 
     use crate::{
         instructions::{
-            riscv::add::AddInstruction, ChipChallenges, Instruction, InstructionGraph,
-            SingerCircuitBuilder,
+            riscv::add::{AddInstruction, RV_INSTRUCTION},
+            ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder,
         },
         scheme::GKRGraphProverState,
         test::{get_uint_params, test_opcode_circuit, u2vec},
@@ -252,8 +251,6 @@ mod test {
 
         if cfg!(feature = "dbg-opcode") {
             println!("{:?}", inst_circuit.circuit.assert_consts);
-            println!("======");
-            // println!("{:?}", inst_circuit.circuit.layers);
         }
 
         let mut phase0_values_map = BTreeMap::<String, Vec<Goldilocks>>::new();
@@ -328,7 +325,7 @@ mod test {
         let c = GoldilocksExt2::from(66u64);
         let circuit_witness_challenges = vec![c; 3];
 
-        let circuit_witness = test_opcode_circuit(
+        test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,
             phase0_witness_size,
@@ -340,7 +337,7 @@ mod test {
     fn bench_add_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
-            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+            SingerCircuitBuilder::<E>::new_riscv(chip_challenges).expect("circuit builder failed");
         let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
@@ -362,7 +359,7 @@ mod test {
         let _ = AddInstruction::construct_graph_and_witness(
             &mut singer_builder.graph_builder,
             &mut singer_builder.chip_builder,
-            &circuit_builder.insts_circuits[<AddInstruction as Instruction<E>>::OPCODE as usize],
+            &circuit_builder.insts_circuits[RV_INSTRUCTION as usize],
             vec![phase0],
             &real_challenges,
             1 << instance_num_vars,

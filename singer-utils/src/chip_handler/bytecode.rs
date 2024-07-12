@@ -9,12 +9,12 @@ use crate::{
 
 use super::{BytecodeChipOperations, ROMOperations};
 
-impl<Ext: ExtensionField> BytecodeChipOperations<Ext> for ROMHandler<Ext> {
-    fn bytecode_with_pc_opcode(
+impl<Ext: ExtensionField> ROMHandler<Ext> {
+    pub fn bytecode_with_pc(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
-        opcode: OpcodeType,
+        opcode: u64,
     ) {
         let key = [
             vec![MixedCell::Constant(Ext::BaseField::from(
@@ -26,8 +26,19 @@ impl<Ext: ExtensionField> BytecodeChipOperations<Ext> for ROMHandler<Ext> {
         self.rom_load_mixed(
             circuit_builder,
             &key,
-            &[MixedCell::Constant(Ext::BaseField::from(opcode as u64))],
+            &[MixedCell::Constant(Ext::BaseField::from(opcode))],
         );
+    }
+}
+
+impl<Ext: ExtensionField> BytecodeChipOperations<Ext> for ROMHandler<Ext> {
+    fn bytecode_with_pc_opcode(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        pc: &[CellId],
+        opcode: OpcodeType,
+    ) {
+        self.bytecode_with_pc(circuit_builder, pc, opcode.into());
     }
 
     fn bytecode_with_pc_byte(

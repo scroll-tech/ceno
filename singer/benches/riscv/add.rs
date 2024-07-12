@@ -36,7 +36,7 @@ const RAYON_NUM_THREADS: usize = 8;
 
 use singer::{
     instructions::{
-        riscv::add::AddInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
+        self, riscv::add::AddInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
     },
     scheme::GKRGraphProverState,
     CircuitWiresIn, SingerGraphBuilder, SingerParams,
@@ -69,7 +69,7 @@ fn bench_add(c: &mut Criterion) {
     };
     let chip_challenges = ChipChallenges::default();
     let circuit_builder =
-        SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        SingerCircuitBuilder::<E>::new_riscv(chip_challenges).expect("circuit builder failed");
 
     for instance_num_vars in 11..12 {
         // expand more input size once runtime is acceptable
@@ -115,7 +115,7 @@ fn bench_add(c: &mut Criterion) {
                         &mut singer_builder.graph_builder,
                         &mut singer_builder.chip_builder,
                         &circuit_builder.insts_circuits
-                            [<AddInstruction as Instruction<E>>::OPCODE as usize],
+                            [instructions::riscv::add::RV_INSTRUCTION as usize],
                         vec![phase0],
                         &real_challenges,
                         1 << instance_num_vars,
