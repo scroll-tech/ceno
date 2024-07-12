@@ -1,4 +1,4 @@
-use crate::{chip_handler::RangeChipOperations, error::UtilError, uint_new::uint::UInt};
+use crate::{chip_handler::RangeChipOperations, error::UtilError, uint::uint::UInt};
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
@@ -292,7 +292,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::uint_new::{constants::AddSubConstants, UInt};
+    use crate::uint::{constants::AddSubConstants, UInt};
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
@@ -328,8 +328,8 @@ mod tests {
         let (carry_id, carry_cells) =
             circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
-        let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint_new");
-        let addend_1 = UInt20::try_from(addend_1_cells).expect("should build uint_new");
+        let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
+        let addend_1 = UInt20::try_from(addend_1_cells).expect("should build uint");
 
         // update circuit builder with circuit instructions
         let result =
@@ -403,7 +403,7 @@ mod tests {
         let (carry_id, carry_cells) =
             circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
-        let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint_new");
+        let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
         // update circuit builder
         let result = UInt20::add_const_unsafe(
@@ -477,7 +477,7 @@ mod tests {
         let (carry_id, carry_cells) =
             circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
-        let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint_new");
+        let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
         // update circuit builder
         let result = UInt20::add_cell_unsafe(
@@ -555,8 +555,8 @@ mod tests {
         let (borrow_id, borrow_cells) =
             circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
-        let minuend = UInt20::try_from(minuend_cells).expect("should build uint_new");
-        let subtrahend = UInt20::try_from(subtrahend_cells).expect("should build uint_new");
+        let minuend = UInt20::try_from(minuend_cells).expect("should build uint");
+        let subtrahend = UInt20::try_from(subtrahend_cells).expect("should build uint");
 
         // update the circuit builder
         let result =

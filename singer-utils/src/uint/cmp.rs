@@ -1,7 +1,7 @@
 use crate::{
     chip_handler::RangeChipOperations,
     error::UtilError,
-    uint_new::{constants::AddSubConstants, uint::UInt},
+    uint::{constants::AddSubConstants, uint::UInt},
 };
 use ff::Field;
 use ff_ext::ExtensionField;

@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, ChallengeId, CircuitBuilder, MixedCell, WitnessId};
 
-use crate::{constants::OpcodeType, error::UtilError, structs::ChipChallenges, uint_new::UInt};
+use crate::{constants::OpcodeType, error::UtilError, structs::ChipChallenges, uint::UInt};
 
 pub mod bytecode;
 pub mod calldata;

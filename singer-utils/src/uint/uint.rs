@@ -1,7 +1,7 @@
 use crate::{
     constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH},
     error::UtilError,
-    uint_new::util::{add_one_to_big_num, convert_decomp, pad_cells},
+    uint::util::{add_one_to_big_num, convert_decomp, pad_cells},
 };
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -134,7 +134,7 @@ impl<const M: usize, const C: usize> TryFrom<&[CellId]> for UInt<M, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::uint_new::uint::UInt;
+    use crate::uint::uint::UInt;
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;

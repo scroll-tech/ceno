@@ -1,10 +1,10 @@
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, ChallengeId, ExtCellId};
 use strum_macros::EnumIter;
-use uint_new::UInt;
+use uint::UInt;
 
 use crate::constants::{EVM_STACK_BIT_WIDTH, VALUE_BIT_WIDTH};
-use crate::uint_new;
+use crate::uint;
 
 #[derive(Clone, Debug, Copy, EnumIter)]
 pub enum RAMType {

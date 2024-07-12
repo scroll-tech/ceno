@@ -107,7 +107,7 @@ pub fn add_one_to_big_num<F: SmallField>(limb_modulo: F, limbs: &[F]) -> Vec<F> 
 
 #[cfg(test)]
 mod tests {
-    use crate::uint_new::util::{add_one_to_big_num, const_min, convert_decomp, pad_cells};
+    use crate::uint::util::{add_one_to_big_num, const_min, convert_decomp, pad_cells};
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;

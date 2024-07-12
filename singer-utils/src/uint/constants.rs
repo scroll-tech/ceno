@@ -1,6 +1,6 @@
 use super::uint::UInt;
 use crate::constants::RANGE_CHIP_BIT_WIDTH;
-use crate::uint_new::util::const_min;
+use crate::uint::util::const_min;
 use std::marker::PhantomData;
 
 impl<const M: usize, const C: usize> UInt<M, C> {

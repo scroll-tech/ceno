@@ -12,7 +12,7 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint_new::constants::AddSubConstants,
+    uint::constants::AddSubConstants,
 };
 use std::sync::Arc;
 

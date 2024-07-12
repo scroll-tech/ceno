@@ -13,7 +13,7 @@ use singer_utils::{
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint_new::constants::AddSubConstants,
+    uint::constants::AddSubConstants,
 };
 use std::{mem, sync::Arc};
 

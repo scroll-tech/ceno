@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
-use singer_utils::uint_new::constants::AddSubConstants;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::ROMOperations,
     chips::IntoEnumIterator,
