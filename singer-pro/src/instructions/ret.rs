@@ -3,7 +3,7 @@ use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
-use singer_utils::uint::constants::AddSubConstants;
+use singer_utils::uint_new::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{OAMOperations, ROMOperations},
     chips::{IntoEnumIterator, SingerChipBuilder},

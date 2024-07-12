@@ -11,7 +11,7 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::constants::AddSubConstants,
+    uint_new::constants::AddSubConstants,
 };
 use std::sync::Arc;
 
@@ -190,7 +190,7 @@ mod test {
     use singer_utils::{
         constants::RANGE_CHIP_BIT_WIDTH,
         structs::{StackUInt, TSUInt},
-        uint::constants::AddSubConstants,
+        uint_new::constants::AddSubConstants,
     };
     use std::{collections::BTreeMap, time::Instant};
     use transcript::Transcript;

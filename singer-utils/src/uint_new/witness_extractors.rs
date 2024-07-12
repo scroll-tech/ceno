@@ -1,5 +1,5 @@
-use crate::uint::constants::AddSubConstants;
-use crate::uint::uint::UInt;
+use crate::uint_new::constants::AddSubConstants;
+use crate::uint_new::uint::UInt;
 use simple_frontend::structs::CellId;
 
 // TODO: split this into different impls, constrained by specific contexts

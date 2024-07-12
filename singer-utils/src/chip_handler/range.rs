@@ -6,7 +6,7 @@ use crate::{
     constants::{RANGE_CHIP_BIT_WIDTH, STACK_TOP_BIT_WIDTH},
     error::UtilError,
     structs::{PCUInt, ROMHandler, TSUInt},
-    uint::UInt,
+    uint_new::UInt,
 };
 
 use super::{ROMOperations, RangeChipOperations};
