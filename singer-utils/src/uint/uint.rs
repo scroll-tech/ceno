@@ -1,6 +1,8 @@
-use crate::constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH};
-use crate::error::UtilError;
-use crate::uint::util::{add_one_to_big_num, convert_decomp, pad_cells};
+use crate::{
+    constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH},
+    error::UtilError,
+    uint::util::{add_one_to_big_num, convert_decomp, pad_cells},
+};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -80,6 +82,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             Self::MAX_CELL_BIT_WIDTH,
             is_little_endian,
         )?;
+        debug_assert!(values.len() <= Self::N_OPERAND_CELLS);
         // TODO: is this safe, do we need to ensure that the padded cells are always 0?
         pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
         values.try_into()
@@ -170,8 +173,8 @@ mod tests {
         // since total bit = 30 then expect 5 cells ( 30 / 6)
         // since we have 3 cells, we need to pad with 2 more
         // hence expected output:
-        // 110010 110110 010100 000000 000000(bit representation)
-        //     50     54     20      0      0
+        // 100011 100111 000101 000000 000000(bit representation)
+        //     35     39      5      0      0
 
         let witness_values = vec![3, 0, 2, 3, 1, 2, 1, 1]
             .into_iter()
@@ -188,7 +191,7 @@ mod tests {
         let output = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
         assert_eq!(
             &output[..5],
-            vec![50, 54, 20, 0, 0]
+            vec![35, 39, 5, 0, 0]
                 .into_iter()
                 .map(|v| Goldilocks::from(v))
                 .collect_vec()

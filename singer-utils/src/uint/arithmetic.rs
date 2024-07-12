@@ -1,6 +1,4 @@
-use crate::chip_handler::RangeChipOperations;
-use crate::error::UtilError;
-use crate::uint::uint::UInt;
+use crate::{chip_handler::RangeChipOperations, error::UtilError, uint::uint::UInt};
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
@@ -294,8 +292,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::uint::constants::AddSubConstants;
-    use crate::uint::UInt;
+    use crate::uint::{constants::AddSubConstants, UInt};
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;

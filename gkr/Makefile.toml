@@ -1,7 +1,7 @@
 [env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 CORE = { script = ["grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}'"] }
 RAYON_NUM_THREADS = "${CORE}"
-CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 
 [tasks.gkr_bench]
 command = "cargo"

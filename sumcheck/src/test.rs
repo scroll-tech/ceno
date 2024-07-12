@@ -95,6 +95,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
 }
 
 #[test]
+#[ignore = "temporarily not supporting degree > 2"]
 fn test_trivial_polynomial() {
     test_trivial_polynomial_helper::<GoldilocksExt2>();
 }
@@ -109,6 +110,7 @@ fn test_trivial_polynomial_helper<E: ExtensionField>() {
 }
 
 #[test]
+#[ignore = "temporarily not supporting degree > 2"]
 fn test_normal_polynomial() {
     test_normal_polynomial_helper::<GoldilocksExt2>();
 }

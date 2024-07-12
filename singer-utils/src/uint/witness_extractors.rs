@@ -13,7 +13,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     pub fn extract_carry_no_overflow_add_sub(witness: &[CellId]) -> &[CellId] {
-        &witness[AddSubConstants::<Self>::N_RANGE_CELLS_IN_CARRY_NO_OVERFLOW..]
+        &witness[AddSubConstants::<Self>::N_RANGE_CELLS_NO_OVERFLOW..]
     }
 
     // TODO: why do we need this
@@ -35,6 +35,6 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     pub fn extract_range_values_no_overflow(witness: &[CellId]) -> &[CellId] {
-        &witness[..AddSubConstants::<Self>::N_RANGE_CELLS_IN_CARRY_NO_OVERFLOW]
+        &witness[..AddSubConstants::<Self>::N_RANGE_CELLS_NO_OVERFLOW]
     }
 }
