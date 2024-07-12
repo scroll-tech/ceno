@@ -4,7 +4,6 @@ use gkr::structs::Circuit;
 use itertools::izip;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -13,6 +12,7 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::constants::AddSubConstants,
 };
 use std::sync::Arc;
 
@@ -36,9 +36,9 @@ register_witness!(
         clk => 1,
 
         old_stack_ts_dest => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_dest_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_dest_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
         old_stack_ts_cond => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_cond_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_cond_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
 
         dest_values => StackUInt::N_OPERAND_CELLS,
         cond_values => StackUInt::N_OPERAND_CELLS,

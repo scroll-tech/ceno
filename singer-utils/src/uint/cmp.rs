@@ -1,7 +1,8 @@
-use crate::chip_handler::RangeChipOperations;
-use crate::error::UtilError;
-use crate::uint::constants::AddSubConstants;
-use crate::uint::uint::UInt;
+use crate::{
+    chip_handler::RangeChipOperations,
+    error::UtilError,
+    uint::{constants::AddSubConstants, uint::UInt},
+};
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};

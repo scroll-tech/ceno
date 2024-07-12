@@ -4,7 +4,6 @@ use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, MemoryChipOperations, OAMOperations,
@@ -14,6 +13,7 @@ use singer_utils::{
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::constants::AddSubConstants,
 };
 use std::{mem, sync::Arc};
 
@@ -300,7 +300,7 @@ register_witness!(
     },
     phase0 {
         old_memory_ts => TSUInt::N_OPERAND_CELLS,
-        old_memory_ts_lt =>  AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_memory_ts_lt =>  AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
 
         offset_add_delta => AddSubConstants::<StackUInt>::N_WITNESS_CELLS,
         prev_mem_bytes => 1
@@ -401,8 +401,7 @@ mod test {
     use core::ops::Range;
     use goldilocks::Goldilocks;
     use simple_frontend::structs::CellId;
-    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
-    use singer_utils::structs::TSUInt;
+    use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
     use std::collections::BTreeMap;
 
     impl MstoreInstruction {
@@ -478,7 +477,8 @@ mod test {
         phase0_values_map.insert(
             "phase0_memory_ts_add".to_string(),
             vec![
-                Goldilocks::from(4u64), // first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are range values, memory_ts + 1 = 4
+                Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
+                                         * range values, memory_ts + 1 = 4 */
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),

@@ -49,8 +49,7 @@ pub fn convert_decomp<E: ExtensionField>(
     for values in small_cells.chunks(small_cell_count_per_big_cell) {
         let big_cell = circuit_builder.create_cell();
         for (small_chunk_index, small_bit_cell) in values.iter().enumerate() {
-            let shift_size =
-                (small_cell_count_per_big_cell - small_chunk_index - 1) * small_cell_bit_width;
+            let shift_size = small_chunk_index * small_cell_bit_width;
             circuit_builder.add(
                 big_cell,
                 *small_bit_cell,
@@ -153,7 +152,7 @@ mod tests {
         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let (_, small_values) = circuit_builder.create_witness_in(9);
         let small_bit_width = 2;
-        let big_bit_width = 5;
+        let big_bit_width = 6;
         let big_values = convert_decomp(
             &mut circuit_builder,
             &small_values,
@@ -162,7 +161,8 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(big_values.len(), 5);
+        assert_eq!(big_values.len(), 3);
+        circuit_builder.create_witness_out_from_cells(&big_values);
 
         // verify construction against concrete witness values
         circuit_builder.configure();
@@ -174,18 +174,17 @@ mod tests {
         //  3  0  2  3  1  2  1  1  3 (field representation)
         //
         // expected output
-        // repacking into cells of bit width 5
-        // we can only fit two 2-bit cells into a 5 bit cell
-        // 1100 1011 0110 0101 1100 (bit representation)
-        //   12   11    6    5   12 (field representation)
+        // repacking into cells of bit width 6
+        // we can only fit three 2-bit cells into a 6 bit cell
+        // 100011 100111 110101 (bit representation)
+        // 35     39     53     (field representation)
 
         let witness_values = vec![3, 0, 2, 3, 1, 2, 1, 1, 3]
             .into_iter()
             .map(|v| Goldilocks::from(v))
             .collect::<Vec<_>>();
         let circuit_witness = {
-            let challenges = vec![GoldilocksExt2::from(2)];
-            let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
+            let mut circuit_witness = CircuitWitness::new(&circuit, vec![]);
             circuit_witness.add_instance(&circuit, vec![witness_values]);
             circuit_witness
         };
@@ -195,8 +194,8 @@ mod tests {
         let output = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
 
         assert_eq!(
-            &output[..5],
-            vec![12, 11, 6, 5, 12]
+            &output[..3],
+            vec![35, 39, 53]
                 .into_iter()
                 .map(|v| Goldilocks::from(v))
                 .collect::<Vec<_>>()
@@ -204,8 +203,8 @@ mod tests {
 
         // padding to power of 2
         assert_eq!(
-            &output[5..],
-            vec![0, 0, 0]
+            &output[3..],
+            vec![0]
                 .into_iter()
                 .map(|v| Goldilocks::from(v))
                 .collect_vec()
