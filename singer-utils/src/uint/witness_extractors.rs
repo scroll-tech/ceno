@@ -8,25 +8,23 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     // witness_structure
     // [...range_values..., ...carry_witness...]
 
-    pub fn extract_carry_add_sub(witness: &[CellId]) -> &[CellId] {
+    pub fn extract_carry_add(witness: &[CellId]) -> &[CellId] {
         &witness[Self::N_RANGE_CELLS..]
     }
 
-    pub fn extract_carry_no_overflow_add_sub(witness: &[CellId]) -> &[CellId] {
+    pub fn extract_carry_no_overflow_add(witness: &[CellId]) -> &[CellId] {
         &witness[AddSubConstants::<Self>::N_RANGE_CELLS_NO_OVERFLOW..]
     }
 
-    // TODO: why do we need this
-    pub fn extract_unsafe_carry_add_sub(witness: &[CellId]) -> &[CellId] {
+    pub fn extract_unsafe_carry_add(witness: &[CellId]) -> &[CellId] {
         witness
     }
 
-    pub fn extract_borrow_add_sub(witness: &[CellId]) -> &[CellId] {
+    pub fn extract_borrow_sub(witness: &[CellId]) -> &[CellId] {
         &witness[Self::N_RANGE_CELLS..]
     }
 
-    // TODO: why do we need this
-    pub fn extract_unsafe_borrow_add_sub(witness: &[CellId]) -> &[CellId] {
+    pub fn extract_unsafe_borrow_sub(witness: &[CellId]) -> &[CellId] {
         witness
     }
 

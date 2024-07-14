@@ -1,3 +1,4 @@
+use ff::PrimeField;
 use crate::error::UtilError;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -20,9 +21,8 @@ pub fn convert_decomp<E: ExtensionField>(
     big_cell_bit_width: usize,
     is_little_endian: bool,
 ) -> Result<Vec<CellId>, UtilError> {
-    // TODO: technically there is a limit on the bit width (based on the field size),
-    //  we should handle this edge case
-    //  not sure this should (or can) be handled here tho
+    assert!(E::BaseField::NUM_BITS >= big_cell_bit_width as u32);
+
     if small_cell_bit_width > big_cell_bit_width {
         return Err(UtilError::UIntError(
             "cannot pack bigger width cells into smaller width cells".to_string(),

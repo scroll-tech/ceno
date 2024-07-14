@@ -13,8 +13,6 @@ use sumcheck::util::ceil_log2;
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
 pub struct UInt<const M: usize, const C: usize> {
-    // TODO: the size of C should not be more than the size of the underlying field
-    // TODO: should this be private?
     pub values: Vec<CellId>,
 }
 
@@ -83,7 +81,6 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             is_little_endian,
         )?;
         debug_assert!(values.len() <= Self::N_OPERAND_CELLS);
-        // TODO: is this safe, do we need to ensure that the padded cells are always 0?
         pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
         values.try_into()
     }

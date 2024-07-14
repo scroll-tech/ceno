@@ -40,7 +40,6 @@ impl<E: ExtensionField> RangeChipOperations<E> for ROMHandler<E> {
             Ok((*uint).clone())
         } else if let Some(range_values) = range_value_witness {
             let range_value = UInt::<M, C>::from_range_values(circuit_builder, range_values)?;
-            // TODO: use the self paradigm here
             UInt::<M, C>::assert_eq(circuit_builder, uint, &range_value)?;
             let b: usize = M.min(C);
             let chunk_size = (b + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
@@ -99,8 +98,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         constant: i64,
         witness: &[CellId],
     ) -> Result<PCUInt, UtilError> {
-        // TODO: why unsafe here?
-        let carry = PCUInt::extract_unsafe_carry_add_sub(witness);
+        let carry = PCUInt::extract_unsafe_carry_add(witness);
         PCUInt::add_const_unsafe(
             circuit_builder,
             &pc,
@@ -116,9 +114,6 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         constant: i64,
         witness: &[CellId],
     ) -> Result<TSUInt, UtilError> {
-        // TODO: why safe but with unsafe carry
-        // TODO: there must be a bug here
-        // let carry = TSUInt::extract_unsafe_carry(witness);
         TSUInt::add_const(
             circuit_builder,
             self,

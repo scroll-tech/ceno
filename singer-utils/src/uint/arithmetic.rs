@@ -56,7 +56,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry_add_sub(witness);
+        let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -96,7 +96,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         constant: E::BaseField,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry_add_sub(witness);
+        let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -111,7 +111,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         constant: E::BaseField,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry_no_overflow_add_sub(witness);
+        let carry = Self::extract_carry_no_overflow_add(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -151,7 +151,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_1: CellId,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry_add_sub(witness);
+        let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -166,7 +166,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_1: CellId,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry_no_overflow_add_sub(witness);
+        let carry = Self::extract_carry_no_overflow_add(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -205,7 +205,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         subtrahend: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let borrow = Self::extract_borrow_add_sub(witness);
+        let borrow = Self::extract_borrow_sub(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::sub_unsafe(circuit_builder, minuend, subtrahend, borrow)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))

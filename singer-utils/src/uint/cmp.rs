@@ -16,7 +16,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         operand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(CellId, UInt<M, C>), UtilError> {
-        let borrow = Self::extract_borrow_add_sub(witness);
+        let borrow = Self::extract_borrow_sub(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_diff = Self::sub_unsafe(circuit_builder, operand_0, operand_1, borrow)?;
 
@@ -116,7 +116,6 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         operand_0: &UInt<M, C>,
         operand_1: &[CellId],
     ) -> Result<(), UtilError> {
-        // TODO: really need to test this, different from reference implementation
         let range_as_uint = UInt::from_range_values(circuit_builder, operand_1)?;
         Self::assert_eq(circuit_builder, &operand_0, &range_as_uint)
     }
