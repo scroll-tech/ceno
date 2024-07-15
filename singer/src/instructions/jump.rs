@@ -7,6 +7,7 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::chip_handler::bytecode::BytecodeChip;
 use singer_utils::chip_handler::global_state::GlobalStateChip;
 use singer_utils::chip_handler::oam_handler::OAMHandler;
@@ -42,7 +43,7 @@ register_witness!(
         next_pc => PCUInt::N_OPERAND_CELLS,
 
         old_stack_ts => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt => TSUInt::N_WITNESS_CELLS
+        old_stack_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -224,7 +225,6 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64), // current length has no cells for borrow
             ],
         );

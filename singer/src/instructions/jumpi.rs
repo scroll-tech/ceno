@@ -14,6 +14,7 @@ use singer_utils::chip_handler::stack::StackChip;
 use singer_utils::{
     constants::OpcodeType,
     register_witness,
+    uint::constants::AddSubConstants,
     structs::{PCUInt, StackUInt, TSUInt},
 };
 use std::cell::RefCell;
@@ -40,16 +41,16 @@ register_witness!(
         clk => 1,
 
         old_stack_ts_dest => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_dest_lt => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_dest_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
         old_stack_ts_cond => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_cond_lt => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_cond_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
 
         dest_values => StackUInt::N_OPERAND_CELLS,
         cond_values => StackUInt::N_OPERAND_CELLS,
         cond_values_inv => StackUInt::N_OPERAND_CELLS,
         cond_non_zero_or_inv => 1,
 
-        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
         pc_plus_1_opcode => 1
     }
 );

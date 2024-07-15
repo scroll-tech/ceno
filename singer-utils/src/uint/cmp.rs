@@ -1,10 +1,11 @@
 use crate::chip_handler::range::RangeChip;
-use crate::error::UtilError;
-use crate::uint::uint::UInt;
+use crate::{
+    error::UtilError,
+    uint::{constants::AddSubConstants, uint::UInt},
+};
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
-use std::ops::Range;
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Generates the required information for asserting lt and leq
@@ -15,7 +16,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         operand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(CellId, UInt<M, C>), UtilError> {
-        let borrow = Self::extract_borrow(witness);
+        let borrow = Self::extract_borrow_sub(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_diff = Self::sub_unsafe(circuit_builder, operand_0, operand_1, borrow)?;
 
@@ -26,8 +27,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         )?;
 
         // if operand_0 < operand_1, the last borrow should equal 1
-        if borrow.len() == Self::N_CARRY_CELLS {
-            Ok((borrow[Self::N_CARRY_CELLS - 1], diff))
+        if borrow.len() == AddSubConstants::<Self>::N_CARRY_CELLS {
+            Ok((borrow[AddSubConstants::<Self>::N_CARRY_CELLS - 1], diff))
         } else {
             Ok((circuit_builder.create_cell(), diff))
         }
@@ -109,13 +110,13 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(())
     }
 
+
     /// Asserts that a `UInt<M, C>` instance and a set of range cells represent equal value
     pub fn assert_eq_range_values<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         operand_0: &UInt<M, C>,
         operand_1: &[CellId],
     ) -> Result<(), UtilError> {
-        // TODO: really need to test this, different from reference implementation
         let range_as_uint = UInt::from_range_values(circuit_builder, operand_1)?;
         Self::assert_eq(circuit_builder, &operand_0, &range_as_uint)
     }

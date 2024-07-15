@@ -168,7 +168,7 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         constant: i64,
         witness: &[CellId],
     ) -> Result<PCUInt, UtilError> {
-        let carry = PCUInt::extract_unsafe_carry(witness);
+        let carry = PCUInt::extract_unsafe_carry_add(witness);
         PCUInt::add_const_unsafe(
             circuit_builder,
             &pc,

@@ -1,8 +1,6 @@
 use crate::structs::ChipChallenges;
 use simple_frontend::structs::ChallengeId;
 
-// TODO: consider renaming the entire structure from chip_handler to something more representative
-//  of the underlying logic.
 pub mod bytecode;
 pub mod calldata;
 pub mod global_state;

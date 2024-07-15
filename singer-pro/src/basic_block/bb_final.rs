@@ -11,6 +11,7 @@ use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
 use singer_utils::chip_handler::stack::StackChip;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chips::IntoEnumIterator,
     register_witness,
@@ -32,7 +33,7 @@ pub struct BasicBlockFinal;
 
 register_witness!(BasicBlockFinal, phase0 {
     // State in related
-    stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
+    stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
 });
 
 impl BasicBlockFinal {

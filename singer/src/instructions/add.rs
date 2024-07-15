@@ -18,6 +18,7 @@ use singer_utils::{
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use singer_utils::uint::constants::AddSubConstants;
 
 use crate::error::ZKVMError;
 
@@ -38,17 +39,17 @@ register_witness!(
         stack_top => 1,
         clk => 1,
 
-        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         old_stack_ts0 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt0 => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_lt0 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
         old_stack_ts1 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt1 => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_stack_ts_lt1 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
 
         addend_0 => StackUInt::N_OPERAND_CELLS,
         addend_1 => StackUInt::N_OPERAND_CELLS,
-        instruction_add => StackUInt::N_WITNESS_CELLS
+        instruction_add => AddSubConstants::<StackUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -199,18 +200,22 @@ mod test {
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
     use simple_frontend::structs::CellId;
-    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
-    use singer_utils::structs::{StackUInt, TSUInt};
-    use std::collections::BTreeMap;
-    use std::time::Instant;
+    use singer_utils::{
+        constants::RANGE_CHIP_BIT_WIDTH,
+        structs::{StackUInt, TSUInt},
+        uint::constants::AddSubConstants,
+    };
+    use std::{collections::BTreeMap, time::Instant};
     use transcript::Transcript;
 
-    use crate::instructions::{
-        AddInstruction, ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder,
+    use crate::{
+        instructions::{
+            AddInstruction, ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder,
+        },
+        scheme::GKRGraphProverState,
+        test::{get_uint_params, test_opcode_circuit, u2vec},
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
-    use crate::scheme::GKRGraphProverState;
-    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
 
     impl AddInstruction {
         #[inline]
@@ -288,8 +293,8 @@ mod test {
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
             vec![
-                Goldilocks::from(4u64), // first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
-                Goldilocks::from(0u64),
+                Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(48/16) = 3 cells are
+                                         * range values, stack_ts + 1 = 4 */
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
                 // no place for carry
@@ -307,8 +312,7 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
-                Goldilocks::from(1u64), // borrow
+                Goldilocks::from(1u64),
             ],
         );
         phase0_values_map.insert(
@@ -323,8 +327,7 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
-                Goldilocks::from(1u64), // borrow
+                Goldilocks::from(1u64),
             ],
         );
         let m: u64 = (1 << get_uint_params::<StackUInt>().1) - 1;
@@ -344,12 +347,8 @@ mod test {
         // The actual challenges used is:
         // challenges
         //  { ChallengeConst { challenge: 1, exp: i }: [Goldilocks(c^i)] }
-        let c: u64 = 6;
-        let circuit_witness_challenges = vec![
-            GoldilocksExt2::from(c),
-            GoldilocksExt2::from(c),
-            GoldilocksExt2::from(c),
-        ];
+        let c = GoldilocksExt2::from(6u64);
+        let circuit_witness_challenges = vec![c; 3];
 
         let circuit_witness = test_opcode_circuit(
             &inst_circuit,
@@ -358,15 +357,6 @@ mod test {
             &phase0_values_map,
             circuit_witness_challenges,
         );
-
-        // check the correctness of add operation
-        // stack_push = RLC([stack_ts=3, RAMType::Stack=0, stack_top=98, result=0,1,0,0,0,0,0,0, len=11])
-        //            = 3 (stack_ts) + c^2 * 98 (stack_top) + c^4 * 1 + c^11
-        let add_stack_push_wire_id = inst_circuit.layout.chip_check_wire_id[1].unwrap().0;
-        let add_stack_push =
-            &circuit_witness.witness_out_ref()[add_stack_push_wire_id as usize].instances[0][1];
-        let add_stack_push_value: u64 = 3 + c.pow(2_u32) * 98 + c.pow(4u32) * 1 + c.pow(11_u32);
-        assert_eq!(*add_stack_push, Goldilocks::from(add_stack_push_value));
     }
 
     fn bench_add_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {

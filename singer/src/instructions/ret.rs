@@ -11,6 +11,7 @@ use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
 use singer_utils::chip_handler::stack::StackChip;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chips::SingerChipBuilder,
     constants::OpcodeType,
@@ -397,7 +398,7 @@ register_witness!(
     phase0 {
         old_memory_ts => TSUInt::N_OPERAND_CELLS,
 
-        offset_add => StackUInt::N_WITNESS_CELLS
+        offset_add => AddSubConstants::<StackUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -531,6 +532,8 @@ impl ReturnRestMemStore {
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
         let mem_byte = phase0[Self::phase0_mem_byte().start];
+        let memory_ts = circuit_builder.create_cells(StackUInt::N_OPERAND_CELLS);
+        oam_handler.borrow_mut().write(&mut circuit_builder, offset, &memory_ts, &[mem_byte]);
         let memory_ts = circuit_builder.create_cells(StackUInt::N_OPERAND_CELLS);
         oam_handler
             .borrow_mut()

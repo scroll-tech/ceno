@@ -10,6 +10,7 @@ use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
 use singer_utils::chip_handler::stack::StackChip;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     constants::OpcodeType,
     register_witness,
@@ -37,13 +38,13 @@ register_witness!(
         stack_top => 1,
         clk => 1,
 
-        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         old_stack_ts_1 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt_1 => TSUInt::N_WITNESS_CELLS,
+        old_stack_ts_lt_1 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
         old_stack_ts_n_plus_1 => TSUInt::N_OPERAND_CELLS,
-        old_stack_ts_lt_n_plus_1 => TSUInt::N_WITNESS_CELLS,
+        old_stack_ts_lt_n_plus_1 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
         stack_values_1 => StackUInt::N_OPERAND_CELLS,
         stack_values_n_plus_1 => StackUInt::N_OPERAND_CELLS
     }
@@ -310,7 +311,6 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64), // current length has no cells for borrow
             ],
         );
@@ -326,7 +326,6 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64), // current length has no cells for borrow
             ],
         );

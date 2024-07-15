@@ -1,0 +1,53 @@
+name: Tests
+
+# We only run these lints on trial-merges of PRs to reduce noise.
+on:
+  merge_group:
+  pull_request:
+    types: [synchronize, opened, reopened, ready_for_review]
+  push:
+    branches:
+      - master
+
+jobs:
+  skip_check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
+        with:
+          cancel_others: 'true'
+          concurrent_skipping: 'same_content_newer'
+          paths_ignore: '["**/README.md"]'
+
+  tests:
+    needs: [skip_check]
+    if: |
+      github.event.pull_request.draft == false &&
+      (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
+    name: Run Tests
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Cargo cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: lint-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo make
+        run: |
+          cargo install --force cargo-make
+      - name: run test
+        uses: actions-rs/cargo@v1
+        with:
+          command: make
+          args: tests

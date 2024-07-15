@@ -58,7 +58,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry(witness);
+        let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -98,7 +98,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         constant: E::BaseField,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry(witness);
+        let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -113,7 +113,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         constant: E::BaseField,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry_no_overflow(witness);
+        let carry = Self::extract_carry_no_overflow_add(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -153,7 +153,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_1: CellId,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry(witness);
+        let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -168,7 +168,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_1: CellId,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let carry = Self::extract_carry_no_overflow(witness);
+        let carry = Self::extract_carry_no_overflow_add(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -207,7 +207,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         subtrahend: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let borrow = Self::extract_borrow(witness);
+        let borrow = Self::extract_borrow_sub(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::sub_unsafe(circuit_builder, minuend, subtrahend, borrow)?;
         range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
@@ -223,12 +223,12 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         // overflow carry
         // represents the portion of the result that should move to the next operation
         // inorder to keep the value <= C bits
-        // carry[i] = addend_0[i] + addend_1[i] % 2^C
+        // carry[i] = (addend_0[i] + addend_1[i]) % 2^C
 
         // last carry
         // represents the carry that was passed from the previous operation
         // this carry should be added to the current result
-        // carry[i - 1] = addend_0[i - 1] + addend_1[i - 1] % 2^C
+        // carry[i - 1] = (addend_0[i - 1] + addend_1[i - 1]) % 2^C
 
         if limb_index > carry.len() {
             return;
@@ -294,7 +294,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::uint::UInt;
+    use crate::uint::{constants::AddSubConstants, UInt};
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
@@ -327,7 +327,8 @@ mod tests {
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
         let (addend_1_id, addend_1_cells) =
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
-        let (carry_id, carry_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+        let (carry_id, carry_cells) =
+            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
         let addend_1 = UInt20::try_from(addend_1_cells).expect("should build uint");
@@ -401,7 +402,8 @@ mod tests {
         // addend_0, carry, constant
         let (addend_0_id, addend_0_cells) =
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
-        let (carry_id, carry_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+        let (carry_id, carry_cells) =
+            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
@@ -474,7 +476,8 @@ mod tests {
         let (addend_0_id, addend_0_cells) =
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
         let (small_value_id, small_value_cell) = circuit_builder.create_witness_in(1);
-        let (carry_id, carry_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+        let (carry_id, carry_cells) =
+            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
@@ -551,7 +554,8 @@ mod tests {
         let (subtrahend_id, subtrahend_cells) =
             circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
         // |Carry| == |Borrow|
-        let (borrow_id, borrow_cells) = circuit_builder.create_witness_in(UInt20::N_CARRY_CELLS);
+        let (borrow_id, borrow_cells) =
+            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let minuend = UInt20::try_from(minuend_cells).expect("should build uint");
         let subtrahend = UInt20::try_from(subtrahend_cells).expect("should build uint");

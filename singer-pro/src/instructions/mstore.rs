@@ -16,6 +16,7 @@ use singer_utils::{
     chips::{IntoEnumIterator, SingerChipBuilder},
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
+    uint::constants::AddSubConstants,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
 use std::cell::RefCell;
@@ -119,7 +120,7 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
 register_witness!(
     MstoreInstruction,
     phase0 {
-        memory_ts_add => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        memory_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
         mem_bytes => EVM_STACK_BYTE_WIDTH
     }
 );
@@ -230,9 +231,9 @@ register_witness!(
     },
     phase0 {
         old_memory_ts => TSUInt::N_OPERAND_CELLS,
-        old_memory_ts_lt => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
+        old_memory_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
 
-        offset_add_delta => StackUInt::N_WITNESS_CELLS,
+        offset_add_delta => AddSubConstants::<StackUInt>::N_WITNESS_CELLS,
         prev_mem_byte => 1
     }
 );

@@ -2,6 +2,7 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::chip_handler::bytecode::BytecodeChip;
 use singer_utils::chip_handler::global_state::GlobalStateChip;
 use singer_utils::chip_handler::range::RangeChip;
@@ -35,7 +36,7 @@ register_witness!(
     AddInstruction,
     phase0 {
         // Witness for addend_0 + addend_1
-        instruction_add => StackUInt::N_WITNESS_CELLS
+        instruction_add => AddSubConstants::<StackUInt>::N_WITNESS_CELLS
     }
 );
 

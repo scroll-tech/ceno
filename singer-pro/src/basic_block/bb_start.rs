@@ -9,6 +9,7 @@ use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
 use singer_utils::chip_handler::stack::StackChip;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chips::IntoEnumIterator,
     register_multi_witness,
@@ -39,7 +40,7 @@ register_multi_witness!(BasicBlockStart, phase0(n_stack_items) {
     // Stack values
     old_stack_values(n_stack_items) => StackUInt::N_OPERAND_CELLS,
     old_stack_ts(n_stack_items) => TSUInt::N_OPERAND_CELLS,
-    old_stack_ts_lt(n_stack_items) => TSUInt::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
+    old_stack_ts_lt(n_stack_items) => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW
 });
 
 impl BasicBlockStart {

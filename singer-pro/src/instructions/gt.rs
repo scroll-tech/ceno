@@ -4,6 +4,7 @@ use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chips::IntoEnumIterator,
     constants::OpcodeType,
@@ -30,7 +31,7 @@ register_witness!(
     GtInstruction,
     phase0 {
         // Witness for operand_0 > operand_1
-        instruction_gt => StackUInt::N_WITNESS_CELLS
+        instruction_gt => AddSubConstants::<StackUInt>::N_WITNESS_CELLS
     }
 );
 

@@ -10,6 +10,7 @@ use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
 use singer_utils::chip_handler::stack::StackChip;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chips::{IntoEnumIterator, SingerChipBuilder},
     constants::OpcodeType,
@@ -118,7 +119,7 @@ register_witness!(
     },
     phase0 {
         old_memory_ts => TSUInt::N_OPERAND_CELLS,
-        offset_add => StackUInt::N_WITNESS_CELLS
+        offset_add => AddSubConstants::<StackUInt>::N_WITNESS_CELLS
     }
 );
 

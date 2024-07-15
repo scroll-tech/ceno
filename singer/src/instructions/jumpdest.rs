@@ -10,6 +10,7 @@ use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
 use singer_utils::chip_handler::stack::StackChip;
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     constants::OpcodeType,
     register_witness,
@@ -38,7 +39,7 @@ register_witness!(
         stack_top => 1,
         clk => 1,
 
-        pc_add => PCUInt::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS
     }
 );
 
