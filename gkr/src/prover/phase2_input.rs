@@ -65,7 +65,6 @@ impl<E: ExtensionField> IOPProverState<E> {
                     }
                     g[subset_wire_id] = eq_y_ry[new_wire_id];
                 }
-
                 (
                     {
                         let mut f = DenseMultilinearExtension::from_evaluations_vec(

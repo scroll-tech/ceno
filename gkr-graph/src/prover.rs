@@ -21,6 +21,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         expected_max_thread_id: usize,
     ) -> Result<IOPProof<E>, GKRGraphError> {
         assert_eq!(target_evals.0.len(), circuit.targets.len());
+        assert_eq!(circuit_witness.node_witnesses.len(), circuit.nodes.len());
 
         let mut output_evals = vec![vec![]; circuit.nodes.len()];
         let mut wit_out_evals = circuit
@@ -36,10 +37,42 @@ impl<E: ExtensionField> IOPProverState<E> {
         let gkr_proofs = izip!(&circuit.nodes, &circuit_witness.node_witnesses)
             .rev()
             .map(|(node, witness)| {
-                // println!("expected_max_thread_id {:?}", expected_max_thread_id);
                 let max_thread_id = witness.n_instances().min(expected_max_thread_id);
-                // println!("max_thread_id {:?}", max_thread_id);
-                let timer = std::time::Instant::now();
+
+                // sanity check for witness poly evaluation
+                if cfg!(debug_assertions) {
+
+                    // TODO figure out a way to do sanity check on output_evals
+                    // it doens't work for now because output evaluation
+                    // might only take partial range of output layer witness
+                    // assert!(output_evals[node.id].len() <= 1);
+                    // if !output_evals[node.id].is_empty() {
+                    // debug_assert_eq!(
+                    //     witness
+                    //         .output_layer_witness_ref()
+                    //         .instances
+                    //         .as_slice()
+                    //         .original_mle()
+                    //         .evaluate(&point_and_eval.point),
+                    //         point_and_eval.eval,
+                    //     "node_id {} output eval failed",
+                    //     node.id,
+                    // );
+                    // }
+
+                    for (witness_id, point_and_eval) in wit_out_evals[node.id].iter().enumerate() {
+                        let mle = witness.witness_out_ref()[witness_id]
+                            .instances
+                            .as_slice()
+                            .original_mle();
+                        debug_assert_eq!(
+                            mle.evaluate(&point_and_eval.point),
+                            point_and_eval.eval,
+                            "node_id {} output eval failed",
+                            node.id,
+                        );
+                    }
+                }
                 let (proof, input_claim) = GKRProverState::prove_parallel(
                     &node.circuit,
                     witness,
@@ -48,6 +81,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     max_thread_id,
                     transcript,
                 );
+
                 // println!(
                 //     "Proving node {}, label {}, num_instances:{}, took {}s",
                 //     node.id,
@@ -56,24 +90,32 @@ impl<E: ExtensionField> IOPProverState<E> {
                 //     timer.elapsed().as_secs_f64()
                 // );
 
-                izip!(&node.preds, input_claim.point_and_evals)
+                izip!(&node.preds, &input_claim.point_and_evals)
                     .enumerate()
-                    .for_each(|(wire_id, (pred, point_and_eval))| match pred {
+                    .for_each(|(wire_id, (pred_type, point_and_eval))| match pred_type {
                         PredType::Source => {
-                            debug_assert_eq!(
-                                witness.witness_in_ref()[wire_id as usize]
+                            // sanity check for input poly evaluation
+                            if cfg!(debug_assertions) {
+                                let input_layer_poly =  witness.witness_in_ref()[wire_id]
                                     .instances
                                     .as_slice()
-                                    .original_mle()
-                                    .evaluate(&point_and_eval.point),
-                                point_and_eval.eval
-                            );
+                                    .original_mle();
+                                debug_assert_eq!(
+                                    input_layer_poly.evaluate(&point_and_eval.point),
+                                    point_and_eval.eval,
+                                    "mismatch at node.id {:?} wire_id {:?}, input_claim.point_and_evals.point {:?}, node.preds {:?}",
+                                    node.id,
+                                    wire_id,
+                                    input_claim.point_and_evals[0].point,
+                                    node.preds
+                                );
+                            }
                         }
-                        PredType::PredWire(out) | PredType::PredWireDup(out) => {
-                            let point = match pred {
+                        PredType::PredWire(pred_out) | PredType::PredWireDup(pred_out) => {
+                            let point = match pred_type {
                                 PredType::PredWire(_) => point_and_eval.point.clone(),
                                 PredType::PredWireDup(out) => {
-                                    let node_id = match out {
+                                    let pred_node_id = match out {
                                         NodeOutputType::OutputLayer(id) => id,
                                         NodeOutputType::WireOut(id, _) => id,
                                     };
@@ -81,27 +123,28 @@ impl<E: ExtensionField> IOPProverState<E> {
                                     // [single_instance_slice ||
                                     // new_instance_index_slice]. The old point
                                     // is [single_instance_slices ||
-                                    // new_instance_index_slices[(new_instance_num_vars
-                                    // - old_instance_num_vars)..]]
-                                    let old_instance_num_vars = circuit_witness.node_witnesses
-                                        [*node_id]
+                                    // new_instance_index_slices[(instance_num_vars
+                                    // - pred_instance_num_vars)..]]
+                                    let pred_instance_num_vars = circuit_witness.node_witnesses
+                                        [*pred_node_id]
                                         .instance_num_vars();
-                                    let new_instance_num_vars = witness.instance_num_vars();
-                                    let num_vars =
-                                        point_and_eval.point.len() - new_instance_num_vars;
+                                    let instance_num_vars = witness.instance_num_vars();
+                                    let num_vars = point_and_eval.point.len() - instance_num_vars;
                                     [
                                         point_and_eval.point[..num_vars].to_vec(),
                                         point_and_eval.point[num_vars
-                                            + (new_instance_num_vars - old_instance_num_vars)..]
+                                            + (instance_num_vars - pred_instance_num_vars)..]
                                             .to_vec(),
                                     ]
                                     .concat()
                                 }
                                 _ => unreachable!(),
                             };
-                            match out {
-                                NodeOutputType::OutputLayer(id) => output_evals[*id]
-                                    .push(PointAndEval::new_from_ref(&point, &point_and_eval.eval)),
+                            match pred_out {
+                                NodeOutputType::OutputLayer(id) => {
+                                    output_evals[*id]
+                                    .push(PointAndEval::new_from_ref(&point, &point_and_eval.eval))
+                                },
                                 NodeOutputType::WireOut(id, wire_id) => {
                                     let evals = &mut wit_out_evals[*id][*wire_id as usize];
                                     assert!(

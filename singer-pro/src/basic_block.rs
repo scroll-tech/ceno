@@ -536,7 +536,7 @@ mod test {
                 LayerWitness::default(),
                 LayerWitness::default(),
                 LayerWitness {
-                    instances: random_matrix(n_instances, PCUInt::N_OPRAND_CELLS),
+                    instances: random_matrix(n_instances, PCUInt::N_OPERAND_CELLS),
                 },
                 LayerWitness::default(),
                 LayerWitness::default(),

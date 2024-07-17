@@ -1,8 +1,10 @@
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, ChallengeId, ExtCellId};
 use strum_macros::EnumIter;
+use uint::UInt;
 
 use crate::constants::{EVM_STACK_BIT_WIDTH, VALUE_BIT_WIDTH};
+use crate::uint;
 
 #[derive(Clone, Debug, Copy, EnumIter)]
 pub enum RAMType {
@@ -47,14 +49,8 @@ pub struct ROMHandler<Ext: ExtensionField> {
     pub(crate) challenge: ChipChallenges,
 }
 
-/// Unsigned integer with `M` bits. C denotes the cell bit width.
-#[derive(Clone, Debug)]
-pub struct UInt<const M: usize, const C: usize> {
-    pub(crate) values: Vec<CellId>,
-}
-
 pub type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
 pub type PCUInt = UInt64;
-pub type TSUInt = UInt<56, 56>;
+pub type TSUInt = UInt<48, 48>;
 pub type StackUInt = UInt<{ EVM_STACK_BIT_WIDTH as usize }, { VALUE_BIT_WIDTH as usize }>;
 pub type RegisterUInt = UInt64;

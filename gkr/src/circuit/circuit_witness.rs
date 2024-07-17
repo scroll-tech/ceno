@@ -53,6 +53,7 @@ impl<F: SmallField> CircuitWitness<F> {
             let mut layer_wit =
                 vec![vec![F::ZERO; circuit.layers[n_layers - 1].size()]; n_instances];
             for instance_id in 0..n_instances {
+                assert_eq!(wits_in.len(), circuit.paste_from_wits_in.len());
                 for (wit_id, (l, r)) in circuit.paste_from_wits_in.iter().enumerate() {
                     for i in *l..*r {
                         layer_wit[instance_id][i] =
@@ -175,34 +176,45 @@ impl<F: SmallField> CircuitWitness<F> {
     pub fn add_instances<E>(
         &mut self,
         circuit: &Circuit<E>,
-        wits_in: Vec<LayerWitness<F>>,
+        new_wits_in: Vec<LayerWitness<F>>,
         n_instances: usize,
     ) where
         E: ExtensionField<BaseField = F>,
     {
-        assert_eq!(wits_in.len(), circuit.n_witness_in);
+        assert_eq!(new_wits_in.len(), circuit.n_witness_in);
         assert!(n_instances.is_power_of_two());
-        assert!(!wits_in
+        assert!(!new_wits_in
             .iter()
             .any(|wit_in| wit_in.instances.len() != n_instances));
 
-        let (new_layer_wits, new_wits_out) =
-            CircuitWitness::new_instances(circuit, &wits_in, &self.challenges, n_instances);
+        let (inferred_layer_wits, inferred_wits_out) =
+            CircuitWitness::new_instances(circuit, &new_wits_in, &self.challenges, n_instances);
 
         // Merge self and circuit_witness.
-        for (layer_wit, new_layer_wit) in self.layers.iter_mut().zip(new_layer_wits.into_iter()) {
-            layer_wit.instances.extend(new_layer_wit.instances);
+        for (layer_wit, inferred_layer_wit) in
+            self.layers.iter_mut().zip(inferred_layer_wits.into_iter())
+        {
+            layer_wit.instances.extend(inferred_layer_wit.instances);
         }
 
-        for (wit_out, new_wit_out) in self.witness_out.iter_mut().zip(new_wits_out.into_iter()) {
-            wit_out.instances.extend(new_wit_out.instances);
+        for (wit_out, inferred_wits_out) in self
+            .witness_out
+            .iter_mut()
+            .zip(inferred_wits_out.into_iter())
+        {
+            wit_out.instances.extend(inferred_wits_out.instances);
         }
 
-        for (wit_in, new_wit_in) in self.witness_in.iter_mut().zip(wits_in.into_iter()) {
+        for (wit_in, new_wit_in) in self.witness_in.iter_mut().zip(new_wits_in.into_iter()) {
             wit_in.instances.extend(new_wit_in.instances);
         }
 
         self.n_instances += n_instances;
+
+        // check correctness in debug build
+        if cfg!(debug_assertions) {
+            self.check_correctness(circuit);
+        }
     }
 
     pub fn instance_num_vars(&self) -> usize {

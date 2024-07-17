@@ -155,8 +155,10 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             // 1. check if the received 'P(0) + P(1) = expected`.
             if evaluations[0] + evaluations[1] != expected {
                 panic!(
-                    "{}th round's prover message is not consistent with the claim. {:?} {:?} {:?}",
-                    i, evaluations[0], evaluations[1], expected
+                    "{}th round's prover message is not consistent with the claim. {:?} {:?}",
+                    i,
+                    evaluations[0] + evaluations[1],
+                    expected
                 );
             }
         }

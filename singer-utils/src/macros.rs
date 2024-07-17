@@ -1,5 +1,6 @@
 #[macro_export]
 macro_rules! register_witness {
+    // phaseX_size() implementation
     ($struct_name:ident, $($wire_name:ident { $($slice_name:ident => $length:expr),* }),*) => {
         paste! {
             impl $struct_name {
@@ -10,10 +11,23 @@ macro_rules! register_witness {
                     }
 
                     register_witness!(@internal $wire_name, 0usize; $($slice_name => $length),*);
+
+                    #[inline]
+                    pub fn [<$wire_name _ idxes_map>]() -> BTreeMap<&'static str, std::ops::Range<usize>> {
+                        let mut map = BTreeMap::new();
+
+                        $(
+                            map.insert(stringify!([<$wire_name _ $slice_name>]), Self::[<$wire_name _ $slice_name>]());
+                        )*
+
+                        map
+                    }
+
                 )*
             }
         }
     };
+
 
     ($struct_name:ident<N>, $($wire_name:ident { $($slice_name:ident => $length:expr),* }),*) => {
         paste! {
@@ -25,6 +39,18 @@ macro_rules! register_witness {
                     }
 
                     register_witness!(@internal $wire_name, 0usize; $($slice_name => $length),*);
+
+                    #[inline]
+                    pub fn [<$wire_name _ idxes_map>]() -> BTreeMap<&'static str, std::ops::Range<usize>> {
+                        let mut map = BTreeMap::new();
+
+                        $(
+                            map.insert(stringify!([<$wire_name _ $slice_name>]), Self::[<$wire_name _ $slice_name>]());
+                        )*
+
+                        map
+                    }
+
                 )*
             }
         }
@@ -32,8 +58,12 @@ macro_rules! register_witness {
 
     (@internal $wire_name:ident, $offset:expr; $name:ident => $length:expr $(, $rest:ident => $rest_length:expr)*) => {
         paste! {
-            fn [<$wire_name _ $name>]() -> std::ops::Range<usize> {
+            pub fn [<$wire_name _ $name>]() -> std::ops::Range<usize> {
                 $offset..$offset + $length
+            }
+
+            pub fn [<$wire_name _ $name _ str>]() -> &'static str {
+                stringify!([<$wire_name _ $name>])
             }
             register_witness!(@internal $wire_name, $offset + $length; $($rest => $rest_length),*);
         }

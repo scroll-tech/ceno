@@ -5,8 +5,8 @@ use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use crate::{
     constants::{RANGE_CHIP_BIT_WIDTH, STACK_TOP_BIT_WIDTH},
     error::UtilError,
-    structs::{PCUInt, ROMHandler, TSUInt, UInt},
-    uint::UIntAddSub,
+    structs::{PCUInt, ROMHandler, TSUInt},
+    uint::UInt,
 };
 
 use super::{ROMOperations, RangeChipOperations};
@@ -40,7 +40,7 @@ impl<E: ExtensionField> RangeChipOperations<E> for ROMHandler<E> {
             Ok((*uint).clone())
         } else if let Some(range_values) = range_value_witness {
             let range_value = UInt::<M, C>::from_range_values(circuit_builder, range_values)?;
-            uint.assert_eq(circuit_builder, &range_value);
+            UInt::<M, C>::assert_eq(circuit_builder, uint, &range_value)?;
             let b: usize = M.min(C);
             let chunk_size = (b + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
             for chunk in range_values.chunks(chunk_size) {
@@ -106,8 +106,8 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         constant: i64,
         witness: &[CellId],
     ) -> Result<PCUInt, UtilError> {
-        let carry = UIntAddSub::<PCUInt>::extract_unsafe_carry(witness);
-        UIntAddSub::<PCUInt>::add_const_unsafe(
+        let carry = PCUInt::extract_unsafe_carry_add(witness);
+        PCUInt::add_const_unsafe(
             circuit_builder,
             &pc,
             i64_to_base_field::<Ext>(constant),
@@ -131,8 +131,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
         constant: i64,
         witness: &[CellId],
     ) -> Result<TSUInt, UtilError> {
-        // let carry = UIntAddSub::<TSUInt>::extract_unsafe_carry(witness);
-        UIntAddSub::<TSUInt>::add_const(
+        TSUInt::add_const(
             circuit_builder,
             self,
             &ts,

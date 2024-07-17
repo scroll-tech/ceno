@@ -17,7 +17,7 @@ use super::ChipCircuitGadgets;
 
 fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
     let mut circuit_builder = CircuitBuilder::<E>::new();
-    let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPRAND_CELLS);
+    let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPERAND_CELLS);
     let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
     let mut rom_handler = ROMHandler::new(&challenges);
@@ -51,16 +51,8 @@ pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
     let wits_in = vec![
         LayerWitness {
             instances: PCUInt::counter_vector::<E::BaseField>(bytecode.len().next_power_of_two())
-                .into_iter()
-                .map(|x| vec![x])
-                .collect_vec(),
-        },
-        LayerWitness {
-            instances: bytecode
-                .iter()
-                .map(|x| vec![E::BaseField::from(*x as u64)])
-                .collect_vec(),
-        },
+        };
+        2
     ];
 
     let table_node_id = builder.add_node_with_witness(

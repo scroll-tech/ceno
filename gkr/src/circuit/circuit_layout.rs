@@ -132,7 +132,8 @@ impl<E: ExtensionField> Circuit<E> {
             });
             let segment = (
                 wire_ids_in_layer[in_cell_ids[0]],
-                wire_ids_in_layer[in_cell_ids[in_cell_ids.len() - 1]] + 1,
+                wire_ids_in_layer[in_cell_ids[in_cell_ids.len() - 1]] + 1, /* + 1 for exclusive
+                                                                            *   last index */
             );
             match ty {
                 InType::Witness(wit_id) => {
@@ -258,9 +259,10 @@ impl<E: ExtensionField> Circuit<E> {
                             .push(output_subsets.update_wire_id(old_layer_id, old_wire_id));
                     }
                     OutType::AssertConst(constant) => {
+                        let new_wire_id = output_subsets.update_wire_id(old_layer_id, old_wire_id);
                         output_assert_const.push(GateCIn {
                             idx_in: [],
-                            idx_out: output_subsets.update_wire_id(old_layer_id, old_wire_id),
+                            idx_out: new_wire_id,
                             scalar: ConstantType::Field(i64_to_field(constant)),
                         });
                     }
@@ -288,8 +290,7 @@ impl<E: ExtensionField> Circuit<E> {
             } else {
                 let last_layer = &layers[(layer_id - 1) as usize];
                 if !last_layer.is_linear() || !layer.copy_to.is_empty() {
-                    curr_sc_steps
-                        .extend([SumcheckStepType::Phase1Step1, SumcheckStepType::Phase1Step2]);
+                    curr_sc_steps.extend([SumcheckStepType::Phase1Step1]);
                 }
             }
 
@@ -900,7 +901,7 @@ mod tests {
         // Single input witness, therefore no input phase 2 steps.
         assert_eq!(
             circuit.layers[2].sumcheck_steps,
-            vec![SumcheckStepType::Phase1Step1, SumcheckStepType::Phase1Step2,]
+            vec![SumcheckStepType::Phase1Step1]
         );
         // There are only one incoming evals since the last layer is linear, and
         // no subset evals. Therefore, there are no phase1 steps.
@@ -931,7 +932,7 @@ mod tests {
         // Single input witness, therefore no input phase 2 steps.
         assert_eq!(
             circuit.layers[1].sumcheck_steps,
-            vec![SumcheckStepType::Phase1Step1, SumcheckStepType::Phase1Step2]
+            vec![SumcheckStepType::Phase1Step1]
         );
         // Output layer, single output witness, therefore no output phase 1 steps.
         assert_eq!(

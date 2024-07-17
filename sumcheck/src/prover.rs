@@ -1,4 +1,4 @@
-use std::{mem, sync::Arc};
+use std::{array, mem, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
@@ -8,8 +8,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
 };
-use transcript::Challenge;
-use transcript::{Transcript, TranscriptSyncronized};
+use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
 #[cfg(feature = "non_pow2_rayon_thread")]
 use crate::local_thread_pool::{create_local_pool_once, LOCAL_THREAD_POOL};
@@ -26,7 +25,8 @@ use crate::{
 impl<E: ExtensionField> IOPProverState<E> {
     /// Given a virtual polynomial, generate an IOP proof.
     /// multi-threads model follow https://arxiv.org/pdf/2210.00264#page=8 "distributed sumcheck"
-    /// This is experiment features. It's preferable that we move parallel level up more to "bould_poly" so it can be more isolation
+    /// This is experiment features. It's preferable that we move parallel level up more to
+    /// "bould_poly" so it can be more isolation
     #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys")]
     pub fn prove_batch_polys(
         max_thread_id: usize,
@@ -72,7 +72,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             })
             .collect::<Vec<_>>();
 
-        // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last work thread
+        // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last work
+        // thread
         for thread_id in 0..(max_thread_id - 1) {
             let mut prover_state = Self::prover_init_with_extrapolation_aux(
                 mem::take(&mut polys[thread_id]),
@@ -357,8 +358,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                 self.poly
                     .flattened_ml_extensions
                     .iter_mut()
-                    // benchmark result indicate make_mut achieve better performange than get_mut, which can be +5% overhead
-                    // rust docs doen't explain the reason
+                    // benchmark result indicate make_mut achieve better performange than get_mut,
+                    // which can be +5% overhead rust docs doen't explain the
+                    // reason
                     .map(Arc::make_mut)
                     .for_each(|f| {
                         f.fix_variables_in_place(&[r.elements]);
@@ -382,16 +384,16 @@ impl<E: ExtensionField> IOPProverState<E> {
                     1 => {
                         let f = &self.poly.flattened_ml_extensions[products[0]];
                         op_mle! {
-                            |f| (0..f.len())
-                            .into_iter()
-                            .step_by(2)
-                            .map(|b| {
-                                AdditiveArray([
-                                    f[b],
-                                    f[b + 1]
-                                ])
-                            })
-                            .sum::<AdditiveArray<_, 2>>(),
+                            |f| {
+                                (0..f.len())
+                                    .into_iter()
+                                    .step_by(2)
+                                    .fold(AdditiveArray::<E, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
+                                            acc.0[0] += f[b];
+                                            acc.0[1] += f[b+1];
+                                            acc
+                                    })
+                            },
                             |sum| AdditiveArray(sum.0.map(E::from))
                         }
                         .to_vec()
@@ -402,17 +404,16 @@ impl<E: ExtensionField> IOPProverState<E> {
                             &self.poly.flattened_ml_extensions[products[1]],
                         );
                         commutative_op_mle_pair!(
-                            |f, g| (0..f.len())
-                                .into_iter()
-                                .step_by(2)
-                                .map(|b| {
-                                    AdditiveArray([
-                                        f[b] * g[b],
-                                        f[b + 1] * g[b + 1],
-                                        (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]),
-                                    ])
-                                })
-                                .sum::<AdditiveArray<_, 3>>(),
+                            |f, g| (0..f.len()).into_iter().step_by(2).fold(
+                                AdditiveArray::<E, 3>(array::from_fn(|_| 0.into())),
+                                |mut acc, b| {
+                                    acc.0[0] += f[b] * g[b];
+                                    acc.0[1] += f[b + 1] * g[b + 1];
+                                    acc.0[2] +=
+                                        (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]);
+                                    acc
+                                }
+                            ),
                             |sum| AdditiveArray(sum.0.map(E::from))
                         )
                         .to_vec()
@@ -623,8 +624,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                 self.poly
                     .flattened_ml_extensions
                     .par_iter_mut()
-                    // benchmark result indicate make_mut achieve better performange than get_mut, which can be +5% overhead
-                    // rust docs doen't explain the reason
+                    // benchmark result indicate make_mut achieve better performange than get_mut,
+                    // which can be +5% overhead rust docs doen't explain the
+                    // reason
                     .map(Arc::make_mut)
                     .for_each(|f| {
                         f.fix_variables_in_place_parallel(&[r.elements]);

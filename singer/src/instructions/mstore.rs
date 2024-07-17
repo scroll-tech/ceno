@@ -13,9 +13,9 @@ use singer_utils::{
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
+    uint::constants::AddSubConstants,
 };
-use std::{mem, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 
@@ -140,21 +140,21 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
 register_witness!(
     MstoreInstruction,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        memory_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        memory_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
-        offset => StackUInt::N_OPRAND_CELLS,
+        offset => StackUInt::N_OPERAND_CELLS,
         mem_bytes => EVM_STACK_BYTE_WIDTH,
-        old_stack_ts_offset => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt_offset => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
-        old_stack_ts_value => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt_value => UIntCmp::<TSUInt>::N_WITNESS_CELLS
+        old_stack_ts_offset => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt_offset => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
+        old_stack_ts_value => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt_value => AddSubConstants::<TSUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -209,7 +209,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         // Pop offset from stack
         let offset = StackUInt::try_from(&phase0[Self::phase0_offset()])?;
         let old_stack_ts_offset = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_offset()])?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_offset,
@@ -227,9 +227,9 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
         rom_handler.range_check_bytes(&mut circuit_builder, mem_bytes)?;
 
-        let mem_value = StackUInt::from_bytes_big_endien(&mut circuit_builder, &mem_bytes)?;
+        let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
         let old_stack_ts_value = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_value()])?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts_value,
@@ -292,17 +292,17 @@ pub struct MstoreAccessory;
 register_witness!(
     MstoreAccessory,
     pred_dup {
-        memory_ts => TSUInt::N_OPRAND_CELLS,
-        offset => StackUInt::N_OPRAND_CELLS
+        memory_ts => TSUInt::N_OPERAND_CELLS,
+        offset => StackUInt::N_OPERAND_CELLS
     },
     pred_ooo {
         mem_bytes => 1
     },
     phase0 {
-        old_memory_ts => TSUInt::N_OPRAND_CELLS,
-        old_memory_ts_lt =>  UIntCmp::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        old_memory_ts => TSUInt::N_OPERAND_CELLS,
+        old_memory_ts_lt =>  AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
 
-        offset_add_delta => UIntAddSub::<StackUInt>::N_WITNESS_CELLS,
+        offset_add_delta => AddSubConstants::<StackUInt>::N_WITNESS_CELLS,
         prev_mem_bytes => 1
     }
 );
@@ -331,14 +331,14 @@ impl MstoreAccessory {
         let offset = StackUInt::try_from(&pred_dup[Self::pred_dup_offset()])?;
         let offset_add_delta = &phase0[Self::phase0_offset_add_delta()];
         let delta = circuit_builder.create_counter_in(0)[0];
-        let offset_plus_delta = UIntAddSub::<StackUInt>::add_small(
+        let offset_plus_delta = StackUInt::add_cell(
             &mut circuit_builder,
             &mut rom_handler,
             &offset,
             delta,
             offset_add_delta,
         )?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_memory_ts,
@@ -378,7 +378,9 @@ impl MstoreAccessory {
 
 #[cfg(test)]
 mod test {
-    use crate::{instructions::InstructionGraph, scheme::GKRGraphProverState, SingerParams};
+    use crate::{
+        instructions::InstructionGraph, scheme::GKRGraphProverState, utils::u64vec, SingerParams,
+    };
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
@@ -397,51 +399,10 @@ mod test {
         CircuitWiresIn, SingerGraphBuilder,
     };
 
-    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use core::ops::Range;
+    use crate::test::{get_uint_params, test_opcode_circuit};
     use goldilocks::Goldilocks;
-    use simple_frontend::structs::CellId;
-    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
-    use singer_utils::structs::TSUInt;
+    use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
     use std::collections::BTreeMap;
-
-    impl MstoreInstruction {
-        #[inline]
-        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
-            let mut map = BTreeMap::new();
-
-            map.insert("phase0_pc".to_string(), Self::phase0_pc());
-            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
-            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
-            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
-            map.insert("phase0_clk".to_string(), Self::phase0_clk());
-            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
-            map.insert(
-                "phase0_memory_ts_add".to_string(),
-                Self::phase0_memory_ts_add(),
-            );
-            map.insert("phase0_offset".to_string(), Self::phase0_offset());
-            map.insert("phase0_mem_bytes".to_string(), Self::phase0_mem_bytes());
-            map.insert(
-                "phase0_old_stack_ts_offset".to_string(),
-                Self::phase0_old_stack_ts_offset(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_lt_offset".to_string(),
-                Self::phase0_old_stack_ts_lt_offset(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_value".to_string(),
-                Self::phase0_old_stack_ts_value(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_lt_value".to_string(),
-                Self::phase0_old_stack_ts_lt_value(),
-            );
-
-            map
-        }
-    }
 
     #[test]
     fn test_mstore_construct_circuit() {
@@ -478,7 +439,8 @@ mod test {
         phase0_values_map.insert(
             "phase0_memory_ts_add".to_string(),
             vec![
-                Goldilocks::from(4u64), // first TSUInt::N_RANGE_CHECK_CELLS = 1*(56/16) = 4 cells are range values, memory_ts + 1 = 4
+                Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
+                                         * range values, memory_ts + 1 = 4 */
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
@@ -491,14 +453,14 @@ mod test {
             vec![Goldilocks::from(2u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt_offset".to_string(),
             vec![
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
+                // Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64), // borrow
             ],
         );
@@ -511,14 +473,14 @@ mod test {
             vec![Goldilocks::from(1u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt_value".to_string(),
             vec![
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
+                // Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64), // borrow
             ],
         );

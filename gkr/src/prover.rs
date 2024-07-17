@@ -8,7 +8,8 @@ use multilinear_extensions::{
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
 };
 use simple_frontend::structs::LayerId;
 use transcript::Transcript;
@@ -85,21 +86,44 @@ impl<E: ExtensionField> IOPProverState<E> {
                                     transcript,
                                 )].to_vec()
                         },
-                        (SumcheckStepType::Phase1Step1, SumcheckStepType::Phase1Step2, _) =>
-                            [
-                                prover_state
-                                    .prove_and_update_state_phase1_step1(
-                                        circuit,
-                                        circuit_witness,
-                                        transcript,
-                                    ),
-                                prover_state
-                                    .prove_and_update_state_phase1_step2(
-                                        circuit,
-                                        circuit_witness,
-                                        transcript,
-                                    ),
-                            ].to_vec()
+                        (SumcheckStepType::Phase1Step1, _, _) => {
+                            let alpha = transcript
+                                .get_and_append_challenge(b"combine subset evals")
+                                .elements;
+                            let hi_num_vars = circuit_witness.instance_num_vars();
+                            let eq_t = prover_state.to_next_phase_point_and_evals.par_iter().chain(prover_state.subset_point_and_evals[layer_id as usize].par_iter().map(|(_, point_and_eval)| point_and_eval)).map(|point_and_eval|{
+                                let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                                build_eq_x_r_vec(&point_and_eval.point[point_lo_num_vars..])
+                            }).collect::<Vec<Vec<_>>>();
+                            let virtual_polys: Vec<VirtualPolynomial<E>> = (0..max_thread_id).into_par_iter().map(|thread_id| {
+                                let span = entered_span!("build_poly");
+                                let virtual_poly = IOPProverState::build_phase1_step1_sumcheck_poly(
+                                    &prover_state,
+                                            layer_id,
+                                            alpha,
+                                            &eq_t,
+                                            circuit,
+                                            circuit_witness,
+                                            (thread_id, max_thread_id),
+                                        );
+                                exit_span!(span);
+                                virtual_poly
+                            }).collect();
+
+                            let (sumcheck_proof, sumcheck_prover_state)  = sumcheck::structs::IOPProverState::<E>::prove_batch_polys(
+                                max_thread_id,
+                                virtual_polys.try_into().unwrap(),
+                                transcript,
+                            );
+
+                            let prover_msg = prover_state.combine_phase1_step1_evals(
+                                sumcheck_proof,
+                                sumcheck_prover_state,
+                            );
+
+                            vec![prover_msg]
+
+                            }
                         ,
                         (SumcheckStepType::Phase2Step1, step2, _) => {
                             let span = entered_span!("phase2_gkr");
@@ -261,19 +285,11 @@ impl<E: ExtensionField> IOPProverState<E> {
             })
             .collect_vec();
         let to_next_phase_point_and_evals = output_evals;
-        subset_point_and_evals[0] = wires_out_evals.into_iter().map(|p| (0, p)).collect();
-
-        let phase1_layer_polys = (0..n_layers)
-            .into_par_iter()
-            .map(|layer_id| {
-                let num_vars = circuit.layers[layer_id].num_vars;
-                mem::take(&mut circuit_witness.layer_poly(
-                    layer_id.try_into().unwrap(),
-                    num_vars,
-                    (0, 1),
-                ))
-            })
+        subset_point_and_evals[0] = wires_out_evals
+            .into_iter()
+            .map(|p| (0 as LayerId, p))
             .collect();
+
         Self {
             to_next_phase_point_and_evals,
             subset_point_and_evals,
@@ -282,7 +298,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             assert_point,
             // Default
             layer_id: 0,
-            phase1_layer_polys,
+            phase1_layer_poly: ArcDenseMultilinearExtension::default(),
             g1_values: vec![],
         }
     }

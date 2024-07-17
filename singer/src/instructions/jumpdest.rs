@@ -3,6 +3,7 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -10,9 +11,8 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
-    uint::UIntAddSub,
 };
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -27,13 +27,13 @@ impl<E: ExtensionField> InstructionGraph<E> for JumpdestInstruction {
 register_witness!(
     JumpdestInstruction,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS ,
-        stack_ts=> TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS ,
+        stack_ts=> TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS
     }
 );
 
@@ -100,38 +100,23 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
 #[cfg(test)]
 mod test {
     use ark_std::test_rng;
-    use core::ops::Range;
     use ff::Field;
     use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
-    use simple_frontend::structs::CellId;
-    use std::collections::BTreeMap;
-    use std::time::Instant;
+    use std::{collections::BTreeMap, time::Instant};
     use transcript::Transcript;
 
-    use crate::instructions::{
-        ChipChallenges, Instruction, InstructionGraph, JumpdestInstruction, SingerCircuitBuilder,
+    use crate::{
+        instructions::{
+            ChipChallenges, Instruction, InstructionGraph, JumpdestInstruction,
+            SingerCircuitBuilder,
+        },
+        scheme::GKRGraphProverState,
+        test::test_opcode_circuit,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
-    use crate::scheme::GKRGraphProverState;
-    use crate::test::test_opcode_circuit;
-    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
-
-    impl JumpdestInstruction {
-        #[inline]
-        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
-            let mut map = BTreeMap::new();
-            map.insert("phase0_pc".to_string(), Self::phase0_pc());
-            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
-            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
-            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
-            map.insert("phase0_clk".to_string(), Self::phase0_clk());
-            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
-
-            map
-        }
-    }
 
     #[test]
     fn test_jumpdest_construct_circuit() {

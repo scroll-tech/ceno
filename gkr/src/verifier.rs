@@ -1,6 +1,6 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use simple_frontend::structs::{ChallengeConst, LayerId};
 use std::collections::HashMap;
 use transcript::Transcript;
@@ -8,7 +8,8 @@ use transcript::Transcript;
 use crate::{
     error::GKRError,
     structs::{
-        Circuit, GKRInputClaims, IOPProof, IOPVerifierState, PointAndEval, SumcheckStepType,
+        Circuit, GKRInputClaims, IOPProof, IOPProverStepMessage, IOPVerifierState, PointAndEval,
+        SumcheckStepType,
     },
 };
 
@@ -44,48 +45,44 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             circuit.layers[0].num_vars + instance_num_vars,
         );
 
-        let mut step_proof_iter = proof.sumcheck_proofs.into_iter();
+        let mut sumcheck_proofs_iter = proof.sumcheck_proofs.into_iter();
         for layer_id in 0..circuit.layers.len() {
             let timer = start_timer!(|| format!("Verify layer {}", layer_id));
             verifier_state.layer_id = layer_id as LayerId;
 
             let layer = &circuit.layers[layer_id as usize];
-            for step in layer.sumcheck_steps.iter() {
-                let step_msg = step_proof_iter
-                    .next()
-                    .ok_or(GKRError::VerifyError("Wrong number of step proofs"))?;
+            for (step, step_proof) in izip!(layer.sumcheck_steps.iter(), &mut sumcheck_proofs_iter)
+            {
                 match step {
                     SumcheckStepType::OutputPhase1Step1 => verifier_state
                         .verify_and_update_state_output_phase1_step1(
-                            circuit, step_msg, transcript,
+                            circuit, step_proof, transcript,
                         )?,
                     SumcheckStepType::OutputPhase1Step2 => verifier_state
                         .verify_and_update_state_output_phase1_step2(
-                            circuit, step_msg, transcript,
+                            circuit, step_proof, transcript,
                         )?,
                     SumcheckStepType::Phase1Step1 => verifier_state
-                        .verify_and_update_state_phase1_step1(circuit, step_msg, transcript)?,
-                    SumcheckStepType::Phase1Step2 => verifier_state
-                        .verify_and_update_state_phase1_step2(circuit, step_msg, transcript)?,
+                        .verify_and_update_state_phase1_step1(circuit, step_proof, transcript)?,
                     SumcheckStepType::Phase2Step1 => verifier_state
-                        .verify_and_update_state_phase2_step1(circuit, step_msg, transcript)?,
+                        .verify_and_update_state_phase2_step1(circuit, step_proof, transcript)?,
                     SumcheckStepType::Phase2Step2 => verifier_state
                         .verify_and_update_state_phase2_step2(
-                            circuit, step_msg, transcript, false,
+                            circuit, step_proof, transcript, false,
                         )?,
                     SumcheckStepType::Phase2Step2NoStep3 => verifier_state
                         .verify_and_update_state_phase2_step2(
-                            circuit, step_msg, transcript, true,
+                            circuit, step_proof, transcript, true,
                         )?,
                     SumcheckStepType::Phase2Step3 => verifier_state
-                        .verify_and_update_state_phase2_step3(circuit, step_msg, transcript)?,
+                        .verify_and_update_state_phase2_step3(circuit, step_proof, transcript)?,
                     SumcheckStepType::LinearPhase2Step1 => verifier_state
                         .verify_and_update_state_linear_phase2_step1(
-                            circuit, step_msg, transcript,
+                            circuit, step_proof, transcript,
                         )?,
                     SumcheckStepType::InputPhase2Step1 => verifier_state
                         .verify_and_update_state_input_phase2_step1(
-                            circuit, step_msg, transcript,
+                            circuit, step_proof, transcript,
                         )?,
                     _ => unreachable!(),
                 }

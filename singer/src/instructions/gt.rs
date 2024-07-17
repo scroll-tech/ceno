@@ -11,9 +11,9 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::{UIntAddSub, UIntCmp},
+    uint::constants::AddSubConstants,
 };
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -28,23 +28,23 @@ impl<E: ExtensionField> InstructionGraph<E> for GtInstruction {
 register_witness!(
     GtInstruction,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add => UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        pc_add => AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
-        old_stack_ts0 => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt0 => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
-        old_stack_ts1 => TSUInt::N_OPRAND_CELLS,
-        old_stack_ts_lt1 => UIntCmp::<TSUInt>::N_WITNESS_CELLS,
+        old_stack_ts0 => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt0 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
+        old_stack_ts1 => TSUInt::N_OPERAND_CELLS,
+        old_stack_ts_lt1 => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
 
-        oprand_0 => StackUInt::N_OPRAND_CELLS,
-        oprand_1 => StackUInt::N_OPRAND_CELLS,
-        instruction_gt => UIntCmp::<StackUInt>::N_WITNESS_CELLS
+        oprand_0 => StackUInt::N_OPERAND_CELLS,
+        oprand_1 => StackUInt::N_OPERAND_CELLS,
+        instruction_gt => AddSubConstants::<StackUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -95,7 +95,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         // Execution result = addend0 + addend1, with carry.
         let oprand_0 = (&phase0[Self::phase0_oprand_0()]).try_into()?;
         let oprand_1 = (&phase0[Self::phase0_oprand_1()]).try_into()?;
-        let (result, _) = UIntCmp::<StackUInt>::lt(
+        let (result, _) = StackUInt::lt(
             &mut circuit_builder,
             &mut rom_handler,
             &oprand_1,
@@ -111,7 +111,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
 
         // Pop two values from stack
         let old_stack_ts0 = (&phase0[Self::phase0_old_stack_ts0()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts0,
@@ -126,7 +126,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         );
 
         let old_stack_ts1 = (&phase0[Self::phase0_old_stack_ts1()]).try_into()?;
-        UIntCmp::<TSUInt>::assert_lt(
+        TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &old_stack_ts1,
@@ -176,66 +176,24 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
 #[cfg(test)]
 mod test {
     use ark_std::test_rng;
-    use core::ops::Range;
     use ff::Field;
     use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
-    use simple_frontend::structs::CellId;
-    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
-    use singer_utils::structs::TSUInt;
-    use std::collections::BTreeMap;
-    use std::time::Instant;
+    use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
+    use std::{collections::BTreeMap, time::Instant};
     use transcript::Transcript;
 
-    use crate::instructions::{
-        ChipChallenges, GtInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
+    use crate::{
+        instructions::{
+            ChipChallenges, GtInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
+        },
+        scheme::GKRGraphProverState,
+        test::{get_uint_params, test_opcode_circuit},
+        utils::u64vec,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
-    use crate::scheme::GKRGraphProverState;
-    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
-
-    impl GtInstruction {
-        #[inline]
-        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
-            let mut map = BTreeMap::new();
-            map.insert("phase0_pc".to_string(), Self::phase0_pc());
-            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
-            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
-            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
-            map.insert("phase0_clk".to_string(), Self::phase0_clk());
-            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
-            map.insert(
-                "phase0_stack_ts_add".to_string(),
-                Self::phase0_stack_ts_add(),
-            );
-            map.insert(
-                "phase0_old_stack_ts0".to_string(),
-                Self::phase0_old_stack_ts0(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_lt0".to_string(),
-                Self::phase0_old_stack_ts_lt0(),
-            );
-            map.insert(
-                "phase0_old_stack_ts1".to_string(),
-                Self::phase0_old_stack_ts1(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_lt1".to_string(),
-                Self::phase0_old_stack_ts_lt1(),
-            );
-            map.insert("phase0_oprand_0".to_string(), Self::phase0_oprand_0());
-            map.insert("phase0_oprand_1".to_string(), Self::phase0_oprand_1());
-            map.insert(
-                "phase0_instruction_gt".to_string(),
-                Self::phase0_instruction_gt(),
-            );
-
-            map
-        }
-    }
 
     #[test]
     fn test_gt_construct_circuit() {
@@ -272,7 +230,8 @@ mod test {
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
             vec![
-                Goldilocks::from(4u64), // first TSUInt::N_RANGE_CHECK_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
+                Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
+                                         * range values, stack_ts + 1 = 4 */
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
@@ -284,14 +243,14 @@ mod test {
             vec![Goldilocks::from(2u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt0".to_string(),
             vec![
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
+                // Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64),
             ],
         );
@@ -300,14 +259,14 @@ mod test {
             vec![Goldilocks::from(1u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt1".to_string(),
             vec![
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                Goldilocks::from(range_values[3]),
+                // Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64),
             ],
         );

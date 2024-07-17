@@ -11,9 +11,9 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
-    uint::UIntAddSub,
+    uint::constants::AddSubConstants,
 };
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -28,14 +28,14 @@ impl<E: ExtensionField, const N: usize> InstructionGraph<E> for PushInstruction<
 register_witness!(
     PushInstruction<N>,
     phase0 {
-        pc => PCUInt::N_OPRAND_CELLS,
-        stack_ts => TSUInt::N_OPRAND_CELLS,
-        memory_ts => TSUInt::N_OPRAND_CELLS,
+        pc => PCUInt::N_OPERAND_CELLS,
+        stack_ts => TSUInt::N_OPERAND_CELLS,
+        memory_ts => TSUInt::N_OPERAND_CELLS,
         stack_top => 1,
         clk => 1,
 
-        pc_add_i_plus_1 => N * UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
-        stack_ts_add => UIntAddSub::<TSUInt>::N_NO_OVERFLOW_WITNESS_CELLS,
+        pc_add_i_plus_1 => N * AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS,
+        stack_ts_add => AddSubConstants::<TSUInt>::N_WITNESS_CELLS_NO_CARRY_OVERFLOW,
 
         stack_bytes => N
     }
@@ -98,7 +98,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
         rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr)?;
 
         let stack_bytes = &phase0[Self::phase0_stack_bytes()];
-        let stack_values = StackUInt::from_bytes_big_endien(&mut circuit_builder, stack_bytes)?;
+        let stack_values = StackUInt::from_bytes_big_endian(&mut circuit_builder, stack_bytes)?;
         // Push value to stack
         ram_handler.stack_push(
             &mut circuit_builder,
@@ -114,7 +114,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
             <Self as Instruction<E>>::OPCODE,
         );
         for (i, pc_add_i_plus_1) in phase0[Self::phase0_pc_add_i_plus_1()]
-            .chunks(UIntAddSub::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
+            .chunks(AddSubConstants::<PCUInt>::N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS)
             .enumerate()
         {
             let next_pc =
@@ -146,46 +146,22 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
 #[cfg(test)]
 mod test {
     use ark_std::test_rng;
-    use core::ops::Range;
     use ff::Field;
     use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
-    use simple_frontend::structs::CellId;
-    use std::collections::BTreeMap;
-    use std::time::Instant;
+    use std::{collections::BTreeMap, time::Instant};
     use transcript::Transcript;
 
-    use crate::instructions::{
-        ChipChallenges, Instruction, InstructionGraph, PushInstruction, SingerCircuitBuilder,
+    use crate::{
+        instructions::{
+            ChipChallenges, Instruction, InstructionGraph, PushInstruction, SingerCircuitBuilder,
+        },
+        scheme::GKRGraphProverState,
+        test::test_opcode_circuit,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
-    use crate::scheme::GKRGraphProverState;
-    use crate::test::test_opcode_circuit;
-    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
-
-    impl<const N: usize> PushInstruction<N> {
-        #[inline]
-        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
-            let mut map = BTreeMap::new();
-            map.insert("phase0_pc".to_string(), Self::phase0_pc());
-            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
-            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
-            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
-            map.insert("phase0_clk".to_string(), Self::phase0_clk());
-            map.insert(
-                "phase0_pc_add_i_plus_1".to_string(),
-                Self::phase0_pc_add_i_plus_1(),
-            );
-            map.insert(
-                "phase0_stack_ts_add".to_string(),
-                Self::phase0_stack_ts_add(),
-            );
-            map.insert("phase0_stack_bytes".to_string(), Self::phase0_stack_bytes());
-
-            map
-        }
-    }
 
     #[test]
     fn test_push1_construct_circuit() {
@@ -221,7 +197,8 @@ mod test {
         phase0_values_map.insert(
             "phase0_stack_ts_add".to_string(),
             vec![
-                Goldilocks::from(2u64), // first TSUInt::N_RANGE_CHECK_CELLS = 1*(56/16) = 4 cells are range values, stack_ts + 1 = 4
+                Goldilocks::from(2u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
+                                         * range values, stack_ts + 1 = 4 */
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),
                 Goldilocks::from(0u64),

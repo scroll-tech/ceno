@@ -1,12 +1,12 @@
 use ark_std::{end_timer, start_timer};
 use ff::Field;
 use ff_ext::ExtensionField;
-use itertools::{chain, Itertools};
+use itertools::{chain, izip, Itertools};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
-use std::{iter, mem};
+use std::{iter, mem, sync::Arc};
 use transcript::Transcript;
 
 use crate::{
@@ -26,7 +26,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     /// Sumcheck 1: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y) )
     ///     sigma = \sum_j( \alpha^j * wit_out_eval[j](rt_j || ry_j) )
     ///             + \alpha^{wit_out_eval[j].len()} * assert_const(rt || ry) )
-    ///     f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
+    ///     f1^{(j)}(y) = layers[i](rt_j || y)
     ///     g1^{(j)}(y) = \alpha^j eq(ry_j, y)
     //                      or \alpha^j copy_to[j](ry_j, y)
     //                      or \alpha^j assert_subset_eq(ry, y)
@@ -41,6 +41,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         let alpha = transcript
             .get_and_append_challenge(b"combine subset evals")
             .elements;
+
         let total_length = self.to_next_phase_point_and_evals.len()
             + self.subset_point_and_evals[self.layer_id as usize].len()
             + 1;
@@ -55,11 +56,15 @@ impl<E: ExtensionField> IOPProverState<E> {
         let lo_num_vars = circuit.layers[self.layer_id as usize].num_vars;
         let hi_num_vars = circuit_witness.instance_num_vars();
 
+        self.phase1_layer_poly = circuit_witness
+            .layer_poly::<E>((self.layer_id).try_into().unwrap(), lo_num_vars, (0, 1))
+            .into();
+
         // sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
-        // f1^{(j)}(y) = \sum_t( eq(rt_j, t) * layers[i](t || y) )
+        // f1^{(j)}(y) = layers[i](rt_j || y)
         // g1^{(j)}(y) = \alpha^j eq(ry_j, y)
         //                  or \alpha^j copy_to[j](ry_j, y)
-        //                  or \alpha^j assert_subset_eq[j](ry, y)
+        //                  or \alpha^j assert_subset_eq(ry, y)
         // TODO: Double check the soundness here.
         let (mut f1, mut g1): (
             Vec<ArcDenseMultilinearExtension<E>>,
@@ -70,7 +75,8 @@ impl<E: ExtensionField> IOPProverState<E> {
                 let point = &point_and_eval.point;
                 let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
 
-                let f1_j = self.phase1_layer_polys[self.layer_id as usize]
+                let f1_j = self
+                    .phase1_layer_poly
                     .fix_high_variables(&point[point_lo_num_vars..]);
 
                 let g1_j = lo_eq_w_p
@@ -88,18 +94,20 @@ impl<E: ExtensionField> IOPProverState<E> {
         let (f1_copy_to, g1_copy_to): (
             Vec<ArcDenseMultilinearExtension<E>>,
             Vec<ArcDenseMultilinearExtension<E>>,
-        ) = izip_parallizable!(
+        ) = izip!(
             &circuit.copy_to_wits_out,
             &self.subset_point_and_evals[self.layer_id as usize],
             &alpha_pows[self.to_next_phase_point_and_evals.len()..]
         )
         .map(|(copy_to, (_, point_and_eval), alpha_pow)| {
-            let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
             let point = &point_and_eval.point;
-            let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
+            let point_lo_num_vars = point.len() - hi_num_vars;
+
+            let lo_eq_w_p = build_eq_x_r_vec(&point[..point_lo_num_vars]);
             assert!(copy_to.len() <= lo_eq_w_p.len());
 
-            let f1_j = self.phase1_layer_polys[self.layer_id as usize]
+            let f1_j = self
+                .phase1_layer_poly
                 .fix_high_variables(&point[point_lo_num_vars..]);
 
             let g1_j = copy_to.as_slice().fix_row_row_first_with_scalar(
@@ -118,12 +126,14 @@ impl<E: ExtensionField> IOPProverState<E> {
         f1.extend(f1_copy_to);
         g1.extend(g1_copy_to);
 
-        let f1_j = self.phase1_layer_polys[self.layer_id as usize]
+        let f1_j = self
+            .phase1_layer_poly
             .fix_high_variables(&self.assert_point[lo_num_vars..]);
         f1.push(f1_j.into());
 
         let alpha_pow = alpha_pows.last().unwrap();
         let lo_eq_w_p = build_eq_x_r_vec(&self.assert_point[..lo_num_vars]);
+
         let mut g_last = vec![E::ZERO; 1 << lo_num_vars];
         circuit.assert_consts.iter().for_each(|gate| {
             g_last[gate.idx_out as usize] = lo_eq_w_p[gate.idx_out as usize] * alpha_pow;
@@ -175,9 +185,9 @@ impl<E: ExtensionField> IOPProverState<E> {
         let hi_num_vars = circuit_witness.instance_num_vars();
 
         // f2(t) = layers[i](t || ry)
-        let f2 = self.phase1_layer_polys[self.layer_id as usize]
-            .fix_variables_parallel(&self.to_next_step_point)
-            .into();
+        let mut f2 = mem::take(&mut self.phase1_layer_poly);
+
+        Arc::make_mut(&mut f2).fix_variables_in_place_parallel(&self.to_next_step_point);
 
         // g2(t) = \sum_j \alpha^j (eq or copy_to[j] or assert_subset)(ry_j, ry) eq(rt_j, t)
         let output_points = chain![
