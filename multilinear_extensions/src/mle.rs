@@ -508,6 +508,36 @@ macro_rules! op_mle_4 {
         }
     };
 }
+
+#[macro_export]
+macro_rules! op_mle_5 {
+    (|$f1:ident, $f2:ident, $f3:ident, $f4:ident, $f5:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
+        match (
+            &$f1.evaluations,
+            &$f2.evaluations,
+            &$f3.evaluations,
+            &$f4.evaluations,
+            &$f5.evaluations,
+        ) {
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Ext(f3),
+                $crate::mle::FieldType::Ext(f4),
+                $crate::mle::FieldType::Ext(f5),
+            ) => {
+                let $f1 = f1;
+                let $f2 = f2;
+                let $f3 = f3;
+                let $f4 = f4;
+                let $f5 = f5;
+                $op
+            }
+            _ => unreachable!(),
+        }
+    };
+}
+
 #[deprecated(note = "deprecated parallel version due to syncronizaion overhead")]
 impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// Reduce the number of variables of `self` by fixing the

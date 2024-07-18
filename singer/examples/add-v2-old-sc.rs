@@ -1,10 +1,10 @@
 use std::{array, sync::Arc, time::Instant};
 
-use ark_std::test_rng;
+use ark_std::{end_timer, start_timer, test_rng};
 use ff_ext::{ff::Field, ExtensionField};
 use gkr::structs::Point;
 use goldilocks::{Goldilocks, GoldilocksExt2};
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, FieldType},
     op_mle,
@@ -29,13 +29,24 @@ fn alpha_pows<E: ExtensionField>(size: usize, transcript: &mut Transcript<E>) ->
         .collect_vec()
 }
 
-fn prove_split_and_product<E: ExtensionField>(
+/// r_out(rt) + alpha * w_out(rt)
+///     = \sum_s eq(rt, s) * (r_in[0](s) * ... * r_in[2^D - 1](s)
+///                           + alpha * w_in[0](s) * ... * w_in[2^D - 1](s))
+/// rs' = r_0...r_{D - 1} || rs
+/// r_in'(rs') = sum_b eq(rs'[..D], b) r_in[b](rs)
+/// w_in'(rs') = sum_b eq(rs'[..D], b) w_in[b](rs)
+fn prove_split_and_product<E: ExtensionField, const LOGD: usize>(
     point: Point<E>,
     r: &[ArcMLEVec<E>],
     w: &[ArcMLEVec<E>],
     transcript: &mut Transcript<E>,
-) -> (IOPProof<E>, Point<E>, Vec<[E; 2]>) {
-    println!("prove_table_read_write");
+) -> (IOPProof<E>, Point<E>, [E; 2]) {
+    let timer = start_timer!(|| format!(
+        "vars: {}, prod size: {}, prove_split_and_product",
+        point.len(),
+        1 << LOGD
+    ));
+    println!("prove_split_and_product");
     let num_vars = point.len();
 
     let eq = build_eq_x_r_vec(&point);
@@ -62,20 +73,33 @@ fn prove_split_and_product<E: ExtensionField>(
         .collect_vec();
 
     let mut virtual_poly = VirtualPolynomial::new(num_vars);
-    virtual_poly.add_mle_list(vec![feq.clone(), fr[0].clone(), fr[1].clone()], rc_s[0]);
-    virtual_poly.add_mle_list(vec![feq.clone(), fw[0].clone(), fw[1].clone()], rc_s[1]);
+    virtual_poly.add_mle_list([vec![feq.clone()], fr].concat(), rc_s[0]);
+    virtual_poly.add_mle_list([vec![feq.clone()], fw].concat(), rc_s[1]);
 
     // Split
     let (proof, state) = IOPProverState::prove_parallel(virtual_poly, transcript);
     let evals = state.get_mle_final_evaluations();
-    let mut point = proof.point.clone();
-    let r = transcript.get_and_append_challenge(b"merge").elements;
-    point.push(r);
-    (
-        proof,
-        point,
-        evals[1..].chunks(2).map(|c| [c[0], c[1]]).collect(),
-    )
+    let mut point = (0..LOGD)
+        .map(|_| transcript.get_and_append_challenge(b"merge").elements)
+        .collect_vec();
+    let coeffs = build_eq_x_r_vec(&point);
+    point.extend(proof.point.clone());
+
+    let prod_size = 1 << LOGD;
+    let ret_evals = [
+        izip!(evals[1..(1 + prod_size)].iter(), coeffs.iter())
+            .map(|(a, b)| *a * b)
+            .sum::<E>(),
+        izip!(
+            evals[(1 + prod_size)..(1 + 2 * prod_size)].iter(),
+            coeffs.iter()
+        )
+        .map(|(a, b)| *a * b)
+        .sum::<E>(),
+    ];
+
+    end_timer!(timer);
+    (proof, point, ret_evals)
 }
 
 /// alpha^0 r(rt) + alpha w(rt)
@@ -96,6 +120,7 @@ fn prove_select<E: ExtensionField>(
     w: &[ArcMLEVec<E>; 64],
     transcript: &mut Transcript<E>,
 ) -> (IOPProof<E>, Point<E>, Vec<E>) {
+    let timer = start_timer!(|| format!("vars: {}, prove_select", point.len()));
     println!("prove select");
     let num_vars = inst_num_vars;
 
@@ -154,6 +179,7 @@ fn prove_select<E: ExtensionField>(
     let (proof, state) = IOPProverState::prove_parallel(virtual_poly, transcript);
     let evals = state.get_mle_final_evaluations();
     let point = proof.point.clone();
+    end_timer!(timer);
     (proof, point, evals)
 }
 
@@ -169,10 +195,14 @@ fn prove_add_opcode<E: ExtensionField>(
 fn main() {
     type E = GoldilocksExt2;
     type F = Goldilocks;
-    let inst_num_vars = 20;
-    let tree_layer = inst_num_vars + 6;
+    const LOGD: usize = 2;
 
-    let real_inst_size = 20;
+    // Multiply D items together in the product subcircuit.
+    const D: usize = 1 << LOGD;
+    let inst_num_vars: usize = 20;
+    let tree_layer = (inst_num_vars + 6) / LOGD;
+
+    let real_inst_size = (1 << inst_num_vars) - 100;
 
     let input = array::from_fn(|_| {
         Arc::new(
@@ -183,12 +213,15 @@ fn main() {
     });
     let mut wit = vec![vec![]; tree_layer + 1];
     (0..tree_layer).for_each(|i| {
-        wit[i] = vec![
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-        ];
+        wit[i] = (0..2 * D)
+            .map(|_| {
+                Arc::new(
+                    (0..1 << i * LOGD)
+                        .map(|_| E::random(test_rng()))
+                        .collect_vec(),
+                )
+            })
+            .collect_vec();
     });
     wit[tree_layer] = (0..128)
         .map(|_| {
@@ -203,13 +236,17 @@ fn main() {
     let mut transcript = &mut Transcript::<E>::new(b"prover");
     let time = Instant::now();
     let w_point = (0..tree_layer).fold(vec![], |last_point, i| {
-        let (_, nxt_point, _) =
-            prove_split_and_product(last_point, &wit[i][0..2], &wit[i][2..4], &mut transcript);
+        let (_, nxt_point, _) = prove_split_and_product::<_, LOGD>(
+            last_point,
+            &wit[i][0..D],
+            &wit[i][D..2 * D],
+            &mut transcript,
+        );
         println!("prove table read write {}", nxt_point.len());
         nxt_point
     });
 
-    assert_eq!(w_point.len(), tree_layer);
+    assert_eq!(w_point.len(), tree_layer * LOGD);
 
     let r: &[_; 64] = wit[tree_layer][0..64].try_into().unwrap();
     let w: &[_; 64] = wit[tree_layer][64..128].try_into().unwrap();

@@ -4,7 +4,7 @@ use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
-    commutative_op_mle_pair, op_mle, op_mle_3, op_mle_4, virtual_poly::VirtualPolynomial,
+    commutative_op_mle_pair, op_mle, op_mle_3, op_mle_4, op_mle_5, virtual_poly::VirtualPolynomial,
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
@@ -437,12 +437,11 @@ impl<E: ExtensionField> IOPProverState<E> {
                                     let c2 = f2[b + 1] - f2[b];
                                     let c3 = f3[b + 1] - f3[b];
                                     AdditiveArray([
-                                        f1[b] * f2[b] * f3[b],
-                                        f1[b + 1] * f2[b + 1] * f3[b + 1],
-                                        (c1 + f1[b + 1]) * (c2 + f2[b + 1]) * (c3 + f3[b + 1]),
+                                        f1[b] * (f2[b] * f3[b]),
+                                        f1[b + 1] * (f2[b + 1] * f3[b + 1]),
+                                        (c1 + f1[b + 1]) * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
                                         (c1 + c1 + f1[b + 1])
-                                            * (c2 + c2 + f2[b + 1])
-                                            * (c3 + c3 + f3[b + 1]),
+                                            * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
                                     ])
                                 })
                                 .sum::<AdditiveArray<_, 4>>(),
@@ -472,20 +471,19 @@ impl<E: ExtensionField> IOPProverState<E> {
                                     let double_c3 = c3 + c3;
                                     let double_c4 = c4 + c4;
                                     AdditiveArray([
-                                        f1[b] * f2[b] * f3[b] * f4[b],
-                                        f1[b + 1] * f2[b + 1] * f3[b + 1] * f4[b + 1],
+                                        f1[b] * (f2[b] * (f3[b] * f4[b])),
+                                        f1[b + 1] * (f2[b + 1] * (f3[b + 1] * f4[b + 1])),
                                         (c1 + f1[b + 1])
-                                            * (c2 + f2[b + 1])
-                                            * (c3 + f3[b + 1])
-                                            * (c4 + f4[b + 1]),
+                                            * ((c2 + f2[b + 1])
+                                                * ((c3 + f3[b + 1]) * (c4 + f4[b + 1]))),
                                         (double_c1 + f1[b + 1])
-                                            * (double_c2 + f2[b + 1])
-                                            * (double_c3 + f3[b + 1])
-                                            * (double_c4 + f4[b + 1]),
+                                            * ((double_c2 + f2[b + 1])
+                                                * ((double_c3 + f3[b + 1])
+                                                    * (double_c4 + f4[b + 1]))),
                                         (c1 + double_c1 + f1[b + 1])
-                                            * (c2 + double_c2 + f2[b + 1])
-                                            * (c3 + double_c3 + f3[b + 1])
-                                            * (c4 + double_c4 + f4[b + 1]),
+                                            * ((c2 + double_c2 + f2[b + 1])
+                                                * ((c3 + double_c3 + f3[b + 1])
+                                                    * (c4 + double_c4 + f4[b + 1]))),
                                     ])
                                 })
                                 .sum::<AdditiveArray<_, 5>>(),
@@ -837,6 +835,65 @@ impl<E: ExtensionField> IOPProverState<E> {
                                         ])
                                     })
                                     .sum::<AdditiveArray<_, 5>>(),
+                                |sum| AdditiveArray(sum.0.map(E::from))
+                            )
+                            .to_vec()
+                        }
+                        5 => {
+                            let (f1, f2, f3, f4, f5) = (
+                                &self.poly.flattened_ml_extensions[products[0]],
+                                &self.poly.flattened_ml_extensions[products[1]],
+                                &self.poly.flattened_ml_extensions[products[2]],
+                                &self.poly.flattened_ml_extensions[products[3]],
+                                &self.poly.flattened_ml_extensions[products[4]],
+                            );
+                            op_mle_5!(
+                                |f1, f2, f3, f4, f5| (0..f1.len())
+                                    .into_par_iter()
+                                    .step_by(2)
+                                    .with_min_len(64)
+                                    .map(|b| {
+                                        // f = c x + d
+                                        let c1 = f1[b + 1] - f1[b];
+                                        let c2 = f2[b + 1] - f2[b];
+                                        let c3 = f3[b + 1] - f3[b];
+                                        let c4 = f4[b + 1] - f4[b];
+                                        let c5 = f5[b + 1] - f5[b];
+                                        let double_c1 = c1 + c1;
+                                        let double_c2 = c2 + c2;
+                                        let double_c3 = c3 + c3;
+                                        let double_c4 = c4 + c4;
+                                        let double_c5 = c5 + c5;
+                                        AdditiveArray([
+                                            f1[b] * f2[b] * f3[b] * f4[b] * f5[b],
+                                            f1[b + 1]
+                                                * f2[b + 1]
+                                                * f3[b + 1]
+                                                * f4[b + 1]
+                                                * f5[b + 1],
+                                            (c1 + f1[b + 1])
+                                                * (c2 + f2[b + 1])
+                                                * (c3 + f3[b + 1])
+                                                * (c4 + f4[b + 1])
+                                                * (c5 + f5[b + 1]),
+                                            (double_c1 + f1[b + 1])
+                                                * (double_c2 + f2[b + 1])
+                                                * (double_c3 + f3[b + 1])
+                                                * (double_c4 + f4[b + 1])
+                                                * (double_c5 + f5[b + 1]),
+                                            (c1 + double_c1 + f1[b + 1])
+                                                * (c2 + double_c2 + f2[b + 1])
+                                                * (c3 + double_c3 + f3[b + 1])
+                                                * (c4 + double_c4 + f4[b + 1])
+                                                * (c5 + double_c5 + f5[b + 1]),
+                                            (double_c1 + double_c1 + f1[b + 1])
+                                                * (double_c2 + double_c2 + f2[b + 1])
+                                                * (double_c3 + double_c3 + f3[b + 1])
+                                                * (double_c4 + double_c4 + f4[b + 1])
+                                                * (double_c5 + double_c5 + f5[b + 1]),
+                                        ])
+                                    })
+                                    .sum::<AdditiveArray<_, 6>>(),
                                 |sum| AdditiveArray(sum.0.map(E::from))
                             )
                             .to_vec()
