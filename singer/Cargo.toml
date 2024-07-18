@@ -50,5 +50,10 @@ name = "rv_add"
 harness = false
 path = "benches/riscv/add.rs"
 
+[[example]]
+name = "rv_add"
+harness = false
+path = "examples/riscv/add.rs"
+
 [profile.bench]
 opt-level = 0
