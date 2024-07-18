@@ -1,24 +1,19 @@
-#![feature(generic_const_exprs)]
-use paste::paste;
 use std::{array, sync::Arc, time::Instant};
 
 use ark_std::test_rng;
 use ff_ext::{ff::Field, ExtensionField};
 use gkr::structs::Point;
 use goldilocks::{Goldilocks, GoldilocksExt2};
-use itertools::{chain, Itertools};
+use itertools::Itertools;
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension,
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, FieldType},
+    op_mle,
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
 use sumcheck::structs::{IOPProof, IOPProverState};
 use transcript::Transcript;
 
 type ArcMLEVec<E> = Arc<Vec<E>>;
-
-fn log2(x: usize) -> usize {
-    (std::mem::size_of::<usize>() * 8 - 1) - x.leading_zeros() as usize
-}
 
 fn alpha_pows<E: ExtensionField>(size: usize, transcript: &mut Transcript<E>) -> Vec<E> {
     // println!("alpha_pow");
@@ -34,43 +29,21 @@ fn alpha_pows<E: ExtensionField>(size: usize, transcript: &mut Transcript<E>) ->
         .collect_vec()
 }
 
-/// read_records: 4, write_record: 2, lookup_records: 32
-/// layer 1:    read, write, lookup
-/// layer 2:    read, lookup
-/// layer 3~5:  lookup
-fn prove_table_read_write_lookup<E: ExtensionField, const L: usize>(
+fn prove_split_and_product<E: ExtensionField>(
     point: Point<E>,
-    ld: &[ArcMLEVec<E>],
-    ln: &[ArcMLEVec<E>],
     r: &[ArcMLEVec<E>],
     w: &[ArcMLEVec<E>],
     transcript: &mut Transcript<E>,
 ) -> (IOPProof<E>, Point<E>, Vec<[E; 2]>) {
-    println!("prove_table_read_write_lookup");
+    println!("prove_table_read_write");
     let num_vars = point.len();
 
     let eq = build_eq_x_r_vec(&point);
-    let rc_s = alpha_pows(4, transcript);
+    let rc_s = alpha_pows(2, transcript);
     // println!("point len: {}", point.len());
     let feq = Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
         num_vars, &eq,
     ));
-    let fld = ld
-        .iter()
-        .map(|ld| {
-            Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
-                num_vars, &ld,
-            ))
-        })
-        .collect_vec();
-    let fln = ln
-        .iter()
-        .map(|ln| {
-            Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
-                num_vars, &ln,
-            ))
-        })
-        .collect_vec();
     let fr = r
         .iter()
         .map(|r| {
@@ -89,20 +62,10 @@ fn prove_table_read_write_lookup<E: ExtensionField, const L: usize>(
         .collect_vec();
 
     let mut virtual_poly = VirtualPolynomial::new(num_vars);
-    virtual_poly.add_mle_list(vec![feq.clone(), fld[0].clone(), fld[1].clone()], rc_s[0]);
-    virtual_poly.add_mle_list(vec![feq.clone(), fld[1].clone(), fln[0].clone()], rc_s[1]);
-    virtual_poly.add_mle_list(vec![feq.clone(), fld[0].clone(), fln[1].clone()], rc_s[1]);
-    match L {
-        1 => {
-            virtual_poly.add_mle_list(vec![feq.clone(), fr[0].clone(), fr[1].clone()], rc_s[2]);
-            virtual_poly.add_mle_list(vec![feq.clone(), fw[0].clone(), fw[1].clone()], rc_s[3]);
-        }
-        2 => {
-            virtual_poly.add_mle_list(vec![feq.clone(), fr[0].clone(), fr[1].clone()], rc_s[2]);
-        }
-        _ => {}
-    }
+    virtual_poly.add_mle_list(vec![feq.clone(), fr[0].clone(), fr[1].clone()], rc_s[0]);
+    virtual_poly.add_mle_list(vec![feq.clone(), fw[0].clone(), fw[1].clone()], rc_s[1]);
 
+    // Split
     let (proof, state) = IOPProverState::prove_parallel(virtual_poly, transcript);
     let evals = state.get_mle_final_evaluations();
     let mut point = proof.point.clone();
@@ -115,103 +78,78 @@ fn prove_table_read_write_lookup<E: ExtensionField, const L: usize>(
     )
 }
 
+/// alpha^0 r(rt) + alpha w(rt)
+/// = \sum_s alpha^0 * eq(rt[..6], 0)(sel(s) * fr[0](s) + (1 - sel(s)))
+/// + ...
+/// + alpha^0 * eq(rt[..6], 63)(sel(s) * fr[63](s) + (1 - sel(s)))
+/// + alpha^1 * eq(rt[..6], 0)(sel(s) * fw[0](s) + (1 - sel(s)))
+/// + ...
+/// + alpha^1 * eq(rt[..6], 63)(sel(s) * fw[63](s) + (1 - sel(s)))
+/// = \sum_s eq(s)*sel(s)*( alpha^0 * eq(rt[..6], 0) * fr[0] + ... + alpha^0 * eq(rt[..6], 63) * fr[63]
+///                       + alpha^1 * eq(rt[..6], 0) * fw[0] + ... + alpha^1 * eq(rt[..6], 63) * fw[63]
+///    + (alpha^0 + alpha^1)(1 - sel(rt[6..]))
 fn prove_select<E: ExtensionField>(
     inst_num_vars: usize,
     real_inst_size: usize,
-    l_point: &Point<E>,
-    r_point: &Point<E>,
-    w_point: &Point<E>,
-    ld: &[ArcMLEVec<E>; 32],
-    ln: &[ArcMLEVec<E>; 32],
-    r: &[ArcMLEVec<E>; 4],
-    w: &[ArcMLEVec<E>; 2],
+    point: &Point<E>,
+    r: &[ArcMLEVec<E>; 64],
+    w: &[ArcMLEVec<E>; 64],
     transcript: &mut Transcript<E>,
 ) -> (IOPProof<E>, Point<E>, Vec<E>) {
     println!("prove select");
     let num_vars = inst_num_vars;
 
-    let l_eq = build_eq_x_r_vec(&l_point[5..]);
-    let r_eq = build_eq_x_r_vec(&r_point[2..]);
-    let w_eq = build_eq_x_r_vec(&w_point[1..]);
+    let eq = build_eq_x_r_vec(&point[6..]);
     let mut sel = vec![E::BaseField::ONE; real_inst_size];
     sel.extend(vec![
         E::BaseField::ZERO;
         (1 << inst_num_vars) - real_inst_size
     ]);
-    let rc_s = alpha_pows(4, transcript);
-    let lrc_s = build_eq_x_r_vec(&l_point[..5]);
-    let rrc_s = build_eq_x_r_vec(&r_point[..2]);
-    let wrc_s = build_eq_x_r_vec(&w_point[..1]);
-    let fl_eq = Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
-        num_vars, &l_eq,
-    ));
-    let fr_eq = Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
-        num_vars, &r_eq,
-    ));
-    let fw_eq = Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
-        num_vars, &w_eq,
+    let rc_s = alpha_pows(2, transcript);
+    let index_rc_s = build_eq_x_r_vec(&point[..6]);
+    let feq = Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
+        num_vars, &eq,
     ));
     let fsel = Arc::new(DenseMultilinearExtension::from_evaluations_slice(
         num_vars, &sel,
     ));
-    let fld: [_; 32] = array::from_fn(|i| {
-        Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
-            num_vars, &ld[i],
-        ))
-    });
-    let fln: [_; 32] = array::from_fn(|i| {
-        Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
-            num_vars, &ln[i],
-        ))
-    });
-    let fr: [_; 4] = array::from_fn(|i| {
+    let fr: [_; 64] = array::from_fn(|i| {
         Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
             num_vars, &r[i],
         ))
     });
-    let fw: [_; 2] = array::from_fn(|i| {
+    let fw: [_; 64] = array::from_fn(|i| {
         Arc::new(DenseMultilinearExtension::from_evaluations_ext_slice(
             num_vars, &w[i],
         ))
     });
 
+    let dense_poly_mul_ext = |poly: &ArcDenseMultilinearExtension<E>, sc: E| {
+        let evaluations = op_mle!(|poly| poly.iter().map(|x| sc * x).collect_vec());
+        DenseMultilinearExtension::from_evaluations_ext_vec(poly.num_vars, evaluations)
+    };
+    let dense_poly_add = |a: DenseMultilinearExtension<E>, b: DenseMultilinearExtension<E>| {
+        let evaluations = match (a.evaluations, b.evaluations) {
+            (FieldType::Ext(a), FieldType::Ext(b)) => {
+                a.iter().zip(b.iter()).map(|(x, y)| *x + y).collect_vec()
+            }
+            _ => unreachable!(),
+        };
+        DenseMultilinearExtension::from_evaluations_ext_vec(a.num_vars, evaluations)
+    };
+
+    let f = (0..63)
+        .map(|i| dense_poly_mul_ext(&fr[i], rc_s[0] * index_rc_s[i]))
+        .reduce(|a, b| dense_poly_add(a, b))
+        .unwrap();
+    let f = (0..63)
+        .map(|i| dense_poly_mul_ext(&fw[i], rc_s[1] * index_rc_s[i]))
+        .fold(f, |a, b| dense_poly_add(a, b));
+    let f = Arc::new(f);
     let mut virtual_poly = VirtualPolynomial::new(num_vars);
-    // alpha^0 * (sel * (fld[i] - 1) * lrc[i] + lrc[i]), poly is alpha^0 * lrc[i] * sel *
-    // fld - alpha^0 * lrc[i] * sel
-    let mut sel_coeff = E::ZERO;
-    (0..32).for_each(|i| {
-        virtual_poly.add_mle_list(
-            vec![fl_eq.clone(), fld[i].clone(), fsel.clone()],
-            rc_s[0] * lrc_s[i],
-        );
-        sel_coeff += rc_s[0] * lrc_s[i];
-    });
-    // alpha^1 * (sel * fln[i] * lrc[i]), poly is alpha^1 * lrc[i] * sel * fln
-    (0..32).for_each(|i| {
-        virtual_poly.add_mle_list(
-            vec![fl_eq.clone(), fln[i].clone(), fsel.clone()],
-            rc_s[1] * lrc_s[i],
-        );
-    });
-    // alpha^2 * (sel * (fr[i] - 1) * rrc[i] + rrc[i]), poly is alpha^2 * rrc[i] * sel *
-    // fr - alpha^2 * rrc[i] * sel
-    (0..4).for_each(|i| {
-        virtual_poly.add_mle_list(
-            vec![fr_eq.clone(), fr[i].clone(), fsel.clone()],
-            rc_s[2] * rrc_s[i],
-        );
-        sel_coeff += rc_s[2] * rrc_s[i];
-    });
-    // alpha^3 * (sel * (fw[i] - 1) * rrc[i] + rrc[i]), poly is alpha^3 * wrc[i] * sel *
-    // fw - alpha^2 * wrc[i] * sel
-    (0..2).for_each(|i| {
-        virtual_poly.add_mle_list(
-            vec![fw_eq.clone(), fw[i].clone(), fsel.clone()],
-            rc_s[3] * wrc_s[i],
-        );
-        sel_coeff += rc_s[3] * wrc_s[i];
-    });
-    virtual_poly.add_mle_list(vec![fsel], -sel_coeff);
+    let sel_coeff = rc_s.iter().sum::<E>();
+    virtual_poly.add_mle_list(vec![fsel.clone()], -sel_coeff);
+    virtual_poly.add_mle_list(vec![feq.clone(), f, fsel], E::ONE);
 
     let (proof, state) = IOPProverState::prove_parallel(virtual_poly, transcript);
     let evals = state.get_mle_final_evaluations();
@@ -232,9 +170,9 @@ fn main() {
     type E = GoldilocksExt2;
     type F = Goldilocks;
     let inst_num_vars = 20;
-    let tree_layer = inst_num_vars + 5;
+    let tree_layer = inst_num_vars + 6;
 
-    let real_inst_size = 60000;
+    let real_inst_size = 20;
 
     let input = array::from_fn(|_| {
         Arc::new(
@@ -244,29 +182,7 @@ fn main() {
         )
     });
     let mut wit = vec![vec![]; tree_layer + 1];
-    (0..inst_num_vars + 1).for_each(|i| {
-        wit[i] = vec![
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-        ];
-    });
-    (inst_num_vars + 1..inst_num_vars + 2).for_each(|i| {
-        wit[i] = vec![
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-            Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
-        ];
-    });
-    (inst_num_vars + 2..tree_layer).for_each(|i| {
+    (0..tree_layer).for_each(|i| {
         wit[i] = vec![
             Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
             Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
@@ -274,7 +190,7 @@ fn main() {
             Arc::new((0..1 << i).map(|_| E::random(test_rng())).collect_vec()),
         ];
     });
-    wit[tree_layer] = (0..70)
+    wit[tree_layer] = (0..128)
         .map(|_| {
             Arc::new(
                 (0..(1 << inst_num_vars))
@@ -286,56 +202,21 @@ fn main() {
 
     let mut transcript = &mut Transcript::<E>::new(b"prover");
     let time = Instant::now();
-    let w_point = (0..inst_num_vars + 1).fold(vec![], |last_point, i| {
-        let (_, nxt_point, _) = prove_table_read_write_lookup::<_, 1>(
-            last_point,
-            &wit[i][0..2],
-            &wit[i][2..4],
-            &wit[i][4..6],
-            &wit[i][6..8],
-            &mut transcript,
-        );
-        nxt_point
-    });
-    let r_point = (inst_num_vars + 1..inst_num_vars + 2).fold(w_point.clone(), |last_point, i| {
-        let (_, nxt_point, _) = prove_table_read_write_lookup::<_, 2>(
-            last_point,
-            &wit[i][0..2],
-            &wit[i][2..4],
-            &wit[i][4..6],
-            &[],
-            &mut transcript,
-        );
-        nxt_point
-    });
-    let l_point = (inst_num_vars + 2..tree_layer).fold(r_point.clone(), |last_point, i| {
-        let (_, nxt_point, _) = prove_table_read_write_lookup::<_, 3>(
-            last_point,
-            &wit[i][0..2],
-            &wit[i][2..4],
-            &[],
-            &[],
-            &mut transcript,
-        );
+    let w_point = (0..tree_layer).fold(vec![], |last_point, i| {
+        let (_, nxt_point, _) =
+            prove_split_and_product(last_point, &wit[i][0..2], &wit[i][2..4], &mut transcript);
+        println!("prove table read write {}", nxt_point.len());
         nxt_point
     });
 
-    assert_eq!(l_point.len(), inst_num_vars + 5);
-    assert_eq!(r_point.len(), inst_num_vars + 2);
-    assert_eq!(w_point.len(), inst_num_vars + 1);
+    assert_eq!(w_point.len(), tree_layer);
 
-    let ld: &[_; 32] = wit[tree_layer][..32].try_into().unwrap();
-    let ln: &[_; 32] = wit[tree_layer][32..64].try_into().unwrap();
-    let r: &[_; 4] = wit[tree_layer][64..68].try_into().unwrap();
-    let w: &[_; 2] = wit[tree_layer][68..70].try_into().unwrap();
+    let r: &[_; 64] = wit[tree_layer][0..64].try_into().unwrap();
+    let w: &[_; 64] = wit[tree_layer][64..128].try_into().unwrap();
     let (_, point, _) = prove_select(
         inst_num_vars,
         real_inst_size,
-        &l_point,
-        &r_point,
         &w_point,
-        &ld,
-        &ln,
         &r,
         &w,
         &mut transcript,
