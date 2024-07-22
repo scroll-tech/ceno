@@ -5,7 +5,6 @@ use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::chip_handler::bytecode::BytecodeChip;
 use singer_utils::chip_handler::global_state::GlobalStateChip;
-use singer_utils::chip_handler::oam_handler::OAMHandler;
 use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
@@ -140,8 +139,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
         let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
 
         // instantiate chips
         let mut range_chip = RangeChip::new(rom_handler.clone());
@@ -163,7 +161,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let memory_ts = TSUInt::try_from(memory_ts.as_slice())?;
         let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()])?;
 
-        oam_handler.borrow_mut().read(
+        ram_handler.borrow_mut().read_oam(
             &mut circuit_builder,
             offset_plus_delta.values(),
             old_memory_ts.values(),

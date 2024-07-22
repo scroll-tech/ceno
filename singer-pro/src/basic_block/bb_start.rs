@@ -4,7 +4,6 @@ use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::chip_handler::global_state::GlobalStateChip;
-use singer_utils::chip_handler::oam_handler::OAMHandler;
 use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
@@ -57,13 +56,12 @@ impl BasicBlockStart {
             circuit_builder.create_witness_in(Self::phase0_size(n_stack_items));
 
         let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
 
         // instantiate chips
-        let global_state_chip = GlobalStateChip::new(oam_handler.clone());
+        let global_state_chip = GlobalStateChip::new(ram_handler.clone());
         let mut range_chip = RangeChip::new(rom_handler.clone());
-        let stack_chip = StackChip::new(oam_handler.clone());
+        let stack_chip = StackChip::new(ram_handler.clone());
 
         // State update
         let pc = &phase0[Self::phase0_pc(n_stack_items)];

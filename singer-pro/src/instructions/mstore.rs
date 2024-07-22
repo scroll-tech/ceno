@@ -7,7 +7,6 @@ use simple_frontend::structs::CircuitBuilder;
 use singer_utils::chip_handler::bytecode::BytecodeChip;
 use singer_utils::chip_handler::global_state::GlobalStateChip;
 use singer_utils::chip_handler::memory::MemoryChip;
-use singer_utils::chip_handler::oam_handler::OAMHandler;
 use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
@@ -252,8 +251,7 @@ impl MstoreAccessory {
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
 
         // instantiate chips
         let mut range_chip = RangeChip::new(rom_handler.clone());

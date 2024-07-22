@@ -1,4 +1,4 @@
-use crate::chip_handler::oam_handler::OAMHandler;
+use crate::chip_handler::ram_handler::RAMHandler;
 use crate::chip_handler::util::cell_to_mixed;
 use crate::structs::RAMType;
 use ff_ext::ExtensionField;
@@ -8,12 +8,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct GlobalStateChip<Ext: ExtensionField> {
-    oam_handler: Rc<RefCell<OAMHandler<Ext>>>,
+    ram_handler: Rc<RefCell<RAMHandler<Ext>>>,
 }
 
 impl<Ext: ExtensionField> GlobalStateChip<Ext> {
-    pub fn new(oam_handler: Rc<RefCell<OAMHandler<Ext>>>) -> Self {
-        Self { oam_handler }
+    pub fn new(ram_handler: Rc<RefCell<RAMHandler<Ext>>>) -> Self {
+        Self { ram_handler }
     }
 
     pub fn state_in(
@@ -36,9 +36,9 @@ impl<Ext: ExtensionField> GlobalStateChip<Ext> {
         ]
         .concat();
 
-        self.oam_handler
+        self.ram_handler
             .borrow_mut()
-            .read_mixed(circuit_builder, &[], &key, &[]);
+            .read_oam_mixed(circuit_builder, &[], &key, &[]);
     }
 
     pub fn state_out(
@@ -62,8 +62,8 @@ impl<Ext: ExtensionField> GlobalStateChip<Ext> {
         ]
         .concat();
 
-        self.oam_handler
+        self.ram_handler
             .borrow_mut()
-            .write_mixed(circuit_builder, &[], &key, &[]);
+            .write_oam_mixed(circuit_builder, &[], &key, &[]);
     }
 }

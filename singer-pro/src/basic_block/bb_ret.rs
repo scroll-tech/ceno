@@ -3,9 +3,6 @@ use gkr::structs::Circuit;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::chip_handler::bytecode::BytecodeChip;
-use singer_utils::chip_handler::global_state::GlobalStateChip;
-use singer_utils::chip_handler::oam_handler::OAMHandler;
 use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
@@ -36,7 +33,7 @@ pub struct BasicBlockReturn;
 /// sub-circuit.
 pub struct BBReturnRestMemLoad;
 /// This circuit is to initialize the memory with 0 at the beginning. It can
-/// only touches the used addresses.
+/// only touch the used addresses.
 pub struct BBReturnRestMemStore;
 
 impl BasicBlockReturn {
@@ -59,12 +56,11 @@ impl BasicBlockReturn {
         let (clk_id, _) = circuit_builder.create_witness_in(1);
 
         let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
 
         // instantiate chips
         let mut range_chip = RangeChip::new(rom_handler.clone());
-        let stack_chip = StackChip::new(oam_handler.clone());
+        let stack_chip = StackChip::new(ram_handler.clone());
 
         // Check the of stack_top + offset.
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
@@ -138,16 +134,15 @@ impl BBReturnRestMemLoad {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
         let mem_byte = phase0[Self::phase0_mem_byte().start];
         let old_memory_ts = &phase0[Self::phase0_old_memory_ts()];
-        oam_handler
+        ram_handler
             .borrow_mut()
-            .read(&mut circuit_builder, offset, old_memory_ts, &[mem_byte]);
+            .read_oam(&mut circuit_builder, offset, old_memory_ts, &[mem_byte]);
 
         let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
@@ -188,17 +183,16 @@ impl BBReturnRestMemStore {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
         let mem_byte = phase0[Self::phase0_mem_byte().start];
         // memory_ts is zero.
         let memory_ts = circuit_builder.create_cells(StackUInt::N_OPERAND_CELLS);
-        oam_handler
+        ram_handler
             .borrow_mut()
-            .write(&mut circuit_builder, offset, &memory_ts, &[mem_byte]);
+            .write_oam(&mut circuit_builder, offset, &memory_ts, &[mem_byte]);
 
         let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();
@@ -239,11 +233,10 @@ impl BBReturnRestStackPop {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut oam_handler = Rc::new(RefCell::new(OAMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(oam_handler.clone())));
+        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
 
         // instantiate chips
-        let stack_chip = StackChip::new(oam_handler.clone());
+        let stack_chip = StackChip::new(ram_handler.clone());
 
         // Pop from stack
         let stack_top = circuit_builder.create_counter_in(0);

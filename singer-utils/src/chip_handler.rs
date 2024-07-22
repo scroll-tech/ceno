@@ -5,7 +5,6 @@ pub mod bytecode;
 pub mod calldata;
 pub mod global_state;
 pub mod memory;
-pub mod oam_handler;
 pub mod ram_handler;
 pub mod range;
 pub mod rom_handler;
