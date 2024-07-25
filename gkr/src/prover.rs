@@ -1,4 +1,4 @@
-use std::mem;
+use std::{mem, ops::AddAssign, time::{Duration, Instant}};
 
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
@@ -59,12 +59,21 @@ impl<E: ExtensionField> IOPProverState<E> {
             )
         });
 
+        let sumcheck_prove_dur = Instant::now();
+        let mut phase2_build_mle_durs = vec![];
+        let mut phase2_sumcheck_prove_durs = vec![];
+        let mut phase1_prove_sumcheck_durs = vec![];
+        let mut build_eq_durs = vec![];
         let sumcheck_proofs = (0..circuit.layers.len() as LayerId)
             .map(|layer_id| {
                 let timer = start_timer!(|| format!("Prove layer {}", layer_id));
 
                 prover_state.layer_id = layer_id;
 
+                let mut phase2_build_mle_dur = Duration::ZERO;
+                let mut phase2_sumcheck_dur = Duration::ZERO;
+                let mut phase1_prove_sumcheck_dur = Duration::ZERO;
+                let mut build_eq_dur = Duration::ZERO;
                 let dummy_step = SumcheckStepType::Undefined;
                 let proofs = circuit.layers[layer_id as usize]
                     .sumcheck_steps
@@ -85,8 +94,9 @@ impl<E: ExtensionField> IOPProverState<E> {
                                     transcript,
                                 )].to_vec()
                         },
-                        (SumcheckStepType::Phase1Step1, SumcheckStepType::Phase1Step2, _) =>
-                            [
+                        (SumcheckStepType::Phase1Step1, SumcheckStepType::Phase1Step2, _) => {
+                            let dur = Instant::now();
+                            let proofs = [
                                 prover_state
                                     .prove_and_update_state_phase1_step1(
                                         circuit,
@@ -99,8 +109,10 @@ impl<E: ExtensionField> IOPProverState<E> {
                                         circuit_witness,
                                         transcript,
                                     ),
-                            ].to_vec()
-                        ,
+                            ].to_vec();
+                            phase1_prove_sumcheck_dur.add_assign(dur.elapsed());
+                            proofs
+                        },
                         (SumcheckStepType::Phase2Step1, step2, _) => {
                             let span = entered_span!("phase2_gkr");
                             let max_steps = match step2 {
@@ -113,9 +125,12 @@ impl<E: ExtensionField> IOPProverState<E> {
                             let mut layer_polys = (0..max_thread_id).map(|_| ArcDenseMultilinearExtension::default()).collect::<Vec<ArcDenseMultilinearExtension<E>>>();
                             let mut res = vec![];
                             for step in 0..max_steps {
+                                let dur = Instant::now();
                                 let bounded_eval_point = prover_state.to_next_step_point.clone();
                                 eqs.push(build_eq_x_r_vec(&bounded_eval_point));
+                                build_eq_dur.add_assign(dur.elapsed());
                                 // build step round poly
+                                let build_mle_dur = Instant::now();
                                 let virtual_polys: Vec<VirtualPolynomial<E>> = (0..max_thread_id).into_par_iter().zip(layer_polys.par_iter_mut()).map(|(thread_id, layer_poly)| {
                                     let span = entered_span!("build_poly");
                                     let (next_layer_poly_step1, virtual_poly) = match step {
@@ -154,18 +169,23 @@ impl<E: ExtensionField> IOPProverState<E> {
                                         },
                                         _ => unimplemented!(),
                                     };
+
                                     if let Some(next_layer_poly_step1) = next_layer_poly_step1 {
                                         let _ = mem::replace(layer_poly, next_layer_poly_step1);
                                     }
                                     exit_span!(span);
                                     virtual_poly
                                 }).collect();
+                                let build_mle_dur = build_mle_dur.elapsed();
+                                phase2_build_mle_dur.add_assign(build_mle_dur);
 
+                                let sumcheck_dur = Instant::now();
                                 let (sumcheck_proof, sumcheck_prover_state)  = sumcheck::structs::IOPProverState::<E>::prove_batch_polys(
                                     max_thread_id,
                                     virtual_polys.try_into().unwrap(),
                                     transcript,
                                 );
+                                phase2_sumcheck_dur.add_assign(sumcheck_dur.elapsed());
 
                                 let iop_prover_step =
                                     match step {
@@ -221,14 +241,22 @@ impl<E: ExtensionField> IOPProverState<E> {
                     })
                     .collect_vec();
                 end_timer!(timer);
-
+                println!("layer {} | phase2 build mle: {:?}", layer_id, phase2_build_mle_dur);
+                phase2_build_mle_durs.push(phase2_build_mle_dur);
+                phase2_sumcheck_prove_durs.push(phase2_sumcheck_dur);
+                phase1_prove_sumcheck_durs.push(phase1_prove_sumcheck_dur);
+                build_eq_durs.push(build_eq_dur);
                 proofs
             })
             .flatten()
             .collect_vec();
         end_timer!(timer);
         exit_span!(span);
-
+        println!("phase2 build mle in total: {:?}", phase2_build_mle_durs.iter().sum::<Duration>());
+        println!("phase2 prove sumcheck in total: {:?}", phase2_sumcheck_prove_durs.iter().sum::<Duration>());
+        println!("phase1 prove sumcheck in total: {:?}", phase1_prove_sumcheck_durs.iter().sum::<Duration>());
+        println!("build eq in total: {:?}", build_eq_durs.iter().sum::<Duration>());
+        println!("prove sumcheck took {:?}", sumcheck_prove_dur.elapsed());
         (
             IOPProof { sumcheck_proofs },
             GKRInputClaims {

@@ -20,6 +20,8 @@ fn eval_partial_poly(c: &mut Criterion) {
         let mut group = c.benchmark_group("mle");
         group.sample_size(NUM_SAMPLES);
 
+        let points = (0..=2u64).map(E::from).collect::<Vec<_>>();
+        let weights = barycentric_weights(&points);
         let mut setup = |nv, i| {
             let mut f = Arc::new(DenseMultilinearExtension::<E>::random(nv, &mut rng));
             let mut g = Arc::new(DenseMultilinearExtension::<E>::random(nv, &mut rng));
@@ -96,10 +98,6 @@ fn eval_partial_poly(c: &mut Criterion) {
                     let extrapolation = (0..poly.aux_info.max_degree - products.len())
                         .into_iter()
                         .map(|i| {
-                            let points = (0..(1 + products.len()) as u64)
-                                .map(E::from)
-                                .collect::<Vec<_>>();
-                            let weights = barycentric_weights(&points);
                             let at = E::from((products.len() + 1 + i) as u64);
                             extrapolate(&points, &weights, &sum, &at)
                         })

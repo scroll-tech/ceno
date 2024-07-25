@@ -8,7 +8,7 @@ fn fix_var(c: &mut Criterion) {
     let mut rng = thread_rng();
 
     const NUM_SAMPLES: usize = 10;
-    for nv in 12..20 {
+    for nv in 16..24 {
         let mut group = c.benchmark_group("mle");
         group.sample_size(NUM_SAMPLES);
 
@@ -39,7 +39,7 @@ fn fix_var_par(c: &mut Criterion) {
     let mut rng = thread_rng();
 
     const NUM_SAMPLES: usize = 10;
-    for nv in 12..20 {
+    for nv in 16..24 {
         let mut group = c.benchmark_group("mle");
         group.sample_size(NUM_SAMPLES);
 

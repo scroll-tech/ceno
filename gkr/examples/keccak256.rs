@@ -24,7 +24,7 @@ fn main() {
     #[allow(unused_mut)]
     let mut max_thread_id: usize = env::var("RAYON_NUM_THREADS")
         .map(|v| str::parse::<usize>(&v).unwrap_or(1))
-        .unwrap();
+        .unwrap_or(1);
 
     if !is_power_of_2(max_thread_id) {
         #[cfg(not(feature = "non_pow2_rayon_thread"))]
@@ -85,7 +85,7 @@ fn main() {
     let subscriber = Registry::default()
         .with(
             fmt::layer()
-                .compact()
+                    .compact()
                 .with_thread_ids(false)
                 .with_thread_names(false),
         )
@@ -93,7 +93,7 @@ fn main() {
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    for log2_n in 0..12 {
+    for log2_n in 10..11 {
         let Some((proof, output_mle)) =
             prove_keccak256::<GoldilocksExt2>(log2_n, &circuit, (1 << log2_n).min(max_thread_id))
         else {
