@@ -1,4 +1,4 @@
-use ark_std::rand::{thread_rng, Rng};
+use ark_std::rand::thread_rng;
 use criterion::*;
 use ff::Field;
 use goldilocks::GoldilocksExt2;

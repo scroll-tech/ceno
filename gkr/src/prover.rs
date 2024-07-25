@@ -1,4 +1,8 @@
-use std::{mem, ops::AddAssign, time::{Duration, Instant}};
+use std::{
+    mem,
+    ops::AddAssign,
+    time::{Duration, Instant},
+};
 
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
@@ -252,10 +256,22 @@ impl<E: ExtensionField> IOPProverState<E> {
             .collect_vec();
         end_timer!(timer);
         exit_span!(span);
-        println!("phase2 build mle in total: {:?}", phase2_build_mle_durs.iter().sum::<Duration>());
-        println!("phase2 prove sumcheck in total: {:?}", phase2_sumcheck_prove_durs.iter().sum::<Duration>());
-        println!("phase1 prove sumcheck in total: {:?}", phase1_prove_sumcheck_durs.iter().sum::<Duration>());
-        println!("build eq in total: {:?}", build_eq_durs.iter().sum::<Duration>());
+        println!(
+            "phase2 build mle in total: {:?}",
+            phase2_build_mle_durs.iter().sum::<Duration>()
+        );
+        println!(
+            "phase2 prove sumcheck in total: {:?}",
+            phase2_sumcheck_prove_durs.iter().sum::<Duration>()
+        );
+        println!(
+            "phase1 prove sumcheck in total: {:?}",
+            phase1_prove_sumcheck_durs.iter().sum::<Duration>()
+        );
+        println!(
+            "build eq in total: {:?}",
+            build_eq_durs.iter().sum::<Duration>()
+        );
         println!("prove sumcheck took {:?}", sumcheck_prove_dur.elapsed());
         (
             IOPProof { sumcheck_proofs },
