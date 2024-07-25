@@ -19,6 +19,7 @@ use self::{
 
 // arithmetic
 pub mod add;
+pub mod add_v2;
 
 // bitwise
 pub mod gt;
