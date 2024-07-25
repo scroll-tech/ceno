@@ -63,14 +63,13 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
         vec![Goldilocks::from(2u64)],
     );
     let m: u64 = (1 << TSUInt::C) - 1;
-    let range_values = u64vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+    let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
     phase0_values_map.insert(
         AddInstruction::phase0_old_stack_ts_lt0_str(),
         vec![
             Goldilocks::from(range_values[0]),
             Goldilocks::from(range_values[1]),
             Goldilocks::from(range_values[2]),
-            Goldilocks::from(range_values[3]),
             Goldilocks::from(1u64), // borrow
         ],
     );
@@ -79,14 +78,13 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
         vec![Goldilocks::from(1u64)],
     );
     let m: u64 = (1 << TSUInt::C) - 2;
-    let range_values = u64vec::<{ TSUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+    let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
     phase0_values_map.insert(
         AddInstruction::phase0_old_stack_ts_lt1_str(),
         vec![
             Goldilocks::from(range_values[0]),
             Goldilocks::from(range_values[1]),
             Goldilocks::from(range_values[2]),
-            Goldilocks::from(range_values[3]),
             Goldilocks::from(1u64), // borrow
         ],
     );
@@ -99,7 +97,7 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
         AddInstruction::phase0_addend_1_str(),
         vec![Goldilocks::from(1u64)],
     );
-    let range_values = u64vec::<{ StackUInt::N_RANGE_CHECK_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
+    let range_values = u64vec::<{ StackUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
     let mut wit_phase0_instruction_add: Vec<Goldilocks> = vec![];
     for i in 0..16 {
         wit_phase0_instruction_add.push(Goldilocks::from(range_values[i]))

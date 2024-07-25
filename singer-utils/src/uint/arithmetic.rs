@@ -1,7 +1,7 @@
 use crate::{chip_handler::RangeChipOperations, error::UtilError, uint::uint::UInt};
 use ff::Field;
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
+use simple_frontend::structs::{CellId, CircuitBuilder};
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Little-endian addition.
@@ -332,7 +332,7 @@ mod tests {
         let addend_1 = UInt20::try_from(addend_1_cells).expect("should build uint");
 
         // update circuit builder with circuit instructions
-        let result =
+        let _ =
             UInt20::add_unsafe(&mut circuit_builder, &addend_0, &addend_1, &carry_cells).unwrap();
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
@@ -406,7 +406,7 @@ mod tests {
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
         // update circuit builder
-        let result = UInt20::add_const_unsafe(
+        let _ = UInt20::add_const_unsafe(
             &mut circuit_builder,
             &addend_0,
             Goldilocks::from(200),
@@ -480,7 +480,7 @@ mod tests {
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
         // update circuit builder
-        let result = UInt20::add_cell_unsafe(
+        let _ = UInt20::add_cell_unsafe(
             &mut circuit_builder,
             &addend_0,
             small_value_cell[0],
@@ -559,7 +559,7 @@ mod tests {
         let subtrahend = UInt20::try_from(subtrahend_cells).expect("should build uint");
 
         // update the circuit builder
-        let result =
+        let _ =
             UInt20::sub_unsafe(&mut circuit_builder, &minuend, &subtrahend, &borrow_cells).unwrap();
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);

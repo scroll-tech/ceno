@@ -261,6 +261,7 @@ mod test {
         );
     }
 
+    #[cfg(not(debug_assertions))]
     fn bench_calldataload_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
@@ -319,6 +320,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_calldataload_instruction() {
         bench_calldataload_instruction_helper::<GoldilocksExt2>(10);
     }

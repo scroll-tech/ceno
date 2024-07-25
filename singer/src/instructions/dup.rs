@@ -268,6 +268,7 @@ mod test {
         );
     }
 
+    #[cfg(not(debug_assertions))]
     fn bench_dup_instruction_helper<E: ExtensionField, const N: usize>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
@@ -327,11 +328,13 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_dup1_instruction() {
         bench_dup_instruction_helper::<GoldilocksExt2, 1>(10);
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_dup2_instruction() {
         bench_dup_instruction_helper::<GoldilocksExt2, 2>(10);
     }
