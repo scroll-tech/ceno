@@ -358,7 +358,7 @@ pub fn eq_eval<F: PrimeField>(x: &[F], y: &[F]) -> F {
 /// Evaluate
 ///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 /// over r, which is
-///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
+///      eq(x,r) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
 pub fn build_eq_x_r_sequential<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
     let evals = build_eq_x_r_vec_sequential(r);
     let mle = DenseMultilinearExtension::from_evaluations_ext_vec(r.len(), evals);
@@ -438,8 +438,7 @@ pub fn build_eq_x_r<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<
 /// Evaluate
 ///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 /// over r, which is
-///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-
+///      eq(x,r) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
 #[tracing::instrument(skip_all, name = "multilinear_extensions::build_eq_x_r_vec")]
 pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
     // avoid unnecessary allocation
@@ -479,8 +478,8 @@ fn build_eq_x_r_helper<E: ExtensionField>(r: &[E], buf: &mut [Vec<E>; 2]) {
     for (i, r) in r.iter().rev().enumerate() {
         let [current, next] = buf;
         let (cur_size, next_size) = (1 << i, 1 << (i + 1));
-        // suppose at the previous step we processed buf [0..size]
-        // for the current step we are populating new buf[0..2*size]
+        // suppose at the previous step we processed current_buf[0..size]
+        // for the current step we are populating new_buf[0..2*size]
         // for j travese 0..size
         // buf[2*j + 1] = r * buf[j]
         // buf[2*j] = (1 - r) * buf[j]

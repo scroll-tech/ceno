@@ -1,8 +1,11 @@
-use ark_std::rand::thread_rng;
+use ark_std::rand::{thread_rng, Rng};
 use criterion::*;
 use ff::Field;
 use goldilocks::GoldilocksExt2;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::{
+    mle::DenseMultilinearExtension,
+    virtual_poly::{build_eq_x_r, build_eq_x_r_sequential},
+};
 
 fn fix_var(c: &mut Criterion) {
     let mut rng = thread_rng();
@@ -66,5 +69,42 @@ fn fix_var_par(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, fix_var, fix_var_par,);
+fn bench_build_eq_internal(c: &mut Criterion, use_par: bool) {
+    const NUM_SAMPLES: usize = 10;
+    let mut rng = thread_rng();
+    let group_name = if use_par {
+        "build_eq_par"
+    } else {
+        "build_eq_seq"
+    };
+    let mut group = c.benchmark_group(group_name);
+    group.sample_size(NUM_SAMPLES);
+
+    for num_vars in 15..24 {
+        group.bench_function(format!("{}", num_vars), |b| {
+            b.iter_batched(
+                || {
+                    (0..num_vars)
+                        .map(|_| GoldilocksExt2::random(&mut rng))
+                        .collect::<Vec<GoldilocksExt2>>()
+                },
+                |r| {
+                    if use_par {
+                        build_eq_x_r(&r)
+                    } else {
+                        build_eq_x_r_sequential(&r)
+                    }
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+}
+
+fn bench_build_eq(c: &mut Criterion) {
+    bench_build_eq_internal(c, false);
+    bench_build_eq_internal(c, true);
+}
+
+criterion_group!(benches, bench_build_eq, fix_var, fix_var_par,);
 criterion_main!(benches);
