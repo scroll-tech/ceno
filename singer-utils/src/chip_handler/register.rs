@@ -5,15 +5,16 @@ use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
 use crate::structs::{RAMHandler, RAMType};
 
-use super::{OAMOperations, RegisterChipOperations};
+use super::{RAMOperations, RegisterChipOperations};
 
 impl<Ext: ExtensionField> RegisterChipOperations<Ext> for RAMHandler<Ext> {
     fn register_read(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         register_id: &[CellId],
+        prev_timestamp: &[CellId],
         timestamp: &[CellId],
-        values: &[CellId],
+        value: &[CellId],
     ) {
         let key = [
             vec![MixedCell::Constant(Ext::BaseField::from(
@@ -22,17 +23,20 @@ impl<Ext: ExtensionField> RegisterChipOperations<Ext> for RAMHandler<Ext> {
             register_id.iter().map(|&x| x.into()).collect_vec(),
         ]
         .concat();
+        let prev_timestamp = prev_timestamp.iter().map(|&x| x.into()).collect_vec();
         let timestamp = timestamp.iter().map(|&x| x.into()).collect_vec();
-        let values = values.iter().map(|&x| x.into()).collect_vec();
-        self.oam_load_mixed(circuit_builder, &timestamp, &key, &values);
+        let value = value.iter().map(|&x| x.into()).collect_vec();
+        self.ram_load_mixed(circuit_builder, &prev_timestamp, &timestamp, &key, &value);
     }
 
     fn register_store(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         register_id: &[CellId],
+        prev_timestamp: &[CellId],
         timestamp: &[CellId],
-        values: &[CellId],
+        prev_value: &[CellId],
+        value: &[CellId],
     ) {
         let key = [
             vec![MixedCell::Constant(Ext::BaseField::from(
@@ -41,8 +45,17 @@ impl<Ext: ExtensionField> RegisterChipOperations<Ext> for RAMHandler<Ext> {
             register_id.iter().map(|&x| x.into()).collect_vec(),
         ]
         .concat();
+        let prev_timestamp = prev_timestamp.iter().map(|&x| x.into()).collect_vec();
         let timestamp = timestamp.iter().map(|&x| x.into()).collect_vec();
-        let values = values.iter().map(|&x| x.into()).collect_vec();
-        self.oam_load_mixed(circuit_builder, &timestamp, &key, &values);
+        let value = value.iter().map(|&x| x.into()).collect_vec();
+        let prev_value = prev_value.iter().map(|&x| x.into()).collect_vec();
+        self.ram_store_mixed(
+            circuit_builder,
+            &prev_timestamp,
+            &timestamp,
+            &key,
+            &prev_value,
+            &value,
+        );
     }
 }

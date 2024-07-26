@@ -102,18 +102,19 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         // Register timestamp range check
         let prev_rs1_ts = (&phase0[Self::phase0_prev_rs1_ts()]).try_into()?;
         let prev_rs2_ts = (&phase0[Self::phase0_prev_rs2_ts()]).try_into()?;
+        let memory_ts = (&phase0[Self::phase0_memory_ts()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &prev_rs1_ts,
-            &memory_ts.try_into()?,
+            &memory_ts,
             &phase0[Self::phase0_prev_rs1_ts_lt()],
         )?;
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
             &prev_rs2_ts,
-            &memory_ts.try_into()?,
+            &memory_ts,
             &phase0[Self::phase0_prev_rs2_ts_lt()],
         )?;
         if cfg!(feature = "dbg-opcode") {
@@ -142,15 +143,24 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             &mut circuit_builder,
             rs1,
             prev_rs1_ts.values(),
+            memory_ts.values(),
             &phase0[Self::phase0_addend_0()],
         );
         ram_handler.register_read(
             &mut circuit_builder,
             rs2,
             prev_rs2_ts.values(),
+            memory_ts.values(),
             &phase0[Self::phase0_addend_1()],
         );
-        ram_handler.register_store(&mut circuit_builder, rd, memory_ts, result.values());
+        ram_handler.register_store(
+            &mut circuit_builder,
+            rd,
+            &zero_cell_ids,
+            memory_ts.values(),
+            &zero_cell_ids,
+            result.values(),
+        );
 
         // Ram/Rom finalization
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);

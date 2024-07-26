@@ -52,6 +52,7 @@ pub trait RegisterChipOperations<Ext: ExtensionField>: OAMOperations<Ext> {
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         register_id: &[CellId],
+        prev_timestamp: &[CellId],
         timestamp: &[CellId],
         values: &[CellId],
     );
@@ -60,7 +61,9 @@ pub trait RegisterChipOperations<Ext: ExtensionField>: OAMOperations<Ext> {
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         register_id: &[CellId],
+        prev_timestamp: &[CellId],
         timestamp: &[CellId],
+        prev_values: &[CellId],
         values: &[CellId],
     );
 }
