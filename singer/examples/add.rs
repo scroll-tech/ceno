@@ -61,7 +61,7 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
         AddInstruction::phase0_old_stack_ts0_str(),
         vec![Goldilocks::from(2u64)],
     );
-    let m: u64 = (1 << TSUInt::MAX_CELL_BIT_WIDTH) - 1;
+    let m: u64 = (1 << TSUInt::C) - 1;
     let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
     phase0_values_map.insert(
         AddInstruction::phase0_old_stack_ts_lt0_str(),
@@ -76,7 +76,7 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
         AddInstruction::phase0_old_stack_ts1_str(),
         vec![Goldilocks::from(1u64)],
     );
-    let m: u64 = (1 << TSUInt::MAX_CELL_BIT_WIDTH) - 2;
+    let m: u64 = (1 << TSUInt::C) - 2;
     let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
     phase0_values_map.insert(
         AddInstruction::phase0_old_stack_ts_lt1_str(),

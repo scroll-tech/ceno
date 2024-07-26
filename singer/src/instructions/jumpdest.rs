@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
         BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
@@ -11,6 +10,7 @@ use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
+    uint::constants::AddSubConstants,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -166,6 +166,7 @@ mod test {
         );
     }
 
+    #[cfg(not(debug_assertions))]
     fn bench_jumpdest_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
@@ -224,6 +225,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_jumpdest_instruction() {
         bench_jumpdest_instruction_helper::<GoldilocksExt2>(10);
     }

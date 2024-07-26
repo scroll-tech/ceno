@@ -1,8 +1,7 @@
-use ff::PrimeField;
 use crate::error::UtilError;
+use ff::PrimeField;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
 /// Given some data represented by n small cells of size s
@@ -120,7 +119,7 @@ mod tests {
         let (_, big_values) = circuit_builder.create_witness_in(5);
         let big_bit_width = 5;
         let small_bit_width = 2;
-        let cell_packing_result = convert_decomp(
+        let _ = convert_decomp(
             &mut circuit_builder,
             &big_values,
             big_bit_width,

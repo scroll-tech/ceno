@@ -5,7 +5,6 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 use sumcheck::util::ceil_log2;
 
@@ -154,7 +153,7 @@ mod tests {
         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let (_, small_values) = circuit_builder.create_witness_in(8);
         type UInt30 = UInt<30, 6>;
-        let uint_instance =
+        let _ =
             UInt30::from_different_sized_cell_values(&mut circuit_builder, &small_values, 2, true)
                 .unwrap();
         circuit_builder.configure();
