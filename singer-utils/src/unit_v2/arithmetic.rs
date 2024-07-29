@@ -3,7 +3,7 @@ use itertools::izip;
 
 use crate::{
     structs_v2::CircuitBuilderV2,
-    util_v2::{ExpressionV2, ZKVMV2Error},
+    util_v2::{Expression, ZKVMV2Error},
 };
 
 use super::UIntV2;
@@ -12,7 +12,7 @@ impl<const M: usize, const C: usize> UIntV2<M, C> {
     pub fn add_const<E: ExtensionField>(
         &self,
         _circuit_builder: &CircuitBuilderV2<E>,
-        _constant: ExpressionV2<E>,
+        _constant: Expression<E>,
     ) -> Result<Self, ZKVMV2Error> {
         // TODO
         Ok(self.clone())
@@ -42,7 +42,7 @@ impl<const M: usize, const C: usize> UIntV2<M, C> {
         &self,
         circuit_builder: &mut CircuitBuilderV2<E>,
         rhs: &UIntV2<M, C>,
-    ) -> Result<ExpressionV2<E>, ZKVMV2Error> {
+    ) -> Result<Expression<E>, ZKVMV2Error> {
         Ok(self.expr().remove(0) + 1.into())
     }
 }

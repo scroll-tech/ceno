@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     structs::{PCUIntV2, TSUIntV2, UInt64V2},
-    util_v2::{ExpressionV2, WitIn, ZKVMV2Error},
+    util_v2::{Expression, WitIn, ZKVMV2Error},
 };
 
 pub mod general;
@@ -14,14 +14,14 @@ pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
         &mut self,
         pc: &PCUIntV2,
         memory_ts: &TSUIntV2,
-        clk: ExpressionV2<E>,
+        clk: Expression<E>,
     ) -> Result<(), ZKVMV2Error>;
 
     fn state_out(
         &mut self,
         pc: &PCUIntV2,
         memory_ts: &TSUIntV2,
-        clk: ExpressionV2<E>,
+        clk: Expression<E>,
     ) -> Result<(), ZKVMV2Error>;
 }
 

@@ -24,9 +24,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
     ) -> Result<(), ZKVMError> {
         // verify and reduce product tower sumcheck
 
-        // verify main + sel sumcheck
+        // verify zero statement (degree > 1) + sel sumcheck
 
-        // verify record (degree = 1) statement, thus no sumcheck
+        // verify records (degree = 1) statement, thus no sumcheck
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
         Ok(())

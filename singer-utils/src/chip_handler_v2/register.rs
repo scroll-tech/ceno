@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use crate::{
     structs::{RAMType, TSUIntV2, UInt64V2},
     structs_v2::CircuitBuilderV2,
-    util_v2::{ExpressionV2, ToExpr, WitIn, ZKVMV2Error},
+    util_v2::{Expression, ToExpr, WitIn, ZKVMV2Error},
 };
 
 use super::RegisterChipOperations;
@@ -19,7 +19,7 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilderV2<E> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
-                vec![ExpressionV2::<E>::Constant(E::BaseField::from(
+                vec![Expression::<E>::Constant(E::BaseField::from(
                     RAMType::Register as u64,
                 ))],
                 vec![register_id.expr()],
@@ -31,7 +31,7 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilderV2<E> {
         // Write (a, v, t)
         let write_record = self.rlc_chip_record(
             [
-                vec![ExpressionV2::<E>::Constant(E::BaseField::from(
+                vec![Expression::<E>::Constant(E::BaseField::from(
                     RAMType::Register as u64,
                 ))],
                 vec![register_id.expr()],
@@ -56,7 +56,7 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilderV2<E> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
-                vec![ExpressionV2::<E>::Constant(E::BaseField::from(
+                vec![Expression::<E>::Constant(E::BaseField::from(
                     RAMType::Register as u64,
                 ))],
                 vec![register_id.expr()],
@@ -68,7 +68,7 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilderV2<E> {
         // Write (a, v, t)
         let write_record = self.rlc_chip_record(
             [
-                vec![ExpressionV2::<E>::Constant(E::BaseField::from(
+                vec![Expression::<E>::Constant(E::BaseField::from(
                     RAMType::Register as u64,
                 ))],
                 vec![register_id.expr()],

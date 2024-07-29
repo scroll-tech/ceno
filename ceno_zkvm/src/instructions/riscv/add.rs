@@ -44,7 +44,6 @@ impl<E: ExtensionField> InstructionV2<E> for AddInstruction {
         let clk = circuit_builder.create_witin();
 
         // state in
-        // all of them should implement expr
         circuit_builder.state_in(&pc, &memory_ts, clk.expr())?;
 
         let next_pc = pc.add_const(circuit_builder, 1.into())?;

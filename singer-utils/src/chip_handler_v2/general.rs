@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     structs_v2::{Circuit, CircuitBuilderV2},
-    util_v2::{ExpressionV2, WitIn, ZKVMV2Error},
+    util_v2::{Expression, WitIn, ZKVMV2Error},
 };
 use ff::Field;
 
@@ -15,8 +15,8 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
             lk_expressions: vec![],
             assert_zero_expressions: vec![],
             assert_zero_sumcheck_expressions: vec![],
-            chip_record_alpha: ExpressionV2::Challenge(0, 1, E::ONE, E::ZERO),
-            chip_record_beta: ExpressionV2::Challenge(1, 1, E::ONE, E::ZERO),
+            chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
+            chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
             phantom: std::marker::PhantomData,
         }
     }
@@ -30,7 +30,7 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
             },
         }
     }
-    pub fn read_record(&mut self, rlc_record: ExpressionV2<E>) -> Result<(), ZKVMV2Error> {
+    pub fn read_record(&mut self, rlc_record: Expression<E>) -> Result<(), ZKVMV2Error> {
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -41,7 +41,7 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
         Ok(())
     }
 
-    pub fn write_record(&mut self, rlc_record: ExpressionV2<E>) -> Result<(), ZKVMV2Error> {
+    pub fn write_record(&mut self, rlc_record: Expression<E>) -> Result<(), ZKVMV2Error> {
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -52,11 +52,11 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
         Ok(())
     }
 
-    pub fn rlc_chip_record(&self, records: Vec<ExpressionV2<E>>) -> ExpressionV2<E> {
+    pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
         assert!(!records.is_empty());
         let beta_pows = {
             let mut beta_pows = Vec::with_capacity(records.len());
-            beta_pows.push(ExpressionV2::Constant(E::BaseField::ONE));
+            beta_pows.push(Expression::Constant(E::BaseField::ONE));
             (0..records.len() - 1).for_each(|_| {
                 beta_pows.push(self.chip_record_beta.clone() * beta_pows.last().unwrap().clone())
             });
@@ -73,7 +73,7 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
         item_rlc + self.chip_record_alpha.clone()
     }
 
-    pub fn require_zero(&mut self, assert_zero_expr: ExpressionV2<E>) -> Result<(), ZKVMV2Error> {
+    pub fn require_zero(&mut self, assert_zero_expr: Expression<E>) -> Result<(), ZKVMV2Error> {
         assert!(
             assert_zero_expr.degree() > 0,
             "constant expression assert to zero ?"
@@ -89,14 +89,14 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
 
     pub fn require_equal(
         &mut self,
-        target: ExpressionV2<E>,
-        rlc_record: ExpressionV2<E>,
+        target: Expression<E>,
+        rlc_record: Expression<E>,
     ) -> Result<(), ZKVMV2Error> {
         self.require_zero(target - rlc_record)
     }
 
-    pub fn require_one(&mut self, expr: ExpressionV2<E>) -> Result<(), ZKVMV2Error> {
-        self.require_zero(ExpressionV2::from(1) - expr)
+    pub fn require_one(&mut self, expr: Expression<E>) -> Result<(), ZKVMV2Error> {
+        self.require_zero(Expression::from(1) - expr)
     }
 
     pub fn finalize_circuit(&self) -> Circuit<E> {

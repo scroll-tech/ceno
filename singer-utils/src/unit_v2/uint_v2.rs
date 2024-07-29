@@ -3,7 +3,7 @@ use crate::{
     error::UtilError,
     structs_v2::CircuitBuilderV2,
     uint::util::add_one_to_big_num,
-    util_v2::{ExpressionV2, ToExpr, WitIn},
+    util_v2::{Expression, ToExpr, WitIn},
 };
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -25,11 +25,11 @@ impl<const M: usize, const C: usize> UIntV2<M, C> {
         }
     }
 
-    pub fn expr<E: ExtensionField>(&self) -> Vec<ExpressionV2<E>> {
+    pub fn expr<E: ExtensionField>(&self) -> Vec<Expression<E>> {
         self.values
             .iter()
             .map(ToExpr::expr)
-            .collect::<Vec<ExpressionV2<E>>>()
+            .collect::<Vec<Expression<E>>>()
     }
 
     /// Return the `UInt` underlying cell id's
