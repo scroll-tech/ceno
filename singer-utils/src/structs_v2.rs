@@ -25,3 +25,16 @@ pub struct CircuitBuilderV2<E: ExtensionField> {
 
     pub(crate) phantom: PhantomData<E>,
 }
+
+pub struct Circuit<E: ExtensionField> {
+    pub(crate) num_witin: usize,
+    pub r_expressions: Vec<ExpressionV2<E>>,
+    pub w_expressions: Vec<ExpressionV2<E>>,
+    /// lookup expression
+    pub lk_expressions: Vec<ExpressionV2<E>>,
+
+    /// main constraints zero expression
+    pub assert_zero_expressions: Vec<ExpressionV2<E>>,
+    /// main constraints zero expression for expression degree > 1, which require sumcheck to prove
+    pub assert_zero_sumcheck_expressions: Vec<ExpressionV2<E>>,
+}

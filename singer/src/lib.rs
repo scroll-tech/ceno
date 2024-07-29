@@ -17,6 +17,7 @@ use std::mem;
 pub mod error;
 pub mod instructions;
 pub mod scheme;
+pub mod scheme_v2;
 #[cfg(test)]
 pub mod test;
 pub use utils::u64vec;

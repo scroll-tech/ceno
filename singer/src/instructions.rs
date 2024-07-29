@@ -19,7 +19,6 @@ use self::{
 
 // arithmetic
 pub mod add;
-pub mod add_v2;
 pub mod riscv_add;
 
 // bitwise

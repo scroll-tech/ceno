@@ -1,7 +1,9 @@
+use core::num;
+
 use ff_ext::ExtensionField;
 
 use crate::{
-    structs_v2::CircuitBuilderV2,
+    structs_v2::{Circuit, CircuitBuilderV2},
     util_v2::{ExpressionV2, WitIn, ZKVMV2Error},
 };
 use ff::Field;
@@ -97,5 +99,16 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
 
     pub fn require_one(&mut self, expr: ExpressionV2<E>) -> Result<(), ZKVMV2Error> {
         self.require_zero(ExpressionV2::from(1) - expr)
+    }
+
+    pub fn finalize_circuit(&self) -> Circuit<E> {
+        Circuit {
+            num_witin: self.num_witin,
+            r_expressions: self.r_expressions.clone(),
+            w_expressions: self.w_expressions.clone(),
+            lk_expressions: self.lk_expressions.clone(),
+            assert_zero_expressions: self.assert_zero_expressions.clone(),
+            assert_zero_sumcheck_expressions: self.assert_zero_sumcheck_expressions.clone(),
+        }
     }
 }

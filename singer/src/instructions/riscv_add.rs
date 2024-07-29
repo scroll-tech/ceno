@@ -126,6 +126,7 @@ mod test {
             AddInstruction, ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder,
         },
         scheme::GKRGraphProverState,
+        scheme_v2::prover::ZKVMProver,
         test::{get_uint_params, test_opcode_circuit_v2},
         utils::u64vec,
         CircuitWiresIn, SingerGraphBuilder, SingerParams,
@@ -142,6 +143,11 @@ mod test {
 
         let mut circuit_builder = CircuitBuilderV2::<GoldilocksExt2>::new();
         let _ = AddInstructionV2::construct_circuit(&mut circuit_builder);
+        let circuit = circuit_builder.finalize_circuit();
+
+        // get proof
+        let prover = ZKVMProver::new(circuit);
+        let proof = prover.create_proof();
 
         println!("circuit_builder {:?}", circuit_builder);
     }
