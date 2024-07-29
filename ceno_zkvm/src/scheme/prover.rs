@@ -18,6 +18,9 @@ impl<E: ExtensionField> ZKVMProver<E> {
         // construct main constraint sumcheck virtual polynomial
         let circuit = &self.circuit;
 
+        // build first part of sumcheck: selector
+        // circuit.
+
         // witness inference
 
         Ok(ZKVMProof {})

@@ -13,7 +13,7 @@ use singer_utils::{
 
 use util_v2::{InstructionV2, ZKVMV2Error};
 
-pub struct AddInstructionV2;
+pub struct AddInstruction;
 
 // impl<E: ExtensionField> InstructionGraph<E> for AddInstruction {
 //     type InstType = Self;
@@ -36,7 +36,7 @@ pub struct InstructionConfig<E: ExtensionField> {
     prev_rd_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
 }
 
-impl<E: ExtensionField> InstructionV2<E> for AddInstructionV2 {
+impl<E: ExtensionField> InstructionV2<E> for AddInstruction {
     const OPCODE: OpcodeType = OpcodeType::ADD;
     const NAME: &'static str = "ADD";
     type InstructionConfig = InstructionConfig<E>;
@@ -119,20 +119,11 @@ mod test {
     use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use singer_utils::{structs_v2::CircuitBuilderV2, util_v2::InstructionV2};
-    use transcript::Transcript;
+    use transcript::{Challenge, Transcript};
 
-    use crate::{
-        instructions::{
-            AddInstruction, ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
-        scheme_v2::prover::ZKVMProver,
-        test::{get_uint_params, test_opcode_circuit_v2},
-        utils::u64vec,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
-    };
+    use crate::scheme::prover::ZKVMProver;
 
-    use super::AddInstructionV2;
+    use super::AddInstruction;
 
     #[test]
     fn test_add_construct_circuit() {
@@ -142,12 +133,13 @@ mod test {
         let c = GoldilocksExt2::from(6u64);
 
         let mut circuit_builder = CircuitBuilderV2::<GoldilocksExt2>::new();
-        let _ = AddInstructionV2::construct_circuit(&mut circuit_builder);
+        let _ = AddInstruction::construct_circuit(&mut circuit_builder);
         let circuit = circuit_builder.finalize_circuit();
 
         // get proof
         let prover = ZKVMProver::new(circuit);
-        let proof = prover.create_proof();
+        let challenges = vec![1.into(), 2.into()];
+        let proof = prover.create_proof(&challenges);
 
         println!("circuit_builder {:?}", circuit_builder);
     }
