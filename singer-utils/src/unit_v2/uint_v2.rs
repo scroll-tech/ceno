@@ -1,61 +1,77 @@
 use crate::{
-    constants::{BYTE_BIT_WIDTH, RANGE_CHIP_BIT_WIDTH},
+    constants::BYTE_BIT_WIDTH,
     error::UtilError,
-    uint::util::{add_one_to_big_num, convert_decomp, pad_cells},
+    structs_v2::CircuitBuilderV2,
+    uint::util::add_one_to_big_num,
+    util_v2::{ExpressionV2, ToExpr, WitIn},
 };
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::Itertools;
-use simple_frontend::structs::{CellId, CircuitBuilder};
 use sumcheck::util::ceil_log2;
 
 #[derive(Clone)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
-pub struct UInt<const M: usize, const C: usize> {
-    pub values: Vec<CellId>,
+pub struct UIntV2<const M: usize, const C: usize> {
+    pub values: Vec<WitIn>,
 }
 
-impl<const M: usize, const C: usize> UInt<M, C> {
+impl<const M: usize, const C: usize> UIntV2<M, C> {
+    pub fn new<E: ExtensionField>(circuit_builder: &mut CircuitBuilderV2<E>) -> Self {
+        Self {
+            values: (0..Self::N_OPERAND_CELLS)
+                .map(|_| circuit_builder.create_witin())
+                .collect(),
+        }
+    }
+
+    pub fn expr<E: ExtensionField>(&self) -> Vec<ExpressionV2<E>> {
+        self.values
+            .iter()
+            .map(ToExpr::expr)
+            .collect::<Vec<ExpressionV2<E>>>()
+    }
+
     /// Return the `UInt` underlying cell id's
-    pub fn values(&self) -> &[CellId] {
+    pub fn wits_in(&self) -> &[WitIn] {
         &self.values
     }
 
     /// Builds a `UInt` instance from a set of cells that represent `RANGE_VALUES`
     /// assumes range_values are represented in little endian form
-    pub fn from_range_values<E: ExtensionField>(
-        circuit_builder: &mut CircuitBuilder<E>,
-        range_values: &[CellId],
+    pub fn from_range_wits_in<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilderV2<E>,
+        range_values: &[WitIn],
     ) -> Result<Self, UtilError> {
-        Self::from_different_sized_cell_values(
-            circuit_builder,
-            range_values,
-            RANGE_CHIP_BIT_WIDTH,
-            true,
-        )
+        // Self::from_different_sized_cell_values(
+        //     circuit_builder,
+        //     range_values,
+        //     RANGE_CHIP_BIT_WIDTH,
+        //     true,
+        // )
+        todo!()
     }
 
     /// Builds a `UInt` instance from a set of cells that represent big-endian `BYTE_VALUES`
     pub fn from_bytes_big_endian<E: ExtensionField>(
-        circuit_builder: &mut CircuitBuilder<E>,
-        bytes: &[CellId],
+        circuit_builder: &mut CircuitBuilderV2<E>,
+        bytes: &[WitIn],
     ) -> Result<Self, UtilError> {
         Self::from_bytes(circuit_builder, bytes, false)
     }
 
     /// Builds a `UInt` instance from a set of cells that represent little-endian `BYTE_VALUES`
     pub fn from_bytes_little_endian<E: ExtensionField>(
-        circuit_builder: &mut CircuitBuilder<E>,
-        bytes: &[CellId],
+        circuit_builder: &mut CircuitBuilderV2<E>,
+        bytes: &[WitIn],
     ) -> Result<Self, UtilError> {
         Self::from_bytes(circuit_builder, bytes, true)
     }
 
     /// Builds a `UInt` instance from a set of cells that represent `BYTE_VALUES`
     pub fn from_bytes<E: ExtensionField>(
-        circuit_builder: &mut CircuitBuilder<E>,
-        bytes: &[CellId],
+        circuit_builder: &mut CircuitBuilderV2<E>,
+        bytes: &[WitIn],
         is_little_endian: bool,
     ) -> Result<Self, UtilError> {
         Self::from_different_sized_cell_values(
@@ -68,21 +84,22 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     /// Builds a `UInt` instance from a set of cell values of a certain `CELL_WIDTH`
     fn from_different_sized_cell_values<E: ExtensionField>(
-        circuit_builder: &mut CircuitBuilder<E>,
-        cell_values: &[CellId],
+        circuit_builder: &mut CircuitBuilderV2<E>,
+        wits_in: &[WitIn],
         cell_width: usize,
         is_little_endian: bool,
     ) -> Result<Self, UtilError> {
-        let mut values = convert_decomp(
-            circuit_builder,
-            cell_values,
-            cell_width,
-            Self::MAX_CELL_BIT_WIDTH,
-            is_little_endian,
-        )?;
-        debug_assert!(values.len() <= Self::N_OPERAND_CELLS);
-        pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
-        values.try_into()
+        todo!()
+        // let mut values = convert_decomp(
+        //     circuit_builder,
+        //     wits_in,
+        //     cell_width,
+        //     Self::MAX_CELL_BIT_WIDTH,
+        //     is_little_endian,
+        // )?;
+        // debug_assert!(values.len() <= Self::N_OPERAND_CELLS);
+        // pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
+        // values.try_into()
     }
 
     /// Generate ((0)_{2^C}, (1)_{2^C}, ..., (size - 1)_{2^C})
@@ -102,10 +119,10 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 }
 
 /// Construct `UInt` from `Vec<CellId>`
-impl<const M: usize, const C: usize> TryFrom<Vec<CellId>> for UInt<M, C> {
+impl<const M: usize, const C: usize> TryFrom<Vec<WitIn>> for UIntV2<M, C> {
     type Error = UtilError;
 
-    fn try_from(values: Vec<CellId>) -> Result<Self, Self::Error> {
+    fn try_from(values: Vec<WitIn>) -> Result<Self, Self::Error> {
         if values.len() != Self::N_OPERAND_CELLS {
             return Err(UtilError::UIntError(format!(
                 "cannot construct UInt<{}, {}> from {} cells, requires {} cells",
@@ -121,10 +138,10 @@ impl<const M: usize, const C: usize> TryFrom<Vec<CellId>> for UInt<M, C> {
 }
 
 /// Construct `UInt` from `$[CellId]`
-impl<const M: usize, const C: usize> TryFrom<&[CellId]> for UInt<M, C> {
+impl<const M: usize, const C: usize> TryFrom<&[WitIn]> for UIntV2<M, C> {
     type Error = UtilError;
 
-    fn try_from(values: &[CellId]) -> Result<Self, Self::Error> {
+    fn try_from(values: &[WitIn]) -> Result<Self, Self::Error> {
         values.to_vec().try_into()
     }
 }

@@ -6,7 +6,9 @@ use gkr::structs::Point;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::{
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, FieldType},
+    mle::{
+        ArcDenseMultilinearExtension, DenseMultilinearExtension, FieldType, MultilinearExtension,
+    },
     op_mle,
     virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };

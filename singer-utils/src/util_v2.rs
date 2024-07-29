@@ -1,13 +1,11 @@
-use std::{
-    marker::PhantomData,
-    ops::{Add, Mul, Neg, Sub},
-};
+use std::ops::{Add, Mul, Neg, Sub};
 
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
+use simple_frontend::structs::ChallengeId;
 use std::cmp::max;
 
-use crate::{constants::OpcodeType, error::UtilError, structs::ChipChallenges};
+use crate::{constants::OpcodeType, error::UtilError, structs_v2::CircuitBuilderV2};
 
 #[derive(Debug)]
 pub enum ZKVMV2Error {
@@ -27,7 +25,6 @@ pub trait InstructionV2<E: ExtensionField> {
     type InstructionConfig;
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilderV2<E>,
-        challenges: ChipChallenges,
     ) -> Result<Self::InstructionConfig, ZKVMV2Error>;
 }
 
@@ -44,7 +41,7 @@ pub enum ExpressionV2<E: ExtensionField> {
     Product(Box<ExpressionV2<E>>, Box<ExpressionV2<E>>),
     /// This is a scaled polynomial
     Scaled(Box<ExpressionV2<E>>, E),
-    Challenge(ChipChallenges),
+    Challenge(ChallengeId),
 }
 
 impl<E: ExtensionField> ExpressionV2<E> {
@@ -99,42 +96,8 @@ impl<E: ExtensionField> Mul for ExpressionV2<E> {
 }
 
 #[derive(Clone, Debug)]
-// TODO it's a bit weird for the circuit to be clonable.
-// maybe we should move all of them to a meta object and make CircuitBuilder stateless.
-pub struct CircuitBuilderV2<E: ExtensionField> {
-    num_witin: usize,
-    pub r_expressions: Vec<ExpressionV2<E>>,
-    pub w_expressions: Vec<ExpressionV2<E>>,
-    /// lookup expression
-    pub lk_expressions: Vec<ExpressionV2<E>>,
-
-    /// main constraints zero expression
-    pub assert_zero_expressions: Vec<ExpressionV2<E>>,
-    /// main constraints zero expression for expression degree > 1, which require sumcheck to prove
-    pub assert_zero_sumcheck_expressions: Vec<ExpressionV2<E>>,
-
-    // alpha, beta challenge for chip record
-    pub chip_record_alpha: ExpressionV2<E>,
-    pub chip_record_beta: ExpressionV2<E>,
-
-    phantom: PhantomData<E>,
-}
-
-///
 pub struct WitIn {
     pub id: usize,
-}
-
-impl<E: ExtensionField> CircuitBuilderV2<E> {
-    pub fn create_witin(&mut self) -> WitIn {
-        WitIn {
-            id: {
-                let id = self.num_witin;
-                self.num_witin += 1;
-                id
-            },
-        }
-    }
 }
 
 pub trait ToExpr<E: ExtensionField> {

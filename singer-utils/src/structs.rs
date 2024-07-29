@@ -1,16 +1,20 @@
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{CellId, ChallengeId, ExtCellId};
+use simple_frontend::structs::{ChallengeId, ExtCellId};
 use strum_macros::EnumIter;
 use uint::UInt;
 
-use crate::constants::{EVM_STACK_BIT_WIDTH, VALUE_BIT_WIDTH};
-use crate::uint;
+use crate::{
+    constants::{EVM_STACK_BIT_WIDTH, VALUE_BIT_WIDTH},
+    uint,
+    unit_v2::UIntV2,
+};
 
 #[derive(Clone, Debug, Copy, EnumIter)]
 pub enum RAMType {
     Stack,
     Memory,
     GlobalState,
+    Register,
 }
 
 #[derive(Clone, Debug, Copy, EnumIter)]
@@ -52,3 +56,7 @@ pub type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
 pub type PCUInt = UInt64;
 pub type TSUInt = UInt<48, 48>;
 pub type StackUInt = UInt<{ EVM_STACK_BIT_WIDTH as usize }, { VALUE_BIT_WIDTH as usize }>;
+
+pub type UInt64V2 = UIntV2<64, VALUE_BIT_WIDTH>;
+pub type PCUIntV2 = UInt64V2;
+pub type TSUIntV2 = UIntV2<48, 48>;
