@@ -15,15 +15,10 @@ use util_v2::{InstructionV2, ZKVMV2Error};
 
 pub struct AddInstruction;
 
-// impl<E: ExtensionField> InstructionGraph<E> for AddInstruction {
-//     type InstType = Self;
-// }
-
 pub struct InstructionConfig<E: ExtensionField> {
     pub pc: PCUIntV2,
     pub memory_ts: TSUIntV2,
     pub clk: WitIn,
-    phantom: PhantomData<E>,
     pub prev_rd_memory_value: UInt64V2,
     pub addend_0: UInt64V2,
     pub addend_1: UInt64V2,
@@ -34,6 +29,7 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub prev_rs1_memory_ts: TSUIntV2,
     pub prev_rs2_memory_ts: TSUIntV2,
     pub prev_rd_memory_ts: TSUIntV2,
+    phantom: PhantomData<E>,
 }
 
 impl<E: ExtensionField> InstructionV2<E> for AddInstruction {
