@@ -1,4 +1,9 @@
-use std::{borrow::Cow, mem, sync::Arc};
+use std::{
+    any::{Any, TypeId},
+    borrow::Cow,
+    mem,
+    sync::Arc,
+};
 
 use crate::{op_mle, util::ceil_log2};
 use ark_std::{end_timer, rand::RngCore, start_timer};
@@ -131,7 +136,35 @@ impl<E: ExtensionField> Into<Arc<dyn MultilinearExtension<E, Output = Self>>>
 
 pub type ArcDenseMultilinearExtension<E> = Arc<DenseMultilinearExtension<E>>;
 
+fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
+    let length = vec.len();
+    let capacity = vec.capacity();
+    let ptr = vec.as_mut_ptr();
+    // Prevent `vec` from dropping its contents
+    mem::forget(vec);
+
+    // Convert the pointer to the new type
+    let new_ptr = ptr as *mut B;
+
+    // Create a new vector with the same length and capacity, but different type
+    unsafe { Vec::from_raw_parts(new_ptr, length, capacity) }
+}
+
 impl<E: ExtensionField> DenseMultilinearExtension<E> {
+    pub fn from_evaluation_vec_smart<T: Clone + 'static>(
+        num_vars: usize,
+        evaluations: Vec<T>,
+    ) -> Self {
+        if TypeId::of::<T>() == TypeId::of::<E>() {
+            return Self::from_evaluations_ext_vec(num_vars, cast_vec(evaluations.to_vec()));
+        }
+
+        if TypeId::of::<T>() == TypeId::of::<E::BaseField>() {
+            return Self::from_evaluations_vec(num_vars, cast_vec(evaluations.to_vec()));
+        }
+        unimplemented!("type not support")
+    }
+
     /// Construct a new polynomial from a list of evaluations where the index
     /// represents a point in {0,1}^`num_vars` in little endian form. For
     /// example, `0b1011` represents `P(1,1,0,1)`
@@ -955,7 +988,6 @@ macro_rules! commutative_op_mle_pair {
     (|$first:ident, $second:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$first.evaluations(), &$second.evaluations()) {
             ($crate::mle::FieldType::Base(base1), $crate::mle::FieldType::Base(base2)) => {
-                println!("hihih");
                 let $first = if let Some((start, offset)) = $first.evaluations_range() {
                     &base1[start..][..offset]
                 } else {

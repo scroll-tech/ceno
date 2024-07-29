@@ -1,5 +1,3 @@
-use core::num;
-
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -17,8 +15,8 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
             lk_expressions: vec![],
             assert_zero_expressions: vec![],
             assert_zero_sumcheck_expressions: vec![],
-            chip_record_alpha: ExpressionV2::Challenge(0),
-            chip_record_beta: ExpressionV2::Challenge(1),
+            chip_record_alpha: ExpressionV2::Challenge(0, 1, E::ONE, E::ZERO),
+            chip_record_beta: ExpressionV2::Challenge(1, 1, E::ONE, E::ZERO),
             phantom: std::marker::PhantomData,
         }
     }

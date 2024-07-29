@@ -24,16 +24,16 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub memory_ts: TSUIntV2,
     pub clk: WitIn,
     phantom: PhantomData<E>,
-    prev_rd_memory_value: singer_utils::unit_v2::UIntV2<64, 32>,
-    addend_0: singer_utils::unit_v2::UIntV2<64, 32>,
-    addend_1: singer_utils::unit_v2::UIntV2<64, 32>,
-    outcome: singer_utils::unit_v2::UIntV2<64, 32>,
-    rs1_id: WitIn,
-    rs2_id: WitIn,
-    rd_id: WitIn,
-    prev_rs1_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
-    prev_rs2_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
-    prev_rd_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
+    pub prev_rd_memory_value: singer_utils::unit_v2::UIntV2<64, 32>,
+    pub addend_0: singer_utils::unit_v2::UIntV2<64, 32>,
+    pub addend_1: singer_utils::unit_v2::UIntV2<64, 32>,
+    pub outcome: singer_utils::unit_v2::UIntV2<64, 32>,
+    pub rs1_id: WitIn,
+    pub rs2_id: WitIn,
+    pub rd_id: WitIn,
+    pub prev_rs1_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
+    pub prev_rs2_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
+    pub prev_rd_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
 }
 
 impl<E: ExtensionField> InstructionV2<E> for AddInstruction {
@@ -114,10 +114,15 @@ impl<E: ExtensionField> InstructionV2<E> for AddInstruction {
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeMap;
+
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
+    use gkr::util::ceil_log2;
     use goldilocks::{Goldilocks, GoldilocksExt2};
+    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use simple_frontend::structs::WitnessId;
     use singer_utils::{structs_v2::CircuitBuilderV2, util_v2::InstructionV2};
     use transcript::{Challenge, Transcript};
 
@@ -131,17 +136,36 @@ mod test {
         // challenges
         //  { ChallengeConst { challenge: 1, exp: i }: [Goldilocks(c^i)] }
         let c = GoldilocksExt2::from(6u64);
+        let mut rng = test_rng();
 
         let mut circuit_builder = CircuitBuilderV2::<GoldilocksExt2>::new();
         let _ = AddInstruction::construct_circuit(&mut circuit_builder);
         let circuit = circuit_builder.finalize_circuit();
 
+        // generate mock witness
+        let mut wits_in = BTreeMap::new();
+        let num_instances = 4;
+        (0..circuit.num_witin as usize).for_each(|witness_id| {
+            wits_in.insert(
+                witness_id as WitnessId,
+                DenseMultilinearExtension::from_evaluations_vec(
+                    ceil_log2(num_instances),
+                    (0..num_instances)
+                        .map(|_| Goldilocks::random(&mut rng))
+                        .collect(),
+                ),
+            );
+        });
+
         // get proof
         let prover = ZKVMProver::new(circuit);
         let challenges = vec![1.into(), 2.into()];
-        let proof = prover.create_proof(&challenges);
 
-        println!("circuit_builder {:?}", circuit_builder);
+        let _ = prover
+            .create_proof(wits_in, num_instances, &challenges)
+            .expect("create_proof failed");
+
+        // println!("circuit_builder {:?}", circuit_builder);
     }
 
     fn bench_add_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {

@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
+use simple_frontend::structs::WitnessId;
 
 use crate::util_v2::ExpressionV2;
 
@@ -8,7 +9,7 @@ use crate::util_v2::ExpressionV2;
 // TODO it's a bit weird for the circuit builder to be clonable. Might define a internal meta for it
 // maybe we should move all of them to a meta object and make CircuitBuilder stateless.
 pub struct CircuitBuilderV2<E: ExtensionField> {
-    pub(crate) num_witin: usize,
+    pub(crate) num_witin: WitnessId,
     pub r_expressions: Vec<ExpressionV2<E>>,
     pub w_expressions: Vec<ExpressionV2<E>>,
     /// lookup expression
@@ -27,7 +28,7 @@ pub struct CircuitBuilderV2<E: ExtensionField> {
 }
 
 pub struct Circuit<E: ExtensionField> {
-    pub(crate) num_witin: usize,
+    pub num_witin: WitnessId,
     pub r_expressions: Vec<ExpressionV2<E>>,
     pub w_expressions: Vec<ExpressionV2<E>>,
     /// lookup expression
