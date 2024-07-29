@@ -221,6 +221,7 @@ pub trait InstructionGraph<E: ExtensionField> {
         real_n_instances: usize,
         _: &SingerParams,
     ) -> Result<Option<NodeOutputType>, ZKVMError> {
+        assert_eq!(sources.len(), 1, "unknown source length");
         let inst_circuit = &inst_circuits[0];
         let inst_wires_in = mem::take(&mut sources[0]);
         let node_id = graph_builder.add_node_with_witness(

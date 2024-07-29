@@ -76,6 +76,7 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
                         ),
                     };
                     let old_num_instances = self.witness.node_witnesses[*id].n_instances();
+                    // TODO find way to avoid expensive clone for wit_in
                     let new_instances = match pred {
                         PredType::PredWire(_) => {
                             let new_size = (old_num_instances * out[0].len()) / num_instances;

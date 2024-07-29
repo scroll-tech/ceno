@@ -9,15 +9,15 @@ use singer_utils::chip_handler::ram_handler::RAMHandler;
 use singer_utils::chip_handler::range::RangeChip;
 use singer_utils::chip_handler::rom_handler::ROMHandler;
 use singer_utils::chip_handler::stack::StackChip;
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, StackUInt, TSUInt},
+    uint::constants::AddSubConstants,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -137,7 +137,6 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
 #[cfg(test)]
 mod test {
     use ark_std::test_rng;
-    use core::ops::Range;
     use ff::Field;
     use ff_ext::ExtensionField;
     use gkr::structs::LayerWitness;
@@ -145,44 +144,20 @@ mod test {
     use itertools::Itertools;
     use std::collections::BTreeMap;
 
-    use crate::instructions::{ChipChallenges, Instruction, PopInstruction};
-    use crate::test::{get_uint_params, test_opcode_circuit, u2vec};
-    use simple_frontend::structs::CellId;
-    use singer_utils::constants::RANGE_CHIP_BIT_WIDTH;
-    use singer_utils::structs::TSUInt;
+    use crate::{
+        instructions::{ChipChallenges, Instruction, PopInstruction},
+        test::{get_uint_params, test_opcode_circuit},
+        utils::u64vec,
+    };
+    use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
     use std::time::Instant;
     use transcript::Transcript;
 
-    use crate::instructions::{InstructionGraph, SingerCircuitBuilder};
-    use crate::scheme::GKRGraphProverState;
-    use crate::{CircuitWiresIn, SingerGraphBuilder, SingerParams};
-
-    impl PopInstruction {
-        #[inline]
-        fn phase0_idxes_map() -> BTreeMap<String, Range<CellId>> {
-            let mut map = BTreeMap::new();
-            map.insert("phase0_pc".to_string(), Self::phase0_pc());
-            map.insert("phase0_stack_ts".to_string(), Self::phase0_stack_ts());
-            map.insert("phase0_memory_ts".to_string(), Self::phase0_memory_ts());
-            map.insert("phase0_stack_top".to_string(), Self::phase0_stack_top());
-            map.insert("phase0_clk".to_string(), Self::phase0_clk());
-            map.insert("phase0_pc_add".to_string(), Self::phase0_pc_add());
-            map.insert(
-                "phase0_old_stack_ts".to_string(),
-                Self::phase0_old_stack_ts(),
-            );
-            map.insert(
-                "phase0_old_stack_ts_lt".to_string(),
-                Self::phase0_old_stack_ts_lt(),
-            );
-            map.insert(
-                "phase0_stack_values".to_string(),
-                Self::phase0_stack_values(),
-            );
-
-            map
-        }
-    }
+    use crate::{
+        instructions::{InstructionGraph, SingerCircuitBuilder},
+        scheme::GKRGraphProverState,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
+    };
 
     #[test]
     fn test_pop_construct_circuit() {
@@ -221,7 +196,7 @@ mod test {
             vec![Goldilocks::from(1u64)],
         );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
-        let range_values = u2vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             "phase0_old_stack_ts_lt".to_string(),
             vec![
@@ -260,6 +235,7 @@ mod test {
         );
     }
 
+    #[cfg(not(debug_assertions))]
     fn bench_pop_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
@@ -317,6 +293,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_pop_instruction() {
         bench_pop_instruction_helper::<GoldilocksExt2>(10);
     }

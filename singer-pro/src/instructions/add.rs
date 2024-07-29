@@ -14,9 +14,9 @@ use singer_utils::{
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
+use std::{collections::BTreeMap, sync::Arc};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},

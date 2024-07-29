@@ -20,7 +20,7 @@ use singer_utils::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::{mem, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{
     component::{

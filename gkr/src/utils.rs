@@ -176,7 +176,7 @@ pub fn eq4_eval<E: ExtensionField>(x: &[E], y: &[E], z: &[E], w: &[E]) -> E {
     res
 }
 
-pub fn tensor_product<F: SmallField>(a: &[F], b: &[F]) -> Vec<F> {
+pub fn tensor_product<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
     let mut res = vec![F::ZERO; a.len() * b.len()];
     for i in 0..a.len() {
         for j in 0..b.len() {

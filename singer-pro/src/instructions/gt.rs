@@ -13,7 +13,7 @@ use singer_utils::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},

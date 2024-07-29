@@ -1,18 +1,17 @@
-use std::cmp::max;
-use std::mem;
-use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use std::{cmp::max, collections::HashMap, marker::PhantomData, mem, sync::Arc};
 
-use crate::mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension};
-use crate::util::bit_decompose;
-use ark_std::rand::Rng;
-use ark_std::{end_timer, start_timer};
-use ff::Field;
-use ff::PrimeField;
+use crate::{
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
+    util::bit_decompose,
+};
+use ark_std::{end_timer, rand::Rng, start_timer};
+use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
-use rayon::iter::IntoParallelIterator;
-use rayon::iter::IntoParallelRefIterator;
-use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
-use rayon::slice::ParallelSliceMut;
+use rayon::{
+    iter::{IntoParallelIterator, IntoParallelRefIterator},
+    prelude::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use serde::{Deserialize, Serialize};
 
 #[rustfmt::skip]

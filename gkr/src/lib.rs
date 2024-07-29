@@ -11,5 +11,7 @@ pub mod unsafe_utils;
 pub mod utils;
 mod verifier;
 
+pub use sumcheck::util;
+
 #[cfg(test)]
 mod test;

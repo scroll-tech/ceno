@@ -503,6 +503,7 @@ mod test {
     use transcript::Transcript;
 
     // A benchmark containing `n_adds_in_bb` ADD instructions in a basic block.
+    #[cfg(not(debug_assertions))]
     fn bench_bb_helper<E: ExtensionField>(instance_num_vars: usize, n_adds_in_bb: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
@@ -612,6 +613,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_bb() {
         bench_bb_helper::<GoldilocksExt2>(10, 5);
     }
