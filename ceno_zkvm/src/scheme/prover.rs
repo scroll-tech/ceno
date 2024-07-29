@@ -14,6 +14,7 @@ use rayon::iter::{
 };
 use simple_frontend::structs::WitnessId;
 use singer_utils::structs_v2::Circuit;
+use transcript::Transcript;
 
 use crate::error::ZKVMError;
 
@@ -31,6 +32,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         &self,
         witnesses: BTreeMap<WitnessId, DenseMultilinearExtension<E>>,
         num_instances: usize,
+        _transcript: &mut Transcript<E>,
         challenges: &[E],
     ) -> Result<ZKVMProof, ZKVMError> {
         let circuit = &self.circuit;
@@ -150,8 +152,9 @@ impl<E: ExtensionField> ZKVMProver<E> {
             })
             .collect();
         let (r_records_wit, w_records_wit) = records_wit.split_at(circuit.r_expressions.len());
-        println!("r_records_wit {:?}", r_records_wit);
+        println!("r_records_wit {:?}", r_records_wit,);
 
+        println!("w_records_wit {:?}", w_records_wit);
         exit_span!(span);
 
         // construct main constraint sumcheck virtual polynomial

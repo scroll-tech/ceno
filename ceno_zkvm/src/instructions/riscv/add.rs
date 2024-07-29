@@ -24,16 +24,16 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub memory_ts: TSUIntV2,
     pub clk: WitIn,
     phantom: PhantomData<E>,
-    pub prev_rd_memory_value: singer_utils::unit_v2::UIntV2<64, 32>,
-    pub addend_0: singer_utils::unit_v2::UIntV2<64, 32>,
-    pub addend_1: singer_utils::unit_v2::UIntV2<64, 32>,
-    pub outcome: singer_utils::unit_v2::UIntV2<64, 32>,
+    pub prev_rd_memory_value: UInt64V2,
+    pub addend_0: UInt64V2,
+    pub addend_1: UInt64V2,
+    pub outcome: UInt64V2,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
-    pub prev_rs1_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
-    pub prev_rs2_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
-    pub prev_rd_memory_ts: singer_utils::unit_v2::UIntV2<48, 48>,
+    pub prev_rs1_memory_ts: TSUIntV2,
+    pub prev_rs2_memory_ts: TSUIntV2,
+    pub prev_rd_memory_ts: TSUIntV2,
 }
 
 impl<E: ExtensionField> InstructionV2<E> for AddInstruction {
@@ -124,7 +124,7 @@ mod test {
     use multilinear_extensions::mle::DenseMultilinearExtension;
     use simple_frontend::structs::WitnessId;
     use singer_utils::{structs_v2::CircuitBuilderV2, util_v2::InstructionV2};
-    use transcript::{Challenge, Transcript};
+    use transcript::Transcript;
 
     use crate::scheme::prover::ZKVMProver;
 
@@ -132,10 +132,6 @@ mod test {
 
     #[test]
     fn test_add_construct_circuit() {
-        // The actual challenges used is:
-        // challenges
-        //  { ChallengeConst { challenge: 1, exp: i }: [Goldilocks(c^i)] }
-        let c = GoldilocksExt2::from(6u64);
         let mut rng = test_rng();
 
         let mut circuit_builder = CircuitBuilderV2::<GoldilocksExt2>::new();
@@ -159,71 +155,17 @@ mod test {
 
         // get proof
         let prover = ZKVMProver::new(circuit);
+        let mut transcript = Transcript::new(b"riscv");
         let challenges = vec![1.into(), 2.into()];
 
         let _ = prover
-            .create_proof(wits_in, num_instances, &challenges)
+            .create_proof(wits_in, num_instances, &mut transcript, &challenges)
             .expect("create_proof failed");
 
         // println!("circuit_builder {:?}", circuit_builder);
     }
 
-    fn bench_add_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
-        // let chip_challenges = ChipChallenges::default();
-        // let circuit_builder =
-        //     SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
-        // let mut singer_builder = SingerGraphBuilder::<E>::new();
-
-        // let mut rng = test_rng();
-        // let size = AddInstruction::phase0_size();
-        // let phase0: CircuitWiresIn<E> = vec![
-        //     (0..(1 << instance_num_vars))
-        //         .map(|_| {
-        //             (0..size)
-        //                 .map(|_| E::BaseField::random(&mut rng))
-        //                 .collect_vec()
-        //         })
-        //         .collect_vec()
-        //         .into(),
-        // ];
-
-        // let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
-
-        // let timer = Instant::now();
-
-        // let _ = AddInstruction::construct_graph_and_witness(
-        //     &mut singer_builder.graph_builder,
-        //     &mut singer_builder.chip_builder,
-        //     &circuit_builder.insts_circuits[<AddInstruction as Instruction<E>>::OPCODE as usize],
-        //     vec![phase0],
-        //     &real_challenges,
-        //     1 << instance_num_vars,
-        //     &SingerParams::default(),
-        // )
-        // .expect("gkr graph construction failed");
-
-        // let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
-
-        // println!(
-        //     "AddInstruction::construct_graph_and_witness, instance_num_vars = {}, time = {}",
-        //     instance_num_vars,
-        //     timer.elapsed().as_secs_f64()
-        // );
-
-        // let point = vec![E::random(&mut rng), E::random(&mut rng)];
-        // let target_evals = graph.target_evals(&wit, &point);
-
-        // let mut prover_transcript = &mut Transcript::new(b"Singer");
-
-        // let timer = Instant::now();
-        // let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
-        //     .expect("prove failed");
-        // println!(
-        //     "AddInstruction::prove, instance_num_vars = {}, time = {}",
-        //     instance_num_vars,
-        //     timer.elapsed().as_secs_f64()
-        // );
-    }
+    fn bench_add_instruction_helper<E: ExtensionField>(_instance_num_vars: usize) {}
 
     #[test]
     fn bench_add_instruction() {
