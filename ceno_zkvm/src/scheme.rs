@@ -1,3 +1,10 @@
-pub mod prover;
+use ff_ext::ExtensionField;
+use gkr::structs::PointAndEval;
 
-pub struct ZKVMProof {}
+pub mod prover;
+pub mod verifier;
+
+#[derive(Clone)]
+pub struct ZKVMProof<E: ExtensionField> {
+    pub input_point_and_evals: Vec<PointAndEval<E>>,
+}

@@ -119,14 +119,14 @@ mod test {
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
-    use gkr::util::ceil_log2;
+    use gkr::{structs::PointAndEval, util::ceil_log2};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use multilinear_extensions::mle::DenseMultilinearExtension;
     use simple_frontend::structs::WitnessId;
     use singer_utils::{structs_v2::CircuitBuilderV2, util_v2::InstructionV2};
     use transcript::Transcript;
 
-    use crate::scheme::prover::ZKVMProver;
+    use crate::scheme::{prover::ZKVMProver, verifier::ZKVMVerifier};
 
     use super::AddInstruction;
 
@@ -154,14 +154,24 @@ mod test {
         });
 
         // get proof
-        let prover = ZKVMProver::new(circuit);
+        let prover = ZKVMProver::new(circuit.clone()); // circuit clone due to verifier alos need circuit reference
         let mut transcript = Transcript::new(b"riscv");
         let challenges = vec![1.into(), 2.into()];
 
-        let _ = prover
+        let proof = prover
             .create_proof(wits_in, num_instances, &mut transcript, &challenges)
             .expect("create_proof failed");
 
+        let verifier = ZKVMVerifier::new(circuit);
+        let mut v_transcript = Transcript::new(b"riscv");
+        verifier
+            .verify(
+                &proof,
+                &mut v_transcript,
+                &PointAndEval::default(),
+                &challenges,
+            )
+            .expect("verifier failed");
         // println!("circuit_builder {:?}", circuit_builder);
     }
 

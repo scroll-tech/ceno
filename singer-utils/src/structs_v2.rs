@@ -27,6 +27,7 @@ pub struct CircuitBuilderV2<E: ExtensionField> {
     pub(crate) phantom: PhantomData<E>,
 }
 
+#[derive(Clone, Debug)]
 pub struct Circuit<E: ExtensionField> {
     pub num_witin: WitnessId,
     pub r_expressions: Vec<ExpressionV2<E>>,

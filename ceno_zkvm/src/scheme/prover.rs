@@ -20,6 +20,7 @@ use crate::error::ZKVMError;
 
 use super::ZKVMProof;
 
+const MIN_PAR_SIZE: usize = 64;
 pub struct ZKVMProver<E: ExtensionField> {
     circuit: Circuit<E>,
 }
@@ -34,7 +35,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         num_instances: usize,
         _transcript: &mut Transcript<E>,
         challenges: &[E],
-    ) -> Result<ZKVMProof, ZKVMError> {
+    ) -> Result<ZKVMProof<E>, ZKVMError> {
         let circuit = &self.circuit;
         let log2_instances = ceil_log2(num_instances);
         let next_pow2_instances = 1 << log2_instances;
@@ -45,8 +46,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
             v.num_vars() == log2_instances && v.evaluations().len() == next_pow2_instances
         });
 
-        // main constraint: read record witness inference
-        let span = entered_span!("inference::read_record_evaluation");
+        // main constraint: read/write record witness inference
+        let span = entered_span!("wit_inference::record");
         let records_wit: Vec<ArcMultilinearExtension<'_, E>> = circuit
             .r_expressions
             .iter()
@@ -70,7 +71,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
                         scalar
                     },
                     &|challenge_id, pow, scalar, offset| {
-                        // TODO cache challenge power to be aquire once
+                        // TODO cache challenge power to be aquire once for each power
                         let challenge = challenges[challenge_id as usize];
                         let challenge: ArcMultilinearExtension<E> =
                             Arc::new(DenseMultilinearExtension::from_evaluations_ext_vec(
@@ -91,13 +92,19 @@ impl<E: ExtensionField> ZKVMProver<E> {
                                 (1, _) => {
                                     Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
                                         ceil_log2(b.len()),
-                                        b.par_iter().with_min_len(64).map(|b| a[0] + *b).collect(),
+                                        b.par_iter()
+                                            .with_min_len(MIN_PAR_SIZE)
+                                            .map(|b| a[0] + *b)
+                                            .collect(),
                                     ))
                                 }
                                 (_, 1) => {
                                     Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
                                         ceil_log2(a.len()),
-                                        a.par_iter().with_min_len(64).map(|a| *a + b[0]).collect(),
+                                        a.par_iter()
+                                            .with_min_len(MIN_PAR_SIZE)
+                                            .map(|a| *a + b[0])
+                                            .collect(),
                                     ))
                                 }
                                 (_, _) => {
@@ -105,7 +112,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
                                         ceil_log2(a.len()),
                                         a.par_iter()
                                             .zip(b.par_iter())
-                                            .with_min_len(64)
+                                            .with_min_len(MIN_PAR_SIZE)
                                             .map(|(a, b)| *a + b)
                                             .collect(),
                                     ))
@@ -125,13 +132,19 @@ impl<E: ExtensionField> ZKVMProver<E> {
                                 (1, _) => {
                                     Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
                                         ceil_log2(b.len()),
-                                        b.par_iter().with_min_len(64).map(|b| a[0] * *b).collect(),
+                                        b.par_iter()
+                                            .with_min_len(MIN_PAR_SIZE)
+                                            .map(|b| a[0] * *b)
+                                            .collect(),
                                     ))
                                 }
                                 (_, 1) => {
                                     Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
                                         ceil_log2(a.len()),
-                                        a.par_iter().with_min_len(64).map(|a| *a * b[0]).collect(),
+                                        a.par_iter()
+                                            .with_min_len(MIN_PAR_SIZE)
+                                            .map(|a| *a * b[0])
+                                            .collect(),
                                     ))
                                 }
                                 (_, _) => {
@@ -144,7 +157,10 @@ impl<E: ExtensionField> ZKVMProver<E> {
                         op_mle!(|a| {
                             Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
                                 ceil_log2(a.len()),
-                                a.par_iter().with_min_len(64).map(|a| scalar * a).collect(),
+                                a.par_iter()
+                                    .with_min_len(MIN_PAR_SIZE)
+                                    .map(|a| scalar * a)
+                                    .collect(),
                             ))
                         })
                     },
@@ -153,15 +169,27 @@ impl<E: ExtensionField> ZKVMProver<E> {
             .collect();
         let (r_records_wit, w_records_wit) = records_wit.split_at(circuit.r_expressions.len());
         println!("r_records_wit {:?}", r_records_wit,);
-
         println!("w_records_wit {:?}", w_records_wit);
         exit_span!(span);
 
-        // construct main constraint sumcheck virtual polynomial
+        // product constraint: tower witness inference
+        let span = entered_span!("wit_inference::tower_witness");
+        // TODO
+        // we dont make the last layer as new vector to save memory
+        exit_span!(span);
 
-        // build first part of sumcheck: selector
-        // circuit.
+        // product constraint tower sumcheck
+        let span = entered_span!("sumcheck::tower");
+        // TODO
+        exit_span!(span);
 
-        Ok(ZKVMProof {})
+        // main constraints degree > 1 + selector sumcheck
+        let span = entered_span!("sumcheck::main_sel");
+        // TODO
+        exit_span!(span);
+
+        Ok(ZKVMProof {
+            input_point_and_evals: vec![],
+        })
     }
 }
