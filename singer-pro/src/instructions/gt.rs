@@ -2,18 +2,15 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
-use singer_utils::chip_handler::range::RangeChip;
-use singer_utils::chip_handler::rom_handler::ROMHandler;
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
+    chip_handler::{range::RangeChip, rom_handler::ROMHandler},
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
+    uint::constants::AddSubConstants,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},

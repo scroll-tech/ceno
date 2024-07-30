@@ -4,18 +4,14 @@ use gkr::structs::Circuit;
 use itertools::izip;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::chip_handler::bytecode::BytecodeChip;
-use singer_utils::chip_handler::range::RangeChip;
-use singer_utils::chip_handler::rom_handler::ROMHandler;
 use singer_utils::{
+    chip_handler::{bytecode::BytecodeChip, range::RangeChip, rom_handler::ROMHandler},
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, StackUInt, TSUInt},
 };
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},

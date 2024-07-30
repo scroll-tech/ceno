@@ -19,7 +19,14 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         }
     }
 
-    pub fn read(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, old_ts: &[CellId], cur_ts: &[CellId], key: &[CellId], value: &[CellId]) {
+    pub fn read(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<Ext>,
+        old_ts: &[CellId],
+        cur_ts: &[CellId],
+        key: &[CellId],
+        value: &[CellId],
+    ) {
         self.read_oam(circuit_builder, old_ts, key, value);
         self.write_oam(circuit_builder, cur_ts, key, value);
     }

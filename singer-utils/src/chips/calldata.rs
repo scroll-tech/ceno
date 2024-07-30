@@ -1,6 +1,4 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use crate::{
     error::UtilError,
@@ -8,8 +6,7 @@ use crate::{
 };
 
 use super::ChipCircuitGadgets;
-use crate::chip_handler::calldata::CalldataChip;
-use crate::chip_handler::rom_handler::ROMHandler;
+use crate::chip_handler::{calldata::CalldataChip, rom_handler::ROMHandler};
 use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};

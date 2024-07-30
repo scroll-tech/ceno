@@ -1,15 +1,14 @@
-use crate::chip_handler::rom_handler::ROMHandler;
-use crate::chip_handler::util::cell_to_mixed;
-use crate::constants::{RANGE_CHIP_BIT_WIDTH, STACK_TOP_BIT_WIDTH};
-use crate::error::UtilError;
-use crate::structs::{PCUInt, TSUInt};
-use crate::uint::UInt;
+use crate::{
+    chip_handler::{rom_handler::ROMHandler, util::cell_to_mixed},
+    constants::{RANGE_CHIP_BIT_WIDTH, STACK_TOP_BIT_WIDTH},
+    error::UtilError,
+    structs::{PCUInt, TSUInt},
+    uint::UInt,
+};
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
-use std::cell::RefCell;
-use std::io::Read;
-use std::rc::Rc;
+use std::{cell::RefCell, io::Read, rc::Rc};
 
 pub struct RangeChip<Ext: ExtensionField> {
     rom_handler: Rc<RefCell<ROMHandler<Ext>>>,

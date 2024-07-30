@@ -3,18 +3,15 @@ use gkr::structs::Circuit;
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::chip_handler::ram_handler::RAMHandler;
-use singer_utils::chip_handler::range::RangeChip;
-use singer_utils::chip_handler::rom_handler::ROMHandler;
-use singer_utils::chip_handler::stack::StackChip;
 use singer_utils::{
+    chip_handler::{
+        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+    },
     chips::IntoEnumIterator,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
 };
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use crate::{
     component::{

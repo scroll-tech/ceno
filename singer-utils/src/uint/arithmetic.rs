@@ -1,6 +1,4 @@
-use crate::chip_handler::range::RangeChip;
-use crate::error::UtilError;
-use crate::uint::uint::UInt;
+use crate::{chip_handler::range::RangeChip, error::UtilError, uint::uint::UInt};
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder};

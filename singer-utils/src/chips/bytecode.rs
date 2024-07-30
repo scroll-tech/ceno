@@ -1,6 +1,4 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, LayerWitness};
@@ -9,9 +7,8 @@ use itertools::Itertools;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use sumcheck::util::ceil_log2;
 
-use crate::chip_handler::bytecode::BytecodeChip;
-use crate::chip_handler::rom_handler::ROMHandler;
 use crate::{
+    chip_handler::{bytecode::BytecodeChip, rom_handler::ROMHandler},
     error::UtilError,
     structs::{ChipChallenges, PCUInt},
 };

@@ -2,16 +2,14 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
-use singer_utils::chip_handler::calldata::CalldataChip;
 use singer_utils::{
+    chip_handler::calldata::CalldataChip,
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt, UInt64},
 };
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},

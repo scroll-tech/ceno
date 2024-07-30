@@ -1,11 +1,11 @@
-use crate::chip_handler::ram_handler::RAMHandler;
-use crate::chip_handler::util::cell_to_mixed;
-use crate::structs::RAMType;
+use crate::{
+    chip_handler::{ram_handler::RAMHandler, util::cell_to_mixed},
+    structs::RAMType,
+};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder, MixedCell};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 pub struct GlobalStateChip<Ext: ExtensionField> {
     ram_handler: Rc<RefCell<RAMHandler<Ext>>>,

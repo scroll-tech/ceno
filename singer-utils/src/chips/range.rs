@@ -1,15 +1,16 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use simple_frontend::structs::CircuitBuilder;
 
-use crate::chip_handler::range::RangeChip;
-use crate::chip_handler::rom_handler::ROMHandler;
-use crate::{constants::RANGE_CHIP_BIT_WIDTH, error::UtilError, structs::ChipChallenges};
+use crate::{
+    chip_handler::{range::RangeChip, rom_handler::ROMHandler},
+    constants::RANGE_CHIP_BIT_WIDTH,
+    error::UtilError,
+    structs::ChipChallenges,
+};
 
 fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
     let mut circuit_builder = CircuitBuilder::<E>::new();

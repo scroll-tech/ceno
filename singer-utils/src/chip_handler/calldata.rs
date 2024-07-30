@@ -1,11 +1,11 @@
-use crate::chip_handler::rom_handler::ROMHandler;
-use crate::chip_handler::util::cell_to_mixed;
-use crate::structs::ROMType;
+use crate::{
+    chip_handler::{rom_handler::ROMHandler, util::cell_to_mixed},
+    structs::ROMType,
+};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 pub struct CalldataChip<Ext: ExtensionField> {
     rom_handler: Rc<RefCell<ROMHandler<Ext>>>,

@@ -1,12 +1,13 @@
-use crate::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState, PointAndEval};
-use crate::utils::MultilinearExtensionFromVectors;
+use crate::{
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState, PointAndEval},
+    utils::MultilinearExtensionFromVectors,
+};
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
-use std::iter;
-use std::time::Duration;
+use std::{iter, time::Duration};
 use transcript::Transcript;
 
 // build an IsZero Gadget
@@ -75,7 +76,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     };
     println!("circuit witness: {:?}", circuit_witness);
     // use of check_correctness will panic
-    //circuit_witness.check_correctness(&circuit);
+    // circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
@@ -232,7 +233,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     };
     println!("circuit witness: {:?}", circuit_witness);
     // use of check_correctness will panic
-    //circuit_witness.check_correctness(&circuit);
+    // circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
@@ -305,21 +306,19 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     );
     let proof_time: Duration = start.elapsed();
 
-    /*
     // verifier panics due to mismatch of number of variables
-    let start = std::time::Instant::now();
-    let _claim = IOPVerifierState::verify_parallel(
-        &circuit,
-        &[],
-        &[],
-        &verifier_wires_out_evals,
-        &proof,
-        instance_num_vars,
-        &mut verifier_transcript,
-    ).unwrap();
-    let verification_time: Duration = start.elapsed();
-
-    println!("proof time: {:?}, verification time: {:?}", proof_time, verification_time);
-    */
+    // let start = std::time::Instant::now();
+    // let _claim = IOPVerifierState::verify_parallel(
+    // &circuit,
+    // &[],
+    // &[],
+    // &verifier_wires_out_evals,
+    // &proof,
+    // instance_num_vars,
+    // &mut verifier_transcript,
+    // ).unwrap();
+    // let verification_time: Duration = start.elapsed();
+    //
+    // println!("proof time: {:?}, verification time: {:?}", proof_time, verification_time);
     println!("proof time: {:?}", proof_time);
 }

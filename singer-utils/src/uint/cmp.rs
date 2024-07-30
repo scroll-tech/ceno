@@ -1,5 +1,5 @@
-use crate::chip_handler::range::RangeChip;
 use crate::{
+    chip_handler::range::RangeChip,
     error::UtilError,
     uint::{constants::AddSubConstants, uint::UInt},
 };
@@ -109,7 +109,6 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         }
         Ok(())
     }
-
 
     /// Asserts that a `UInt<M, C>` instance and a set of range cells represent equal value
     pub fn assert_eq_range_values<E: ExtensionField>(

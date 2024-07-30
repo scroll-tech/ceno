@@ -4,23 +4,18 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
-use singer_utils::chip_handler::bytecode::BytecodeChip;
-use singer_utils::chip_handler::global_state::GlobalStateChip;
-use singer_utils::chip_handler::memory::MemoryChip;
-use singer_utils::chip_handler::ram_handler::RAMHandler;
-use singer_utils::chip_handler::range::RangeChip;
-use singer_utils::chip_handler::rom_handler::ROMHandler;
-use singer_utils::chip_handler::stack::StackChip;
 use singer_utils::{
+    chip_handler::{
+        bytecode::BytecodeChip, global_state::GlobalStateChip, memory::MemoryChip,
+        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+    },
     chips::{IntoEnumIterator, SingerChipBuilder},
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
-    uint::constants::AddSubConstants,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
+    uint::constants::AddSubConstants,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::{collections::BTreeMap, mem, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
 
 use crate::{
     component::{

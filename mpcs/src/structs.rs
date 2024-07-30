@@ -68,7 +68,7 @@ pub enum PCSProverMessage<E: ExtensionField> {
         h2: E,              // h(2)
         f_comm: Commitment, // Commitment to the current polynomial
     },
-    Last(DenseMultilinearExtension<E>), // The polynomial sent in the last round in FRI. It won't be very large.
+    Last(DenseMultilinearExtension<E>), /* The polynomial sent in the last round in FRI. It won't be very large. */
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
