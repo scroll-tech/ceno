@@ -153,7 +153,7 @@ mod test {
         let mut transcript = Transcript::new(b"riscv");
         let challenges = vec![1.into(), 2.into()];
 
-        let proof = prover
+        let mut proof = prover
             .create_proof(wits_in, num_instances, &mut transcript, &challenges)
             .expect("create_proof failed");
 
@@ -161,7 +161,7 @@ mod test {
         let mut v_transcript = Transcript::new(b"riscv");
         verifier
             .verify(
-                &proof,
+                &mut proof,
                 &mut v_transcript,
                 &PointAndEval::default(),
                 &challenges,

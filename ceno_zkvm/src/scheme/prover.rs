@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use ark_std::test_rng;
-use ff::Field;
 use ff_ext::ExtensionField;
 use gkr::{entered_span, exit_span};
 use multilinear_extensions::{
@@ -18,12 +17,13 @@ use singer_utils::structs_v2::Circuit;
 use sumcheck::structs::IOPProverStateV2;
 use transcript::Transcript;
 
-use crate::{error::ZKVMError, utils::get_challenge_pows};
+use crate::{
+    error::ZKVMError,
+    scheme::constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, MIN_PAR_SIZE},
+    utils::get_challenge_pows,
+};
 
 use super::ZKVMProof;
-
-const MIN_PAR_SIZE: usize = 64;
-const MAINCONSTRAIN_SUMCHECK_BATCH_SIZE: usize = 2;
 
 pub struct ZKVMProver<E: ExtensionField> {
     circuit: Circuit<E>,
@@ -207,6 +207,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 .take(log2_instances + log2_w_count)
                 .collect(),
         );
+        // TODO fix record_r_eval, record_w_eval
+        let (record_r_eval, record_w_eval) = (E::random(&mut rng), E::random(&mut rng));
         let mut virtual_poly = VirtualPolynomialV2::<E>::new(log2_instances);
         let alpha_pow = get_challenge_pows(MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, transcript);
         let (alpha_read, alpha_write) = (&alpha_pow[0], &alpha_pow[1]);
@@ -219,7 +221,6 @@ impl<E: ExtensionField> ZKVMProver<E> {
         // create selector: all ONE, but padding ZERO to ceil_log2
         let (sel_r, sel_w): (ArcMultilinearExtension<E>, ArcMultilinearExtension<E>) = {
             let mut sel_r = build_eq_x_r_vec(&rt_r[log2_r_count..]);
-            println!("num_instances {}, sel_r {}", num_instances, sel_r.len());
             if num_instances < sel_r.len() {
                 sel_r.splice(num_instances..sel_r.len(), std::iter::repeat(E::ZERO));
             }
@@ -256,20 +257,42 @@ impl<E: ExtensionField> ZKVMProver<E> {
             // \sum_t (sel(rt_w[log2_w_count..], t) * (\sum_i alpha_write * eq(rt_w[..log2_w_count], i) - 1))
             virtual_poly.add_mle_list(vec![sel_w.clone()], eq_w[i] * alpha_write - E::ONE);
         }
-        let (proof, state) = IOPProverStateV2::prove_parallel(virtual_poly, transcript);
-        let evals = state.get_mle_final_evaluations();
+        let (main_sel_sumcheck_proofs, state) =
+            IOPProverStateV2::prove_parallel(virtual_poly, transcript);
+        let main_sel_evals = state.get_mle_final_evaluations();
         assert_eq!(
-            evals.len(),
+            main_sel_evals.len(),
             r_counts_per_instance + w_counts_per_instance + 2
         ); // 2 from [sel_r, sel_w]
-        let point = proof.point.clone();
-        println!("evals {:?}", evals,);
-        println!("point {:?}", point);
+        let r_records_in_evals = main_sel_evals.as_slice()[1..][..r_counts_per_instance].to_vec();
+        let w_records_in_evals = main_sel_evals.as_slice()[2 + r_counts_per_instance..]
+            [..w_counts_per_instance]
+            .to_vec();
+        assert!(
+            r_records_in_evals.len() == r_counts_per_instance
+                && w_records_in_evals.len() == w_counts_per_instance
+        );
+        let input_open_point = main_sel_sumcheck_proofs.point.clone();
+        assert!(input_open_point.len() == log2_instances);
+        println!("evals {:?}", main_sel_evals,);
+        println!("point {:?}", input_open_point);
+        exit_span!(span);
 
+        let span = entered_span!("witin::evals");
+        let wits_in_evals = witnesses
+            .par_iter()
+            .map(|(_, poly)| poly.evaluate(&input_open_point))
+            .collect();
         exit_span!(span);
 
         Ok(ZKVMProof {
-            input_point_and_evals: vec![],
+            num_instances,
+            out_record_r_eval: record_r_eval,
+            out_record_w_eval: record_w_eval,
+            main_sel_sumcheck_proofs: main_sel_sumcheck_proofs.proofs,
+            r_records_in_evals,
+            w_records_in_evals,
+            wits_in_evals,
         })
     }
 }
