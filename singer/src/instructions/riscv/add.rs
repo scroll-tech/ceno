@@ -43,11 +43,16 @@ register_witness!(
         addend_1 => UInt64::N_OPERAND_CELLS,
         outcome => AddSubConstants::<UInt64>::N_WITNESS_CELLS,
 
+        // the value pointed by `rd` before being written with `outcome`
+        prev_rd_value => UInt64::N_OPERAND_CELLS,
+
         // register timestamps and comparison gadgets
         prev_rs1_ts => TSUInt::N_OPERAND_CELLS,
         prev_rs2_ts => TSUInt::N_OPERAND_CELLS,
+        prev_rd_ts => TSUInt::N_OPERAND_CELLS,
         prev_rs1_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
-        prev_rs2_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS
+        prev_rs2_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS,
+        prev_rd_ts_lt => AddSubConstants::<TSUInt>::N_WITNESS_CELLS
     }
 );
 
@@ -102,6 +107,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         // Register timestamp range check
         let prev_rs1_ts = (&phase0[Self::phase0_prev_rs1_ts()]).try_into()?;
         let prev_rs2_ts = (&phase0[Self::phase0_prev_rs2_ts()]).try_into()?;
+        let prev_rd_ts = (&phase0[Self::phase0_prev_rd_ts()]).try_into()?;
         let memory_ts = (&phase0[Self::phase0_memory_ts()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
@@ -116,6 +122,13 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             &prev_rs2_ts,
             &memory_ts,
             &phase0[Self::phase0_prev_rs2_ts_lt()],
+        )?;
+        TSUInt::assert_lt(
+            &mut circuit_builder,
+            &mut rom_handler,
+            &prev_rd_ts,
+            &memory_ts,
+            &phase0[Self::phase0_prev_rd_ts_lt()],
         )?;
         if cfg!(feature = "dbg-opcode") {
             println!(
@@ -139,6 +152,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         let rs1 = &phase0[Self::phase0_rs1()];
         let rs2 = &phase0[Self::phase0_rs2()];
         let rd = &phase0[Self::phase0_rd()];
+        let prev_rd_value = &phase0[Self::phase0_prev_rd_value()];
         ram_handler.register_read(
             &mut circuit_builder,
             rs1,
@@ -156,9 +170,9 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         ram_handler.register_store(
             &mut circuit_builder,
             rd,
-            &zero_cell_ids,
+            prev_rd_ts.values(),
             memory_ts.values(),
-            &zero_cell_ids,
+            &prev_rd_value,
             result.values(),
         );
 
@@ -284,6 +298,11 @@ mod test {
         phase0_values_map.insert(AddInstruction::phase0_outcome_str(), wit_phase0_outcome);
 
         phase0_values_map.insert(
+            AddInstruction::phase0_prev_rd_value_str(),
+            vec![Goldilocks::from(33u64)],
+        );
+
+        phase0_values_map.insert(
             AddInstruction::phase0_prev_rs1_ts_str(),
             vec![Goldilocks::from(2u64)],
         );
@@ -306,6 +325,21 @@ mod test {
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
             AddInstruction::phase0_prev_rs2_ts_lt_str(),
+            vec![
+                Goldilocks::from(range_values[0]),
+                Goldilocks::from(range_values[1]),
+                Goldilocks::from(range_values[2]),
+                Goldilocks::from(1u64), // borrow
+            ],
+        );
+        phase0_values_map.insert(
+            AddInstruction::phase0_prev_rd_ts_str(),
+            vec![Goldilocks::from(2u64)],
+        );
+        let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
+        let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
+        phase0_values_map.insert(
+            AddInstruction::phase0_prev_rd_ts_lt_str(),
             vec![
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
