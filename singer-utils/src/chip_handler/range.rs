@@ -9,6 +9,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::{cell::RefCell, io::Read, rc::Rc};
+use crate::chip_handler::ChipHandler;
 
 pub struct RangeChip<Ext: ExtensionField> {
     rom_handler: Rc<RefCell<ROMHandler<Ext>>>,
@@ -20,7 +21,7 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
     }
 
     pub fn small_range_check(
-        &mut self,
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         value: MixedCell<Ext>,
         bit_width: usize,
@@ -32,39 +33,39 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         let items = [value.mul(Ext::BaseField::from(
             1 << (RANGE_CHIP_BIT_WIDTH - bit_width),
         ))];
-        self.rom_handler
-            .borrow_mut()
+
+        chip_handler.rom_handler
             .read_mixed(circuit_builder, &[], &items);
+
         Ok(())
     }
 
     pub fn range_check_stack_top(
-        &mut self,
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
     ) -> Result<(), UtilError> {
-        self.small_range_check(circuit_builder, stack_top, STACK_TOP_BIT_WIDTH)
+        Self::small_range_check(chip_handler, circuit_builder, stack_top, STACK_TOP_BIT_WIDTH)
     }
 
     pub fn range_check_bytes(
-        &mut self,
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         bytes: &[CellId],
     ) -> Result<(), UtilError> {
         let bytes = cell_to_mixed(bytes);
         for byte in bytes {
-            self.small_range_check(circuit_builder, byte, 8)?
+            Self::small_range_check(chip_handler, circuit_builder, byte, 8)?
         }
         Ok(())
     }
 
     pub fn range_check_table_item(
-        &mut self,
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         item: CellId,
     ) {
-        self.rom_handler
-            .borrow_mut()
+        chip_handler.rom_handler
             .read(circuit_builder, &[], &[item])
     }
 
@@ -144,14 +145,14 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
     }
 
     pub fn non_zero(
-        &mut self,
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         val: CellId,
         wit: CellId,
     ) -> Result<CellId, UtilError> {
         let prod = circuit_builder.create_cell();
         circuit_builder.mul2(prod, val, wit, Ext::BaseField::ONE);
-        self.small_range_check(circuit_builder, prod.into(), 1)?;
+        Self::small_range_check(chip_handler, circuit_builder, prod.into(), 1)?;
 
         let statement = circuit_builder.create_cell();
         // If val != 0, then prod = 1. => assert!( val (prod - 1) = 0 )
@@ -177,7 +178,7 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
     }
 
     pub fn add_ts_with_const(
-        &mut self,
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         ts: &TSUInt,
         constant: i64,
@@ -185,7 +186,7 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
     ) -> Result<TSUInt, UtilError> {
         TSUInt::add_const(
             circuit_builder,
-            self,
+            chip_handler,
             &ts,
             i64_to_base_field::<Ext>(constant),
             witness,
