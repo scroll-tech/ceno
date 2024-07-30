@@ -7,18 +7,13 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::{cell::RefCell, rc::Rc};
+use crate::chip_handler::ChipHandler;
 
-pub struct MemoryChip<Ext: ExtensionField> {
-    ram_handler: Rc<RefCell<RAMHandler<Ext>>>,
-}
+pub struct MemoryChip {}
 
-impl<Ext: ExtensionField> MemoryChip<Ext> {
-    pub fn new(ram_handler: Rc<RefCell<RAMHandler<Ext>>>) -> Self {
-        Self { ram_handler }
-    }
-
-    pub fn read(
-        &self,
+impl MemoryChip {
+    pub fn read<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],
         old_ts: &[CellId],
@@ -34,7 +29,7 @@ impl<Ext: ExtensionField> MemoryChip<Ext> {
         .concat();
         let old_ts = cell_to_mixed(old_ts);
         let cur_ts = cell_to_mixed(cur_ts);
-        self.ram_handler.borrow_mut().read_mixed(
+        chip_handler.ram_handler.read_mixed(
             circuit_builder,
             &old_ts,
             &cur_ts,
@@ -43,8 +38,8 @@ impl<Ext: ExtensionField> MemoryChip<Ext> {
         );
     }
 
-    pub fn write(
-        &self,
+    pub fn write<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],
         old_ts: &[CellId],
@@ -61,7 +56,7 @@ impl<Ext: ExtensionField> MemoryChip<Ext> {
         .concat();
         let old_ts = cell_to_mixed(old_ts);
         let cur_ts = cell_to_mixed(cur_ts);
-        self.ram_handler.borrow_mut().write_mixed(
+        chip_handler.ram_handler.write_mixed(
             circuit_builder,
             &old_ts,
             &cur_ts,
