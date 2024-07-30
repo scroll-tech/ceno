@@ -67,7 +67,7 @@ impl BasicBlockStart {
         let stack_top = phase0[Self::phase0_stack_top(n_stack_items).start];
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk(n_stack_items).start];
-        global_state_chip.state_in(
+        GlobalStateChip::state_in(
             &mut circuit_builder,
             pc,
             stack_ts,
@@ -78,10 +78,10 @@ impl BasicBlockStart {
 
         // Check the of stack_top + offset.
         let stack_top_l = stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[0]));
-        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
+        RangeChip::range_check_stack_top(&mut circuit_builder, stack_top_l)?;
         let stack_top_r =
             stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[n_stack_items - 1]));
-        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
+        RangeChip::range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // pop all elements from the stack.
         let stack_ts = TSUInt::try_from(stack_ts)?;
@@ -90,12 +90,12 @@ impl BasicBlockStart {
                 TSUInt::try_from(&phase0[Self::phase0_old_stack_ts(i, n_stack_items)])?;
             TSUInt::assert_lt(
                 &mut circuit_builder,
-                &mut range_chip,
+                &mut chip_handler,
                 &old_stack_ts,
                 &stack_ts,
                 &phase0[Self::phase0_old_stack_ts_lt(i, n_stack_items)],
             )?;
-            stack_chip.pop(
+            StackChip::pop(
                 &mut circuit_builder,
                 stack_top_expr.add(i64_to_base_field::<E>(*offset)),
                 old_stack_ts.values(),

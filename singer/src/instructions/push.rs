@@ -71,7 +71,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        global_state_chip.state_in(
+        GlobalStateChip::state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -85,14 +85,14 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
             N as i64 + 1,
             &phase0[Self::phase0_pc_add_i_plus_1()],
         )?;
-        let next_stack_ts = range_chip.add_ts_with_const(
+        let next_stack_ts = RangeChip::add_ts_with_const(
             &mut circuit_builder,
             &stack_ts,
             1,
             &phase0[Self::phase0_stack_ts_add()],
         )?;
 
-        global_state_chip.state_out(
+        GlobalStateChip::state_out(
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
@@ -102,12 +102,12 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
         );
 
         // Check the range of stack_top is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_expr)?;
+        RangeChip::range_check_stack_top(&mut circuit_builder, stack_top_expr)?;
 
         let stack_bytes = &phase0[Self::phase0_stack_bytes()];
         let stack_values = StackUInt::from_bytes_big_endian(&mut circuit_builder, stack_bytes)?;
         // Push value to stack
-        stack_chip.push(
+        StackChip::push(
             &mut circuit_builder,
             stack_top_expr,
             stack_ts.values(),
@@ -115,7 +115,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
         );
 
         // Bytecode check for (pc, PUSH{N}), (pc + 1, byte[0]), ..., (pc + N, byte[N - 1])
-        bytecode_chip.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
@@ -126,7 +126,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
         {
             let next_pc =
                 RangeChip::add_pc_const(&mut circuit_builder, &pc, i as i64 + 1, pc_add_i_plus_1)?;
-            bytecode_chip.bytecode_with_pc_byte(
+            BytecodeChip::bytecode_with_pc_byte(
                 &mut circuit_builder,
                 next_pc.values(),
                 stack_bytes[i],

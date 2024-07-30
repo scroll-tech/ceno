@@ -62,7 +62,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         let cond_values_inv = &phase0[Self::phase0_cond_values_inv()];
         let mut cond_values_non_zero = Vec::new();
         for (val, wit) in izip!(cond_values, cond_values_inv) {
-            cond_values_non_zero.push(range_chip.non_zero(&mut circuit_builder, val, *wit)?);
+            cond_values_non_zero.push(RangeChip::non_zero(&mut circuit_builder, val, *wit)?);
         }
         // cond_non_zero = [summation of cond_values_non_zero[i] != 0]
         let non_zero_or = circuit_builder.create_cell();
@@ -71,7 +71,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
             .for_each(|x| circuit_builder.add(non_zero_or, *x, E::BaseField::ONE));
         let cond_non_zero_or_inv = phase0[Self::phase0_cond_non_zero_or_inv().start];
         let cond_non_zero =
-            range_chip.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
+            RangeChip::non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
 
         // If cond_non_zero, next_pc = dest, otherwise, pc = pc + 1
         let pc_plus_1 = &phase0[Self::phase0_pc_plus_1()];
@@ -90,7 +90,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
             cond_non_zero,
         );
         // Check (next_pc, next_opcode) is a valid instruction
-        bytecode_chip.bytecode_with_pc_byte(&mut circuit_builder, &next_pc, next_opcode);
+        BytecodeChip::bytecode_with_pc_byte(&mut circuit_builder, &next_pc, next_opcode);
 
         // To successor instruction
         let (next_memory_ts_id, next_memory_ts) =

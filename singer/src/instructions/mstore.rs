@@ -182,7 +182,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        global_state_chip.state_in(
+        GlobalStateChip::state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -193,13 +193,13 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         let next_pc =
             RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        let next_memory_ts = range_chip.add_ts_with_const(
+        let next_memory_ts = RangeChip::add_ts_with_const(
             &mut circuit_builder,
             &memory_ts,
             1,
             &phase0[Self::phase0_memory_ts_add()],
         )?;
-        global_state_chip.state_out(
+        GlobalStateChip::state_out(
             &mut circuit_builder,
             next_pc.values(),
             stack_ts.values(),
@@ -208,7 +208,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
             clk_expr.add(E::BaseField::ONE),
         );
 
-        range_chip.range_check_stack_top(
+        RangeChip::range_check_stack_top(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
         )?;
@@ -218,12 +218,12 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let old_stack_ts_offset = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_offset()])?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &old_stack_ts_offset,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_offset()],
         )?;
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts_offset.values(),
@@ -232,18 +232,18 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         // Pop mem_bytes from stack
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
-        range_chip.range_check_bytes(&mut circuit_builder, mem_bytes)?;
+        RangeChip::range_check_bytes(&mut circuit_builder, mem_bytes)?;
 
         let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
         let old_stack_ts_value = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_value()])?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &old_stack_ts_value,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_value()],
         )?;
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
             old_stack_ts_value.values(),
@@ -251,7 +251,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         );
 
         // Bytecode check for (pc, mstore)
-        bytecode_chip.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
@@ -344,14 +344,14 @@ impl MstoreAccessory {
         let delta = circuit_builder.create_counter_in(0)[0];
         let offset_plus_delta = StackUInt::add_cell(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &offset,
             delta,
             offset_add_delta,
         )?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &old_memory_ts,
             &memory_ts,
             old_memory_ts_lt,

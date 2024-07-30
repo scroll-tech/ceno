@@ -61,7 +61,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         let addend_1 = addend_1.try_into()?;
         let result = StackUInt::add(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &addend_0,
             &addend_1,
             &phase0[Self::phase0_instruction_add()],

@@ -59,7 +59,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         let stack_top = phase0[Self::phase0_stack_top().start];
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        global_state_chip.state_in(
+        GlobalStateChip::state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -70,7 +70,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
 
         let next_pc =
             RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        global_state_chip.state_out(
+        GlobalStateChip::state_out(
             &mut circuit_builder,
             next_pc.values(),
             stack_ts.values(), // Because there is no stack push.
@@ -80,7 +80,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         );
 
         // Bytecode check for (pc, jump)
-        bytecode_chip.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,

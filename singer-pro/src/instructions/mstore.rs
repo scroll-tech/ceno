@@ -140,7 +140,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         // Update memory timestamp.
         let memory_ts = TSUInt::try_from(memory_ts.as_slice())?;
-        let next_memory_ts = range_chip.add_ts_with_const(
+        let next_memory_ts = RangeChip::add_ts_with_const(
             &mut circuit_builder,
             &memory_ts,
             1,
@@ -152,7 +152,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         // Pop mem_bytes from stack
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
-        range_chip.range_check_bytes(&mut circuit_builder, mem_bytes)?;
+        RangeChip::range_check_bytes(&mut circuit_builder, mem_bytes)?;
 
         let mem_values = StackUInt::try_from(mem_values.as_slice())?;
         let mem_values_from_bytes =
@@ -262,14 +262,14 @@ impl MstoreAccessory {
         let delta = circuit_builder.create_counter_in(0)[0];
         let offset_plus_delta = StackUInt::add_cell(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &offset,
             delta,
             offset_add_delta,
         )?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &old_memory_ts,
             &memory_ts,
             old_memory_ts_lt,

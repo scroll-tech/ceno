@@ -62,10 +62,10 @@ impl BasicBlockReturn {
         // Check the of stack_top + offset.
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
         let stack_top_l = stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[0]));
-        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
+        RangeChip::range_check_stack_top(&mut circuit_builder, stack_top_l)?;
         let stack_top_r =
             stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[n_stack_items - 1]));
-        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
+        RangeChip::range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // From predesessor instruction
         let (memory_ts_id, _) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
@@ -73,7 +73,7 @@ impl BasicBlockReturn {
             .iter()
             .map(|offset| {
                 let (stack_from_insts_id, stack_from_insts) = circuit_builder.create_witness_in(1);
-                stack_chip.push(
+                StackChip::push(
                     &mut circuit_builder,
                     stack_top_expr.add(i64_to_base_field::<E>(*offset)),
                     &stack_ts,
@@ -239,7 +239,7 @@ impl BBReturnRestStackPop {
         let stack_top = circuit_builder.create_counter_in(0);
         let stack_values = &phase0[Self::phase0_stack_values()];
         let old_stack_ts = &phase0[Self::phase0_old_stack_ts()];
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top[0].into(),
             old_stack_ts,

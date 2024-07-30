@@ -58,7 +58,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         let operand_1 = operand_1.try_into()?;
         let (result, _) = StackUInt::lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &operand_0,
             &operand_1,
             &phase0[Self::phase0_instruction_gt()],

@@ -146,7 +146,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let offset_add_delta = &phase0[Self::phase0_offset_add()];
         let offset_plus_delta = StackUInt::add_cell(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &offset,
             delta,
             offset_add_delta,

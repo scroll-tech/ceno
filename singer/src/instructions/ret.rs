@@ -299,7 +299,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let stack_top = phase0[Self::phase0_stack_top().start];
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
-        global_state_chip.state_in(
+        GlobalStateChip::state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -309,7 +309,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         );
 
         // Check the range of stack_top - 2 is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        range_chip.range_check_stack_top(
+        RangeChip::range_check_stack_top(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
         )?;
@@ -317,7 +317,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         // Pop offset and mem_size from stack
         let old_stack_ts0 = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts0()])?;
         let offset = StackUInt::try_from(&phase0[Self::phase0_offset()])?;
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
             old_stack_ts0.values(),
@@ -326,7 +326,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
 
         let old_stack_ts1 = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts1()])?;
         let length = StackUInt::try_from(&phase0[Self::phase0_mem_length()])?;
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
             &old_stack_ts1.values(),
@@ -334,7 +334,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         );
 
         // Bytecode check for (pc, ret)
-        bytecode_chip.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
@@ -416,7 +416,7 @@ impl ReturnPublicOutLoad {
         let offset_add_delta_witness = &phase0[Self::phase0_offset_add()];
         let new_offset = StackUInt::add_cell(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &offset,
             delta[0],
             offset_add_delta_witness,
@@ -580,7 +580,7 @@ impl ReturnRestStackPop {
         let stack_values = &phase0[Self::phase0_stack_values()];
 
         let old_stack_ts = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts()])?;
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top[0].into(),
             old_stack_ts.values(),

@@ -66,17 +66,13 @@ impl BasicBlockFinal {
 
         let stack_ts = TSUInt::try_from(stack_ts)?;
         let stack_ts_add_witness = &phase0[Self::phase0_stack_ts_add()];
-        let next_stack_ts = range_chip.add_ts_with_const(
-            &mut circuit_builder,
-            &stack_ts,
-            1,
-            stack_ts_add_witness,
-        )?;
+        let next_stack_ts =
+            RangeChip::add_ts_with_const(&mut circuit_builder, &stack_ts, 1, stack_ts_add_witness)?;
 
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
         let clk_expr = MixedCell::Cell(clk[0]);
-        global_state_chip.state_out(
+        GlobalStateChip::state_out(
             &mut circuit_builder,
             &next_pc,
             next_stack_ts.values(),
@@ -87,10 +83,10 @@ impl BasicBlockFinal {
 
         // Check the of stack_top + offset.
         let stack_top_l = stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[0]));
-        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
+        RangeChip::range_check_stack_top(&mut circuit_builder, stack_top_l)?;
         let stack_top_r =
             stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[n_stack_items - 1]));
-        range_chip.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
+        RangeChip::range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // From predesessor instruction
         let stack_operand_ids = stack_top_offsets
@@ -98,7 +94,7 @@ impl BasicBlockFinal {
             .map(|offset| {
                 let (stack_from_insts_id, stack_from_insts) =
                     circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
-                stack_chip.push(
+                StackChip::push(
                     &mut circuit_builder,
                     stack_top_expr.add(i64_to_base_field::<E>(*offset)),
                     stack_ts.values(),

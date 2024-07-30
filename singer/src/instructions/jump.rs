@@ -67,7 +67,7 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        global_state_chip.state_in(
+        GlobalStateChip::state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -84,19 +84,19 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &old_stack_ts,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt()],
         )?;
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts.values(),
             next_pc,
         );
 
-        global_state_chip.state_out(
+        GlobalStateChip::state_out(
             &mut circuit_builder,
             &next_pc,
             stack_ts.values(), // Because there is no stack push.
@@ -106,13 +106,13 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
         );
 
         // Bytecode check for (pc, jump)
-        bytecode_chip.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
         );
         // Bytecode check for (next_pc, jumpdest)
-        bytecode_chip.bytecode_with_pc_opcode(&mut circuit_builder, &next_pc, OpcodeType::JUMPDEST);
+        BytecodeChip::bytecode_with_pc_opcode(&mut circuit_builder, &next_pc, OpcodeType::JUMPDEST);
 
         let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
         let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);

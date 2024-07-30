@@ -72,7 +72,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        global_state_chip.state_in(
+        GlobalStateChip::state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -83,14 +83,14 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
 
         let next_pc =
             RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        let next_stack_ts = range_chip.add_ts_with_const(
+        let next_stack_ts = RangeChip::add_ts_with_const(
             &mut circuit_builder,
             &stack_ts,
             1,
             &phase0[Self::phase0_stack_ts_add()],
         )?;
 
-        global_state_chip.state_out(
+        GlobalStateChip::state_out(
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
@@ -104,14 +104,14 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         let oprand_1 = (&phase0[Self::phase0_oprand_1()]).try_into()?;
         let (result, _) = StackUInt::lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &oprand_1,
             &oprand_0,
             &phase0[Self::phase0_instruction_gt()],
         )?;
 
         // Check the range of stack_top - 2 is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        range_chip.range_check_stack_top(
+        RangeChip::range_check_stack_top(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
         )?;
@@ -120,12 +120,12 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         let old_stack_ts0 = (&phase0[Self::phase0_old_stack_ts0()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &old_stack_ts0,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt0()],
         )?;
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
             old_stack_ts0.values(),
@@ -135,12 +135,12 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         let old_stack_ts1 = (&phase0[Self::phase0_old_stack_ts1()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &old_stack_ts1,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt1()],
         )?;
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
             &old_stack_ts1.values(),
@@ -149,7 +149,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
 
         // Push one result to stack. Since values are little-endien, it is
         // equivalent to pad result with 0s.
-        stack_chip.push(
+        StackChip::push(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
             stack_ts.values(),
@@ -157,7 +157,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         );
 
         // Bytecode check for (pc, gt)
-        bytecode_chip.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,

@@ -75,7 +75,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        global_state_chip.state_in(
+        GlobalStateChip::state_in(
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -86,14 +86,14 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
 
         let next_pc =
             RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        let next_stack_ts = range_chip.add_ts_with_const(
+        let next_stack_ts = RangeChip::add_ts_with_const(
             &mut circuit_builder,
             &stack_ts,
             1,
             &phase0[Self::phase0_stack_ts_add()],
         )?;
 
-        global_state_chip.state_out(
+        GlobalStateChip::state_out(
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
@@ -103,7 +103,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         );
 
         // Check the range of stack_top - N is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        range_chip.range_check_stack_top(
+        RangeChip::range_check_stack_top(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(N as u64)),
         )?;
@@ -112,13 +112,13 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &old_stack_ts,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt()],
         )?;
         let stack_values = &phase0[Self::phase0_stack_values()];
-        stack_chip.pop(
+        StackChip::pop(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
             old_stack_ts.values(),
@@ -126,15 +126,15 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         );
 
         // Check the range of stack_top within [0, 1 << STACK_TOP_BIT_WIDTH).
-        range_chip.range_check_stack_top(&mut circuit_builder, stack_top.into())?;
+        RangeChip::range_check_stack_top(&mut circuit_builder, stack_top.into())?;
         // Push stack_values twice to stack
-        stack_chip.push(
+        StackChip::push(
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
             stack_ts.values(),
             stack_values,
         );
-        stack_chip.push(
+        StackChip::push(
             &mut circuit_builder,
             stack_top_expr,
             stack_ts.values(),
@@ -142,7 +142,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         );
 
         // Bytecode check for (pc, DUP{N})
-        bytecode_chip.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
