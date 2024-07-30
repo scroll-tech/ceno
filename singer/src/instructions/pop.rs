@@ -114,6 +114,7 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
         );
 
         let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
+        circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
