@@ -3,7 +3,7 @@ use crate::{
     structs::ChipChallenges,
 };
 use ff_ext::ExtensionField;
-use simple_frontend::structs::ChallengeId;
+use simple_frontend::structs::{ChallengeId, CircuitBuilder, WitnessId};
 
 pub mod bytecode;
 pub mod calldata;
@@ -50,5 +50,18 @@ impl<Ext: ExtensionField> ChipHandler<Ext> {
             ram_handler: RAMHandler::new(challenge.clone()),
             rom_handler: ROMHandler::new(challenge),
         }
+    }
+
+    pub fn finalize(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<Ext>,
+    ) -> (
+        Option<(WitnessId, usize)>,
+        Option<(WitnessId, usize)>,
+        Option<(WitnessId, usize)>,
+    ) {
+        let (ram_load_id, ram_store_id) = self.ram_handler.finalize(circuit_builder);
+        let rom_id = self.rom_handler.finalize(circuit_builder);
+        (ram_load_id, ram_store_id, rom_id)
     }
 }
