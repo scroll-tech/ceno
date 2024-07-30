@@ -1,22 +1,16 @@
 use crate::{
-    chip_handler::{ram_handler::RAMHandler, util::cell_to_mixed},
+    chip_handler::{ram_handler::RAMHandler, util::cell_to_mixed, ChipHandler},
     structs::RAMType,
 };
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::{cell::RefCell, rc::Rc};
 
-pub struct StackChip<Ext: ExtensionField> {
-    ram_handler: Rc<RefCell<RAMHandler<Ext>>>,
-}
+pub struct StackChip {}
 
-impl<Ext: ExtensionField> StackChip<Ext> {
-    pub fn new(ram_handler: Rc<RefCell<RAMHandler<Ext>>>) -> Self {
-        Self { ram_handler }
-    }
-
-    pub fn push(
-        &self,
+impl StackChip {
+    pub fn push<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
         stack_ts: &[CellId],
@@ -28,13 +22,13 @@ impl<Ext: ExtensionField> StackChip<Ext> {
         ];
         let stack_ts = cell_to_mixed(stack_ts);
         let values = cell_to_mixed(values);
-        self.ram_handler
-            .borrow_mut()
+        chip_handler
+            .ram_handler
             .write_oam_mixed(circuit_builder, &stack_ts, &key, &values);
     }
 
-    pub fn pop(
-        &self,
+    pub fn pop<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
         stack_ts: &[CellId],
@@ -46,8 +40,8 @@ impl<Ext: ExtensionField> StackChip<Ext> {
         ];
         let stack_ts = cell_to_mixed(stack_ts);
         let values = cell_to_mixed(values);
-        self.ram_handler
-            .borrow_mut()
+        chip_handler
+            .ram_handler
             .read_oam_mixed(circuit_builder, &stack_ts, &key, &values);
     }
 }
