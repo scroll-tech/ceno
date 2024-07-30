@@ -1,4 +1,6 @@
 use ff_ext::ExtensionField;
+use itertools::Itertools;
+use transcript::Transcript;
 
 pub(crate) fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
     if x >= 0 {
@@ -6,6 +8,24 @@ pub(crate) fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
     } else {
         -E::BaseField::from((-x) as u64)
     }
+}
+
+/// derive challenge from transcript and return all pows result
+pub fn get_challenge_pows<E: ExtensionField>(
+    size: usize,
+    transcript: &mut Transcript<E>,
+) -> Vec<E> {
+    // println!("alpha_pow");
+    let alpha = transcript
+        .get_and_append_challenge(b"combine subset evals")
+        .elements;
+    (0..size)
+        .scan(E::ONE, |state, _| {
+            let res = *state;
+            *state *= alpha;
+            Some(res)
+        })
+        .collect_vec()
 }
 
 // split single u64 value into W slices, each slice got C bits.

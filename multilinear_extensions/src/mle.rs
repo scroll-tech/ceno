@@ -1,9 +1,4 @@
-use std::{
-    any::{Any, TypeId},
-    borrow::Cow,
-    mem,
-    sync::Arc,
-};
+use std::{any::TypeId, borrow::Cow, mem, sync::Arc};
 
 use crate::{op_mle, util::ceil_log2};
 use ark_std::{end_timer, rand::RngCore, start_timer};
@@ -89,11 +84,11 @@ pub trait IntoMLE<T>: Sized {
     fn into_mle(self) -> T;
 }
 
-impl<E: ExtensionField> IntoMLE<DenseMultilinearExtension<E>> for Vec<E::BaseField> {
+impl<F: Field, E: ExtensionField> IntoMLE<DenseMultilinearExtension<E>> for Vec<F> {
     fn into_mle(mut self) -> DenseMultilinearExtension<E> {
         let next_pow2 = self.len().next_power_of_two();
-        self.resize(next_pow2, E::BaseField::ZERO);
-        DenseMultilinearExtension::from_evaluations_vec(ceil_log2(next_pow2), self)
+        self.resize(next_pow2, F::ZERO);
+        DenseMultilinearExtension::from_evaluation_vec_smart::<F>(ceil_log2(next_pow2), self)
     }
 }
 

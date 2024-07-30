@@ -151,7 +151,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         // sumcheck: sigma = \sum_{s || y}(f1({s || y}) * (\sum_j g1^{(j)}({s || y})))
         let span = entered_span!("virtual_poly");
         let mut virtual_poly_1: VirtualPolynomialV2<E> =
-            VirtualPolynomialV2::new_from_mle(f1, E::BaseField::ONE);
+            VirtualPolynomialV2::new_from_mle(f1, E::ONE);
         virtual_poly_1.mul_by_mle(g1, E::BaseField::ONE);
         exit_span!(span);
         end_timer!(timer);

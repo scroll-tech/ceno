@@ -122,7 +122,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let mut virtual_poly = VirtualPolynomialV2::new(max_lo_in_num_vars);
         for (f, g) in f_vec.into_iter().zip(g_vec.into_iter()) {
-            let mut tmp = VirtualPolynomialV2::new_from_mle(f, E::BaseField::ONE);
+            let mut tmp = VirtualPolynomialV2::new_from_mle(f, E::ONE);
             tmp.mul_by_mle(g, E::BaseField::ONE);
             virtual_poly.merge(&tmp);
         }
