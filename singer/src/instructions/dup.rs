@@ -6,7 +6,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
@@ -58,14 +58,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
-
-        // instantiate chips
-        let global_state_chip = GlobalStateChip::new(ram_handler.clone());
-        let mut range_chip = RangeChip::new(rom_handler.clone());
-        let stack_chip = StackChip::new(ram_handler.clone());
-        let bytecode_chip = BytecodeChip::new(rom_handler.clone());
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -76,6 +69,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
         GlobalStateChip::state_in(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -87,6 +81,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         let next_pc =
             RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
         let next_stack_ts = RangeChip::add_ts_with_const(
+            &mut chip_handler,
             &mut circuit_builder,
             &stack_ts,
             1,
@@ -94,6 +89,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         )?;
 
         GlobalStateChip::state_out(
+            &mut chip_handler,
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
@@ -104,6 +100,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
 
         // Check the range of stack_top - N is within [0, 1 << STACK_TOP_BIT_WIDTH).
         RangeChip::range_check_stack_top(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(N as u64)),
         )?;
@@ -119,6 +116,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         )?;
         let stack_values = &phase0[Self::phase0_stack_values()];
         StackChip::pop(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
             old_stack_ts.values(),
@@ -126,15 +124,21 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         );
 
         // Check the range of stack_top within [0, 1 << STACK_TOP_BIT_WIDTH).
-        RangeChip::range_check_stack_top(&mut circuit_builder, stack_top.into())?;
+        RangeChip::range_check_stack_top(
+            &mut chip_handler,
+            &mut circuit_builder,
+            stack_top.into(),
+        )?;
         // Push stack_values twice to stack
         StackChip::push(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
             stack_ts.values(),
             stack_values,
         );
         StackChip::push(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr,
             stack_ts.values(),
@@ -143,13 +147,13 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
 
         // Bytecode check for (pc, DUP{N})
         BytecodeChip::bytecode_with_pc_opcode(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
         );
 
-        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
-        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
