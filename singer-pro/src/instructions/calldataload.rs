@@ -48,7 +48,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
 
         // CallDataLoad check (offset, data)
         let data = &phase0[Self::phase0_data()];
-        CalldataChip::load(&mut circuit_builder, &mut circuit_builder, &offset, data);
+        CalldataChip::load(&mut chip_handler, &mut circuit_builder, &offset, data);
 
         // To successor instruction
         let (data_copy_id, data_copy) = circuit_builder.create_witness_out(data.len());
