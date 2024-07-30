@@ -277,7 +277,7 @@ impl MstoreAccessory {
 
         let mem_byte = pred_ooo[Self::pred_ooo_mem_byte().start];
         let prev_mem_byte = phase0[Self::phase0_prev_mem_byte().start];
-        memory_chip.write(
+        MemoryChip::write(
             &mut circuit_builder,
             offset_plus_delta.values(),
             old_memory_ts.values(),

@@ -6,7 +6,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
@@ -48,14 +48,7 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
-
-        // instantiate chips
-        let global_state_chip = GlobalStateChip::new(ram_handler.clone());
-        let mut range_chip = RangeChip::new(rom_handler.clone());
-        let stack_chip = StackChip::new(ram_handler.clone());
-        let bytecode_chip = BytecodeChip::new(rom_handler.clone());
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -66,6 +59,7 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
         GlobalStateChip::state_in(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -77,6 +71,7 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
         let next_pc =
             RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
         GlobalStateChip::state_out(
+            &mut chip_handler,
             &mut circuit_builder,
             next_pc.values(),
             stack_ts.values(),
@@ -86,8 +81,11 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
         );
 
         // Check the range of stack_top - 1 is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        range_chip
-            .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(E::BaseField::ONE))?;
+        RangeChip::range_check_stack_top(
+            &mut chip_handler,
+            &mut circuit_builder,
+            stack_top_expr.sub(E::BaseField::ONE),
+        )?;
 
         // Pop rlc from stack
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
@@ -100,6 +98,7 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
         )?;
         let stack_values = &phase0[Self::phase0_stack_values()];
         StackChip::pop(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
             old_stack_ts.values(),
@@ -108,14 +107,13 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
 
         // Bytecode check for (pc, POP)
         BytecodeChip::bytecode_with_pc_opcode(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
         );
 
-        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
-        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
-        circuit_builder.configure();
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
