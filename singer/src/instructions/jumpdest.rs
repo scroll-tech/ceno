@@ -14,6 +14,7 @@ use singer_utils::{
     uint::constants::AddSubConstants,
 };
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use singer_utils::chip_handler::ChipHandler;
 
 use crate::error::ZKVMError;
 
@@ -45,12 +46,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
-
-        // instantiate chips
-        let global_state_chip = GlobalStateChip::new(ram_handler.clone());
-        let bytecode_chip = BytecodeChip::new(rom_handler.clone());
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -60,6 +56,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
         GlobalStateChip::state_in(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -71,6 +68,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         let next_pc =
             RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
         GlobalStateChip::state_out(
+            &mut chip_handler,
             &mut circuit_builder,
             next_pc.values(),
             stack_ts.values(), // Because there is no stack push.
@@ -81,13 +79,13 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
 
         // Bytecode check for (pc, jump)
         BytecodeChip::bytecode_with_pc_opcode(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
         );
 
-        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
-        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
