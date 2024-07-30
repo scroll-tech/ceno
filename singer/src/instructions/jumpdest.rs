@@ -6,7 +6,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
@@ -14,7 +14,6 @@ use singer_utils::{
     uint::constants::AddSubConstants,
 };
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
-use singer_utils::chip_handler::ChipHandler;
 
 use crate::error::ZKVMError;
 
