@@ -76,8 +76,6 @@ impl RangeChip {
         uint: &UInt<M, C>,
         range_value_witness: Option<&[CellId]>,
     ) -> Result<UInt<M, C>, UtilError> {
-        // TODO: revisit
-        // TODO: make an explicit type for range_value_witness that explain it's structure
         let uint_cell_width = UInt::<M, C>::MAX_CELL_BIT_WIDTH;
 
         if uint_cell_width <= RANGE_CHIP_BIT_WIDTH {
@@ -116,10 +114,7 @@ impl RangeChip {
                 UInt::<M, C>::from_range_values(circuit_builder, range_values)?;
             UInt::<M, C>::assert_eq(circuit_builder, uint, &range_value_as_uint)?;
 
-            // TODO: revisit
-            // TODO: rid this part (once resolve potential logical bug in constant definition across the project)
-            let n_range_cells_per_cell =
-                (uint_cell_width + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
+            let n_range_cells_per_cell = UInt::<M, C>::N_RANGE_CELLS_PER_CELL;
 
             debug_assert!(range_values.len() % n_range_cells_per_cell == 0);
 
