@@ -6,18 +6,13 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder, MixedCell};
 use std::{cell::RefCell, rc::Rc};
+use crate::chip_handler::ChipHandler;
 
-pub struct GlobalStateChip<Ext: ExtensionField> {
-    ram_handler: Rc<RefCell<RAMHandler<Ext>>>,
-}
+pub struct GlobalStateChip {}
 
-impl<Ext: ExtensionField> GlobalStateChip<Ext> {
-    pub fn new(ram_handler: Rc<RefCell<RAMHandler<Ext>>>) -> Self {
-        Self { ram_handler }
-    }
-
-    pub fn state_in(
-        &self,
+impl GlobalStateChip {
+    pub fn state_in<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         stack_ts: &[CellId],
@@ -36,13 +31,12 @@ impl<Ext: ExtensionField> GlobalStateChip<Ext> {
         ]
         .concat();
 
-        self.ram_handler
-            .borrow_mut()
+        chip_handler.ram_handler
             .read_oam_mixed(circuit_builder, &[], &key, &[]);
     }
 
-    pub fn state_out(
-        &self,
+    pub fn state_out<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         stack_ts: &[CellId],
@@ -54,7 +48,6 @@ impl<Ext: ExtensionField> GlobalStateChip<Ext> {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 RAMType::GlobalState as u64,
             ))],
-            // TODO: implement helper method on &[CellId]
             cell_to_mixed(pc),
             cell_to_mixed(stack_ts),
             cell_to_mixed(memory_ts),
@@ -62,8 +55,7 @@ impl<Ext: ExtensionField> GlobalStateChip<Ext> {
         ]
         .concat();
 
-        self.ram_handler
-            .borrow_mut()
+        chip_handler.ram_handler
             .write_oam_mixed(circuit_builder, &[], &key, &[]);
     }
 }
