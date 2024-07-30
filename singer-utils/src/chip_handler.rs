@@ -40,7 +40,7 @@ impl ChipChallenges {
 }
 
 pub struct ChipHandler<Ext: ExtensionField> {
-    ram_handler: RAMHandler<Ext>,
+    pub ram_handler: RAMHandler<Ext>,
     rom_handler: ROMHandler<Ext>,
 }
 
