@@ -6,7 +6,7 @@ use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     chips::{IntoEnumIterator, SingerChipBuilder},
     constants::OpcodeType,
@@ -134,11 +134,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
         let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
-
-        // instantiate chips
-        let mut range_chip = RangeChip::new(rom_handler.clone());
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // Compute offset + counter
         let delta = circuit_builder.create_counter_in(0)[0];
@@ -157,7 +153,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let memory_ts = TSUInt::try_from(memory_ts.as_slice())?;
         let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()])?;
 
-        ram_handler.borrow_mut().read_oam(
+        chip_handler.ram_handler.read_oam(
             &mut circuit_builder,
             offset_plus_delta.values(),
             old_memory_ts.values(),
@@ -169,8 +165,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
             circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, memory_ts.values());
 
-        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
-        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];
