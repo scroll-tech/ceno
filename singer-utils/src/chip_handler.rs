@@ -1,4 +1,8 @@
-use crate::structs::ChipChallenges;
+use crate::{
+    chip_handler::{ram_handler::RAMHandler, rom_handler::ROMHandler},
+    structs::ChipChallenges,
+};
+use ff_ext::ExtensionField;
 use simple_frontend::structs::ChallengeId;
 
 pub mod bytecode;
@@ -32,5 +36,19 @@ impl ChipChallenges {
     }
     pub fn record_rlc(&self) -> ChallengeId {
         self.record_rlc
+    }
+}
+
+pub struct ChipHandler<Ext: ExtensionField> {
+    ram_handler: RAMHandler<Ext>,
+    rom_handler: ROMHandler<Ext>,
+}
+
+impl<Ext: ExtensionField> ChipHandler<Ext> {
+    pub fn new(challenge: ChipChallenges) -> Self {
+        Self {
+            ram_handler: RAMHandler::new(challenge.clone()),
+            rom_handler: ROMHandler::new(challenge),
+        }
     }
 }
