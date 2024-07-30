@@ -1,12 +1,11 @@
 use crate::{
-    chip_handler::{ram_handler::RAMHandler, util::cell_to_mixed},
+    chip_handler::{ram_handler::RAMHandler, util::cell_to_mixed, ChipHandler},
     structs::RAMType,
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{Cell, CellId, CircuitBuilder, MixedCell};
 use std::{cell::RefCell, rc::Rc};
-use crate::chip_handler::ChipHandler;
 
 pub struct GlobalStateChip {}
 
@@ -31,7 +30,8 @@ impl GlobalStateChip {
         ]
         .concat();
 
-        chip_handler.ram_handler
+        chip_handler
+            .ram_handler
             .read_oam_mixed(circuit_builder, &[], &key, &[]);
     }
 
@@ -55,7 +55,8 @@ impl GlobalStateChip {
         ]
         .concat();
 
-        chip_handler.ram_handler
+        chip_handler
+            .ram_handler
             .write_oam_mixed(circuit_builder, &[], &key, &[]);
     }
 }

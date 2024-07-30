@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{ram_handler::RAMHandler, util::cell_to_mixed},
+    chip_handler::{ram_handler::RAMHandler, util::cell_to_mixed, ChipHandler},
     structs::RAMType,
 };
 use ark_std::iterable::Iterable;
@@ -7,7 +7,6 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::{cell::RefCell, rc::Rc};
-use crate::chip_handler::ChipHandler;
 
 pub struct MemoryChip {}
 

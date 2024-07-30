@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{rom_handler::ROMHandler, util::cell_to_mixed},
+    chip_handler::{rom_handler::ROMHandler, util::cell_to_mixed, ChipHandler},
     constants::{RANGE_CHIP_BIT_WIDTH, STACK_TOP_BIT_WIDTH},
     error::UtilError,
     structs::{PCUInt, TSUInt},
@@ -9,18 +9,11 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 use std::{cell::RefCell, io::Read, rc::Rc};
-use crate::chip_handler::ChipHandler;
 
-pub struct RangeChip<Ext: ExtensionField> {
-    rom_handler: Rc<RefCell<ROMHandler<Ext>>>,
-}
+pub struct RangeChip {}
 
-impl<Ext: ExtensionField> RangeChip<Ext> {
-    pub fn new(rom_handler: Rc<RefCell<ROMHandler<Ext>>>) -> Self {
-        Self { rom_handler }
-    }
-
-    pub fn small_range_check(
+impl RangeChip {
+    pub fn small_range_check<Ext: ExtensionField>(
         chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         value: MixedCell<Ext>,
@@ -34,21 +27,27 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
             1 << (RANGE_CHIP_BIT_WIDTH - bit_width),
         ))];
 
-        chip_handler.rom_handler
+        chip_handler
+            .rom_handler
             .read_mixed(circuit_builder, &[], &items);
 
         Ok(())
     }
 
-    pub fn range_check_stack_top(
+    pub fn range_check_stack_top<Ext: ExtensionField>(
         chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         stack_top: MixedCell<Ext>,
     ) -> Result<(), UtilError> {
-        Self::small_range_check(chip_handler, circuit_builder, stack_top, STACK_TOP_BIT_WIDTH)
+        Self::small_range_check(
+            chip_handler,
+            circuit_builder,
+            stack_top,
+            STACK_TOP_BIT_WIDTH,
+        )
     }
 
-    pub fn range_check_bytes(
+    pub fn range_check_bytes<Ext: ExtensionField>(
         chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         bytes: &[CellId],
@@ -60,31 +59,31 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         Ok(())
     }
 
-    pub fn range_check_table_item(
+    pub fn range_check_table_item<Ext: ExtensionField>(
         chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         item: CellId,
     ) {
-        chip_handler.rom_handler
-            .read(circuit_builder, &[], &[item])
+        chip_handler.rom_handler.read(circuit_builder, &[], &[item])
     }
 
     /// Ensures that the value represented in a `UInt<M, C>` (as field elements)
     /// matches its definition.
     /// i.e. total_represented_value <= M and each value represented per cell <= max_cell_width
-    pub fn range_check_uint<const M: usize, const C: usize>(
-        &mut self,
+    pub fn range_check_uint<const M: usize, const C: usize, Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         uint: &UInt<M, C>,
         range_value_witness: Option<&[CellId]>,
     ) -> Result<UInt<M, C>, UtilError> {
+        // TODO: revisit
         // TODO: make an explicit type for range_value_witness that explain it's structure
         let uint_cell_width = UInt::<M, C>::MAX_CELL_BIT_WIDTH;
 
         if uint_cell_width <= RANGE_CHIP_BIT_WIDTH {
             // the range_table can range check any value up to RANGE_CHIP_BIT_WIDTH
             // since the uint_cell_width is less than or equal to RANGE_CHIP_BIT_WIDTH
-            // the uint cell values can be range checked directly (i.e no need for decomposition witness)
+            // the uint cell values can be range checked directly (i.e. no need for decomposition witness)
             for (index, cell) in uint.values.iter().enumerate() {
                 // compute the maximum_bit_width for each cell (will be used to perform range check)
                 let range_check_width = if index == 0 {
@@ -99,7 +98,12 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
                 };
 
                 // perform range check on cell
-                self.small_range_check(circuit_builder, (*cell).into(), range_check_width)?;
+                Self::small_range_check(
+                    chip_handler,
+                    circuit_builder,
+                    (*cell).into(),
+                    range_check_width,
+                )?;
             }
             return Ok(uint.clone());
         }
@@ -112,6 +116,7 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
                 UInt::<M, C>::from_range_values(circuit_builder, range_values)?;
             UInt::<M, C>::assert_eq(circuit_builder, uint, &range_value_as_uint)?;
 
+            // TODO: revisit
             // TODO: rid this part (once resolve potential logical bug in constant definition across the project)
             let n_range_cells_per_cell =
                 (uint_cell_width + RANGE_CHIP_BIT_WIDTH - 1) / RANGE_CHIP_BIT_WIDTH;
@@ -122,7 +127,8 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
                 // the range cells are big endian relative to the uint cell they represent
                 // hence the first n - 1 range cells should take full width
                 for i in 0..(n_range_cells_per_cell - 1) {
-                    self.small_range_check(
+                    Self::small_range_check(
+                        chip_handler,
                         circuit_builder,
                         range_cells[i].into(),
                         RANGE_CHIP_BIT_WIDTH,
@@ -131,7 +137,8 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
 
                 // the last range cell represents the least significant range cell
                 // hence we truncate the max_value accordingly
-                self.small_range_check(
+                Self::small_range_check(
+                    chip_handler,
                     circuit_builder,
                     range_cells[n_range_cells_per_cell - 1].into(),
                     uint_cell_width - ((n_range_cells_per_cell - 1) * RANGE_CHIP_BIT_WIDTH),
@@ -144,7 +151,7 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         }
     }
 
-    pub fn non_zero(
+    pub fn non_zero<Ext: ExtensionField>(
         chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         val: CellId,
@@ -162,7 +169,7 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         Ok(prod)
     }
 
-    pub fn add_pc_const(
+    pub fn add_pc_const<Ext: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &PCUInt,
         constant: i64,
@@ -177,7 +184,7 @@ impl<Ext: ExtensionField> RangeChip<Ext> {
         )
     }
 
-    pub fn add_ts_with_const(
+    pub fn add_ts_with_const<Ext: ExtensionField>(
         chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         ts: &TSUInt,
