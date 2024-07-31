@@ -1,31 +1,28 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{cmp::max, collections::BTreeMap, mem, sync::Arc};
 
 use ff_ext::ExtensionField;
-use gkr::{entered_span, exit_span};
+use gkr::{entered_span, exit_span, structs::Point};
+
 use itertools::Itertools;
 use multilinear_extensions::{
-    commutative_op_mle_pair,
-    mle::{DenseMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
-    op_mle,
+    mle::{DenseMultilinearExtension, IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
 };
-use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
-        ParallelIterator,
-    },
-    prelude::ParallelSliceMut,
-};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use simple_frontend::structs::WitnessId;
-use singer_utils::{structs_v2::Circuit, util_v2::Expression};
-use sumcheck::structs::IOPProverStateV2;
+use singer_utils::structs_v2::Circuit;
+use sumcheck::structs::{IOPProverMessage, IOPProverStateV2};
 use transcript::Transcript;
 
 use crate::{
     error::ZKVMError,
-    scheme::constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, MIN_PAR_SIZE, PRODUCT_ARGUMENT_SIZE},
+    scheme::{
+        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_PRODUCT_FANIN},
+        utils::{infer_tower_product_witness, interleaving_mles_to_mles, wit_infer_by_expr},
+    },
+    structs::{TowerProofs, TowerProver, TowerProverSpec},
     utils::get_challenge_pows,
 };
 
@@ -87,9 +84,9 @@ impl<E: ExtensionField> ZKVMProver<E> {
             r_records_wit,
             log2_num_instances,
             log2_r_count,
-            PRODUCT_ARGUMENT_SIZE,
+            NUM_PRODUCT_FANIN,
         );
-        assert_eq!(r_records_last_layer.len(), PRODUCT_ARGUMENT_SIZE);
+        assert_eq!(r_records_last_layer.len(), NUM_PRODUCT_FANIN);
         exit_span!(span);
 
         // infer all tower witness after last layer
@@ -97,7 +94,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let r_wit_layers = infer_tower_product_witness(
             log2_num_instances + log2_r_count,
             r_records_last_layer,
-            PRODUCT_ARGUMENT_SIZE,
+            NUM_PRODUCT_FANIN,
         );
         exit_span!(span);
 
@@ -107,16 +104,16 @@ impl<E: ExtensionField> ZKVMProver<E> {
             w_records_wit,
             log2_num_instances,
             log2_w_count,
-            PRODUCT_ARGUMENT_SIZE,
+            NUM_PRODUCT_FANIN,
         );
-        assert_eq!(w_records_last_layer.len(), PRODUCT_ARGUMENT_SIZE);
+        assert_eq!(w_records_last_layer.len(), NUM_PRODUCT_FANIN);
         exit_span!(span);
 
         let span = entered_span!("wit_inference::tower_witness_w_layers");
         let w_wit_layers = infer_tower_product_witness(
             log2_num_instances + log2_w_count,
             w_records_last_layer,
-            PRODUCT_ARGUMENT_SIZE,
+            NUM_PRODUCT_FANIN,
         );
         exit_span!(span);
 
@@ -125,15 +122,15 @@ impl<E: ExtensionField> ZKVMProver<E> {
             assert_eq!(r_wit_layers.len(), (log2_num_instances + log2_r_count));
             assert_eq!(w_wit_layers.len(), (log2_num_instances + log2_w_count));
             assert!(r_wit_layers.iter().enumerate().all(|(i, r_wit_layer)| {
-                let expected_size = 1 << i;
-                r_wit_layer.len() == PRODUCT_ARGUMENT_SIZE
+                let expected_size = 1 << (ceil_log2(NUM_PRODUCT_FANIN) * i);
+                r_wit_layer.len() == NUM_PRODUCT_FANIN
                     && r_wit_layer
                         .iter()
                         .all(|f| f.evaluations().len() == expected_size)
             }));
             assert!(w_wit_layers.iter().enumerate().all(|(i, w_wit_layer)| {
-                let expected_size = 1 << i;
-                w_wit_layer.len() == PRODUCT_ARGUMENT_SIZE
+                let expected_size = 1 << (ceil_log2(NUM_PRODUCT_FANIN) * i);
+                w_wit_layer.len() == NUM_PRODUCT_FANIN
                     && w_wit_layer
                         .iter()
                         .all(|f| f.evaluations().len() == expected_size)
@@ -142,22 +139,43 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         // product constraint tower sumcheck
         let span = entered_span!("sumcheck::tower");
-        // TODO
+        // final evals for verifier
+        let record_r_out_evals: Vec<E> = r_wit_layers[0]
+            .iter()
+            .map(|w| w.get_ext_field_vec()[0])
+            .collect();
+        let record_w_out_evals: Vec<E> = w_wit_layers[0]
+            .iter()
+            .map(|w| w.get_ext_field_vec()[0])
+            .collect();
+        assert!(
+            record_r_out_evals.len() == NUM_PRODUCT_FANIN
+                && record_w_out_evals.len() == NUM_PRODUCT_FANIN
+        );
+        let (next_rt, tower_proof) = TowerProver::create_proof(
+            vec![
+                TowerProverSpec {
+                    witness: r_wit_layers,
+                },
+                TowerProverSpec {
+                    witness: w_wit_layers,
+                },
+            ],
+            NUM_PRODUCT_FANIN,
+            transcript,
+        );
+        assert_eq!(
+            next_rt.len(),
+            log2_num_instances + max(log2_r_count, log2_w_count) // TODO add lookup count
+        );
         exit_span!(span);
 
-        // main constraints degree > 1 + selector sumcheck
+        // selector main constraints degree > 1 sumcheck
         let span = entered_span!("sumcheck::main_sel");
-        // TODO fix rt_r/rt_w to use real
         let (rt_r, rt_w): (Vec<E>, Vec<E>) = (
-            (0..(log2_num_instances + log2_r_count))
-                .map(|i| E::from(i as u64))
-                .collect(),
-            (0..(log2_num_instances + log2_w_count))
-                .map(|i| E::from(i as u64))
-                .collect(),
+            next_rt[0..(log2_num_instances + log2_r_count)].to_vec(),
+            next_rt[0..(log2_num_instances + log2_w_count)].to_vec(),
         );
-        // TODO fix record_r_eval, record_w_eval
-        let (record_r_eval, record_w_eval) = (E::from(5u64), E::from(7u64));
         let mut virtual_poly = VirtualPolynomialV2::<E>::new(log2_num_instances);
         let alpha_pow = get_challenge_pows(MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, transcript);
         let (alpha_read, alpha_write) = (&alpha_pow[0], &alpha_pow[1]);
@@ -230,8 +248,6 @@ impl<E: ExtensionField> ZKVMProver<E> {
         );
         let input_open_point = main_sel_sumcheck_proofs.point.clone();
         assert!(input_open_point.len() == log2_num_instances);
-        println!("evals {:?}", main_sel_evals,);
-        println!("point {:?}", input_open_point);
         exit_span!(span);
 
         let span = entered_span!("witin::evals");
@@ -243,8 +259,9 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         Ok(ZKVMProof {
             num_instances,
-            out_record_r_eval: record_r_eval,
-            out_record_w_eval: record_w_eval,
+            record_r_out_evals,
+            record_w_out_evals,
+            tower_proof,
             main_sel_sumcheck_proofs: main_sel_sumcheck_proofs.proofs,
             r_records_in_evals,
             w_records_in_evals,
@@ -253,245 +270,92 @@ impl<E: ExtensionField> ZKVMProver<E> {
     }
 }
 
-/// interleaving multiple mles into mles for the product/logup arguments last layer witness
-fn interleaving_mles_to_mles<'a, E: ExtensionField>(
-    mles: &[ArcMultilinearExtension<E>],
-    log2_num_instances: usize,
-    log2_per_instance_size: usize,
-    product_argument_size: usize,
-) -> Vec<ArcMultilinearExtension<'a, E>> {
-    assert!(product_argument_size.is_power_of_two());
-    let mle_group_len = mles.len() / product_argument_size;
-    let log_product_argument_size = ceil_log2(product_argument_size);
-    mles.chunks(mle_group_len)
-        .map(|records_mle| {
-            // interleaving records witness into single vector
-            let mut evaluations = vec![
-                E::ONE;
-                1 << (log2_num_instances + log2_per_instance_size
-                    - log_product_argument_size)
-            ];
-            let per_instance_size = 1 << (log2_per_instance_size - log_product_argument_size);
-            records_mle
-                .iter()
-                .enumerate()
-                .for_each(|(record_i, record_mle)| match record_mle.evaluations() {
-                    FieldType::Ext(record_mle) => record_mle
-                        .par_iter()
-                        .zip(evaluations.par_chunks_mut(per_instance_size))
-                        .with_min_len(MIN_PAR_SIZE)
-                        .for_each(|(value, instance)| {
-                            assert_eq!(instance.len(), per_instance_size);
-                            instance[record_i] = *value;
-                        }),
-                    _ => {
-                        unreachable!("must be extension field")
-                    }
-                });
-            evaluations.into_mle().into()
-        })
-        .collect::<Vec<ArcMultilinearExtension<E>>>()
-}
-
-/// infer tower witness from last layer
-fn infer_tower_product_witness<'a, E: ExtensionField>(
-    num_vars: usize,
-    last_layer: Vec<ArcMultilinearExtension<'a, E>>,
-    product_argument_size: usize,
-) -> Vec<Vec<ArcMultilinearExtension<'a, E>>> {
-    assert!(last_layer.len() == product_argument_size);
-    let mut r_wit_layers = (0..num_vars - 1).fold(vec![last_layer], |mut acc, i| {
-        let next_layer = acc.last().unwrap();
-        let cur_len = next_layer[0].evaluations().len() / product_argument_size;
-        let cur_layer: Vec<ArcMultilinearExtension<E>> = (0..product_argument_size)
-            .map(|index| {
-                let mut evaluations = vec![E::ONE; cur_len];
-                next_layer.iter().for_each(|f| match f.evaluations() {
-                    FieldType::Ext(f) => {
-                        let start: usize = index * cur_len;
-                        f[start..][..cur_len]
-                            .par_iter()
-                            .zip(evaluations.par_iter_mut())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|(v, evaluations)| *evaluations *= *v)
-                            .collect()
-                    }
-                    _ => unreachable!("must be extension field"),
-                });
-                println!("i {} evaluation {:?} ", i, evaluations);
-                evaluations.into_mle().into()
-            })
-            .collect_vec();
-        acc.push(cur_layer);
-        acc
-    });
-    r_wit_layers.reverse();
-    r_wit_layers
-}
-
-fn wit_infer_by_expr<'a, E: ExtensionField>(
-    witnesses: &BTreeMap<WitnessId, DenseMultilinearExtension<E>>,
-    challenges: &[E],
-    expr: &Expression<E>,
-) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate::<ArcMultilinearExtension<'_, E>>(
-        &|witness_id| {
-            let a: ArcMultilinearExtension<E> = Arc::new(
-                witnesses
-                    .get(&witness_id)
-                    .expect("non exist witness")
-                    .clone(),
-            );
-            a
-        },
-        &|scalar| {
-            let scalar: ArcMultilinearExtension<E> = Arc::new(
-                DenseMultilinearExtension::from_evaluations_vec(0, vec![scalar]),
-            );
-            scalar
-        },
-        &|challenge_id, pow, scalar, offset| {
-            // TODO cache challenge power to be aquire once for each power
-            let challenge = challenges[challenge_id as usize];
-            let challenge: ArcMultilinearExtension<E> =
-                Arc::new(DenseMultilinearExtension::from_evaluations_ext_vec(
-                    0,
-                    vec![challenge.pow(&[pow as u64]) * scalar + offset],
-                ));
-            challenge
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] + b[0]],
-                    )),
-                    (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] + *b)
-                            .collect(),
-                    )),
-                    (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a + b[0])
-                            .collect(),
-                    )),
-                    (_, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .zip(b.par_iter())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|(a, b)| *a + b)
-                            .collect(),
-                    )),
-                }
-            })
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] * b[0]],
-                    )),
-                    (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] * *b)
-                            .collect(),
-                    )),
-                    (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a * b[0])
-                            .collect(),
-                    )),
-                    (_, _) => {
-                        unimplemented!("r,w only support degree 1 expression")
-                    }
-                }
-            })
-        },
-        &|a, scalar| {
-            op_mle!(|a| {
-                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                    ceil_log2(a.len()),
-                    a.par_iter()
-                        .with_min_len(MIN_PAR_SIZE)
-                        .map(|a| scalar * a)
-                        .collect(),
-                ))
-            })
-        },
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use ff::Field;
-    use goldilocks::{ExtensionField, GoldilocksExt2};
-    use multilinear_extensions::{
-        commutative_op_mle_pair,
-        mle::{FieldType, IntoMLE},
-        op_mle,
-        util::ceil_log2,
-        virtual_poly_v2::ArcMultilinearExtension,
-    };
-
-    use crate::scheme::prover::{infer_tower_product_witness, interleaving_mles_to_mles};
-
-    #[test]
-    fn test_infer_tower_witness() {
-        type E = GoldilocksExt2;
-        let product_argument_size = 2;
-        let last_layer: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from(2u64)].into_mle().into(),
-            vec![E::from(3u64), E::from(4u64)].into_mle().into(),
-        ];
-        let num_vars = ceil_log2(last_layer[0].evaluations().len()) + 1;
-        let res = infer_tower_product_witness(num_vars, last_layer.clone(), 2);
-        let (left, right) = (&res[0][0], &res[0][1]);
-        let final_product = commutative_op_mle_pair!(
-            |left, right| {
-                assert!(left.len() == 1 && right.len() == 1);
-                left[0] * right[0]
-            },
-            |out| E::from_base(&out)
-        );
-        let expected_final_product: E = last_layer
-            .iter()
-            .map(|f| match f.evaluations() {
-                FieldType::Ext(e) => e.iter().cloned().reduce(|a, b| a * b).unwrap(),
-                _ => unreachable!(""),
-            })
-            .product();
-        assert_eq!(res.len(), num_vars);
-        assert!(
-            res.iter()
-                .all(|layer_wit| layer_wit.len() == product_argument_size)
-        );
-        assert_eq!(final_product, expected_final_product);
+/// TowerProofs
+impl<E: ExtensionField> TowerProofs<E> {
+    pub fn new(spec_size: usize) -> Self {
+        TowerProofs {
+            proofs: vec![],
+            specs_eval: vec![vec![]; spec_size],
+        }
+    }
+    pub fn push_sumcheck_proofs(&mut self, proofs: Vec<IOPProverMessage<E>>) {
+        self.proofs.push(proofs);
     }
 
-    #[test]
-    fn test_interleaving_mles_to_mles() {
-        type E = GoldilocksExt2;
-        let product_argument_size = 2;
-        // [[1, 2], [3, 4]]
-        let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from(2u64)].into_mle().into(),
-            vec![E::from(3u64), E::from(4u64)].into_mle().into(),
-        ];
-        let res = interleaving_mles_to_mles(&input_mles, 1, 2, product_argument_size);
-        // [[1, 1, 2, 1], [3, 1, 4, 1]]
-        assert!(res[0].get_ext_field_vec() == vec![E::ONE, E::ONE, E::from(2u64), E::ONE],);
-        assert!(res[1].get_ext_field_vec() == vec![E::from(3u64), E::ONE, E::from(4u64), E::ONE]);
+    pub fn push_evals(&mut self, spec_index: usize, evals: Vec<E>) {
+        self.specs_eval[spec_index].push(evals);
+    }
+
+    pub fn spec_size(&self) -> usize {
+        return self.specs_eval.len();
+    }
+}
+
+/// Tower Prover
+impl TowerProver {
+    pub fn create_proof<'a, E: ExtensionField>(
+        mut specs: Vec<TowerProverSpec<'a, E>>,
+        num_product_fanin: usize,
+        transcript: &mut Transcript<E>,
+    ) -> (Point<E>, TowerProofs<E>) {
+        let mut proofs = TowerProofs::new(specs.len());
+        assert!(specs.len() > 0);
+        let log2_num_product_fanin = ceil_log2(num_product_fanin);
+        // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
+        let max_round = specs.iter().map(|m| m.witness.len()).max().unwrap() - 1;
+
+        // TODO soundness question: should we generate alpha for each layer?
+        let alpha_pows = get_challenge_pows(specs.len(), transcript);
+        let initial_rt: Point<E> = (0..log2_num_product_fanin)
+            .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
+            .collect_vec();
+
+        let next_rt = (0..(max_round - 1)).fold(initial_rt, |rt, round| {
+            let mut virtual_poly = VirtualPolynomialV2::<E>::new(rt.len());
+
+            let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&rt).into_mle().into();
+
+            specs.iter_mut().enumerate().for_each(|(i, s)| {
+                if (round + 1) < s.witness.len() {
+                    let layer_polys = mem::take(&mut s.witness[round + 1]);
+
+                    // sanity check
+                    assert_eq!(layer_polys.len(), num_product_fanin);
+                    layer_polys
+                        .iter()
+                        .all(|f| f.evaluations().len() == 1 << (log2_num_product_fanin * round));
+
+                    // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
+                    virtual_poly
+                        .add_mle_list(vec![vec![eq.clone()], layer_polys].concat(), alpha_pows[i]);
+                }
+            });
+            let (sumcheck_proofs, state) =
+                IOPProverStateV2::prove_parallel(virtual_poly, transcript);
+            proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
+
+            let mut rt_prime = (0..log2_num_product_fanin)
+                .map(|_| transcript.get_and_append_challenge(b"merge").elements)
+                .collect_vec();
+            rt_prime.extend(sumcheck_proofs.point);
+
+            let evals = state.get_mle_final_evaluations();
+            let mut evals_iter = evals.iter();
+            specs.iter().enumerate().for_each(|(i, s)| {
+                if (round + 1) < s.witness.len() {
+                    evals_iter.next(); // skip first eq
+                    // collect evals belong to current spec
+                    proofs.push_evals(
+                        i,
+                        (0..s.witness.len())
+                            .map(|_| *evals_iter.next().expect("insufficient evals length"))
+                            .collect::<Vec<E>>(),
+                    );
+                }
+            });
+            rt_prime
+        });
+
+        (next_rt, proofs)
     }
 }

@@ -1,5 +1,6 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use transcript::Transcript;
 
 pub(crate) fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {

@@ -121,7 +121,7 @@ mod test {
     use singer_utils::{structs_v2::CircuitBuilderV2, util_v2::InstructionV2};
     use transcript::Transcript;
 
-    use crate::scheme::{prover::ZKVMProver, verifier::ZKVMVerifier};
+    use crate::scheme::{constants::NUM_PRODUCT_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier};
 
     use super::AddInstruction;
 
@@ -163,6 +163,7 @@ mod test {
             .verify(
                 &mut proof,
                 &mut v_transcript,
+                NUM_PRODUCT_FANIN,
                 &PointAndEval::default(),
                 &challenges,
             )

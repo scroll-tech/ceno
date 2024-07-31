@@ -997,6 +997,104 @@ macro_rules! op_mle {
     };
 }
 
+#[macro_export]
+macro_rules! op_mle_3 {
+    (|$f1:ident, $f2:ident, $f3:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
+        match (&$f1.evaluations(), &$f2.evaluations(), &$f3.evaluations()) {
+            (
+                $crate::mle::FieldType::Base(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                let $bb_out = $op;
+                $op_bb_out
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Ext(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            _ => unreachable!(),
+        }
+    };
+}
+
 /// macro support op(a, b) and tackles type matching internally.
 /// Please noted that op must satisfy commutative rule w.r.t op(b, a) operand swap.
 #[macro_export]

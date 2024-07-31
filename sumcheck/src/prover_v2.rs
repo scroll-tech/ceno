@@ -6,7 +6,7 @@ use ff_ext::ExtensionField;
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, MultilinearExtension},
-    op_mle,
+    op_mle, op_mle_3,
     virtual_poly_v2::VirtualPolynomialV2,
 };
 use rayon::{
@@ -728,7 +728,36 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             )
                             .to_vec()
                         }
-                        _ => unimplemented!("do not support degree > 2"),
+                        3 => {
+                            let (f1, f2, f3) = (
+                                &self.poly.flattened_ml_extensions[products[0]],
+                                &self.poly.flattened_ml_extensions[products[1]],
+                                &self.poly.flattened_ml_extensions[products[2]],
+                            );
+                            op_mle_3!(
+                                |f1, f2, f3| (0..f1.len())
+                                    .into_iter()
+                                    .step_by(2)
+                                    .map(|b| {
+                                        // f = c x + d
+                                        let c1 = f1[b + 1] - f1[b];
+                                        let c2 = f2[b + 1] - f2[b];
+                                        let c3 = f3[b + 1] - f3[b];
+                                        AdditiveArray([
+                                            f1[b] * (f2[b] * f3[b]),
+                                            f1[b + 1] * (f2[b + 1] * f3[b + 1]),
+                                            (c1 + f1[b + 1])
+                                                * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
+                                            (c1 + c1 + f1[b + 1])
+                                                * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
+                                        ])
+                                    })
+                                    .sum::<AdditiveArray<_, 4>>(),
+                                |sum| AdditiveArray(sum.0.map(E::from))
+                            )
+                            .to_vec()
+                        }
+                        _ => unimplemented!("do not support degree > 3"),
                     };
                     exit_span!(span);
                     sum.iter_mut().for_each(|sum| *sum *= coefficient);

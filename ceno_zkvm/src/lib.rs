@@ -3,4 +3,5 @@ pub mod instructions;
 pub mod scheme;
 // #[cfg(test)]
 pub use utils::u64vec;
+mod structs;
 mod utils;

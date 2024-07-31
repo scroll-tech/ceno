@@ -4,7 +4,7 @@ use singer_utils::error::UtilError;
 pub enum ZKVMError {
     CircuitError,
     UtilError(UtilError),
-    VerifyError,
+    VerifyError(&'static str),
 }
 
 impl From<UtilError> for ZKVMError {
