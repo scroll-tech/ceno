@@ -1,6 +1,5 @@
-use std::{iter, marker::PhantomData, mem};
+use std::{marker::PhantomData, mem};
 
-use ark_std::test_rng;
 use ff_ext::ExtensionField;
 use gkr::{structs::PointAndEval, util::ceil_log2};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec_sequential, VPAuxInfo};
@@ -24,11 +23,10 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         &self,
         proof: &mut ZKVMProof<E>,
         transcript: &mut Transcript<E>,
-        out_evals: &PointAndEval<E>,
+        _out_evals: &PointAndEval<E>,
         _challenges: &[E], // derive challenge from PCS
     ) -> Result<(), ZKVMError> {
         // TODO remove rng
-        let mut rng = test_rng();
         let num_instances = proof.num_instances;
         let log2_num_instances = ceil_log2(num_instances);
         // verify and reduce product tower sumcheck
@@ -44,11 +42,11 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             ceil_log2(w_counts_per_instance),
         );
         let (rt_r, rt_w): (Vec<E>, Vec<E>) = (
-            iter::repeat(E::random(&mut rng))
-                .take(log2_num_instances + log2_r_count)
+            (0..(log2_num_instances + log2_r_count))
+                .map(|i| E::from(i as u64))
                 .collect(),
-            iter::repeat(E::random(&mut rng))
-                .take(log2_num_instances + log2_w_count)
+            (0..(log2_num_instances + log2_w_count))
+                .map(|i| E::from(i as u64))
                 .collect(),
         );
 
@@ -56,6 +54,10 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let (alpha_read, alpha_write) = (&alpha_pow[0], &alpha_pow[1]);
         let claim_sum = *alpha_read * (proof.out_record_r_eval - E::ONE)
             + *alpha_write * (proof.out_record_w_eval - E::ONE);
+        println!(
+            "verifier alpha_read {:?} alpha_write {:?}",
+            alpha_read, alpha_write
+        );
         let main_sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {

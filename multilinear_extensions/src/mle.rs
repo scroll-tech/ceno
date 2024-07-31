@@ -21,7 +21,6 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     fn num_vars(&self) -> usize;
     fn evaluations(&self) -> &FieldType<E>;
     fn evaluations_range(&self) -> Option<(usize, usize)>; // start offset
-    fn get_base_field_vec(&self) -> &[E::BaseField];
     fn evaluations_to_owned(self) -> FieldType<E>;
     fn merge(&mut self, rhs: Self::Output);
     fn get_ranged_mle<'a>(
@@ -43,6 +42,26 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     fn fix_variables_in_place_parallel(&mut self, partial_point: &[E]);
 
     fn name(&self) -> &'static str;
+
+    fn get_ext_field_vec(&self) -> &[E] {
+        match &self.evaluations() {
+            FieldType::Ext(evaluations) => {
+                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
+                &evaluations[start..][..offset]
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn get_base_field_vec(&self) -> &[E::BaseField] {
+        match &self.evaluations() {
+            FieldType::Base(evaluations) => {
+                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
+                &evaluations[start..][..offset]
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> {
@@ -146,6 +165,7 @@ fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
 }
 
 impl<E: ExtensionField> DenseMultilinearExtension<E> {
+    /// This function can tell T being Field or ExtensionField and invoke respective function
     pub fn from_evaluation_vec_smart<T: Clone + 'static>(
         num_vars: usize,
         evaluations: Vec<T>,
@@ -157,6 +177,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         if TypeId::of::<T>() == TypeId::of::<E::BaseField>() {
             return Self::from_evaluations_vec(num_vars, cast_vec(evaluations.to_vec()));
         }
+
         unimplemented!("type not support")
     }
 
