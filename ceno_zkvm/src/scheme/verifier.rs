@@ -1,5 +1,6 @@
 use std::{cmp::max, marker::PhantomData};
 
+use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use gkr::{
     structs::{Point, PointAndEval},
@@ -19,7 +20,7 @@ use crate::{
     utils::get_challenge_pows,
 };
 
-use super::{constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, ZKVMProof};
+use super::{constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMProof};
 
 pub struct ZKVMVerifier<E: ExtensionField> {
     circuit: Circuit<E>,
@@ -35,7 +36,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
-        _challenges: &[E], // derive challenge from PCS
+        challenges: &[E], // derive challenge from PCS
     ) -> Result<(), ZKVMError> {
         let (r_counts_per_instance, w_counts_per_instance) = (
             self.circuit.r_expressions.len(),
@@ -135,9 +136,35 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             ));
         }
         // verify records (degree = 1) statement, thus no sumcheck
+        if self
+            .circuit
+            .r_expressions
+            .iter()
+            .chain(self.circuit.w_expressions.iter())
+            .zip_eq(
+                proof.r_records_in_evals[..r_counts_per_instance]
+                    .iter()
+                    .chain(proof.w_records_in_evals[..w_counts_per_instance].iter()),
+            )
+            .any(|(expr, expected_evals)| {
+                eval_by_expr(&proof.wits_in_evals, challenges, &expr) != *expected_evals
+            })
+        {
+            return Err(ZKVMError::VerifyError("record evaluate zer != 0"));
+        }
+
         let _input_opening_point = main_sel_eval_point;
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
+        if self
+            .circuit
+            .assert_zero_expressions
+            .iter()
+            .any(|expr| eval_by_expr(&proof.wits_in_evals, challenges, &expr) != E::ZERO)
+        {
+            return Err(ZKVMError::VerifyError("zero expression != 0"));
+        }
+
         Ok(())
     }
 }
