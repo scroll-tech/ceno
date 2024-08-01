@@ -560,9 +560,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 .flattened_ml_extensions
                 .par_iter_mut()
                 .for_each(|mle| {
-                    Arc::get_mut(mle)
-                        .unwrap()
-                        .fix_variables_in_place_parallel(&[p.elements]);
+                    if let Some(mle) = Arc::get_mut(mle) {
+                        mle.fix_variables_in_place_parallel(&[p.elements])
+                    } else {
+                        *mle = mle.fix_variables(&[p.elements]).into()
+                    }
                 });
         };
         exit_span!(span);

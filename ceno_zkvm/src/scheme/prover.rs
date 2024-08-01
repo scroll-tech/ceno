@@ -65,8 +65,6 @@ impl<E: ExtensionField> ZKVMProver<E> {
             })
             .collect();
         let (r_records_wit, w_records_wit) = records_wit.split_at(circuit.r_expressions.len());
-        println!("r_records_wit {:?}", r_records_wit,);
-        println!("w_records_wit {:?}", w_records_wit);
         exit_span!(span);
 
         // product constraint: tower witness inference
@@ -179,10 +177,6 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let mut virtual_poly = VirtualPolynomialV2::<E>::new(log2_num_instances);
         let alpha_pow = get_challenge_pows(MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, transcript);
         let (alpha_read, alpha_write) = (&alpha_pow[0], &alpha_pow[1]);
-        println!(
-            "prover alpha_read {:?} alpha_write {:?}",
-            alpha_read, alpha_write
-        );
 
         assert_eq!(
             &rt_r[log2_r_count..].len(),
@@ -304,13 +298,13 @@ impl TowerProver {
         // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
         let max_round = specs.iter().map(|m| m.witness.len()).max().unwrap() - 1;
 
-        // TODO soundness question: should we generate alpha for each layer?
+        // TODO soundness question: should we generate new alpha for each layer?
         let alpha_pows = get_challenge_pows(specs.len(), transcript);
         let initial_rt: Point<E> = (0..log2_num_product_fanin)
             .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
             .collect_vec();
 
-        let next_rt = (0..(max_round - 1)).fold(initial_rt, |rt, round| {
+        let next_rt = (0..max_round).fold(initial_rt, |rt, round| {
             let mut virtual_poly = VirtualPolynomialV2::<E>::new(rt.len());
 
             let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&rt).into_mle().into();
@@ -341,18 +335,19 @@ impl TowerProver {
 
             let evals = state.get_mle_final_evaluations();
             let mut evals_iter = evals.iter();
+            evals_iter.next(); // skip first eq
             specs.iter().enumerate().for_each(|(i, s)| {
                 if (round + 1) < s.witness.len() {
-                    evals_iter.next(); // skip first eq
                     // collect evals belong to current spec
                     proofs.push_evals(
                         i,
-                        (0..s.witness.len())
+                        (0..num_product_fanin)
                             .map(|_| *evals_iter.next().expect("insufficient evals length"))
                             .collect::<Vec<E>>(),
                     );
                 }
             });
+            assert_eq!(evals_iter.next(), None);
             rt_prime
         });
 
