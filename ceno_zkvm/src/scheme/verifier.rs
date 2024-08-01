@@ -61,7 +61,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             // return Err(ZKVMError::VerifyError("rw set equality check failed"));
         }
         let expected_max_round = log2_num_instances + max(log2_r_count, log2_w_count); // TODO add lookup
-        let _rt = TowerVerify::verify(
+        let (rt_tower, record_evals) = TowerVerify::verify(
             vec![
                 proof.record_r_out_evals.clone(),
                 proof.record_w_out_evals.clone(),
@@ -71,23 +71,19 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             num_product_fanin,
             transcript,
         )?;
+        assert!(record_evals.len() == 2, "[r_record, w_record]");
 
         // verify zero statement (degree > 1) + sel sumcheck
-        // TODO fix rt_r/rt_w to use real
         let (rt_r, rt_w): (Vec<E>, Vec<E>) = (
-            (0..(log2_num_instances + log2_r_count))
-                .map(|i| E::from(i as u64))
-                .collect(),
-            (0..(log2_num_instances + log2_w_count))
-                .map(|i| E::from(i as u64))
-                .collect(),
+            rt_tower[..log2_num_instances + log2_r_count].to_vec(),
+            rt_tower[..log2_num_instances + log2_w_count].to_vec(),
         );
 
         let alpha_pow = get_challenge_pows(MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, transcript);
         let (alpha_read, alpha_write) = (&alpha_pow[0], &alpha_pow[1]);
-        // let claim_sum = *alpha_read * (proof.record_r_sel_eval - E::ONE)
-        //     + *alpha_write * (proof.record_w_sel_eval - E::ONE);
-        let claim_sum = E::ONE; // TODO FIXME
+        let claim_sum =
+            *alpha_read * (record_evals[0] - E::ONE) + *alpha_write * (record_evals[1] - E::ONE);
+        println!("going to main sel verify");
         let main_sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {
@@ -101,6 +97,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             },
             transcript,
         );
+        println!("main sel verify success");
         let (main_sel_eval_point, expected_evaluation) = (
             main_sel_subclaim.point.clone(),
             main_sel_subclaim.expected_evaluation,
@@ -178,7 +175,7 @@ impl TowerVerify {
         expected_max_round: usize,
         num_product_fanin: usize,
         transcript: &mut Transcript<E>,
-    ) -> Result<Point<E>, ZKVMError> {
+    ) -> Result<(Point<E>, Vec<E>), ZKVMError> {
         let log2_num_product_fanin = ceil_log2(num_product_fanin);
         // sanity check
         assert!(initial_evals.len() == tower_proofs.spec_size());
@@ -196,6 +193,9 @@ impl TowerVerify {
         let initial_claim = izip!(initial_evals, alpha_pows.iter())
             .map(|(evals, alpha)| evals.into_mle().evaluate(&initial_rt) * alpha)
             .sum();
+
+        // evaluation in the tower input layer
+        let mut spec_input_layer_eval = vec![E::ZERO; tower_proofs.spec_size()];
 
         let next_rt = (0..(expected_max_round - 1)).try_fold(
             PointAndEval {
@@ -244,23 +244,29 @@ impl TowerVerify {
                 assert_eq!(coeffs.len(), num_product_fanin);
                 let rt_prime = vec![rt, r_merge].concat();
 
-                let spec_evals = (0..tower_proofs.spec_size()).map(|spec_index| {
-                    if round < tower_proofs.specs_eval[spec_index].len() {
-                        // merged evaluation
-                        izip!(
-                            tower_proofs.specs_eval[spec_index][round].iter(),
-                            coeffs.iter()
-                        )
-                        .map(|(a, b)| *a * b)
-                        .sum::<E>()
-                    } else {
-                        E::ZERO
-                    }
-                });
+                let spec_evals = (0..tower_proofs.spec_size())
+                    .map(|spec_index| {
+                        if round < tower_proofs.specs_eval[spec_index].len() {
+                            // merged evaluation
+                            let evals = izip!(
+                                tower_proofs.specs_eval[spec_index][round].iter(),
+                                coeffs.iter()
+                            )
+                            .map(|(a, b)| *a * b)
+                            .sum::<E>();
+                            // this will keep update until round > evaluation
+                            spec_input_layer_eval[spec_index] = evals;
+                            evals
+                        } else {
+                            E::ZERO
+                        }
+                    })
+                    .collect::<Vec<E>>();
                 // sum evaluation from different specs
                 let next_eval = spec_evals
+                    .iter()
                     .zip(alpha_pows.iter())
-                    .map(|(eval, alpha)| eval * alpha)
+                    .map(|(eval, alpha)| *eval * alpha)
                     .sum();
                 Ok(PointAndEval {
                     point: rt_prime,
@@ -269,6 +275,6 @@ impl TowerVerify {
             },
         )?;
 
-        Ok(next_rt.point)
+        Ok((next_rt.point, spec_input_layer_eval))
     }
 }

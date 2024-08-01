@@ -150,7 +150,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             record_r_out_evals.len() == NUM_PRODUCT_FANIN
                 && record_w_out_evals.len() == NUM_PRODUCT_FANIN
         );
-        let (next_rt, tower_proof) = TowerProver::create_proof(
+        let (rt_tower, tower_proof) = TowerProver::create_proof(
             vec![
                 TowerProverSpec {
                     witness: r_wit_layers,
@@ -163,7 +163,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             transcript,
         );
         assert_eq!(
-            next_rt.len(),
+            rt_tower.len(),
             log2_num_instances + max(log2_r_count, log2_w_count) // TODO add lookup count
         );
         exit_span!(span);
@@ -171,18 +171,13 @@ impl<E: ExtensionField> ZKVMProver<E> {
         // selector main constraints degree > 1 sumcheck
         let span = entered_span!("sumcheck::main_sel");
         let (rt_r, rt_w): (Vec<E>, Vec<E>) = (
-            next_rt[0..(log2_num_instances + log2_r_count)].to_vec(),
-            next_rt[0..(log2_num_instances + log2_w_count)].to_vec(),
+            rt_tower[..log2_num_instances + log2_r_count].to_vec(),
+            rt_tower[..log2_num_instances + log2_w_count].to_vec(),
         );
+
         let mut virtual_poly = VirtualPolynomialV2::<E>::new(log2_num_instances);
         let alpha_pow = get_challenge_pows(MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, transcript);
         let (alpha_read, alpha_write) = (&alpha_pow[0], &alpha_pow[1]);
-
-        assert_eq!(
-            &rt_r[log2_r_count..].len(),
-            &rt_w[log2_w_count..].len(),
-            "instance var didn't match"
-        );
         // create selector: all ONE, but padding ZERO to ceil_log2
         let (sel_r, sel_w): (ArcMultilinearExtension<E>, ArcMultilinearExtension<E>) = {
             let mut sel_r = build_eq_x_r_vec(&rt_r[log2_r_count..]);
