@@ -304,10 +304,10 @@ impl TowerProver {
             .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
             .collect_vec();
 
-        let next_rt = (0..max_round).fold(initial_rt, |rt, round| {
-            let mut virtual_poly = VirtualPolynomialV2::<E>::new(rt.len());
+        let next_rt = (0..max_round).fold(initial_rt, |out_rt, round| {
+            let mut virtual_poly = VirtualPolynomialV2::<E>::new(out_rt.len());
 
-            let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&rt).into_mle().into();
+            let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
 
             specs.iter_mut().enumerate().for_each(|(i, s)| {
                 if (round + 1) < s.witness.len() {
@@ -328,10 +328,11 @@ impl TowerProver {
                 IOPProverStateV2::prove_parallel(virtual_poly, transcript);
             proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
 
-            let mut rt_prime = (0..log2_num_product_fanin)
+            // rt' = r_merge || rt
+            let r_merge = (0..log2_num_product_fanin)
                 .map(|_| transcript.get_and_append_challenge(b"merge").elements)
                 .collect_vec();
-            rt_prime.extend(sumcheck_proofs.point);
+            let rt_prime = vec![sumcheck_proofs.point, r_merge].concat();
 
             let evals = state.get_mle_final_evaluations();
             let mut evals_iter = evals.iter();

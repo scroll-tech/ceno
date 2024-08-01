@@ -9,7 +9,7 @@ use gkr::{
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
-    virtual_poly::{build_eq_x_r_vec_sequential, VPAuxInfo},
+    virtual_poly::{build_eq_x_r_vec_sequential, eq_eval, VPAuxInfo},
 };
 use singer_utils::structs_v2::Circuit;
 use sumcheck::structs::{IOPProof, IOPVerifierState};
@@ -197,13 +197,13 @@ impl TowerVerify {
             .map(|(evals, alpha)| evals.into_mle().evaluate(&initial_rt) * alpha)
             .sum();
 
-        let next_rt = (0..(expected_max_round - 1)).fold(
+        let next_rt = (0..(expected_max_round - 1)).try_fold(
             PointAndEval {
                 point: initial_rt,
                 eval: initial_claim,
             },
             |point_and_eval, round| {
-                let (_rt, out_claim) = (&point_and_eval.point, &point_and_eval.eval);
+                let (out_rt, out_claim) = (&point_and_eval.point, &point_and_eval.eval);
                 let sumcheck_claim = IOPVerifierState::verify(
                     *out_claim,
                     &IOPProof {
@@ -218,18 +218,32 @@ impl TowerVerify {
                     transcript,
                 );
 
-                // TODO check expected_evaluation
-                let point: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
+                // check expected_evaluation
+                let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
+                let expected_evaluation: E = (0..tower_proofs.spec_size())
+                    .map(|spec_index| {
+                        eq_eval(&out_rt, &rt)
+                            * alpha_pows[spec_index]
+                            * tower_proofs.specs_eval[spec_index]
+                                .get(round)
+                                .map(|evals| evals.iter().product())
+                                .unwrap_or(E::ZERO)
+                    })
+                    .sum();
+                if expected_evaluation != sumcheck_claim.expected_evaluation {
+                    return Err(ZKVMError::VerifyError("mismatch tower evaluation"));
+                }
 
                 // derive single eval
                 // rt' = r_merge || rt
                 // r_merge.len() == ceil_log2(num_product_fanin)
-                let mut rt_prime = (0..log2_num_product_fanin)
+                let r_merge = (0..log2_num_product_fanin)
                     .map(|_| transcript.get_and_append_challenge(b"merge").elements)
                     .collect_vec();
-                let coeffs = build_eq_x_r_vec_sequential(&rt_prime);
-                rt_prime.extend(point);
+                let coeffs = build_eq_x_r_vec_sequential(&r_merge);
                 assert_eq!(coeffs.len(), num_product_fanin);
+                let rt_prime = vec![rt, r_merge].concat();
+
                 let spec_evals = (0..tower_proofs.spec_size()).map(|spec_index| {
                     if round < tower_proofs.specs_eval[spec_index].len() {
                         // merged evaluation
@@ -248,12 +262,12 @@ impl TowerVerify {
                     .zip(alpha_pows.iter())
                     .map(|(eval, alpha)| eval * alpha)
                     .sum();
-                PointAndEval {
+                Ok(PointAndEval {
                     point: rt_prime,
                     eval: next_eval,
-                }
+                })
             },
-        );
+        )?;
 
         Ok(next_rt.point)
     }
