@@ -169,6 +169,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 pub struct TowerVerify;
 
 impl TowerVerify {
+    // TODO review hyper parameter usage and trust less from prover
     pub fn verify<E: ExtensionField>(
         initial_evals: Vec<Vec<E>>,
         tower_proofs: &TowerProofs<E>,
