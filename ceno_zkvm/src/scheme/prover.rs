@@ -36,6 +36,11 @@ impl<E: ExtensionField> ZKVMProver<E> {
     pub fn new(circuit: Circuit<E>) -> Self {
         ZKVMProver { circuit }
     }
+
+    /// create proof giving witness and num_instances
+    /// major flow break down into
+    /// 1: witness layer inferring from input -> output
+    /// 2: proof (sumcheck reduce) from output to input
     pub fn create_proof(
         &self,
         witnesses: BTreeMap<WitnessId, DenseMultilinearExtension<E>>,
@@ -170,7 +175,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         );
         exit_span!(span);
 
-        // selector main constraints degree > 1 sumcheck
+        // batch sumcheck: selector + main degree > 1 constraints
         let span = entered_span!("sumcheck::main_sel");
         let (rt_r, rt_w): (Vec<E>, Vec<E>) = (
             rt_tower[..log2_num_instances + log2_r_count].to_vec(),
@@ -198,16 +203,17 @@ impl<E: ExtensionField> ZKVMProver<E> {
         // read
         // rt_r := rt || rs
         for i in 0..r_counts_per_instance {
-            // \sum_t (sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[i] ))
+            // \sum_t (sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[t] ))
             virtual_poly.add_mle_list(
                 vec![sel_r.clone(), r_records_wit[i].clone()],
                 eq_r[i] * alpha_read,
             );
         }
-        for i in r_counts_per_instance..r_counts_per_instance.next_power_of_two() {
-            // \sum_t (sel(rt, t) * (\sum_i alpha_read * (eq(rs, i) - 1)))
-            virtual_poly.add_mle_list(vec![sel_r.clone()], *alpha_read * (eq_r[i] - E::ONE));
-        }
+        // \sum_t alpha_read * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
+        virtual_poly.add_mle_list(
+            vec![sel_r.clone()],
+            *alpha_read * eq_r[r_counts_per_instance..].iter().sum::<E>() - *alpha_read,
+        );
 
         // write
         // rt := rt || rs
@@ -218,10 +224,11 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 eq_w[i] * alpha_write,
             );
         }
-        for i in w_counts_per_instance..w_counts_per_instance.next_power_of_two() {
-            // \sum_t (sel(rt, t) * (\sum_i alpha_write * (eq(rs, i) - 1)))
-            virtual_poly.add_mle_list(vec![sel_w.clone()], *alpha_write * (eq_w[i] - E::ONE));
-        }
+        // \sum_t alpha_write * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
+        virtual_poly.add_mle_list(
+            vec![sel_w.clone()],
+            *alpha_write * eq_w[w_counts_per_instance..].iter().sum::<E>() - *alpha_write,
+        );
         let (main_sel_sumcheck_proofs, state) =
             IOPProverStateV2::prove_parallel(virtual_poly, transcript);
         let main_sel_evals = state.get_mle_final_evaluations();
@@ -229,7 +236,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             main_sel_evals.len(),
             r_counts_per_instance + w_counts_per_instance + 2
         ); // 2 from [sel_r, sel_w]
-        let r_records_in_evals = main_sel_evals.as_slice()[1..][..r_counts_per_instance].to_vec(); // 1 to skip first sel
+        let r_records_in_evals = main_sel_evals.as_slice()[1..][..r_counts_per_instance].to_vec(); // 1 to skip sel
         let w_records_in_evals = main_sel_evals.as_slice()[2 + r_counts_per_instance..] // 2 to skip read/write sel
             [..w_counts_per_instance]
             .to_vec();
