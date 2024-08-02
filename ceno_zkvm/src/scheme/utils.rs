@@ -27,6 +27,7 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
     log2_num_instances: usize,
     log2_per_instance_size: usize,
     num_product_fanin: usize,
+    default: E,
 ) -> Vec<ArcMultilinearExtension<'a, E>> {
     assert!(num_product_fanin.is_power_of_two());
     let mle_group_len = mles.len() / num_product_fanin;
@@ -35,7 +36,7 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
         .map(|records_mle| {
             // interleaving records witness into single vector
             let mut evaluations = vec![
-                E::ONE;
+                default;
                 1 << (log2_num_instances + log2_per_instance_size
                     - log_num_product_fanin)
             ];
@@ -274,7 +275,7 @@ mod tests {
             vec![E::ONE, E::from(2u64)].into_mle().into(),
             vec![E::from(3u64), E::from(4u64)].into_mle().into(),
         ];
-        let res = interleaving_mles_to_mles(&input_mles, 1, 2, num_product_fanin);
+        let res = interleaving_mles_to_mles(&input_mles, 1, 2, num_product_fanin, E::ONE);
         // [[1, 1, 2, 1], [3, 1, 4, 1]]
         assert!(res[0].get_ext_field_vec() == vec![E::ONE, E::ONE, E::from(2u64), E::ONE],);
         assert!(res[1].get_ext_field_vec() == vec![E::from(3u64), E::ONE, E::from(4u64), E::ONE]);

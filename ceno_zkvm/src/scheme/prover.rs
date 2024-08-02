@@ -83,6 +83,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             log2_num_instances,
             log2_r_count,
             NUM_PRODUCT_FANIN,
+            E::ONE,
         );
         assert_eq!(r_records_last_layer.len(), NUM_PRODUCT_FANIN);
         exit_span!(span);
@@ -103,6 +104,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             log2_num_instances,
             log2_w_count,
             NUM_PRODUCT_FANIN,
+            E::ONE,
         );
         assert_eq!(w_records_last_layer.len(), NUM_PRODUCT_FANIN);
         exit_span!(span);
