@@ -16,12 +16,7 @@ impl<Ext: ExtensionField> ROMHandler<Ext> {
 }
 
 impl<Ext: ExtensionField> ROMOperations<Ext> for ROMHandler<Ext> {
-    fn rom_load(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<Ext>,
-        key: &[CellId],
-        value: &[CellId],
-    ) {
+    fn rom_load(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, key: &[CellId], value: &[CellId]) {
         let item_rlc = circuit_builder.create_ext_cell();
         let items = [key.to_vec(), value.to_vec()].concat();
         circuit_builder.rlc(&item_rlc, &items, self.challenge.record_item_rlc());
@@ -58,9 +53,6 @@ impl<Ext: ExtensionField> ROMOperations<Ext> for ROMHandler<Ext> {
             circuit_builder.add_ext(&out, &last, Ext::BaseField::ONE);
             records.push(out);
         }
-        Some((
-            circuit_builder.create_witness_out_from_exts(&records),
-            records.len(),
-        ))
+        Some((circuit_builder.create_witness_out_from_exts(&records), records.len()))
     }
 }

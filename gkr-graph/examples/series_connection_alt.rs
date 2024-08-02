@@ -7,8 +7,8 @@ use gkr::{
 use gkr_graph::{
     error::GKRGraphError,
     structs::{
-        CircuitGraphAuxInfo, CircuitGraphBuilder, IOPProverState, IOPVerifierState, NodeOutputType,
-        PredType, TargetEvaluations,
+        CircuitGraphAuxInfo, CircuitGraphBuilder, IOPProverState, IOPVerifierState, NodeOutputType, PredType,
+        TargetEvaluations,
     },
 };
 use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -16,10 +16,7 @@ use simple_frontend::structs::{ChallengeId, CircuitBuilder, MixedCell};
 use std::sync::Arc;
 use transcript::Transcript;
 
-fn construct_input<E: ExtensionField>(
-    input_size: usize,
-    challenge: ChallengeId,
-) -> Arc<Circuit<E>> {
+fn construct_input<E: ExtensionField>(input_size: usize, challenge: ChallengeId) -> Arc<Circuit<E>> {
     let mut circuit_builder = CircuitBuilder::<E>::new();
     let (_, inputs) = circuit_builder.create_witness_in(input_size);
     let (_, lookup_inputs) = circuit_builder.create_ext_witness_out(input_size);
@@ -34,10 +31,7 @@ fn construct_input<E: ExtensionField>(
 
 /// Construct a selector for n_instances and each instance contains `num`
 /// items. `num` must be a power of 2.
-pub(crate) fn construct_prefix_selector<E: ExtensionField>(
-    n_instances: usize,
-    num: usize,
-) -> Arc<Circuit<E>> {
+pub(crate) fn construct_prefix_selector<E: ExtensionField>(n_instances: usize, num: usize) -> Arc<Circuit<E>> {
     assert_eq!(num, num.next_power_of_two());
     let mut circuit_builder = CircuitBuilder::<E>::new();
     let _ = circuit_builder.create_constant_in(n_instances * num, 1);
@@ -59,12 +53,7 @@ pub(crate) fn construct_inv_sum<E: ExtensionField>() -> Arc<Circuit<E>> {
     let den_mul = circuit_builder.create_ext_cell();
     circuit_builder.mul2_ext(&den_mul, &input[0], &input[1], E::BaseField::ONE);
     let tmp = circuit_builder.create_ext_cell();
-    circuit_builder.sel_mixed_and_ext(
-        &tmp,
-        &MixedCell::Constant(E::BaseField::ONE),
-        &input[0],
-        cond[0],
-    );
+    circuit_builder.sel_mixed_and_ext(&tmp, &MixedCell::Constant(E::BaseField::ONE), &input[0], cond[0]);
     circuit_builder.sel_ext(&output[0], &tmp, &den_mul, cond[1]);
 
     // select the numerator 0 or 1 or input[0] + input[1]
@@ -143,11 +132,7 @@ fn main() -> Result<(), GKRGraphError> {
     let mut prover_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
     let mut verifier_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
     let mut prover_transcript = Transcript::<GoldilocksExt2>::new(b"test");
-    let challenge = vec![
-        prover_transcript
-            .get_and_append_challenge(b"lookup challenge")
-            .elements,
-    ];
+    let challenge = vec![prover_transcript.get_and_append_challenge(b"lookup challenge").elements];
 
     let mut add_node_and_witness = |label: &'static str,
                                     circuit: &Arc<Circuit<_>>,
@@ -225,12 +210,8 @@ fn main() -> Result<(), GKRGraphError> {
     // Proofs generation
     // =================
     let output_point = vec![
-        prover_transcript
-            .get_and_append_challenge(b"output point")
-            .elements,
-        prover_transcript
-            .get_and_append_challenge(b"output point")
-            .elements,
+        prover_transcript.get_and_append_challenge(b"output point").elements,
+        prover_transcript.get_and_append_challenge(b"output point").elements,
     ];
     let output_eval = circuit_witness
         .node_witnesses
@@ -259,12 +240,8 @@ fn main() -> Result<(), GKRGraphError> {
         .elements];
 
     let output_point = vec![
-        verifier_transcript
-            .get_and_append_challenge(b"output point")
-            .elements,
-        verifier_transcript
-            .get_and_append_challenge(b"output point")
-            .elements,
+        verifier_transcript.get_and_append_challenge(b"output point").elements,
+        verifier_transcript.get_and_append_challenge(b"output point").elements,
     ];
 
     IOPVerifierState::verify(

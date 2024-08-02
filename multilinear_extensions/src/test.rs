@@ -92,8 +92,7 @@ fn test_fix_high_variables() {
     let result1 = poly.fix_high_variables(&partial_point[1..]);
     assert_eq!(result1, expected1);
 
-    let expected2 =
-        DenseMultilinearExtension::from_evaluations_ext_vec(1, vec![-E::from(23), E::from(139)]);
+    let expected2 = DenseMultilinearExtension::from_evaluations_ext_vec(1, vec![-E::from(23), E::from(139)]);
     let result2 = poly.fix_high_variables(&partial_point);
     assert_eq!(result2, expected2);
 }
@@ -126,8 +125,7 @@ fn build_eq_x_r_for_test<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExten
         let mut current_eval = E::ONE;
         let bit_sequence = bit_decompose(i, num_var);
 
-        for (&bit, (ri, one_minus_ri)) in bit_sequence.iter().zip(r.iter().zip(one_minus_r.iter()))
-        {
+        for (&bit, (ri, one_minus_ri)) in bit_sequence.iter().zip(r.iter().zip(one_minus_r.iter())) {
             current_eval *= if bit { *ri } else { *one_minus_ri };
         }
         eval.push(current_eval);

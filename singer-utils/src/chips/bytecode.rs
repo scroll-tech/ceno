@@ -81,14 +81,9 @@ pub(crate) fn construct_bytecode_table<E: ExtensionField>(
     let bytecode_circuit = construct_circuit(challenges);
     let selector = ChipCircuitGadgets::construct_prefix_selector(bytecode_len, 1);
 
-    let selector_node_id =
-        builder.add_node("bytecode selector circuit", &selector.circuit, vec![])?;
+    let selector_node_id = builder.add_node("bytecode selector circuit", &selector.circuit, vec![])?;
 
-    let table_node_id = builder.add_node(
-        "bytecode table circuit",
-        &bytecode_circuit,
-        vec![PredType::Source; 2],
-    )?;
+    let table_node_id = builder.add_node("bytecode table circuit", &bytecode_circuit, vec![PredType::Source; 2])?;
 
     Ok((
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),

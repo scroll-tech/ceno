@@ -9,8 +9,7 @@ use simple_frontend::structs::WitnessId;
 use crate::{
     error::GKRGraphError,
     structs::{
-        CircuitGraph, CircuitGraphBuilder, CircuitGraphWitness, CircuitNode, NodeInputType,
-        NodeOutputType, PredType,
+        CircuitGraph, CircuitGraphBuilder, CircuitGraphWitness, CircuitNode, NodeInputType, NodeOutputType, PredType,
     },
 };
 
@@ -45,16 +44,13 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
         assert!(num_instances.is_power_of_two());
         assert_eq!(sources.len(), circuit.n_witness_in);
         assert!(
-            !sources.iter().any(
-                |source| source.instances.len() != 0 && source.instances.len() != num_instances
-            ),
+            !sources
+                .iter()
+                .any(|source| source.instances.len() != 0 && source.instances.len() != num_instances),
             "node_id: {}, num_instances: {}, sources_num_instances: {:?}",
             id,
             num_instances,
-            sources
-                .iter()
-                .map(|source| source.instances.len())
-                .collect_vec()
+            sources.iter().map(|source| source.instances.len()).collect_vec()
         );
 
         let mut witness = CircuitWitness::new(circuit, challenges);
@@ -65,14 +61,11 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
                     let (id, out) = &match out {
                         NodeOutputType::OutputLayer(id) => (
                             *id,
-                            &self.witness.node_witnesses[*id]
-                                .output_layer_witness_ref()
-                                .instances,
+                            &self.witness.node_witnesses[*id].output_layer_witness_ref().instances,
                         ),
                         NodeOutputType::WireOut(id, wit_id) => (
                             *id,
-                            &self.witness.node_witnesses[*id].witness_out_ref()[*wit_id as usize]
-                                .instances,
+                            &self.witness.node_witnesses[*id].witness_out_ref()[*wit_id as usize].instances,
                         ),
                     };
                     let old_num_instances = self.witness.node_witnesses[*id].n_instances();
@@ -94,10 +87,7 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
                             out.iter()
                                 .cloned()
                                 .flat_map(|single_instance| {
-                                    single_instance
-                                        .into_iter()
-                                        .cycle()
-                                        .take(num_dups * old_size)
+                                    single_instance.into_iter().cycle().take(num_dups * old_size)
                                 })
                                 .chunks(old_size)
                                 .into_iter()
@@ -146,9 +136,7 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
     }
 
     /// Collect the information of `self.sources` and `self.targets`.
-    pub fn finalize_graph_and_witness(
-        mut self,
-    ) -> (CircuitGraph<E>, CircuitGraphWitness<E::BaseField>) {
+    pub fn finalize_graph_and_witness(mut self) -> (CircuitGraph<E>, CircuitGraphWitness<E::BaseField>) {
         // Generate all possible graph output
         let outs = self
             .graph
@@ -244,10 +232,7 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
             },
         );
 
-        assert_eq!(
-            expected_target,
-            targets.iter().cloned().collect::<BTreeSet<_>>()
-        );
+        assert_eq!(expected_target, targets.iter().cloned().collect::<BTreeSet<_>>());
 
         self.graph.sources = sources.into_iter().collect();
         self.graph.targets = targets.to_vec();

@@ -49,8 +49,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         // From predesessor instruction
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
         let (dest_id, dest) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
-        let (cond_values_id, cond_values) =
-            circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+        let (cond_values_id, cond_values) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
         let mut rom_handler = ROMHandler::new(&challenges);
 
@@ -66,8 +65,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
             .iter()
             .for_each(|x| circuit_builder.add(non_zero_or, *x, E::BaseField::ONE));
         let cond_non_zero_or_inv = phase0[Self::phase0_cond_non_zero_or_inv().start];
-        let cond_non_zero =
-            rom_handler.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
+        let cond_non_zero = rom_handler.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
 
         // If cond_non_zero, next_pc = dest, otherwise, pc = pc + 1
         let pc_plus_1 = &phase0[Self::phase0_pc_plus_1()];
@@ -89,8 +87,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         rom_handler.bytecode_with_pc_byte(&mut circuit_builder, &next_pc, next_opcode);
 
         // To successor instruction
-        let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
+        let (next_memory_ts_id, next_memory_ts) = circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         let rom_id = rom_handler.finalize(&mut circuit_builder);

@@ -33,10 +33,7 @@ const NUM_SAMPLES: usize = 10;
 const RAYON_NUM_THREADS: usize = 8;
 
 fn bench_keccak256(c: &mut Criterion) {
-    println!(
-        "#layers: {}",
-        keccak256_circuit::<GoldilocksExt2>().layers.len()
-    );
+    println!("#layers: {}", keccak256_circuit::<GoldilocksExt2>().layers.len());
 
     let max_thread_id = {
         if !is_power_of_2(RAYON_NUM_THREADS) {
@@ -74,10 +71,7 @@ fn bench_keccak256(c: &mut Criterion) {
             BenchmarkId::new("prove_keccak256", format!("keccak256_log2_{}", log2_n)),
             |b| {
                 b.iter(|| {
-                    assert!(
-                        prove_keccak256(log2_n, &circuit, (1 << log2_n).min(max_thread_id),)
-                            .is_some()
-                    );
+                    assert!(prove_keccak256(log2_n, &circuit, (1 << log2_n).min(max_thread_id),).is_some());
                 });
             },
         );

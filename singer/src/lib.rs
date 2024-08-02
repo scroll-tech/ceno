@@ -3,13 +3,9 @@
 use error::ZKVMError;
 use ff_ext::ExtensionField;
 use gkr::structs::LayerWitness;
-use gkr_graph::structs::{
-    CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
-};
+use gkr_graph::structs::{CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType};
 use goldilocks::SmallField;
-use instructions::{
-    construct_inst_graph, construct_inst_graph_and_witness, InstOutputType, SingerCircuitBuilder,
-};
+use instructions::{construct_inst_graph, construct_inst_graph_and_witness, InstOutputType, SingerCircuitBuilder};
 use singer_utils::chips::SingerChipBuilder;
 use std::mem;
 
@@ -59,14 +55,7 @@ impl<E: ExtensionField> SingerGraphBuilder<E> {
         program_input: &[u8],
         real_challenges: &[E],
         params: &SingerParams,
-    ) -> Result<
-        (
-            SingerCircuit<E>,
-            SingerWitness<E::BaseField>,
-            SingerWiresOutID,
-        ),
-        ZKVMError,
-    > {
+    ) -> Result<(SingerCircuit<E>, SingerWitness<E::BaseField>, SingerWiresOutID), ZKVMError> {
         // Add instruction and its extension (if any) circuits to the graph.
         for inst_wires_in in singer_wires_in.instructions.into_iter() {
             let InstWiresIn {
@@ -120,11 +109,7 @@ impl<E: ExtensionField> SingerGraphBuilder<E> {
 
         let (graph, graph_witness) =
             graph_builder.finalize_graph_and_witness_with_targets(&singer_wire_out_id.to_vec());
-        Ok((
-            SingerCircuit(graph),
-            SingerWitness(graph_witness),
-            singer_wire_out_id,
-        ))
+        Ok((SingerCircuit(graph), SingerWitness(graph_witness), singer_wire_out_id))
     }
 
     pub fn construct_graph(
@@ -218,12 +203,7 @@ pub struct SingerWiresOutValues<F: SmallField> {
 
 impl SingerWiresOutID {
     pub fn to_vec(&self) -> Vec<NodeOutputType> {
-        let mut res = [
-            self.ram_load.clone(),
-            self.ram_store.clone(),
-            self.rom_input.clone(),
-        ]
-        .concat();
+        let mut res = [self.ram_load.clone(), self.ram_store.clone(), self.rom_input.clone()].concat();
         if let Some(public_output_size) = self.public_output_size {
             res.push(public_output_size);
         }

@@ -48,10 +48,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
 
     /// Construct a selector for n_instances and each instance contains `num`
     /// items. `num` must be a power of 2.
-    pub(crate) fn construct_prefix_selector(
-        n_instances: usize,
-        num: usize,
-    ) -> PrefixSelectorCircuit<E> {
+    pub(crate) fn construct_prefix_selector(n_instances: usize, num: usize) -> PrefixSelectorCircuit<E> {
         assert_eq!(num, num.next_power_of_two());
         let mut circuit_builder = CircuitBuilder::<E>::new();
         let _ = circuit_builder.create_constant_in(n_instances * num, 1);
@@ -75,12 +72,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
         let den_mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&den_mul, &input[0], &input[1], E::BaseField::ONE);
         let tmp = circuit_builder.create_ext_cell();
-        circuit_builder.sel_mixed_and_ext(
-            &tmp,
-            &MixedCell::Constant(E::BaseField::ONE),
-            &input[0],
-            cond[0],
-        );
+        circuit_builder.sel_mixed_and_ext(&tmp, &MixedCell::Constant(E::BaseField::ONE), &input[0], cond[0]);
         circuit_builder.sel_ext(&output[0], &tmp, &den_mul, cond[1]);
 
         // select the numerator 0 or 1 or input[0] + input[1]
@@ -114,12 +106,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
         let den_mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&den_mul, &input_den[0], &input_den[1], E::BaseField::ONE);
         let tmp = circuit_builder.create_ext_cell();
-        circuit_builder.sel_mixed_and_ext(
-            &tmp,
-            &MixedCell::Constant(E::BaseField::ONE),
-            &input_den[0],
-            cond[0],
-        );
+        circuit_builder.sel_mixed_and_ext(&tmp, &MixedCell::Constant(E::BaseField::ONE), &input_den[0], cond[0]);
         circuit_builder.sel_ext(&output[0], &tmp, &den_mul, cond[1]);
 
         // select the numerator, 0 or input_num[0] or input_den[0] * input_num[1] + input_num[0] * input_den[1]
@@ -231,12 +218,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
         let mul = circuit_builder.create_ext_cell();
         circuit_builder.mul2_ext(&mul, &input[0], &input[1], E::BaseField::ONE);
         let tmp = circuit_builder.create_ext_cell();
-        circuit_builder.sel_mixed_and_ext(
-            &tmp,
-            &MixedCell::Constant(E::BaseField::ONE),
-            &input[0],
-            sel[0],
-        );
+        circuit_builder.sel_mixed_and_ext(&tmp, &MixedCell::Constant(E::BaseField::ONE), &input[0], sel[0]);
         circuit_builder.sel_ext(&output[0], &tmp, &mul, sel[1]);
 
         circuit_builder.configure();

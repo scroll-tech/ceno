@@ -17,11 +17,7 @@ pub fn verify<E: ExtensionField>(
 ) -> Result<(), ZKVMError> {
     // TODO: Add PCS.
     let point = (0..2 * <E as ExtensionField>::DEGREE)
-        .map(|_| {
-            transcript
-                .get_and_append_challenge(b"output point")
-                .elements
-        })
+        .map(|_| transcript.get_and_append_challenge(b"output point").elements)
         .collect_vec();
 
     let SingerWiresOutValues {
@@ -45,9 +41,7 @@ pub fn verify<E: ExtensionField>(
             let (den, num) = x.split_at(l / 2);
             (E::from_limbs(den), E::from_limbs(num))
         })
-        .fold((E::ONE, E::ZERO), |acc, x| {
-            (acc.0 * x.0, acc.0 * x.1 + acc.1 * x.0)
-        });
+        .fold((E::ONE, E::ZERO), |acc, x| (acc.0 * x.0, acc.0 * x.1 + acc.1 * x.0));
     let rom_table_sum = rom_table
         .iter()
         .map(|x| {
@@ -55,9 +49,7 @@ pub fn verify<E: ExtensionField>(
             let (den, num) = x.split_at(l / 2);
             (E::from_limbs(den), E::from_limbs(num))
         })
-        .fold((E::ONE, E::ZERO), |acc, x| {
-            (acc.0 * x.0, acc.0 * x.1 + acc.1 * x.0)
-        });
+        .fold((E::ONE, E::ZERO), |acc, x| (acc.0 * x.0, acc.0 * x.1 + acc.1 * x.0));
     if rom_input_sum.0 * rom_table_sum.1 != rom_input_sum.1 * rom_table_sum.0 {
         return Err(ZKVMError::VerifyError);
     }
@@ -66,10 +58,7 @@ pub fn verify<E: ExtensionField>(
         chain![ram_load, ram_store, rom_input, rom_table]
             .map(|x| {
                 let f = vec![x.to_vec()].as_slice().original_mle();
-                PointAndEval::new(
-                    point[..f.num_vars].to_vec(),
-                    f.evaluate(&point[..f.num_vars]),
-                )
+                PointAndEval::new(point[..f.num_vars].to_vec(), f.evaluate(&point[..f.num_vars]))
             })
             .collect_vec(),
     );
@@ -80,10 +69,7 @@ pub fn verify<E: ExtensionField>(
             point[..f.num_vars].to_vec(),
             f.evaluate(&point[..f.num_vars]),
         ));
-        assert_eq!(
-            output[0],
-            E::BaseField::from(aux_info.program_output_len as u64)
-        )
+        assert_eq!(output[0], E::BaseField::from(aux_info.program_output_len as u64))
     }
 
     GKRGraphVerifierState::verify(

@@ -16,9 +16,7 @@ impl<Ext: ExtensionField> MemoryChipOperations<Ext> for RAMHandler<Ext> {
         byte: CellId,
     ) {
         let key = [
-            vec![MixedCell::Constant(Ext::BaseField::from(
-                RAMType::Memory as u64,
-            ))],
+            vec![MixedCell::Constant(Ext::BaseField::from(RAMType::Memory as u64))],
             offset.iter().map(|&x| x.into()).collect_vec(),
         ]
         .concat();
@@ -37,9 +35,7 @@ impl<Ext: ExtensionField> MemoryChipOperations<Ext> for RAMHandler<Ext> {
         cur_byte: CellId,
     ) {
         let key = [
-            vec![MixedCell::Constant(Ext::BaseField::from(
-                RAMType::Memory as u64,
-            ))],
+            vec![MixedCell::Constant(Ext::BaseField::from(RAMType::Memory as u64))],
             offset.iter().map(|&x| x.into()).collect_vec(),
         ]
         .concat();

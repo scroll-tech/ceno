@@ -96,14 +96,9 @@ pub(crate) fn construct_calldata_table<E: ExtensionField>(
     let calldata_circuit = construct_circuit(challenges);
     let selector = ChipCircuitGadgets::construct_prefix_selector(program_input_len, 1);
 
-    let selector_node_id =
-        builder.add_node("calldata selector circuit", &selector.circuit, vec![])?;
+    let selector_node_id = builder.add_node("calldata selector circuit", &selector.circuit, vec![])?;
 
-    let table_node_id = builder.add_node(
-        "calldata table circuit",
-        &calldata_circuit,
-        vec![PredType::Source; 2],
-    )?;
+    let table_node_id = builder.add_node("calldata table circuit", &calldata_circuit, vec![PredType::Source; 2])?;
 
     Ok((
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),

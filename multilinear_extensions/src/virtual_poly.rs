@@ -113,11 +113,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
     /// `coefficient`.
-    pub fn add_mle_list(
-        &mut self,
-        mle_list: Vec<ArcDenseMultilinearExtension<E>>,
-        coefficient: E::BaseField,
-    ) {
+    pub fn add_mle_list(&mut self, mle_list: Vec<ArcDenseMultilinearExtension<E>>, coefficient: E::BaseField) {
         let mle_list: Vec<ArcDenseMultilinearExtension<E>> = mle_list.into_iter().collect();
         let mut indexed_product = Vec::with_capacity(mle_list.len());
 
@@ -211,11 +207,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
             point.len()
         );
 
-        let evals: Vec<E> = self
-            .flattened_ml_extensions
-            .iter()
-            .map(|x| x.evaluate(point))
-            .collect();
+        let evals: Vec<E> = self.flattened_ml_extensions.iter().map(|x| x.evaluate(point)).collect();
 
         let res = self
             .products
@@ -239,10 +231,8 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
         let mut sum = E::ZERO;
         let mut poly = VirtualPolynomial::new(nv);
         for _ in 0..num_products {
-            let num_multiplicands =
-                rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
-            let (product, product_sum) =
-                DenseMultilinearExtension::random_mle_list(nv, num_multiplicands, rng);
+            let num_multiplicands = rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
+            let (product, product_sum) = DenseMultilinearExtension::random_mle_list(nv, num_multiplicands, rng);
             let coefficient = E::BaseField::random(&mut rng);
             poly.add_mle_list(product, coefficient);
             sum += product_sum * coefficient;
@@ -262,10 +252,8 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     ) -> Self {
         let mut poly = VirtualPolynomial::new(nv);
         for _ in 0..num_products {
-            let num_multiplicands =
-                rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
-            let product =
-                DenseMultilinearExtension::random_zero_mle_list(nv, num_multiplicands, rng);
+            let num_multiplicands = rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
+            let product = DenseMultilinearExtension::random_zero_mle_list(nv, num_multiplicands, rng);
             let coefficient = E::BaseField::random(&mut rng);
             poly.add_mle_list(product, coefficient);
         }

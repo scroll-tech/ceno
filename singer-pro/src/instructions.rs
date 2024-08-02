@@ -12,8 +12,8 @@ use crate::{
 };
 
 use self::{
-    add::AddInstruction, calldataload::CalldataloadInstruction, gt::GtInstruction,
-    jump::JumpInstruction, jumpi::JumpiInstruction, mstore::MstoreInstruction,
+    add::AddInstruction, calldataload::CalldataloadInstruction, gt::GtInstruction, jump::JumpInstruction,
+    jumpi::JumpiInstruction, mstore::MstoreInstruction,
 };
 
 // arithmetic
@@ -47,10 +47,7 @@ impl<E: ExtensionField> SingerInstCircuitBuilder<E> {
         let mut insts_circuits = HashMap::new();
         insts_circuits.insert(0x01, AddInstruction::construct_circuits(challenges)?);
         insts_circuits.insert(0x11, GtInstruction::construct_circuits(challenges)?);
-        insts_circuits.insert(
-            0x35,
-            CalldataloadInstruction::construct_circuits(challenges)?,
-        );
+        insts_circuits.insert(0x35, CalldataloadInstruction::construct_circuits(challenges)?);
         insts_circuits.insert(0x52, MstoreInstruction::construct_circuits(challenges)?);
         insts_circuits.insert(0x56, JumpInstruction::construct_circuits(challenges)?);
         insts_circuits.insert(0x57, JumpiInstruction::construct_circuits(challenges)?);
@@ -138,9 +135,7 @@ pub(crate) trait InstructionGraph<E: ExtensionField> {
 
     /// Construct instruction circuits and its extensions. Mostly there is no
     /// extensions.
-    fn construct_circuits(
-        challenges: ChipChallenges,
-    ) -> Result<(InstCircuit<E>, Vec<AccessoryCircuit<E>>), ZKVMError> {
+    fn construct_circuits(challenges: ChipChallenges) -> Result<(InstCircuit<E>, Vec<AccessoryCircuit<E>>), ZKVMError> {
         Ok((Self::InstType::construct_circuit(challenges)?, vec![]))
     }
 
@@ -195,11 +190,7 @@ pub(crate) trait InstructionGraph<E: ExtensionField> {
         real_n_instances: usize,
         _params: &SingerParams,
     ) -> Result<(Vec<usize>, Vec<NodeOutputType>, Option<NodeOutputType>), ZKVMError> {
-        let node_id = graph_builder.add_node(
-            <Self::InstType as Instruction<E>>::NAME,
-            &inst_circuit.circuit,
-            preds,
-        )?;
+        let node_id = graph_builder.add_node(<Self::InstType as Instruction<E>>::NAME, &inst_circuit.circuit, preds)?;
         let stack = inst_circuit
             .layout
             .to_succ_inst

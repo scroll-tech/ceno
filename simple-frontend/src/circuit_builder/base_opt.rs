@@ -2,8 +2,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 
 use crate::structs::{
-    Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, InType, MixedCell, OutType,
-    WitnessId,
+    Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, InType, MixedCell, OutType, WitnessId,
 };
 
 impl<Ext: ExtensionField> CircuitBuilder<Ext> {
@@ -26,10 +25,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
 
     pub fn create_witness_in(&mut self, num: usize) -> (WitnessId, Vec<CellId>) {
         let cell = self.create_cells(num);
-        self.mark_cells(
-            CellType::In(InType::Witness(self.n_witness_in as WitnessId)),
-            &cell,
-        );
+        self.mark_cells(CellType::In(InType::Witness(self.n_witness_in as WitnessId)), &cell);
         self.n_witness_in += 1;
         ((self.n_witness_in - 1) as WitnessId, cell)
     }
@@ -51,19 +47,13 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
 
     pub fn create_witness_out(&mut self, num: usize) -> (WitnessId, Vec<CellId>) {
         let cell = self.create_cells(num);
-        self.mark_cells(
-            CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)),
-            &cell,
-        );
+        self.mark_cells(CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)), &cell);
         self.n_witness_out += 1;
         ((self.n_witness_out - 1) as WitnessId, cell)
     }
 
     pub fn create_witness_out_from_cells(&mut self, cells: &[CellId]) -> WitnessId {
-        self.mark_cells(
-            CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)),
-            &cells,
-        );
+        self.mark_cells(CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)), &cells);
         self.n_witness_out += 1;
         (self.n_witness_out - 1) as WitnessId
     }
@@ -103,25 +93,12 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         self.mul2_internal(out, in_0, in_1, ConstantType::Field(scalar));
     }
 
-    pub(crate) fn mul2_internal(
-        &mut self,
-        out: CellId,
-        in_0: CellId,
-        in_1: CellId,
-        scalar: ConstantType<Ext>,
-    ) {
+    pub(crate) fn mul2_internal(&mut self, out: CellId, in_0: CellId, in_1: CellId, scalar: ConstantType<Ext>) {
         let out_cell = &mut self.cells[out];
         out_cell.gates.push(GateType::mul2(in_0, in_1, scalar));
     }
 
-    pub fn mul3(
-        &mut self,
-        out: CellId,
-        in_0: CellId,
-        in_1: CellId,
-        in_2: CellId,
-        scalar: Ext::BaseField,
-    ) {
+    pub fn mul3(&mut self, out: CellId, in_0: CellId, in_1: CellId, in_2: CellId, scalar: Ext::BaseField) {
         if scalar == Ext::BaseField::ZERO {
             return;
         }
@@ -137,9 +114,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         scalar: ConstantType<Ext>,
     ) {
         let out_cell = &mut self.cells[out];
-        out_cell
-            .gates
-            .push(GateType::mul3(in_0, in_1, in_2, scalar));
+        out_cell.gates.push(GateType::mul3(in_0, in_1, in_2, scalar));
     }
 
     pub fn assert_const(&mut self, out: CellId, constant: i64) {
@@ -180,13 +155,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         self.add(out, in_0, Ext::BaseField::ONE);
     }
 
-    pub fn sel_mixed(
-        &mut self,
-        out: CellId,
-        in_0: MixedCell<Ext>,
-        in_1: MixedCell<Ext>,
-        cond: CellId,
-    ) {
+    pub fn sel_mixed(&mut self, out: CellId, in_0: MixedCell<Ext>, in_1: MixedCell<Ext>, cond: CellId) {
         // (1 - cond) * in_0 + cond * in_1 = (in_1 - in_0) * cond + in_0
         match (in_0, in_1) {
             (MixedCell::Constant(in_0), MixedCell::Constant(in_1)) => {

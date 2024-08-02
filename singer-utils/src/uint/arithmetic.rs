@@ -32,9 +32,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_1: &UInt<M, C>,
         carry: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let result: UInt<M, C> = circuit_builder
-            .create_cells(Self::N_OPERAND_CELLS)
-            .try_into()?;
+        let result: UInt<M, C> = circuit_builder.create_cells(Self::N_OPERAND_CELLS).try_into()?;
 
         for i in 0..Self::N_OPERAND_CELLS {
             let (a, b, result) = (addend_0.values[i], addend_1.values[i], result.values[i]);
@@ -70,9 +68,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         constant: E::BaseField,
         carry: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let result: UInt<M, C> = circuit_builder
-            .create_cells(Self::N_OPERAND_CELLS)
-            .try_into()?;
+        let result: UInt<M, C> = circuit_builder.create_cells(Self::N_OPERAND_CELLS).try_into()?;
 
         // add constant to the first limb
         circuit_builder.add_const(result.values[0], constant);
@@ -125,9 +121,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_1: CellId,
         carry: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let result: UInt<M, C> = circuit_builder
-            .create_cells(Self::N_OPERAND_CELLS)
-            .try_into()?;
+        let result: UInt<M, C> = circuit_builder.create_cells(Self::N_OPERAND_CELLS).try_into()?;
 
         // add small_value to the first limb
         circuit_builder.add(result.values[0], addend_1, E::BaseField::ONE);
@@ -180,13 +174,10 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         subtrahend: &UInt<M, C>,
         borrow: &[CellId],
     ) -> Result<UInt<M, C>, UtilError> {
-        let result: UInt<M, C> = circuit_builder
-            .create_cells(Self::N_OPERAND_CELLS)
-            .try_into()?;
+        let result: UInt<M, C> = circuit_builder.create_cells(Self::N_OPERAND_CELLS).try_into()?;
 
         for i in 0..Self::N_OPERAND_CELLS {
-            let (minuend, subtrahend, result) =
-                (minuend.values[i], subtrahend.values[i], result.values[i]);
+            let (minuend, subtrahend, result) = (minuend.values[i], subtrahend.values[i], result.values[i]);
 
             circuit_builder.add(result, minuend, E::BaseField::ONE);
             circuit_builder.add(result, subtrahend, -E::BaseField::ONE);
@@ -235,11 +226,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         // handle overflow carry
         // we need to subtract the carry value from the current result
         if limb_index < carry.len() {
-            circuit_builder.add(
-                result_cell_id,
-                carry[limb_index],
-                -E::BaseField::from(1 << C),
-            );
+            circuit_builder.add(result_cell_id, carry[limb_index], -E::BaseField::from(1 << C));
         }
 
         // handle last operation carry
@@ -275,11 +262,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         // handle borrow
         // we need to add borrow units of C to the result
         if limb_index < borrow.len() {
-            circuit_builder.add(
-                result_cell_id,
-                borrow[limb_index],
-                E::BaseField::from(1 << C),
-            );
+            circuit_builder.add(result_cell_id, borrow[limb_index], E::BaseField::from(1 << C));
         }
 
         // handle last borrow
@@ -321,19 +304,15 @@ mod tests {
 
         // input wires
         // addend_0, addend_1, carry
-        let (addend_0_id, addend_0_cells) =
-            circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
-        let (addend_1_id, addend_1_cells) =
-            circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
-        let (carry_id, carry_cells) =
-            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
+        let (addend_0_id, addend_0_cells) = circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        let (addend_1_id, addend_1_cells) = circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        let (carry_id, carry_cells) = circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
         let addend_1 = UInt20::try_from(addend_1_cells).expect("should build uint");
 
         // update circuit builder with circuit instructions
-        let _ =
-            UInt20::add_unsafe(&mut circuit_builder, &addend_0, &addend_1, &carry_cells).unwrap();
+        let _ = UInt20::add_unsafe(&mut circuit_builder, &addend_0, &addend_1, &carry_cells).unwrap();
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
 
@@ -373,10 +352,7 @@ mod tests {
         let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
         assert_eq!(
             result_values,
-            [14, 17, 31, 14]
-                .into_iter()
-                .map(|v| Goldilocks::from(v))
-                .collect_vec()
+            [14, 17, 31, 14].into_iter().map(|v| Goldilocks::from(v)).collect_vec()
         );
     }
 
@@ -398,21 +374,13 @@ mod tests {
 
         // input wires
         // addend_0, carry, constant
-        let (addend_0_id, addend_0_cells) =
-            circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
-        let (carry_id, carry_cells) =
-            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
+        let (addend_0_id, addend_0_cells) = circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        let (carry_id, carry_cells) = circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
         // update circuit builder
-        let _ = UInt20::add_const_unsafe(
-            &mut circuit_builder,
-            &addend_0,
-            Goldilocks::from(200),
-            &carry_cells,
-        )
-        .unwrap();
+        let _ = UInt20::add_const_unsafe(&mut circuit_builder, &addend_0, Goldilocks::from(200), &carry_cells).unwrap();
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
 
@@ -446,10 +414,7 @@ mod tests {
         let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
         assert_eq!(
             result_values,
-            [22, 2, 0, 15]
-                .into_iter()
-                .map(|v| Goldilocks::from(v))
-                .collect_vec()
+            [22, 2, 0, 15].into_iter().map(|v| Goldilocks::from(v)).collect_vec()
         );
     }
 
@@ -471,22 +436,14 @@ mod tests {
 
         // input wires
         // addend_0, carry, constant
-        let (addend_0_id, addend_0_cells) =
-            circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        let (addend_0_id, addend_0_cells) = circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
         let (small_value_id, small_value_cell) = circuit_builder.create_witness_in(1);
-        let (carry_id, carry_cells) =
-            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
+        let (carry_id, carry_cells) = circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let addend_0 = UInt20::try_from(addend_0_cells).expect("should build uint");
 
         // update circuit builder
-        let _ = UInt20::add_cell_unsafe(
-            &mut circuit_builder,
-            &addend_0,
-            small_value_cell[0],
-            &carry_cells,
-        )
-        .unwrap();
+        let _ = UInt20::add_cell_unsafe(&mut circuit_builder, &addend_0, small_value_cell[0], &carry_cells).unwrap();
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
 
@@ -497,10 +454,7 @@ mod tests {
             .rev()
             .map(|v| Goldilocks::from(v))
             .collect_vec();
-        let small_value_witness = vec![200]
-            .into_iter()
-            .map(|v| Goldilocks::from(v))
-            .collect_vec();
+        let small_value_witness = vec![200].into_iter().map(|v| Goldilocks::from(v)).collect_vec();
         let carry_witness = vec![0, 1, 1, 6]
             .into_iter()
             .rev()
@@ -525,10 +479,7 @@ mod tests {
         let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
         assert_eq!(
             result_values,
-            [22, 2, 0, 15]
-                .into_iter()
-                .map(|v| Goldilocks::from(v))
-                .collect_vec()
+            [22, 2, 0, 15].into_iter().map(|v| Goldilocks::from(v)).collect_vec()
         );
     }
 
@@ -547,20 +498,16 @@ mod tests {
 
         // input wires
         // minuend, subtrahend, borrow
-        let (minuend_id, minuend_cells) =
-            circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
-        let (subtrahend_id, subtrahend_cells) =
-            circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        let (minuend_id, minuend_cells) = circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
+        let (subtrahend_id, subtrahend_cells) = circuit_builder.create_witness_in(UInt20::N_OPERAND_CELLS);
         // |Carry| == |Borrow|
-        let (borrow_id, borrow_cells) =
-            circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
+        let (borrow_id, borrow_cells) = circuit_builder.create_witness_in(AddSubConstants::<UInt20>::N_CARRY_CELLS);
 
         let minuend = UInt20::try_from(minuend_cells).expect("should build uint");
         let subtrahend = UInt20::try_from(subtrahend_cells).expect("should build uint");
 
         // update the circuit builder
-        let _ =
-            UInt20::sub_unsafe(&mut circuit_builder, &minuend, &subtrahend, &borrow_cells).unwrap();
+        let _ = UInt20::sub_unsafe(&mut circuit_builder, &minuend, &subtrahend, &borrow_cells).unwrap();
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
 
@@ -600,10 +547,7 @@ mod tests {
         let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
         assert_eq!(
             result_values,
-            [20, 30, 21, 3]
-                .into_iter()
-                .map(|v| Goldilocks::from(v))
-                .collect_vec()
+            [20, 30, 21, 3].into_iter().map(|v| Goldilocks::from(v)).collect_vec()
         );
     }
 }

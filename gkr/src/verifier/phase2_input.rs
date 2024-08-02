@@ -51,10 +51,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
 
         let mut sumcheck_sigma = self.to_next_step_point_and_eval.eval - g_value_const;
         if !layer.add_consts.is_empty() {
-            sumcheck_sigma -= layer
-                .add_consts
-                .as_slice()
-                .eval(&self.eq_y_ry, &self.challenges);
+            sumcheck_sigma -= layer.add_consts.as_slice().eval(&self.eq_y_ry, &self.challenges);
         }
 
         if lo_in_num_vars.is_none() {
@@ -81,16 +78,9 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         self.eq_x1_rx1 = build_eq_x_r_vec(&claim_point);
         let g_values_iter = chain![
             circuit.paste_from_wits_in.iter().cloned(),
-            circuit
-                .paste_from_counter_in
-                .iter()
-                .map(|(_, (l, r))| (*l, *r))
+            circuit.paste_from_counter_in.iter().map(|(_, (l, r))| (*l, *r))
         ]
-        .map(|(l, r)| {
-            (l..r)
-                .map(|i| self.eq_y_ry[i] * self.eq_x1_rx1[i - l])
-                .sum::<E>()
-        });
+        .map(|(l, r)| (l..r).map(|i| self.eq_y_ry[i] * self.eq_x1_rx1[i - l]).sum::<E>());
 
         // TODO: Double check here.
         let f_counter_values = circuit
@@ -99,17 +89,11 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             .map(|(num_vars, _)| {
                 let point = [&claim_point[..*num_vars], hi_point].concat();
                 counter_eval(num_vars + hi_num_vars, &point)
-                    * claim_point[*num_vars..]
-                        .iter()
-                        .map(|x| E::ONE - *x)
-                        .product::<E>()
+                    * claim_point[*num_vars..].iter().map(|x| E::ONE - *x).product::<E>()
             })
             .collect_vec();
         let got_value = izip!(
-            chain![
-                step_msg.sumcheck_eval_values.iter(),
-                f_counter_values.iter()
-            ],
+            chain![step_msg.sumcheck_eval_values.iter(), f_counter_values.iter()],
             g_values_iter
         )
         .map(|(f, g)| *f * g)
@@ -132,8 +116,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             PointAndEval::new_from_ref(&point, &wit_in_eval)
         })
         .collect_vec();
-        self.to_next_step_point_and_eval =
-            PointAndEval::new([&claim_point, hi_point].concat(), E::ZERO);
+        self.to_next_step_point_and_eval = PointAndEval::new([&claim_point, hi_point].concat(), E::ZERO);
 
         end_timer!(timer);
         if claim.expected_evaluation != got_value {

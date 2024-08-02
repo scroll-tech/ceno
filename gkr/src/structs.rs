@@ -148,11 +148,11 @@ pub struct Layer<E: ExtensionField> {
     // Gates. Should be all None if it's the input layer.
     pub(crate) add_consts: Vec<GateCIn<ConstantType<E>>>,
     pub(crate) adds: Vec<Gate1In<ConstantType<E>>>,
-    pub(crate) adds_fanin_mapping: [BTreeMap<CellId, Vec<Gate1In<ConstantType<E>>>>; 1], /* grouping for 1 fanins */
+    pub(crate) adds_fanin_mapping: [BTreeMap<CellId, Vec<Gate1In<ConstantType<E>>>>; 1], // grouping for 1 fanins
     pub(crate) mul2s: Vec<Gate2In<ConstantType<E>>>,
-    pub(crate) mul2s_fanin_mapping: [BTreeMap<CellId, Vec<Gate2In<ConstantType<E>>>>; 2], /* grouping for 2 fanins */
+    pub(crate) mul2s_fanin_mapping: [BTreeMap<CellId, Vec<Gate2In<ConstantType<E>>>>; 2], // grouping for 2 fanins
     pub(crate) mul3s: Vec<Gate3In<ConstantType<E>>>,
-    pub(crate) mul3s_fanin_mapping: [BTreeMap<CellId, Vec<Gate3In<ConstantType<E>>>>; 3], /* grouping for 3 fanins */
+    pub(crate) mul3s_fanin_mapping: [BTreeMap<CellId, Vec<Gate3In<ConstantType<E>>>>; 3], // grouping for 3 fanins
 
     /// The corresponding wires copied from this layer to later layers. It is
     /// (later layer id -> current wire id to be copied). It stores the non-zero

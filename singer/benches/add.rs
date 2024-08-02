@@ -66,8 +66,7 @@ fn bench_add(c: &mut Criterion) {
         }
     };
     let chip_challenges = ChipChallenges::default();
-    let circuit_builder =
-        SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+    let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
 
     for instance_num_vars in 10..14 {
         // expand more input size once runtime is acceptable
@@ -83,32 +82,27 @@ fn bench_add(c: &mut Criterion) {
                         let mut rng = test_rng();
                         let singer_builder = SingerGraphBuilder::<E>::new();
                         let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
-                                (rng, singer_builder, real_challenges)
+                        (rng, singer_builder, real_challenges)
                     },
-           |(mut rng,mut singer_builder, real_challenges)| {
+                    |(mut rng, mut singer_builder, real_challenges)| {
                         let size = AddInstruction::phase0_size();
-                        let phase0: CircuitWiresIn<<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField> = vec![LayerWitness {
-                            instances: (0..(1 << instance_num_vars))
-                                .map(|_| {
-                                    (0..size)
-                                        .map(|_| {
-                                            <GoldilocksExt2 as ExtensionField>::BaseField::random(
-                                                &mut rng,
-                                            )
-                                        })
-                                        .collect_vec()
-                                })
-                                .collect_vec(),
-                        }];
-
+                        let phase0: CircuitWiresIn<<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField> =
+                            vec![LayerWitness {
+                                instances: (0..(1 << instance_num_vars))
+                                    .map(|_| {
+                                        (0..size)
+                                            .map(|_| <GoldilocksExt2 as ExtensionField>::BaseField::random(&mut rng))
+                                            .collect_vec()
+                                    })
+                                    .collect_vec(),
+                            }];
 
                         let timer = Instant::now();
 
                         let _ = AddInstruction::construct_graph_and_witness(
                             &mut singer_builder.graph_builder,
                             &mut singer_builder.chip_builder,
-                            &circuit_builder.insts_circuits
-                                [<AddInstruction as Instruction<E>>::OPCODE as usize],
+                            &circuit_builder.insts_circuits[<AddInstruction as Instruction<E>>::OPCODE as usize],
                             vec![phase0],
                             &real_challenges,
                             1 << instance_num_vars,
@@ -143,7 +137,8 @@ fn bench_add(c: &mut Criterion) {
                             instance_num_vars,
                             timer.elapsed().as_secs_f64()
                         );
-                });
+                    },
+                );
             },
         );
 

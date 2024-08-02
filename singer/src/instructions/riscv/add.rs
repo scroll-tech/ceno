@@ -5,9 +5,7 @@ use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
-    chip_handler::{
-        GlobalStateChipOperations, OAMOperations, ROMOperations, RegisterChipOperations,
-    },
+    chip_handler::{GlobalStateChipOperations, OAMOperations, ROMOperations, RegisterChipOperations},
     constants::OpcodeType,
     register_witness,
     riscv_constant::RvInstructions,
@@ -87,8 +85,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             clk,
         );
 
-        let next_pc =
-            ROMHandler::increase_pc(&mut circuit_builder, &pc, &phase0[Self::phase0_next_pc()])?;
+        let next_pc = ROMHandler::increase_pc(&mut circuit_builder, &pc, &phase0[Self::phase0_next_pc()])?;
         let next_memory_ts = rom_handler.increase_ts(
             &mut circuit_builder,
             &memory_ts.try_into()?,
@@ -131,10 +128,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             &phase0[Self::phase0_prev_rd_ts_lt()],
         )?;
         if cfg!(feature = "dbg-opcode") {
-            println!(
-                "addInstCircuit::phase0_outcome: {:?}",
-                Self::phase0_outcome()
-            );
+            println!("addInstCircuit::phase0_outcome: {:?}", Self::phase0_outcome());
         }
 
         // Execution result = addend0 + addend1, with carry.
@@ -239,14 +233,8 @@ mod test {
         }
 
         let mut phase0_values_map = BTreeMap::<&'static str, Vec<Goldilocks>>::new();
-        phase0_values_map.insert(
-            AddInstruction::phase0_pc_str(),
-            vec![Goldilocks::from(1u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_memory_ts_str(),
-            vec![Goldilocks::from(3u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_pc_str(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(AddInstruction::phase0_memory_ts_str(), vec![Goldilocks::from(3u64)]);
         phase0_values_map.insert(
             AddInstruction::phase0_next_memory_ts_str(),
             vec![
@@ -257,38 +245,20 @@ mod test {
                 Goldilocks::from(0u64),
             ],
         );
-        phase0_values_map.insert(
-            AddInstruction::phase0_clk_str(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_clk_str(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             AddInstruction::phase0_next_pc_str(),
             vec![], // carry is 0, may test carry using larger values in PCUInt
         );
 
         // register id assigned
-        phase0_values_map.insert(
-            AddInstruction::phase0_rs1_str(),
-            vec![Goldilocks::from(1u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_rs2_str(),
-            vec![Goldilocks::from(2u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_rd_str(),
-            vec![Goldilocks::from(3u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_rs1_str(), vec![Goldilocks::from(1u64)]);
+        phase0_values_map.insert(AddInstruction::phase0_rs2_str(), vec![Goldilocks::from(2u64)]);
+        phase0_values_map.insert(AddInstruction::phase0_rd_str(), vec![Goldilocks::from(3u64)]);
 
         let m: u64 = (1 << get_uint_params::<UInt64>().1) - 1;
-        phase0_values_map.insert(
-            AddInstruction::phase0_addend_0_str(),
-            vec![Goldilocks::from(m)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_addend_1_str(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_addend_0_str(), vec![Goldilocks::from(m)]);
+        phase0_values_map.insert(AddInstruction::phase0_addend_1_str(), vec![Goldilocks::from(1u64)]);
         let range_values = u64vec::<{ UInt64::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
         let mut wit_phase0_outcome: Vec<Goldilocks> = vec![];
         for i in 0..4 {
@@ -302,10 +272,7 @@ mod test {
             vec![Goldilocks::from(33u64)],
         );
 
-        phase0_values_map.insert(
-            AddInstruction::phase0_prev_rs1_ts_str(),
-            vec![Goldilocks::from(2u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_prev_rs1_ts_str(), vec![Goldilocks::from(2u64)]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
@@ -317,10 +284,7 @@ mod test {
                 Goldilocks::from(1u64), // borrow
             ],
         );
-        phase0_values_map.insert(
-            AddInstruction::phase0_prev_rs2_ts_str(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_prev_rs2_ts_str(), vec![Goldilocks::from(1u64)]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
@@ -332,10 +296,7 @@ mod test {
                 Goldilocks::from(1u64), // borrow
             ],
         );
-        phase0_values_map.insert(
-            AddInstruction::phase0_prev_rd_ts_str(),
-            vec![Goldilocks::from(2u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_prev_rd_ts_str(), vec![Goldilocks::from(2u64)]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
@@ -365,19 +326,14 @@ mod test {
     #[cfg(not(debug_assertions))]
     fn bench_add_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
-        let circuit_builder =
-            SingerCircuitBuilder::<E>::new_riscv(chip_challenges).expect("circuit builder failed");
+        let circuit_builder = SingerCircuitBuilder::<E>::new_riscv(chip_challenges).expect("circuit builder failed");
         let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
         let size = AddInstruction::phase0_size();
         let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
-                .map(|_| {
-                    (0..size)
-                        .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
-                })
+                .map(|_| (0..size).map(|_| E::BaseField::random(&mut rng)).collect_vec())
                 .collect_vec(),
         }];
 
@@ -410,8 +366,8 @@ mod test {
         let mut prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
-            .expect("prove failed");
+        let _ =
+            GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1).expect("prove failed");
         println!(
             "AddInstruction::prove, instance_num_vars = {}, time
        = {}",

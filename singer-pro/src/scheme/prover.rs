@@ -5,9 +5,7 @@ use gkr_graph::structs::{CircuitGraphAuxInfo, NodeOutputType};
 use itertools::Itertools;
 use transcript::Transcript;
 
-use crate::{
-    error::ZKVMError, SingerCircuit, SingerWiresOutID, SingerWiresOutValues, SingerWitness,
-};
+use crate::{error::ZKVMError, SingerCircuit, SingerWiresOutID, SingerWiresOutValues, SingerWitness};
 
 use super::{GKRGraphProverState, SingerProof};
 
@@ -19,11 +17,7 @@ pub fn prove<E: ExtensionField>(
 ) -> Result<(SingerProof<E>, CircuitGraphAuxInfo), ZKVMError> {
     // TODO: Add PCS.
     let point = (0..2 * <E as ExtensionField>::DEGREE)
-        .map(|_| {
-            transcript
-                .get_and_append_challenge(b"output point")
-                .elements
-        })
+        .map(|_| transcript.get_and_append_challenge(b"output point").elements)
         .collect_vec();
 
     let singer_out_evals = {
@@ -32,15 +26,13 @@ pub fn prove<E: ExtensionField>(
                 .iter()
                 .map(|node| {
                     match node {
-                        NodeOutputType::OutputLayer(node_id) => vm_witness.0.node_witnesses
-                            [*node_id as usize]
+                        NodeOutputType::OutputLayer(node_id) => vm_witness.0.node_witnesses[*node_id as usize]
                             .output_layer_witness_ref()
                             .instances
                             .iter()
                             .cloned()
                             .flatten(),
-                        NodeOutputType::WireOut(node_id, wit_id) => vm_witness.0.node_witnesses
-                            [*node_id as usize]
+                        NodeOutputType::WireOut(node_id, wit_id) => vm_witness.0.node_witnesses[*node_id as usize]
                             .witness_out_ref()[*wit_id as usize]
                             .instances
                             .iter()
@@ -76,8 +68,7 @@ pub fn prove<E: ExtensionField>(
     };
 
     let target_evals = vm_circuit.0.target_evals(&vm_witness.0, &point);
-    let gkr_phase_proof =
-        GKRGraphProverState::prove(&vm_circuit.0, &vm_witness.0, &target_evals, transcript, 1)?;
+    let gkr_phase_proof = GKRGraphProverState::prove(&vm_circuit.0, &vm_witness.0, &target_evals, transcript, 1)?;
     Ok((
         SingerProof {
             gkr_phase_proof,

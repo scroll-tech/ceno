@@ -10,16 +10,12 @@ use transcript::Transcript;
 
 fn main() {
     let chip_challenges = ChipChallenges::default();
-    let circuit_builder = SingerInstCircuitBuilder::<GoldilocksExt2>::new(chip_challenges)
-        .expect("circuit builder failed");
+    let circuit_builder =
+        SingerInstCircuitBuilder::<GoldilocksExt2>::new(chip_challenges).expect("circuit builder failed");
 
     let bytecode = vec![vec![0x60 as u8, 0x01, 0x50]];
-    let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::new(
-        circuit_builder.clone(),
-        &bytecode,
-        chip_challenges,
-    )
-    .expect("graph builder failed");
+    let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::new(circuit_builder.clone(), &bytecode, chip_challenges)
+        .expect("graph builder failed");
 
     let mut prover_transcript = Transcript::new(b"Singer pro");
 
@@ -52,9 +48,8 @@ fn main() {
 
     // 4. Verify.
     let mut verifier_transcript = Transcript::new(b"Singer pro");
-    let singer_builder =
-        SingerGraphBuilder::<GoldilocksExt2>::new(circuit_builder, &bytecode, chip_challenges)
-            .expect("graph builder failed");
+    let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::new(circuit_builder, &bytecode, chip_challenges)
+        .expect("graph builder failed");
     let circuit = singer_builder
         .construct_graph(&singer_aux_info)
         .expect("construct failed");

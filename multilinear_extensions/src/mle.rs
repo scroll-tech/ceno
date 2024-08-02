@@ -94,11 +94,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// Returns an error if the MLE length does not match the point.
     pub fn evaluate(&self, point: &[E]) -> E {
         // TODO: return error.
-        assert_eq!(
-            self.num_vars,
-            point.len(),
-            "MLE size does not match the point"
-        );
+        assert_eq!(self.num_vars, point.len(), "MLE size does not match the point");
         let mle = self.fix_variables_parallel(point);
         op_mle!(mle, |f| f[0], |v| E::from(v))
     }
@@ -107,10 +103,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// `partial_point.len()` variables at `partial_point`.
     pub fn fix_variables(&self, partial_point: &[E]) -> Self {
         // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars,
-            "invalid size of partial point"
-        );
+        assert!(partial_point.len() <= self.num_vars, "invalid size of partial point");
         let mut poly = Cow::Borrowed(self);
 
         // evaluate single variable of partial point from left to right
@@ -158,8 +151,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
                 }
                 FieldType::Ext(evaluations) => {
                     (0..evaluations.len()).step_by(2).for_each(|b| {
-                        evaluations[b >> 1] =
-                            evaluations[b] + (evaluations[b + 1] - evaluations[b]) * point
+                        evaluations[b >> 1] = evaluations[b] + (evaluations[b + 1] - evaluations[b]) * point
                     });
                 }
                 FieldType::Unreachable => unreachable!(),
@@ -180,10 +172,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// `partial_point.len()` variables at `partial_point` from high position
     pub fn fix_high_variables(&self, partial_point: &[E]) -> Self {
         // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars,
-            "invalid size of partial point"
-        );
+        assert!(partial_point.len() <= self.num_vars, "invalid size of partial point");
         let current_eval_size = self.evaluations.len();
         let mut poly = Cow::Borrowed(self);
         // `Cow` type here to skip first evaluation vector copy
@@ -213,10 +202,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// `partial_point.len()` variables at `partial_point` from high position in place
     pub fn fix_high_variables_in_place(&mut self, partial_point: &[E]) {
         // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars,
-            "invalid size of partial point"
-        );
+        assert!(partial_point.len() <= self.num_vars, "invalid size of partial point");
         let nv = self.num_vars;
         let mut current_eval_size = self.evaluations.len();
         for point in partial_point.iter().rev() {
@@ -256,9 +242,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
 
     /// Generate a random evaluation of a multilinear poly
     pub fn random(nv: usize, mut rng: &mut impl RngCore) -> Self {
-        let eval = (0..1 << nv)
-            .map(|_| E::BaseField::random(&mut rng))
-            .collect();
+        let eval = (0..1 << nv).map(|_| E::BaseField::random(&mut rng)).collect();
         DenseMultilinearExtension::from_evaluations_vec(nv, eval)
     }
 
@@ -400,10 +384,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// `partial_point.len()` variables at `partial_point`.
     pub fn fix_variables_parallel(&self, partial_point: &[E]) -> Self {
         // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars,
-            "invalid size of partial point"
-        );
+        assert!(partial_point.len() <= self.num_vars, "invalid size of partial point");
         let mut poly = Cow::Borrowed(self);
 
         // evaluate single variable of partial point from left to right

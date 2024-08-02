@@ -4,9 +4,7 @@ use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
-    chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-    },
+    chip_handler::{BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations},
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
@@ -62,8 +60,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
             clk,
         );
 
-        let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        let next_pc = ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
         ram_handler.state_out(
             &mut circuit_builder,
             next_pc.values(),
@@ -74,11 +71,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         );
 
         // Bytecode check for (pc, jump)
-        rom_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            pc.values(),
-            <Self as Instruction<E>>::OPCODE,
-        );
+        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), <Self as Instruction<E>>::OPCODE);
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
         let rom_id = rom_handler.finalize(&mut circuit_builder);
@@ -109,10 +102,7 @@ mod test {
     use transcript::Transcript;
 
     use crate::{
-        instructions::{
-            ChipChallenges, Instruction, InstructionGraph, JumpdestInstruction,
-            SingerCircuitBuilder,
-        },
+        instructions::{ChipChallenges, Instruction, InstructionGraph, JumpdestInstruction, SingerCircuitBuilder},
         scheme::GKRGraphProverState,
         test::test_opcode_circuit,
         CircuitWiresIn, SingerGraphBuilder, SingerParams,
@@ -141,10 +131,7 @@ mod test {
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert(
-            "phase0_stack_top".to_string(),
-            vec![Goldilocks::from(100u64)],
-        );
+        phase0_values_map.insert("phase0_stack_top".to_string(), vec![Goldilocks::from(100u64)]);
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),
@@ -169,19 +156,14 @@ mod test {
     #[cfg(not(debug_assertions))]
     fn bench_jumpdest_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
-        let circuit_builder =
-            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
         let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
         let size = JumpdestInstruction::phase0_size();
         let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
-                .map(|_| {
-                    (0..size)
-                        .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
-                })
+                .map(|_| (0..size).map(|_| E::BaseField::random(&mut rng)).collect_vec())
                 .collect_vec(),
         }];
 
@@ -192,8 +174,7 @@ mod test {
         let _ = JumpdestInstruction::construct_graph_and_witness(
             &mut singer_builder.graph_builder,
             &mut singer_builder.chip_builder,
-            &circuit_builder.insts_circuits
-                [<JumpdestInstruction as Instruction<E>>::OPCODE as usize],
+            &circuit_builder.insts_circuits[<JumpdestInstruction as Instruction<E>>::OPCODE as usize],
             vec![phase0],
             &real_challenges,
             1 << instance_num_vars,
@@ -215,8 +196,8 @@ mod test {
         let mut prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
-            .expect("prove failed");
+        let _ =
+            GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1).expect("prove failed");
         println!(
             "JumpdestInstruction::prove, instance_num_vars = {}, time = {}",
             instance_num_vars,

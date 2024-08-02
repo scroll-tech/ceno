@@ -11,10 +11,9 @@ use strum_macros::EnumIter;
 use crate::{error::ZKVMError, CircuitWiresIn, SingerParams};
 
 use self::{
-    add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
-    gt::GtInstruction, jump::JumpInstruction, jumpdest::JumpdestInstruction,
-    jumpi::JumpiInstruction, mstore::MstoreInstruction, pop::PopInstruction, push::PushInstruction,
-    ret::ReturnInstruction, swap::SwapInstruction,
+    add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction, gt::GtInstruction,
+    jump::JumpInstruction, jumpdest::JumpdestInstruction, jumpi::JumpiInstruction, mstore::MstoreInstruction,
+    pop::PopInstruction, push::PushInstruction, ret::ReturnInstruction, swap::SwapInstruction,
 };
 
 // arithmetic
@@ -57,9 +56,8 @@ impl<E: ExtensionField> SingerCircuitBuilder<E> {
         for opcode in 0..=255 {
             insts_circuits.push(construct_instruction_circuits(opcode, challenges)?);
         }
-        let insts_circuits: [Vec<InstCircuit<E>>; 256] = insts_circuits
-            .try_into()
-            .map_err(|_| ZKVMError::CircuitError)?;
+        let insts_circuits: [Vec<InstCircuit<E>>; 256] =
+            insts_circuits.try_into().map_err(|_| ZKVMError::CircuitError)?;
         Ok(Self {
             insts_circuits,
             challenges,
@@ -157,13 +155,7 @@ pub(crate) fn construct_inst_graph<E: ExtensionField>(
         _ => unimplemented!(),
     };
 
-    construct_graph(
-        graph_builder,
-        chip_builder,
-        inst_circuits,
-        real_n_instances,
-        params,
-    )
+    construct_graph(graph_builder, chip_builder, inst_circuits, real_n_instances, params)
 }
 
 #[derive(Clone, Copy, Debug, EnumIter)]

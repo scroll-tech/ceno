@@ -32,11 +32,8 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         self.eq_y_ry = build_eq_x_r_vec(lo_point);
 
         // sigma = layers[i](rt || ry) - add_const(ry),
-        let sumcheck_sigma = self.to_next_step_point_and_eval.eval
-            - layer
-                .add_consts
-                .as_slice()
-                .eval(&self.eq_y_ry, &self.challenges);
+        let sumcheck_sigma =
+            self.to_next_step_point_and_eval.eval - layer.add_consts.as_slice().eval(&self.eq_y_ry, &self.challenges);
 
         // Sumcheck 1: sigma = \sum_{x1} f1(x1) * g1(x1) + \sum_j f1'_j(x1) * g1'_j(x1)
         //     sigma = layers[i](rt || ry) - add_const(ry),
@@ -58,21 +55,20 @@ impl<E: ExtensionField> IOPVerifierState<E> {
 
         self.eq_x1_rx1 = build_eq_x_r_vec(&claim1_point[..lo_in_num_vars]);
         let g1_values_iter = chain![
-            iter::once(layer.adds.as_slice().eval(
-                &self.eq_y_ry,
-                &self.eq_x1_rx1,
-                &self.challenges
-            )),
-            layer.paste_from.iter().map(|(_, paste_from)| {
-                paste_from
+            iter::once(
+                layer
+                    .adds
                     .as_slice()
-                    .eval_col_first(&self.eq_y_ry, &self.eq_x1_rx1)
-            })
+                    .eval(&self.eq_y_ry, &self.eq_x1_rx1, &self.challenges)
+            ),
+            layer
+                .paste_from
+                .iter()
+                .map(|(_, paste_from)| { paste_from.as_slice().eval_col_first(&self.eq_y_ry, &self.eq_x1_rx1) })
         ];
 
         let f1_values = &step_msg.sumcheck_eval_values;
-        let got_value_1 =
-            izip!(f1_values.iter(), g1_values_iter).fold(E::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
+        let got_value_1 = izip!(f1_values.iter(), g1_values_iter).fold(E::ZERO, |acc, (&f1, g1)| acc + f1 * g1);
 
         end_timer!(timer);
         if claim_1.expected_evaluation != got_value_1 {
@@ -80,16 +76,11 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         }
 
         let new_point = [&claim1_point, &self.out_point[lo_out_num_vars..]].concat();
-        self.to_next_phase_point_and_evals =
-            vec![PointAndEval::new_from_ref(&new_point, &f1_values[0])];
-        izip!(layer.paste_from.iter(), f1_values.iter().skip(1)).for_each(
-            |((&old_layer_id, _), &subset_value)| {
-                self.subset_point_and_evals[old_layer_id as usize].push((
-                    self.layer_id,
-                    PointAndEval::new_from_ref(&new_point, &subset_value),
-                ));
-            },
-        );
+        self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(&new_point, &f1_values[0])];
+        izip!(layer.paste_from.iter(), f1_values.iter().skip(1)).for_each(|((&old_layer_id, _), &subset_value)| {
+            self.subset_point_and_evals[old_layer_id as usize]
+                .push((self.layer_id, PointAndEval::new_from_ref(&new_point, &subset_value)));
+        });
         self.to_next_step_point_and_eval = self.to_next_phase_point_and_evals[0].clone();
 
         Ok(())

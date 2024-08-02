@@ -14,19 +14,9 @@ pub mod rom_handler;
 pub mod stack;
 
 pub trait BytecodeChipOperations<Ext: ExtensionField>: ROMOperations<Ext> {
-    fn bytecode_with_pc_opcode(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<Ext>,
-        pc: &[CellId],
-        opcode: OpcodeType,
-    );
+    fn bytecode_with_pc_opcode(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, pc: &[CellId], opcode: OpcodeType);
 
-    fn bytecode_with_pc_byte(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<Ext>,
-        pc: &[CellId],
-        byte: CellId,
-    );
+    fn bytecode_with_pc_byte(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, pc: &[CellId], byte: CellId);
 }
 
 pub trait StackChipOperations<Ext: ExtensionField>: OAMOperations<Ext> {
@@ -113,12 +103,7 @@ pub trait MemoryChipOperations<Ext: ExtensionField>: RAMOperations<Ext> {
 }
 
 pub trait CalldataChipOperations<Ext: ExtensionField>: ROMOperations<Ext> {
-    fn calldataload(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<Ext>,
-        offset: &[CellId],
-        data: &[CellId],
-    );
+    fn calldataload(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, offset: &[CellId], data: &[CellId]);
 }
 
 pub trait GlobalStateChipOperations<E: ExtensionField> {
@@ -144,12 +129,7 @@ pub trait GlobalStateChipOperations<E: ExtensionField> {
 }
 
 pub trait ROMOperations<Ext: ExtensionField> {
-    fn rom_load(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<Ext>,
-        key: &[CellId],
-        value: &[CellId],
-    );
+    fn rom_load(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, key: &[CellId], value: &[CellId]);
 
     fn rom_load_mixed(
         &mut self,
@@ -179,13 +159,7 @@ pub trait OAMOperations<Ext: ExtensionField> {
         value: &[MixedCell<Ext>],
     );
 
-    fn oam_store(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<Ext>,
-        ts: &[CellId],
-        key: &[CellId],
-        value: &[CellId],
-    );
+    fn oam_store(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, ts: &[CellId], key: &[CellId], value: &[CellId]);
 
     fn oam_store_mixed(
         &mut self,

@@ -16,10 +16,7 @@ use crate::local_thread_pool::{create_local_pool_once, LOCAL_THREAD_POOL};
 use crate::{
     entered_span, exit_span,
     structs::{IOPProof, IOPProverMessage, IOPProverState},
-    util::{
-        barycentric_weights, ceil_log2, extrapolate, merge_sumcheck_polys, AdditiveArray,
-        AdditiveVec,
-    },
+    util::{barycentric_weights, ceil_log2, extrapolate, merge_sumcheck_polys, AdditiveArray, AdditiveVec},
 };
 
 impl<E: ExtensionField> IOPProverState<E> {
@@ -37,10 +34,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         assert_eq!(polys.len(), max_thread_id);
 
         let log2_max_thread_id = ceil_log2(max_thread_id); // do not support SIZE not power of 2
-        let (num_variables, max_degree) = (
-            polys[0].aux_info.num_variables,
-            polys[0].aux_info.max_degree,
-        );
+        let (num_variables, max_degree) = (polys[0].aux_info.num_variables, polys[0].aux_info.max_degree);
         for poly in polys[1..].iter() {
             assert!(poly.aux_info.num_variables == num_variables);
             assert!(poly.aux_info.max_degree == max_degree);
@@ -75,10 +69,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last work
         // thread
         for thread_id in 0..(max_thread_id - 1) {
-            let mut prover_state = Self::prover_init_with_extrapolation_aux(
-                mem::take(&mut polys[thread_id]),
-                extrapolation_aux.clone(),
-            );
+            let mut prover_state =
+                Self::prover_init_with_extrapolation_aux(mem::take(&mut polys[thread_id]), extrapolation_aux.clone());
             let tx_prover_state = tx_prover_state.clone();
             let mut thread_based_transcript = thread_based_transcript.clone();
 
@@ -86,12 +78,10 @@ impl<E: ExtensionField> IOPProverState<E> {
                 let mut challenge = None;
                 let span = entered_span!("prove_rounds");
                 for _ in 0..num_variables {
-                    let prover_msg =
-                        IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
+                    let prover_msg = IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
                     thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
-                    challenge =
-                        Some(thread_based_transcript.get_and_append_challenge(b"Internal round"));
+                    challenge = Some(thread_based_transcript.get_and_append_challenge(b"Internal round"));
                     thread_based_transcript.commit_rolling();
                 }
                 exit_span!(span);
@@ -99,17 +89,11 @@ impl<E: ExtensionField> IOPProverState<E> {
                 if let Some(p) = challenge {
                     prover_state.challenges.push(p);
                     // fix last challenge to collect final evaluation
-                    prover_state
-                        .poly
-                        .flattened_ml_extensions
-                        .iter_mut()
-                        .for_each(|mle| {
-                            let mle = Arc::make_mut(mle);
-                            mle.fix_variables_in_place(&[p.elements]);
-                        });
-                    tx_prover_state
-                        .send(Some((thread_id, prover_state)))
-                        .unwrap();
+                    prover_state.poly.flattened_ml_extensions.iter_mut().for_each(|mle| {
+                        let mle = Arc::make_mut(mle);
+                        mle.fix_variables_in_place(&[p.elements]);
+                    });
+                    tx_prover_state.send(Some((thread_id, prover_state))).unwrap();
                 } else {
                     tx_prover_state.send(None).unwrap();
                 }
@@ -140,10 +124,8 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let mut prover_msgs = Vec::with_capacity(num_variables);
         let thread_id = max_thread_id - 1;
-        let mut prover_state = Self::prover_init_with_extrapolation_aux(
-            mem::take(&mut polys[thread_id]),
-            extrapolation_aux.clone(),
-        );
+        let mut prover_state =
+            Self::prover_init_with_extrapolation_aux(mem::take(&mut polys[thread_id]), extrapolation_aux.clone());
         let tx_prover_state = tx_prover_state.clone();
         let mut thread_based_transcript = thread_based_transcript.clone();
 
@@ -153,8 +135,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         // refactor to shared closure cause to 5% throuput drop
         let mut challenge = None;
         for _ in 0..num_variables {
-            let prover_msg =
-                IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
+            let prover_msg = IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
             thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
             // for each round, we must collect #SIZE prover message
@@ -188,17 +169,11 @@ impl<E: ExtensionField> IOPProverState<E> {
         if let Some(p) = challenge {
             prover_state.challenges.push(p);
             // fix last challenge to collect final evaluation
-            prover_state
-                .poly
-                .flattened_ml_extensions
-                .iter_mut()
-                .for_each(|mle| {
-                    let mle = Arc::make_mut(mle);
-                    mle.fix_variables_in_place(&[p.elements]);
-                });
-            tx_prover_state
-                .send(Some((thread_id, prover_state)))
-                .unwrap();
+            prover_state.poly.flattened_ml_extensions.iter_mut().for_each(|mle| {
+                let mle = Arc::make_mut(mle);
+                mle.fix_variables_in_place(&[p.elements]);
+            });
+            tx_prover_state.send(Some((thread_id, prover_state))).unwrap();
         } else {
             tx_prover_state.send(None).unwrap();
         }
@@ -232,14 +207,12 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         // second stage sumcheck
         let poly = merge_sumcheck_polys(&prover_states, max_thread_id);
-        let mut prover_state =
-            Self::prover_init_with_extrapolation_aux(poly, extrapolation_aux.clone());
+        let mut prover_state = Self::prover_init_with_extrapolation_aux(poly, extrapolation_aux.clone());
 
         let mut challenge = None;
         let span = entered_span!("prove_rounds_stage2");
         for _ in 0..log2_max_thread_id {
-            let prover_msg =
-                IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
+            let prover_msg = IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
 
             prover_msg
                 .evaluations
@@ -290,10 +263,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
     ) -> Self {
         let start = start_timer!(|| "sum check prover init");
-        assert_ne!(
-            polynomial.aux_info.num_variables, 0,
-            "Attempt to prove a constant."
-        );
+        assert_ne!(polynomial.aux_info.num_variables, 0, "Attempt to prove a constant.");
         end_timer!(start);
 
         let max_degree = polynomial.aux_info.max_degree;
@@ -311,17 +281,10 @@ impl<E: ExtensionField> IOPProverState<E> {
     ///
     /// Main algorithm used is from section 3.2 of [XZZPS19](https://eprint.iacr.org/2019/317.pdf#subsection.3.2).
     #[tracing::instrument(skip_all, name = "sumcheck::prove_round_and_update_state")]
-    pub(crate) fn prove_round_and_update_state(
-        &mut self,
-        challenge: &Option<Challenge<E>>,
-    ) -> IOPProverMessage<E> {
-        let start =
-            start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
+    pub(crate) fn prove_round_and_update_state(&mut self, challenge: &Option<Challenge<E>>) -> IOPProverMessage<E> {
+        let start = start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
 
-        assert!(
-            self.round < self.poly.aux_info.num_variables,
-            "Prover is not active"
-        );
+        assert!(self.round < self.poly.aux_info.num_variables, "Prover is not active");
 
         // let fix_argument = start_timer!(|| "fix argument");
 
@@ -340,11 +303,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         if self.round == 0 {
             assert!(challenge.is_none(), "first round should be prover first.");
         } else {
-            assert!(
-                challenge.is_some(),
-                "verifier message is empty in round {}",
-                self.round
-            );
+            assert!(challenge.is_some(), "verifier message is empty in round {}", self.round);
             let chal = challenge.unwrap();
             self.challenges.push(chal);
             let r = self.challenges[self.round - 1];
@@ -409,8 +368,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 |mut acc, b| {
                                     acc.0[0] += f[b] * g[b];
                                     acc.0[1] += f[b + 1] * g[b + 1];
-                                    acc.0[2] +=
-                                        (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]);
+                                    acc.0[2] += (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]);
                                     acc
                                 }
                             ),
@@ -501,10 +459,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         let mut prover_msgs = Vec::with_capacity(num_variables);
         let span = entered_span!("prove_rounds");
         for _ in 0..num_variables {
-            let prover_msg = IOPProverState::prove_round_and_update_state_parallel(
-                &mut prover_state,
-                &challenge,
-            );
+            let prover_msg = IOPProverState::prove_round_and_update_state_parallel(&mut prover_state, &challenge);
 
             prover_msg
                 .evaluations
@@ -553,10 +508,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     /// over {0,1}^`num_vars`.
     pub(crate) fn prover_init_parallel(polynomial: VirtualPolynomial<E>) -> Self {
         let start = start_timer!(|| "sum check prover init");
-        assert_ne!(
-            polynomial.aux_info.num_variables, 0,
-            "Attempt to prove a constant."
-        );
+        assert_ne!(polynomial.aux_info.num_variables, 0, "Attempt to prove a constant.");
 
         let max_degree = polynomial.aux_info.max_degree;
         let prover_state = Self {
@@ -585,13 +537,9 @@ impl<E: ExtensionField> IOPProverState<E> {
         &mut self,
         challenge: &Option<Challenge<E>>,
     ) -> IOPProverMessage<E> {
-        let start =
-            start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
+        let start = start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
 
-        assert!(
-            self.round < self.poly.aux_info.num_variables,
-            "Prover is not active"
-        );
+        assert!(self.round < self.poly.aux_info.num_variables, "Prover is not active");
 
         // let fix_argument = start_timer!(|| "fix argument");
 
@@ -683,8 +631,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                         AdditiveArray([
                                             f[b] * g[b],
                                             f[b + 1] * g[b + 1],
-                                            (f[b + 1] + f[b + 1] - f[b])
-                                                * (g[b + 1] + g[b + 1] - g[b]),
+                                            (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]),
                                         ])
                                     })
                                     .sum::<AdditiveArray<_, 3>>(),

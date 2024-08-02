@@ -21,12 +21,9 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         transcript: &mut Transcript<E>,
     ) -> Result<(), GKRError> {
         let timer = start_timer!(|| "Verifier sumcheck phase 1 step 1");
-        let alpha = transcript
-            .get_and_append_challenge(b"combine subset evals")
-            .elements;
-        let total_length = self.to_next_phase_point_and_evals.len()
-            + self.subset_point_and_evals[self.layer_id as usize].len()
-            + 1;
+        let alpha = transcript.get_and_append_challenge(b"combine subset evals").elements;
+        let total_length =
+            self.to_next_phase_point_and_evals.len() + self.subset_point_and_evals[self.layer_id as usize].len() + 1;
         let alpha_pows = {
             let mut alpha_pows = vec![E::ONE; total_length];
             for i in 0..total_length.saturating_sub(1) {
@@ -45,9 +42,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             });
         sigma_1 += izip!(
             self.subset_point_and_evals[self.layer_id as usize].iter(),
-            alpha_pows
-                .iter()
-                .skip(self.to_next_phase_point_and_evals.len())
+            alpha_pows.iter().skip(self.to_next_phase_point_and_evals.len())
         )
         .fold(E::ZERO, |acc, ((_, point_and_eval), alpha_pow)| {
             acc + point_and_eval.eval * alpha_pow
@@ -76,25 +71,21 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         let f_value = step_msg.sumcheck_eval_values[0];
 
         let g_value: E = chain![
-            izip!(self.to_next_phase_point_and_evals.iter(), alpha_pows.iter()).map(
-                |(point_and_eval, alpha_pow)| {
-                    let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
-                    let eq_t = eq_eval(
-                        &point_and_eval.point[point_lo_num_vars..],
-                        &claim1_point[(claim1_point.len() - hi_num_vars)..],
-                    );
-                    let eq_y = eq_eval(
-                        &point_and_eval.point[..point_lo_num_vars],
-                        &claim1_point[..point_lo_num_vars],
-                    );
-                    eq_t * eq_y * alpha_pow
-                }
-            ),
+            izip!(self.to_next_phase_point_and_evals.iter(), alpha_pows.iter()).map(|(point_and_eval, alpha_pow)| {
+                let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                let eq_t = eq_eval(
+                    &point_and_eval.point[point_lo_num_vars..],
+                    &claim1_point[(claim1_point.len() - hi_num_vars)..],
+                );
+                let eq_y = eq_eval(
+                    &point_and_eval.point[..point_lo_num_vars],
+                    &claim1_point[..point_lo_num_vars],
+                );
+                eq_t * eq_y * alpha_pow
+            }),
             izip!(
                 self.subset_point_and_evals[self.layer_id as usize].iter(),
-                alpha_pows
-                    .iter()
-                    .skip(self.to_next_phase_point_and_evals.len())
+                alpha_pows.iter().skip(self.to_next_phase_point_and_evals.len())
             )
             .map(|((new_layer_id, point_and_eval), alpha_pow)| {
                 let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;

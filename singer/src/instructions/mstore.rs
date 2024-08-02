@@ -6,8 +6,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, MemoryChipOperations, OAMOperations,
-        ROMOperations, RangeChipOperations, StackChipOperations,
+        BytecodeChipOperations, GlobalStateChipOperations, MemoryChipOperations, OAMOperations, ROMOperations,
+        RangeChipOperations, StackChipOperations,
     },
     chips::SingerChipBuilder,
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
@@ -122,11 +122,8 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
         preds[mstore_acc_circuit.layout.pred_ooo_wire_id.unwrap() as usize] = PredType::PredWire(
             NodeOutputType::WireOut(inst_node_id, inst_circuit.layout.succ_ooo_wires_id[0]),
         );
-        let mstore_acc_node_id = graph_builder.add_node(
-            stringify!(MstoreAccessory),
-            &mstore_acc_circuit.circuit,
-            preds,
-        )?;
+        let mstore_acc_node_id =
+            graph_builder.add_node(stringify!(MstoreAccessory), &mstore_acc_circuit.circuit, preds)?;
         chip_builder.construct_chip_check_graph(
             graph_builder,
             mstore_acc_node_id,
@@ -184,8 +181,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
             clk,
         );
 
-        let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        let next_pc = ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
         let next_memory_ts = rom_handler.add_ts_with_const(
             &mut circuit_builder,
             &memory_ts,
@@ -201,10 +197,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
             clk_expr.add(E::BaseField::ONE),
         );
 
-        rom_handler.range_check_stack_top(
-            &mut circuit_builder,
-            stack_top_expr.sub(E::BaseField::from(2)),
-        )?;
+        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(E::BaseField::from(2)))?;
 
         // Pop offset from stack
         let offset = StackUInt::try_from(&phase0[Self::phase0_offset()])?;
@@ -244,15 +237,10 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         );
 
         // Bytecode check for (pc, mstore)
-        rom_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            pc.values(),
-            <Self as Instruction<E>>::OPCODE,
-        );
+        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), <Self as Instruction<E>>::OPCODE);
 
         // To accessory
-        let (to_acc_dup_id, to_acc_dup) =
-            circuit_builder.create_witness_out(MstoreAccessory::pred_dup_size());
+        let (to_acc_dup_id, to_acc_dup) = circuit_builder.create_witness_out(MstoreAccessory::pred_dup_size());
         add_assign_each_cell(
             &mut circuit_builder,
             &to_acc_dup[MstoreAccessory::pred_dup_memory_ts()],
@@ -264,8 +252,8 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
             offset.values(),
         );
 
-        let (to_acc_ooo_id, to_acc_ooo) = circuit_builder
-            .create_witness_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
+        let (to_acc_ooo_id, to_acc_ooo) =
+            circuit_builder.create_witness_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
         add_assign_each_cell(&mut circuit_builder, &to_acc_ooo, mem_bytes);
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
@@ -308,9 +296,7 @@ register_witness!(
 );
 
 impl MstoreAccessory {
-    fn construct_circuit<E: ExtensionField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit<E: ExtensionField>(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From predesessor circuit.
@@ -331,13 +317,8 @@ impl MstoreAccessory {
         let offset = StackUInt::try_from(&pred_dup[Self::pred_dup_offset()])?;
         let offset_add_delta = &phase0[Self::phase0_offset_add_delta()];
         let delta = circuit_builder.create_counter_in(0)[0];
-        let offset_plus_delta = StackUInt::add_cell(
-            &mut circuit_builder,
-            &mut rom_handler,
-            &offset,
-            delta,
-            offset_add_delta,
-        )?;
+        let offset_plus_delta =
+            StackUInt::add_cell(&mut circuit_builder, &mut rom_handler, &offset, delta, offset_add_delta)?;
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,
@@ -378,9 +359,7 @@ impl MstoreAccessory {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        instructions::InstructionGraph, scheme::GKRGraphProverState, utils::u64vec, SingerParams,
-    };
+    use crate::{instructions::InstructionGraph, scheme::GKRGraphProverState, utils::u64vec, SingerParams};
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
@@ -427,10 +406,7 @@ mod test {
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(3u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(3u64)]);
-        phase0_values_map.insert(
-            "phase0_stack_top".to_string(),
-            vec![Goldilocks::from(100u64)],
-        );
+        phase0_values_map.insert("phase0_stack_top".to_string(), vec![Goldilocks::from(100u64)]);
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),
@@ -448,10 +424,7 @@ mod test {
             ],
         );
         phase0_values_map.insert("phase0_offset".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert(
-            "phase0_old_stack_ts_offset".to_string(),
-            vec![Goldilocks::from(2u64)],
-        );
+        phase0_values_map.insert("phase0_old_stack_ts_offset".to_string(), vec![Goldilocks::from(2u64)]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
@@ -468,10 +441,7 @@ mod test {
             "phase0_mem_bytes".to_string(),
             vec![], // use 32-byte 0 for mem_bytes
         );
-        phase0_values_map.insert(
-            "phase0_old_stack_ts_value".to_string(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert("phase0_old_stack_ts_value".to_string(), vec![Goldilocks::from(1u64)]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
@@ -503,8 +473,7 @@ mod test {
     #[cfg(not(debug_assertions))]
     fn bench_mstore_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
-        let circuit_builder =
-            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
         let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
@@ -562,8 +531,8 @@ mod test {
         let mut prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
-            .expect("prove failed");
+        let _ =
+            GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1).expect("prove failed");
         println!(
             "MstoreInstruction::prove, instance_num_vars = {}, time = {}",
             instance_num_vars,

@@ -1,6 +1,5 @@
 use ff_ext::ExtensionField;
-use singer_utils::constants::OpcodeType;
-use singer_utils::structs::ChipChallenges;
+use singer_utils::{constants::OpcodeType, structs::ChipChallenges};
 
 use crate::{component::InstCircuit, error::ZKVMError};
 

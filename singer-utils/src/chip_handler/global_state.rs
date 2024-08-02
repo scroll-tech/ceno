@@ -16,9 +16,7 @@ impl<Ext: ExtensionField> GlobalStateChipOperations<Ext> for RAMHandler<Ext> {
         clk: CellId,
     ) {
         let key = [
-            vec![MixedCell::Constant(Ext::BaseField::from(
-                RAMType::GlobalState as u64,
-            ))],
+            vec![MixedCell::Constant(Ext::BaseField::from(RAMType::GlobalState as u64))],
             pc.iter().map(|&x| x.into()).collect::<Vec<_>>(),
             stack_ts.iter().map(|&x| x.into()).collect::<Vec<_>>(),
             memory_ts.iter().map(|&x| x.into()).collect::<Vec<_>>(),
@@ -38,9 +36,7 @@ impl<Ext: ExtensionField> GlobalStateChipOperations<Ext> for RAMHandler<Ext> {
         clk: MixedCell<Ext>,
     ) {
         let key = [
-            vec![MixedCell::Constant(Ext::BaseField::from(
-                RAMType::GlobalState as u64,
-            ))],
+            vec![MixedCell::Constant(Ext::BaseField::from(RAMType::GlobalState as u64))],
             pc.iter().map(|&x| x.into()).collect::<Vec<_>>(),
             stack_ts.iter().map(|&x| x.into()).collect::<Vec<_>>(),
             memory_ts.iter().map(|&x| x.into()).collect::<Vec<_>>(),

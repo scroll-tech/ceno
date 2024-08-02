@@ -17,9 +17,7 @@ impl<Ext: ExtensionField> RegisterChipOperations<Ext> for RAMHandler<Ext> {
         value: &[CellId],
     ) {
         let key = [
-            vec![MixedCell::Constant(Ext::BaseField::from(
-                RAMType::Register as u64,
-            ))],
+            vec![MixedCell::Constant(Ext::BaseField::from(RAMType::Register as u64))],
             register_id.iter().map(|&x| x.into()).collect_vec(),
         ]
         .concat();
@@ -39,9 +37,7 @@ impl<Ext: ExtensionField> RegisterChipOperations<Ext> for RAMHandler<Ext> {
         value: &[CellId],
     ) {
         let key = [
-            vec![MixedCell::Constant(Ext::BaseField::from(
-                RAMType::Register as u64,
-            ))],
+            vec![MixedCell::Constant(Ext::BaseField::from(RAMType::Register as u64))],
             register_id.iter().map(|&x| x.into()).collect_vec(),
         ]
         .concat();
@@ -49,13 +45,6 @@ impl<Ext: ExtensionField> RegisterChipOperations<Ext> for RAMHandler<Ext> {
         let timestamp = timestamp.iter().map(|&x| x.into()).collect_vec();
         let value = value.iter().map(|&x| x.into()).collect_vec();
         let prev_value = prev_value.iter().map(|&x| x.into()).collect_vec();
-        self.ram_store_mixed(
-            circuit_builder,
-            &prev_timestamp,
-            &timestamp,
-            &key,
-            &prev_value,
-            &value,
-        );
+        self.ram_store_mixed(circuit_builder, &prev_timestamp, &timestamp, &key, &prev_value, &value);
     }
 }

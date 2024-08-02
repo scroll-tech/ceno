@@ -36,12 +36,7 @@ pub trait EvaluateGate1In<E>
 where
     E: ExtensionField,
 {
-    fn eval(
-        &self,
-        out_eq_vec: &[E],
-        in_eq_vec: &[E],
-        challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
-    ) -> E;
+    fn eval(&self, out_eq_vec: &[E], in_eq_vec: &[E], challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>) -> E;
     fn fix_out_variables(
         &self,
         in_size: usize,
@@ -54,16 +49,9 @@ impl<E> EvaluateGate1In<E> for &[Gate1In<ConstantType<E>>]
 where
     E: ExtensionField,
 {
-    fn eval(
-        &self,
-        out_eq_vec: &[E],
-        in_eq_vec: &[E],
-        challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
-    ) -> E {
+    fn eval(&self, out_eq_vec: &[E], in_eq_vec: &[E], challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>) -> E {
         self.iter().fold(E::ZERO, |acc, gate| {
-            acc + out_eq_vec[gate.idx_out]
-                * in_eq_vec[gate.idx_in[0]]
-                * (&gate.scalar.eval(challenges))
+            acc + out_eq_vec[gate.idx_out] * in_eq_vec[gate.idx_in[0]] * (&gate.scalar.eval(challenges))
         })
     }
     fn fix_out_variables(

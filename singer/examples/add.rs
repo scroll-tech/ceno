@@ -23,26 +23,11 @@ use transcript::Transcript;
 
 fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
     let mut phase0_values_map = BTreeMap::<&'static str, Vec<Goldilocks>>::new();
-    phase0_values_map.insert(
-        AddInstruction::phase0_pc_str(),
-        vec![Goldilocks::from(1u64)],
-    );
-    phase0_values_map.insert(
-        AddInstruction::phase0_stack_ts_str(),
-        vec![Goldilocks::from(3u64)],
-    );
-    phase0_values_map.insert(
-        AddInstruction::phase0_memory_ts_str(),
-        vec![Goldilocks::from(1u64)],
-    );
-    phase0_values_map.insert(
-        AddInstruction::phase0_stack_top_str(),
-        vec![Goldilocks::from(100u64)],
-    );
-    phase0_values_map.insert(
-        AddInstruction::phase0_clk_str(),
-        vec![Goldilocks::from(1u64)],
-    );
+    phase0_values_map.insert(AddInstruction::phase0_pc_str(), vec![Goldilocks::from(1u64)]);
+    phase0_values_map.insert(AddInstruction::phase0_stack_ts_str(), vec![Goldilocks::from(3u64)]);
+    phase0_values_map.insert(AddInstruction::phase0_memory_ts_str(), vec![Goldilocks::from(1u64)]);
+    phase0_values_map.insert(AddInstruction::phase0_stack_top_str(), vec![Goldilocks::from(100u64)]);
+    phase0_values_map.insert(AddInstruction::phase0_clk_str(), vec![Goldilocks::from(1u64)]);
     phase0_values_map.insert(
         AddInstruction::phase0_pc_add_str(),
         vec![], // carry is 0, may test carry using larger values in PCUInt
@@ -57,10 +42,7 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
             // no place for carry
         ],
     );
-    phase0_values_map.insert(
-        AddInstruction::phase0_old_stack_ts0_str(),
-        vec![Goldilocks::from(2u64)],
-    );
+    phase0_values_map.insert(AddInstruction::phase0_old_stack_ts0_str(), vec![Goldilocks::from(2u64)]);
     let m: u64 = (1 << TSUInt::C) - 1;
     let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
     phase0_values_map.insert(
@@ -72,10 +54,7 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
             Goldilocks::from(1u64), // borrow
         ],
     );
-    phase0_values_map.insert(
-        AddInstruction::phase0_old_stack_ts1_str(),
-        vec![Goldilocks::from(1u64)],
-    );
+    phase0_values_map.insert(AddInstruction::phase0_old_stack_ts1_str(), vec![Goldilocks::from(1u64)]);
     let m: u64 = (1 << TSUInt::C) - 2;
     let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
     phase0_values_map.insert(
@@ -88,24 +67,15 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
         ],
     );
     let m: u64 = (1 << StackUInt::MAX_CELL_BIT_WIDTH) - 1;
-    phase0_values_map.insert(
-        AddInstruction::phase0_addend_0_str(),
-        vec![Goldilocks::from(m)],
-    );
-    phase0_values_map.insert(
-        AddInstruction::phase0_addend_1_str(),
-        vec![Goldilocks::from(1u64)],
-    );
+    phase0_values_map.insert(AddInstruction::phase0_addend_0_str(), vec![Goldilocks::from(m)]);
+    phase0_values_map.insert(AddInstruction::phase0_addend_1_str(), vec![Goldilocks::from(1u64)]);
     let range_values = u64vec::<{ StackUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
     let mut wit_phase0_instruction_add: Vec<Goldilocks> = vec![];
     for i in 0..16 {
         wit_phase0_instruction_add.push(Goldilocks::from(range_values[i]))
     }
     wit_phase0_instruction_add.push(Goldilocks::from(1u64)); // carry is [1, 0, ...]
-    phase0_values_map.insert(
-        AddInstruction::phase0_instruction_add_str(),
-        wit_phase0_instruction_add,
-    );
+    phase0_values_map.insert(AddInstruction::phase0_instruction_add_str(), wit_phase0_instruction_add);
     phase0_values_map
 }
 fn main() {
@@ -113,8 +83,7 @@ fn main() {
     let instance_num_vars = 11;
     type E = GoldilocksExt2;
     let chip_challenges = ChipChallenges::default();
-    let circuit_builder =
-        SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+    let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
     let mut singer_builder = SingerGraphBuilder::<E>::new();
 
     let mut rng = test_rng();
@@ -125,14 +94,8 @@ fn main() {
     let mut single_witness_in = vec![<GoldilocksExt2 as ExtensionField>::BaseField::ZERO; size];
 
     for key in phase0_idx_map.keys() {
-        let range = phase0_idx_map
-            .get(key)
-            .unwrap()
-            .clone()
-            .collect::<Vec<CellId>>();
-        let values = phase0_values_map
-            .get(key)
-            .expect(&("unknown key ".to_owned() + key));
+        let range = phase0_idx_map.get(key).unwrap().clone().collect::<Vec<CellId>>();
+        let values = phase0_values_map.get(key).expect(&("unknown key ".to_owned() + key));
         for (value_idx, cell_idx) in range.into_iter().enumerate() {
             if value_idx < values.len() {
                 single_witness_in[cell_idx] = values[value_idx];
@@ -140,12 +103,11 @@ fn main() {
         }
     }
 
-    let phase0: CircuitWiresIn<<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField> =
-        vec![LayerWitness {
-            instances: (0..(1 << instance_num_vars))
-                .map(|_| single_witness_in.clone())
-                .collect_vec(),
-        }];
+    let phase0: CircuitWiresIn<<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField> = vec![LayerWitness {
+        instances: (0..(1 << instance_num_vars))
+            .map(|_| single_witness_in.clone())
+            .collect_vec(),
+    }];
 
     let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 
@@ -172,12 +134,7 @@ fn main() {
 
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let subscriber = Registry::default()
-        .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(false)
-                .with_thread_names(false),
-        )
+        .with(fmt::layer().compact().with_thread_ids(false).with_thread_names(false))
         .with(EnvFilter::from_default_env())
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();

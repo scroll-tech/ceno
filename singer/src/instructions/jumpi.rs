@@ -6,8 +6,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RangeChipOperations, StackChipOperations,
+        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
+        StackChipOperations,
     },
     constants::OpcodeType,
     register_witness,
@@ -77,10 +77,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         );
 
         // Range check stack_top - 2
-        rom_handler.range_check_stack_top(
-            &mut circuit_builder,
-            stack_top_expr.sub(E::BaseField::from(2)),
-        )?;
+        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(E::BaseField::from(2)))?;
 
         // Pop the destination pc from stack.
         let dest_values = &phase0[Self::phase0_dest_values()];
@@ -131,8 +128,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
             .iter()
             .for_each(|x| circuit_builder.add(non_zero_or, *x, E::BaseField::ONE));
         let cond_non_zero_or_inv = phase0[Self::phase0_cond_non_zero_or_inv().start];
-        let cond_non_zero =
-            rom_handler.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
+        let cond_non_zero = rom_handler.non_zero(&mut circuit_builder, non_zero_or, cond_non_zero_or_inv)?;
 
         // If cond_non_zero, next_pc = dest, otherwise, pc = pc + 1
         let pc_add_1 = &phase0[Self::phase0_pc_add()];
@@ -154,11 +150,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         );
 
         // Bytecode check for (pc, jumpi)
-        rom_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            pc.values(),
-            <Self as Instruction<E>>::OPCODE,
-        );
+        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), <Self as Instruction<E>>::OPCODE);
 
         // If cond_non_zero, next_opcode = JUMPDEST, otherwise, opcode = pc + 1 opcode
         let pc_plus_1_opcode = phase0[Self::phase0_pc_plus_1_opcode().start];

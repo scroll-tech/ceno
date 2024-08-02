@@ -35,8 +35,7 @@ impl LayerSubsets {
             return old_wire_id;
         }
         if !self.subsets.contains_key(&(old_layer_id, old_wire_id)) {
-            self.subsets
-                .insert((old_layer_id, old_wire_id), self.wire_id_assigner);
+            self.subsets.insert((old_layer_id, old_wire_id), self.wire_id_assigner);
             self.wire_id_assigner += 1;
         }
         self.subsets[&(old_layer_id, old_wire_id)]
@@ -47,10 +46,7 @@ impl LayerSubsets {
     fn update_layer_info<Ext: ExtensionField>(&self, layers: &mut Vec<Layer<Ext>>) {
         let mut paste_from = BTreeMap::new();
         for ((old_layer_id, old_wire_id), new_wire_id) in self.subsets.iter() {
-            paste_from
-                .entry(*old_layer_id)
-                .or_insert(vec![])
-                .push(*new_wire_id);
+            paste_from.entry(*old_layer_id).or_insert(vec![]).push(*new_wire_id);
             layers[*old_layer_id as usize]
                 .copy_to
                 .entry(self.layer_id)
@@ -60,9 +56,8 @@ impl LayerSubsets {
         layers[self.layer_id as usize].paste_from = paste_from;
 
         layers[self.layer_id as usize].num_vars = ceil_log2(self.wire_id_assigner) as usize;
-        layers[self.layer_id as usize].max_previous_num_vars = layers[self.layer_id as usize]
-            .max_previous_num_vars
-            .max(ceil_log2(
+        layers[self.layer_id as usize].max_previous_num_vars =
+            layers[self.layer_id as usize].max_previous_num_vars.max(ceil_log2(
                 layers[self.layer_id as usize]
                     .paste_from
                     .iter()
@@ -126,9 +121,7 @@ impl<E: ExtensionField> Circuit<E> {
                 // Each wire_in should be assigned with a consecutive
                 // input layer segment. Then we can use a special
                 // sumcheck protocol to prove it.
-                assert!(
-                    i == 0 || wire_ids_in_layer[*cell_id] == wire_ids_in_layer[wire_in[i - 1]] + 1
-                );
+                assert!(i == 0 || wire_ids_in_layer[*cell_id] == wire_ids_in_layer[wire_in[i - 1]] + 1);
             });
             let segment = (
                 wire_ids_in_layer[in_cell_ids[0]],
@@ -138,17 +131,15 @@ impl<E: ExtensionField> Circuit<E> {
             match ty {
                 InType::Witness(wit_id) => {
                     input_paste_from_wits_in[*wit_id as usize] = segment;
-                    max_in_wit_num_vars = max_in_wit_num_vars
-                        .map_or(Some(ceil_log2(in_cell_ids.len())), |x| {
-                            Some(x.max(ceil_log2(in_cell_ids.len())))
-                        });
+                    max_in_wit_num_vars = max_in_wit_num_vars.map_or(Some(ceil_log2(in_cell_ids.len())), |x| {
+                        Some(x.max(ceil_log2(in_cell_ids.len())))
+                    });
                 }
                 InType::Counter(num_vars) => {
                     input_paste_from_counter_in.push((*num_vars, segment));
-                    max_in_wit_num_vars = max_in_wit_num_vars
-                        .map_or(Some(ceil_log2(in_cell_ids.len())), |x| {
-                            Some(x.max(ceil_log2(in_cell_ids.len())))
-                        });
+                    max_in_wit_num_vars = max_in_wit_num_vars.map_or(Some(ceil_log2(in_cell_ids.len())), |x| {
+                        Some(x.max(ceil_log2(in_cell_ids.len())))
+                    });
                 }
                 InType::Constant(constant) => {
                     input_paste_from_consts_in.push((*constant, segment));
@@ -164,9 +155,7 @@ impl<E: ExtensionField> Circuit<E> {
             let new_layer_id = layer_id + 1;
             let mut subsets = LayerSubsets::new(
                 new_layer_id,
-                layers_of_cell_id[new_layer_id as usize]
-                    .len()
-                    .next_power_of_two(),
+                layers_of_cell_id[new_layer_id as usize].len().next_power_of_two(),
             );
 
             for (i, cell_id) in layers_of_cell_id[layer_id as usize].iter().enumerate() {
@@ -236,8 +225,7 @@ impl<E: ExtensionField> Circuit<E> {
 
             subsets.update_layer_info(&mut layers);
             // Initialize the next layer `max_previous_num_vars` equals that of the `self.layer_id`.
-            layers[layer_id as usize].max_previous_num_vars =
-                layers[new_layer_id as usize].num_vars;
+            layers[layer_id as usize].max_previous_num_vars = layers[new_layer_id as usize].num_vars;
         }
 
         // Compute the copy_to from the output layer to the wires_out. Notice
@@ -282,10 +270,7 @@ impl<E: ExtensionField> Circuit<E> {
                     || circuit_builder.n_witness_out() == 1 && output_copy_to[0] != seg
                     || !output_assert_const.is_empty()
                 {
-                    curr_sc_steps.extend([
-                        SumcheckStepType::OutputPhase1Step1,
-                        SumcheckStepType::OutputPhase1Step2,
-                    ]);
+                    curr_sc_steps.extend([SumcheckStepType::OutputPhase1Step1, SumcheckStepType::OutputPhase1Step2]);
                 }
             } else {
                 let last_layer = &layers[(layer_id - 1) as usize];
@@ -296,8 +281,7 @@ impl<E: ExtensionField> Circuit<E> {
 
             if layer.layer_id == n_layers - 1 {
                 if input_paste_from_wits_in.len() > 1
-                    || input_paste_from_wits_in.len() == 1
-                        && input_paste_from_wits_in[0] != (0, 1 << layer.num_vars)
+                    || input_paste_from_wits_in.len() == 1 && input_paste_from_wits_in[0] != (0, 1 << layer.num_vars)
                     || !input_paste_from_counter_in.is_empty()
                     || !input_paste_from_consts_in.is_empty()
                 {
@@ -336,10 +320,7 @@ impl<E: ExtensionField> Circuit<E> {
         }
     }
 
-    pub(crate) fn generate_basefield_challenges(
-        &self,
-        challenges: &[E],
-    ) -> HashMap<ChallengeConst, Vec<E::BaseField>> {
+    pub(crate) fn generate_basefield_challenges(&self, challenges: &[E]) -> HashMap<ChallengeConst, Vec<E::BaseField>> {
         let mut challenge_exps = HashMap::<ChallengeConst, E>::new();
         let mut update_const = |constant| match constant {
             ConstantType::Challenge(c, _) => {
@@ -355,19 +336,10 @@ impl<E: ExtensionField> Circuit<E> {
             _ => {}
         };
         self.layers.iter().for_each(|layer| {
-            layer
-                .add_consts
-                .iter()
-                .for_each(|gate| update_const(gate.scalar));
+            layer.add_consts.iter().for_each(|gate| update_const(gate.scalar));
             layer.adds.iter().for_each(|gate| update_const(gate.scalar));
-            layer
-                .mul2s
-                .iter()
-                .for_each(|gate| update_const(gate.scalar));
-            layer
-                .mul3s
-                .iter()
-                .for_each(|gate| update_const(gate.scalar));
+            layer.mul2s.iter().for_each(|gate| update_const(gate.scalar));
+            layer.mul3s.iter().for_each(|gate| update_const(gate.scalar));
         });
         challenge_exps
             .into_iter()
@@ -421,11 +393,7 @@ impl<E: ExtensionField> Layer<E> {
         1 << self.max_previous_num_vars
     }
 
-    pub fn paste_from_fix_variables_eq(
-        &self,
-        old_layer_id: LayerId,
-        current_point_eq: &[E],
-    ) -> Vec<E> {
+    pub fn paste_from_fix_variables_eq(&self, old_layer_id: LayerId, current_point_eq: &[E]) -> Vec<E> {
         assert_eq!(current_point_eq.len(), self.size());
         self.paste_from
             .get(&old_layer_id)
@@ -434,12 +402,7 @@ impl<E: ExtensionField> Layer<E> {
             .fix_row_col_first(current_point_eq, self.max_previous_num_vars)
     }
 
-    pub fn paste_from_eval_eq(
-        &self,
-        old_layer_id: LayerId,
-        current_point_eq: &[E],
-        subset_point_eq: &[E],
-    ) -> E {
+    pub fn paste_from_eval_eq(&self, old_layer_id: LayerId, current_point_eq: &[E], subset_point_eq: &[E]) -> E {
         assert_eq!(current_point_eq.len(), self.size());
         assert_eq!(subset_point_eq.len(), self.max_previous_size());
         self.paste_from
@@ -456,12 +419,7 @@ impl<E: ExtensionField> Layer<E> {
             .fix_row_row_first(subset_point_eq, self.num_vars)
     }
 
-    pub fn copy_to_eval_eq(
-        &self,
-        new_layer_id: LayerId,
-        subset_point_eq: &[E],
-        current_point_eq: &[E],
-    ) -> E {
+    pub fn copy_to_eval_eq(&self, new_layer_id: LayerId, subset_point_eq: &[E], current_point_eq: &[E]) -> E {
         self.copy_to
             .get(&new_layer_id)
             .unwrap()
@@ -507,11 +465,7 @@ impl<E: ExtensionField> fmt::Debug for Circuit<E> {
         }
         writeln!(f, "  n_witness_in: {}", self.n_witness_in)?;
         writeln!(f, "  paste_from_wits_in: {:?}", self.paste_from_wits_in)?;
-        writeln!(
-            f,
-            "  paste_from_counter_in: {:?}",
-            self.paste_from_counter_in
-        )?;
+        writeln!(f, "  paste_from_counter_in: {:?}", self.paste_from_counter_in)?;
         writeln!(f, "  paste_from_consts_in: {:?}", self.paste_from_consts_in)?;
         writeln!(f, "  copy_to_wits_out: {:?}", self.copy_to_wits_out)?;
         writeln!(f, "  assert_const: {:?}", self.assert_consts)?;
@@ -616,10 +570,7 @@ mod tests {
         let mut expected_paste_from_consts_in = vec![];
         expected_paste_from_consts_in.push((1, (11, 13)));
         assert_eq!(circuit.paste_from_wits_in, expected_paste_from_wits_in);
-        assert_eq!(
-            circuit.paste_from_counter_in,
-            expected_paste_from_counter_in
-        );
+        assert_eq!(circuit.paste_from_counter_in, expected_paste_from_counter_in);
         assert_eq!(circuit.paste_from_consts_in, expected_paste_from_consts_in);
     }
 
@@ -689,46 +640,22 @@ mod tests {
             Gate {
                 idx_in: [],
                 idx_out: 0,
-                scalar: ConstantType::<GoldilocksExt2>::Challenge(
-                    ChallengeConst {
-                        challenge: 0,
-                        exp: 2,
-                    },
-                    0,
-                ),
+                scalar: ConstantType::<GoldilocksExt2>::Challenge(ChallengeConst { challenge: 0, exp: 2 }, 0),
             },
             Gate {
                 idx_in: [],
                 idx_out: 1,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 0,
-                        exp: 2,
-                    },
-                    1,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 0, exp: 2 }, 1),
             },
             Gate {
                 idx_in: [],
                 idx_out: 2,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 1,
-                        exp: 2,
-                    },
-                    0,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 1, exp: 2 }, 0),
             },
             Gate {
                 idx_in: [],
                 idx_out: 3,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 1,
-                        exp: 2,
-                    },
-                    1,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 1, exp: 2 }, 1),
             },
         ];
 
@@ -736,90 +663,42 @@ mod tests {
             Gate {
                 idx_in: [0],
                 idx_out: 0,
-                scalar: ConstantType::<GoldilocksExt2>::Challenge(
-                    ChallengeConst {
-                        challenge: 0,
-                        exp: 0,
-                    },
-                    0,
-                ),
+                scalar: ConstantType::<GoldilocksExt2>::Challenge(ChallengeConst { challenge: 0, exp: 0 }, 0),
             },
             Gate {
                 idx_in: [1],
                 idx_out: 0,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 0,
-                        exp: 1,
-                    },
-                    0,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 0, exp: 1 }, 0),
             },
             Gate {
                 idx_in: [0],
                 idx_out: 1,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 0,
-                        exp: 0,
-                    },
-                    1,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 0, exp: 0 }, 1),
             },
             Gate {
                 idx_in: [1],
                 idx_out: 1,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 0,
-                        exp: 1,
-                    },
-                    1,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 0, exp: 1 }, 1),
             },
             Gate {
                 idx_in: [2],
                 idx_out: 2,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 1,
-                        exp: 0,
-                    },
-                    0,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 1, exp: 0 }, 0),
             },
             Gate {
                 idx_in: [3],
                 idx_out: 2,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 1,
-                        exp: 1,
-                    },
-                    0,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 1, exp: 1 }, 0),
             },
             Gate {
                 idx_in: [2],
                 idx_out: 3,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 1,
-                        exp: 0,
-                    },
-                    1,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 1, exp: 0 }, 1),
             },
             Gate {
                 idx_in: [3],
                 idx_out: 3,
-                scalar: ConstantType::Challenge(
-                    ChallengeConst {
-                        challenge: 1,
-                        exp: 1,
-                    },
-                    1,
-                ),
+                scalar: ConstantType::Challenge(ChallengeConst { challenge: 1, exp: 1 }, 1),
             },
         ];
 
@@ -899,18 +778,12 @@ mod tests {
 
         assert_eq!(circuit.layers.len(), 3);
         // Single input witness, therefore no input phase 2 steps.
-        assert_eq!(
-            circuit.layers[2].sumcheck_steps,
-            vec![SumcheckStepType::Phase1Step1]
-        );
+        assert_eq!(circuit.layers[2].sumcheck_steps, vec![SumcheckStepType::Phase1Step1]);
         // There are only one incoming evals since the last layer is linear, and
         // no subset evals. Therefore, there are no phase1 steps.
         assert_eq!(
             circuit.layers[1].sumcheck_steps,
-            vec![
-                SumcheckStepType::Phase2Step1,
-                SumcheckStepType::Phase2Step2NoStep3,
-            ]
+            vec![SumcheckStepType::Phase2Step1, SumcheckStepType::Phase2Step2NoStep3,]
         );
         // Output layer, single output witness, therefore no output phase 1 steps.
         assert_eq!(
@@ -930,17 +803,11 @@ mod tests {
 
         assert_eq!(circuit.layers.len(), 2);
         // Single input witness, therefore no input phase 2 steps.
-        assert_eq!(
-            circuit.layers[1].sumcheck_steps,
-            vec![SumcheckStepType::Phase1Step1]
-        );
+        assert_eq!(circuit.layers[1].sumcheck_steps, vec![SumcheckStepType::Phase1Step1]);
         // Output layer, single output witness, therefore no output phase 1 steps.
         assert_eq!(
             circuit.layers[0].sumcheck_steps,
-            vec![
-                SumcheckStepType::Phase2Step1,
-                SumcheckStepType::Phase2Step2NoStep3
-            ]
+            vec![SumcheckStepType::Phase2Step1, SumcheckStepType::Phase2Step2NoStep3]
         );
     }
 }

@@ -9,9 +9,7 @@ use crate::{
     basic_block::bb_ret::{BBReturnRestMemLoad, BBReturnRestMemStore},
     component::{AccessoryCircuit, BBFinalCircuit, BBStartCircuit},
     error::ZKVMError,
-    instructions::{
-        construct_inst_graph, construct_inst_graph_and_witness, SingerInstCircuitBuilder,
-    },
+    instructions::{construct_inst_graph, construct_inst_graph_and_witness, SingerInstCircuitBuilder},
     BasicBlockWiresIn, SingerParams,
 };
 
@@ -103,10 +101,7 @@ impl<E: ExtensionField> SingerBasicBlockBuilder<E> {
     }
 
     pub(crate) fn basic_block_bytecode(&self) -> Vec<Vec<u8>> {
-        self.basic_blocks
-            .iter()
-            .map(|bb| bb.bytecode.clone())
-            .collect()
+        self.basic_blocks.iter().map(|bb| bb.bytecode.clone()).collect()
     }
 }
 
@@ -129,11 +124,7 @@ pub struct BasicBlock<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> BasicBlock<E> {
-    pub(crate) fn new(
-        bytecode: &[u8],
-        pc_start: u64,
-        challenges: ChipChallenges,
-    ) -> Result<Self, ZKVMError> {
+    pub(crate) fn new(bytecode: &[u8], pc_start: u64, challenges: ChipChallenges) -> Result<Self, ZKVMError> {
         let mut stack_top = 0 as i64;
         let mut pc = pc_start;
         let mut stack_offsets = HashSet::new();
@@ -170,8 +161,7 @@ impl<E: ExtensionField> BasicBlock<E> {
         stack_offsets.sort();
 
         let bb_start_stack_top_offsets = stack_offsets[0..=lower_bound(&stack_offsets, 0)].to_vec();
-        let bb_final_stack_top_offsets =
-            stack_offsets[0..=lower_bound(&stack_offsets, stack_top)].to_vec();
+        let bb_final_stack_top_offsets = stack_offsets[0..=lower_bound(&stack_offsets, stack_top)].to_vec();
 
         let info = BasicBlockInfo {
             pc_start,
@@ -181,22 +171,18 @@ impl<E: ExtensionField> BasicBlock<E> {
         };
 
         let bb_start_circuit = BasicBlockStart::construct_circuit(&info, challenges)?;
-        let (bb_final_circuit, bb_acc_circuits) =
-            if bytecode.last() == Some(&(OpcodeType::RETURN as u8)) {
-                (
-                    BasicBlockReturn::construct_circuit(&info, challenges)?,
-                    vec![
-                        BBReturnRestMemLoad::construct_circuit(challenges)?,
-                        BBReturnRestMemStore::construct_circuit(challenges)?,
-                        BBReturnRestStackPop::construct_circuit(challenges)?,
-                    ],
-                )
-            } else {
-                (
-                    BasicBlockFinal::construct_circuit(&info, challenges)?,
-                    vec![],
-                )
-            };
+        let (bb_final_circuit, bb_acc_circuits) = if bytecode.last() == Some(&(OpcodeType::RETURN as u8)) {
+            (
+                BasicBlockReturn::construct_circuit(&info, challenges)?,
+                vec![
+                    BBReturnRestMemLoad::construct_circuit(challenges)?,
+                    BBReturnRestMemStore::construct_circuit(challenges)?,
+                    BBReturnRestStackPop::construct_circuit(challenges)?,
+                ],
+            )
+        } else {
+            (BasicBlockFinal::construct_circuit(&info, challenges)?, vec![])
+        };
 
         Ok(BasicBlock {
             bytecode: bytecode.to_vec(),
@@ -245,8 +231,7 @@ impl<E: ExtensionField> BasicBlock<E> {
 
         let mut to_succ = &bb_start_circuit.layout.to_succ_inst;
         let mut next_pc = None;
-        let mut local_stack =
-            BasicBlockStack::initialize(self.info.clone(), bb_start_node_id, to_succ);
+        let mut local_stack = BasicBlockStack::initialize(self.info.clone(), bb_start_node_id, to_succ);
         let mut pred_node_id = bb_start_node_id;
 
         // The return instruction will return the size of the public output. We
@@ -260,12 +245,9 @@ impl<E: ExtensionField> BasicBlock<E> {
             let mode = StackOpMode::from(opcode);
             let stack = local_stack.pop_node_outputs(mode);
             let memory_ts = NodeOutputType::WireOut(pred_node_id, to_succ.next_memory_ts_id);
-            let preds = inst_circuit.layout.input(
-                inst_circuit.circuit.n_witness_in,
-                opcode,
-                stack,
-                memory_ts,
-            );
+            let preds = inst_circuit
+                .layout
+                .input(inst_circuit.circuit.n_witness_in, opcode, stack, memory_ts);
             let (node_id, stack, po) = construct_inst_graph_and_witness(
                 opcode,
                 graph_builder,
@@ -290,17 +272,10 @@ impl<E: ExtensionField> BasicBlock<E> {
         }
 
         let stack = local_stack.finalize();
-        let stack_ts = NodeOutputType::WireOut(
-            bb_start_node_id,
-            bb_start_circuit.layout.to_bb_final.stack_ts_id,
-        );
+        let stack_ts = NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.stack_ts_id);
         let memory_ts = NodeOutputType::WireOut(pred_node_id, to_succ.next_memory_ts_id);
-        let stack_top = NodeOutputType::WireOut(
-            bb_start_node_id,
-            bb_start_circuit.layout.to_bb_final.stack_top_id,
-        );
-        let clk =
-            NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.clk_id);
+        let stack_top = NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.stack_top_id);
+        let clk = NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.clk_id);
         let preds = bb_final_circuit.layout.input(
             bb_final_circuit.circuit.n_witness_in,
             stack,
@@ -326,11 +301,7 @@ impl<E: ExtensionField> BasicBlock<E> {
             real_n_instances,
         )?;
 
-        let real_n_instances_bb_accs = vec![
-            params.n_mem_finalize,
-            params.n_mem_initialize,
-            params.n_stack_finalize,
-        ];
+        let real_n_instances_bb_accs = vec![params.n_mem_finalize, params.n_mem_initialize, params.n_stack_finalize];
         for ((acc, acc_wires_in), real_n_instances) in bb_acc_circuits
             .iter()
             .zip(bb_wires_in.bb_accs.iter_mut())
@@ -384,8 +355,7 @@ impl<E: ExtensionField> BasicBlock<E> {
 
         let mut to_succ = &bb_start_circuit.layout.to_succ_inst;
         let mut next_pc = None;
-        let mut local_stack =
-            BasicBlockStack::initialize(self.info.clone(), bb_start_node_id, to_succ);
+        let mut local_stack = BasicBlockStack::initialize(self.info.clone(), bb_start_node_id, to_succ);
         let mut pred_node_id = bb_start_node_id;
 
         // The return instruction will return the size of the public output. We
@@ -398,12 +368,9 @@ impl<E: ExtensionField> BasicBlock<E> {
             let mode = StackOpMode::from(*opcode);
             let stack = local_stack.pop_node_outputs(mode);
             let memory_ts = NodeOutputType::WireOut(pred_node_id, to_succ.next_memory_ts_id);
-            let preds = inst_circuit.layout.input(
-                inst_circuit.circuit.n_witness_in,
-                *opcode,
-                stack,
-                memory_ts,
-            );
+            let preds = inst_circuit
+                .layout
+                .input(inst_circuit.circuit.n_witness_in, *opcode, stack, memory_ts);
             let (node_id, stack, po) = construct_inst_graph(
                 *opcode,
                 graph_builder,
@@ -426,17 +393,10 @@ impl<E: ExtensionField> BasicBlock<E> {
         }
 
         let stack = local_stack.finalize();
-        let stack_ts = NodeOutputType::WireOut(
-            bb_start_node_id,
-            bb_start_circuit.layout.to_bb_final.stack_ts_id,
-        );
+        let stack_ts = NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.stack_ts_id);
         let memory_ts = NodeOutputType::WireOut(pred_node_id, to_succ.next_memory_ts_id);
-        let stack_top = NodeOutputType::WireOut(
-            bb_start_node_id,
-            bb_start_circuit.layout.to_bb_final.stack_top_id,
-        );
-        let clk =
-            NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.clk_id);
+        let stack_top = NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.stack_top_id);
+        let clk = NodeOutputType::WireOut(bb_start_node_id, bb_start_circuit.layout.to_bb_final.clk_id);
         let preds = bb_final_circuit.layout.input(
             bb_final_circuit.circuit.n_witness_in,
             stack,
@@ -446,8 +406,7 @@ impl<E: ExtensionField> BasicBlock<E> {
             clk,
             next_pc,
         );
-        let bb_final_node_id =
-            graph_builder.add_node("BB final", &bb_final_circuit.circuit, preds)?;
+        let bb_final_node_id = graph_builder.add_node("BB final", &bb_final_circuit.circuit, preds)?;
         chip_builder.construct_chip_check_graph(
             graph_builder,
             bb_final_node_id,
@@ -455,17 +414,10 @@ impl<E: ExtensionField> BasicBlock<E> {
             real_n_instances,
         )?;
 
-        let real_n_instances_bb_accs = vec![
-            params.n_mem_finalize,
-            params.n_mem_initialize,
-            params.n_stack_finalize,
-        ];
+        let real_n_instances_bb_accs = vec![params.n_mem_finalize, params.n_mem_initialize, params.n_stack_finalize];
         for (acc, real_n_instances) in bb_acc_circuits.iter().zip(real_n_instances_bb_accs) {
-            let acc_node_id = graph_builder.add_node(
-                "BB acc",
-                &acc.circuit,
-                vec![PredType::Source; acc.circuit.n_witness_in],
-            )?;
+            let acc_node_id =
+                graph_builder.add_node("BB acc", &acc.circuit, vec![PredType::Source; acc.circuit.n_witness_in])?;
             chip_builder.construct_chip_check_graph(
                 graph_builder,
                 acc_node_id,
@@ -480,9 +432,7 @@ impl<E: ExtensionField> BasicBlock<E> {
 #[cfg(test)]
 mod test {
     use crate::{
-        basic_block::{
-            bb_final::BasicBlockFinal, bb_start::BasicBlockStart, BasicBlock, BasicBlockInfo,
-        },
+        basic_block::{bb_final::BasicBlockFinal, bb_start::BasicBlockStart, BasicBlock, BasicBlockInfo},
         instructions::{add::AddInstruction, SingerInstCircuitBuilder},
         scheme::GKRGraphProverState,
         BasicBlockWiresIn, SingerParams,
@@ -506,8 +456,7 @@ mod test {
     #[cfg(not(debug_assertions))]
     fn bench_bb_helper<E: ExtensionField>(instance_num_vars: usize, n_adds_in_bb: usize) {
         let chip_challenges = ChipChallenges::default();
-        let circuit_builder =
-            SingerInstCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let circuit_builder = SingerInstCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
 
         let bytecode = vec![vec![OpcodeType::ADD as u8; n_adds_in_bb]];
 
@@ -524,10 +473,7 @@ mod test {
         };
         let bb_witness = BasicBlockWiresIn {
             bb_start: vec![LayerWitness {
-                instances: random_matrix(
-                    n_instances,
-                    BasicBlockStart::phase0_size(n_adds_in_bb + 1),
-                ),
+                instances: random_matrix(n_instances, BasicBlockStart::phase0_size(n_adds_in_bb + 1)),
             }],
             bb_final: vec![
                 LayerWitness {
@@ -564,10 +510,10 @@ mod test {
             bb_final_stack_top_offsets: vec![-1],
             delta_stack_top: -(n_adds_in_bb as i64),
         };
-        let bb_start_circuit = BasicBlockStart::construct_circuit(&info, chip_challenges)
-            .expect("construct circuit failed");
-        let bb_final_circuit = BasicBlockFinal::construct_circuit(&info, chip_challenges)
-            .expect("construct circuit failed");
+        let bb_start_circuit =
+            BasicBlockStart::construct_circuit(&info, chip_challenges).expect("construct circuit failed");
+        let bb_final_circuit =
+            BasicBlockFinal::construct_circuit(&info, chip_challenges).expect("construct circuit failed");
         let bb = BasicBlock {
             bytecode: bytecode[0].clone(),
             info,
@@ -603,8 +549,8 @@ mod test {
         let mut prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
-            .expect("prove failed");
+        let _ =
+            GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1).expect("prove failed");
         println!(
             "AddInstruction::prove, instance_num_vars = {}, time = {}s",
             instance_num_vars,

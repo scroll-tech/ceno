@@ -67,15 +67,12 @@ impl<E: ExtensionField> IOPProverState<E> {
                 }
                 (
                     {
-                        let mut f = DenseMultilinearExtension::from_evaluations_vec(
-                            max_lo_in_num_vars + hi_num_vars,
-                            f,
-                        );
+                        let mut f =
+                            DenseMultilinearExtension::from_evaluations_vec(max_lo_in_num_vars + hi_num_vars, f);
                         f.fix_high_variables_in_place(hi_point);
                         f.into()
                     },
-                    DenseMultilinearExtension::from_evaluations_ext_vec(max_lo_in_num_vars, g)
-                        .into(),
+                    DenseMultilinearExtension::from_evaluations_ext_vec(max_lo_in_num_vars, g).into(),
                 )
             })
             .unzip();
@@ -99,15 +96,12 @@ impl<E: ExtensionField> IOPProverState<E> {
                 }
                 (
                     {
-                        let mut f = DenseMultilinearExtension::from_evaluations_vec(
-                            max_lo_in_num_vars + hi_num_vars,
-                            f,
-                        );
+                        let mut f =
+                            DenseMultilinearExtension::from_evaluations_vec(max_lo_in_num_vars + hi_num_vars, f);
                         f.fix_high_variables_in_place(&hi_point);
                         f.into()
                     },
-                    DenseMultilinearExtension::from_evaluations_ext_vec(max_lo_in_num_vars, g)
-                        .into(),
+                    DenseMultilinearExtension::from_evaluations_ext_vec(max_lo_in_num_vars, g).into(),
                 )
             })
             .unzip();
@@ -122,19 +116,14 @@ impl<E: ExtensionField> IOPProverState<E> {
             virtual_poly.merge(&tmp);
         }
 
-        let (sumcheck_proofs, prover_state) =
-            SumcheckState::prove_parallel(virtual_poly, transcript);
+        let (sumcheck_proofs, prover_state) = SumcheckState::prove_parallel(virtual_poly, transcript);
         let eval_point = sumcheck_proofs.point.clone();
         let (f_vec, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
             .into_iter()
             .enumerate()
             .partition(|(i, _)| i % 2 == 0);
-        let eval_values_f = f_vec
-            .into_iter()
-            .take(wits_in.len())
-            .map(|(_, f)| f)
-            .collect_vec();
+        let eval_values_f = f_vec.into_iter().take(wits_in.len()).map(|(_, f)| f).collect_vec();
 
         self.to_next_phase_point_and_evals = izip!(paste_from_wit_in.iter(), eval_values_f.iter())
             .map(|((l, r), eval)| {

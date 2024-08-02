@@ -7,8 +7,8 @@ use transcript::Transcript;
 use crate::{
     error::GKRGraphError,
     structs::{
-        CircuitGraph, CircuitGraphWitness, GKRProverState, IOPProof, IOPProverState,
-        NodeOutputType, PredType, TargetEvaluations,
+        CircuitGraph, CircuitGraphWitness, GKRProverState, IOPProof, IOPProverState, NodeOutputType, PredType,
+        TargetEvaluations,
     },
 };
 

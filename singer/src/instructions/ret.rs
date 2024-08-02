@@ -4,16 +4,16 @@ use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RangeChipOperations, StackChipOperations,
+        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
+        StackChipOperations,
     },
     chips::SingerChipBuilder,
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    uint::constants::AddSubConstants,
 };
 use std::{collections::BTreeMap, mem, sync::Arc};
 
@@ -80,11 +80,9 @@ impl<E: ExtensionField> InstructionGraph<E> for ReturnInstruction {
         let pub_out_load_circuit = &inst_circuits[1];
         let n_witness_in = pub_out_load_circuit.circuit.n_witness_in;
         let mut preds = vec![PredType::Source; n_witness_in];
-        preds[pub_out_load_circuit.layout.pred_dup_wire_id.unwrap() as usize] =
-            PredType::PredWireDup(NodeOutputType::WireOut(
-                inst_node_id,
-                inst_circuit.layout.succ_dup_wires_id[0],
-            ));
+        preds[pub_out_load_circuit.layout.pred_dup_wire_id.unwrap() as usize] = PredType::PredWireDup(
+            NodeOutputType::WireOut(inst_node_id, inst_circuit.layout.succ_dup_wires_id[0]),
+        );
         let pub_out_load_node_id = graph_builder.add_node_with_witness(
             stringify!(ReturnPublicOutLoad),
             &pub_out_load_circuit.circuit,
@@ -190,16 +188,11 @@ impl<E: ExtensionField> InstructionGraph<E> for ReturnInstruction {
         let pub_out_load_circuit = &inst_circuits[1];
         let n_witness_in = pub_out_load_circuit.circuit.n_witness_in;
         let mut preds = vec![PredType::Source; n_witness_in];
-        preds[pub_out_load_circuit.layout.pred_dup_wire_id.unwrap() as usize] =
-            PredType::PredWireDup(NodeOutputType::WireOut(
-                inst_node_id,
-                inst_circuit.layout.succ_dup_wires_id[0],
-            ));
-        let pub_out_load_node_id = graph_builder.add_node(
-            stringify!(ReturnPublicOutLoad),
-            &pub_out_load_circuit.circuit,
-            preds,
-        )?;
+        preds[pub_out_load_circuit.layout.pred_dup_wire_id.unwrap() as usize] = PredType::PredWireDup(
+            NodeOutputType::WireOut(inst_node_id, inst_circuit.layout.succ_dup_wires_id[0]),
+        );
+        let pub_out_load_node_id =
+            graph_builder.add_node(stringify!(ReturnPublicOutLoad), &pub_out_load_circuit.circuit, preds)?;
         chip_builder.construct_chip_check_graph(
             graph_builder,
             pub_out_load_node_id,
@@ -302,10 +295,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         );
 
         // Check the range of stack_top - 2 is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        rom_handler.range_check_stack_top(
-            &mut circuit_builder,
-            stack_top_expr.sub(E::BaseField::from(2)),
-        )?;
+        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(E::BaseField::from(2)))?;
 
         // Pop offset and mem_size from stack
         let old_stack_ts0 = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts0()])?;
@@ -327,11 +317,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         );
 
         // Bytecode check for (pc, ret)
-        rom_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            pc.values(),
-            <Self as Instruction<E>>::OPCODE,
-        );
+        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), <Self as Instruction<E>>::OPCODE);
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
         let rom_id = rom_handler.finalize(&mut circuit_builder);
@@ -340,8 +326,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
         // Copy length to the target wire.
-        let (target_wire_id, target) =
-            circuit_builder.create_witness_out(StackUInt::N_OPERAND_CELLS);
+        let (target_wire_id, target) = circuit_builder.create_witness_out(StackUInt::N_OPERAND_CELLS);
         let length = length.values();
         for i in 1..length.len() {
             circuit_builder.assert_const(length[i], 0);
@@ -351,8 +336,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         // println!("target: {:?}", target);
 
         // Copy offset to wires of public output load circuit.
-        let (pub_out_wire_id, pub_out) =
-            circuit_builder.create_witness_out(ReturnPublicOutLoad::pred_size());
+        let (pub_out_wire_id, pub_out) = circuit_builder.create_witness_out(ReturnPublicOutLoad::pred_size());
         let pub_out_offset = &pub_out[ReturnPublicOutLoad::pred_offset()];
         let offset = offset.values();
         add_assign_each_cell(&mut circuit_builder, pub_out_offset, offset);
@@ -390,9 +374,7 @@ register_witness!(
 );
 
 impl ReturnPublicOutLoad {
-    fn construct_circuit<E: ExtensionField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit<E: ExtensionField>(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (pred_wire_id, pred) = circuit_builder.create_witness_in(Self::pred_size());
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
@@ -453,9 +435,7 @@ register_witness!(
 );
 
 impl ReturnRestMemLoad {
-    fn construct_circuit<E: ExtensionField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit<E: ExtensionField>(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -464,12 +444,7 @@ impl ReturnRestMemLoad {
         let offset = &phase0[Self::phase0_offset()];
         let mem_byte = phase0[Self::phase0_mem_byte().start];
         let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()])?;
-        ram_handler.oam_load(
-            &mut circuit_builder,
-            &offset,
-            old_memory_ts.values(),
-            &[mem_byte],
-        );
+        ram_handler.oam_load(&mut circuit_builder, &offset, old_memory_ts.values(), &[mem_byte]);
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
@@ -500,9 +475,7 @@ register_witness!(
 );
 
 impl ReturnRestMemStore {
-    fn construct_circuit<E: ExtensionField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit<E: ExtensionField>(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);
@@ -544,9 +517,7 @@ register_witness!(
 );
 
 impl ReturnRestStackPop {
-    fn construct_circuit<E: ExtensionField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit<E: ExtensionField>(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
         let mut ram_handler = RAMHandler::new(&challenges);

@@ -8,11 +8,7 @@ use itertools::Itertools;
 use crate::structs::{CircuitGraph, CircuitGraphWitness, NodeOutputType, TargetEvaluations};
 
 impl<E: ExtensionField> CircuitGraph<E> {
-    pub fn target_evals(
-        &self,
-        witness: &CircuitGraphWitness<E::BaseField>,
-        point: &Point<E>,
-    ) -> TargetEvaluations<E> {
+    pub fn target_evals(&self, witness: &CircuitGraphWitness<E::BaseField>, point: &Point<E>) -> TargetEvaluations<E> {
         // println!("targets: {:?}, point: {:?}", self.targets, point);
         let target_evals = self
             .targets
@@ -24,8 +20,8 @@ impl<E: ExtensionField> CircuitGraph<E> {
                         .instances
                         .as_slice()
                         .original_mle(),
-                    NodeOutputType::WireOut(node_id, wit_id) => witness.node_witnesses[*node_id]
-                        .witness_out_ref()[*wit_id as usize]
+                    NodeOutputType::WireOut(node_id, wit_id) => witness.node_witnesses[*node_id].witness_out_ref()
+                        [*wit_id as usize]
                         .instances
                         .as_slice()
                         .original_mle(),

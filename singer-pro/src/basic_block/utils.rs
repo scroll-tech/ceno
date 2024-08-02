@@ -11,21 +11,15 @@ pub(super) struct BasicBlockStack {
 }
 
 impl BasicBlockStack {
-    pub(super) fn initialize(
-        info: BasicBlockInfo,
-        bb_start_node_id: usize,
-        bb_to_succ: &ToSuccInst,
-    ) -> Self {
-        let mut stack =
-            vec![NodeOutputType::OutputLayer(0); -info.bb_start_stack_top_offsets[0] as usize];
+    pub(super) fn initialize(info: BasicBlockInfo, bb_start_node_id: usize, bb_to_succ: &ToSuccInst) -> Self {
+        let mut stack = vec![NodeOutputType::OutputLayer(0); -info.bb_start_stack_top_offsets[0] as usize];
         let stack_top = stack.len() as i64;
         bb_to_succ
             .stack_result_ids
             .iter()
             .zip(info.bb_start_stack_top_offsets.iter().rev())
             .for_each(|(&wire_id, &offset)| {
-                stack[(stack_top + offset) as usize] =
-                    NodeOutputType::WireOut(bb_start_node_id, wire_id);
+                stack[(stack_top + offset) as usize] = NodeOutputType::WireOut(bb_start_node_id, wire_id);
             });
         Self { stack, info }
     }
@@ -44,10 +38,7 @@ impl BasicBlockStack {
         match mode {
             StackOpMode::PopPush(n, _) => (0..n).map(|_| self.stack.pop().unwrap()).collect_vec(),
             StackOpMode::Swap(n) => {
-                vec![
-                    self.stack[self.stack.len() - 1],
-                    self.stack[self.stack.len() - n - 1],
-                ]
+                vec![self.stack[self.stack.len() - 1], self.stack[self.stack.len() - n - 1]]
             }
             StackOpMode::Dup(n) => {
                 vec![self.stack[self.stack.len() - n]]

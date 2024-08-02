@@ -70,8 +70,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         prover_msg: &IOPProverMessage<E>,
         transcript: &mut Transcript<E>,
     ) -> Challenge<E> {
-        let start =
-            start_timer!(|| format!("sum check verify {}-th round and update state", self.round));
+        let start = start_timer!(|| format!("sum check verify {}-th round and update state", self.round));
 
         assert!(
             !self.finished,
@@ -88,8 +87,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
 
         let challenge = transcript.get_and_append_challenge(b"Internal round");
         self.challenges.push(challenge);
-        self.polynomials_received
-            .push(prover_msg.evaluations.to_vec());
+        self.polynomials_received.push(prover_msg.evaluations.to_vec());
 
         if self.round == self.num_vars {
             // accept and close

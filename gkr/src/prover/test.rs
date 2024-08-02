@@ -9,9 +9,7 @@ use simple_frontend::structs::{ChallengeConst, ChallengeId, CircuitBuilder, Mixe
 use transcript::Transcript;
 
 use crate::{
-    structs::{
-        Circuit, CircuitWitness, IOPProverState, IOPVerifierState, LayerWitness, PointAndEval,
-    },
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState, LayerWitness, PointAndEval},
     utils::{i64_to_field, MultilinearExtensionFromVectors},
 };
 
@@ -30,13 +28,7 @@ fn copy_and_paste_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
 
     // Layer 0
     let (_, mul_001123) = circuit_builder.create_witness_out(1);
-    circuit_builder.mul3(
-        mul_001123[0],
-        mul_01,
-        mul_012,
-        input[3],
-        Ext::BaseField::ONE,
-    );
+    circuit_builder.mul3(mul_001123[0], mul_01, mul_012, input[3], Ext::BaseField::ONE);
 
     circuit_builder.configure();
     let circuit = Circuit::new(&circuit_builder);
@@ -44,10 +36,8 @@ fn copy_and_paste_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     circuit
 }
 
-fn copy_and_paste_witness<Ext: ExtensionField>() -> (
-    Vec<LayerWitness<Ext::BaseField>>,
-    CircuitWitness<Ext::BaseField>,
-) {
+fn copy_and_paste_witness<Ext: ExtensionField>() -> (Vec<LayerWitness<Ext::BaseField>>, CircuitWitness<Ext::BaseField>)
+{
     // witness_in, single instance
     let inputs = vec![vec![
         i64_to_field(5),
@@ -122,10 +112,8 @@ fn paste_from_wit_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     circuit
 }
 
-fn paste_from_wit_in_witness<Ext: ExtensionField>() -> (
-    Vec<LayerWitness<Ext::BaseField>>,
-    CircuitWitness<Ext::BaseField>,
-) {
+fn paste_from_wit_in_witness<Ext: ExtensionField>(
+) -> (Vec<LayerWitness<Ext::BaseField>>, CircuitWitness<Ext::BaseField>) {
     // witness_in, single instance
     let leaves1 = vec![vec![i64_to_field(5), i64_to_field(7), i64_to_field(11)]];
     let leaves2 = vec![vec![i64_to_field(13), i64_to_field(17), i64_to_field(19)]];
@@ -173,12 +161,8 @@ fn paste_from_wit_in_witness<Ext: ExtensionField>() -> (
     let outputs1 = vec![vec![i64_to_field(35), i64_to_field(143)]];
     let outputs2 = vec![vec![i64_to_field(5005)]];
     let witness_out = vec![
-        LayerWitness {
-            instances: outputs1,
-        },
-        LayerWitness {
-            instances: outputs2,
-        },
+        LayerWitness { instances: outputs1 },
+        LayerWitness { instances: outputs2 },
     ];
 
     (
@@ -214,10 +198,8 @@ fn copy_to_wit_out_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     circuit
 }
 
-fn copy_to_wit_out_witness<Ext: ExtensionField>() -> (
-    Vec<LayerWitness<Ext::BaseField>>,
-    CircuitWitness<Ext::BaseField>,
-) {
+fn copy_to_wit_out_witness<Ext: ExtensionField>() -> (Vec<LayerWitness<Ext::BaseField>>, CircuitWitness<Ext::BaseField>)
+{
     // witness_in, single instance
     let leaves = vec![vec![
         i64_to_field(5),
@@ -264,24 +246,12 @@ fn copy_to_wit_out_witness<Ext: ExtensionField>() -> (
     )
 }
 
-fn copy_to_wit_out_witness_2<Ext: ExtensionField>() -> (
-    Vec<LayerWitness<Ext::BaseField>>,
-    CircuitWitness<Ext::BaseField>,
-) {
+fn copy_to_wit_out_witness_2<Ext: ExtensionField>(
+) -> (Vec<LayerWitness<Ext::BaseField>>, CircuitWitness<Ext::BaseField>) {
     // witness_in, 2 instances
     let leaves = vec![
-        vec![
-            i64_to_field(5),
-            i64_to_field(7),
-            i64_to_field(11),
-            i64_to_field(13),
-        ],
-        vec![
-            i64_to_field(5),
-            i64_to_field(13),
-            i64_to_field(11),
-            i64_to_field(7),
-        ],
+        vec![i64_to_field(5), i64_to_field(7), i64_to_field(11), i64_to_field(13)],
+        vec![i64_to_field(5), i64_to_field(13), i64_to_field(11), i64_to_field(7)],
     ];
     let witness_in = vec![LayerWitness { instances: leaves }];
 
@@ -310,18 +280,8 @@ fn copy_to_wit_out_witness_2<Ext: ExtensionField>() -> (
         },
         LayerWitness {
             instances: vec![
-                vec![
-                    i64_to_field(5),
-                    i64_to_field(7),
-                    i64_to_field(11),
-                    i64_to_field(13),
-                ],
-                vec![
-                    i64_to_field(5),
-                    i64_to_field(13),
-                    i64_to_field(11),
-                    i64_to_field(7),
-                ],
+                vec![i64_to_field(5), i64_to_field(7), i64_to_field(11), i64_to_field(13)],
+                vec![i64_to_field(5), i64_to_field(13), i64_to_field(11), i64_to_field(7)],
             ],
         },
     ];
@@ -396,35 +356,21 @@ where
 
     // witness_in, double instances
     let leaves = vec![
-        vec![
-            i64_to_field(5),
-            i64_to_field(7),
-            i64_to_field(11),
-            i64_to_field(13),
-        ],
-        vec![
-            i64_to_field(5),
-            i64_to_field(13),
-            i64_to_field(11),
-            i64_to_field(7),
-        ],
+        vec![i64_to_field(5), i64_to_field(7), i64_to_field(11), i64_to_field(13)],
+        vec![i64_to_field(5), i64_to_field(13), i64_to_field(11), i64_to_field(7)],
     ];
     let witness_in = vec![LayerWitness {
         instances: leaves.clone(),
     }];
 
-    let inner00: Ext = challenge_pows[0][0].1 * (&leaves[0][0])
-        + challenge_pows[0][1].1 * (&leaves[0][1])
-        + challenge_pows[0][2].1;
-    let inner01: Ext = challenge_pows[1][0].1 * (&leaves[0][2])
-        + challenge_pows[1][1].1 * (&leaves[0][3])
-        + challenge_pows[1][2].1;
-    let inner10: Ext = challenge_pows[0][0].1 * (&leaves[1][0])
-        + challenge_pows[0][1].1 * (&leaves[1][1])
-        + challenge_pows[0][2].1;
-    let inner11: Ext = challenge_pows[1][0].1 * (&leaves[1][2])
-        + challenge_pows[1][1].1 * (&leaves[1][3])
-        + challenge_pows[1][2].1;
+    let inner00: Ext =
+        challenge_pows[0][0].1 * (&leaves[0][0]) + challenge_pows[0][1].1 * (&leaves[0][1]) + challenge_pows[0][2].1;
+    let inner01: Ext =
+        challenge_pows[1][0].1 * (&leaves[0][2]) + challenge_pows[1][1].1 * (&leaves[0][3]) + challenge_pows[1][2].1;
+    let inner10: Ext =
+        challenge_pows[0][0].1 * (&leaves[1][0]) + challenge_pows[0][1].1 * (&leaves[1][1]) + challenge_pows[0][2].1;
+    let inner11: Ext =
+        challenge_pows[1][0].1 * (&leaves[1][2]) + challenge_pows[1][1].1 * (&leaves[1][3]) + challenge_pows[1][2].1;
 
     let inners = vec![
         [inner00.clone().as_bases(), inner01.clone().as_bases()].concat(),
@@ -456,9 +402,7 @@ where
         LayerWitness {
             instances: roots.clone(),
         },
-        LayerWitness {
-            instances: root_tmps,
-        },
+        LayerWitness { instances: root_tmps },
         LayerWitness { instances: inners },
         LayerWitness { instances: leaves },
     ];
@@ -493,12 +437,7 @@ fn inv_sum_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     let den_mul = circuit_builder.create_ext_cell();
     circuit_builder.mul2_ext(&den_mul, &input[0], &input[1], Ext::BaseField::ONE);
     let tmp = circuit_builder.create_ext_cell();
-    circuit_builder.sel_mixed_and_ext(
-        &tmp,
-        &MixedCell::Constant(Ext::BaseField::ONE),
-        &input[0],
-        cond[0],
-    );
+    circuit_builder.sel_mixed_and_ext(&tmp, &MixedCell::Constant(Ext::BaseField::ONE), &input[0], cond[0]);
     circuit_builder.sel_ext(&output[0], &tmp, &den_mul, cond[1]);
 
     // select the numerator 0 or 1 or input[0] + input[1]
@@ -515,30 +454,10 @@ fn inv_sum_witness_4_instances<Ext: ExtensionField>() -> CircuitWitness<Ext::Bas
     let circuit = inv_sum_circuit::<Ext>();
     // witness_in, double instances
     let leaves = vec![
-        vec![
-            i64_to_field(5),
-            i64_to_field(7),
-            i64_to_field(11),
-            i64_to_field(13),
-        ],
-        vec![
-            i64_to_field(5),
-            i64_to_field(13),
-            i64_to_field(11),
-            i64_to_field(7),
-        ],
-        vec![
-            i64_to_field(23),
-            i64_to_field(29),
-            i64_to_field(17),
-            i64_to_field(19),
-        ],
-        vec![
-            i64_to_field(29),
-            i64_to_field(17),
-            i64_to_field(19),
-            i64_to_field(23),
-        ],
+        vec![i64_to_field(5), i64_to_field(7), i64_to_field(11), i64_to_field(13)],
+        vec![i64_to_field(5), i64_to_field(13), i64_to_field(11), i64_to_field(7)],
+        vec![i64_to_field(23), i64_to_field(29), i64_to_field(17), i64_to_field(19)],
+        vec![i64_to_field(29), i64_to_field(17), i64_to_field(19), i64_to_field(23)],
     ];
     let cond: Vec<Vec<<Ext as ExtensionField>::BaseField>> = vec![
         vec![i64_to_field(1), i64_to_field(1)],
@@ -546,10 +465,7 @@ fn inv_sum_witness_4_instances<Ext: ExtensionField>() -> CircuitWitness<Ext::Bas
         vec![i64_to_field(1), i64_to_field(1)],
         vec![i64_to_field(0), i64_to_field(0)],
     ];
-    let witness_in = vec![
-        LayerWitness { instances: leaves },
-        LayerWitness { instances: cond },
-    ];
+    let witness_in = vec![LayerWitness { instances: leaves }, LayerWitness { instances: cond }];
     let mut circuit_wits = CircuitWitness::new(&circuit, vec![]);
     circuit_wits.add_instances(&circuit, witness_in, 4);
     circuit_wits
@@ -720,12 +636,7 @@ fn mixed_in_witness_4_instances<Ext: ExtensionField>() -> CircuitWitness<Ext::Ba
             i64_to_field(43),
         ],
     ];
-    let witness_in = vec![
-        LayerWitness { instances: input },
-        LayerWitness {
-            instances: input_ext,
-        },
-    ];
+    let witness_in = vec![LayerWitness { instances: input }, LayerWitness { instances: input_ext }];
     let mut circuit_wits = CircuitWitness::new(&circuit, vec![]);
     circuit_wits.add_instances(&circuit, witness_in, 4);
     circuit_wits
@@ -738,9 +649,7 @@ fn prove_and_verify<Ext: ExtensionField>(
 ) {
     let mut rng = test_rng();
     let out_num_vars = circuit.output_num_vars() + circuit_wits.instance_num_vars();
-    let out_point = (0..out_num_vars)
-        .map(|_| Ext::random(&mut rng))
-        .collect_vec();
+    let out_point = (0..out_num_vars).map(|_| Ext::random(&mut rng)).collect_vec();
 
     let out_point_and_evals = if circuit.n_witness_out == 0 {
         vec![PointAndEval::new(

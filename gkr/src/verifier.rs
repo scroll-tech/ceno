@@ -8,8 +8,7 @@ use transcript::Transcript;
 use crate::{
     error::GKRError,
     structs::{
-        Circuit, GKRInputClaims, IOPProof, IOPProverStepMessage, IOPVerifierState, PointAndEval,
-        SumcheckStepType,
+        Circuit, GKRInputClaims, IOPProof, IOPProverStepMessage, IOPVerifierState, PointAndEval, SumcheckStepType,
     },
 };
 
@@ -51,39 +50,35 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             verifier_state.layer_id = layer_id as LayerId;
 
             let layer = &circuit.layers[layer_id as usize];
-            for (step, step_proof) in izip!(layer.sumcheck_steps.iter(), &mut sumcheck_proofs_iter)
-            {
+            for (step, step_proof) in izip!(layer.sumcheck_steps.iter(), &mut sumcheck_proofs_iter) {
                 match step {
-                    SumcheckStepType::OutputPhase1Step1 => verifier_state
-                        .verify_and_update_state_output_phase1_step1(
-                            circuit, step_proof, transcript,
-                        )?,
-                    SumcheckStepType::OutputPhase1Step2 => verifier_state
-                        .verify_and_update_state_output_phase1_step2(
-                            circuit, step_proof, transcript,
-                        )?,
-                    SumcheckStepType::Phase1Step1 => verifier_state
-                        .verify_and_update_state_phase1_step1(circuit, step_proof, transcript)?,
-                    SumcheckStepType::Phase2Step1 => verifier_state
-                        .verify_and_update_state_phase2_step1(circuit, step_proof, transcript)?,
-                    SumcheckStepType::Phase2Step2 => verifier_state
-                        .verify_and_update_state_phase2_step2(
-                            circuit, step_proof, transcript, false,
-                        )?,
-                    SumcheckStepType::Phase2Step2NoStep3 => verifier_state
-                        .verify_and_update_state_phase2_step2(
-                            circuit, step_proof, transcript, true,
-                        )?,
-                    SumcheckStepType::Phase2Step3 => verifier_state
-                        .verify_and_update_state_phase2_step3(circuit, step_proof, transcript)?,
-                    SumcheckStepType::LinearPhase2Step1 => verifier_state
-                        .verify_and_update_state_linear_phase2_step1(
-                            circuit, step_proof, transcript,
-                        )?,
-                    SumcheckStepType::InputPhase2Step1 => verifier_state
-                        .verify_and_update_state_input_phase2_step1(
-                            circuit, step_proof, transcript,
-                        )?,
+                    SumcheckStepType::OutputPhase1Step1 => {
+                        verifier_state.verify_and_update_state_output_phase1_step1(circuit, step_proof, transcript)?
+                    }
+                    SumcheckStepType::OutputPhase1Step2 => {
+                        verifier_state.verify_and_update_state_output_phase1_step2(circuit, step_proof, transcript)?
+                    }
+                    SumcheckStepType::Phase1Step1 => {
+                        verifier_state.verify_and_update_state_phase1_step1(circuit, step_proof, transcript)?
+                    }
+                    SumcheckStepType::Phase2Step1 => {
+                        verifier_state.verify_and_update_state_phase2_step1(circuit, step_proof, transcript)?
+                    }
+                    SumcheckStepType::Phase2Step2 => {
+                        verifier_state.verify_and_update_state_phase2_step2(circuit, step_proof, transcript, false)?
+                    }
+                    SumcheckStepType::Phase2Step2NoStep3 => {
+                        verifier_state.verify_and_update_state_phase2_step2(circuit, step_proof, transcript, true)?
+                    }
+                    SumcheckStepType::Phase2Step3 => {
+                        verifier_state.verify_and_update_state_phase2_step3(circuit, step_proof, transcript)?
+                    }
+                    SumcheckStepType::LinearPhase2Step1 => {
+                        verifier_state.verify_and_update_state_linear_phase2_step1(circuit, step_proof, transcript)?
+                    }
+                    SumcheckStepType::InputPhase2Step1 => {
+                        verifier_state.verify_and_update_state_input_phase2_step1(circuit, step_proof, transcript)?
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -114,11 +109,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             wires_out_evals.last().unwrap().clone()
         };
         let assert_point = (0..output_wit_num_vars)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"assert_point")
-                    .elements
-            })
+            .map(|_| transcript.get_and_append_challenge(b"assert_point").elements)
             .collect_vec();
         let to_next_phase_point_and_evals = output_evals;
         subset_point_and_evals[0] = wires_out_evals.into_iter().map(|p| (0, p)).collect();

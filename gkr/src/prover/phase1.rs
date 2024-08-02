@@ -12,9 +12,7 @@ use sumcheck::{entered_span, util::ceil_log2};
 
 use crate::{
     exit_span,
-    structs::{
-        Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval, SumcheckProof,
-    },
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval, SumcheckProof},
     utils::{tensor_product, MatrixMLERowFirst},
 };
 
@@ -37,9 +35,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         let span = entered_span!("preparation");
         let timer = start_timer!(|| "Prover sumcheck phase 1 step 1");
 
-        let total_length = self.to_next_phase_point_and_evals.len()
-            + self.subset_point_and_evals[self.layer_id as usize].len()
-            + 1;
+        let total_length =
+            self.to_next_phase_point_and_evals.len() + self.subset_point_and_evals[self.layer_id as usize].len() + 1;
         let alpha_pows = {
             let mut alpha_pows = vec![E::ONE; total_length];
             for i in 0..total_length.saturating_sub(1) {
@@ -59,11 +56,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         // f1^{(j)}(y) = layers[i](t || y)
         let f1: Arc<DenseMultilinearExtension<E>> = circuit_witness
-            .layer_poly::<E>(
-                (layer_id).try_into().unwrap(),
-                lo_num_vars,
-                multi_threads_meta,
-            )
+            .layer_poly::<E>((layer_id).try_into().unwrap(), lo_num_vars, multi_threads_meta)
             .into();
 
         assert_eq!(
@@ -81,22 +74,17 @@ impl<E: ExtensionField> IOPProverState<E> {
                     // g1^{(j)}(y) = \alpha^j * eq(rt_j, t) * eq(ry_j, y)
                     let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
 
-                    let eq_y =
-                        build_eq_x_r_vec_sequential(&point_and_eval.point[..point_lo_num_vars])
-                            .into_iter()
-                            .take(1 << lo_num_vars)
-                            .map(|eq| *alpha_pow * eq)
-                            .collect_vec();
+                    let eq_y = build_eq_x_r_vec_sequential(&point_and_eval.point[..point_lo_num_vars])
+                        .into_iter()
+                        .take(1 << lo_num_vars)
+                        .map(|eq| *alpha_pow * eq)
+                        .collect_vec();
 
                     let eq_t_unit_len = eq_t.len() / max_thread_id;
                     let start_index = thread_id * eq_t_unit_len;
-                    let g1_j =
-                        tensor_product(&eq_t[start_index..(start_index + eq_t_unit_len)], &eq_y);
+                    let g1_j = tensor_product(&eq_t[start_index..(start_index + eq_t_unit_len)], &eq_y);
 
-                    assert_eq!(
-                        g1_j.len(),
-                        (1 << (hi_num_vars + lo_num_vars - log2_max_thread_id))
-                    );
+                    assert_eq!(g1_j.len(), (1 << (hi_num_vars + lo_num_vars - log2_max_thread_id)));
 
                     g1_j
                 })
@@ -106,44 +94,34 @@ impl<E: ExtensionField> IOPProverState<E> {
                         &alpha_pows[self.to_next_phase_point_and_evals.len()..],
                         eq_t.iter().skip(self.to_next_phase_point_and_evals.len())
                     )
-                    .map(
-                        |((new_layer_id, point_and_eval), alpha_pow, eq_t)| {
-                            let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
-                            let copy_to = &copy_to_matrices[new_layer_id];
-                            let lo_eq_w_p = build_eq_x_r_vec_sequential(
-                                &point_and_eval.point[..point_lo_num_vars],
-                            );
+                    .map(|((new_layer_id, point_and_eval), alpha_pow, eq_t)| {
+                        let point_lo_num_vars = point_and_eval.point.len() - hi_num_vars;
+                        let copy_to = &copy_to_matrices[new_layer_id];
+                        let lo_eq_w_p = build_eq_x_r_vec_sequential(&point_and_eval.point[..point_lo_num_vars]);
 
-                            // g2^{(j)}(y) = \alpha^j * eq(rt_j, t) * copy_to[j](ry_j, y)
-                            let eq_t_unit_len = eq_t.len() / max_thread_id;
-                            let start_index = thread_id * eq_t_unit_len;
-                            let g2_j = tensor_product(
-                                &eq_t[start_index..(start_index + eq_t_unit_len)],
-                                &copy_to.as_slice().fix_row_row_first_with_scalar(
-                                    &lo_eq_w_p,
-                                    lo_num_vars,
-                                    alpha_pow,
-                                ),
-                            );
+                        // g2^{(j)}(y) = \alpha^j * eq(rt_j, t) * copy_to[j](ry_j, y)
+                        let eq_t_unit_len = eq_t.len() / max_thread_id;
+                        let start_index = thread_id * eq_t_unit_len;
+                        let g2_j = tensor_product(
+                            &eq_t[start_index..(start_index + eq_t_unit_len)],
+                            &copy_to
+                                .as_slice()
+                                .fix_row_row_first_with_scalar(&lo_eq_w_p, lo_num_vars, alpha_pow),
+                        );
 
-                            assert_eq!(
-                                g2_j.len(),
-                                (1 << (hi_num_vars + lo_num_vars - log2_max_thread_id))
-                            );
-                            g2_j
-                        },
-                    ),
+                        assert_eq!(g2_j.len(), (1 << (hi_num_vars + lo_num_vars - log2_max_thread_id)));
+                        g2_j
+                    }),
                 )
                 .collect::<Vec<Vec<_>>>();
 
             DenseMultilinearExtension::from_evaluations_ext_vec(
                 hi_num_vars + lo_num_vars - log2_max_thread_id,
-                gs.into_iter()
-                    .fold(vec![E::ZERO; 1 << f1.num_vars], |mut acc, g| {
-                        assert_eq!(1 << f1.num_vars, g.len());
-                        acc.iter_mut().enumerate().for_each(|(i, v)| *v += g[i]);
-                        acc
-                    }),
+                gs.into_iter().fold(vec![E::ZERO; 1 << f1.num_vars], |mut acc, g| {
+                    assert_eq!(1 << f1.num_vars, g.len());
+                    acc.iter_mut().enumerate().for_each(|(i, v)| *v += g[i]);
+                    acc
+                }),
             )
             .into()
         };
@@ -172,10 +150,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         let eval_value_1 = f1.remove(0).1;
 
         self.to_next_step_point = sumcheck_proof_1.point.clone();
-        self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(
-            &self.to_next_step_point,
-            &eval_value_1,
-        )];
+        self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(&self.to_next_step_point, &eval_value_1)];
         self.subset_point_and_evals[self.layer_id as usize].clear();
 
         IOPProverStepMessage {

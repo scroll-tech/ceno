@@ -46,14 +46,8 @@ pub(crate) fn test_opcode_circuit_v2<Ext: ExtensionField>(
     witness_in[phase0_input_idx as usize] = vec![Ext::BaseField::ZERO; phase0_witness_size];
 
     for key in phase0_idx_map.keys() {
-        let range = phase0_idx_map
-            .get(key)
-            .unwrap()
-            .clone()
-            .collect::<Vec<CellId>>();
-        let values = phase0_values_map
-            .get(key)
-            .expect(&("unknown key ".to_owned() + key));
+        let range = phase0_idx_map.get(key).unwrap().clone().collect::<Vec<CellId>>();
+        let values = phase0_values_map.get(key).expect(&("unknown key ".to_owned() + key));
         for (value_idx, cell_idx) in range.into_iter().enumerate() {
             if value_idx < values.len() {
                 witness_in[phase0_input_idx as usize][cell_idx] = values[value_idx];

@@ -53,8 +53,7 @@ impl<const M: usize, const C: usize> AddSubConstants<UInt<M, C>> {
 
     /// The size of the witness assuming carry has no overflow
     /// |Range_values| + |Carry - 1|
-    pub const N_WITNESS_CELLS_NO_CARRY_OVERFLOW: usize =
-        UInt::<M, C>::N_RANGE_CELLS + Self::N_CARRY_CELLS_NO_OVERFLOW;
+    pub const N_WITNESS_CELLS_NO_CARRY_OVERFLOW: usize = UInt::<M, C>::N_RANGE_CELLS + Self::N_CARRY_CELLS_NO_OVERFLOW;
 
     pub const N_NO_OVERFLOW_WITNESS_UNSAFE_CELLS: usize = Self::N_CARRY_CELLS_NO_OVERFLOW;
 

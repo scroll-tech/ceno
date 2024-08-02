@@ -15,9 +15,7 @@ use crate::structs::Step::{Step1, Step2, Step3};
 
 use crate::{
     circuit::EvaluateConstant,
-    structs::{
-        Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval, SumcheckProof,
-    },
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval, SumcheckProof},
 };
 
 macro_rules! prepare_stepx_g_fn {
@@ -89,16 +87,10 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let span = entered_span!("f1_g1");
         // merge next_layer_vec with next_layer_poly
-        let next_layer_vec = circuit_witness.layers[layer_id as usize + 1]
-            .instances
-            .as_slice();
+        let next_layer_vec = circuit_witness.layers[layer_id as usize + 1].instances.as_slice();
         let num_vars = circuit.layers[layer_id as usize].max_previous_num_vars();
         let phase2_next_layer_polys_v2: ArcDenseMultilinearExtension<E> = circuit_witness
-            .layer_poly(
-                (layer_id + 1).try_into().unwrap(),
-                num_vars,
-                multi_threads_meta,
-            )
+            .layer_poly((layer_id + 1).try_into().unwrap(), num_vars, multi_threads_meta)
             .into();
 
         // f1(s1 || x1) = layers[i + 1](s1 || x1)
@@ -132,9 +124,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     * (&gate.scalar.eval(&challenges))
             },
             adds_fanin_mapping,
-            |s, gate| {
-                eq[(s << lo_out_num_vars) ^ gate.idx_out] * (&gate.scalar.eval(&challenges))
-            }
+            |s, gate| { eq[(s << lo_out_num_vars) ^ gate.idx_out] * (&gate.scalar.eval(&challenges)) }
         );
         let g1 = DenseMultilinearExtension::from_evaluations_ext_vec(f1.num_vars, g1).into();
         exit_span!(span);
@@ -142,33 +132,34 @@ impl<E: ExtensionField> IOPProverState<E> {
         // f1'^{(j)}(s1 || x1) = subset[j][i](s1 || x1)
         // g1'^{(j)}(s1 || x1) = eq(rt, s1) paste_from[j](ry, x1)
         let span = entered_span!("f1j_g1j");
-        let (f1_j, g1_j)= izip!(&layer.paste_from).map(|(j, paste_from)| {
-            let paste_from_sources = circuit_witness.layers_ref();
-            let old_wire_id = |old_layer_id: usize, subset_wire_id: usize| -> usize {
-                circuit.layers[old_layer_id].copy_to[&(layer_id as u32)][subset_wire_id]
-            };
+        let (f1_j, g1_j) = izip!(&layer.paste_from)
+            .map(|(j, paste_from)| {
+                let paste_from_sources = circuit_witness.layers_ref();
+                let old_wire_id = |old_layer_id: usize, subset_wire_id: usize| -> usize {
+                    circuit.layers[old_layer_id].copy_to[&(layer_id as u32)][subset_wire_id]
+                };
 
-            let mut f1_j = vec![0.into(); 1 << f1.num_vars];
-            let mut g1_j = vec![E::ZERO; 1 << f1.num_vars];
+                let mut f1_j = vec![0.into(); 1 << f1.num_vars];
+                let mut g1_j = vec![E::ZERO; 1 << f1.num_vars];
 
-            paste_from
-                .iter()
-                .enumerate()
-                .for_each(|(subset_wire_id, &new_wire_id)| {
-                    for s in 0..(1 << (hi_num_vars - log2_max_thread_id)) {
-                        let global_s = thread_s + s;
-                        f1_j[(s << lo_in_num_vars) ^ subset_wire_id] =
-                            paste_from_sources[*j as usize].instances[global_s]
-                                [old_wire_id(*j as usize, subset_wire_id)];
-                        g1_j[(s << lo_in_num_vars) ^ subset_wire_id] += eq[(global_s << lo_out_num_vars) ^ new_wire_id];
-                    }
-                });
-            (
-                DenseMultilinearExtension::from_evaluations_vec(f1.num_vars, f1_j).into(),
-                DenseMultilinearExtension::from_evaluations_ext_vec(f1.num_vars, g1_j).into()
-            )
-        })
-        .unzip::<_, _, Vec<ArcDenseMultilinearExtension<E>>, Vec<ArcDenseMultilinearExtension<E>>>();
+                paste_from
+                    .iter()
+                    .enumerate()
+                    .for_each(|(subset_wire_id, &new_wire_id)| {
+                        for s in 0..(1 << (hi_num_vars - log2_max_thread_id)) {
+                            let global_s = thread_s + s;
+                            f1_j[(s << lo_in_num_vars) ^ subset_wire_id] = paste_from_sources[*j as usize].instances
+                                [global_s][old_wire_id(*j as usize, subset_wire_id)];
+                            g1_j[(s << lo_in_num_vars) ^ subset_wire_id] +=
+                                eq[(global_s << lo_out_num_vars) ^ new_wire_id];
+                        }
+                    });
+                (
+                    DenseMultilinearExtension::from_evaluations_vec(f1.num_vars, f1_j).into(),
+                    DenseMultilinearExtension::from_evaluations_ext_vec(f1.num_vars, g1_j).into(),
+                )
+            })
+            .unzip::<_, _, Vec<ArcDenseMultilinearExtension<E>>, Vec<ArcDenseMultilinearExtension<E>>>();
         exit_span!(span);
 
         let (f, g): (
@@ -208,18 +199,13 @@ impl<E: ExtensionField> IOPProverState<E> {
         // eval_values_g1[0]
         eval_values_1.push(g1_vec[0].1);
 
-        self.to_next_phase_point_and_evals =
-            vec![PointAndEval::new_from_ref(&eval_point_1, &eval_values_1[0])];
-        izip!(
-            layer.paste_from.iter(),
-            eval_values_1[..f1_vec_len].iter().skip(1)
-        )
-        .for_each(|((&old_layer_id, _), &subset_value)| {
-            self.subset_point_and_evals[old_layer_id as usize].push((
-                self.layer_id,
-                PointAndEval::new_from_ref(&eval_point_1, &subset_value),
-            ));
-        });
+        self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(&eval_point_1, &eval_values_1[0])];
+        izip!(layer.paste_from.iter(), eval_values_1[..f1_vec_len].iter().skip(1)).for_each(
+            |((&old_layer_id, _), &subset_value)| {
+                self.subset_point_and_evals[old_layer_id as usize]
+                    .push((self.layer_id, PointAndEval::new_from_ref(&eval_point_1, &subset_value)));
+            },
+        );
         self.to_next_step_point = eval_point_1;
 
         IOPProverStepMessage {
@@ -256,9 +242,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         let threads_num_vars = hi_num_vars - log2_max_thread_id;
         let thread_s = thread_id << threads_num_vars;
 
-        let phase2_next_layer_vec = circuit_witness.layers[layer_id as usize + 1]
-            .instances
-            .as_slice();
+        let phase2_next_layer_vec = circuit_witness.layers[layer_id as usize + 1].instances.as_slice();
 
         let challenges = &circuit_witness.challenges;
 
@@ -368,16 +352,11 @@ impl<E: ExtensionField> IOPProverState<E> {
         let g3 = {
             let mut g3 = vec![E::ZERO; 1 << (f3.num_vars)];
             let fanin_mapping = &layer.mul3s_fanin_mapping[Step3 as usize];
-            prepare_stepx_g_fn!(
-                &mut g3,
-                lo_in_num_vars,
-                thread_s,
-                fanin_mapping,
-                |s, gate| eq0[(s << lo_out_num_vars) ^ gate.idx_out]
-                    * eq1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                    * eq2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
-                    * (&gate.scalar.eval(&challenges))
-            );
+            prepare_stepx_g_fn!(&mut g3, lo_in_num_vars, thread_s, fanin_mapping, |s, gate| eq0
+                [(s << lo_out_num_vars) ^ gate.idx_out]
+                * eq1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
+                * eq2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
+                * (&gate.scalar.eval(&challenges)));
             DenseMultilinearExtension::from_evaluations_ext_vec(f3.num_vars, g3).into()
         };
 

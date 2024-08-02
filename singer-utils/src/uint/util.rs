@@ -49,11 +49,7 @@ pub fn convert_decomp<E: ExtensionField>(
         let big_cell = circuit_builder.create_cell();
         for (small_chunk_index, small_bit_cell) in values.iter().enumerate() {
             let shift_size = small_chunk_index * small_cell_bit_width;
-            circuit_builder.add(
-                big_cell,
-                *small_bit_cell,
-                E::BaseField::from(1 << shift_size),
-            );
+            circuit_builder.add(big_cell, *small_bit_cell, E::BaseField::from(1 << shift_size));
         }
         new_cell_ids.push(big_cell);
     }
@@ -62,11 +58,7 @@ pub fn convert_decomp<E: ExtensionField>(
 }
 
 /// Pads a `Vec<CellId>` with new cells to reach some given size n
-pub fn pad_cells<E: ExtensionField>(
-    circuit_builder: &mut CircuitBuilder<E>,
-    cells: &mut Vec<CellId>,
-    size: usize,
-) {
+pub fn pad_cells<E: ExtensionField>(circuit_builder: &mut CircuitBuilder<E>, cells: &mut Vec<CellId>, size: usize) {
     if cells.len() < size {
         cells.extend(circuit_builder.create_cells(size - cells.len()))
     }
@@ -119,14 +111,7 @@ mod tests {
         let (_, big_values) = circuit_builder.create_witness_in(5);
         let big_bit_width = 5;
         let small_bit_width = 2;
-        let _ = convert_decomp(
-            &mut circuit_builder,
-            &big_values,
-            big_bit_width,
-            small_bit_width,
-            true,
-        )
-        .unwrap();
+        let _ = convert_decomp(&mut circuit_builder, &big_values, big_bit_width, small_bit_width, true).unwrap();
     }
 
     #[test]
@@ -203,10 +188,7 @@ mod tests {
         // padding to power of 2
         assert_eq!(
             &output[3..],
-            vec![0]
-                .into_iter()
-                .map(|v| Goldilocks::from(v))
-                .collect_vec()
+            vec![0].into_iter().map(|v| Goldilocks::from(v)).collect_vec()
         );
     }
 
@@ -240,77 +222,49 @@ mod tests {
         let updated_limbs = add_one_to_big_num(limb_modulo, &initial_limbs);
         assert_eq!(
             updated_limbs,
-            vec![
-                Goldilocks::from(1),
-                Goldilocks::from(0),
-                Goldilocks::from(0)
-            ]
+            vec![Goldilocks::from(1), Goldilocks::from(0), Goldilocks::from(0)]
         );
 
         // 010
         let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
         assert_eq!(
             updated_limbs,
-            vec![
-                Goldilocks::from(0),
-                Goldilocks::from(1),
-                Goldilocks::from(0)
-            ]
+            vec![Goldilocks::from(0), Goldilocks::from(1), Goldilocks::from(0)]
         );
 
         // 110
         let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
         assert_eq!(
             updated_limbs,
-            vec![
-                Goldilocks::from(1),
-                Goldilocks::from(1),
-                Goldilocks::from(0)
-            ]
+            vec![Goldilocks::from(1), Goldilocks::from(1), Goldilocks::from(0)]
         );
 
         // 001
         let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
         assert_eq!(
             updated_limbs,
-            vec![
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-                Goldilocks::from(1)
-            ]
+            vec![Goldilocks::from(0), Goldilocks::from(0), Goldilocks::from(1)]
         );
 
         // 101
         let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
         assert_eq!(
             updated_limbs,
-            vec![
-                Goldilocks::from(1),
-                Goldilocks::from(0),
-                Goldilocks::from(1)
-            ]
+            vec![Goldilocks::from(1), Goldilocks::from(0), Goldilocks::from(1)]
         );
 
         // 011
         let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
         assert_eq!(
             updated_limbs,
-            vec![
-                Goldilocks::from(0),
-                Goldilocks::from(1),
-                Goldilocks::from(1)
-            ]
+            vec![Goldilocks::from(0), Goldilocks::from(1), Goldilocks::from(1)]
         );
 
         // 111
         let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
         assert_eq!(
             updated_limbs,
-            vec![
-                Goldilocks::from(1),
-                Goldilocks::from(1),
-                Goldilocks::from(1)
-            ]
+            vec![Goldilocks::from(1), Goldilocks::from(1), Goldilocks::from(1)]
         );
 
         // restart cycle
@@ -318,11 +272,7 @@ mod tests {
         let updated_limbs = add_one_to_big_num(limb_modulo, &updated_limbs);
         assert_eq!(
             updated_limbs,
-            vec![
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-                Goldilocks::from(0)
-            ]
+            vec![Goldilocks::from(0), Goldilocks::from(0), Goldilocks::from(0)]
         );
     }
 }

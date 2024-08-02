@@ -18,14 +18,10 @@ impl<E: ExtensionField> SingerCircuitBuilder<E> {
             insts_circuits.push(construct_instruction_circuits(opcode.into(), challenges)?);
         }
         for _ in ins_len..255 {
-            insts_circuits.push(construct_instruction_circuits(
-                RvInstructions::END.into(),
-                challenges,
-            )?);
+            insts_circuits.push(construct_instruction_circuits(RvInstructions::END.into(), challenges)?);
         }
-        let insts_circuits: [Vec<InstCircuit<E>>; 256] = insts_circuits
-            .try_into()
-            .map_err(|_| ZKVMError::CircuitError)?;
+        let insts_circuits: [Vec<InstCircuit<E>>; 256] =
+            insts_circuits.try_into().map_err(|_| ZKVMError::CircuitError)?;
         Ok(Self {
             insts_circuits,
             challenges,

@@ -13,42 +13,26 @@ use crate::{
     util::interpolate_uni_poly,
 };
 
-fn test_sumcheck<E: ExtensionField>(
-    nv: usize,
-    num_multiplicands_range: (usize, usize),
-    num_products: usize,
-) {
+fn test_sumcheck<E: ExtensionField>(nv: usize, num_multiplicands_range: (usize, usize), num_products: usize) {
     let mut rng = test_rng();
     let mut transcript = Transcript::new(b"test");
 
-    let (poly, asserted_sum) =
-        VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
+    let (poly, asserted_sum) = VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
     let poly_info = poly.aux_info.clone();
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly.clone(), &mut transcript);
 
     let mut transcript = Transcript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
     assert!(
-        poly.evaluate(
-            &subclaim
-                .point
-                .iter()
-                .map(|c| c.elements)
-                .collect::<Vec<_>>()
-                .as_ref()
-        ) == subclaim.expected_evaluation,
+        poly.evaluate(&subclaim.point.iter().map(|c| c.elements).collect::<Vec<_>>().as_ref())
+            == subclaim.expected_evaluation,
         "wrong subclaim"
     );
 }
 
-fn test_sumcheck_internal<E: ExtensionField>(
-    nv: usize,
-    num_multiplicands_range: (usize, usize),
-    num_products: usize,
-) {
+fn test_sumcheck_internal<E: ExtensionField>(nv: usize, num_multiplicands_range: (usize, usize), num_products: usize) {
     let mut rng = test_rng();
-    let (poly, asserted_sum) =
-        VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
+    let (poly, asserted_sum) = VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
     let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.num_variables);
     let mut prover_state = IOPProverState::prover_init_parallel(poly.clone());
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
@@ -59,8 +43,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     transcript.append_message(b"initializing transcript for testing");
 
     for _ in 0..num_variables {
-        let prover_message =
-            IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
+        let prover_message = IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
 
         challenge = Some(IOPVerifierState::verify_round_and_update_state(
             &mut verifier_state,
@@ -82,14 +65,8 @@ fn test_sumcheck_internal<E: ExtensionField>(
     };
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);
     assert!(
-        poly.evaluate(
-            &subclaim
-                .point
-                .iter()
-                .map(|c| c.elements)
-                .collect::<Vec<_>>()
-                .as_ref()
-        ) == subclaim.expected_evaluation,
+        poly.evaluate(&subclaim.point.iter().map(|c| c.elements).collect::<Vec<_>>().as_ref())
+            == subclaim.expected_evaluation,
         "wrong subclaim"
     );
 }
@@ -152,11 +129,7 @@ struct DensePolynomial(Vec<GoldilocksExt2>);
 
 impl DensePolynomial {
     fn rand(degree: usize, mut rng: &mut impl RngCore) -> Self {
-        Self(
-            (0..degree)
-                .map(|_| GoldilocksExt2::random(&mut rng))
-                .collect(),
-        )
+        Self((0..degree).map(|_| GoldilocksExt2::random(&mut rng)).collect())
     }
 
     fn evaluate(&self, p: &GoldilocksExt2) -> GoldilocksExt2 {

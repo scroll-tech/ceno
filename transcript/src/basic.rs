@@ -20,9 +20,7 @@ impl<E: ExtensionField> Transcript<E> {
         let mut hasher = Poseidon::<E::BaseField, _, _>::new(8, 22);
         let label_f = E::BaseField::bytes_to_field_elements(label);
         hasher.update(label_f.as_slice());
-        Self {
-            sponge_hasher: hasher,
-        }
+        Self { sponge_hasher: hasher }
     }
 }
 

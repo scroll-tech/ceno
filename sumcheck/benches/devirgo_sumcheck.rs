@@ -29,10 +29,8 @@ fn prepare_input<E: ExtensionField>(
 ) -> (E, VirtualPolynomial<E>, Vec<VirtualPolynomial<E>>) {
     let mut rng = test_rng();
     let size_log2 = ceil_log2(max_thread_id);
-    let f1: Arc<DenseMultilinearExtension<E>> =
-        DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
-    let g1: Arc<DenseMultilinearExtension<E>> =
-        DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
+    let f1: Arc<DenseMultilinearExtension<E>> = DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
+    let g1: Arc<DenseMultilinearExtension<E>> = DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
 
     let mut virtual_poly_1 = VirtualPolynomial::new_from_mle(f1.clone(), E::BaseField::ONE);
     virtual_poly_1.mul_by_mle(g1.clone(), <E as ff_ext::ExtensionField>::BaseField::ONE);
@@ -40,10 +38,7 @@ fn prepare_input<E: ExtensionField>(
     let mut virtual_poly_f1: Vec<VirtualPolynomial<E>> = match &f1.evaluations {
         multilinear_extensions::mle::FieldType::Base(evaluations) => evaluations
             .chunks((1 << nv) >> size_log2)
-            .map(|chunk| {
-                DenseMultilinearExtension::<E>::from_evaluations_vec(nv - size_log2, chunk.to_vec())
-                    .into()
-            })
+            .map(|chunk| DenseMultilinearExtension::<E>::from_evaluations_vec(nv - size_log2, chunk.to_vec()).into())
             .map(|mle| VirtualPolynomial::new_from_mle(mle, E::BaseField::ONE))
             .collect_vec(),
         _ => unreachable!(),
@@ -52,10 +47,7 @@ fn prepare_input<E: ExtensionField>(
     let poly_g1: Vec<ArcDenseMultilinearExtension<E>> = match &g1.evaluations {
         multilinear_extensions::mle::FieldType::Base(evaluations) => evaluations
             .chunks((1 << nv) >> size_log2)
-            .map(|chunk| {
-                DenseMultilinearExtension::<E>::from_evaluations_vec(nv - size_log2, chunk.to_vec())
-                    .into()
-            })
+            .map(|chunk| DenseMultilinearExtension::<E>::from_evaluations_vec(nv - size_log2, chunk.to_vec()).into())
             .collect_vec(),
         _ => unreachable!(),
     };
@@ -71,11 +63,7 @@ fn prepare_input<E: ExtensionField>(
         .iter_mut()
         .zip(poly_g1.iter())
         .for_each(|(f1, g1)| f1.mul_by_mle(g1.clone(), E::BaseField::ONE));
-    (
-        asserted_sum,
-        virtual_poly_1,
-        virtual_poly_f1.try_into().unwrap(),
-    )
+    (asserted_sum, virtual_poly_1, virtual_poly_f1.try_into().unwrap())
 }
 
 #[from_env]
@@ -90,30 +78,19 @@ fn sumcheck_fn(c: &mut Criterion) {
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
-        group.bench_function(
-            BenchmarkId::new("prove_sumcheck", format!("sumcheck_nv_{}", nv)),
-            |b| {
-                b.iter_with_setup(
-                    || {
-                        let prover_transcript = Transcript::<E>::new(b"test");
-                        let (asserted_sum, virtual_poly, virtual_poly_splitted) =
-                            { prepare_input(RAYON_NUM_THREADS, nv) };
-                        (
-                            prover_transcript,
-                            asserted_sum,
-                            virtual_poly,
-                            virtual_poly_splitted,
-                        )
-                    },
-                    |(mut prover_transcript, asserted_sum, virtual_poly, virtual_poly_splitted)| {
-                        let (sumcheck_proof_v1, _) = IOPProverState::<E>::prove_parallel(
-                            virtual_poly.clone(),
-                            &mut prover_transcript,
-                        );
-                    },
-                );
-            },
-        );
+        group.bench_function(BenchmarkId::new("prove_sumcheck", format!("sumcheck_nv_{}", nv)), |b| {
+            b.iter_with_setup(
+                || {
+                    let prover_transcript = Transcript::<E>::new(b"test");
+                    let (asserted_sum, virtual_poly, virtual_poly_splitted) = { prepare_input(RAYON_NUM_THREADS, nv) };
+                    (prover_transcript, asserted_sum, virtual_poly, virtual_poly_splitted)
+                },
+                |(mut prover_transcript, asserted_sum, virtual_poly, virtual_poly_splitted)| {
+                    let (sumcheck_proof_v1, _) =
+                        IOPProverState::<E>::prove_parallel(virtual_poly.clone(), &mut prover_transcript);
+                },
+            );
+        });
 
         group.finish();
     }
@@ -128,31 +105,22 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
-        group.bench_function(
-            BenchmarkId::new("prove_sumcheck", format!("devirgo_nv_{}", nv)),
-            |b| {
-                b.iter_with_setup(
-                    || {
-                        let prover_transcript = Transcript::<E>::new(b"test");
-                        let (asserted_sum, virtual_poly, virtual_poly_splitted) =
-                            { prepare_input(RAYON_NUM_THREADS, nv) };
-                        (
-                            prover_transcript,
-                            asserted_sum,
-                            virtual_poly,
-                            virtual_poly_splitted,
-                        )
-                    },
-                    |(mut prover_transcript, asserted_sum, virtual_poly, virtual_poly_splitted)| {
-                        let (sumcheck_proof_v2, _) = IOPProverState::<E>::prove_batch_polys(
-                            RAYON_NUM_THREADS,
-                            virtual_poly_splitted,
-                            &mut prover_transcript,
-                        );
-                    },
-                );
-            },
-        );
+        group.bench_function(BenchmarkId::new("prove_sumcheck", format!("devirgo_nv_{}", nv)), |b| {
+            b.iter_with_setup(
+                || {
+                    let prover_transcript = Transcript::<E>::new(b"test");
+                    let (asserted_sum, virtual_poly, virtual_poly_splitted) = { prepare_input(RAYON_NUM_THREADS, nv) };
+                    (prover_transcript, asserted_sum, virtual_poly, virtual_poly_splitted)
+                },
+                |(mut prover_transcript, asserted_sum, virtual_poly, virtual_poly_splitted)| {
+                    let (sumcheck_proof_v2, _) = IOPProverState::<E>::prove_batch_polys(
+                        RAYON_NUM_THREADS,
+                        virtual_poly_splitted,
+                        &mut prover_transcript,
+                    );
+                },
+            );
+        });
 
         group.finish();
     }

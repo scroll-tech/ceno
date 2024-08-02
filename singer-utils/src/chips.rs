@@ -69,10 +69,8 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
                 real_n_instances.next_power_of_two(),
             )?;
             let mut preds = vec![PredType::Source; 2];
-            preds[leaf.input_id as usize] =
-                PredType::PredWire(NodeOutputType::WireOut(node_id, input_wit_id));
-            preds[leaf.cond_id as usize] =
-                PredType::PredWire(NodeOutputType::OutputLayer(selector_node_id));
+            preds[leaf.input_id as usize] = PredType::PredWire(NodeOutputType::WireOut(node_id, input_wit_id));
+            preds[leaf.cond_id as usize] = PredType::PredWire(NodeOutputType::OutputLayer(selector_node_id));
 
             let instance_num_vars = ceil_log2(real_n_instances * num) - 1;
             build_tree_graph_and_witness(
@@ -138,22 +136,13 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
                          inner: &Arc<Circuit<E>>|
          -> Result<NodeOutputType, UtilError> {
             let selector = ChipCircuitGadgets::construct_prefix_selector(n_instances, num);
-            let selector_node_id =
-                graph_builder.add_node("selector circuit", &selector.circuit, vec![])?;
+            let selector_node_id = graph_builder.add_node("selector circuit", &selector.circuit, vec![])?;
             let mut preds = vec![PredType::Source; 2];
-            preds[leaf.input_id as usize] =
-                PredType::PredWire(NodeOutputType::WireOut(node_id, input_wit_id));
-            preds[leaf.cond_id as usize] =
-                PredType::PredWire(NodeOutputType::OutputLayer(selector_node_id));
+            preds[leaf.input_id as usize] = PredType::PredWire(NodeOutputType::WireOut(node_id, input_wit_id));
+            preds[leaf.cond_id as usize] = PredType::PredWire(NodeOutputType::OutputLayer(selector_node_id));
 
             let instance_num_vars = ceil_log2(real_n_instances) - 1;
-            build_tree_graph(
-                graph_builder,
-                preds,
-                &leaf.circuit,
-                inner,
-                instance_num_vars,
-            )
+            build_tree_graph(graph_builder, preds, &leaf.circuit, inner, instance_num_vars)
         };
 
         // Set equality argument
@@ -213,17 +202,9 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             (preds, sources)
         };
 
-        let (input_pred, selector_pred, instance_num_vars) = construct_bytecode_table_and_witness(
-            graph_builder,
-            bytecode,
-            challenges,
-            real_challenges,
-        )?;
-        let (preds, sources) = pred_source(
-            LookupChipType::BytecodeChip as usize,
-            input_pred,
-            selector_pred,
-        );
+        let (input_pred, selector_pred, instance_num_vars) =
+            construct_bytecode_table_and_witness(graph_builder, bytecode, challenges, real_challenges)?;
+        let (preds, sources) = pred_source(LookupChipType::BytecodeChip as usize, input_pred, selector_pred);
         tables_out[LookupChipType::BytecodeChip as usize] = build_tree_graph_and_witness(
             graph_builder,
             preds,
@@ -234,17 +215,9 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             instance_num_vars,
         )?;
 
-        let (input_pred, selector_pred, instance_num_vars) = construct_calldata_table_and_witness(
-            graph_builder,
-            program_input,
-            challenges,
-            real_challenges,
-        )?;
-        let (preds, sources) = pred_source(
-            LookupChipType::CalldataChip as usize,
-            input_pred,
-            selector_pred,
-        );
+        let (input_pred, selector_pred, instance_num_vars) =
+            construct_calldata_table_and_witness(graph_builder, program_input, challenges, real_challenges)?;
+        let (preds, sources) = pred_source(LookupChipType::CalldataChip as usize, input_pred, selector_pred);
         tables_out[LookupChipType::CalldataChip as usize] = build_tree_graph_and_witness(
             graph_builder,
             preds,
@@ -264,12 +237,8 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
                 mem::take(&mut table_count_witness[table_type as usize].instances);
             (preds, sources)
         };
-        let (input_pred, instance_num_vars) = construct_range_table_and_witness(
-            graph_builder,
-            RANGE_CHIP_BIT_WIDTH,
-            challenges,
-            real_challenges,
-        )?;
+        let (input_pred, instance_num_vars) =
+            construct_range_table_and_witness(graph_builder, RANGE_CHIP_BIT_WIDTH, challenges, real_challenges)?;
         let (preds, sources) = preds_no_selector(LookupChipType::RangeChip as usize, input_pred);
         tables_out[LookupChipType::RangeChip as usize] = build_tree_graph_and_witness(
             graph_builder,
@@ -307,24 +276,14 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
         let (input_pred, selector_pred, instance_num_vars) =
             construct_bytecode_table(graph_builder, byte_code_len, challenges)?;
         let preds = compute_preds(input_pred, selector_pred);
-        tables_out[LookupChipType::BytecodeChip as usize] = build_tree_graph(
-            graph_builder,
-            preds,
-            &leaf.circuit,
-            inner,
-            instance_num_vars,
-        )?;
+        tables_out[LookupChipType::BytecodeChip as usize] =
+            build_tree_graph(graph_builder, preds, &leaf.circuit, inner, instance_num_vars)?;
 
         let (input_pred, selector_pred, instance_num_vars) =
             construct_calldata_table(graph_builder, program_input_len, challenges)?;
         let preds = compute_preds(input_pred, selector_pred);
-        tables_out[LookupChipType::CalldataChip as usize] = build_tree_graph(
-            graph_builder,
-            preds,
-            &leaf.circuit,
-            inner,
-            instance_num_vars,
-        )?;
+        tables_out[LookupChipType::CalldataChip as usize] =
+            build_tree_graph(graph_builder, preds, &leaf.circuit, inner, instance_num_vars)?;
 
         let leaf = &self.chip_circuit_gadgets.frac_sum_leaf_no_selector;
         let compute_preds_no_selector = |table_pred| {
@@ -332,16 +291,10 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             preds[leaf.input_den_id as usize] = table_pred;
             preds
         };
-        let (input_pred, instance_num_vars) =
-            construct_range_table(graph_builder, RANGE_CHIP_BIT_WIDTH, challenges)?;
+        let (input_pred, instance_num_vars) = construct_range_table(graph_builder, RANGE_CHIP_BIT_WIDTH, challenges)?;
         let preds = compute_preds_no_selector(input_pred);
-        tables_out[LookupChipType::RangeChip as usize] = build_tree_graph(
-            graph_builder,
-            preds,
-            &leaf.circuit,
-            inner,
-            instance_num_vars,
-        )?;
+        tables_out[LookupChipType::RangeChip as usize] =
+            build_tree_graph(graph_builder, preds, &leaf.circuit, inner, instance_num_vars)?;
         Ok(tables_out)
     }
 }
@@ -374,28 +327,27 @@ fn build_tree_graph_and_witness<E: ExtensionField>(
     real_challenges: &[E],
     instance_num_vars: usize,
 ) -> Result<NodeOutputType, UtilError> {
-    let (last_pred, _) =
-        (0..=instance_num_vars).fold(Ok((first_pred, first_source)), |prev, i| {
-            let circuit = if i == 0 { leaf } else { inner };
-            match prev {
-                Ok((pred, source)) => graph_builder
-                    .add_node_with_witness(
-                        "tree inner node",
-                        circuit,
-                        pred,
-                        real_challenges.to_vec(),
-                        source,
-                        1 << (instance_num_vars - i),
+    let (last_pred, _) = (0..=instance_num_vars).fold(Ok((first_pred, first_source)), |prev, i| {
+        let circuit = if i == 0 { leaf } else { inner };
+        match prev {
+            Ok((pred, source)) => graph_builder
+                .add_node_with_witness(
+                    "tree inner node",
+                    circuit,
+                    pred,
+                    real_challenges.to_vec(),
+                    source,
+                    1 << (instance_num_vars - i),
+                )
+                .map(|id| {
+                    (
+                        vec![PredType::PredWire(NodeOutputType::OutputLayer(id))],
+                        vec![LayerWitness { instances: vec![] }],
                     )
-                    .map(|id| {
-                        (
-                            vec![PredType::PredWire(NodeOutputType::OutputLayer(id))],
-                            vec![LayerWitness { instances: vec![] }],
-                        )
-                    }),
-                Err(err) => Err(err),
-            }
-        })?;
+                }),
+            Err(err) => Err(err),
+        }
+    })?;
     match last_pred[0] {
         PredType::PredWire(out) => Ok(out),
         _ => unreachable!(),

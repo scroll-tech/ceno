@@ -15,10 +15,7 @@ use singer_utils::{
 use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{
-    component::{
-        AccessoryCircuit, AccessoryLayout, FromPredInst, FromWitness, InstCircuit, InstLayout,
-        ToSuccInst,
-    },
+    component::{AccessoryCircuit, AccessoryLayout, FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
     error::ZKVMError,
     utils::add_assign_each_cell,
     CircuitWitnessIn, SingerParams,
@@ -31,9 +28,7 @@ pub struct MstoreInstruction;
 impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
     type InstType = Self;
 
-    fn construct_circuits(
-        challenges: ChipChallenges,
-    ) -> Result<(InstCircuit<E>, Vec<AccessoryCircuit<E>>), ZKVMError> {
+    fn construct_circuits(challenges: ChipChallenges) -> Result<(InstCircuit<E>, Vec<AccessoryCircuit<E>>), ZKVMError> {
         Ok((
             Self::InstType::construct_circuit(challenges)?,
             vec![MstoreAccessory::construct_circuit(challenges)?],
@@ -127,8 +122,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         // From predesessor instruction
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
         let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
-        let (mem_value_id, mem_values) =
-            circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
+        let (mem_value_id, mem_values) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
         let mut rom_handler = ROMHandler::new(&challenges);
 
@@ -141,16 +135,14 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
             &phase0[Self::phase0_memory_ts_add()],
         )?;
         // To successor instruction
-        let next_memory_ts_id =
-            circuit_builder.create_witness_out_from_cells(next_memory_ts.values());
+        let next_memory_ts_id = circuit_builder.create_witness_out_from_cells(next_memory_ts.values());
 
         // Pop mem_bytes from stack
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
         rom_handler.range_check_bytes(&mut circuit_builder, mem_bytes)?;
 
         let mem_values = StackUInt::try_from(mem_values.as_slice())?;
-        let mem_values_from_bytes =
-            StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
+        let mem_values_from_bytes = StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
         StackUInt::assert_eq(&mut circuit_builder, &mem_values_from_bytes, &mem_values)?;
 
         // To chips.
@@ -161,8 +153,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         to_chip_ids[InstOutChipType::ROMInput as usize] = rom_id;
 
         // To accessory circuits.
-        let (to_acc_dup_id, to_acc_dup) =
-            circuit_builder.create_witness_out(MstoreAccessory::pred_dup_size());
+        let (to_acc_dup_id, to_acc_dup) = circuit_builder.create_witness_out(MstoreAccessory::pred_dup_size());
         add_assign_each_cell(
             &mut circuit_builder,
             &to_acc_dup[MstoreAccessory::pred_dup_memory_ts()],
@@ -174,8 +165,8 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
             &offset,
         );
 
-        let (to_acc_ooo_id, to_acc_ooo) = circuit_builder
-            .create_witness_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
+        let (to_acc_ooo_id, to_acc_ooo) =
+            circuit_builder.create_witness_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
         add_assign_each_cell(&mut circuit_builder, &to_acc_ooo, mem_bytes);
 
         circuit_builder.configure();
@@ -227,9 +218,7 @@ register_witness!(
 );
 
 impl MstoreAccessory {
-    pub fn construct_circuit<E: ExtensionField>(
-        challenges: ChipChallenges,
-    ) -> Result<AccessoryCircuit<E>, ZKVMError> {
+    pub fn construct_circuit<E: ExtensionField>(challenges: ChipChallenges) -> Result<AccessoryCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
 
         // From predesessor circuit.
@@ -250,13 +239,8 @@ impl MstoreAccessory {
         let offset = StackUInt::try_from(&pred_dup[Self::pred_dup_offset()])?;
         let offset_add_delta = &phase0[Self::phase0_offset_add_delta()];
         let delta = circuit_builder.create_counter_in(0)[0];
-        let offset_plus_delta = StackUInt::add_cell(
-            &mut circuit_builder,
-            &mut rom_handler,
-            &offset,
-            delta,
-            offset_add_delta,
-        )?;
+        let offset_plus_delta =
+            StackUInt::add_cell(&mut circuit_builder, &mut rom_handler, &offset, delta, offset_add_delta)?;
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut rom_handler,

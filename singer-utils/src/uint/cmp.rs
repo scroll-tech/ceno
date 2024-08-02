@@ -20,11 +20,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let range_values = Self::extract_range_values(witness);
         let computed_diff = Self::sub_unsafe(circuit_builder, operand_0, operand_1, borrow)?;
 
-        let diff = range_chip_handler.range_check_uint(
-            circuit_builder,
-            &computed_diff,
-            Some(&range_values),
-        )?;
+        let diff = range_chip_handler.range_check_uint(circuit_builder, &computed_diff, Some(&range_values))?;
 
         // if operand_0 < operand_1, the last borrow should equal 1
         if borrow.len() == AddSubConstants::<Self>::N_CARRY_CELLS {
@@ -42,13 +38,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         operand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(), UtilError> {
-        let (borrow, _) = Self::lt(
-            circuit_builder,
-            range_chip_handler,
-            operand_0,
-            operand_1,
-            witness,
-        )?;
+        let (borrow, _) = Self::lt(circuit_builder, range_chip_handler, operand_0, operand_1, witness)?;
         circuit_builder.assert_const(borrow, 1);
         Ok(())
     }
@@ -61,13 +51,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         operand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(), UtilError> {
-        let (borrow, diff) = Self::lt(
-            circuit_builder,
-            range_chip_handler,
-            operand_0,
-            operand_1,
-            witness,
-        )?;
+        let (borrow, diff) = Self::lt(circuit_builder, range_chip_handler, operand_0, operand_1, witness)?;
 
         // we have two scenarios
         // 1. eq
@@ -81,12 +65,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let diff_values = diff.values();
         for d in diff_values.iter() {
             let s = circuit_builder.create_cell();
-            circuit_builder.sel_mixed(
-                s,
-                (*d).into(),
-                MixedCell::Constant(E::BaseField::ZERO),
-                borrow,
-            );
+            circuit_builder.sel_mixed(s, (*d).into(), MixedCell::Constant(E::BaseField::ZERO), borrow);
             circuit_builder.assert_const(s, 0);
         }
 

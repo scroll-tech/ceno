@@ -50,21 +50,15 @@ impl<E: ExtensionField> TranscriptSyncronized<E> {
     }
 
     pub fn append_field_element_ext(&mut self, element: &E) {
-        self.ef_append_tx[self.rolling_index]
-            .send(vec![*element])
-            .unwrap();
+        self.ef_append_tx[self.rolling_index].send(vec![*element]).unwrap();
     }
 
     pub fn append_field_element_exts(&mut self, element: &[E]) {
-        self.ef_append_tx[self.rolling_index]
-            .send(element.to_vec())
-            .unwrap();
+        self.ef_append_tx[self.rolling_index].send(element.to_vec()).unwrap();
     }
 
     pub fn append_field_element(&mut self, element: &E::BaseField) {
-        self.bf_append_tx[self.rolling_index]
-            .send(vec![*element])
-            .unwrap();
+        self.bf_append_tx[self.rolling_index].send(vec![*element]).unwrap();
     }
 
     pub fn append_challenge(&mut self, _challenge: Challenge<E>) {
@@ -108,9 +102,7 @@ impl<E: ExtensionField> TranscriptSyncronized<E> {
     }
 
     pub fn send_challenge(&self, challenge: E) {
-        self.challenge_tx[self.rolling_index]
-            .send(challenge)
-            .unwrap();
+        self.challenge_tx[self.rolling_index].send(challenge).unwrap();
     }
 
     pub fn commit_rolling(&mut self) {

@@ -103,10 +103,7 @@ impl<Ext: ExtensionField> OAMOperations<Ext> for RAMHandler<Ext> {
                 circuit_builder.add_const(out.cells[0], Ext::BaseField::ONE);
                 records.push(out);
             }
-            Some((
-                circuit_builder.create_witness_out_from_exts(&records),
-                records.len(),
-            ))
+            Some((circuit_builder.create_witness_out_from_exts(&records), records.len()))
         };
 
         let mut rd_records = self.rd_records;

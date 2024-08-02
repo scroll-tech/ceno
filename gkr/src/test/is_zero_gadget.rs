@@ -1,12 +1,13 @@
-use crate::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState, PointAndEval};
-use crate::utils::MultilinearExtensionFromVectors;
+use crate::{
+    structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState, PointAndEval},
+    utils::MultilinearExtensionFromVectors,
+};
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
-use std::iter;
-use std::time::Duration;
+use std::{iter, time::Duration};
 use transcript::Transcript;
 
 // build an IsZero Gadget
@@ -75,7 +76,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     };
     println!("circuit witness: {:?}", circuit_witness);
     // use of check_correctness will panic
-    //circuit_witness.check_correctness(&circuit);
+    // circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
@@ -96,10 +97,8 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     assert_eq!(is_zero_wire_out_ref.instances[0][0], out_is_zero);
 
     // add prover-verifier process
-    let mut prover_transcript =
-        Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
-    let mut verifier_transcript =
-        Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+    let mut prover_transcript = Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+    let mut verifier_transcript = Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
 
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];
@@ -130,10 +129,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
         let prover_output_eval = output_mle.evaluate(&prover_output_point);
         let verifier_output_eval = output_mle.evaluate(&verifier_output_point);
         prover_wires_out_evals.push(PointAndEval::new(prover_output_point, prover_output_eval));
-        verifier_wires_out_evals.push(PointAndEval::new(
-            verifier_output_point,
-            verifier_output_eval,
-        ));
+        verifier_wires_out_evals.push(PointAndEval::new(verifier_output_point, verifier_output_eval));
     }
 
     let start = std::time::Instant::now();
@@ -192,23 +188,17 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     let mut is_zero_prev_items = circuit_builder.create_cell();
     circuit_builder.add_const(is_zero_prev_items, Goldilocks::from(1));
     for (value_item, inv_item) in value.into_iter().zip(inv) {
-        let (is_zero_item, cond1_item, cond2_item) =
-            is_zero_gadget(&mut circuit_builder, value_item, inv_item);
+        let (is_zero_item, cond1_item, cond2_item) = is_zero_gadget(&mut circuit_builder, value_item, inv_item);
         cond1.push(cond1_item);
         cond2.push(cond2_item);
         let is_zero = circuit_builder.create_cell();
         // TODO: can optimize using mul3
-        circuit_builder.mul2(
-            is_zero,
-            is_zero_prev_items,
-            is_zero_item,
-            Goldilocks::from(1),
-        );
+        circuit_builder.mul2(is_zero, is_zero_prev_items, is_zero_item, Goldilocks::from(1));
         is_zero_prev_items = is_zero;
     }
 
-    let cond_wire_out_id = circuit_builder
-        .create_witness_out_from_cells(&[cond1.as_slice(), cond2.as_slice()].concat());
+    let cond_wire_out_id =
+        circuit_builder.create_witness_out_from_cells(&[cond1.as_slice(), cond2.as_slice()].concat());
     let is_zero_wire_out_id = circuit_builder.create_witness_out_from_cells(&[is_zero_prev_items]);
 
     circuit_builder.configure();
@@ -232,7 +222,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     };
     println!("circuit witness: {:?}", circuit_witness);
     // use of check_correctness will panic
-    //circuit_witness.check_correctness(&circuit);
+    // circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
@@ -254,10 +244,8 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     assert_eq!(is_zero_wire_out_ref.instances[0][0], out_is_zero);
 
     // add prover-verifier process
-    let mut prover_transcript =
-        Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
-    let mut verifier_transcript =
-        Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+    let mut prover_transcript = Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
+    let mut verifier_transcript = Transcript::<GoldilocksExt2>::new(b"test_gkr_circuit_IsZeroGadget_simple");
 
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];
@@ -288,10 +276,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
         let prover_output_eval = output_mle.evaluate(&prover_output_point);
         let verifier_output_eval = output_mle.evaluate(&verifier_output_point);
         prover_wires_out_evals.push(PointAndEval::new(prover_output_point, prover_output_eval));
-        verifier_wires_out_evals.push(PointAndEval::new(
-            verifier_output_point,
-            verifier_output_eval,
-        ));
+        verifier_wires_out_evals.push(PointAndEval::new(verifier_output_point, verifier_output_eval));
     }
 
     let start = std::time::Instant::now();
@@ -305,21 +290,19 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     );
     let proof_time: Duration = start.elapsed();
 
-    /*
     // verifier panics due to mismatch of number of variables
-    let start = std::time::Instant::now();
-    let _claim = IOPVerifierState::verify_parallel(
-        &circuit,
-        &[],
-        &[],
-        &verifier_wires_out_evals,
-        &proof,
-        instance_num_vars,
-        &mut verifier_transcript,
-    ).unwrap();
-    let verification_time: Duration = start.elapsed();
-
-    println!("proof time: {:?}, verification time: {:?}", proof_time, verification_time);
-    */
+    // let start = std::time::Instant::now();
+    // let _claim = IOPVerifierState::verify_parallel(
+    // &circuit,
+    // &[],
+    // &[],
+    // &verifier_wires_out_evals,
+    // &proof,
+    // instance_num_vars,
+    // &mut verifier_transcript,
+    // ).unwrap();
+    // let verification_time: Duration = start.elapsed();
+    //
+    // println!("proof time: {:?}, verification time: {:?}", proof_time, verification_time);
     println!("proof time: {:?}", proof_time);
 }

@@ -50,14 +50,12 @@ impl<F: SmallField> CircuitWitness<F> {
 
         // The first layer.
         layer_wits[n_layers - 1] = {
-            let mut layer_wit =
-                vec![vec![F::ZERO; circuit.layers[n_layers - 1].size()]; n_instances];
+            let mut layer_wit = vec![vec![F::ZERO; circuit.layers[n_layers - 1].size()]; n_instances];
             for instance_id in 0..n_instances {
                 assert_eq!(wits_in.len(), circuit.paste_from_wits_in.len());
                 for (wit_id, (l, r)) in circuit.paste_from_wits_in.iter().enumerate() {
                     for i in *l..*r {
-                        layer_wit[instance_id][i] =
-                            wits_in[wit_id as usize].instances[instance_id][i - *l];
+                        layer_wit[instance_id][i] = wits_in[wit_id as usize].instances[instance_id][i - *l];
                     }
                 }
                 for (constant, (l, r)) in circuit.paste_from_consts_in.iter() {
@@ -67,63 +65,53 @@ impl<F: SmallField> CircuitWitness<F> {
                 }
                 for (num_vars, (l, r)) in circuit.paste_from_counter_in.iter() {
                     for i in *l..*r {
-                        layer_wit[instance_id][i] =
-                            F::from(((instance_id << num_vars) ^ (i - *l)) as u64);
+                        layer_wit[instance_id][i] = F::from(((instance_id << num_vars) ^ (i - *l)) as u64);
                     }
                 }
             }
-            LayerWitness {
-                instances: layer_wit,
-            }
+            LayerWitness { instances: layer_wit }
         };
 
         for (layer_id, layer) in circuit.layers.iter().enumerate().rev().skip(1) {
             let size = circuit.layers[layer_id].size();
             let mut current_layer_wits = vec![vec![F::ZERO; size]; n_instances];
 
-            izip!((0..n_instances), current_layer_wits.iter_mut()).for_each(
-                |(instance_id, current_layer_wit)| {
-                    layer
-                        .paste_from
+            izip!((0..n_instances), current_layer_wits.iter_mut()).for_each(|(instance_id, current_layer_wit)| {
+                layer.paste_from.iter().for_each(|(old_layer_id, new_wire_ids)| {
+                    new_wire_ids
                         .iter()
-                        .for_each(|(old_layer_id, new_wire_ids)| {
-                            new_wire_ids.iter().enumerate().for_each(
-                                |(subset_wire_id, new_wire_id)| {
-                                    let old_wire_id = circuit.layers[*old_layer_id as usize]
-                                        .copy_to
-                                        .get(&(layer_id as LayerId))
-                                        .unwrap()[subset_wire_id];
-                                    current_layer_wit[*new_wire_id] = layer_wits
-                                        [*old_layer_id as usize]
-                                        .instances[instance_id][old_wire_id];
-                                },
-                            );
+                        .enumerate()
+                        .for_each(|(subset_wire_id, new_wire_id)| {
+                            let old_wire_id = circuit.layers[*old_layer_id as usize]
+                                .copy_to
+                                .get(&(layer_id as LayerId))
+                                .unwrap()[subset_wire_id];
+                            current_layer_wit[*new_wire_id] =
+                                layer_wits[*old_layer_id as usize].instances[instance_id][old_wire_id];
                         });
+                });
 
-                    let last_layer_wit = &layer_wits[layer_id + 1].instances[instance_id];
-                    for add_const in layer.add_consts.iter() {
-                        current_layer_wit[add_const.idx_out] += add_const.scalar.eval(&challenges);
-                    }
+                let last_layer_wit = &layer_wits[layer_id + 1].instances[instance_id];
+                for add_const in layer.add_consts.iter() {
+                    current_layer_wit[add_const.idx_out] += add_const.scalar.eval(&challenges);
+                }
 
-                    for add in layer.adds.iter() {
-                        current_layer_wit[add.idx_out] +=
-                            last_layer_wit[add.idx_in[0]] * add.scalar.eval(&challenges);
-                    }
+                for add in layer.adds.iter() {
+                    current_layer_wit[add.idx_out] += last_layer_wit[add.idx_in[0]] * add.scalar.eval(&challenges);
+                }
 
-                    for mul2 in layer.mul2s.iter() {
-                        current_layer_wit[mul2.idx_out] += last_layer_wit[mul2.idx_in[0]]
-                            * last_layer_wit[mul2.idx_in[1]]
-                            * mul2.scalar.eval(&challenges);
-                    }
+                for mul2 in layer.mul2s.iter() {
+                    current_layer_wit[mul2.idx_out] +=
+                        last_layer_wit[mul2.idx_in[0]] * last_layer_wit[mul2.idx_in[1]] * mul2.scalar.eval(&challenges);
+                }
 
-                    for mul3 in layer.mul3s.iter() {
-                        current_layer_wit[mul3.idx_out] += last_layer_wit[mul3.idx_in[0]]
-                            * last_layer_wit[mul3.idx_in[1]]
-                            * last_layer_wit[mul3.idx_in[2]]
-                            * mul3.scalar.eval(&challenges);
-                    }
-                },
-            );
+                for mul3 in layer.mul3s.iter() {
+                    current_layer_wit[mul3.idx_out] += last_layer_wit[mul3.idx_in[0]]
+                        * last_layer_wit[mul3.idx_in[1]]
+                        * last_layer_wit[mul3.idx_in[2]]
+                        * mul3.scalar.eval(&challenges);
+                }
+            });
 
             layer_wits[layer_id] = LayerWitness {
                 instances: current_layer_wits,
@@ -173,35 +161,23 @@ impl<F: SmallField> CircuitWitness<F> {
         self.add_instances(circuit, wits_in, 1);
     }
 
-    pub fn add_instances<E>(
-        &mut self,
-        circuit: &Circuit<E>,
-        new_wits_in: Vec<LayerWitness<F>>,
-        n_instances: usize,
-    ) where
+    pub fn add_instances<E>(&mut self, circuit: &Circuit<E>, new_wits_in: Vec<LayerWitness<F>>, n_instances: usize)
+    where
         E: ExtensionField<BaseField = F>,
     {
         assert_eq!(new_wits_in.len(), circuit.n_witness_in);
         assert!(n_instances.is_power_of_two());
-        assert!(!new_wits_in
-            .iter()
-            .any(|wit_in| wit_in.instances.len() != n_instances));
+        assert!(!new_wits_in.iter().any(|wit_in| wit_in.instances.len() != n_instances));
 
         let (inferred_layer_wits, inferred_wits_out) =
             CircuitWitness::new_instances(circuit, &new_wits_in, &self.challenges, n_instances);
 
         // Merge self and circuit_witness.
-        for (layer_wit, inferred_layer_wit) in
-            self.layers.iter_mut().zip(inferred_layer_wits.into_iter())
-        {
+        for (layer_wit, inferred_layer_wit) in self.layers.iter_mut().zip(inferred_layer_wits.into_iter()) {
             layer_wit.instances.extend(inferred_layer_wit.instances);
         }
 
-        for (wit_out, inferred_wits_out) in self
-            .witness_out
-            .iter_mut()
-            .zip(inferred_wits_out.into_iter())
-        {
+        for (wit_out, inferred_wits_out) in self.witness_out.iter_mut().zip(inferred_wits_out.into_iter()) {
             wit_out.instances.extend(inferred_wits_out.instances);
         }
 
@@ -274,13 +250,8 @@ impl<F: SmallField> CircuitWitness<F> {
             }
         }
 
-        for (layer_id, (layer_witnesses, layer)) in self
-            .layers
-            .iter()
-            .zip(circuit.layers.iter())
-            .enumerate()
-            .rev()
-            .skip(1)
+        for (layer_id, (layer_witnesses, layer)) in
+            self.layers.iter().zip(circuit.layers.iter()).enumerate().rev().skip(1)
         {
             let prev_layer_wits = &self.layers[layer_id + 1];
             for (copy_id, (prev, curr)) in prev_layer_wits
@@ -294,13 +265,11 @@ impl<F: SmallField> CircuitWitness<F> {
                     expected[add_const.idx_out] += add_const.scalar.eval(&self.challenges);
                 }
                 for add in layer.adds.iter() {
-                    expected[add.idx_out] +=
-                        prev[add.idx_in[0]] * add.scalar.eval(&self.challenges);
+                    expected[add.idx_out] += prev[add.idx_in[0]] * add.scalar.eval(&self.challenges);
                 }
                 for mul2 in layer.mul2s.iter() {
-                    expected[mul2.idx_out] += prev[mul2.idx_in[0]]
-                        * prev[mul2.idx_in[1]]
-                        * mul2.scalar.eval(&self.challenges);
+                    expected[mul2.idx_out] +=
+                        prev[mul2.idx_in[0]] * prev[mul2.idx_in[1]] * mul2.scalar.eval(&self.challenges);
                 }
                 for mul3 in layer.mul3s.iter() {
                     expected[mul3.idx_out] += prev[mul3.idx_in[0]]
@@ -317,8 +286,7 @@ impl<F: SmallField> CircuitWitness<F> {
                             .copy_to
                             .get(&(layer_id as LayerId))
                             .unwrap()[subset_wire_id];
-                        expected[*new_wire_id] =
-                            self.layers[*old_layer_id as usize].instances[copy_id][old_wire_id];
+                        expected[*new_wire_id] = self.layers[*old_layer_id as usize].instances[copy_id][old_wire_id];
                     }
                 }
                 assert_eq!(
@@ -375,10 +343,7 @@ impl<F: SmallField> CircuitWitness<F> {
         for gate in circuit.assert_consts.iter() {
             if let ConstantType::Field(constant) = gate.scalar {
                 for copy_id in 0..self.n_instances {
-                    assert_eq!(
-                        output_layer_witness.instances[copy_id][gate.idx_out],
-                        constant
-                    );
+                    assert_eq!(output_layer_witness.instances[copy_id][gate.idx_out], constant);
                 }
             }
         }
@@ -418,14 +383,11 @@ impl<F: SmallField> CircuitWitness<F> {
         single_num_vars: usize,
         multi_threads_meta: (usize, usize),
     ) -> ArcDenseMultilinearExtension<Ext> {
-        self.layers[layer_id as usize]
-            .instances
-            .as_slice()
-            .mle_with_meta(
-                single_num_vars,
-                self.instance_num_vars(),
-                multi_threads_meta,
-            )
+        self.layers[layer_id as usize].instances.as_slice().mle_with_meta(
+            single_num_vars,
+            self.instance_num_vars(),
+            multi_threads_meta,
+        )
     }
 }
 
@@ -480,13 +442,7 @@ mod test {
 
         // Layer 0
         let (_, mul_001123) = circuit_builder.create_witness_out(1);
-        circuit_builder.mul3(
-            mul_001123[0],
-            mul_01,
-            mul_012,
-            input[3],
-            Ext::BaseField::ONE,
-        );
+        circuit_builder.mul3(mul_001123[0], mul_01, mul_012, input[3], Ext::BaseField::ONE);
 
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
@@ -494,10 +450,8 @@ mod test {
         circuit
     }
 
-    fn copy_and_paste_witness<Ext: ExtensionField>() -> (
-        Vec<LayerWitness<Ext::BaseField>>,
-        CircuitWitness<Ext::BaseField>,
-    ) {
+    fn copy_and_paste_witness<Ext: ExtensionField>(
+    ) -> (Vec<LayerWitness<Ext::BaseField>>, CircuitWitness<Ext::BaseField>) {
         // witness_in, single instance
         let inputs = vec![vec![
             i64_to_field(5),
@@ -572,10 +526,8 @@ mod test {
         circuit
     }
 
-    fn paste_from_wit_in_witness<Ext: ExtensionField>() -> (
-        Vec<LayerWitness<Ext::BaseField>>,
-        CircuitWitness<Ext::BaseField>,
-    ) {
+    fn paste_from_wit_in_witness<Ext: ExtensionField>(
+    ) -> (Vec<LayerWitness<Ext::BaseField>>, CircuitWitness<Ext::BaseField>) {
         // witness_in, single instance
         let leaves1 = vec![vec![i64_to_field(5), i64_to_field(7), i64_to_field(11)]];
         let leaves2 = vec![vec![i64_to_field(13), i64_to_field(17), i64_to_field(19)]];
@@ -623,12 +575,8 @@ mod test {
         let outputs1 = vec![vec![i64_to_field(35), i64_to_field(143)]];
         let outputs2 = vec![vec![i64_to_field(5005)]];
         let witness_out = vec![
-            LayerWitness {
-                instances: outputs1,
-            },
-            LayerWitness {
-                instances: outputs2,
-            },
+            LayerWitness { instances: outputs1 },
+            LayerWitness { instances: outputs2 },
         ];
 
         (
@@ -664,10 +612,8 @@ mod test {
         circuit
     }
 
-    fn copy_to_wit_out_witness<Ext: ExtensionField>() -> (
-        Vec<LayerWitness<Ext::BaseField>>,
-        CircuitWitness<Ext::BaseField>,
-    ) {
+    fn copy_to_wit_out_witness<Ext: ExtensionField>(
+    ) -> (Vec<LayerWitness<Ext::BaseField>>, CircuitWitness<Ext::BaseField>) {
         // witness_in, single instance
         let leaves = vec![vec![
             i64_to_field(5),
@@ -714,24 +660,12 @@ mod test {
         )
     }
 
-    fn copy_to_wit_out_witness_2<Ext: ExtensionField>() -> (
-        Vec<LayerWitness<Ext::BaseField>>,
-        CircuitWitness<Ext::BaseField>,
-    ) {
+    fn copy_to_wit_out_witness_2<Ext: ExtensionField>(
+    ) -> (Vec<LayerWitness<Ext::BaseField>>, CircuitWitness<Ext::BaseField>) {
         // witness_in, 2 instances
         let leaves = vec![
-            vec![
-                i64_to_field(5),
-                i64_to_field(7),
-                i64_to_field(11),
-                i64_to_field(13),
-            ],
-            vec![
-                i64_to_field(5),
-                i64_to_field(13),
-                i64_to_field(11),
-                i64_to_field(7),
-            ],
+            vec![i64_to_field(5), i64_to_field(7), i64_to_field(11), i64_to_field(13)],
+            vec![i64_to_field(5), i64_to_field(13), i64_to_field(11), i64_to_field(7)],
         ];
         let witness_in = vec![LayerWitness { instances: leaves }];
 
@@ -760,18 +694,8 @@ mod test {
             },
             LayerWitness {
                 instances: vec![
-                    vec![
-                        i64_to_field(5),
-                        i64_to_field(7),
-                        i64_to_field(11),
-                        i64_to_field(13),
-                    ],
-                    vec![
-                        i64_to_field(5),
-                        i64_to_field(13),
-                        i64_to_field(11),
-                        i64_to_field(7),
-                    ],
+                    vec![i64_to_field(5), i64_to_field(7), i64_to_field(11), i64_to_field(13)],
+                    vec![i64_to_field(5), i64_to_field(13), i64_to_field(11), i64_to_field(7)],
                 ],
             },
         ];
@@ -846,18 +770,8 @@ mod test {
 
         // witness_in, double instances
         let leaves = vec![
-            vec![
-                i64_to_field(5),
-                i64_to_field(7),
-                i64_to_field(11),
-                i64_to_field(13),
-            ],
-            vec![
-                i64_to_field(5),
-                i64_to_field(13),
-                i64_to_field(11),
-                i64_to_field(7),
-            ],
+            vec![i64_to_field(5), i64_to_field(7), i64_to_field(11), i64_to_field(13)],
+            vec![i64_to_field(5), i64_to_field(13), i64_to_field(11), i64_to_field(7)],
         ];
         let witness_in = vec![LayerWitness {
             instances: leaves.clone(),
@@ -877,16 +791,8 @@ mod test {
             + challenge_pows[1][2].1;
 
         let inners = vec![
-            [
-                inner00.clone().as_bases().to_vec(),
-                inner01.clone().as_bases().to_vec(),
-            ]
-            .concat(),
-            [
-                inner10.clone().as_bases().to_vec(),
-                inner11.clone().as_bases().to_vec(),
-            ]
-            .concat(),
+            [inner00.clone().as_bases().to_vec(), inner01.clone().as_bases().to_vec()].concat(),
+            [inner10.clone().as_bases().to_vec(), inner11.clone().as_bases().to_vec()].concat(),
         ];
 
         let root_tmp0 = vec![
@@ -911,9 +817,7 @@ mod test {
             LayerWitness {
                 instances: roots.clone(),
             },
-            LayerWitness {
-                instances: root_tmps,
-            },
+            LayerWitness { instances: root_tmps },
             LayerWitness { instances: inners },
             LayerWitness { instances: leaves },
         ];
@@ -1008,21 +912,13 @@ mod test {
 
         let (_, out) = circuit_builder.create_witness_out(2);
         // like a bypass gate, passing 6 to output out[0]
-        circuit_builder.add(
-            out[0],
-            mul_0_1_res,
-            <GoldilocksExt2 as ExtensionField>::BaseField::ONE,
-        );
+        circuit_builder.add(out[0], mul_0_1_res, <GoldilocksExt2 as ExtensionField>::BaseField::ONE);
 
         // assert const 2
         circuit_builder.assert_const(leaves[2], 5);
 
         // 5 + -5 = 0, put in out[1]
-        circuit_builder.add(
-            out[1],
-            leaves[2],
-            <GoldilocksExt2 as ExtensionField>::BaseField::ONE,
-        );
+        circuit_builder.add(out[1], leaves[2], <GoldilocksExt2 as ExtensionField>::BaseField::ONE);
         circuit_builder.add_const(
             out[1],
             <GoldilocksExt2 as ExtensionField>::BaseField::from(5).neg(), // -5

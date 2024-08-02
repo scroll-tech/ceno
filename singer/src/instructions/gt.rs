@@ -5,8 +5,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RangeChipOperations, StackChipOperations,
+        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
+        StackChipOperations,
     },
     constants::OpcodeType,
     register_witness,
@@ -74,14 +74,9 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
             clk,
         );
 
-        let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        let next_stack_ts = rom_handler.add_ts_with_const(
-            &mut circuit_builder,
-            &stack_ts,
-            1,
-            &phase0[Self::phase0_stack_ts_add()],
-        )?;
+        let next_pc = ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        let next_stack_ts =
+            rom_handler.add_ts_with_const(&mut circuit_builder, &stack_ts, 1, &phase0[Self::phase0_stack_ts_add()])?;
 
         ram_handler.state_out(
             &mut circuit_builder,
@@ -104,10 +99,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         )?;
 
         // Check the range of stack_top - 2 is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        rom_handler.range_check_stack_top(
-            &mut circuit_builder,
-            stack_top_expr.sub(E::BaseField::from(2)),
-        )?;
+        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(E::BaseField::from(2)))?;
 
         // Pop two values from stack
         let old_stack_ts0 = (&phase0[Self::phase0_old_stack_ts0()]).try_into()?;
@@ -150,11 +142,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         );
 
         // Bytecode check for (pc, gt)
-        rom_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            pc.values(),
-            <Self as Instruction<E>>::OPCODE,
-        );
+        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), <Self as Instruction<E>>::OPCODE);
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
         let rom_id = rom_handler.finalize(&mut circuit_builder);
@@ -186,9 +174,7 @@ mod test {
     use transcript::Transcript;
 
     use crate::{
-        instructions::{
-            ChipChallenges, GtInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
-        },
+        instructions::{ChipChallenges, GtInstruction, Instruction, InstructionGraph, SingerCircuitBuilder},
         scheme::GKRGraphProverState,
         test::{get_uint_params, test_opcode_circuit},
         utils::u64vec,
@@ -218,10 +204,7 @@ mod test {
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(3u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert(
-            "phase0_stack_top".to_string(),
-            vec![Goldilocks::from(100u64)],
-        );
+        phase0_values_map.insert("phase0_stack_top".to_string(), vec![Goldilocks::from(100u64)]);
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),
@@ -238,10 +221,7 @@ mod test {
                 // no place for carry
             ],
         );
-        phase0_values_map.insert(
-            "phase0_old_stack_ts0".to_string(),
-            vec![Goldilocks::from(2u64)],
-        );
+        phase0_values_map.insert("phase0_old_stack_ts0".to_string(), vec![Goldilocks::from(2u64)]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
@@ -254,10 +234,7 @@ mod test {
                 Goldilocks::from(1u64),
             ],
         );
-        phase0_values_map.insert(
-            "phase0_old_stack_ts1".to_string(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert("phase0_old_stack_ts1".to_string(), vec![Goldilocks::from(1u64)]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
@@ -299,19 +276,14 @@ mod test {
     #[cfg(not(debug_assertions))]
     fn bench_gt_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
-        let circuit_builder =
-            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
         let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
         let size = GtInstruction::phase0_size();
         let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
-                .map(|_| {
-                    (0..size)
-                        .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
-                })
+                .map(|_| (0..size).map(|_| E::BaseField::random(&mut rng)).collect_vec())
                 .collect_vec(),
         }];
 
@@ -344,8 +316,8 @@ mod test {
         let mut prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
-            .expect("prove failed");
+        let _ =
+            GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1).expect("prove failed");
         println!(
             "GtInstruction::prove, instance_num_vars = {}, time = {}",
             instance_num_vars,

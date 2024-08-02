@@ -16,10 +16,7 @@ use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 
 fn main() {
-    println!(
-        "#layers: {}",
-        keccak256_circuit::<GoldilocksExt2>().layers.len()
-    );
+    println!("#layers: {}", keccak256_circuit::<GoldilocksExt2>().layers.len());
 
     #[allow(unused_mut)]
     let mut max_thread_id: usize = env::var("RAYON_NUM_THREADS")
@@ -29,9 +26,7 @@ fn main() {
     if !is_power_of_2(max_thread_id) {
         #[cfg(not(feature = "non_pow2_rayon_thread"))]
         {
-            panic!(
-                "add --features non_pow2_rayon_thread to support non pow of 2 rayon thread pool"
-            );
+            panic!("add --features non_pow2_rayon_thread to support non pow of 2 rayon thread pool");
         }
 
         #[cfg(feature = "non_pow2_rayon_thread")]
@@ -57,17 +52,12 @@ fn main() {
         witness.add_instance(&circuit, all_zero);
         witness.add_instance(&circuit, all_one);
 
-        izip!(
-            &witness.witness_out_ref()[0].instances,
-            [[0; 25], [u64::MAX; 25]]
-        )
-        .for_each(|(wire_out, state)| {
+        izip!(&witness.witness_out_ref()[0].instances, [[0; 25], [u64::MAX; 25]]).for_each(|(wire_out, state)| {
             let output = wire_out[..256]
                 .chunks_exact(64)
                 .map(|bits| {
                     bits.iter().fold(0, |acc, bit| {
-                        (acc << 1)
-                            + (*bit == <GoldilocksExt2 as ExtensionField>::BaseField::ONE) as u64
+                        (acc << 1) + (*bit == <GoldilocksExt2 as ExtensionField>::BaseField::ONE) as u64
                     })
                 })
                 .collect_vec();
@@ -82,12 +72,7 @@ fn main() {
 
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let subscriber = Registry::default()
-        .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(false)
-                .with_thread_names(false),
-        )
+        .with(fmt::layer().compact().with_thread_ids(false).with_thread_names(false))
         .with(EnvFilter::from_default_env())
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();

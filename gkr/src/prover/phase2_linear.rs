@@ -51,9 +51,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let f1_g1 = || {
             // f1(x1) = layers[i + 1](rt || x1)
-            let layer_in_vec = circuit_witness.layers[self.layer_id as usize + 1]
-                .instances
-                .as_slice();
+            let layer_in_vec = circuit_witness.layers[self.layer_id as usize + 1].instances.as_slice();
             let mut f1 = layer_in_vec.mle(lo_in_num_vars, hi_num_vars);
             Arc::make_mut(&mut f1).fix_high_variables_in_place(&hi_point);
 
@@ -85,24 +83,18 @@ impl<E: ExtensionField> IOPProverState<E> {
                 .enumerate()
                 .for_each(|(subset_wire_id, &new_wire_id)| {
                     for s in 0..(1 << hi_num_vars) {
-                        f1_j[(s << lo_in_num_vars) ^ subset_wire_id] = paste_from_sources
-                            [j as usize]
-                            .instances[s][old_wire_id(j as usize, subset_wire_id)];
+                        f1_j[(s << lo_in_num_vars) ^ subset_wire_id] =
+                            paste_from_sources[j as usize].instances[s][old_wire_id(j as usize, subset_wire_id)];
                     }
 
                     g1_j[subset_wire_id] += eq_y_ry[new_wire_id];
                 });
             f1_vec.push({
-                let mut f1_j = DenseMultilinearExtension::from_evaluations_vec(
-                    lo_in_num_vars + hi_num_vars,
-                    f1_j,
-                );
+                let mut f1_j = DenseMultilinearExtension::from_evaluations_vec(lo_in_num_vars + hi_num_vars, f1_j);
                 f1_j.fix_high_variables_in_place(&hi_point);
                 f1_j.into()
             });
-            g1_vec.push(
-                DenseMultilinearExtension::from_evaluations_ext_vec(lo_in_num_vars, g1_j).into(),
-            );
+            g1_vec.push(DenseMultilinearExtension::from_evaluations_ext_vec(lo_in_num_vars, g1_j).into());
         });
 
         // sumcheck: sigma = \sum_{x1} f1(x1) * g1(x1) + \sum_j f1'_j(x1) * g1'_j(x1)
@@ -113,8 +105,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             virtual_poly_1.merge(&tmp);
         }
 
-        let (sumcheck_proof_1, prover_state) =
-            SumcheckState::prove_parallel(virtual_poly_1, transcript);
+        let (sumcheck_proof_1, prover_state) = SumcheckState::prove_parallel(virtual_poly_1, transcript);
         let eval_point_1 = sumcheck_proof_1.point.clone();
         let (f1_vec, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
@@ -124,14 +115,11 @@ impl<E: ExtensionField> IOPProverState<E> {
         let eval_values_f1 = f1_vec.into_iter().map(|(_, f1_j)| f1_j).collect_vec();
 
         let new_point = [&eval_point_1, hi_point].concat();
-        self.to_next_phase_point_and_evals =
-            vec![PointAndEval::new_from_ref(&new_point, &eval_values_f1[0])];
+        self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(&new_point, &eval_values_f1[0])];
         izip!(layer.paste_from.iter(), eval_values_f1.iter().skip(1)).for_each(
             |((&old_layer_id, _), &subset_value)| {
-                self.subset_point_and_evals[old_layer_id as usize].push((
-                    self.layer_id,
-                    PointAndEval::new_from_ref(&new_point, &subset_value),
-                ));
+                self.subset_point_and_evals[old_layer_id as usize]
+                    .push((self.layer_id, PointAndEval::new_from_ref(&new_point, &subset_value)));
             },
         );
         self.to_next_step_point = new_point;

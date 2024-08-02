@@ -10,16 +10,9 @@ use crate::{
 use super::{BytecodeChipOperations, ROMOperations};
 
 impl<Ext: ExtensionField> ROMHandler<Ext> {
-    pub fn bytecode_with_pc(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<Ext>,
-        pc: &[CellId],
-        opcode: u64,
-    ) {
+    pub fn bytecode_with_pc(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, pc: &[CellId], opcode: u64) {
         let key = [
-            vec![MixedCell::Constant(Ext::BaseField::from(
-                ROMType::Bytecode as u64,
-            ))],
+            vec![MixedCell::Constant(Ext::BaseField::from(ROMType::Bytecode as u64))],
             pc.iter().map(|&x| x.into()).collect_vec(),
         ]
         .concat();
@@ -41,16 +34,9 @@ impl<Ext: ExtensionField> BytecodeChipOperations<Ext> for ROMHandler<Ext> {
         self.bytecode_with_pc(circuit_builder, pc, opcode.into());
     }
 
-    fn bytecode_with_pc_byte(
-        &mut self,
-        circuit_builder: &mut CircuitBuilder<Ext>,
-        pc: &[CellId],
-        byte: CellId,
-    ) {
+    fn bytecode_with_pc_byte(&mut self, circuit_builder: &mut CircuitBuilder<Ext>, pc: &[CellId], byte: CellId) {
         let key = [
-            vec![MixedCell::Constant(Ext::BaseField::from(
-                ROMType::Bytecode as u64,
-            ))],
+            vec![MixedCell::Constant(Ext::BaseField::from(ROMType::Bytecode as u64))],
             pc.iter().map(|&x| x.into()).collect_vec(),
         ]
         .concat();

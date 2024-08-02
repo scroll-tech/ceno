@@ -53,8 +53,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         // To successor instruction
         let (data_copy_id, data_copy) = circuit_builder.create_witness_out(data.len());
         add_assign_each_cell(&mut circuit_builder, &data_copy, &data);
-        let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
+        let (next_memory_ts_id, next_memory_ts) = circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips

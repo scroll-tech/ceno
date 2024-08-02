@@ -2,13 +2,13 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::ROMOperations,
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt},
+    uint::constants::AddSubConstants,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -62,8 +62,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         )?;
         // To successor instruction
         let stack_result_id = circuit_builder.create_witness_out_from_cells(result.values());
-        let (next_memory_ts_id, next_memory_ts) =
-            circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
+        let (next_memory_ts_id, next_memory_ts) = circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips

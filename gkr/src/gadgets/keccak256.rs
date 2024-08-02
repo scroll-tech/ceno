@@ -145,26 +145,18 @@ fn not_lhs_and_rhs<E: ExtensionField>(cb: &mut CircuitBuilder<E>, lhs: &Word, rh
 // (x0 + x1 + x2) - 2x0x2 - 2x1x2 - 2x0x1 + 4x0x1x2
 fn xor3<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> Word {
     let out = Word::new(cb);
-    izip!(&out.0, &words[0].0, &words[1].0, &words[2].0).for_each(
-        |(out, wire_0, wire_1, wire_2)| {
-            // (x0 + x1 + x2)
-            cb.add(*out, *wire_0, E::BaseField::ONE);
-            cb.add(*out, *wire_1, E::BaseField::ONE);
-            cb.add(*out, *wire_2, E::BaseField::ONE);
-            // - 2x0x2 - 2x1x2 - 2x0x1
-            cb.mul2(*out, *wire_0, *wire_1, -E::BaseField::ONE.double());
-            cb.mul2(*out, *wire_0, *wire_2, -E::BaseField::ONE.double());
-            cb.mul2(*out, *wire_1, *wire_2, -E::BaseField::ONE.double());
-            // 4x0x1x2
-            cb.mul3(
-                *out,
-                *wire_0,
-                *wire_1,
-                *wire_2,
-                E::BaseField::ONE.double().double(),
-            );
-        },
-    );
+    izip!(&out.0, &words[0].0, &words[1].0, &words[2].0).for_each(|(out, wire_0, wire_1, wire_2)| {
+        // (x0 + x1 + x2)
+        cb.add(*out, *wire_0, E::BaseField::ONE);
+        cb.add(*out, *wire_1, E::BaseField::ONE);
+        cb.add(*out, *wire_2, E::BaseField::ONE);
+        // - 2x0x2 - 2x1x2 - 2x0x1
+        cb.mul2(*out, *wire_0, *wire_1, -E::BaseField::ONE.double());
+        cb.mul2(*out, *wire_0, *wire_2, -E::BaseField::ONE.double());
+        cb.mul2(*out, *wire_1, *wire_2, -E::BaseField::ONE.double());
+        // 4x0x1x2
+        cb.mul3(*out, *wire_0, *wire_1, *wire_2, E::BaseField::ONE.double().double());
+    });
     out
 }
 
@@ -184,18 +176,16 @@ fn xor3<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) ->
 // = (x0 + x2) - 2x0x2 - x1x2 + 2x0x1x2
 fn chi<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> Word {
     let out = Word::new(cb);
-    izip!(&out.0, &words[0].0, &words[1].0, &words[2].0).for_each(
-        |(out, wire_0, wire_1, wire_2)| {
-            // (x0 + x2)
-            cb.add(*out, *wire_0, E::BaseField::ONE);
-            cb.add(*out, *wire_2, E::BaseField::ONE);
-            // - 2x0x2 - x1x2
-            cb.mul2(*out, *wire_0, *wire_2, -E::BaseField::ONE.double());
-            cb.mul2(*out, *wire_1, *wire_2, -E::BaseField::ONE);
-            // 2x0x1x2
-            cb.mul3(*out, *wire_0, *wire_1, *wire_2, E::BaseField::ONE.double());
-        },
-    );
+    izip!(&out.0, &words[0].0, &words[1].0, &words[2].0).for_each(|(out, wire_0, wire_1, wire_2)| {
+        // (x0 + x2)
+        cb.add(*out, *wire_0, E::BaseField::ONE);
+        cb.add(*out, *wire_2, E::BaseField::ONE);
+        // - 2x0x2 - x1x2
+        cb.mul2(*out, *wire_0, *wire_2, -E::BaseField::ONE.double());
+        cb.mul2(*out, *wire_1, *wire_2, -E::BaseField::ONE);
+        // 2x0x1x2
+        cb.mul3(*out, *wire_0, *wire_1, *wire_2, E::BaseField::ONE.double());
+    });
     out
 }
 
@@ -204,20 +194,14 @@ fn chi<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> 
 // = c + (x0 + x2) - 2x0x2 - x1x2 + 2x0x1x2 - 2(c*x0 + c*x2 - 2c*x0*x2 - c*x1*x2 + 2*c*x0*x1*x2)
 // = x0 + x2 + c - 2*x0*x2 - x1*x2 + 2*x0*x1*x2 - 2*c*x0 - 2*c*x2 + 4*c*x0*x2 + 2*c*x1*x2 - 4*c*x0*x1*x2
 // = x0*(1-2c) + x2*(1-2c) + c + x0*x2*(-2 + 4c) + x1*x2(-1 + 2c) + x0*x1*x2(2 - 4c)
-fn chi_and_xor_constant<'a, E: ExtensionField>(
-    cb: &mut CircuitBuilder<E>,
-    words: &[Word; 3],
-    constant: u64,
-) -> Word {
+fn chi_and_xor_constant<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3], constant: u64) -> Word {
     let out = Word::new(cb);
     izip!(
         &out.0,
         &words[0].0,
         &words[1].0,
         &words[2].0,
-        iter::successors(Some(constant.reverse_bits()), |constant| {
-            Some(constant >> 1)
-        })
+        iter::successors(Some(constant.reverse_bits()), |constant| { Some(constant >> 1) })
     )
     .for_each(|(out, wire_0, wire_1, wire_2, constant)| {
         let const_bit = constant & 1;
@@ -274,20 +258,14 @@ fn chi_and_xor_constant<'a, E: ExtensionField>(
 }
 
 #[allow(dead_code)]
-fn xor2_constant<E: ExtensionField>(
-    cb: &mut CircuitBuilder<E>,
-    words: &[Word; 2],
-    constant: u64,
-) -> Word {
+fn xor2_constant<E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 2], constant: u64) -> Word {
     let out = Word::new(cb);
 
     izip!(
         &out.0,
         &words[0].0,
         &words[1].0,
-        iter::successors(Some(constant.reverse_bits()), |constant| {
-            Some(constant >> 1)
-        })
+        iter::successors(Some(constant.reverse_bits()), |constant| { Some(constant >> 1) })
     )
     .for_each(|(out, wire_0, wire_1, constant)| {
         let const_bit = constant & 1;
@@ -334,10 +312,7 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
     // Absorption
     state = izip!(
         state.iter(),
-        input
-            .into_iter()
-            .map(|input| Some(input))
-            .chain(iter::repeat(None))
+        input.into_iter().map(|input| Some(input)).chain(iter::repeat(None))
     )
     .map(|(state, input)| {
         if let Some(input) = input {
@@ -442,8 +417,7 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
     // cb.create_wire_out_from_cells(&state.iter().flat_map(|word| word.0).collect_vec());
 
     let (_, out) = cb.create_witness_out(256);
-    izip!(&out, state.iter().flat_map(|word| &word.0))
-        .for_each(|(out, state)| cb.add(*out, *state, E::BaseField::ONE));
+    izip!(&out, state.iter().flat_map(|word| &word.0)).for_each(|(out, state)| cb.add(*out, *state, E::BaseField::ONE));
 
     cb.configure();
     Circuit::new(cb)
@@ -463,29 +437,18 @@ pub fn prove_keccak256<E: ExtensionField>(
     // Sanity-check
     #[cfg(test)]
     {
-        let all_zero = vec![
-            vec![E::BaseField::ZERO; 25 * 64],
-            vec![E::BaseField::ZERO; 17 * 64],
-        ];
-        let all_one = vec![
-            vec![E::BaseField::ONE; 25 * 64],
-            vec![E::BaseField::ZERO; 17 * 64],
-        ];
+        let all_zero = vec![vec![E::BaseField::ZERO; 25 * 64], vec![E::BaseField::ZERO; 17 * 64]];
+        let all_one = vec![vec![E::BaseField::ONE; 25 * 64], vec![E::BaseField::ZERO; 17 * 64]];
         let mut witness = CircuitWitness::new(&circuit, Vec::new());
         witness.add_instance(&circuit, all_zero);
         witness.add_instance(&circuit, all_one);
 
-        izip!(
-            &witness.witness_out_ref()[0].instances,
-            [[0; 25], [u64::MAX; 25]]
-        )
-        .for_each(|(wire_out, state)| {
+        izip!(&witness.witness_out_ref()[0].instances, [[0; 25], [u64::MAX; 25]]).for_each(|(wire_out, state)| {
             let output = wire_out[..256]
                 .chunks_exact(64)
                 .map(|bits| {
-                    bits.iter().fold(0, |acc, bit| {
-                        (acc << 1) + (*bit == E::BaseField::ONE) as u64
-                    })
+                    bits.iter()
+                        .fold(0, |acc, bit| (acc << 1) + (*bit == E::BaseField::ONE) as u64)
                 })
                 .collect_vec();
             let expected = {
@@ -519,13 +482,9 @@ pub fn prove_keccak256<E: ExtensionField>(
         .mle(lo_num_vars, instance_num_vars);
 
     let mut prover_transcript = Transcript::<E>::new(b"test");
-    let output_point = iter::repeat_with(|| {
-        prover_transcript
-            .get_and_append_challenge(b"output point")
-            .elements
-    })
-    .take(output_mle.num_vars)
-    .collect_vec();
+    let output_point = iter::repeat_with(|| prover_transcript.get_and_append_challenge(b"output point").elements)
+        .take(output_mle.num_vars)
+        .collect_vec();
     let output_eval = output_mle.evaluate(&output_point);
 
     let start = std::time::Instant::now();
@@ -548,13 +507,9 @@ pub fn verify_keccak256<E: ExtensionField>(
     circuit: &Circuit<E>,
 ) -> Result<GKRInputClaims<E>, GKRError> {
     let mut verifer_transcript = Transcript::<E>::new(b"test");
-    let output_point = iter::repeat_with(|| {
-        verifer_transcript
-            .get_and_append_challenge(b"output point")
-            .elements
-    })
-    .take(output_mle.num_vars)
-    .collect_vec();
+    let output_point = iter::repeat_with(|| verifer_transcript.get_and_append_challenge(b"output point").elements)
+        .take(output_mle.num_vars)
+        .collect_vec();
     let output_eval = output_mle.evaluate(&output_point);
     crate::structs::IOPVerifierState::verify_parallel(
         &circuit,

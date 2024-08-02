@@ -27,8 +27,7 @@ pub(crate) fn segment_eval_greater_than<E: ExtensionField>(min_idx: usize, a: &[
         running_product[a.len()] = E::ONE;
         for i in (0..a.len()).rev() {
             let bit = E::from(((min_idx >> i) & 1) as u64);
-            running_product[i] =
-                running_product[i + 1] * (a[i] * bit + (E::ONE - a[i]) * (E::ONE - bit));
+            running_product[i] = running_product[i + 1] * (a[i] * bit + (E::ONE - a[i]) * (E::ONE - bit));
         }
         running_product
     };
@@ -70,8 +69,8 @@ pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[
         running_product[b.len()] = F::ONE;
         for i in (0..b.len()).rev() {
             let bit = F::from(((min_idx >> i) & 1) as u64);
-            running_product[i] = running_product[i + 1]
-                * (a[i] * b[i] * bit + (F::ONE - a[i]) * (F::ONE - b[i]) * (F::ONE - bit));
+            running_product[i] =
+                running_product[i + 1] * (a[i] * b[i] * bit + (F::ONE - a[i]) * (F::ONE - b[i]) * (F::ONE - bit));
         }
         running_product
     };
@@ -116,8 +115,8 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
         running_product[b.len()] = E::ONE;
         for i in (0..b.len()).rev() {
             let bit = E::from(((max_idx >> i) & 1) as u64);
-            running_product[i] = running_product[i + 1]
-                * (a[i] * b[i] * bit + (E::ONE - a[i]) * (E::ONE - b[i]) * (E::ONE - bit));
+            running_product[i] =
+                running_product[i + 1] * (a[i] * b[i] * bit + (E::ONE - a[i]) * (E::ONE - b[i]) * (E::ONE - bit));
         }
         running_product
     };
@@ -277,12 +276,7 @@ impl<E: ExtensionField> MultilinearExtensionFromVectors<E> for &[Vec<E::BaseFiel
 
 pub(crate) trait MatrixMLEColumnFirst<E: ExtensionField> {
     fn fix_row_col_first(&self, row_point_eq: &[E], col_num_vars: usize) -> Vec<E>;
-    fn fix_row_col_first_with_scalar(
-        &self,
-        row_point_eq: &[E],
-        col_num_vars: usize,
-        scalar: &E,
-    ) -> Vec<E>;
+    fn fix_row_col_first_with_scalar(&self, row_point_eq: &[E], col_num_vars: usize, scalar: &E) -> Vec<E>;
     fn eval_col_first(&self, row_point_eq: &[E], col_point_eq: &[E]) -> E;
 }
 
@@ -295,12 +289,7 @@ impl<E: ExtensionField> MatrixMLEColumnFirst<E> for &[usize] {
         ans
     }
 
-    fn fix_row_col_first_with_scalar(
-        &self,
-        row_point_eq: &[E],
-        col_num_vars: usize,
-        scalar: &E,
-    ) -> Vec<E> {
+    fn fix_row_col_first_with_scalar(&self, row_point_eq: &[E], col_num_vars: usize, scalar: &E) -> Vec<E> {
         let mut ans = vec![E::ZERO; 1 << col_num_vars];
         for (col, &non_zero_row) in self.iter().enumerate() {
             ans[col] = row_point_eq[non_zero_row] * scalar;
@@ -309,22 +298,15 @@ impl<E: ExtensionField> MatrixMLEColumnFirst<E> for &[usize] {
     }
 
     fn eval_col_first(&self, row_point_eq: &[E], col_point_eq: &[E]) -> E {
-        self.iter()
-            .enumerate()
-            .fold(E::ZERO, |acc, (col, &non_zero_row)| {
-                acc + row_point_eq[non_zero_row] * col_point_eq[col]
-            })
+        self.iter().enumerate().fold(E::ZERO, |acc, (col, &non_zero_row)| {
+            acc + row_point_eq[non_zero_row] * col_point_eq[col]
+        })
     }
 }
 
 pub(crate) trait MatrixMLERowFirst<E: ExtensionField> {
     fn fix_row_row_first(&self, row_point_eq: &[E], col_num_vars: usize) -> Vec<E>;
-    fn fix_row_row_first_with_scalar(
-        &self,
-        row_point_eq: &[E],
-        col_num_vars: usize,
-        scalar: &E,
-    ) -> Vec<E>;
+    fn fix_row_row_first_with_scalar(&self, row_point_eq: &[E], col_num_vars: usize, scalar: &E) -> Vec<E>;
     fn eval_row_first(&self, row_point_eq: &[E], col_point_eq: &[E]) -> E;
 }
 
@@ -337,12 +319,7 @@ impl<E: ExtensionField> MatrixMLERowFirst<E> for &[usize] {
         ans
     }
 
-    fn fix_row_row_first_with_scalar(
-        &self,
-        row_point_eq: &[E],
-        col_num_vars: usize,
-        scalar: &E,
-    ) -> Vec<E> {
+    fn fix_row_row_first_with_scalar(&self, row_point_eq: &[E], col_num_vars: usize, scalar: &E) -> Vec<E> {
         let mut ans = vec![E::ZERO; 1 << col_num_vars];
         for (row, &non_zero_col) in self.iter().enumerate() {
             ans[non_zero_col] = row_point_eq[row] * scalar;
@@ -351,11 +328,9 @@ impl<E: ExtensionField> MatrixMLERowFirst<E> for &[usize] {
     }
 
     fn eval_row_first(&self, row_point_eq: &[E], col_point_eq: &[E]) -> E {
-        self.iter()
-            .enumerate()
-            .fold(E::ZERO, |acc, (row, &non_zero_col)| {
-                acc + row_point_eq[row] * col_point_eq[non_zero_col]
-            })
+        self.iter().enumerate().fold(E::ZERO, |acc, (row, &non_zero_col)| {
+            acc + row_point_eq[row] * col_point_eq[non_zero_col]
+        })
     }
 }
 
@@ -374,13 +349,11 @@ impl<F: SmallField> SubsetIndices<F> for &[usize] {
         ans
     }
     fn subset_eq_eval(&self, eq_1: &[F]) -> F {
-        self.iter()
-            .fold(F::ZERO, |acc, &non_zero_i| acc + eq_1[non_zero_i])
+        self.iter().fold(F::ZERO, |acc, &non_zero_i| acc + eq_1[non_zero_i])
     }
     fn subset_eq2_eval(&self, eq_1: &[F], eq_2: &[F]) -> F {
-        self.iter().fold(F::ZERO, |acc, &non_zero_i| {
-            acc + eq_1[non_zero_i] * eq_2[non_zero_i]
-        })
+        self.iter()
+            .fold(F::ZERO, |acc, &non_zero_i| acc + eq_1[non_zero_i] * eq_2[non_zero_i])
     }
 }
 
@@ -411,12 +384,8 @@ mod test {
         let mut rng = test_rng();
         let n = 5;
         let pow_n = 1 << n;
-        let a = (0..n)
-            .map(|_| GoldilocksExt2::random(&mut rng))
-            .collect_vec();
-        let b = (0..n)
-            .map(|_| GoldilocksExt2::random(&mut rng))
-            .collect_vec();
+        let a = (0..n).map(|_| GoldilocksExt2::random(&mut rng)).collect_vec();
+        let b = (0..n).map(|_| GoldilocksExt2::random(&mut rng)).collect_vec();
 
         let eq_vec = build_eq_x_r_vec(&a);
 
@@ -424,8 +393,7 @@ mod test {
             let max_idx = 0;
             let mut partial_eq_vec: Vec<_> = eq_vec[0..=max_idx].to_vec();
             partial_eq_vec.extend(vec![GoldilocksExt2::ZERO; pow_n - max_idx - 1]);
-            let expected_ans =
-                DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
+            let expected_ans = DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
             assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
 
@@ -433,8 +401,7 @@ mod test {
             let max_idx = 1;
             let mut partial_eq_vec: Vec<_> = eq_vec[0..=max_idx].to_vec();
             partial_eq_vec.extend(vec![GoldilocksExt2::ZERO; pow_n - max_idx - 1]);
-            let expected_ans =
-                DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
+            let expected_ans = DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
             assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
 
@@ -442,8 +409,7 @@ mod test {
             let max_idx = 12;
             let mut partial_eq_vec: Vec<_> = eq_vec[0..=max_idx].to_vec();
             partial_eq_vec.extend(vec![GoldilocksExt2::ZERO; pow_n - max_idx - 1]);
-            let expected_ans =
-                DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
+            let expected_ans = DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
             assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
 
@@ -451,8 +417,7 @@ mod test {
             let max_idx = 1 << (n - 1) - 1;
             let mut partial_eq_vec: Vec<_> = eq_vec[0..=max_idx].to_vec();
             partial_eq_vec.extend(vec![GoldilocksExt2::ZERO; pow_n - max_idx - 1]);
-            let expected_ans =
-                DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
+            let expected_ans = DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
             assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
 
@@ -460,8 +425,7 @@ mod test {
             let max_idx = 1 << (n - 1);
             let mut partial_eq_vec: Vec<_> = eq_vec[0..=max_idx].to_vec();
             partial_eq_vec.extend(vec![GoldilocksExt2::ZERO; pow_n - max_idx - 1]);
-            let expected_ans =
-                DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
+            let expected_ans = DenseMultilinearExtension::from_evaluations_ext_vec(n, partial_eq_vec).evaluate(&b);
             assert_eq!(expected_ans, eq_eval_less_or_equal_than(max_idx, &a, &b));
         }
     }

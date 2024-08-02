@@ -27,12 +27,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         circuit_builder: &mut CircuitBuilder<E>,
         range_values: &[CellId],
     ) -> Result<Self, UtilError> {
-        Self::from_different_sized_cell_values(
-            circuit_builder,
-            range_values,
-            RANGE_CHIP_BIT_WIDTH,
-            true,
-        )
+        Self::from_different_sized_cell_values(circuit_builder, range_values, RANGE_CHIP_BIT_WIDTH, true)
     }
 
     /// Builds a `UInt` instance from a set of cells that represent big-endian `BYTE_VALUES`
@@ -57,12 +52,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         bytes: &[CellId],
         is_little_endian: bool,
     ) -> Result<Self, UtilError> {
-        Self::from_different_sized_cell_values(
-            circuit_builder,
-            bytes,
-            BYTE_BIT_WIDTH,
-            is_little_endian,
-        )
+        Self::from_different_sized_cell_values(circuit_builder, bytes, BYTE_BIT_WIDTH, is_little_endian)
     }
 
     /// Builds a `UInt` instance from a set of cell values of a certain `CELL_WIDTH`
@@ -153,9 +143,7 @@ mod tests {
         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let (_, small_values) = circuit_builder.create_witness_in(8);
         type UInt30 = UInt<30, 6>;
-        let _ =
-            UInt30::from_different_sized_cell_values(&mut circuit_builder, &small_values, 2, true)
-                .unwrap();
+        let _ = UInt30::from_different_sized_cell_values(&mut circuit_builder, &small_values, 2, true).unwrap();
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
 
@@ -196,10 +184,7 @@ mod tests {
         // padding to power of 2
         assert_eq!(
             &output[5..],
-            vec![0, 0, 0]
-                .into_iter()
-                .map(|v| Goldilocks::from(v))
-                .collect_vec()
+            vec![0, 0, 0].into_iter().map(|v| Goldilocks::from(v)).collect_vec()
         );
     }
 
@@ -224,35 +209,15 @@ mod tests {
             res,
             vec![
                 // 0
-                vec![
-                    Goldilocks::from(0),
-                    Goldilocks::from(0),
-                    Goldilocks::from(0)
-                ],
+                vec![Goldilocks::from(0), Goldilocks::from(0), Goldilocks::from(0)],
                 // 1
-                vec![
-                    Goldilocks::from(1),
-                    Goldilocks::from(0),
-                    Goldilocks::from(0)
-                ],
+                vec![Goldilocks::from(1), Goldilocks::from(0), Goldilocks::from(0)],
                 // 2
-                vec![
-                    Goldilocks::from(0),
-                    Goldilocks::from(1),
-                    Goldilocks::from(0)
-                ],
+                vec![Goldilocks::from(0), Goldilocks::from(1), Goldilocks::from(0)],
                 // 3
-                vec![
-                    Goldilocks::from(1),
-                    Goldilocks::from(1),
-                    Goldilocks::from(0)
-                ],
+                vec![Goldilocks::from(1), Goldilocks::from(1), Goldilocks::from(0)],
                 // 4
-                vec![
-                    Goldilocks::from(0),
-                    Goldilocks::from(0),
-                    Goldilocks::from(1)
-                ],
+                vec![Goldilocks::from(0), Goldilocks::from(0), Goldilocks::from(1)],
             ]
         );
     }

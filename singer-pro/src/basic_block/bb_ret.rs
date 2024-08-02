@@ -13,8 +13,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     component::{
-        AccessoryCircuit, AccessoryLayout, BBFinalCircuit, BBFinalLayout, FromBBStart,
-        FromPredInst, FromWitness,
+        AccessoryCircuit, AccessoryLayout, BBFinalCircuit, BBFinalLayout, FromBBStart, FromPredInst, FromWitness,
     },
     error::ZKVMError,
     utils::i64_to_base_field,
@@ -57,8 +56,7 @@ impl BasicBlockReturn {
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
         let stack_top_l = stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[0]));
         rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_l)?;
-        let stack_top_r =
-            stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[n_stack_items - 1]));
+        let stack_top_r = stack_top_expr.add(i64_to_base_field::<E>(stack_top_offsets[n_stack_items - 1]));
         rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_r)?;
 
         // From predesessor instruction
@@ -223,12 +221,7 @@ impl BBReturnRestStackPop {
         let stack_top = circuit_builder.create_counter_in(0);
         let stack_values = &phase0[Self::phase0_stack_values()];
         let old_stack_ts = &phase0[Self::phase0_old_stack_ts()];
-        ram_handler.stack_pop(
-            &mut circuit_builder,
-            stack_top[0].into(),
-            old_stack_ts,
-            stack_values,
-        );
+        ram_handler.stack_pop(&mut circuit_builder, stack_top[0].into(), old_stack_ts, stack_values);
 
         let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();

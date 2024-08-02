@@ -20,11 +20,7 @@ macro_rules! rlc_base_term {
     };
     ($builder:ident, $n_ext:expr, $out:expr, $in_0:expr; $c:expr, $scalar:expr) => {
         for j in 0..$n_ext {
-            $builder.add_internal(
-                $out[j],
-                $in_0,
-                ConstantType::ChallengeScaled($c, j, $scalar),
-            );
+            $builder.add_internal($out[j], $in_0, ConstantType::ChallengeScaled($c, j, $scalar));
         }
     };
 }

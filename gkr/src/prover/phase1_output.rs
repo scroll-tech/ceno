@@ -38,13 +38,10 @@ impl<E: ExtensionField> IOPProverState<E> {
         transcript: &mut Transcript<E>,
     ) -> IOPProverStepMessage<E> {
         let timer = start_timer!(|| "Prover sumcheck output phase 1 step 1");
-        let alpha = transcript
-            .get_and_append_challenge(b"combine subset evals")
-            .elements;
+        let alpha = transcript.get_and_append_challenge(b"combine subset evals").elements;
 
-        let total_length = self.to_next_phase_point_and_evals.len()
-            + self.subset_point_and_evals[self.layer_id as usize].len()
-            + 1;
+        let total_length =
+            self.to_next_phase_point_and_evals.len() + self.subset_point_and_evals[self.layer_id as usize].len() + 1;
         let alpha_pows = {
             let mut alpha_pows = vec![E::ONE; total_length];
             for i in 0..total_length.saturating_sub(1) {
@@ -75,18 +72,12 @@ impl<E: ExtensionField> IOPProverState<E> {
                 let point = &point_and_eval.point;
                 let lo_eq_w_p = build_eq_x_r_vec(&point_and_eval.point[..point_lo_num_vars]);
 
-                let f1_j = self
-                    .phase1_layer_poly
-                    .fix_high_variables(&point[point_lo_num_vars..]);
+                let f1_j = self.phase1_layer_poly.fix_high_variables(&point[point_lo_num_vars..]);
 
-                let g1_j = lo_eq_w_p
-                    .into_iter()
-                    .map(|eq| *alpha_pow * eq)
-                    .collect_vec();
+                let g1_j = lo_eq_w_p.into_iter().map(|eq| *alpha_pow * eq).collect_vec();
                 (
                     f1_j.into(),
-                    DenseMultilinearExtension::<E>::from_evaluations_ext_vec(lo_num_vars, g1_j)
-                        .into(),
+                    DenseMultilinearExtension::<E>::from_evaluations_ext_vec(lo_num_vars, g1_j).into(),
                 )
             })
             .unzip();
@@ -106,15 +97,11 @@ impl<E: ExtensionField> IOPProverState<E> {
             let lo_eq_w_p = build_eq_x_r_vec(&point[..point_lo_num_vars]);
             assert!(copy_to.len() <= lo_eq_w_p.len());
 
-            let f1_j = self
-                .phase1_layer_poly
-                .fix_high_variables(&point[point_lo_num_vars..]);
+            let f1_j = self.phase1_layer_poly.fix_high_variables(&point[point_lo_num_vars..]);
 
-            let g1_j = copy_to.as_slice().fix_row_row_first_with_scalar(
-                &lo_eq_w_p,
-                lo_num_vars,
-                alpha_pow,
-            );
+            let g1_j = copy_to
+                .as_slice()
+                .fix_row_row_first_with_scalar(&lo_eq_w_p, lo_num_vars, alpha_pow);
 
             (
                 f1_j.into(),
@@ -149,8 +136,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             virtual_poly_1.merge(&tmp);
         }
 
-        let (sumcheck_proof_1, prover_state) =
-            SumcheckState::prove_parallel(virtual_poly_1, transcript);
+        let (sumcheck_proof_1, prover_state) = SumcheckState::prove_parallel(virtual_poly_1, transcript);
         let (f1, g1): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
             .into_iter()
@@ -207,18 +193,14 @@ impl<E: ExtensionField> IOPProverState<E> {
                     .collect_vec()
             })
             .fold(vec![E::ZERO; 1 << hi_num_vars], |acc, nxt| {
-                acc.into_iter()
-                    .zip(nxt.into_iter())
-                    .map(|(a, b)| a + b)
-                    .collect_vec()
+                acc.into_iter().zip(nxt.into_iter()).map(|(a, b)| a + b).collect_vec()
             });
         let g2 = DenseMultilinearExtension::from_evaluations_ext_vec(hi_num_vars, g2);
         // sumcheck: sigma = \sum_t( g2(t) * f2(t) )
         let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::BaseField::ONE);
         virtual_poly_2.mul_by_mle(g2.into(), E::BaseField::ONE);
 
-        let (sumcheck_proof_2, prover_state) =
-            SumcheckState::prove_parallel(virtual_poly_2, transcript);
+        let (sumcheck_proof_2, prover_state) = SumcheckState::prove_parallel(virtual_poly_2, transcript);
         let (mut f2, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()
             .into_iter()
@@ -226,15 +208,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             .partition(|(i, _)| i % 2 == 0);
         let eval_value_2 = f2.remove(0).1;
 
-        self.to_next_step_point = [
-            mem::take(&mut self.to_next_step_point),
-            sumcheck_proof_2.point.clone(),
-        ]
-        .concat();
-        self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(
-            &self.to_next_step_point,
-            &eval_value_2,
-        )];
+        self.to_next_step_point = [mem::take(&mut self.to_next_step_point), sumcheck_proof_2.point.clone()].concat();
+        self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(&self.to_next_step_point, &eval_value_2)];
 
         self.subset_point_and_evals[self.layer_id as usize].clear();
 

@@ -103,12 +103,7 @@ pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F
         let sum_inv = sum.invert().unwrap_or(F::ZERO);
         (coeffs, sum_inv)
     };
-    coeffs
-        .iter()
-        .zip(evals)
-        .map(|(coeff, eval)| *coeff * eval)
-        .sum::<F>()
-        * sum_inv
+    coeffs.iter().zip(evals).map(|(coeff, eval)| *coeff * eval).sum::<F>() * sum_inv
 }
 
 /// Interpolate a uni-variate degree-`p_i.len()-1` polynomial and evaluate this
@@ -206,9 +201,7 @@ pub(crate) fn merge_sumcheck_polys<E: ExtensionField>(
                 .iter()
                 .enumerate()
                 .map(|(_, prover_state)| {
-                    if let FieldType::Ext(evaluations) =
-                        &prover_state.poly.flattened_ml_extensions[i].evaluations
-                    {
+                    if let FieldType::Ext(evaluations) = &prover_state.poly.flattened_ml_extensions[i].evaluations {
                         assert!(evaluations.len() == 1);
                         evaluations[0]
                     } else {

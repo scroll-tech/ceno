@@ -7,9 +7,7 @@ use mock_constant::{poseidon_c, poseidon_m, poseidon_p, poseidon_s};
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
 // round constant
-const N_ROUNDS_P: [usize; 16] = [
-    56, 57, 56, 60, 60, 63, 64, 63, 60, 66, 60, 65, 70, 60, 64, 68,
-];
+const N_ROUNDS_P: [usize; 16] = [56, 57, 56, 60, 60, 63, 64, 63, 60, 66, 60, 65, 70, 60, 64, 68];
 
 // template Sigma() {
 //     signal input in;
@@ -185,15 +183,9 @@ fn poseidon_ex<E: ExtensionField>(
     let c = poseidon_c::<E::BaseField>(t);
     let s = poseidon_s::<E::BaseField>(t);
     let m = poseidon_m::<E::BaseField>(t);
-    let m_slices = m
-        .iter()
-        .map(|row| row.as_slice())
-        .collect::<Vec<&[E::BaseField]>>();
+    let m_slices = m.iter().map(|row| row.as_slice()).collect::<Vec<&[E::BaseField]>>();
     let p = poseidon_p::<E::BaseField>(t);
-    let p_slices = p
-        .iter()
-        .map(|row| row.as_slice())
-        .collect::<Vec<&[E::BaseField]>>();
+    let p_slices = p.iter().map(|row| row.as_slice()).collect::<Vec<&[E::BaseField]>>();
 
     //     component ark[nRoundsF];
     //     component sigmaF[nRoundsF][t];
@@ -257,11 +249,7 @@ fn poseidon_ex<E: ExtensionField>(
 
     for r in 0..(n_rounds_f / 2 - 1) {
         for j in 0..t {
-            sigma_f_in[r][j] = if r == 0 {
-                ark_out[0][j]
-            } else {
-                mix_out[r - 1][j]
-            };
+            sigma_f_in[r][j] = if r == 0 { ark_out[0][j] } else { mix_out[r - 1][j] };
             sigma_f_out[r][j] = sigma(circuit_builder, sigma_f_in[r][j]);
         }
 
@@ -281,8 +269,7 @@ fn poseidon_ex<E: ExtensionField>(
 
     for j in 0..t {
         sigma_f_in[n_rounds_f / 2 - 1][j] = mix_out[n_rounds_f / 2 - 2][j];
-        sigma_f_out[n_rounds_f / 2 - 1][j] =
-            sigma(circuit_builder, sigma_f_in[n_rounds_f / 2 - 1][j]);
+        sigma_f_out[n_rounds_f / 2 - 1][j] = sigma(circuit_builder, sigma_f_in[n_rounds_f / 2 - 1][j]);
     }
 
     //     ark[nRoundsF\2] = Ark(t, C, (nRoundsF\2)*t );
@@ -293,12 +280,7 @@ fn poseidon_ex<E: ExtensionField>(
     for j in 0..t {
         ark_in[n_rounds_f / 2].push(sigma_f_out[n_rounds_f / 2 - 1][j]);
     }
-    ark_out[n_rounds_f / 2] = ark(
-        circuit_builder,
-        &ark_in[n_rounds_f / 2],
-        &c,
-        n_rounds_f / 2 * t,
-    );
+    ark_out[n_rounds_f / 2] = ark(circuit_builder, &ark_in[n_rounds_f / 2], &c, n_rounds_f / 2 * t);
 
     //     mix[nRoundsF\2-1] = Mix(t,P);
     //     for (var j=0; j<t; j++) {
@@ -385,8 +367,7 @@ fn poseidon_ex<E: ExtensionField>(
             } else {
                 mix_out[n_rounds_f / 2 + r - 1][j]
             };
-            sigma_f_out[n_rounds_f / 2 + r][j] =
-                sigma(circuit_builder, sigma_f_in[n_rounds_f / 2 + r][j]);
+            sigma_f_out[n_rounds_f / 2 + r][j] = sigma(circuit_builder, sigma_f_in[n_rounds_f / 2 + r][j]);
         }
 
         for j in 0..t {

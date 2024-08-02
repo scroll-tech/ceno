@@ -147,11 +147,7 @@ mod tests {
         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let (_, input_cells) = circuit_builder.create_witness_in(4);
         let zero_cells = circuit_builder.create_cells(2);
-        let leaves = input_cells
-            .iter()
-            .chain(zero_cells.iter())
-            .cloned()
-            .collect_vec();
+        let leaves = input_cells.iter().chain(zero_cells.iter()).cloned().collect_vec();
         let inners = circuit_builder.create_cells(2);
         circuit_builder.mul3(inners[0], leaves[0], leaves[1], leaves[2], Goldilocks::ONE);
         circuit_builder.mul3(inners[1], leaves[3], leaves[4], leaves[5], Goldilocks::ONE);
@@ -174,11 +170,7 @@ mod tests {
         circuit_builder.add_const(const_cells[0], Goldilocks::ONE);
         circuit_builder.add_const(const_cells[1], Goldilocks::ONE);
 
-        let leaves = input_cells
-            .iter()
-            .chain(const_cells.iter())
-            .cloned()
-            .collect_vec();
+        let leaves = input_cells.iter().chain(const_cells.iter()).cloned().collect_vec();
         let inners = circuit_builder.create_cells(2);
         circuit_builder.mul3(inners[0], leaves[0], leaves[1], leaves[2], Goldilocks::ONE);
         circuit_builder.mul3(inners[1], leaves[3], leaves[4], leaves[5], Goldilocks::ONE);

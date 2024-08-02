@@ -7,8 +7,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RangeChipOperations, StackChipOperations,
+        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations, RangeChipOperations,
+        StackChipOperations,
     },
     constants::OpcodeType,
     register_witness,
@@ -70,8 +70,7 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
         );
 
         // Pop next pc from stack
-        rom_handler
-            .range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(E::BaseField::ONE))?;
+        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top_expr.sub(E::BaseField::ONE))?;
 
         let next_pc = &phase0[Self::phase0_next_pc()];
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
@@ -99,11 +98,7 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
         );
 
         // Bytecode check for (pc, jump)
-        rom_handler.bytecode_with_pc_opcode(
-            &mut circuit_builder,
-            pc.values(),
-            <Self as Instruction<E>>::OPCODE,
-        );
+        rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, pc.values(), <Self as Instruction<E>>::OPCODE);
         // Bytecode check for (next_pc, jumpdest)
         rom_handler.bytecode_with_pc_opcode(&mut circuit_builder, &next_pc, OpcodeType::JUMPDEST);
 
@@ -170,19 +165,13 @@ mod test {
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(2u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert(
-            "phase0_stack_top".to_string(),
-            vec![Goldilocks::from(100u64)],
-        );
+        phase0_values_map.insert("phase0_stack_top".to_string(), vec![Goldilocks::from(100u64)]);
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_next_pc".to_string(),
             vec![Goldilocks::from(127u64), Goldilocks::from(125u64)],
         );
-        phase0_values_map.insert(
-            "phase0_old_stack_ts".to_string(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert("phase0_old_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
         phase0_values_map.insert(
@@ -214,19 +203,14 @@ mod test {
     #[cfg(not(debug_assertions))]
     fn bench_jump_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
-        let circuit_builder =
-            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
         let mut singer_builder = SingerGraphBuilder::<E>::new();
 
         let mut rng = test_rng();
         let size = JumpInstruction::phase0_size();
         let phase0: CircuitWiresIn<E::BaseField> = vec![LayerWitness {
             instances: (0..(1 << instance_num_vars))
-                .map(|_| {
-                    (0..size)
-                        .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
-                })
+                .map(|_| (0..size).map(|_| E::BaseField::random(&mut rng)).collect_vec())
                 .collect_vec(),
         }];
 
@@ -259,8 +243,8 @@ mod test {
         let mut prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
-            .expect("prove failed");
+        let _ =
+            GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1).expect("prove failed");
         println!(
             "JumpInstruction::prove, instance_num_vars = {}, time = {}",
             instance_num_vars,
