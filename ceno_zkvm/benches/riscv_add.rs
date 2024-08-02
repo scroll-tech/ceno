@@ -13,7 +13,10 @@ use criterion::*;
 
 use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
-use multilinear_extensions::{mle::DenseMultilinearExtension, util::ceil_log2};
+use multilinear_extensions::{
+    mle::{DenseMultilinearExtension, IntoMLE},
+    util::ceil_log2,
+};
 use simple_frontend::structs::WitnessId;
 use singer_utils::{structs_v2::CircuitBuilderV2, util_v2::InstructionV2};
 use transcript::Transcript;
@@ -95,12 +98,10 @@ fn bench_add(c: &mut Criterion) {
                         (0..num_witin as usize).for_each(|witness_id| {
                             wits_in.insert(
                                 witness_id as WitnessId,
-                                DenseMultilinearExtension::from_evaluations_vec(
-                                    instance_num_vars,
-                                    (0..num_instances)
-                                        .map(|_| Goldilocks::random(&mut rng))
-                                        .collect(),
-                                ),
+                                (0..num_instances)
+                                    .map(|_| Goldilocks::random(&mut rng))
+                                    .collect::<Vec<Goldilocks>>()
+                                    .into_mle(),
                             );
                         });
                         let timer = Instant::now();

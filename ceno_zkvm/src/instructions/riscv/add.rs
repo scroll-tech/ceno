@@ -116,7 +116,7 @@ mod test {
     use ff_ext::ExtensionField;
     use gkr::{structs::PointAndEval, util::ceil_log2};
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
     use simple_frontend::structs::WitnessId;
     use singer_utils::{structs_v2::CircuitBuilderV2, util_v2::InstructionV2};
     use transcript::Transcript;
@@ -139,12 +139,10 @@ mod test {
         (0..circuit.num_witin as usize).for_each(|witness_id| {
             wits_in.insert(
                 witness_id as WitnessId,
-                DenseMultilinearExtension::from_evaluations_vec(
-                    ceil_log2(num_instances),
-                    (0..num_instances)
-                        .map(|_| Goldilocks::random(&mut rng))
-                        .collect(),
-                ),
+                (0..num_instances)
+                    .map(|_| Goldilocks::random(&mut rng))
+                    .collect::<Vec<Goldilocks>>()
+                    .into_mle(),
             );
         });
 
