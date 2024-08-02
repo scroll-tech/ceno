@@ -563,7 +563,14 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
             "MLE size does not match the point"
         );
         let mle = self.fix_variables_parallel(point);
-        op_mle!(mle, |f| f[0], |v| E::from(v))
+        op_mle!(
+            mle,
+            |f| {
+                assert_eq!(f.len(), 1);
+                f[0]
+            },
+            |v| E::from(v)
+        )
     }
 
     fn num_vars(&self) -> usize {

@@ -30,6 +30,8 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
     pub fn new(circuit: Circuit<E>) -> Self {
         ZKVMVerifier { circuit }
     }
+
+    /// verify proof and return input opening point
     pub fn verify(
         &self,
         proof: &ZKVMProof<E>,
@@ -37,7 +39,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E], // derive challenge from PCS
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<Point<E>, ZKVMError> {
         let (r_counts_per_instance, w_counts_per_instance) = (
             self.circuit.r_expressions.len(),
             self.circuit.w_expressions.len(),
@@ -97,14 +99,18 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             transcript,
         );
         let (main_sel_eval_point, expected_evaluation) = (
-            main_sel_subclaim.point.clone(),
+            main_sel_subclaim
+                .point
+                .iter()
+                .map(|c| c.elements)
+                .collect_vec(),
             main_sel_subclaim.expected_evaluation,
         );
         let eq_r = build_eq_x_r_vec_sequential(&rt_r[..log2_r_count]);
         let eq_w = build_eq_x_r_vec_sequential(&rt_w[..log2_w_count]);
 
         let (sel_r, sel_w) = {
-            // TODO sel evaluation is very costly, maybe optimize it via PCS?
+            // TODO optimize sel evaluation
             let mut sel = vec![E::BaseField::ONE; 1 << log2_num_instances];
             if num_instances < sel.len() {
                 sel.splice(
@@ -114,8 +120,10 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             }
             let sel = sel.into_mle();
             (
-                sel.evaluate(&rt_r[log2_r_count..]),
-                sel.evaluate(&rt_w[log2_w_count..]),
+                eq_eval(&rt_r[log2_r_count..], &main_sel_eval_point)
+                    * sel.evaluate(&rt_r[log2_r_count..]),
+                eq_eval(&rt_w[log2_w_count..], &main_sel_eval_point)
+                    * sel.evaluate(&rt_w[log2_w_count..]),
             )
         };
         let computed_evals = [
@@ -127,7 +135,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                     .sum::<E>()
                     + eq_r[r_counts_per_instance..].iter().sum::<E>()
                     - E::ONE),
-            // write non padding
+            // write
             *alpha_write
                 * sel_w
                 * ((0..w_counts_per_instance)
@@ -162,7 +170,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             return Err(ZKVMError::VerifyError("record evaluate zer != 0"));
         }
 
-        let _input_opening_point = main_sel_eval_point;
+        let input_opening_point = main_sel_eval_point;
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
         if self
@@ -175,7 +183,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             // return Err(ZKVMError::VerifyError("zero expression != 0"));
         }
 
-        Ok(())
+        Ok(input_opening_point)
     }
 }
 

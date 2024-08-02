@@ -157,7 +157,7 @@ mod test {
 
         let verifier = ZKVMVerifier::new(circuit);
         let mut v_transcript = Transcript::new(b"riscv");
-        verifier
+        let _rt_input = verifier
             .verify(
                 &mut proof,
                 &mut v_transcript,
@@ -166,7 +166,7 @@ mod test {
                 &challenges,
             )
             .expect("verifier failed");
-        // println!("circuit_builder {:?}", circuit_builder);
+        // TODO verify opening via PCS
     }
 
     fn bench_add_instruction_helper<E: ExtensionField>(_instance_num_vars: usize) {}
