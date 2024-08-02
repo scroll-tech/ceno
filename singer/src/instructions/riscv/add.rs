@@ -147,14 +147,14 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         let rs2 = &phase0[Self::phase0_rs2()];
         let rd = &phase0[Self::phase0_rd()];
         let prev_rd_value = &phase0[Self::phase0_prev_rd_value()];
-        ram_handler.register_read(
+        ram_handler.register_load(
             &mut circuit_builder,
             rs1,
             prev_rs1_ts.values(),
             memory_ts.values(),
             &phase0[Self::phase0_addend_0()],
         );
-        ram_handler.register_read(
+        ram_handler.register_load(
             &mut circuit_builder,
             rs2,
             prev_rs2_ts.values(),

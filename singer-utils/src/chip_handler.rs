@@ -38,7 +38,7 @@ pub trait StackChipOperations<Ext: ExtensionField>: OAMOperations<Ext> {
 }
 
 pub trait RegisterChipOperations<Ext: ExtensionField>: OAMOperations<Ext> {
-    fn register_read(
+    fn register_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         register_id: &[CellId],

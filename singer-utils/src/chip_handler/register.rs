@@ -8,7 +8,7 @@ use crate::structs::{RAMHandler, RAMType};
 use super::{RAMOperations, RegisterChipOperations};
 
 impl<Ext: ExtensionField> RegisterChipOperations<Ext> for RAMHandler<Ext> {
-    fn register_read(
+    fn register_load(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
         register_id: &[CellId],
