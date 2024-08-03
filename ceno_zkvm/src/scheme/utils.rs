@@ -196,13 +196,27 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField>(
                 }
             })
         },
-        &|a, scalar| {
-            op_mle!(|a| {
+        &|x, a, b| {
+            let a = op_mle!(
+                |a| {
+                    assert_eq!(a.len(), 1);
+                    a[0]
+                },
+                |a| a.into()
+            );
+            let b = op_mle!(
+                |b| {
+                    assert_eq!(b.len(), 1);
+                    b[0]
+                },
+                |b| b.into()
+            );
+            op_mle!(|x| {
                 Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                    ceil_log2(a.len()),
-                    a.par_iter()
+                    ceil_log2(x.len()),
+                    x.par_iter()
                         .with_min_len(MIN_PAR_SIZE)
-                        .map(|a| scalar * a)
+                        .map(|x| a * x + b)
                         .collect(),
                 ))
             })
@@ -225,7 +239,7 @@ pub(crate) fn eval_by_expr<'a, E: ExtensionField>(
         },
         &|a, b| a + b,
         &|a, b| a * b,
-        &|a, scalar| a * scalar,
+        &|x, a, b| a * x + b,
     )
 }
 

@@ -1,3 +1,5 @@
+#![feature(box_patterns)]
+
 pub mod error;
 pub mod instructions;
 pub mod scheme;
