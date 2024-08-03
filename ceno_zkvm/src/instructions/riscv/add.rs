@@ -60,9 +60,13 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         let computed_outcome = addend_0.add(circuit_builder, &addend_1)?;
         outcome.eq(circuit_builder, &computed_outcome)?;
 
+        // TODO rs1_id, rs2_id, rd_id should be byte code lookup
         let rs1_id = circuit_builder.create_witin();
         let rs2_id = circuit_builder.create_witin();
         let rd_id = circuit_builder.create_witin();
+        circuit_builder.assert_u5(rs1_id.expr())?;
+        circuit_builder.assert_u5(rs2_id.expr())?;
+        circuit_builder.assert_u5(rd_id.expr())?;
         let prev_rs1_memory_ts = TSUInt::new(circuit_builder);
         let prev_rs2_memory_ts = TSUInt::new(circuit_builder);
         let prev_rd_memory_ts = TSUInt::new(circuit_builder);

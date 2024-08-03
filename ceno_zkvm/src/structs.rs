@@ -21,3 +21,7 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
 pub type PCUInt = UInt64;
 pub type TSUInt = UInt<48, 48>;
+
+pub enum ROMType {
+    U5, // 2^5=32
+}

@@ -71,6 +71,39 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
         .collect::<Vec<ArcMultilinearExtension<E>>>()
 }
 
+/// infer logup witness from last layer
+pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
+    num_vars: usize,
+    q_mles: [ArcMultilinearExtension<'a, E>; 2],
+) -> Vec<Vec<ArcMultilinearExtension<'a, E>>> {
+    let mut r_wit_layers = (0..num_vars - 1).fold(vec![(None, q_mles)], |acc, _| {
+        let (p, [q1, q2]) = acc.last().unwrap();
+        let cur_len = q1.evaluations().len() / 2;
+        let cur_layer: Vec<ArcMultilinearExtension<E>> = (0..2)
+            .map(|index| {
+                let mut evaluations = vec![E::ONE; cur_len];
+                next_layer.iter().for_each(|f| match f.evaluations() {
+                    FieldType::Ext(f) => {
+                        let start: usize = index * cur_len;
+                        f[start..][..cur_len]
+                            .par_iter()
+                            .zip(evaluations.par_iter_mut())
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|(v, evaluations)| *evaluations *= *v)
+                            .collect()
+                    }
+                    _ => unreachable!("must be extension field"),
+                });
+                evaluations.into_mle().into()
+            })
+            .collect_vec();
+        acc.push(cur_layer);
+        acc
+    });
+    r_wit_layers.reverse();
+    r_wit_layers
+}
+
 /// infer tower witness from last layer
 pub(crate) fn infer_tower_product_witness<'a, E: ExtensionField>(
     num_vars: usize,

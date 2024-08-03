@@ -6,6 +6,7 @@ use crate::{
     circuit_builder::{Circuit, CircuitBuilder},
     error::ZKVMError,
     expression::{Expression, WitIn},
+    structs::ROMType,
 };
 
 impl<E: ExtensionField> CircuitBuilder<E> {
@@ -32,6 +33,18 @@ impl<E: ExtensionField> CircuitBuilder<E> {
             },
         }
     }
+
+    pub fn lk_record(&mut self, rlc_record: Expression<E>) -> Result<(), ZKVMError> {
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc record degree {} != 1",
+            rlc_record.degree()
+        );
+        self.lk_expressions.push(rlc_record);
+        Ok(())
+    }
+
     pub fn read_record(&mut self, rlc_record: Expression<E>) -> Result<(), ZKVMError> {
         assert_eq!(
             rlc_record.degree(),
@@ -99,6 +112,16 @@ impl<E: ExtensionField> CircuitBuilder<E> {
 
     pub fn require_one(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
         self.require_zero(Expression::from(1) - expr)
+    }
+
+    pub(crate) fn assert_u5(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
+            expr,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(rlc_record)?;
+        Ok(())
     }
 
     pub fn finalize_circuit(&self) -> Circuit<E> {

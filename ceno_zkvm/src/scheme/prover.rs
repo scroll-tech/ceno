@@ -20,7 +20,10 @@ use crate::{
     error::ZKVMError,
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_PRODUCT_FANIN},
-        utils::{infer_tower_product_witness, interleaving_mles_to_mles, wit_infer_by_expr},
+        utils::{
+            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+            wit_infer_by_expr,
+        },
     },
     structs::{TowerProofs, TowerProver, TowerProverSpec},
     utils::get_challenge_pows,
@@ -62,22 +65,29 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let span = entered_span!("wit_inference::record");
         let records_wit: Vec<ArcMultilinearExtension<'_, E>> = circuit
             .r_expressions
-            .iter()
-            .chain(circuit.w_expressions.iter())
+            .par_iter()
+            .chain(circuit.w_expressions.par_iter())
+            .chain(circuit.lk_expressions.par_iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
                 wit_infer_by_expr(&witnesses, &challenges, expr)
             })
             .collect();
-        let (r_records_wit, w_records_wit) = records_wit.split_at(circuit.r_expressions.len());
+        let (r_records_wit, w_lk_records_wit) = records_wit.split_at(circuit.r_expressions.len());
+        let (w_records_wit, lk_records_wit) =
+            w_lk_records_wit.split_at(circuit.w_expressions.len());
         exit_span!(span);
 
         // product constraint: tower witness inference
-        let (r_counts_per_instance, w_counts_per_instance) =
-            (circuit.r_expressions.len(), circuit.w_expressions.len());
-        let (log2_r_count, log2_w_count) = (
+        let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
+            circuit.r_expressions.len(),
+            circuit.w_expressions.len(),
+            circuit.lk_expressions.len(),
+        );
+        let (log2_r_count, log2_w_count, log2_lk_count) = (
             ceil_log2(r_counts_per_instance),
             ceil_log2(w_counts_per_instance),
+            ceil_log2(lk_counts_per_instance),
         );
         // process last layer by interleaving all the read/write record respectively
         // as last layer is the output of sel stage
@@ -120,6 +130,23 @@ impl<E: ExtensionField> ZKVMProver<E> {
             w_records_last_layer,
             NUM_PRODUCT_FANIN,
         );
+        exit_span!(span);
+
+        let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
+        // TODO optimize last layer to avoid alloc new vector to save memory
+        let lk_records_last_layer = interleaving_mles_to_mles(
+            lk_records_wit,
+            log2_num_instances,
+            log2_lk_count,
+            2,
+            E::ZERO,
+        );
+        assert_eq!(lk_records_last_layer.len(), 1);
+        exit_span!(span);
+
+        let span = entered_span!("wit_inference::tower_witness_lk_layers");
+        let lk_wit_layers =
+            infer_tower_logup_witness(log2_num_instances + log2_lk_count, lk_records_last_layer);
         exit_span!(span);
 
         if cfg!(test) {
