@@ -1,4 +1,4 @@
-use crate::{error::UtilError, util_v2::WitIn};
+use crate::error::UtilError;
 use ff::PrimeField;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;

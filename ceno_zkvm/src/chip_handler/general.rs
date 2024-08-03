@@ -1,12 +1,14 @@
 use ff_ext::ExtensionField;
 
-use crate::{
-    structs_v2::{Circuit, CircuitBuilderV2},
-    util_v2::{Expression, WitIn, ZKVMV2Error},
-};
 use ff::Field;
 
-impl<E: ExtensionField> CircuitBuilderV2<E> {
+use crate::{
+    circuit_builder::{Circuit, CircuitBuilder},
+    error::ZKVMError,
+    expression::{Expression, WitIn},
+};
+
+impl<E: ExtensionField> CircuitBuilder<E> {
     pub fn new() -> Self {
         Self {
             num_witin: 0,
@@ -30,7 +32,7 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
             },
         }
     }
-    pub fn read_record(&mut self, rlc_record: Expression<E>) -> Result<(), ZKVMV2Error> {
+    pub fn read_record(&mut self, rlc_record: Expression<E>) -> Result<(), ZKVMError> {
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -41,7 +43,7 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
         Ok(())
     }
 
-    pub fn write_record(&mut self, rlc_record: Expression<E>) -> Result<(), ZKVMV2Error> {
+    pub fn write_record(&mut self, rlc_record: Expression<E>) -> Result<(), ZKVMError> {
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -73,7 +75,7 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
         item_rlc + self.chip_record_alpha.clone()
     }
 
-    pub fn require_zero(&mut self, assert_zero_expr: Expression<E>) -> Result<(), ZKVMV2Error> {
+    pub fn require_zero(&mut self, assert_zero_expr: Expression<E>) -> Result<(), ZKVMError> {
         assert!(
             assert_zero_expr.degree() > 0,
             "constant expression assert to zero ?"
@@ -91,11 +93,11 @@ impl<E: ExtensionField> CircuitBuilderV2<E> {
         &mut self,
         target: Expression<E>,
         rlc_record: Expression<E>,
-    ) -> Result<(), ZKVMV2Error> {
+    ) -> Result<(), ZKVMError> {
         self.require_zero(target - rlc_record)
     }
 
-    pub fn require_one(&mut self, expr: Expression<E>) -> Result<(), ZKVMV2Error> {
+    pub fn require_one(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
         self.require_zero(Expression::from(1) - expr)
     }
 

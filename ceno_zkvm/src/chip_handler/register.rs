@@ -1,21 +1,23 @@
 use ff_ext::ExtensionField;
+use singer_utils::structs::RAMType;
 
 use crate::{
-    structs::{RAMType, TSUIntV2, UInt64V2},
-    structs_v2::CircuitBuilderV2,
-    util_v2::{Expression, ToExpr, WitIn, ZKVMV2Error},
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{Expression, ToExpr, WitIn},
+    structs::{TSUInt, UInt64},
 };
 
 use super::RegisterChipOperations;
 
-impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilderV2<E> {
+impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
     fn register_read(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &TSUIntV2,
-        ts: &TSUIntV2,
-        values: &UInt64V2,
-    ) -> Result<(), ZKVMV2Error> {
+        prev_ts: &TSUInt,
+        ts: &TSUInt,
+        values: &UInt64,
+    ) -> Result<(), ZKVMError> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
@@ -48,11 +50,11 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilderV2<E> {
     fn register_write(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &TSUIntV2,
-        ts: &TSUIntV2,
-        prev_values: &UInt64V2,
-        values: &UInt64V2,
-    ) -> Result<(), ZKVMV2Error> {
+        prev_ts: &TSUInt,
+        ts: &TSUInt,
+        prev_values: &UInt64,
+        values: &UInt64,
+    ) -> Result<(), ZKVMError> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [

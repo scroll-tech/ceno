@@ -1,7 +1,7 @@
 mod arithmetic;
 mod constants;
-mod uint_v2;
+mod uint;
 pub mod util;
-pub use uint_v2::UIntV2;
+pub use uint::UInt;
 // pub mod util;
 // mod witness_extractors;

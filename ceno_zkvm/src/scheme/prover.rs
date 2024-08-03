@@ -12,11 +12,11 @@ use multilinear_extensions::{
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use simple_frontend::structs::WitnessId;
-use singer_utils::structs_v2::Circuit;
 use sumcheck::structs::{IOPProverMessage, IOPProverStateV2};
 use transcript::Transcript;
 
 use crate::{
+    circuit_builder::Circuit,
     error::ZKVMError,
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_PRODUCT_FANIN},

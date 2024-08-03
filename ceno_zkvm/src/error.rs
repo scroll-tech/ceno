@@ -1,4 +1,7 @@
-use singer_utils::error::UtilError;
+#[derive(Debug)]
+pub enum UtilError {
+    UIntError(String),
+}
 
 #[derive(Debug)]
 pub enum ZKVMError {

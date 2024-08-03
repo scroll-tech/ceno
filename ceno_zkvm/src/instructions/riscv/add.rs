@@ -2,45 +2,45 @@ use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
 
-use singer_utils::{
-    self,
-    chip_handler_v2::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
-    constants::OpcodeType,
-    structs::{PCUIntV2, TSUIntV2, UInt64V2},
-    structs_v2::CircuitBuilderV2,
-    util_v2::{self, ToExpr, WitIn},
-};
+use singer_utils::{self, constants::OpcodeType};
 
-use util_v2::{InstructionV2, ZKVMV2Error};
+use crate::{
+    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{ToExpr, WitIn},
+    instructions::Instruction,
+    structs::{PCUInt, TSUInt, UInt64},
+};
 
 pub struct AddInstruction;
 
 pub struct InstructionConfig<E: ExtensionField> {
-    pub pc: PCUIntV2,
-    pub memory_ts: TSUIntV2,
+    pub pc: PCUInt,
+    pub memory_ts: TSUInt,
     pub clk: WitIn,
-    pub prev_rd_memory_value: UInt64V2,
-    pub addend_0: UInt64V2,
-    pub addend_1: UInt64V2,
-    pub outcome: UInt64V2,
+    pub prev_rd_memory_value: UInt64,
+    pub addend_0: UInt64,
+    pub addend_1: UInt64,
+    pub outcome: UInt64,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
-    pub prev_rs1_memory_ts: TSUIntV2,
-    pub prev_rs2_memory_ts: TSUIntV2,
-    pub prev_rd_memory_ts: TSUIntV2,
+    pub prev_rs1_memory_ts: TSUInt,
+    pub prev_rs2_memory_ts: TSUInt,
+    pub prev_rd_memory_ts: TSUInt,
     phantom: PhantomData<E>,
 }
 
-impl<E: ExtensionField> InstructionV2<E> for AddInstruction {
+impl<E: ExtensionField> Instruction<E> for AddInstruction {
     const OPCODE: OpcodeType = OpcodeType::ADD;
     const NAME: &'static str = "ADD";
     type InstructionConfig = InstructionConfig<E>;
     fn construct_circuit(
-        circuit_builder: &mut CircuitBuilderV2<E>,
-    ) -> Result<InstructionConfig<E>, ZKVMV2Error> {
-        let pc = PCUIntV2::new(circuit_builder);
-        let memory_ts = TSUIntV2::new(circuit_builder);
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<InstructionConfig<E>, ZKVMError> {
+        let pc = PCUInt::new(circuit_builder);
+        let memory_ts = TSUInt::new(circuit_builder);
         let clk = circuit_builder.create_witin();
 
         // state in
@@ -52,10 +52,10 @@ impl<E: ExtensionField> InstructionV2<E> for AddInstruction {
         circuit_builder.state_out(&next_pc, &next_memory_ts, clk.expr() + 1.into())?;
 
         // Execution result = addend0 + addend1, with carry.
-        let prev_rd_memory_value = UInt64V2::new(circuit_builder);
-        let addend_0 = UInt64V2::new(circuit_builder);
-        let addend_1 = UInt64V2::new(circuit_builder);
-        let outcome = UInt64V2::new(circuit_builder);
+        let prev_rd_memory_value = UInt64::new(circuit_builder);
+        let addend_0 = UInt64::new(circuit_builder);
+        let addend_1 = UInt64::new(circuit_builder);
+        let outcome = UInt64::new(circuit_builder);
 
         let computed_outcome = addend_0.add(circuit_builder, &addend_1)?;
         outcome.eq(circuit_builder, &computed_outcome)?;
@@ -63,9 +63,9 @@ impl<E: ExtensionField> InstructionV2<E> for AddInstruction {
         let rs1_id = circuit_builder.create_witin();
         let rs2_id = circuit_builder.create_witin();
         let rd_id = circuit_builder.create_witin();
-        let prev_rs1_memory_ts = TSUIntV2::new(circuit_builder);
-        let prev_rs2_memory_ts = TSUIntV2::new(circuit_builder);
-        let prev_rd_memory_ts = TSUIntV2::new(circuit_builder);
+        let prev_rs1_memory_ts = TSUInt::new(circuit_builder);
+        let prev_rs2_memory_ts = TSUInt::new(circuit_builder);
+        let prev_rd_memory_ts = TSUInt::new(circuit_builder);
 
         let is_lt_0 = prev_rs1_memory_ts.lt(circuit_builder, &memory_ts)?;
         let is_lt_1 = prev_rs2_memory_ts.lt(circuit_builder, &memory_ts)?;
@@ -114,14 +114,17 @@ mod test {
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
-    use gkr::{structs::PointAndEval, util::ceil_log2};
+    use gkr::structs::PointAndEval;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
+    use multilinear_extensions::mle::IntoMLE;
     use simple_frontend::structs::WitnessId;
-    use singer_utils::{structs_v2::CircuitBuilderV2, util_v2::InstructionV2};
     use transcript::Transcript;
 
-    use crate::scheme::{constants::NUM_PRODUCT_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier};
+    use crate::{
+        circuit_builder::CircuitBuilder,
+        instructions::Instruction,
+        scheme::{constants::NUM_PRODUCT_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier},
+    };
 
     use super::AddInstruction;
 
@@ -129,7 +132,7 @@ mod test {
     fn test_add_construct_circuit() {
         let mut rng = test_rng();
 
-        let mut circuit_builder = CircuitBuilderV2::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let _ = AddInstruction::construct_circuit(&mut circuit_builder);
         let circuit = circuit_builder.finalize_circuit();
 

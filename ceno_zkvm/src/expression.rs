@@ -1,32 +1,11 @@
-use std::ops::{Add, Mul, Neg, Sub};
+use std::{
+    cmp::max,
+    ops::{Add, Mul, Neg, Sub},
+};
 
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use simple_frontend::structs::{ChallengeId, WitnessId};
-use std::cmp::max;
-
-use crate::{constants::OpcodeType, error::UtilError, structs_v2::CircuitBuilderV2};
-
-#[derive(Debug)]
-pub enum ZKVMV2Error {
-    CircuitError(&'static str),
-    UtilError(UtilError),
-    VerifyError,
-}
-
-impl From<UtilError> for ZKVMV2Error {
-    fn from(error: UtilError) -> Self {
-        Self::UtilError(error)
-    }
-}
-pub trait InstructionV2<E: ExtensionField> {
-    const OPCODE: OpcodeType;
-    const NAME: &'static str;
-    type InstructionConfig;
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilderV2<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMV2Error>;
-}
 
 #[derive(Clone, Debug)]
 pub enum Expression<E: ExtensionField> {

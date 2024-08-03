@@ -11,13 +11,12 @@ use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     virtual_poly::{build_eq_x_r_vec_sequential, eq_eval, VPAuxInfo},
 };
-use singer_utils::structs_v2::Circuit;
 use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
-    error::ZKVMError, scheme::constants::NUM_PRODUCT_FANIN, structs::TowerProofs,
-    utils::get_challenge_pows,
+    circuit_builder::Circuit, error::ZKVMError, scheme::constants::NUM_PRODUCT_FANIN,
+    structs::TowerProofs, utils::get_challenge_pows,
 };
 
 use super::{constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMProof};

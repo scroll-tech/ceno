@@ -18,9 +18,8 @@ use rayon::{
     prelude::ParallelSliceMut,
 };
 use simple_frontend::structs::WitnessId;
-use singer_utils::util_v2::Expression;
 
-use crate::scheme::constants::MIN_PAR_SIZE;
+use crate::{expression::Expression, scheme::constants::MIN_PAR_SIZE};
 
 /// interleaving multiple mles into mles for the product/logup arguments last layer witness
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], product_fanin=2,log2_per_instance_size=3

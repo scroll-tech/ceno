@@ -7,18 +7,18 @@ use std::{
 };
 
 use ark_std::test_rng;
-use ceno_zkvm::{instructions::riscv::add::AddInstruction, scheme::prover::ZKVMProver};
+use ceno_zkvm::{
+    circuit_builder::CircuitBuilder,
+    instructions::{riscv::add::AddInstruction, Instruction},
+    scheme::prover::ZKVMProver,
+};
 use const_env::from_env;
 use criterion::*;
 
 use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLE},
-    util::ceil_log2,
-};
+use multilinear_extensions::mle::IntoMLE;
 use simple_frontend::structs::WitnessId;
-use singer_utils::{structs_v2::CircuitBuilderV2, util_v2::InstructionV2};
 use transcript::Transcript;
 
 cfg_if::cfg_if! {
@@ -68,7 +68,7 @@ fn bench_add(c: &mut Criterion) {
             RAYON_NUM_THREADS
         }
     };
-    let mut circuit_builder = CircuitBuilderV2::<GoldilocksExt2>::new();
+    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
     let _ = AddInstruction::construct_circuit(&mut circuit_builder);
     let circuit = circuit_builder.finalize_circuit();
     let num_witin = circuit.num_witin;
