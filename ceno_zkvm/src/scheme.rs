@@ -16,12 +16,20 @@ pub struct ZKVMProof<E: ExtensionField> {
     // product constraints
     pub record_r_out_evals: Vec<E>,
     pub record_w_out_evals: Vec<E>,
+
+    // logup constraint
+    pub lk_p1_out_eval: E,
+    pub lk_p2_out_eval: E,
+    pub lk_q1_out_eval: E,
+    pub lk_q2_out_eval: E,
+
     pub tower_proof: TowerProofs<E>,
 
     // main constraint and select sumcheck proof
     pub main_sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
     pub r_records_in_evals: Vec<E>,
     pub w_records_in_evals: Vec<E>,
+    pub lk_records_in_evals: Vec<E>,
 
     pub wits_in_evals: Vec<E>,
 }

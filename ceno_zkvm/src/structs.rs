@@ -11,7 +11,9 @@ pub struct TowerProver;
 pub struct TowerProofs<E: ExtensionField> {
     pub proofs: Vec<Vec<IOPProverMessage<E>>>,
     // specs -> layers -> evals
-    pub specs_eval: Vec<Vec<Vec<E>>>,
+    pub prod_specs_eval: Vec<Vec<Vec<E>>>,
+    // specs -> layers -> evals
+    pub logup_specs_eval: Vec<Vec<Vec<E>>>,
 }
 
 pub struct TowerProverSpec<'a, E: ExtensionField> {
