@@ -29,7 +29,6 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
         bytecode_cells[0],
     );
     let _ = chip_handler.finalize(&mut circuit_builder);
-    // let _ = rom_handler.borrow_mut().finalize(&mut circuit_builder);
 
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))
