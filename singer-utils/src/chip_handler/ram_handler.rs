@@ -137,7 +137,6 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
     ) -> (Option<(WitnessId, usize)>, Option<(WitnessId, usize)>) {
-        // TODO: remove interior mutability (simplify this logic)
         let mut read_records = self.read_records.clone();
         let mut write_records = self.write_records.clone();
 

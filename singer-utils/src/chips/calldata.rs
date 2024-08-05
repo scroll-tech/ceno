@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::ChipCircuitGadgets;
-use crate::chip_handler::{calldata::CalldataChip, rom_handler::ROMHandler};
+use crate::chip_handler::{calldata::CalldataChip, rom_handler::ROMHandler, ChipHandler};
 use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, LayerWitness};
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
@@ -19,11 +19,16 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
     let (_, id_cells) = circuit_builder.create_witness_in(UInt64::N_OPERAND_CELLS);
     let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-    let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-    let calldata_chip = CalldataChip::new(rom_handler.clone());
-    calldata_chip.load(&mut circuit_builder, &id_cells, &calldata_cells);
+    let mut chip_handler = ChipHandler::new(challenges.clone());
 
-    let _ = rom_handler.borrow_mut().finalize(&mut circuit_builder);
+    CalldataChip::load(
+        &mut chip_handler,
+        &mut circuit_builder,
+        &id_cells,
+        &calldata_cells,
+    );
+
+    let _ = chip_handler.finalize(&mut circuit_builder);
 
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))

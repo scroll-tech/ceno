@@ -6,7 +6,7 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use simple_frontend::structs::CircuitBuilder;
 
 use crate::{
-    chip_handler::{range::RangeChip, rom_handler::ROMHandler},
+    chip_handler::{range::RangeChip, rom_handler::ROMHandler, ChipHandler},
     constants::RANGE_CHIP_BIT_WIDTH,
     error::UtilError,
     structs::ChipChallenges,
@@ -16,11 +16,11 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
     let mut circuit_builder = CircuitBuilder::<E>::new();
     let cells = circuit_builder.create_counter_in(0);
 
-    let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-    let mut range_chip = RangeChip::new(rom_handler.clone());
-    range_chip.range_check_table_item(&mut circuit_builder, cells[0]);
+    let mut chip_handler = ChipHandler::new(challenges.clone());
 
-    let _ = rom_handler.borrow_mut().finalize(&mut circuit_builder);
+    RangeChip::range_check_table_item(&mut chip_handler, &mut circuit_builder, cells[0]);
+
+    let _ = chip_handler.finalize(&mut circuit_builder);
 
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))

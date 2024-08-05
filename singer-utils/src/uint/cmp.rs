@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::range::RangeChip,
+    chip_handler::{range::RangeChip, ChipHandler},
     error::UtilError,
     uint::{constants::AddSubConstants, uint::UInt},
 };
@@ -11,7 +11,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     /// Generates the required information for asserting lt and leq
     pub fn lt<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut RangeChip<E>,
+        chip_handler: &mut ChipHandler<E>,
         operand_0: &UInt<M, C>,
         operand_1: &UInt<M, C>,
         witness: &[CellId],
@@ -20,7 +20,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let range_values = Self::extract_range_values(witness);
         let computed_diff = Self::sub_unsafe(circuit_builder, operand_0, operand_1, borrow)?;
 
-        let diff = range_chip_handler.range_check_uint(
+        let diff = RangeChip::range_check_uint(
+            chip_handler,
             circuit_builder,
             &computed_diff,
             Some(&range_values),
@@ -37,18 +38,12 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     /// Asserts that operand_0 < operand_1
     pub fn assert_lt<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut RangeChip<E>,
+        chip_handler: &mut ChipHandler<E>,
         operand_0: &UInt<M, C>,
         operand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(), UtilError> {
-        let (borrow, _) = Self::lt(
-            circuit_builder,
-            range_chip_handler,
-            operand_0,
-            operand_1,
-            witness,
-        )?;
+        let (borrow, _) = Self::lt(circuit_builder, chip_handler, operand_0, operand_1, witness)?;
         circuit_builder.assert_const(borrow, 1);
         Ok(())
     }
@@ -56,18 +51,13 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     /// Asserts that operand_0 <= operand_1
     pub fn assert_leq<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut RangeChip<E>,
+        chip_handler: &mut ChipHandler<E>,
         operand_0: &UInt<M, C>,
         operand_1: &UInt<M, C>,
         witness: &[CellId],
     ) -> Result<(), UtilError> {
-        let (borrow, diff) = Self::lt(
-            circuit_builder,
-            range_chip_handler,
-            operand_0,
-            operand_1,
-            witness,
-        )?;
+        let (borrow, diff) =
+            Self::lt(circuit_builder, chip_handler, operand_0, operand_1, witness)?;
 
         // we have two scenarios
         // 1. eq

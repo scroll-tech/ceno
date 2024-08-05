@@ -7,6 +7,7 @@ use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, calldata::CalldataChip, global_state::GlobalStateChip,
         ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
@@ -53,15 +54,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // instantiate memory handlers
-        let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
-
-        // instantiate chips
-        let global_state_chip = GlobalStateChip::new(ram_handler.clone());
-        let mut range_chip = RangeChip::new(rom_handler.clone());
-        let stack_chip = StackChip::new(ram_handler.clone());
-        let bytecode_chip = BytecodeChip::new(rom_handler.clone());
-        let calldata_chip = CalldataChip::new(rom_handler.clone());
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -71,7 +64,8 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        global_state_chip.state_in(
+        GlobalStateChip::state_in(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -82,14 +76,16 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
 
         let next_pc =
             RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        let next_stack_ts = range_chip.add_ts_with_const(
+        let next_stack_ts = RangeChip::add_ts_with_const(
+            &mut chip_handler,
             &mut circuit_builder,
             &stack_ts,
             1,
             &phase0[Self::phase0_stack_ts_add()],
         )?;
 
-        global_state_chip.state_out(
+        GlobalStateChip::state_out(
+            &mut chip_handler,
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
@@ -99,7 +95,8 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         );
 
         // Range check for stack top
-        range_chip.range_check_stack_top(
+        RangeChip::range_check_stack_top(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
         )?;
@@ -107,7 +104,8 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         // Stack pop offset from the stack.
         let old_stack_ts = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts()])?;
         let offset = &phase0[Self::phase0_offset()];
-        stack_chip.pop(
+        StackChip::pop(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts.values(),
@@ -115,7 +113,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         );
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut range_chip,
+            &mut chip_handler,
             &old_stack_ts,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt()],
@@ -123,10 +121,11 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
 
         // CallDataLoad check (offset, data)
         let data = &phase0[Self::phase0_data()];
-        calldata_chip.load(&mut circuit_builder, offset, data);
+        CalldataChip::load(&mut chip_handler, &mut circuit_builder, offset, data);
 
         // Stack push data to the stack.
-        stack_chip.push(
+        StackChip::push(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::ONE),
             stack_ts.values(),
@@ -134,14 +133,14 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         );
 
         // Bytecode table (pc, CalldataLoad)
-        bytecode_chip.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
         );
 
-        let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
-        let rom_id = rom_handler.borrow_mut().finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];

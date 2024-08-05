@@ -8,7 +8,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use sumcheck::util::ceil_log2;
 
 use crate::{
-    chip_handler::{bytecode::BytecodeChip, rom_handler::ROMHandler},
+    chip_handler::{bytecode::BytecodeChip, rom_handler::ROMHandler, ChipHandler},
     error::UtilError,
     structs::{ChipChallenges, PCUInt},
 };
@@ -20,11 +20,15 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
     let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPERAND_CELLS);
     let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
-    let mut rom_handler = Rc::new(RefCell::new(ROMHandler::new(challenges.clone())));
-    let bytecode_chip = BytecodeChip::new(rom_handler.clone());
+    let mut chip_handler = ChipHandler::new(challenges.clone());
 
-    bytecode_chip.bytecode_with_pc_byte(&mut circuit_builder, &pc_cells, bytecode_cells[0]);
-    let _ = rom_handler.borrow_mut().finalize(&mut circuit_builder);
+    BytecodeChip::bytecode_with_pc_byte(
+        &mut chip_handler,
+        &mut circuit_builder,
+        &pc_cells,
+        bytecode_cells[0],
+    );
+    let _ = chip_handler.finalize(&mut circuit_builder);
 
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))

@@ -1,27 +1,17 @@
-// TODO: rename and restructure
-
 use crate::{
-    chip_handler::{rom_handler::ROMHandler, util::cell_to_mixed},
+    chip_handler::{util::cell_to_mixed, ChipHandler},
     constants::OpcodeType,
     structs::ROMType,
 };
-use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use simple_frontend::structs::{Cell, CellId, CircuitBuilder, MixedCell};
-use std::{cell::RefCell, rc::Rc};
+use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
-pub struct BytecodeChip<Ext: ExtensionField> {
-    rom_handler: Rc<RefCell<ROMHandler<Ext>>>,
-}
+pub struct BytecodeChip {}
 
-impl<Ext: ExtensionField> BytecodeChip<Ext> {
-    pub fn new(rom_handler: Rc<RefCell<ROMHandler<Ext>>>) -> Self {
-        Self { rom_handler }
-    }
-
-    pub fn bytecode_with_pc_opcode(
-        &self,
+impl BytecodeChip {
+    pub fn bytecode_with_pc_opcode<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         opcode: OpcodeType,
@@ -34,15 +24,15 @@ impl<Ext: ExtensionField> BytecodeChip<Ext> {
         ]
         .concat();
 
-        self.rom_handler.borrow_mut().read_mixed(
+        chip_handler.rom_handler.read_mixed(
             circuit_builder,
             &key,
             &[MixedCell::Constant(Ext::BaseField::from(opcode as u64))],
         );
     }
 
-    pub fn bytecode_with_pc_byte(
-        &self,
+    pub fn bytecode_with_pc_byte<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         byte: CellId,
@@ -54,8 +44,8 @@ impl<Ext: ExtensionField> BytecodeChip<Ext> {
             cell_to_mixed(pc),
         ]
         .concat();
-        self.rom_handler
-            .borrow_mut()
+        chip_handler
+            .rom_handler
             .read_mixed(circuit_builder, &key, &[byte.into()]);
     }
 }

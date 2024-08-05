@@ -1,23 +1,16 @@
 use crate::{
-    chip_handler::{rom_handler::ROMHandler, util::cell_to_mixed},
+    chip_handler::{util::cell_to_mixed, ChipHandler},
     structs::ROMType,
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
-use std::{cell::RefCell, rc::Rc};
 
-pub struct CalldataChip<Ext: ExtensionField> {
-    rom_handler: Rc<RefCell<ROMHandler<Ext>>>,
-}
+pub struct CalldataChip {}
 
-impl<Ext: ExtensionField> CalldataChip<Ext> {
-    pub fn new(rom_handler: Rc<RefCell<ROMHandler<Ext>>>) -> Self {
-        Self { rom_handler }
-    }
-
-    pub fn load(
-        &self,
+impl CalldataChip {
+    pub fn load<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],
         data: &[CellId],
@@ -30,8 +23,8 @@ impl<Ext: ExtensionField> CalldataChip<Ext> {
         ]
         .concat();
         let data = data.iter().map(|&x| x.into()).collect_vec();
-        self.rom_handler
-            .borrow_mut()
+        chip_handler
+            .rom_handler
             .read_mixed(circuit_builder, &key, &data);
     }
 }
