@@ -1,5 +1,6 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use multilinear_extensions::util::ceil_log2;
 use transcript::Transcript;
 
 pub(crate) fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
@@ -39,4 +40,15 @@ pub fn u64vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
         x >>= C;
     }
     ret
+}
+
+/// we expect each thread at least take 4 num of sumcheck variables
+/// return optimal num threads to run sumcheck
+pub fn proper_num_threads(num_vars: usize, expected_max_threads: usize) -> usize {
+    let min_numvar_per_thread = 4;
+    if num_vars <= min_numvar_per_thread {
+        return 1;
+    } else {
+        (1 << (num_vars - min_numvar_per_thread)).min(expected_max_threads)
+    }
 }

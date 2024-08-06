@@ -142,7 +142,7 @@ mod test {
 
         // generate mock witness
         let mut wits_in = BTreeMap::new();
-        let num_instances = 4;
+        let num_instances = 1 << 2;
         (0..circuit.num_witin as usize).for_each(|witness_id| {
             wits_in.insert(
                 witness_id as WitnessId,
@@ -159,7 +159,7 @@ mod test {
         let challenges = vec![1.into(), 2.into()];
 
         let mut proof = prover
-            .create_proof(wits_in, num_instances, &mut transcript, &challenges)
+            .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
             .expect("create_proof failed");
 
         let verifier = ZKVMVerifier::new(circuit);

@@ -48,7 +48,7 @@ pub fn is_power_of_2(x: usize) -> bool {
 }
 
 fn bench_add(c: &mut Criterion) {
-    let max_thread_id = {
+    let max_threads = {
         if !is_power_of_2(RAYON_NUM_THREADS) {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
             {
@@ -106,7 +106,13 @@ fn bench_add(c: &mut Criterion) {
                         });
                         let timer = Instant::now();
                         let _ = prover
-                            .create_proof(wits_in, num_instances, &mut transcript, &real_challenges)
+                            .create_proof(
+                                wits_in,
+                                num_instances,
+                                max_threads,
+                                &mut transcript,
+                                &real_challenges,
+                            )
                             .expect("create_proof failed");
                         println!(
                             "AddInstruction::create_proof, instance_num_vars = {}, time = {}",

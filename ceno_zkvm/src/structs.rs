@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2};
 use singer_utils::constants::VALUE_BIT_WIDTH;
 use sumcheck::structs::IOPProverMessage;
 
@@ -26,4 +26,9 @@ pub type TSUInt = UInt<48, 48>;
 
 pub enum ROMType {
     U5, // 2^5=32
+}
+
+pub struct VirtualPolynomials<'a, E: ExtensionField> {
+    pub num_threads: usize,
+    pub polys: Vec<VirtualPolynomialV2<'a, E>>,
 }
