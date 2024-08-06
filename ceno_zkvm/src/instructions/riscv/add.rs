@@ -127,7 +127,7 @@ mod test {
     use crate::{
         circuit_builder::CircuitBuilder,
         instructions::Instruction,
-        scheme::{constants::NUM_PRODUCT_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier},
+        scheme::{constants::NUM_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier},
     };
 
     use super::AddInstruction;
@@ -168,7 +168,7 @@ mod test {
             .verify(
                 &mut proof,
                 &mut v_transcript,
-                NUM_PRODUCT_FANIN,
+                NUM_FANIN,
                 &PointAndEval::default(),
                 &challenges,
             )

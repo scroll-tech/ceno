@@ -19,7 +19,7 @@ use crate::{
     circuit_builder::Circuit,
     error::ZKVMError,
     scheme::{
-        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_PRODUCT_FANIN},
+        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
             wit_infer_by_expr,
@@ -97,10 +97,10 @@ impl<E: ExtensionField> ZKVMProver<E> {
             r_records_wit,
             log2_num_instances,
             log2_r_count,
-            NUM_PRODUCT_FANIN,
+            NUM_FANIN,
             E::ONE,
         );
-        assert_eq!(r_records_last_layer.len(), NUM_PRODUCT_FANIN);
+        assert_eq!(r_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
         // infer all tower witness after last layer
@@ -108,7 +108,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let r_wit_layers = infer_tower_product_witness(
             log2_num_instances + log2_r_count,
             r_records_last_layer,
-            NUM_PRODUCT_FANIN,
+            NUM_FANIN,
         );
         exit_span!(span);
 
@@ -118,17 +118,17 @@ impl<E: ExtensionField> ZKVMProver<E> {
             w_records_wit,
             log2_num_instances,
             log2_w_count,
-            NUM_PRODUCT_FANIN,
+            NUM_FANIN,
             E::ONE,
         );
-        assert_eq!(w_records_last_layer.len(), NUM_PRODUCT_FANIN);
+        assert_eq!(w_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
         let span = entered_span!("wit_inference::tower_witness_w_layers");
         let w_wit_layers = infer_tower_product_witness(
             log2_num_instances + log2_w_count,
             w_records_last_layer,
-            NUM_PRODUCT_FANIN,
+            NUM_FANIN,
         );
         exit_span!(span);
 
@@ -162,15 +162,15 @@ impl<E: ExtensionField> ZKVMProver<E> {
                     && q2.evaluations().len() == expected_size
             }));
             assert!(r_wit_layers.iter().enumerate().all(|(i, r_wit_layer)| {
-                let expected_size = 1 << (ceil_log2(NUM_PRODUCT_FANIN) * i);
-                r_wit_layer.len() == NUM_PRODUCT_FANIN
+                let expected_size = 1 << (ceil_log2(NUM_FANIN) * i);
+                r_wit_layer.len() == NUM_FANIN
                     && r_wit_layer
                         .iter()
                         .all(|f| f.evaluations().len() == expected_size)
             }));
             assert!(w_wit_layers.iter().enumerate().all(|(i, w_wit_layer)| {
-                let expected_size = 1 << (ceil_log2(NUM_PRODUCT_FANIN) * i);
-                w_wit_layer.len() == NUM_PRODUCT_FANIN
+                let expected_size = 1 << (ceil_log2(NUM_FANIN) * i);
+                w_wit_layer.len() == NUM_FANIN
                     && w_wit_layer
                         .iter()
                         .all(|f| f.evaluations().len() == expected_size)
@@ -192,10 +192,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let lk_p2_out_eval = lk_wit_layers[0][1].get_ext_field_vec()[0];
         let lk_q1_out_eval = lk_wit_layers[0][2].get_ext_field_vec()[0];
         let lk_q2_out_eval = lk_wit_layers[0][3].get_ext_field_vec()[0];
-        assert!(
-            record_r_out_evals.len() == NUM_PRODUCT_FANIN
-                && record_w_out_evals.len() == NUM_PRODUCT_FANIN
-        );
+        assert!(record_r_out_evals.len() == NUM_FANIN && record_w_out_evals.len() == NUM_FANIN);
         let (rt_tower, tower_proof) = TowerProver::create_proof(
             vec![
                 TowerProverSpec {
@@ -208,7 +205,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             vec![TowerProverSpec {
                 witness: lk_wit_layers,
             }],
-            NUM_PRODUCT_FANIN,
+            NUM_FANIN,
             transcript,
         );
         assert_eq!(
@@ -234,7 +231,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let (alpha_read, alpha_write, alpha_lk) = (&alpha_pow[0], &alpha_pow[1], &alpha_pow[2]);
         // create selector: all ONE, but padding ZERO to ceil_log2
         let (sel_r, sel_w, sel_lk) = {
-            // TODO sel_r can be shared if expression count for same expression count
+            // TODO sel can be shared if expression count match
             let mut sel_r = build_eq_x_r_vec(&rt_r[log2_r_count..]);
             if num_instances < sel_r.len() {
                 sel_r.splice(num_instances..sel_r.len(), std::iter::repeat(E::ZERO));

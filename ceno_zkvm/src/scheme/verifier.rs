@@ -15,8 +15,8 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::Circuit, error::ZKVMError, scheme::constants::NUM_PRODUCT_FANIN,
-    structs::TowerProofs, utils::get_challenge_pows,
+    circuit_builder::Circuit, error::ZKVMError, scheme::constants::NUM_FANIN, structs::TowerProofs,
+    utils::get_challenge_pows,
 };
 
 use super::{constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMProof};
@@ -289,7 +289,7 @@ impl TowerVerify {
                         proofs: tower_proofs.proofs[round].clone(),
                     },
                     &VPAuxInfo {
-                        max_degree: NUM_PRODUCT_FANIN + 1, // + 1 for eq
+                        max_degree: NUM_FANIN + 1, // + 1 for eq
                         num_variables: (round + 1) * log2_num_fanin,
                         phantom: PhantomData,
                     },
