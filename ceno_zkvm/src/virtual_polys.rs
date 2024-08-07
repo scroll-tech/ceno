@@ -17,7 +17,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         }
     }
 
-    pub fn get_range_polys(
+    pub fn get_range_polys_by_thread_id(
         &self,
         thread_id: usize,
         polys: Vec<&'a ArcMultilinearExtension<'a, E>>,
@@ -28,6 +28,18 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 let range_poly: ArcMultilinearExtension<E> =
                     Arc::new(poly.get_ranged_mle(self.num_threads, thread_id));
                 range_poly
+            })
+            .collect_vec()
+    }
+
+    pub fn get_all_range_polys(
+        &self,
+        poly: &'a ArcMultilinearExtension<'a, E>,
+    ) -> Vec<ArcMultilinearExtension<'a, E>> {
+        (0..self.num_threads)
+            .map(|thread_id| {
+                self.get_range_polys_by_thread_id(thread_id, vec![poly])
+                    .remove(0)
             })
             .collect_vec()
     }

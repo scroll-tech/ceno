@@ -260,15 +260,11 @@ impl<E: ExtensionField> ZKVMProver<E> {
             )
         };
         let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, log2_num_instances);
-        let sel_r_threads: Vec<ArcMultilinearExtension<'_, E>> = (0..num_threads)
-            .flat_map(|thread_id| virtual_polys.get_range_polys(thread_id, vec![&sel_r]))
-            .collect();
-        let sel_w_threads: Vec<ArcMultilinearExtension<'_, E>> = (0..num_threads)
-            .flat_map(|thread_id| virtual_polys.get_range_polys(thread_id, vec![&sel_w]))
-            .collect();
-        let sel_lk_threads: Vec<ArcMultilinearExtension<'_, E>> = (0..num_threads)
-            .flat_map(|thread_id| virtual_polys.get_range_polys(thread_id, vec![&sel_lk]))
-            .collect();
+        let sel_r_threads = virtual_polys.get_all_range_polys(&sel_r);
+        let sel_w_threads: Vec<ArcMultilinearExtension<'_, E>> =
+            virtual_polys.get_all_range_polys(&sel_w);
+        let sel_lk_threads: Vec<ArcMultilinearExtension<'_, E>> =
+            virtual_polys.get_all_range_polys(&sel_lk);
 
         let eq_r = build_eq_x_r_vec(&rt_r[..log2_r_count]);
         let eq_w = build_eq_x_r_vec(&rt_w[..log2_w_count]);
@@ -280,7 +276,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             for i in 0..r_counts_per_instance {
                 // \sum_t (sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[t] ))
                 let r_records_wit = virtual_polys
-                    .get_range_polys(thread_id, vec![&r_records_wit[i]])
+                    .get_range_polys_by_thread_id(thread_id, vec![&r_records_wit[i]])
                     .remove(0);
                 virtual_polys.add_mle_list(
                     thread_id,
@@ -302,7 +298,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             for i in 0..w_counts_per_instance {
                 // \sum_t (sel(rt, t) * (\sum_i alpha_write * eq(rs, i) * record_w[i] ))
                 let w_records_wit = virtual_polys
-                    .get_range_polys(thread_id, vec![&w_records_wit[i]])
+                    .get_range_polys_by_thread_id(thread_id, vec![&w_records_wit[i]])
                     .remove(0);
                 virtual_polys.add_mle_list(
                     thread_id,
@@ -325,7 +321,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             for i in 0..lk_counts_per_instance {
                 // \sum_t (sel(rt, t) * (\sum_i alpha_lk* eq(rs, i) * record_w[i] ))
                 let lk_records_wit = virtual_polys
-                    .get_range_polys(thread_id, vec![&lk_records_wit[i]])
+                    .get_range_polys_by_thread_id(thread_id, vec![&lk_records_wit[i]])
                     .remove(0);
                 virtual_polys.add_mle_list(
                     thread_id,
@@ -460,90 +456,82 @@ impl TowerProver {
 
             let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
             let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, out_rt.len());
-            // eq_threads is ranged polynomial defined on eq poly reference
-            let eq_threads: Vec<ArcMultilinearExtension<'_, E>> = (0..num_threads)
-                .flat_map(|thread_id| virtual_polys.get_range_polys(thread_id, vec![&eq]))
-                .collect();
+            // eq_threads is ranged polynomials defined on eq with different range
+            let eq_threads: Vec<ArcMultilinearExtension<'_, E>> =
+                virtual_polys.get_all_range_polys(&eq);
 
-            prod_specs
-                .iter()
-                .zip(alpha_pows.iter())
-                .for_each(|(s, alpha)| {
-                    if (round + 1) < s.witness.len() {
-                        let layer_polys = &s.witness[round + 1];
+            for (s, alpha) in prod_specs.iter().zip(alpha_pows.iter()) {
+                if (round + 1) < s.witness.len() {
+                    let layer_polys = &s.witness[round + 1];
 
-                        // sanity check
-                        assert_eq!(layer_polys.len(), num_fanin);
-                        layer_polys
-                            .iter()
-                            .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round));
+                    // sanity check
+                    assert_eq!(layer_polys.len(), num_fanin);
+                    layer_polys
+                        .iter()
+                        .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round));
 
-                        // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
-                        (0..num_threads)
-                            .zip(eq_threads.iter())
-                            .for_each(|(thread_id, eq)| {
-                                let layer_polys = virtual_polys.get_range_polys(
-                                    thread_id,
-                                    layer_polys.iter().map(|x| x).collect(),
-                                );
-                                virtual_polys.add_mle_list(
-                                    thread_id,
-                                    vec![vec![eq.clone()], layer_polys].concat(),
-                                    *alpha,
-                                )
-                            });
+                    // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
+                    for (thread_id, eq) in (0..num_threads).zip(eq_threads.iter()) {
+                        let layer_polys = virtual_polys.get_range_polys_by_thread_id(
+                            thread_id,
+                            layer_polys.iter().map(|x| x).collect(),
+                        );
+                        virtual_polys.add_mle_list(
+                            thread_id,
+                            vec![vec![eq.clone()], layer_polys].concat(),
+                            *alpha,
+                        )
                     }
-                });
+                }
+            }
 
-            logup_specs
+            for (s, alpha) in logup_specs
                 .iter()
                 .zip(alpha_pows[prod_specs.len()..].chunks(2))
-                .for_each(|(s, alpha)| {
-                    if (round + 1) < s.witness.len() {
-                        let layer_polys = &s.witness[round + 1];
-                        // sanity check
-                        assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
-                        layer_polys
-                            .iter()
-                            .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round));
+            {
+                if (round + 1) < s.witness.len() {
+                    let layer_polys = &s.witness[round + 1];
+                    // sanity check
+                    assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
+                    layer_polys
+                        .iter()
+                        .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round));
 
-                        let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
+                    let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
 
-                        (0..num_threads)
-                            .zip(eq_threads.iter())
-                            .for_each(|(thread_id, eq)| {
-                                let mut layer_polys = virtual_polys.get_range_polys(
-                                    thread_id,
-                                    layer_polys.iter().map(|x| x).collect(),
-                                );
-                                let (q2, q1, p2, p1) = (
-                                    layer_polys.pop().unwrap(),
-                                    layer_polys.pop().unwrap(),
-                                    layer_polys.pop().unwrap(),
-                                    layer_polys.pop().unwrap(),
-                                );
+                    for (thread_id, eq) in (0..num_threads).zip(eq_threads.iter()) {
+                        let mut layer_polys = virtual_polys.get_range_polys_by_thread_id(
+                            thread_id,
+                            layer_polys.iter().map(|x| x).collect(),
+                        );
+                        let (q2, q1, p2, p1) = (
+                            layer_polys.pop().unwrap(),
+                            layer_polys.pop().unwrap(),
+                            layer_polys.pop().unwrap(),
+                            layer_polys.pop().unwrap(),
+                        );
 
-                                // \sum_s eq(rt, s) * alpha_numerator^{i} * (p1 * q2 + p2 * q1)
-                                virtual_polys.add_mle_list(
-                                    thread_id,
-                                    vec![eq.clone(), p1, q2.clone()],
-                                    *alpha_numerator,
-                                );
-                                virtual_polys.add_mle_list(
-                                    thread_id,
-                                    vec![eq.clone(), p2, q1.clone()],
-                                    *alpha_numerator,
-                                );
+                        // \sum_s eq(rt, s) * alpha_numerator^{i} * (p1 * q2 + p2 * q1)
+                        virtual_polys.add_mle_list(
+                            thread_id,
+                            vec![eq.clone(), p1, q2.clone()],
+                            *alpha_numerator,
+                        );
+                        virtual_polys.add_mle_list(
+                            thread_id,
+                            vec![eq.clone(), p2, q1.clone()],
+                            *alpha_numerator,
+                        );
 
-                                // \sum_s eq(rt, s) * alpha_denominator^{i} * (q1 * q2)
-                                virtual_polys.add_mle_list(
-                                    thread_id,
-                                    vec![eq.clone(), q1, q2],
-                                    *alpha_denominator,
-                                );
-                            });
+                        // \sum_s eq(rt, s) * alpha_denominator^{i} * (q1 * q2)
+                        virtual_polys.add_mle_list(
+                            thread_id,
+                            vec![eq.clone(), q1, q2],
+                            *alpha_denominator,
+                        );
                     }
-                });
+                }
+            }
 
             let (sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
                 num_threads,
@@ -561,7 +549,7 @@ impl TowerProver {
             let evals = state.get_mle_final_evaluations();
             let mut evals_iter = evals.iter();
             evals_iter.next(); // skip first eq
-            prod_specs.iter().enumerate().for_each(|(i, s)| {
+            for (i, s) in prod_specs.iter().enumerate() {
                 if (round + 1) < s.witness.len() {
                     // collect evals belong to current spec
                     proofs.push_prod_evals(
@@ -571,8 +559,8 @@ impl TowerProver {
                             .collect::<Vec<E>>(),
                     );
                 }
-            });
-            logup_specs.iter().enumerate().for_each(|(i, s)| {
+            }
+            for (i, s) in logup_specs.iter().enumerate() {
                 if (round + 1) < s.witness.len() {
                     // collect evals belong to current spec
                     // p1, q2, p2, q1
@@ -582,7 +570,7 @@ impl TowerProver {
                     let q1 = *evals_iter.next().expect("insufficient evals length");
                     proofs.push_logup_evals(i, vec![p1, p2, q1, q2]);
                 }
-            });
+            }
             assert_eq!(evals_iter.next(), None);
             rt_prime
         });

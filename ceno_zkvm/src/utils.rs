@@ -1,6 +1,5 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use multilinear_extensions::util::ceil_log2;
 use transcript::Transcript;
 
 pub(crate) fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
