@@ -11,19 +11,9 @@ pub mod global_state;
 pub mod register;
 
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
-    fn state_in(
-        &mut self,
-        pc: &PCUInt,
-        memory_ts: &TSUInt,
-        clk: Expression<E>,
-    ) -> Result<(), ZKVMError>;
+    fn state_in(&mut self, pc: &PCUInt, ts: &TSUInt) -> Result<(), ZKVMError>;
 
-    fn state_out(
-        &mut self,
-        pc: &PCUInt,
-        memory_ts: &TSUInt,
-        clk: Expression<E>,
-    ) -> Result<(), ZKVMError>;
+    fn state_out(&mut self, pc: &PCUInt, ts: &TSUInt) -> Result<(), ZKVMError>;
 }
 
 pub trait RegisterChipOperations<E: ExtensionField> {

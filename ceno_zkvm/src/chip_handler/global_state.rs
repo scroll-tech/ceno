@@ -9,16 +9,14 @@ impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitB
     fn state_in(
         &mut self,
         pc: &crate::structs::PCUInt,
-        memory_ts: &crate::structs::TSUInt,
-        clk: Expression<E>,
+        ts: &crate::structs::TSUInt,
     ) -> Result<(), ZKVMError> {
         let items: Vec<Expression<E>> = [
             vec![Expression::Constant(E::BaseField::from(
                 RAMType::GlobalState as u64,
             ))],
             pc.expr(),
-            memory_ts.expr(),
-            vec![clk],
+            ts.expr(),
         ]
         .concat();
 
@@ -29,16 +27,14 @@ impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitB
     fn state_out(
         &mut self,
         pc: &crate::structs::PCUInt,
-        memory_ts: &crate::structs::TSUInt,
-        clk: Expression<E>,
+        ts: &crate::structs::TSUInt,
     ) -> Result<(), ZKVMError> {
         let items: Vec<Expression<E>> = [
             vec![Expression::Constant(E::BaseField::from(
                 RAMType::GlobalState as u64,
             ))],
             pc.expr(),
-            memory_ts.expr(),
-            vec![clk],
+            ts.expr(),
         ]
         .concat();
 

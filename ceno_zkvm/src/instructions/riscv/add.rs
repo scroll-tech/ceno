@@ -19,8 +19,7 @@ pub struct AddInstruction;
 
 pub struct InstructionConfig<E: ExtensionField> {
     pub pc: PCUInt,
-    pub memory_ts: TSUInt,
-    pub clk: WitIn,
+    pub ts: TSUInt,
     pub prev_rd_memory_value: UInt64,
     pub addend_0: UInt64,
     pub addend_1: UInt64,
@@ -28,9 +27,9 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
-    pub prev_rs1_memory_ts: TSUInt,
-    pub prev_rs2_memory_ts: TSUInt,
-    pub prev_rd_memory_ts: TSUInt,
+    pub prev_rs1_ts: TSUInt,
+    pub prev_rs2_ts: TSUInt,
+    pub prev_rd_ts: TSUInt,
     phantom: PhantomData<E>,
 }
 
@@ -42,11 +41,10 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<InstructionConfig<E>, ZKVMError> {
         let pc = PCUInt::new(circuit_builder);
-        let mut memory_ts = TSUInt::new(circuit_builder);
-        let clk = circuit_builder.create_witin();
+        let mut ts = TSUInt::new(circuit_builder);
 
         // state in
-        circuit_builder.state_in(&pc, &memory_ts, clk.expr())?;
+        circuit_builder.state_in(&pc, &ts)?;
 
         let next_pc = pc.add_const(circuit_builder, RISCV64_PC_STEP_SIZE.into())?;
 
@@ -67,39 +65,30 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         circuit_builder.assert_u5(rs2_id.expr())?;
         circuit_builder.assert_u5(rd_id.expr())?;
 
-        let mut prev_rs1_memory_ts = TSUInt::new(circuit_builder);
-        let mut prev_rs2_memory_ts = TSUInt::new(circuit_builder);
-        let mut prev_rd_memory_ts = TSUInt::new(circuit_builder);
+        let mut prev_rs1_ts = TSUInt::new(circuit_builder);
+        let mut prev_rs2_ts = TSUInt::new(circuit_builder);
+        let mut prev_rd_ts = TSUInt::new(circuit_builder);
 
-        let mut memory_ts = circuit_builder.register_read(
-            &rs1_id,
-            &mut prev_rs1_memory_ts,
-            &mut memory_ts,
-            &addend_0,
-        )?;
+        let mut ts =
+            circuit_builder.register_read(&rs1_id, &mut prev_rs1_ts, &mut ts, &addend_0)?;
 
-        let mut memory_ts = circuit_builder.register_read(
-            &rs2_id,
-            &mut prev_rs2_memory_ts,
-            &mut memory_ts,
-            &addend_1,
-        )?;
+        let mut ts =
+            circuit_builder.register_read(&rs2_id, &mut prev_rs2_ts, &mut ts, &addend_1)?;
 
-        let memory_ts = circuit_builder.register_write(
+        let ts = circuit_builder.register_write(
             &rd_id,
-            &mut prev_rd_memory_ts,
-            &mut memory_ts,
+            &mut prev_rd_ts,
+            &mut ts,
             &prev_rd_memory_value,
             &computed_outcome,
         )?;
 
-        let next_memory_ts = memory_ts.add_const(circuit_builder, 1.into())?;
-        circuit_builder.state_out(&next_pc, &next_memory_ts, clk.expr() + 1.into())?;
+        let next_ts = ts.add_const(circuit_builder, 1.into())?;
+        circuit_builder.state_out(&next_pc, &next_ts)?;
 
         Ok(InstructionConfig {
             pc,
-            memory_ts,
-            clk,
+            ts,
             prev_rd_memory_value,
             addend_0,
             addend_1,
@@ -107,9 +96,9 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             rs1_id,
             rs2_id,
             rd_id,
-            prev_rs1_memory_ts,
-            prev_rs2_memory_ts,
-            prev_rd_memory_ts,
+            prev_rs1_ts,
+            prev_rs2_ts,
+            prev_rd_ts,
             phantom: PhantomData,
         })
     }
