@@ -1,3 +1,4 @@
+use super::constants::BYTE_BIT_WIDTH;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::UtilError,
@@ -6,41 +7,64 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
+use itertools::Itertools;
+use singer_utils::{constants::BYTE_BIT_WIDTH, uint::util::add_one_to_big_num};
+pub use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
 
-use super::constants::BYTE_BIT_WIDTH;
+#[derive(Clone, EnumIter)]
+pub enum UintLimb<E: ExtensionField> {
+    WitIn(Vec<WitIn>),
+    Expression(Vec<Expression<E>>),
+}
 
 #[derive(Clone)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
-pub struct UInt<const M: usize, const C: usize> {
-    pub values: Vec<WitIn>,
+pub struct UInt<const M: usize, const C: usize, E: ExtensionField> {
+    pub limbs: UintLimb<E>,
+    // We don't need `overflow` witness since the last element of `carries` represents it.
+    pub carries: Option<Vec<WitIn>>,
 }
 
-impl<const M: usize, const C: usize> UInt<M, C> {
-    pub fn new<E: ExtensionField>(circuit_builder: &mut CircuitBuilder<E>) -> Self {
+impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
+    pub fn new(circuit_builder: &mut CircuitBuilder<E>) -> Self {
         Self {
-            values: (0..Self::N_OPERAND_CELLS)
-                .map(|_| circuit_builder.create_witin())
-                .collect(),
+            limbs: UintLimb::WitIn(
+                (0..Self::NUM_CELLS)
+                    .map(|_| circuit_builder.create_witin())
+                    .collect_vec(),
+            ),
+            carries: None,
         }
     }
 
-    pub fn expr<E: ExtensionField>(&self) -> Vec<Expression<E>> {
-        self.values
-            .iter()
-            .map(ToExpr::expr)
-            .collect::<Vec<Expression<E>>>()
+    pub fn new_expr(circuit_builder: &mut CircuitBuilder<E>) -> Self {
+        Self {
+            limbs: UintLimb::Expression(Vec::new()),
+            carries: None,
+        }
+    }
+
+    pub fn expr(&self) -> Vec<Expression<E>> {
+        match &self.limbs {
+            UintLimb::WitIn(c) => c.iter().map(ToExpr::expr).collect::<Vec<Expression<E>>>(),
+            UintLimb::Expression(e) => e.clone(),
+        }
     }
 
     /// Return the `UInt` underlying cell id's
-    pub fn wits_in(&self) -> &[WitIn] {
-        &self.values
+    pub fn wits_in(&self) -> Option<&[WitIn]> {
+        match &self.limbs {
+            UintLimb::WitIn(c) => Some(&c),
+            _ => None,
+        }
     }
 
     /// Builds a `UInt` instance from a set of cells that represent `RANGE_VALUES`
     /// assumes range_values are represented in little endian form
-    pub fn from_range_wits_in<E: ExtensionField>(
+    pub fn from_range_wits_in(
         circuit_builder: &mut CircuitBuilder<E>,
         range_values: &[WitIn],
     ) -> Result<Self, UtilError> {
@@ -54,7 +78,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Builds a `UInt` instance from a set of cells that represent big-endian `BYTE_VALUES`
-    pub fn from_bytes_big_endian<E: ExtensionField>(
+    pub fn from_bytes_big_endian(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[WitIn],
     ) -> Result<Self, UtilError> {
@@ -62,7 +86,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Builds a `UInt` instance from a set of cells that represent little-endian `BYTE_VALUES`
-    pub fn from_bytes_little_endian<E: ExtensionField>(
+    pub fn from_bytes_little_endian(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[WitIn],
     ) -> Result<Self, UtilError> {
@@ -70,7 +94,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Builds a `UInt` instance from a set of cells that represent `BYTE_VALUES`
-    pub fn from_bytes<E: ExtensionField>(
+    pub fn from_bytes(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[WitIn],
         is_little_endian: bool,
@@ -84,7 +108,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Builds a `UInt` instance from a set of cell values of a certain `CELL_WIDTH`
-    fn from_different_sized_cell_values<E: ExtensionField>(
+    fn from_different_sized_cell_values(
         circuit_builder: &mut CircuitBuilder<E>,
         wits_in: &[WitIn],
         cell_width: usize,
@@ -98,8 +122,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         //     Self::MAX_CELL_BIT_WIDTH,
         //     is_little_endian,
         // )?;
-        // debug_assert!(values.len() <= Self::N_OPERAND_CELLS);
-        // pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
+        // debug_assert!(values.len() <= Self::NUM_CELLS);
+        // pad_cells(circuit_builder, &mut values, Self::NUM_CELLS);
         // values.try_into()
     }
 
@@ -120,26 +144,29 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 }
 
 /// Construct `UInt` from `Vec<CellId>`
-impl<const M: usize, const C: usize> TryFrom<Vec<WitIn>> for UInt<M, C> {
+impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for UInt<M, C, E> {
     type Error = UtilError;
 
-    fn try_from(values: Vec<WitIn>) -> Result<Self, Self::Error> {
-        if values.len() != Self::N_OPERAND_CELLS {
+    fn try_from(limbs: Vec<WitIn>) -> Result<Self, Self::Error> {
+        if limbs.len() != Self::NUM_CELLS {
             return Err(UtilError::UIntError(format!(
                 "cannot construct UInt<{}, {}> from {} cells, requires {} cells",
                 M,
                 C,
-                values.len(),
-                Self::N_OPERAND_CELLS
+                limbs.len(),
+                Self::NUM_CELLS
             )));
         }
 
-        Ok(Self { values })
+        Ok(Self {
+            limbs: UintLimb::WitIn(limbs),
+            carries: None,
+        })
     }
 }
 
 /// Construct `UInt` from `$[CellId]`
-impl<const M: usize, const C: usize> TryFrom<&[WitIn]> for UInt<M, C> {
+impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UInt<M, C, E> {
     type Error = UtilError;
 
     fn try_from(values: &[WitIn]) -> Result<Self, Self::Error> {

@@ -13,10 +13,10 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
     fn register_read(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &mut TSUInt,
-        ts: &mut TSUInt,
-        values: &UInt64,
-    ) -> Result<TSUInt, ZKVMError> {
+        prev_ts: &mut TSUInt<E>,
+        ts: &mut TSUInt<E>,
+        values: &UInt64<E>,
+    ) -> Result<TSUInt<E>, ZKVMError> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
@@ -55,11 +55,11 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
     fn register_write(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &mut TSUInt,
-        ts: &mut TSUInt,
-        prev_values: &UInt64,
-        values: &UInt64,
-    ) -> Result<TSUInt, ZKVMError> {
+        prev_ts: &mut TSUInt<E>,
+        ts: &mut TSUInt<E>,
+        prev_values: &UInt64<E>,
+        values: &UInt64<E>,
+    ) -> Result<TSUInt<E>, ZKVMError> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [

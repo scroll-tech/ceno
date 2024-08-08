@@ -22,9 +22,9 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 const VALUE_BIT_WIDTH: usize = 16;
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
-pub type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
-pub type PCUInt = UInt64;
-pub type TSUInt = UInt<48, 48>;
+pub type UInt64<E> = UInt<64, VALUE_BIT_WIDTH, E>;
+pub type PCUInt<E> = UInt64<E>;
+pub type TSUInt<E> = UInt<48, 48, E>;
 
 pub enum ROMType {
     U5, // 2^5=32
