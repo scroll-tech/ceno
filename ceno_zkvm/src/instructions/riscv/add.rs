@@ -13,6 +13,8 @@ use crate::{
     structs::{PCUInt, TSUInt, UInt64},
 };
 
+use super::constants::RISCV64_PC_STEP_SIZE;
+
 pub struct AddInstruction;
 
 pub struct InstructionConfig<E: ExtensionField> {
@@ -40,16 +42,13 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<InstructionConfig<E>, ZKVMError> {
         let pc = PCUInt::new(circuit_builder);
-        let memory_ts = TSUInt::new(circuit_builder);
+        let mut memory_ts = TSUInt::new(circuit_builder);
         let clk = circuit_builder.create_witin();
 
         // state in
         circuit_builder.state_in(&pc, &memory_ts, clk.expr())?;
 
-        let next_pc = pc.add_const(circuit_builder, 1.into())?;
-        let next_memory_ts = memory_ts.add_const(circuit_builder, 1.into())?;
-
-        circuit_builder.state_out(&next_pc, &next_memory_ts, clk.expr() + 1.into())?;
+        let next_pc = pc.add_const(circuit_builder, RISCV64_PC_STEP_SIZE.into())?;
 
         // Execution result = addend0 + addend1, with carry.
         let prev_rd_memory_value = UInt64::new(circuit_builder);
@@ -60,37 +59,42 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         let computed_outcome = addend_0.add(circuit_builder, &addend_1)?;
         outcome.eq(circuit_builder, &computed_outcome)?;
 
-        // TODO rs1_id, rs2_id, rd_id should be byte code lookup
+        // TODO rs1_id, rs2_id, rd_id should be bytecode lookup
         let rs1_id = circuit_builder.create_witin();
         let rs2_id = circuit_builder.create_witin();
         let rd_id = circuit_builder.create_witin();
         circuit_builder.assert_u5(rs1_id.expr())?;
         circuit_builder.assert_u5(rs2_id.expr())?;
         circuit_builder.assert_u5(rd_id.expr())?;
-        let prev_rs1_memory_ts = TSUInt::new(circuit_builder);
-        let prev_rs2_memory_ts = TSUInt::new(circuit_builder);
-        let prev_rd_memory_ts = TSUInt::new(circuit_builder);
 
-        let is_lt_0 = prev_rs1_memory_ts.lt(circuit_builder, &memory_ts)?;
-        let is_lt_1 = prev_rs2_memory_ts.lt(circuit_builder, &memory_ts)?;
-        let is_lt_2 = prev_rd_memory_ts.lt(circuit_builder, &memory_ts)?;
+        let mut prev_rs1_memory_ts = TSUInt::new(circuit_builder);
+        let mut prev_rs2_memory_ts = TSUInt::new(circuit_builder);
+        let mut prev_rd_memory_ts = TSUInt::new(circuit_builder);
 
-        // less than = true
-        circuit_builder.require_one(is_lt_0)?;
-        circuit_builder.require_one(is_lt_1)?;
-        circuit_builder.require_one(is_lt_2)?;
+        let mut memory_ts = circuit_builder.register_read(
+            &rs1_id,
+            &mut prev_rs1_memory_ts,
+            &mut memory_ts,
+            &addend_0,
+        )?;
 
-        circuit_builder.register_read(&rs1_id, &prev_rs1_memory_ts, &memory_ts, &addend_0)?;
+        let mut memory_ts = circuit_builder.register_read(
+            &rs2_id,
+            &mut prev_rs2_memory_ts,
+            &mut memory_ts,
+            &addend_1,
+        )?;
 
-        circuit_builder.register_read(&rs2_id, &prev_rs2_memory_ts, &memory_ts, &addend_1)?;
-
-        circuit_builder.register_write(
+        let memory_ts = circuit_builder.register_write(
             &rd_id,
-            &prev_rd_memory_ts,
-            &memory_ts,
+            &mut prev_rd_memory_ts,
+            &mut memory_ts,
             &prev_rd_memory_value,
             &computed_outcome,
         )?;
+
+        let next_memory_ts = memory_ts.add_const(circuit_builder, 1.into())?;
+        circuit_builder.state_out(&next_pc, &next_memory_ts, clk.expr() + 1.into())?;
 
         Ok(InstructionConfig {
             pc,

@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 use singer_utils::structs::RAMType;
 
 use crate::{
-    circuit_builder::CircuitBuilder,
+    circuit_builder::{self, CircuitBuilder},
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     structs::{TSUInt, UInt64},
@@ -14,10 +14,10 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
     fn register_read(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &TSUInt,
-        ts: &TSUInt,
+        prev_ts: &mut TSUInt,
+        ts: &mut TSUInt,
         values: &UInt64,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<TSUInt, ZKVMError> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
@@ -44,17 +44,23 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
         );
         self.read_record(read_record)?;
         self.write_record(write_record)?;
-        Ok(())
+
+        // assert prev_ts < current_ts
+        let is_lt = prev_ts.lt(self, ts)?;
+        self.require_one(is_lt)?;
+        let next_ts = ts.add_const(self, 1.into())?;
+
+        Ok(next_ts)
     }
 
     fn register_write(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &TSUInt,
-        ts: &TSUInt,
+        prev_ts: &mut TSUInt,
+        ts: &mut TSUInt,
         prev_values: &UInt64,
         values: &UInt64,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<TSUInt, ZKVMError> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
@@ -81,6 +87,12 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
         );
         self.read_record(read_record)?;
         self.write_record(write_record)?;
-        Ok(())
+
+        // assert prev_ts < current_ts
+        let is_lt = prev_ts.lt(self, ts)?;
+        self.require_one(is_lt)?;
+        let next_ts = ts.add_const(self, 1.into())?;
+
+        Ok(next_ts)
     }
 }
