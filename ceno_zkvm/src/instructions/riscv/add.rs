@@ -16,20 +16,20 @@ use crate::{
 pub struct AddInstruction;
 
 pub struct InstructionConfig<E: ExtensionField> {
-    pub pc: PCUInt,
-    pub memory_ts: TSUInt,
+    pub pc: PCUInt<E>,
+    pub memory_ts: TSUInt<E>,
     pub clk: WitIn,
-    pub prev_rd_memory_value: UInt64,
-    pub addend_0: UInt64,
-    pub addend_1: UInt64,
-    pub outcome: UInt64,
+    pub prev_rd_memory_value: UInt64<E>,
+    pub addend_0: UInt64<E>,
+    pub addend_1: UInt64<E>,
+    pub outcome: UInt64<E>,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
-    pub prev_rs1_memory_ts: TSUInt,
-    pub prev_rs2_memory_ts: TSUInt,
-    pub prev_rd_memory_ts: TSUInt,
-    phantom: PhantomData<E>,
+    pub prev_rs1_memory_ts: TSUInt<E>,
+    pub prev_rs2_memory_ts: TSUInt<E>,
+    pub prev_rd_memory_ts: TSUInt<E>,
+    // phantom: PhantomData<E>,
 }
 
 impl<E: ExtensionField> Instruction<E> for AddInstruction {
@@ -106,7 +106,6 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             prev_rs1_memory_ts,
             prev_rs2_memory_ts,
             prev_rd_memory_ts,
-            phantom: PhantomData,
         })
     }
 }

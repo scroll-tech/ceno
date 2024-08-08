@@ -325,7 +325,7 @@ impl<E: ExtensionField> Mul for Expression<E> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct WitIn {
     pub id: WitnessId,
 }
@@ -339,6 +339,12 @@ impl<E: ExtensionField> ToExpr<E> for WitIn {
         Expression::WitIn(self.id)
     }
 }
+
+// impl<E: Expression> From<E> for WitIn {
+//     fn from(expr: E) -> Self {
+//         WitIn
+//     }
+// }
 
 impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     fn expr(&self) -> Expression<E> {
