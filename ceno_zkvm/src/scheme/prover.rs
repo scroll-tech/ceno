@@ -1,17 +1,14 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use ff_ext::ExtensionField;
 use gkr::{entered_span, exit_span, structs::Point};
 
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLE, MultilinearExtension},
-    util::ceil_log2,
-    virtual_poly::build_eq_x_r_vec,
+    mle::IntoMLE, util::ceil_log2, virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use simple_frontend::structs::WitnessId;
 use sumcheck::structs::{IOPProverMessage, IOPProverStateV2};
 use transcript::Transcript;
 
@@ -44,9 +41,9 @@ impl<E: ExtensionField> ZKVMProver<E> {
     /// major flow break down into
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
-    pub fn create_proof(
+    pub fn create_proof<'a>(
         &self,
-        witnesses: BTreeMap<WitnessId, DenseMultilinearExtension<E>>,
+        witnesses: Vec<ArcMultilinearExtension<'a, E>>,
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
@@ -58,9 +55,9 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         // sanity check
         assert_eq!(witnesses.len(), circuit.num_witin as usize);
-        witnesses.iter().all(|(_, v)| {
+        assert!(witnesses.iter().all(|v| {
             v.num_vars() == log2_num_instances && v.evaluations().len() == next_pow2_instances
-        });
+        }));
 
         // main constraint: read/write record witness inference
         let span = entered_span!("wit_inference::record");
@@ -222,15 +219,24 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         // batch sumcheck: selector + main degree > 1 constraints
         let span = entered_span!("sumcheck::main_sel");
-        let (rt_r, rt_w, rt_lk): (Vec<E>, Vec<E>, Vec<E>) = (
+        let (rt_r, rt_w, rt_lk, rt_non_lc_sumcheck): (Vec<E>, Vec<E>, Vec<E>, Vec<E>) = (
             rt_tower[..log2_num_instances + log2_r_count].to_vec(),
             rt_tower[..log2_num_instances + log2_w_count].to_vec(),
             rt_tower[..log2_num_instances + log2_lk_count].to_vec(),
+            rt_tower[..log2_num_instances].to_vec(),
         );
 
         let num_threads = proper_num_threads(log2_num_instances, max_threads);
-        let alpha_pow = get_challenge_pows(MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, transcript);
-        let (alpha_read, alpha_write, alpha_lk) = (&alpha_pow[0], &alpha_pow[1], &alpha_pow[2]);
+        let alpha_pow = get_challenge_pows(
+            MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + circuit.assert_zero_sumcheck_expressions.len(),
+            transcript,
+        );
+        let mut alpha_pow_iter = alpha_pow.iter();
+        let (alpha_read, alpha_write, alpha_lk) = (
+            alpha_pow_iter.next().unwrap(),
+            alpha_pow_iter.next().unwrap(),
+            alpha_pow_iter.next().unwrap(),
+        );
         // create selector: all ONE, but padding ZERO to ceil_log2
         let (sel_r, sel_w, sel_lk): (
             ArcMultilinearExtension<E>,
@@ -259,6 +265,25 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 sel_lk.into_mle().into(),
             )
         };
+
+        // only initialize when circuit got assert_zero_sumcheck_expressions
+        let sel_non_lc_zero_sumcheck = {
+            if !circuit.assert_zero_sumcheck_expressions.is_empty() {
+                let mut sel_non_lc_zero_sumcheck = build_eq_x_r_vec(&rt_non_lc_sumcheck);
+                if num_instances < sel_non_lc_zero_sumcheck.len() {
+                    sel_non_lc_zero_sumcheck.splice(
+                        num_instances..sel_non_lc_zero_sumcheck.len(),
+                        std::iter::repeat(E::ZERO),
+                    );
+                }
+                let sel_non_lc_zero_sumcheck: ArcMultilinearExtension<E> =
+                    sel_non_lc_zero_sumcheck.into_mle().into();
+                Some(sel_non_lc_zero_sumcheck)
+            } else {
+                None
+            }
+        };
+
         let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, log2_num_instances);
         let sel_r_threads = virtual_polys.get_all_range_polys(&sel_r);
         let sel_w_threads: Vec<ArcMultilinearExtension<'_, E>> =
@@ -331,6 +356,34 @@ impl<E: ExtensionField> ZKVMProver<E> {
             }
         }
 
+        let mut distrinct_zerocheck_terms_set = BTreeSet::new();
+        // degree > 1 zero expression sumcheck
+        if !circuit.assert_zero_sumcheck_expressions.is_empty() {
+            assert!(sel_non_lc_zero_sumcheck.is_some());
+            let sel_non_lc_zero_sumcheck_threads: Vec<ArcMultilinearExtension<'_, E>> =
+                virtual_polys.get_all_range_polys(sel_non_lc_zero_sumcheck.as_ref().unwrap());
+
+            let witnesses_threads: Vec<Vec<ArcMultilinearExtension<E>>> = witnesses
+                .iter()
+                .map(|wit_poly| virtual_polys.get_all_range_polys(wit_poly))
+                .collect();
+
+            // \sum_t (sel(rt, t) * (\sum_j alpha_{j} * all_monomial_terms(t) ))
+            for (expr, alpha) in circuit
+                .assert_zero_sumcheck_expressions
+                .iter()
+                .zip_eq(alpha_pow_iter)
+            {
+                distrinct_zerocheck_terms_set.extend(virtual_polys.add_mle_list_by_expr(
+                    Some(sel_non_lc_zero_sumcheck_threads.clone()),
+                    &witnesses_threads,
+                    expr,
+                    challenges,
+                    *alpha,
+                ));
+            }
+        }
+
         let (main_sel_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
             num_threads,
             virtual_polys.get_batched_polys(),
@@ -339,7 +392,15 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let main_sel_evals = state.get_mle_final_evaluations();
         assert_eq!(
             main_sel_evals.len(),
-            r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance + 3
+            r_counts_per_instance
+                + w_counts_per_instance
+                + lk_counts_per_instance
+                + 3
+                + if circuit.assert_zero_sumcheck_expressions.is_empty() {
+                    0
+                } else {
+                    distrinct_zerocheck_terms_set.len() + 1 // 1 from sel_non_lc_zero_sumcheck
+                }
         ); // 3 from [sel_r, sel_w, sel_lk]
         let mut main_sel_evals_iter = main_sel_evals.into_iter();
         main_sel_evals_iter.next(); // skip sel_r
@@ -354,7 +415,16 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let lk_records_in_evals = (0..lk_counts_per_instance)
             .map(|_| main_sel_evals_iter.next().unwrap())
             .collect_vec();
-        assert!(main_sel_evals_iter.next().is_none());
+        assert!(
+            // we can skip all the rest of degree > 1 monomial terms because all the witness evaluation will be evaluated at last step
+            // and pass to verifier
+            main_sel_evals_iter.count()
+                == if circuit.assert_zero_sumcheck_expressions.is_empty() {
+                    0
+                } else {
+                    distrinct_zerocheck_terms_set.len() + 1
+                }
+        );
         let input_open_point = main_sel_sumcheck_proofs.point.clone();
         assert!(input_open_point.len() == log2_num_instances);
         exit_span!(span);
@@ -362,7 +432,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let span = entered_span!("witin::evals");
         let wits_in_evals = witnesses
             .par_iter()
-            .map(|(_, poly)| poly.evaluate(&input_open_point))
+            .map(|poly| poly.evaluate(&input_open_point))
             .collect();
         exit_span!(span);
 

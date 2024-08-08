@@ -18,6 +18,7 @@ impl<E: ExtensionField> CircuitBuilder<E> {
             lk_expressions: vec![],
             assert_zero_expressions: vec![],
             assert_zero_sumcheck_expressions: vec![],
+            max_non_lc_degree: 0,
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
             phantom: std::marker::PhantomData,
@@ -96,7 +97,12 @@ impl<E: ExtensionField> CircuitBuilder<E> {
         if assert_zero_expr.degree() == 1 {
             self.assert_zero_expressions.push(assert_zero_expr);
         } else {
-            // TODO check expression must be in multivariate monomial form
+            assert_eq!(
+                assert_zero_expr.is_monomial_form(),
+                true,
+                "only support sumcheck in monomial form"
+            );
+            self.max_non_lc_degree = self.max_non_lc_degree.max(assert_zero_expr.degree());
             self.assert_zero_sumcheck_expressions.push(assert_zero_expr);
         }
         Ok(())
@@ -132,6 +138,7 @@ impl<E: ExtensionField> CircuitBuilder<E> {
             lk_expressions: self.lk_expressions.clone(),
             assert_zero_expressions: self.assert_zero_expressions.clone(),
             assert_zero_sumcheck_expressions: self.assert_zero_sumcheck_expressions.clone(),
+            max_non_lc_degree: self.max_non_lc_degree,
         }
     }
 }

@@ -65,6 +65,10 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         circuit_builder.assert_u5(rs2_id.expr())?;
         circuit_builder.assert_u5(rd_id.expr())?;
 
+        // TODO remove me, this is just for testing degree > 1 sumcheck in main constraints
+        circuit_builder
+            .require_zero(rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr())?;
+
         let mut prev_rs1_ts = TSUInt::new(circuit_builder);
         let mut prev_rs2_ts = TSUInt::new(circuit_builder);
         let mut prev_rd_ts = TSUInt::new(circuit_builder);
@@ -106,15 +110,14 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
 
 #[cfg(test)]
 mod test {
-    use std::collections::BTreeMap;
 
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
     use gkr::structs::PointAndEval;
     use goldilocks::{Goldilocks, GoldilocksExt2};
+    use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLE;
-    use simple_frontend::structs::WitnessId;
     use transcript::Transcript;
 
     use crate::{
@@ -134,17 +137,16 @@ mod test {
         let circuit = circuit_builder.finalize_circuit();
 
         // generate mock witness
-        let mut wits_in = BTreeMap::new();
         let num_instances = 1 << 2;
-        (0..circuit.num_witin as usize).for_each(|witness_id| {
-            wits_in.insert(
-                witness_id as WitnessId,
+        let wits_in = (0..circuit.num_witin as usize)
+            .map(|_| {
                 (0..num_instances)
                     .map(|_| Goldilocks::random(&mut rng))
                     .collect::<Vec<Goldilocks>>()
-                    .into_mle(),
-            );
-        });
+                    .into_mle()
+                    .into()
+            })
+            .collect_vec();
 
         // get proof
         let prover = ZKVMProver::new(circuit.clone()); // circuit clone due to verifier alos need circuit reference

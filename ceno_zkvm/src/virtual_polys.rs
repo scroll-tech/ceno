@@ -58,13 +58,22 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         self.polys
     }
 
+    /// add mle terms into virtual poly by expression
+    /// return distinct witin in set
     pub fn add_mle_list_by_expr(
         &mut self,
+        // thread_based selector
+        selector: Option<Vec<ArcMultilinearExtension<'a, E>>>,
         // witin_id -> thread_id
-        wit_ins: Vec<Vec<ArcMultilinearExtension<'a, E>>>,
+        wit_ins: &[Vec<ArcMultilinearExtension<'a, E>>],
         expr: &Expression<E>,
         challenges: &[E],
-    ) {
+        // sumcheck batch challenge
+        alpha: E,
+    ) -> BTreeSet<u16> {
+        if let Some(sel) = &selector {
+            assert_eq!(sel.len(), self.num_threads);
+        }
         assert!(expr.is_monomial_form());
         let monomial_terms = expr.evaluate(
             &|witness_id| {
@@ -122,14 +131,28 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 todo!("make virtual poly support pure constant")
             }
             for thread_id in 0..self.num_threads {
+                let sel = selector
+                    .as_ref()
+                    .map(|sel| vec![sel[thread_id].clone()])
+                    .unwrap_or(vec![]);
                 let terms_polys = monomial_term
                     .iter()
                     .map(|wit_id| wit_ins[*wit_id as usize][thread_id].clone())
                     .collect_vec();
 
-                self.add_mle_list(thread_id, terms_polys, *constant);
+                self.add_mle_list(
+                    thread_id,
+                    vec![sel, terms_polys].concat(),
+                    *constant * alpha,
+                );
             }
         }
+
+        let num_distinct_witins = monomial_terms
+            .into_iter()
+            .flat_map(|(_, monomial_term)| monomial_term.into_iter().collect_vec())
+            .collect::<BTreeSet<u16>>();
+        num_distinct_witins
     }
 }
 
@@ -166,7 +189,8 @@ mod tests {
         let expr: Expression<E> =
             Expression::from(3) * x.expr() * y.expr() + Expression::from(2) * y.expr();
 
-        println!("expr {:?}", expr);
-        virtual_polys.add_mle_list_by_expr(wits_threads, &expr, &[]);
+        let distrinct_zerocheck_terms_set =
+            virtual_polys.add_mle_list_by_expr(None, &wits_threads, &expr, &[], 1.into());
+        assert!(distrinct_zerocheck_terms_set.len() == 2);
     }
 }

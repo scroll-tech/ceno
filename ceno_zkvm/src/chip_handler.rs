@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, WitIn},
+    expression::WitIn,
     structs::{PCUInt, TSUInt, UInt64},
 };
 

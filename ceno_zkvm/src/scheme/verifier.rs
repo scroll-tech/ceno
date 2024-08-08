@@ -15,7 +15,10 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::Circuit, error::ZKVMError, scheme::constants::NUM_FANIN, structs::TowerProofs,
+    circuit_builder::Circuit,
+    error::ZKVMError,
+    scheme::constants::{NUM_FANIN, SEL_DEGREE},
+    structs::TowerProofs,
     utils::get_challenge_pows,
 };
 
@@ -97,8 +100,18 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             rt_tower[..log2_num_instances + log2_lk_count].to_vec(),
         );
 
-        let alpha_pow = get_challenge_pows(MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, transcript);
-        let (alpha_read, alpha_write, alpha_lk) = (&alpha_pow[0], &alpha_pow[1], &alpha_pow[2]);
+        let alpha_pow = get_challenge_pows(
+            MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + self.circuit.assert_zero_sumcheck_expressions.len(),
+            transcript,
+        );
+        let mut alpha_pow_iter = alpha_pow.iter();
+        let (alpha_read, alpha_write, alpha_lk) = (
+            alpha_pow_iter.next().unwrap(),
+            alpha_pow_iter.next().unwrap(),
+            alpha_pow_iter.next().unwrap(),
+        );
+        // alpha_read * (out_r[rt] - 1) + alpha_write * (out_w[rt] - 1) + alpha_lk * (out_lk_q)
+        // + 0 // 0 come from zero check
         let claim_sum = *alpha_read * (record_evals[0] - E::ONE)
             + *alpha_write * (record_evals[1] - E::ONE)
             + *alpha_lk * (logup_q_evals[0]);
@@ -109,13 +122,13 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 proofs: proof.main_sel_sumcheck_proofs.clone(),
             },
             &VPAuxInfo {
-                max_degree: 2,
+                max_degree: SEL_DEGREE.max(self.circuit.max_non_lc_degree),
                 num_variables: log2_num_instances,
                 phantom: PhantomData,
             },
             transcript,
         );
-        let (main_sel_eval_point, expected_evaluation) = (
+        let (input_opening_point, expected_evaluation) = (
             main_sel_subclaim
                 .point
                 .iter()
@@ -127,8 +140,8 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let eq_w = build_eq_x_r_vec_sequential(&rt_w[..log2_w_count]);
         let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
-        let (sel_r, sel_w, sel_lk) = {
-            // TODO optimize sel evaluation
+        let (sel_r, sel_w, sel_lk, sel_non_lc_zero_sumcheck) = {
+            // TODO make sel evaluation succint
             let mut sel = vec![E::BaseField::ONE; 1 << log2_num_instances];
             if num_instances < sel.len() {
                 sel.splice(
@@ -138,14 +151,27 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             }
             let sel = sel.into_mle();
             (
-                eq_eval(&rt_r[log2_r_count..], &main_sel_eval_point)
+                eq_eval(&rt_r[log2_r_count..], &input_opening_point)
                     * sel.evaluate(&rt_r[log2_r_count..]),
-                eq_eval(&rt_w[log2_w_count..], &main_sel_eval_point)
+                eq_eval(&rt_w[log2_w_count..], &input_opening_point)
                     * sel.evaluate(&rt_w[log2_w_count..]),
-                eq_eval(&rt_lk[log2_lk_count..], &main_sel_eval_point)
+                eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
                     * sel.evaluate(&rt_lk[log2_lk_count..]),
+                // only initialize when circuit got non empty assert_zero_sumcheck_expressions
+                {
+                    let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
+                    if !self.circuit.assert_zero_sumcheck_expressions.is_empty() {
+                        Some(
+                            eq_eval(&rt_non_lc_sumcheck, &input_opening_point)
+                                * sel.evaluate(&rt_non_lc_sumcheck),
+                        )
+                    } else {
+                        None
+                    }
+                },
             )
         };
+
         let computed_evals = [
             // read
             *alpha_read
@@ -169,6 +195,21 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 * ((0..lk_counts_per_instance)
                     .map(|i| proof.lk_records_in_evals[i] * eq_lk[i])
                     .sum::<E>()),
+            // degree > 1 zero exp sumcheck
+            {
+                // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))
+                sel_non_lc_zero_sumcheck.unwrap_or(E::ZERO)
+                    * self
+                        .circuit
+                        .assert_zero_sumcheck_expressions
+                        .iter()
+                        .zip_eq(alpha_pow_iter)
+                        .map(|(expr, alpha)| {
+                            // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
+                            *alpha * eval_by_expr(&proof.wits_in_evals, challenges, &expr)
+                        })
+                        .sum::<E>()
+            },
         ]
         .iter()
         .sum::<E>();
@@ -196,8 +237,6 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         {
             return Err(ZKVMError::VerifyError("record evaluate != expected_evals"));
         }
-
-        let input_opening_point = main_sel_eval_point;
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
         if self
