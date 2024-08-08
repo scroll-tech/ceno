@@ -330,6 +330,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 );
             }
         }
+
         let (main_sel_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
             num_threads,
             virtual_polys.get_batched_polys(),
