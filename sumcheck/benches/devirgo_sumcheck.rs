@@ -84,7 +84,7 @@ const RAYON_NUM_THREADS: usize = 8;
 fn sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    for nv in 24..25 {
+    for nv in [13, 14, 15, 16].into_iter() {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("sumcheck_nv_{}", nv));
         group.sample_size(NUM_SAMPLES);
@@ -122,7 +122,7 @@ fn sumcheck_fn(c: &mut Criterion) {
 fn devirgo_sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    for nv in 24..25 {
+    for nv in [13, 14, 15, 16].into_iter() {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("devirgo_nv_{}", nv));
         group.sample_size(NUM_SAMPLES);
