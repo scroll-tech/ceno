@@ -18,9 +18,16 @@ pub enum Expression<E: ExtensionField> {
     Sum(Box<Expression<E>>, Box<Expression<E>>),
     /// This is the product of two polynomials
     Product(Box<Expression<E>>, Box<Expression<E>>),
-    /// This is a ax + b polynomial
+    /// This is x, a, b expr to represent ax + b polynomial
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
     Challenge(ChallengeId, usize, E, E), // (challenge_id, power, scalar, offset)
+}
+
+/// this is used as finite state machine state
+/// for differentiate a expression is in monomial form or not
+enum MonomialState {
+    SumTerm,
+    ProductTerm,
 }
 
 impl<E: ExtensionField> Expression<E> {
@@ -67,6 +74,46 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Challenge(challenge_id, pow, scalar, offset) => {
                 challenge(*challenge_id, *pow, *scalar, *offset)
             }
+        }
+    }
+
+    pub fn is_monomial_form(&self) -> bool {
+        Self::is_monomial_form_inner(MonomialState::SumTerm, self)
+    }
+
+    fn is_zero_expr(expr: &Expression<E>) -> bool {
+        match expr {
+            Expression::WitIn(_) => false,
+            Expression::Constant(c) => *c == E::BaseField::ZERO,
+            Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
+            Expression::Product(a, b) => Self::is_zero_expr(a) || Self::is_zero_expr(b),
+            Expression::ScaledSum(_, _, _) => false,
+            Expression::Challenge(_, _, _, _) => false,
+        }
+    }
+    fn is_monomial_form_inner(s: MonomialState, expr: &Expression<E>) -> bool {
+        match (expr, s) {
+            (Expression::WitIn(_), MonomialState::SumTerm) => true,
+            (Expression::WitIn(_), MonomialState::ProductTerm) => true,
+            (Expression::Constant(_), MonomialState::SumTerm) => true,
+            (Expression::Constant(_), MonomialState::ProductTerm) => true,
+            (Expression::Sum(a, b), MonomialState::SumTerm) => {
+                Self::is_monomial_form_inner(MonomialState::SumTerm, a)
+                    && Self::is_monomial_form_inner(MonomialState::SumTerm, b)
+            }
+            (Expression::Sum(_, _), MonomialState::ProductTerm) => false,
+            (Expression::Product(a, b), MonomialState::SumTerm) => {
+                Self::is_monomial_form_inner(MonomialState::ProductTerm, a)
+                    && Self::is_monomial_form_inner(MonomialState::ProductTerm, b)
+            }
+            (Expression::Product(a, b), MonomialState::ProductTerm) => {
+                Self::is_monomial_form_inner(MonomialState::ProductTerm, a)
+                    && Self::is_monomial_form_inner(MonomialState::ProductTerm, b)
+            }
+            (Expression::ScaledSum(_, _, _), MonomialState::SumTerm) => true,
+            (Expression::ScaledSum(_, _, b), MonomialState::ProductTerm) => Self::is_zero_expr(b),
+            (Expression::Challenge(_, _, _, _), MonomialState::SumTerm) => true,
+            (Expression::Challenge(_, _, _, _), MonomialState::ProductTerm) => true,
         }
     }
 }
@@ -424,5 +471,59 @@ mod tests {
                 Box::new(Expression::Challenge(0, 2, E::ONE, E::ZERO,)),
             )
         );
+    }
+
+    #[test]
+    fn test_is_monomial_form() {
+        type E = GoldilocksExt2;
+        let mut cb = CircuitBuilder::<E>::new();
+        let x = cb.create_witin();
+        let y = cb.create_witin();
+        let z = cb.create_witin();
+        // scaledsum * challenge
+        // 3 * x + 2
+        let expr: Expression<E> =
+            Into::<Expression<E>>::into(3usize) * x.expr() + Into::<Expression<E>>::into(2usize);
+        assert_eq!(expr.is_monomial_form(), true);
+
+        // 2 product term
+        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr() * y.expr()
+            + Into::<Expression<E>>::into(2usize) * x.expr();
+        assert_eq!(expr.is_monomial_form(), true);
+
+        // complex linear operation
+        // (2c + 3) * x * y - 6z
+        let expr: Expression<E> =
+            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr() * y.expr()
+                - Into::<Expression<E>>::into(6usize) * z.expr();
+        assert_eq!(expr.is_monomial_form(), true);
+
+        // complex linear operation
+        // (2c + 3) * x * y - 6z
+        let expr: Expression<E> =
+            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr() * y.expr()
+                - Into::<Expression<E>>::into(6usize) * z.expr();
+        assert_eq!(expr.is_monomial_form(), true);
+
+        // complex linear operation
+        // (2 * x + 3) * 3 + 6 * 8
+        let expr: Expression<E> = (Into::<Expression<E>>::into(2usize) * x.expr()
+            + Into::<Expression<E>>::into(3usize))
+            * Into::<Expression<E>>::into(3usize)
+            + Into::<Expression<E>>::into(6usize) * Into::<Expression<E>>::into(8usize);
+        assert_eq!(expr.is_monomial_form(), true);
+    }
+
+    #[test]
+    fn test_not_monomial_form() {
+        type E = GoldilocksExt2;
+        let mut cb = CircuitBuilder::<E>::new();
+        let x = cb.create_witin();
+        let y = cb.create_witin();
+        // scaledsum * challenge
+        // (x + 1) * (y + 1)
+        let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr())
+            * (Into::<Expression<E>>::into(2usize) + y.expr());
+        assert_eq!(expr.is_monomial_form(), false);
     }
 }

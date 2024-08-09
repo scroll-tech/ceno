@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
@@ -17,7 +17,6 @@ use rayon::{
     },
     prelude::ParallelSliceMut,
 };
-use simple_frontend::structs::WitnessId;
 
 use crate::{expression::Expression, scheme::constants::MIN_PAR_SIZE};
 
@@ -202,20 +201,12 @@ pub(crate) fn infer_tower_product_witness<'a, E: ExtensionField>(
 }
 
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField>(
-    witnesses: &BTreeMap<WitnessId, DenseMultilinearExtension<E>>,
+    witnesses: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E],
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
     expr.evaluate::<ArcMultilinearExtension<'_, E>>(
-        &|witness_id| {
-            let a: ArcMultilinearExtension<E> = Arc::new(
-                witnesses
-                    .get(&witness_id)
-                    .expect("non exist witness")
-                    .clone(),
-            );
-            a
-        },
+        &|witness_id| witnesses[witness_id as usize].clone(),
         &|scalar| {
             let scalar: ArcMultilinearExtension<E> = Arc::new(
                 DenseMultilinearExtension::from_evaluations_vec(0, vec![scalar]),

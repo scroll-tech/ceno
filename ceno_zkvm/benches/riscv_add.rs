@@ -1,10 +1,7 @@
 #![allow(clippy::manual_memcpy)]
 #![allow(clippy::needless_range_loop)]
 
-use std::{
-    collections::BTreeMap,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use ark_std::test_rng;
 use ceno_zkvm::{
@@ -17,8 +14,8 @@ use criterion::*;
 
 use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
+use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLE;
-use simple_frontend::structs::WitnessId;
 use transcript::Transcript;
 
 cfg_if::cfg_if! {
@@ -93,17 +90,16 @@ fn bench_add(c: &mut Criterion) {
                     },
                     |(mut rng, real_challenges)| {
                         // generate mock witness
-                        let mut wits_in = BTreeMap::new();
                         let num_instances = 1 << instance_num_vars;
-                        (0..num_witin as usize).for_each(|witness_id| {
-                            wits_in.insert(
-                                witness_id as WitnessId,
+                        let wits_in = (0..num_witin as usize)
+                            .map(|_| {
                                 (0..num_instances)
                                     .map(|_| Goldilocks::random(&mut rng))
                                     .collect::<Vec<Goldilocks>>()
-                                    .into_mle(),
-                            );
-                        });
+                                    .into_mle()
+                                    .into()
+                            })
+                            .collect_vec();
                         let timer = Instant::now();
                         let _ = prover
                             .create_proof(

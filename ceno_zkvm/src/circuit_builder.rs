@@ -19,6 +19,8 @@ pub struct CircuitBuilder<E: ExtensionField> {
     pub assert_zero_expressions: Vec<Expression<E>>,
     /// main constraints zero expression for expression degree > 1, which require sumcheck to prove
     pub assert_zero_sumcheck_expressions: Vec<Expression<E>>,
+    /// max zero sumcheck degree
+    pub max_non_lc_degree: usize,
 
     // alpha, beta challenge for chip record
     pub chip_record_alpha: Expression<E>,
@@ -39,4 +41,7 @@ pub struct Circuit<E: ExtensionField> {
     pub assert_zero_expressions: Vec<Expression<E>>,
     /// main constraints zero expression for expression degree > 1, which require sumcheck to prove
     pub assert_zero_sumcheck_expressions: Vec<Expression<E>>,
+
+    /// max zero sumcheck degree
+    pub max_non_lc_degree: usize,
 }
