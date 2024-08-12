@@ -52,38 +52,89 @@ pub fn proper_num_threads(num_vars: usize, expected_max_threads: usize) -> usize
     }
 }
 
-// evaluate sel(r) for raw MLE [1, 1,...1, 0, 0, 0] where the length of [1] equal to #num_instance
+// evaluate sel(r) for raw MLE where the length of [1] equal to #num_instance
 pub fn sel_eval<E: ExtensionField>(num_instances: usize, r: &[E]) -> E {
-    assert!(num_instances > 0);
-    E::ONE - segment_eval_greater_than(num_instances - 1, &r)
+    assert!(num_instances > 0 && !r.is_empty());
+    // e.g. lagrange basis with boolean hypercube n=3 can be viewed as binary tree
+    //         root
+    //       /     \
+    //      / \   / \
+    //     /\ /\ /\ /\
+    // with 2^n leafs as [eq(r, 000), eq(r, 001), eq(r, 010), eq(r, 011), eq(r, 100), eq(r, 101), eq(r, 110), eq(r, 111)]
+
+    // giving a selector for evaluations e.g. [1, 1, 1, 1, 1, 1, 0, 0]
+    // it's equivalent that we only wanna sum up to 6th terms, in index position should be 6-1 = 5 = (101)_2
+    //       /     \
+    //      / \   / \
+    //     /\ /\ /\ /\
+    //     11 11 11 00
+
+    // which algorithms can be view as traversing (101)_2 from msb to lsb order and check bit ?= 1
+    // if bit = 1 we need to sum all the left sub-tree, otherwise we do nothing
+    // and finally, add the leaf term to final sum
+
+    // sum for all lagrange terms = 1 = (1-r2 + r2) x (1-r1 + r1) x (1-r0 + r0)...
+    // for left sub-tree terms of root, it's equivalent to (1-r2) x (1-r1 + r1) x (1-r0 + r0) = (1-r2)
+    // observe from the rule, the left sub-tree of any intermediate node is eq(r.rev()[..depth], bit_patterns) x (1-r[depth]) x 1
+    // bit_patterns := bit traverse from root to this node
+
+    // so for the above case
+    // sum
+    // = (1-r2) -> left sub-tree from root
+    // + 0 -> goes to left, therefore do nothing
+    // + (r2) x (1-r1) x (1-r0) -> goes to right, therefore add left sub-tree
+    // + (r2) x (1-r1) x (r0) -> final term
+
+    let mut acc = E::ONE;
+    let mut sum = E::ZERO;
+
+    let (bits, _) = (0..r.len()).fold((vec![], num_instances - 1), |(mut bits, mut cur_num), _| {
+        let bit = cur_num & 1;
+        bits.push(bit);
+        cur_num = cur_num >> 1;
+
+        (bits, cur_num)
+    });
+
+    for (r, bit) in r.iter().rev().zip(bits.iter().rev()) {
+        if *bit == 1 {
+            // push left sub tree
+            sum += acc * (E::ONE - r);
+            // acc
+            acc *= r
+        } else {
+            acc *= E::ONE - r;
+        }
+    }
+    sum += acc; // final term
+    sum
 }
 
-/// This is to compute a segment indicator. Specifically, it is an MLE of the
-/// following vector:
-///     segment_{\mathbf{x}}
-///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i b_i + (1 - x_i)(1 - b_i))
-pub(crate) fn segment_eval_greater_than<E: ExtensionField>(min_idx: usize, a: &[E]) -> E {
-    let running_product2 = {
-        let mut running_product = vec![E::ZERO; a.len() + 1];
-        running_product[a.len()] = E::ONE;
-        for i in (0..a.len()).rev() {
-            let bit = E::from(((min_idx >> i) & 1) as u64);
-            running_product[i] =
-                running_product[i + 1] * (a[i] * bit + (E::ONE - a[i]) * (E::ONE - bit));
-        }
-        running_product
-    };
-    // Here is an example of how this works:
-    // Suppose min_idx = (110101)_2
-    // Then ans = eq(11011, a[1..6])
-    //          + eq(111, a[3..6], b[3..6])
-    let mut ans = E::ZERO;
-    for i in 0..a.len() {
-        let bit = (min_idx >> i) & 1;
-        if bit == 1 {
-            continue;
-        }
-        ans += running_product2[i + 1] * a[i];
+#[cfg(test)]
+mod tests {
+    use goldilocks::GoldilocksExt2;
+
+    use crate::utils::sel_eval;
+    use ff::Field;
+
+    #[test]
+    fn test_sel_eval() {
+        type E = GoldilocksExt2;
+        let ra = [E::from(2), E::from(3), E::from(4)]; // r2, r1, r0
+
+        assert_eq!(
+            sel_eval(6, &ra),
+            (E::from(1) - E::from(4)) // 1-r0
+                + (E::from(4)) * (E::ONE - E::from(3)) * (E::ONE - E::from(2)) // (r0) * (1-r1) * (1-r2)
+                + (E::from(4)) * (E::ONE - E::from(3)) * (E::from(2)) // (r0) * (1-r1) * (r2)
+        );
+
+        assert_eq!(
+            sel_eval(5, &ra),
+            (E::from(1) - E::from(4)) // 1-r0
+                + (E::from(4)) * (E::ONE - E::from(3)) * (E::ONE - E::from(2)) /* (r0) * (1-r1) * (1-r2) */
+        );
+
+        // assert_eq!(sel_eval(7, &ra), sel_eval_ori(7, &ra));
     }
-    ans
 }
