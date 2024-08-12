@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use ark_std::iterable::Iterable;
-use ff_ext::{ff::Field, ExtensionField};
+use ff_ext::ExtensionField;
 use gkr::{
     structs::{Point, PointAndEval},
     util::ceil_log2,
@@ -19,7 +19,7 @@ use crate::{
     error::ZKVMError,
     scheme::constants::{NUM_FANIN, SEL_DEGREE},
     structs::TowerProofs,
-    utils::get_challenge_pows,
+    utils::{get_challenge_pows, sel_eval},
 };
 
 use super::{constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMProof};
@@ -141,29 +141,20 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
         let (sel_r, sel_w, sel_lk, sel_non_lc_zero_sumcheck) = {
-            // TODO make sel evaluation succint
-            let mut sel = vec![E::BaseField::ONE; 1 << log2_num_instances];
-            if num_instances < sel.len() {
-                sel.splice(
-                    num_instances..sel.len(),
-                    std::iter::repeat(E::BaseField::ZERO),
-                );
-            }
-            let sel = sel.into_mle();
             (
                 eq_eval(&rt_r[log2_r_count..], &input_opening_point)
-                    * sel.evaluate(&rt_r[log2_r_count..]),
+                    * sel_eval(num_instances, &rt_r[log2_r_count..]),
                 eq_eval(&rt_w[log2_w_count..], &input_opening_point)
-                    * sel.evaluate(&rt_w[log2_w_count..]),
+                    * sel_eval(num_instances, &rt_w[log2_w_count..]),
                 eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
-                    * sel.evaluate(&rt_lk[log2_lk_count..]),
+                    * sel_eval(num_instances, &rt_lk[log2_lk_count..]),
                 // only initialize when circuit got non empty assert_zero_sumcheck_expressions
                 {
                     let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
                     if !self.circuit.assert_zero_sumcheck_expressions.is_empty() {
                         Some(
                             eq_eval(&rt_non_lc_sumcheck, &input_opening_point)
-                                * sel.evaluate(&rt_non_lc_sumcheck),
+                                * sel_eval(num_instances, &rt_non_lc_sumcheck),
                         )
                     } else {
                         None

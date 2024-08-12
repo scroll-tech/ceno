@@ -51,3 +51,39 @@ pub fn proper_num_threads(num_vars: usize, expected_max_threads: usize) -> usize
         (1 << (num_vars - min_numvar_per_thread)).min(expected_max_threads)
     }
 }
+
+// evaluate sel(r) for raw MLE [1, 1,...1, 0, 0, 0] where the length of [1] equal to #num_instance
+pub fn sel_eval<E: ExtensionField>(num_instances: usize, r: &[E]) -> E {
+    assert!(num_instances > 0);
+    E::ONE - segment_eval_greater_than(num_instances - 1, &r)
+}
+
+/// This is to compute a segment indicator. Specifically, it is an MLE of the
+/// following vector:
+///     segment_{\mathbf{x}}
+///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i b_i + (1 - x_i)(1 - b_i))
+pub(crate) fn segment_eval_greater_than<E: ExtensionField>(min_idx: usize, a: &[E]) -> E {
+    let running_product2 = {
+        let mut running_product = vec![E::ZERO; a.len() + 1];
+        running_product[a.len()] = E::ONE;
+        for i in (0..a.len()).rev() {
+            let bit = E::from(((min_idx >> i) & 1) as u64);
+            running_product[i] =
+                running_product[i + 1] * (a[i] * bit + (E::ONE - a[i]) * (E::ONE - bit));
+        }
+        running_product
+    };
+    // Here is an example of how this works:
+    // Suppose min_idx = (110101)_2
+    // Then ans = eq(11011, a[1..6])
+    //          + eq(111, a[3..6], b[3..6])
+    let mut ans = E::ZERO;
+    for i in 0..a.len() {
+        let bit = (min_idx >> i) & 1;
+        if bit == 1 {
+            continue;
+        }
+        ans += running_product2[i + 1] * a[i];
+    }
+    ans
+}
