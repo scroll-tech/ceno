@@ -346,7 +346,7 @@ where
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
         let mut bh_evals = poly.evals().to_vec();
-        let coeffs = interpolate_over_boolean_hypercube(&poly.evals().to_vec());
+        let coeffs = interpolate_over_boolean_hypercube(&bh_evals);
 
         let num_vars = log2_strict(bh_evals.len());
         assert!(num_vars <= pp.max_num_vars && num_vars >= V::get_basecode());
@@ -914,7 +914,7 @@ where
 }
 
 // Split the input into chunks of message size, encode each message, and return the codewords
-fn encode_rs_basecode<F: SmallField>(
+pub fn encode_rs_basecode<F: SmallField>(
     poly: &Vec<F>,
     rate: usize,
     message_size: usize,
@@ -1041,7 +1041,7 @@ pub fn evaluate_over_foldable_domain<F: SmallField>(
     coeffs_with_rep
 }
 
-fn interpolate_over_boolean_hypercube<F: SmallField>(evals: &Vec<F>) -> Vec<F> {
+pub fn interpolate_over_boolean_hypercube<F: SmallField>(evals: &Vec<F>) -> Vec<F> {
     let timer = start_timer!(|| "interpolate_over_hypercube");
     //iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
     let n = log2_strict(evals.len());

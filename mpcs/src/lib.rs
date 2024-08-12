@@ -367,8 +367,9 @@ use poly::multilinear::MultilinearPolynomial;
 
 mod basefold;
 pub use basefold::{
-    Basefold, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldDefault,
-    BasefoldDefaultParams, BasefoldExtParams, BasefoldParams,
+    encode_rs_basecode, interpolate_over_boolean_hypercube, Basefold, BasefoldCommitment,
+    BasefoldCommitmentWithData, BasefoldDefault, BasefoldDefaultParams, BasefoldExtParams,
+    BasefoldParams,
 };
 
 fn validate_input<'a, F: Field>(
