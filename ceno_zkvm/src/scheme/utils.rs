@@ -379,6 +379,27 @@ mod tests {
     }
 
     #[test]
+    fn test_interleaving_mles_to_mles_edge_case() {
+        type E = GoldilocksExt2;
+        let num_product_fanin = 2;
+        // one instance, 2 mles: [[2], [3]]
+        let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
+            vec![E::from(2u64)].into_mle().into(),
+            vec![E::from(3u64)].into_mle().into(),
+        ];
+        let res = interleaving_mles_to_mles(&input_mles, 0, 2, num_product_fanin, E::ONE);
+        // [[1, 3, 5, 7], [2, 4, 6, 8]]
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::ONE, E::from(3u64), E::from(5u64), E::from(7u64)],
+        );
+        assert_eq!(
+            res[1].get_ext_field_vec(),
+            vec![E::from(2u64), E::from(4u64), E::from(6u64), E::from(8u64)],
+        );
+    }
+
+    #[test]
     fn test_interleaving_mles_to_mles() {
         type E = GoldilocksExt2;
         let num_product_fanin = 2;

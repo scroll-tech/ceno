@@ -137,7 +137,7 @@ mod test {
         let circuit = circuit_builder.finalize_circuit();
 
         // generate mock witness
-        let num_instances = 1 << 2;
+        let num_instances = 1 << 0;
         let wits_in = (0..circuit.num_witin as usize)
             .map(|_| {
                 (0..num_instances)
