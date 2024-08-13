@@ -545,11 +545,9 @@ impl TowerProver {
 
                     // sanity check
                     assert_eq!(layer_polys.len(), num_fanin);
-                    assert!(
-                        layer_polys
-                            .iter()
-                            .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round)))
-                    );
+                    assert!(layer_polys
+                        .iter()
+                        .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round))));
 
                     // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
                     for (thread_id, eq) in (0..num_threads).zip(eq_threads.iter()) {
@@ -572,11 +570,9 @@ impl TowerProver {
                     let layer_polys = &s.witness[round];
                     // sanity check
                     assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
-                    assert!(
-                        layer_polys
-                            .iter()
-                            .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
-                    );
+                    assert!(layer_polys
+                        .iter()
+                        .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),);
 
                     let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
 
