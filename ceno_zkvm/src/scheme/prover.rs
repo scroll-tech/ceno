@@ -91,13 +91,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
         // as last layer is the output of sel stage
         let span = entered_span!("wit_inference::tower_witness_r_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
-        let r_records_last_layer = interleaving_mles_to_mles(
-            r_records_wit,
-            log2_num_instances,
-            log2_r_count,
-            NUM_FANIN,
-            E::ONE,
-        );
+        let r_records_last_layer =
+            interleaving_mles_to_mles(r_records_wit, log2_num_instances, NUM_FANIN, E::ONE);
         assert_eq!(r_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
@@ -112,13 +107,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         let span = entered_span!("wit_inference::tower_witness_w_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
-        let w_records_last_layer = interleaving_mles_to_mles(
-            w_records_wit,
-            log2_num_instances,
-            log2_w_count,
-            NUM_FANIN,
-            E::ONE,
-        );
+        let w_records_last_layer =
+            interleaving_mles_to_mles(w_records_wit, log2_num_instances, NUM_FANIN, E::ONE);
         assert_eq!(w_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
@@ -132,13 +122,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
-        let lk_records_last_layer = interleaving_mles_to_mles(
-            lk_records_wit,
-            log2_num_instances,
-            log2_lk_count,
-            2,
-            E::ZERO,
-        );
+        let lk_records_last_layer =
+            interleaving_mles_to_mles(lk_records_wit, log2_num_instances, 2, E::ZERO);
         assert_eq!(lk_records_last_layer.len(), 2);
         exit_span!(span);
 
@@ -148,7 +133,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         if cfg!(test) {
             // sanity check
-            assert_eq!(lk_wit_layers.len(), (log2_num_instances + log2_lk_count));
+            assert_eq!(lk_wit_layers.len(), log2_num_instances + log2_lk_count);
             assert_eq!(r_wit_layers.len(), (log2_num_instances + log2_r_count));
             assert_eq!(w_wit_layers.len(), (log2_num_instances + log2_w_count));
             assert!(lk_wit_layers.iter().enumerate().all(|(i, w)| {
