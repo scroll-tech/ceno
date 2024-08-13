@@ -9,8 +9,8 @@ use super::GlobalStateRegisterMachineChipOperations;
 impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitBuilder<E> {
     fn state_in(
         &mut self,
-        pc: &crate::structs::PCUInt,
-        ts: &crate::structs::TSUInt,
+        pc: &crate::structs::PCUInt<E>,
+        ts: &crate::structs::TSUInt<E>,
     ) -> Result<(), ZKVMError> {
         let items: Vec<Expression<E>> = [
             vec![Expression::Constant(E::BaseField::from(
@@ -27,8 +27,8 @@ impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitB
 
     fn state_out(
         &mut self,
-        pc: &crate::structs::PCUInt,
-        ts: &crate::structs::TSUInt,
+        pc: &crate::structs::PCUInt<E>,
+        ts: &crate::structs::TSUInt<E>,
     ) -> Result<(), ZKVMError> {
         let items: Vec<Expression<E>> = [
             vec![Expression::Constant(E::BaseField::from(

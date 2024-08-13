@@ -13,7 +13,7 @@ pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
 
-#[derive(Clone, EnumIter)]
+#[derive(Clone, EnumIter, Debug)]
 pub enum UintLimb<E: ExtensionField> {
     WitIn(Vec<WitIn>),
     Expression(Vec<Expression<E>>),
@@ -49,8 +49,27 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
     pub fn expr(&self) -> Vec<Expression<E>> {
         match &self.limbs {
-            UintLimb::WitIn(c) => c.iter().map(ToExpr::expr).collect::<Vec<Expression<E>>>(),
-            UintLimb::Expression(e) => e.clone(),
+            UintLimb::WitIn(c) => {
+                let mut s = c.clone();
+                if let Some(v) = &self.carries {
+                    s = [s, v.clone()].concat();
+                }
+                c.iter().map(ToExpr::expr).collect::<Vec<Expression<E>>>()
+            }
+            UintLimb::Expression(e) => {
+                assert!(self.carries.is_some(), "carries should not be None");
+                e.clone()
+                // [
+                //     e.clone(),
+                //     self.carries
+                //         .as_ref()
+                //         .unwrap()
+                //         .iter()
+                //         .map(ToExpr::expr)
+                //         .collect::<Vec<Expression<E>>>(),
+                // ]
+                // .concat()
+            }
         }
     }
 

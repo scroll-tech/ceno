@@ -20,16 +20,16 @@ pub trait RegisterChipOperations<E: ExtensionField> {
     fn register_read(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &TSUInt<E>,
-        ts: &TSUInt<E>,
+        prev_ts: &mut TSUInt<E>,
+        ts: &mut TSUInt<E>,
         values: &UInt64<E>,
     ) -> Result<TSUInt<E>, ZKVMError>;
 
     fn register_write(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &TSUInt<E>,
-        ts: &TSUInt<E>,
+        prev_ts: &mut TSUInt<E>,
+        ts: &mut TSUInt<E>,
         prev_values: &UInt64<E>,
         values: &UInt64<E>,
     ) -> Result<TSUInt<E>, ZKVMError>;
