@@ -1,0 +1,389 @@
+use crate::{
+    sum_check::{SumCheck, VirtualPolynomial},
+    util::{
+        arithmetic::BooleanHypercube,
+        expression::{Expression, Rotation},
+        parallel::par_map_collect,
+        poly_index_ext,
+        transcript::{FieldTranscriptRead, FieldTranscriptWrite},
+    },
+    Error,
+};
+use ark_std::{end_timer, start_timer};
+use ff::Field;
+use ff_ext::ExtensionField;
+use itertools::Itertools;
+use num_integer::Integer;
+use std::{borrow::Cow, collections::HashMap, fmt::Debug, marker::PhantomData};
+mod coeff;
+use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::build_eq_x_r_vec};
+
+pub use coeff::CoefficientsProver;
+
+#[derive(Debug)]
+pub struct ProverState<'a, E: ExtensionField> {
+    num_vars: usize,
+    expression: &'a Expression<E>,
+    degree: usize,
+    sum: E,
+    lagranges: HashMap<i32, (usize, E)>,
+    identity: E,
+    eq_xys: Vec<DenseMultilinearExtension<E>>,
+    polys: Vec<Vec<Cow<'a, DenseMultilinearExtension<E>>>>,
+    challenges: &'a [E],
+    round: usize,
+    bh: BooleanHypercube,
+}
+
+impl<'a, E: ExtensionField> ProverState<'a, E> {
+    fn new(num_vars: usize, sum: E, virtual_poly: VirtualPolynomial<'a, E>) -> Self {
+        assert!(num_vars > 0 && virtual_poly.expression.max_used_rotation_distance() <= num_vars);
+        let bh = BooleanHypercube::new(num_vars);
+        let lagranges = {
+            let bh = bh.iter().collect_vec();
+            virtual_poly
+                .expression
+                .used_langrange()
+                .into_iter()
+                .map(|i| {
+                    let b = bh[i.rem_euclid(1 << num_vars) as usize];
+                    (i, (b, E::ONE))
+                })
+                .collect()
+        };
+        let eq_xys = virtual_poly
+            .ys
+            .iter()
+            .map(|y| {
+                DenseMultilinearExtension::from_evaluations_ext_vec(y.len(), build_eq_x_r_vec(y))
+            })
+            .collect_vec();
+        let polys = virtual_poly
+            .polys
+            .iter()
+            .map(|poly| {
+                let mut polys = vec![
+                    Cow::Owned(DenseMultilinearExtension::from_evaluations_vec(
+                        0,
+                        vec![E::BaseField::ZERO; 1]
+                    ));
+                    2 * num_vars
+                ];
+                polys[num_vars] = Cow::Borrowed(*poly);
+                polys
+            })
+            .collect_vec();
+        Self {
+            num_vars,
+            expression: virtual_poly.expression,
+            degree: virtual_poly.expression.degree(),
+            sum,
+            lagranges,
+            identity: E::ZERO,
+            eq_xys,
+            polys,
+            challenges: virtual_poly.challenges,
+            round: 0,
+            bh,
+        }
+    }
+
+    fn size(&self) -> usize {
+        1 << (self.num_vars - self.round - 1)
+    }
+
+    fn next_round(&mut self, sum: E, challenge: &E) {
+        self.sum = sum;
+        self.identity += E::from(1 << self.round) * challenge;
+        self.lagranges.values_mut().for_each(|(b, value)| {
+            if b.is_even() {
+                *value *= &(E::ONE - challenge);
+            } else {
+                *value *= challenge;
+            }
+            *b >>= 1;
+        });
+        self.eq_xys.iter_mut().for_each(|eq_xy| {
+            if eq_xy.num_vars > 0 {
+                eq_xy.fix_variables_in_place(&[*challenge])
+            }
+        });
+        if self.round == 0 {
+            let rotation_maps = self
+                .expression
+                .used_rotation()
+                .into_iter()
+                .filter_map(|rotation| {
+                    (rotation != Rotation::cur())
+                        .then(|| (rotation, self.bh.rotation_map(rotation)))
+                })
+                .collect::<HashMap<_, _>>();
+            for query in self.expression.used_query() {
+                if query.rotation() != Rotation::cur() {
+                    let poly = &self.polys[query.poly()][self.num_vars];
+                    let rotated: Vec<_> = par_map_collect(&rotation_maps[&query.rotation()], |b| {
+                        poly_index_ext(poly, *b)
+                    });
+                    let rotated = DenseMultilinearExtension::from_evaluations_ext_vec(
+                        rotated.len().ilog2() as usize,
+                        rotated,
+                    )
+                    .fix_variables(&[*challenge]);
+                    self.polys[query.poly()]
+                        [(query.rotation().0 + self.num_vars as i32) as usize] =
+                        Cow::Owned(rotated);
+                }
+            }
+            self.polys.iter_mut().for_each(|polys| {
+                polys[self.num_vars] =
+                    Cow::Owned(polys[self.num_vars].fix_variables(&[*challenge]));
+            });
+        } else {
+            self.polys.iter_mut().for_each(|polys| {
+                polys.iter_mut().for_each(|poly| {
+                    // If it's constant, then fixing a variable is a no-op
+                    if poly.num_vars > 0 {
+                        poly.to_mut().fix_variables_in_place(&[*challenge]);
+                    }
+                });
+            });
+        }
+        self.round += 1;
+        self.bh = BooleanHypercube::new(self.num_vars - self.round);
+    }
+
+    fn into_evals(self) -> Vec<E> {
+        assert_eq!(self.round, self.num_vars);
+        self.polys
+            .iter()
+            .map(|polys| poly_index_ext(polys[self.num_vars].as_ref(), 0))
+            .collect()
+    }
+}
+
+pub trait ClassicSumCheckProver<E: ExtensionField>: Clone + Debug {
+    type RoundMessage: ClassicSumCheckRoundMessage<E>;
+
+    fn new(state: &ProverState<E>) -> Self;
+
+    fn prove_round(&self, state: &ProverState<E>) -> Self::RoundMessage;
+
+    fn sum(&self, state: &ProverState<E>) -> E;
+}
+
+pub trait ClassicSumCheckRoundMessage<E: ExtensionField>: Sized + Debug {
+    type Auxiliary: Default;
+
+    fn write(&self, transcript: &mut impl FieldTranscriptWrite<E>) -> Result<(), Error>;
+
+    fn read_base(
+        degree: usize,
+        transcript: &mut impl FieldTranscriptRead<E>,
+    ) -> Result<Self, Error>;
+
+    fn read_ext(degree: usize, transcript: &mut impl FieldTranscriptRead<E>)
+        -> Result<Self, Error>;
+
+    fn sum(&self) -> E;
+
+    fn auxiliary(_degree: usize) -> Self::Auxiliary {
+        Default::default()
+    }
+
+    fn evaluate(&self, aux: &Self::Auxiliary, challenge: &E) -> E;
+
+    fn verify_consistency(
+        degree: usize,
+        mut sum: E,
+        msgs: &[Self],
+        challenges: &[E],
+    ) -> Result<E, Error> {
+        let aux = Self::auxiliary(degree);
+        for (round, (msg, challenge)) in msgs.iter().zip(challenges.iter()).enumerate() {
+            if sum != msg.sum() {
+                let msg = if round == 0 {
+                    format!("Expect sum {sum:?} but get {:?}", msg.sum())
+                } else {
+                    format!("Consistency failure at round {round}")
+                };
+                return Err(Error::InvalidSumcheck(msg));
+            }
+            sum = msg.evaluate(&aux, challenge);
+        }
+        Ok(sum)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ClassicSumCheck<P>(PhantomData<P>);
+
+impl<E: ExtensionField, P: ClassicSumCheckProver<E>> SumCheck<E> for ClassicSumCheck<P> {
+    type ProverParam = ();
+    type VerifierParam = ();
+
+    fn prove(
+        _: &Self::ProverParam,
+        num_vars: usize,
+        virtual_poly: VirtualPolynomial<E>,
+        sum: E,
+        transcript: &mut impl FieldTranscriptWrite<E>,
+    ) -> Result<(Vec<E>, Vec<E>), Error> {
+        let _timer = start_timer!(|| {
+            let degree = virtual_poly.expression.degree();
+            format!("sum_check_prove-{num_vars}-{degree}")
+        });
+
+        let mut state = ProverState::new(num_vars, sum, virtual_poly);
+        let mut challenges = Vec::with_capacity(num_vars);
+        let prover = P::new(&state);
+
+        if cfg!(feature = "sanity-check") {
+            assert_eq!(prover.sum(&state), state.sum);
+        }
+
+        let aux = P::RoundMessage::auxiliary(state.degree);
+
+        for _round in 0..num_vars {
+            let timer = start_timer!(|| format!("sum_check_prove_round-{_round}"));
+            let msg = prover.prove_round(&state);
+            end_timer!(timer);
+            msg.write(transcript)?;
+
+            if cfg!(feature = "sanity-check") {
+                assert_eq!(
+                    msg.evaluate(&aux, &E::ZERO) + msg.evaluate(&aux, &E::ONE),
+                    state.sum
+                );
+            }
+
+            let challenge = transcript.squeeze_challenge();
+            challenges.push(challenge);
+
+            let timer = start_timer!(|| format!("sum_check_next_round-{round}"));
+            state.next_round(msg.evaluate(&aux, &challenge), &challenge);
+            end_timer!(timer);
+        }
+
+        Ok((challenges, state.into_evals()))
+    }
+
+    fn verify(
+        _: &Self::VerifierParam,
+        num_vars: usize,
+        degree: usize,
+        sum: E,
+        transcript: &mut impl FieldTranscriptRead<E>,
+    ) -> Result<(E, Vec<E>), Error> {
+        let (msgs, challenges) = {
+            let mut msgs = Vec::with_capacity(num_vars);
+            let mut challenges = Vec::with_capacity(num_vars);
+            for _ in 0..num_vars {
+                msgs.push(P::RoundMessage::read_ext(degree, transcript)?);
+                challenges.push(transcript.squeeze_challenge());
+            }
+            (msgs, challenges)
+        };
+
+        Ok((
+            P::RoundMessage::verify_consistency(degree, sum, &msgs, &challenges)?,
+            challenges,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{
+        sum_check::eq_xy_eval,
+        util::{
+            arithmetic::inner_product,
+            expression::Query,
+            poly_iter_ext,
+            transcript::{InMemoryTranscript, PoseidonTranscript},
+        },
+    };
+
+    use super::*;
+    use goldilocks::{Goldilocks as Fr, GoldilocksExt2 as E};
+
+    #[test]
+    fn test_sum_check_protocol() {
+        let polys = vec![
+            DenseMultilinearExtension::<E>::from_evaluations_vec(
+                2,
+                vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)],
+            ),
+            DenseMultilinearExtension::from_evaluations_vec(
+                2,
+                vec![Fr::from(0), Fr::from(1), Fr::from(1), Fr::from(0)],
+            ),
+            DenseMultilinearExtension::from_evaluations_vec(1, vec![Fr::from(0), Fr::from(1)]),
+        ];
+        let points = vec![vec![E::from(1), E::from(2)], vec![E::from(1)]];
+        let expression = Expression::<E>::eq_xy(0)
+            * Expression::Polynomial(Query::new(0, Rotation::cur()))
+            * E::from(Fr::from(2))
+            + Expression::<E>::eq_xy(0)
+                * Expression::Polynomial(Query::new(1, Rotation::cur()))
+                * E::from(Fr::from(3))
+            + Expression::<E>::eq_xy(1)
+                * Expression::Polynomial(Query::new(2, Rotation::cur()))
+                * E::from(Fr::from(4));
+        let virtual_poly =
+            VirtualPolynomial::<E>::new(&expression, polys.iter(), &[], points.as_slice());
+        let sum = inner_product(
+            &poly_iter_ext(&polys[0]).collect_vec(),
+            &build_eq_x_r_vec(&points[0]),
+        ) * Fr::from(2)
+            + inner_product(
+                &poly_iter_ext(&polys[1]).collect_vec(),
+                &build_eq_x_r_vec(&points[0]),
+            ) * Fr::from(3)
+            + inner_product(
+                &poly_iter_ext(&polys[2]).collect_vec(),
+                &build_eq_x_r_vec(&points[1]),
+            ) * Fr::from(4)
+                * Fr::from(2); // The third polynomial is summed twice because the hypercube is larger
+        let mut transcript = PoseidonTranscript::<E>::new();
+        let (challenges, evals) = <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<E>>::prove(
+            &(),
+            2,
+            virtual_poly.clone(),
+            sum,
+            &mut transcript,
+        )
+        .unwrap();
+
+        assert_eq!(polys[0].evaluate(&challenges), evals[0]);
+        assert_eq!(polys[1].evaluate(&challenges), evals[1]);
+        assert_eq!(polys[2].evaluate(&challenges[..1]), evals[2]);
+
+        let proof = transcript.into_proof();
+        let mut transcript = PoseidonTranscript::<E>::from_proof(&proof);
+
+        let (new_sum, verifier_challenges) = <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<
+            E,
+        >>::verify(&(), 2, 2, sum, &mut transcript)
+        .unwrap();
+
+        assert_eq!(verifier_challenges, challenges);
+        assert_eq!(
+            new_sum,
+            evals[0] * eq_xy_eval(&points[0], &challenges[..2]) * Fr::from(2)
+                + evals[1] * eq_xy_eval(&points[0], &challenges[..2]) * Fr::from(3)
+                + evals[2] * eq_xy_eval(&points[1], &challenges[..1]) * Fr::from(4)
+        );
+
+        let mut transcript = PoseidonTranscript::<E>::from_proof(&proof);
+
+        <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<E>>::verify(
+            &(),
+            2,
+            2,
+            sum + Fr::ONE,
+            &mut transcript,
+        )
+        .expect_err("Should panic");
+    }
+}
