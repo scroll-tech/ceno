@@ -142,6 +142,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 #[cfg(test)]
 mod tests {
     use crate::{circuit_builder::CircuitBuilder, scheme::utils::eval_by_expr, uint::uint::UInt};
+    use ff::Field;
     use ff_ext::ExtensionField;
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -218,11 +219,11 @@ mod tests {
         // verify limb_c[] = limb_a[] + limb_b[]
         assert_eq!(
             eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-            2.into()
+            E::from(0xFFFFu64) + E::from(2u64) - E::ONE * E::from(0x10000u64)
         );
         assert_eq!(
             eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-            3.into()
+            E::ONE + E::ONE
         );
         assert_eq!(
             eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
