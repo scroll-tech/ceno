@@ -47,11 +47,12 @@ impl<E: ExtensionField> ZKVMProver<E> {
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
-        challenges: &[E],
+        challenges: &[E; 2],
     ) -> Result<ZKVMProof<E>, ZKVMError> {
         let circuit = &self.circuit;
         let log2_num_instances = ceil_log2(num_instances);
         let next_pow2_instances = 1 << log2_num_instances;
+        let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         // sanity check
         assert_eq!(witnesses.len(), circuit.num_witin as usize);
@@ -122,8 +123,12 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
-        let lk_records_last_layer =
-            interleaving_mles_to_mles(lk_records_wit, log2_num_instances, 2, E::ZERO);
+        let lk_records_last_layer = interleaving_mles_to_mles(
+            lk_records_wit,
+            log2_num_instances,
+            NUM_FANIN,
+            chip_record_alpha,
+        );
         assert_eq!(lk_records_last_layer.len(), 2);
         exit_span!(span);
 
@@ -134,8 +139,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
         if cfg!(test) {
             // sanity check
             assert_eq!(lk_wit_layers.len(), log2_num_instances + log2_lk_count);
-            assert_eq!(r_wit_layers.len(), (log2_num_instances + log2_r_count));
-            assert_eq!(w_wit_layers.len(), (log2_num_instances + log2_w_count));
+            assert_eq!(r_wit_layers.len(), log2_num_instances + log2_r_count);
+            assert_eq!(w_wit_layers.len(), log2_num_instances + log2_w_count);
             assert!(lk_wit_layers.iter().enumerate().all(|(i, w)| {
                 let expected_size = 1 << i;
                 let (p1, p2, q1, q2) = (&w[0], &w[1], &w[2], &w[3]);
@@ -326,10 +331,9 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         // lk
         // rt := rt || rs
-        // padding is 0, therefore we dont need to add padding term
         for (thread_id, sel_lk) in (0..num_threads).zip(sel_lk_threads.iter()) {
             for i in 0..lk_counts_per_instance {
-                // \sum_t (sel(rt, t) * (\sum_i alpha_lk* eq(rs, i) * record_w[i] ))
+                // \sum_t (sel(rt, t) * (\sum_i alpha_lk* eq(rs, i) * record_w[i]))
                 let lk_records_wit = virtual_polys
                     .get_range_polys_by_thread_id(thread_id, vec![&lk_records_wit[i]])
                     .remove(0);
@@ -339,6 +343,14 @@ impl<E: ExtensionField> ZKVMProver<E> {
                     eq_lk[i] * alpha_lk,
                 );
             }
+            // \sum_t alpha_lk * sel(rt, t) * chip_record_alpha * (\sum_i (eq(rs, i)) - 1)
+            virtual_polys.add_mle_list(
+                thread_id,
+                vec![sel_lk.clone()],
+                *alpha_lk
+                    * chip_record_alpha
+                    * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE),
+            );
         }
 
         let mut distrinct_zerocheck_terms_set = BTreeSet::new();

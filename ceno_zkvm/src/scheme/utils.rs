@@ -210,9 +210,9 @@ pub(crate) fn infer_tower_product_witness<'a, E: ExtensionField>(
     wit_layers
 }
 
-pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField>(
+pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     witnesses: &[ArcMultilinearExtension<'a, E>],
-    challenges: &[E],
+    challenges: &[E; N],
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
     expr.evaluate::<ArcMultilinearExtension<'_, E>>(

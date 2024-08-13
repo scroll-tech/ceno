@@ -151,7 +151,7 @@ mod test {
         // get proof
         let prover = ZKVMProver::new(circuit.clone()); // circuit clone due to verifier alos need circuit reference
         let mut transcript = Transcript::new(b"riscv");
-        let challenges = vec![1.into(), 2.into()];
+        let challenges = [1.into(), 2.into()];
 
         let mut proof = prover
             .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)

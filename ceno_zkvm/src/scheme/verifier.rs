@@ -40,7 +40,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
-        challenges: &[E], // derive challenge from PCS
+        challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             self.circuit.r_expressions.len(),
@@ -52,6 +52,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             ceil_log2(w_counts_per_instance),
             ceil_log2(lk_counts_per_instance),
         );
+        let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         let num_instances = proof.num_instances;
         let log2_num_instances = ceil_log2(num_instances);
@@ -110,11 +111,11 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             alpha_pow_iter.next().unwrap(),
             alpha_pow_iter.next().unwrap(),
         );
-        // alpha_read * (out_r[rt] - 1) + alpha_write * (out_w[rt] - 1) + alpha_lk * (out_lk_q)
+        // alpha_read * (out_r[rt] - 1) + alpha_write * (out_w[rt] - 1) + alpha_lk * (out_lk_q - chip_record_alpha)
         // + 0 // 0 come from zero check
         let claim_sum = *alpha_read * (record_evals[0] - E::ONE)
             + *alpha_write * (record_evals[1] - E::ONE)
-            + *alpha_lk * (logup_q_evals[0]);
+            + *alpha_lk * (logup_q_evals[0] - chip_record_alpha);
         let main_sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {
@@ -185,7 +186,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 * sel_lk
                 * ((0..lk_counts_per_instance)
                     .map(|i| proof.lk_records_in_evals[i] * eq_lk[i])
-                    .sum::<E>()),
+                    .sum::<E>()
+                    + chip_record_alpha
+                        * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE)),
             // degree > 1 zero exp sumcheck
             {
                 // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))

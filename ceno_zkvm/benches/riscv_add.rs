@@ -85,7 +85,7 @@ fn bench_add(c: &mut Criterion) {
                 b.iter_with_setup(
                     || {
                         let mut rng = test_rng();
-                        let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
+                        let real_challenges = [E::random(&mut rng), E::random(&mut rng)];
                         (rng, real_challenges)
                     },
                     |(mut rng, real_challenges)| {
