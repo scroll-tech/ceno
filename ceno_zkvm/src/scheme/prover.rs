@@ -506,7 +506,7 @@ impl TowerProver {
             .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
             .collect_vec();
 
-        let next_rt = (0..max_round).fold(initial_rt, |out_rt, round| {
+        let next_rt = (1..=max_round).fold(initial_rt, |out_rt, round| {
             // in first few round we just run on single thread
             let num_threads = proper_num_threads(out_rt.len(), max_threads);
 
@@ -517,14 +517,16 @@ impl TowerProver {
                 virtual_polys.get_all_range_polys(&eq);
 
             for (s, alpha) in prod_specs.iter().zip(alpha_pows.iter()) {
-                if (round + 1) < s.witness.len() {
-                    let layer_polys = &s.witness[round + 1];
+                if round < s.witness.len() {
+                    let layer_polys = &s.witness[round];
 
                     // sanity check
                     assert_eq!(layer_polys.len(), num_fanin);
-                    layer_polys
-                        .iter()
-                        .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round));
+                    assert!(
+                        layer_polys
+                            .iter()
+                            .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round)))
+                    );
 
                     // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
                     for (thread_id, eq) in (0..num_threads).zip(eq_threads.iter()) {
@@ -545,13 +547,15 @@ impl TowerProver {
                 .iter()
                 .zip(alpha_pows[prod_specs.len()..].chunks(2))
             {
-                if (round + 1) < s.witness.len() {
-                    let layer_polys = &s.witness[round + 1];
+                if round < s.witness.len() {
+                    let layer_polys = &s.witness[round];
                     // sanity check
                     assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
-                    layer_polys
-                        .iter()
-                        .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round));
+                    assert!(
+                        layer_polys
+                            .iter()
+                            .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
+                    );
 
                     let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
 
@@ -606,7 +610,7 @@ impl TowerProver {
             let mut evals_iter = evals.iter();
             evals_iter.next(); // skip first eq
             for (i, s) in prod_specs.iter().enumerate() {
-                if (round + 1) < s.witness.len() {
+                if round < s.witness.len() {
                     // collect evals belong to current spec
                     proofs.push_prod_evals(
                         i,
@@ -617,7 +621,7 @@ impl TowerProver {
                 }
             }
             for (i, s) in logup_specs.iter().enumerate() {
-                if (round + 1) < s.witness.len() {
+                if round < s.witness.len() {
                     // collect evals belong to current spec
                     // p1, q2, p2, q1
                     let p1 = *evals_iter.next().expect("insufficient evals length");

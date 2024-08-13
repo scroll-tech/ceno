@@ -137,8 +137,10 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
                                 .zip(q_evals.par_iter_mut())
                                 .with_min_len(MIN_PAR_SIZE)
                                 .for_each(|(((q1, q2), p_res), q_res)| {
+                                    // 1 / q1 + 1 / q2 = (q1+q2) / q1*q2
+                                    // p is numerator and q is denominator
                                     *p_res = *q1 + q2;
-                                    *q_res = *q1 * q2
+                                    *q_res = *q1 * q2;
                                 }),
                             _ => unreachable!(),
                         };
@@ -178,32 +180,34 @@ pub(crate) fn infer_tower_product_witness<'a, E: ExtensionField>(
     num_product_fanin: usize,
 ) -> Vec<Vec<ArcMultilinearExtension<'a, E>>> {
     assert!(last_layer.len() == num_product_fanin);
-    let mut r_wit_layers = (0..num_vars - 1).fold(vec![last_layer], |mut acc, _| {
-        let next_layer = acc.last().unwrap();
-        let cur_len = next_layer[0].evaluations().len() / num_product_fanin;
-        let cur_layer: Vec<ArcMultilinearExtension<E>> = (0..num_product_fanin)
-            .map(|index| {
-                let mut evaluations = vec![E::ONE; cur_len];
-                next_layer.iter().for_each(|f| match f.evaluations() {
-                    FieldType::Ext(f) => {
-                        let start: usize = index * cur_len;
-                        f[start..][..cur_len]
-                            .par_iter()
-                            .zip(evaluations.par_iter_mut())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|(v, evaluations)| *evaluations *= *v)
-                            .collect()
-                    }
-                    _ => unreachable!("must be extension field"),
-                });
-                evaluations.into_mle().into()
-            })
-            .collect_vec();
-        acc.push(cur_layer);
-        acc
-    });
-    r_wit_layers.reverse();
-    r_wit_layers
+    let log2_num_product_fanin = ceil_log2(num_product_fanin);
+    let mut wit_layers =
+        (0..(num_vars / log2_num_product_fanin) - 1).fold(vec![last_layer], |mut acc, _| {
+            let next_layer = acc.last().unwrap();
+            let cur_len = next_layer[0].evaluations().len() / num_product_fanin;
+            let cur_layer: Vec<ArcMultilinearExtension<E>> = (0..num_product_fanin)
+                .map(|index| {
+                    let mut evaluations = vec![E::ONE; cur_len];
+                    next_layer.iter().for_each(|f| match f.evaluations() {
+                        FieldType::Ext(f) => {
+                            let start: usize = index * cur_len;
+                            f[start..][..cur_len]
+                                .par_iter()
+                                .zip(evaluations.par_iter_mut())
+                                .with_min_len(MIN_PAR_SIZE)
+                                .map(|(v, evaluations)| *evaluations *= *v)
+                                .collect()
+                        }
+                        _ => unreachable!("must be extension field"),
+                    });
+                    evaluations.into_mle().into()
+                })
+                .collect_vec();
+            acc.push(cur_layer);
+            acc
+        });
+    wit_layers.reverse();
+    wit_layers
 }
 
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField>(
