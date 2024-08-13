@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, uint::util::const_min};
 
 use super::UInt;

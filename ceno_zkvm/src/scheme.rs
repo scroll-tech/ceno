@@ -5,7 +5,7 @@ use crate::structs::TowerProofs;
 
 pub mod constants;
 pub mod prover;
-mod utils;
+pub mod utils;
 pub mod verifier;
 
 #[derive(Clone)]
