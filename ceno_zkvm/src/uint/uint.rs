@@ -49,26 +49,32 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
     pub fn expr(&self) -> Vec<Expression<E>> {
         match &self.limbs {
-            UintLimb::WitIn(c) => {
-                let mut s = c.clone();
-                if let Some(v) = &self.carries {
-                    s = [s, v.clone()].concat();
+            UintLimb::WitIn(limbs) => {
+                let mut expr = limbs
+                    .iter()
+                    .map(ToExpr::expr)
+                    .collect::<Vec<Expression<E>>>();
+
+                if let Some(carries) = &self.carries {
+                    expr = expr
+                        .iter()
+                        .enumerate()
+                        .map(|(i, limb)| {
+                            // let carry = carries[i].expr() * 2_usize.pow(C as u32).into();
+                            if i > 0 {
+                                (limb.clone() + carries[i - 1].expr())
+                                // * 2_usize.pow((i * C) as u32).into()
+                            } else {
+                                limb.clone()
+                            }
+                        })
+                        .collect_vec();
                 }
-                c.iter().map(ToExpr::expr).collect::<Vec<Expression<E>>>()
+                expr
             }
             UintLimb::Expression(e) => {
                 assert!(self.carries.is_some(), "carries should not be None");
                 e.clone()
-                // [
-                //     e.clone(),
-                //     self.carries
-                //         .as_ref()
-                //         .unwrap()
-                //         .iter()
-                //         .map(ToExpr::expr)
-                //         .collect::<Vec<Expression<E>>>(),
-                // ]
-                // .concat()
             }
         }
     }

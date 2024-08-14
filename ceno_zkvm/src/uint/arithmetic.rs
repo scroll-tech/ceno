@@ -103,40 +103,52 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         c.carries = (0..Self::NUM_CELLS)
             .map(|_| Some(circuit_builder.create_witin()))
             .collect();
+        let c_carries = c.carries.as_ref().unwrap();
 
-        let a_limbs = self.expr();
-        let b_limbs = multiplier.expr();
-        let c_limbs = c.expr();
+        let a_expr = self.expr();
+        let b_expr = multiplier.expr();
+        let c_expr = c.expr();
 
         // perform mul operation
-        let t0 = a_limbs[0].clone() * b_limbs[0].clone();
-        let t1 = a_limbs[0].clone() * b_limbs[1].clone() + a_limbs[1].clone() * b_limbs[0].clone();
-        let t2 = a_limbs[0].clone() * b_limbs[2].clone()
-            + a_limbs[1].clone() * b_limbs[1].clone()
-            + a_limbs[2].clone() * b_limbs[0].clone();
-        let t3 = a_limbs[0].clone() * b_limbs[3].clone()
-            + a_limbs[1].clone() * b_limbs[2].clone()
-            + a_limbs[2].clone() * b_limbs[1].clone()
-            + a_limbs[3].clone() * b_limbs[0].clone();
-
-        // result check
         let pow_of_C = 2_usize.pow(C as u32);
         let pow_of_2C = 2_usize.pow(2 * C as u32);
-        let c_carries = c.carries.as_ref().unwrap();
+        let t0 = a_expr[0].clone() * b_expr[0].clone() - c_carries[0].expr() * pow_of_C.into();
+        let t1 = a_expr[0].clone() * b_expr[1].clone() + a_expr[1].clone() * b_expr[0].clone()
+            - c_carries[1].expr() * pow_of_C.into();
+        let t2 = a_expr[0].clone() * b_expr[2].clone()
+            + a_expr[1].clone() * b_expr[1].clone()
+            + a_expr[2].clone() * b_expr[0].clone()
+            - c_carries[2].expr() * pow_of_C.into();
+        let t3 = a_expr[0].clone() * b_expr[3].clone()
+            + a_expr[1].clone() * b_expr[2].clone()
+            + a_expr[2].clone() * b_expr[1].clone()
+            + a_expr[3].clone() * b_expr[0].clone()
+            - c_carries[3].expr() * pow_of_C.into();
+
+        // t0 - t4 are degree 2, but we only support monomial form now.
+        // So, we do a small trick here, constrain that intermediate witness equals the expression (t1 - t4)
+        // And then using the intermediate witness for the following computations.
+        let mut inter_wits = UInt::<M, C, E>::new(circuit_builder).expr();
+        circuit_builder.require_equal(inter_wits[0].clone(), t0);
+        circuit_builder.require_equal(inter_wits[1].clone(), t1);
+        circuit_builder.require_equal(inter_wits[2].clone(), t2);
+        circuit_builder.require_equal(inter_wits[3].clone(), t3);
+
+        // result check
         circuit_builder
             .require_equal(
-                t0 + t1 * pow_of_C.into(),
-                c_limbs[0].clone()
-                    + (c_carries[0].expr() + c_limbs[1].clone()) * pow_of_C.into()
-                    + c_carries[1].expr() * pow_of_C.into(),
+                c_expr[0].clone() + c_expr[1].clone() * pow_of_C.into(),
+                inter_wits[0].clone()
+                    + (c_carries[0].expr() + inter_wits[1].clone()) * pow_of_C.into()
+                    - c_carries[1].expr() * pow_of_2C.into(),
             )
             .unwrap();
         circuit_builder
             .require_equal(
-                t2 + t3 * pow_of_C.into(),
-                (c_limbs[2].clone() + c_carries[1].expr())
-                    + (c_carries[2].expr() + c_limbs[3].clone()) * pow_of_C.into()
-                    + c_carries[3].expr() * pow_of_2C.into(),
+                c_expr[2].clone() + c_expr[3].clone() * pow_of_C.into(),
+                inter_wits[2].clone()
+                    + (c_carries[2].expr() + inter_wits[3].clone()) * pow_of_C.into()
+                    - c_carries[3].expr() * pow_of_2C.into(),
             )
             .unwrap();
 
@@ -164,257 +176,490 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        circuit_builder::CircuitBuilder, expression::Expression, scheme::utils::eval_by_expr,
-        uint::uint::UInt,
-    };
-    use ff::Field;
-    use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
 
-    #[test]
-    fn test_uint_add_no_carries() {
-        type E = GoldilocksExt2;
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+    mod add {
+        use crate::{
+            circuit_builder::CircuitBuilder, expression::Expression, scheme::utils::eval_by_expr,
+            uint::uint::UInt,
+        };
+        use ff::Field;
+        use goldilocks::{Goldilocks, GoldilocksExt2};
+        use itertools::Itertools;
+        #[test]
+        fn test_uint_add_no_carries() {
+            type E = GoldilocksExt2;
+            let mut circuit_builder = CircuitBuilder::<E>::new();
 
-        // a = 1 + 1 * 2^16
-        // b = 2 + 1 * 2^16
-        // c = 3 + 2 * 2^16 with 0 carries
-        let a = vec![1, 1, 0, 0];
-        let b = vec![2, 1, 0, 0];
-        let carries = vec![0; 4];
-        let witness_values = [a, b, carries]
-            .concat()
-            .iter()
-            .map(|&a| a.into())
-            .collect_vec();
-        let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+            // a = 1 + 1 * 2^16
+            // b = 2 + 1 * 2^16
+            // c = 3 + 2 * 2^16 with 0 carries
+            let a = vec![1, 1, 0, 0];
+            let b = vec![2, 1, 0, 0];
+            let carries = vec![0; 4];
+            let witness_values = [a, b, carries]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-        let a = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let b = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let c = a.add(&mut circuit_builder, &b).unwrap();
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let c = a.add(&mut circuit_builder, &b).unwrap();
 
-        // verify limb_c[] = limb_a[] + limb_b[]
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-            E::from(3)
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-            E::from(2)
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-            E::ZERO
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-            E::ZERO
-        );
+            // verify limb_c[] = limb_a[] + limb_b[]
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
+                E::from(3)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
+                E::from(2)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
+                E::ZERO
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
+                E::ZERO
+            );
+        }
+
+        #[test]
+        fn test_uint_add_w_carry() {
+            type E = GoldilocksExt2;
+            let mut circuit_builder = CircuitBuilder::<E>::new();
+
+            // a = 65535 + 1 * 2^16
+            // b =   2   + 1 * 2^16
+            // c =   1   + 3 * 2^16 with carries [1, 0, 0, 0]
+            let a = vec![0xFFFF, 1, 0, 0];
+            let b = vec![2, 1, 0, 0];
+            let carries = vec![1, 0, 0, 0];
+            let witness_values = [a, b, carries]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let c = a.add(&mut circuit_builder, &b).unwrap();
+
+            // verify limb_c[] = limb_a[] + limb_b[]
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
+                E::ONE
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
+                E::from(3)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
+                E::ZERO
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
+                E::ZERO
+            );
+        }
+
+        #[test]
+        fn test_uint_add_w_carries() {
+            type E = GoldilocksExt2;
+            let mut circuit_builder = CircuitBuilder::<E>::new();
+
+            // a = 65535 + 65534 * 2^16
+            // b =   2   +   1   * 2^16
+            // c =   1   +   0   * 2^16 + 1 * 2^32 with carries [1, 1, 0, 0]
+            let a = vec![0xFFFF, 0xFFFE, 0, 0];
+            let b = vec![2, 1, 0, 0];
+            let carries = vec![1, 1, 0, 0];
+            let witness_values = [a, b, carries]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let c = a.add(&mut circuit_builder, &b).unwrap();
+
+            // verify limb_c[] = limb_a[] + limb_b[]
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
+                E::ONE
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
+                E::ZERO
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
+                E::ONE
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
+                E::ZERO
+            );
+        }
+
+        #[test]
+        fn test_uint_add_w_overflow() {
+            type E = GoldilocksExt2;
+            let mut circuit_builder = CircuitBuilder::<E>::new();
+
+            // a = 1 + 1 * 2^16 + 0 + 65535 * 2^48
+            // b = 2 + 1 * 2^16 + 0 +     2 * 2^48
+            // c = 3 + 2 * 2^16 + 0 +     1 * 2^48 with carries [0, 0, 0, 1]
+            let a = vec![1, 1, 0, 0xFFFF];
+            let b = vec![2, 1, 0, 2];
+            let carries = vec![0, 0, 0, 1];
+            let witness_values = [a, b, carries]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let c = a.add(&mut circuit_builder, &b).unwrap();
+
+            // verify limb_c[] = limb_a[] + limb_b[]
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
+                E::from(3)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
+                E::from(2)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
+                E::ZERO
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
+                E::ONE
+            );
+        }
+
+        #[test]
+        fn test_uint_add_const_no_carries() {
+            type E = GoldilocksExt2;
+            let mut circuit_builder = CircuitBuilder::<E>::new();
+
+            // a = 1 + 1 * 2^16
+            // b = 2 + 1 * 2^16
+            // c = 3 + 2 * 2^16 with 0 carries
+            let a = vec![1, 1, 0, 0];
+            // let b = vec![2, 1, 0, 0];
+            let carries = vec![0; 4];
+            let witness_values = [a, carries]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = Expression::Constant(2.into());
+            let c = a.add_const(&mut circuit_builder, b).unwrap();
+
+            // verify limb_c[] = limb_a[] + limb_b[]
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
+                E::from(3)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
+                E::ONE
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
+                E::ZERO
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
+                E::ZERO
+            );
+        }
+
+        #[test]
+        fn test_uint_add_const_w_carries() {
+            type E = GoldilocksExt2;
+            let mut circuit_builder = CircuitBuilder::<E>::new();
+
+            // a = 65535 + 1 * 2^16
+            // b =   2   + 1 * 2^16 = 65538
+            // c =   1   + 3 * 2^16 with carries [1, 0, 0, 0]
+            let a = vec![0xFFFF, 1, 0, 0];
+            // let b = vec![2, 1, 0, 0];
+            let carries = vec![1, 0, 0, 0];
+            let witness_values = [a, carries]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = Expression::Constant(65538.into());
+            let c = a.add_const(&mut circuit_builder, b).unwrap();
+
+            // verify limb_c[] = limb_a[] + limb_b[]
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
+                E::ONE
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
+                E::from(3)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
+                E::ZERO
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
+                E::ZERO
+            );
+        }
     }
 
-    #[test]
-    fn test_uint_add_w_carries() {
-        type E = GoldilocksExt2;
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+    mod mul {
+        use crate::{
+            circuit_builder::CircuitBuilder, expression::Expression, scheme::utils::eval_by_expr,
+            uint::uint::UInt,
+        };
+        use ff::Field;
+        use goldilocks::{Goldilocks, GoldilocksExt2};
+        use itertools::Itertools;
+        #[test]
+        fn test_uint_mul_no_carries() {
+            // 18446744069414584321
+            type E = GoldilocksExt2;
+            let mut circuit_builder = CircuitBuilder::<E>::new();
 
-        // a = 65535 + 1 * 2^16
-        // b =   2   + 1 * 2^16
-        // c =   1   + 3 * 2^16 with carries [1, 0, 0, 0]
-        let a = vec![0xFFFF, 1, 0, 0];
-        let b = vec![2, 1, 0, 0];
-        let carries = vec![1, 0, 0, 0];
-        let witness_values = [a, b, carries]
+            // a = 1 + 1 * 2^16
+            // b = 2 + 1 * 2^16
+            // c = 2 + 3 * 2^16 + 1 * 2^32 = 4,295,163,906
+            let a = vec![1, 1, 0, 0];
+            let b = vec![2, 1, 0, 0];
+            let c = vec![2, 3, 1, 0];
+            let carries = vec![0, 0, 0, 0];
+            let inter_values = vec![2, 3, 1, 0];
+            let witness_values = [a, b, c, carries, inter_values]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let c = a.mul(&mut circuit_builder, &b).unwrap();
+
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
+                E::from(2)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
+                E::from(3)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
+                E::from(1)
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
+                E::ZERO
+            );
+        }
+
+        #[test]
+        fn test_uint_mul_w_carry() {
+            type E = GoldilocksExt2;
+            let mut circuit_builder = CircuitBuilder::<E>::new();
+
+            // a = 256 + 1 * 2^16
+            // b = 257 + 1 * 2^16
+            // c = 256 + 514 * 2^16 + 1 * 2^32 = 4,328,653,056
+            let wit_a = vec![256, 1, 0, 0];
+            let wit_b = vec![257, 1, 0, 0];
+            let wit_c = vec![256, 513, 1, 0];
+            let wit_carries = vec![1, 0, 0, 0];
+            let wit_inter_values = vec![256, 513, 1, 0];
+            let witness_values = [
+                wit_a,
+                wit_b,
+                wit_c.clone(),
+                wit_carries.clone(),
+                wit_inter_values.clone(),
+            ]
             .concat()
             .iter()
             .map(|&a| a.into())
             .collect_vec();
-        let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-        let a = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let b = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let c = a.add(&mut circuit_builder, &b).unwrap();
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let c = a.mul(&mut circuit_builder, &b).unwrap();
 
-        // verify limb_c[] = limb_a[] + limb_b[]
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-            E::ONE
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-            E::from(3)
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-            E::ZERO
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-            E::ZERO
-        );
-    }
+            c.expr().iter().for_each(|e| println!("c exprs: {:?}", e));
 
-    #[test]
-    fn test_uint_add_w_carries2() {
-        type E = GoldilocksExt2;
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+            let pow_of_C = 2_usize.pow(16 as u32) as u64;
+            // verify the result
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
+                E::from(wit_c.clone()[0])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
+                E::from(wit_c.clone()[1] + wit_carries[0])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
+                E::from(wit_c.clone()[2] + wit_carries[1])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
+                E::from(wit_c[3] + wit_carries[2])
+            );
 
-        // a = 65535 + 65534 * 2^16
-        // b =   2   +   1   * 2^16
-        // c =   1   +   0   * 2^16 + 1 * 2^32 with carries [1, 1, 0, 0]
-        let a = vec![0xFFFF, 0xFFFE, 0, 0];
-        let b = vec![2, 1, 0, 0];
-        let carries = vec![1, 1, 0, 0];
-        let witness_values = [a, b, carries]
+            // verify the intermediate witness constraints
+            let a_expr = a.expr();
+            let b_expr = b.expr();
+            let t0 = a_expr[0].clone() * b_expr[0].clone()
+                - Expression::Constant((wit_carries.clone()[0] * pow_of_C).into());
+            let t1 = a_expr[0].clone() * b_expr[1].clone() + a_expr[1].clone() * b_expr[0].clone()
+                - Expression::Constant((wit_carries.clone()[1] * pow_of_C).into());
+            let t2 = a_expr[0].clone() * b_expr[2].clone()
+                + a_expr[1].clone() * b_expr[1].clone()
+                + a_expr[2].clone() * b_expr[0].clone()
+                - Expression::Constant((wit_carries.clone()[2] * pow_of_C).into());
+            let t3 = a_expr[0].clone() * b_expr[3].clone()
+                + a_expr[1].clone() * b_expr[2].clone()
+                + a_expr[2].clone() * b_expr[1].clone()
+                + a_expr[3].clone() * b_expr[0].clone()
+                - Expression::Constant((wit_carries.clone()[2] * pow_of_C).into());
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &t0),
+                E::from(wit_inter_values[0])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &t1),
+                E::from(wit_inter_values[1])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &t2),
+                E::from(wit_inter_values[2])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &t3),
+                E::from(wit_inter_values[3])
+            );
+        }
+
+        #[test]
+        fn test_uint_mul_w_carries() {
+            // 18446744069414584321
+            type E = GoldilocksExt2;
+            let mut circuit_builder = CircuitBuilder::<E>::new();
+
+            // a = 256 + 256 * 2^16 = 16,777,472
+            // b = 257 + 256 * 2^16 = 16,777,473
+            // c = 256 + 257 * 2^16 + 2 * 2^32 + 1 * 2^48 = 281,483,583,488,256
+            let wit_a = vec![256, 256, 0, 0];
+            let wit_b = vec![257, 256, 0, 0];
+            // result = [256 * 257, 256*256 + 256*257, 256*256, 0]
+            // ==> [256 + 1 * (2^16), 256 + 2 * (2^16), 0 + 1 * (2^16), 0]
+            // so we get wit_c = [256, 256, 0, 0] and carries = [1, 2, 1, 0]
+            let wit_c = vec![256, 256, 0, 0];
+            let wit_carries = vec![1, 2, 1, 0];
+            let wit_inter_values = vec![256, 256, 0, 0];
+            let witness_values = [
+                wit_a,
+                wit_b,
+                wit_c.clone(),
+                wit_carries.clone(),
+                wit_inter_values.clone(),
+            ]
             .concat()
             .iter()
             .map(|&a| a.into())
             .collect_vec();
-        let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-        let a = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let b = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let c = a.add(&mut circuit_builder, &b).unwrap();
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let c = a.mul(&mut circuit_builder, &b).unwrap();
 
-        // verify limb_c[] = limb_a[] + limb_b[]
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-            E::ONE
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-            E::ZERO
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-            E::ONE
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-            E::ZERO
-        );
-    }
+            c.expr().iter().for_each(|e| {
+                println!(
+                    "c exprs: {:?}",
+                    eval_by_expr(&witness_values, &challenges, &e)
+                )
+            });
 
-    #[test]
-    fn test_uint_add_w_overflow() {
-        type E = GoldilocksExt2;
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+            let pow_of_C = 2_usize.pow(16 as u32) as u64;
+            // verify the result
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
+                E::from(wit_c.clone()[0])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
+                E::from(wit_c.clone()[1] + wit_carries[0])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
+                E::from(wit_c.clone()[2] + wit_carries[1])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
+                E::from(wit_c[3] + wit_carries[2])
+            );
 
-        // a = 1 + 1 * 2^16 + 0 + 65535 * 2^48
-        // b = 2 + 1 * 2^16 + 0 +     2 * 2^48
-        // c = 3 + 2 * 2^16 + 0 +     1 * 2^48 with carries [0, 0, 0, 1]
-        let a = vec![1, 1, 0, 0xFFFF];
-        let b = vec![2, 1, 0, 2];
-        let carries = vec![0, 0, 0, 1];
-        let witness_values = [a, b, carries]
-            .concat()
-            .iter()
-            .map(|&a| a.into())
-            .collect_vec();
-        let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
-        let a = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let b = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let c = a.add(&mut circuit_builder, &b).unwrap();
-
-        // verify limb_c[] = limb_a[] + limb_b[]
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-            E::from(3)
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-            E::from(2)
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-            E::ZERO
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-            E::ONE
-        );
-    }
-
-    #[test]
-    fn test_uint_add_const_no_carries() {
-        type E = GoldilocksExt2;
-        let mut circuit_builder = CircuitBuilder::<E>::new();
-
-        // a = 1 + 1 * 2^16
-        // b = 2 + 1 * 2^16
-        // c = 3 + 2 * 2^16 with 0 carries
-        let a = vec![1, 1, 0, 0];
-        // let b = vec![2, 1, 0, 0];
-        let carries = vec![0; 4];
-        let witness_values = [a, carries]
-            .concat()
-            .iter()
-            .map(|&a| a.into())
-            .collect_vec();
-        let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
-        let a = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let b = Expression::Constant(2.into());
-        let c = a.add_const(&mut circuit_builder, b).unwrap();
-
-        // verify limb_c[] = limb_a[] + limb_b[]
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-            E::from(3)
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-            E::ONE
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-            E::ZERO
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-            E::ZERO
-        );
-    }
-
-    #[test]
-    fn test_uint_add_const_w_carries() {
-        type E = GoldilocksExt2;
-        let mut circuit_builder = CircuitBuilder::<E>::new();
-
-        // a = 65535 + 1 * 2^16
-        // b =   2   + 1 * 2^16 = 65538
-        // c =   1   + 3 * 2^16 with carries [1, 0, 0, 0]
-        let a = vec![0xFFFF, 1, 0, 0];
-        // let b = vec![2, 1, 0, 0];
-        let carries = vec![1, 0, 0, 0];
-        let witness_values = [a, carries]
-            .concat()
-            .iter()
-            .map(|&a| a.into())
-            .collect_vec();
-        let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
-        let a = UInt::<64, 16, E>::new(&mut circuit_builder);
-        let b = Expression::Constant(65538.into());
-        let c = a.add_const(&mut circuit_builder, b).unwrap();
-
-        // verify limb_c[] = limb_a[] + limb_b[]
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-            E::ONE
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-            E::from(3)
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-            E::ZERO
-        );
-        assert_eq!(
-            eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-            E::ZERO
-        );
+            // verify the intermediate witness constraints
+            let a_expr = a.expr();
+            let b_expr = b.expr();
+            let t0 = a_expr[0].clone() * b_expr[0].clone()
+                - Expression::Constant((wit_carries.clone()[0] * pow_of_C).into());
+            let t1 = a_expr[0].clone() * b_expr[1].clone() + a_expr[1].clone() * b_expr[0].clone()
+                - Expression::Constant((wit_carries.clone()[1] * pow_of_C).into());
+            let t2 = a_expr[0].clone() * b_expr[2].clone()
+                + a_expr[1].clone() * b_expr[1].clone()
+                + a_expr[2].clone() * b_expr[0].clone()
+                - Expression::Constant((wit_carries.clone()[2] * pow_of_C).into());
+            let t3 = a_expr[0].clone() * b_expr[3].clone()
+                + a_expr[1].clone() * b_expr[2].clone()
+                + a_expr[2].clone() * b_expr[1].clone()
+                + a_expr[3].clone() * b_expr[0].clone()
+                - Expression::Constant((wit_carries.clone()[3] * pow_of_C).into());
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &t0),
+                E::from(wit_inter_values[0])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &t1),
+                E::from(wit_inter_values[1])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &t2),
+                E::from(wit_inter_values[2])
+            );
+            assert_eq!(
+                eval_by_expr(&witness_values, &challenges, &t3),
+                E::from(wit_inter_values[3])
+            );
+        }
     }
 }
