@@ -1,7 +1,8 @@
 use ff_ext::ExtensionField;
-use singer_utils::structs::RAMType;
 
-use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, expression::Expression};
+use crate::{
+    circuit_builder::CircuitBuilder, error::ZKVMError, expression::Expression, structs::RAMType,
+};
 
 use super::GlobalStateRegisterMachineChipOperations;
 

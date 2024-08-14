@@ -6,7 +6,8 @@ use std::{
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use simple_frontend::structs::{ChallengeId, WitnessId};
+
+use crate::structs::{ChallengeId, WitnessId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expression<E: ExtensionField> {
@@ -389,7 +390,7 @@ impl<E: ExtensionField> ToExpr<E> for WitIn {
 
 impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     fn expr(&self) -> Expression<E> {
-        Expression::Constant(self.clone())
+        Expression::Constant(*self)
     }
 }
 
@@ -484,26 +485,26 @@ mod tests {
         // 3 * x + 2
         let expr: Expression<E> =
             Into::<Expression<E>>::into(3usize) * x.expr() + Into::<Expression<E>>::into(2usize);
-        assert_eq!(expr.is_monomial_form(), true);
+        assert!(expr.is_monomial_form());
 
         // 2 product term
         let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr() * y.expr()
             + Into::<Expression<E>>::into(2usize) * x.expr();
-        assert_eq!(expr.is_monomial_form(), true);
+        assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> =
             Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr() * y.expr()
                 - Into::<Expression<E>>::into(6usize) * z.expr();
-        assert_eq!(expr.is_monomial_form(), true);
+        assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> =
             Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr() * y.expr()
                 - Into::<Expression<E>>::into(6usize) * z.expr();
-        assert_eq!(expr.is_monomial_form(), true);
+        assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2 * x + 3) * 3 + 6 * 8
@@ -511,7 +512,7 @@ mod tests {
             + Into::<Expression<E>>::into(3usize))
             * Into::<Expression<E>>::into(3usize)
             + Into::<Expression<E>>::into(6usize) * Into::<Expression<E>>::into(8usize);
-        assert_eq!(expr.is_monomial_form(), true);
+        assert!(expr.is_monomial_form());
     }
 
     #[test]
@@ -524,6 +525,6 @@ mod tests {
         // (x + 1) * (y + 1)
         let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr())
             * (Into::<Expression<E>>::into(2usize) + y.expr());
-        assert_eq!(expr.is_monomial_form(), false);
+        assert!(!expr.is_monomial_form());
     }
 }

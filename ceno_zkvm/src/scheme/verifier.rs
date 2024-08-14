@@ -2,13 +2,11 @@ use std::marker::PhantomData;
 
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
-use gkr::{
-    structs::{Point, PointAndEval},
-    util::ceil_log2,
-};
+
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
+    util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec_sequential, eq_eval, VPAuxInfo},
 };
 use sumcheck::structs::{IOPProof, IOPVerifierState};
@@ -18,7 +16,7 @@ use crate::{
     circuit_builder::Circuit,
     error::ZKVMError,
     scheme::constants::{NUM_FANIN, SEL_DEGREE},
-    structs::TowerProofs,
+    structs::{Point, PointAndEval, TowerProofs},
     utils::{get_challenge_pows, sel_eval},
 };
 
@@ -68,7 +66,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             // return Err(ZKVMError::VerifyError("rw set equality check failed"));
         }
         let expected_max_round = log2_num_instances
-            + vec![log2_r_count, log2_w_count, log2_lk_count]
+            + [log2_r_count, log2_w_count, log2_lk_count]
                 .iter()
                 .max()
                 .unwrap();
@@ -200,7 +198,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                         .zip_eq(alpha_pow_iter)
                         .map(|(expr, alpha)| {
                             // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
-                            *alpha * eval_by_expr(&proof.wits_in_evals, challenges, &expr)
+                            *alpha * eval_by_expr(&proof.wits_in_evals, challenges, expr)
                         })
                         .sum::<E>()
             },
@@ -226,7 +224,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                     .chain(proof.lk_records_in_evals[..lk_counts_per_instance].iter()),
             )
             .any(|(expr, expected_evals)| {
-                eval_by_expr(&proof.wits_in_evals, challenges, &expr) != *expected_evals
+                eval_by_expr(&proof.wits_in_evals, challenges, expr) != *expected_evals
             })
         {
             return Err(ZKVMError::VerifyError("record evaluate != expected_evals"));
@@ -237,7 +235,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             .circuit
             .assert_zero_expressions
             .iter()
-            .any(|expr| eval_by_expr(&proof.wits_in_evals, challenges, &expr) != E::ZERO)
+            .any(|expr| eval_by_expr(&proof.wits_in_evals, challenges, expr) != E::ZERO)
         {
             // TODO add me back
             // return Err(ZKVMError::VerifyError("zero expression != 0"));
@@ -266,11 +264,9 @@ impl TowerVerify {
         let log2_num_fanin = ceil_log2(num_fanin);
         // sanity check
         assert!(initial_prod_evals.len() == tower_proofs.prod_spec_size());
-        assert!(
-            initial_prod_evals
-                .iter()
-                .all(|evals| evals.len() == num_fanin)
-        );
+        assert!(initial_prod_evals
+            .iter()
+            .all(|evals| evals.len() == num_fanin));
         assert!(initial_logup_evals.len() == tower_proofs.logup_spec_size());
         assert!(initial_logup_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
@@ -334,7 +330,7 @@ impl TowerVerify {
                 let expected_evaluation: E = (0..tower_proofs.prod_spec_size())
                     .zip(alpha_pows.iter())
                     .map(|(spec_index, alpha)| {
-                        eq_eval(&out_rt, &rt)
+                        eq_eval(out_rt, &rt)
                             * alpha
                             * tower_proofs.prod_specs_eval[spec_index]
                                 .get(round)
@@ -346,7 +342,7 @@ impl TowerVerify {
                         .zip(alpha_pows[initial_prod_evals_len..].chunks(2))
                         .map(|(spec_index, alpha)| {
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
-                            eq_eval(&out_rt, &rt)
+                            eq_eval(out_rt, &rt)
                                 * tower_proofs.logup_specs_eval[spec_index]
                                     .get(round)
                                     .map(|evals| {
@@ -370,7 +366,7 @@ impl TowerVerify {
                     .collect_vec();
                 let coeffs = build_eq_x_r_vec_sequential(&r_merge);
                 assert_eq!(coeffs.len(), num_fanin);
-                let rt_prime = vec![rt, r_merge].concat();
+                let rt_prime = [rt, r_merge].concat();
 
                 let prod_spec_evals = (0..tower_proofs.prod_spec_size())
                     .zip(alpha_pows.iter())

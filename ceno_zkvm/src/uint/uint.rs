@@ -2,11 +2,13 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::UtilError,
     expression::{Expression, ToExpr, WitIn},
+    utils::add_one_to_big_num,
 };
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use singer_utils::{constants::BYTE_BIT_WIDTH, uint::util::add_one_to_big_num};
 use sumcheck::util::ceil_log2;
+
+use super::constants::BYTE_BIT_WIDTH;
 
 #[derive(Clone)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.

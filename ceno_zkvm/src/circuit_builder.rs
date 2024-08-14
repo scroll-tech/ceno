@@ -1,9 +1,8 @@
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
-use simple_frontend::structs::WitnessId;
 
-use crate::expression::Expression;
+use crate::{expression::Expression, structs::WitnessId};
 
 #[derive(Clone, Debug)]
 // TODO it's a bit weird for the circuit builder to be clonable. Might define a internal meta for it

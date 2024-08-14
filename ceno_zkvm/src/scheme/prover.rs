@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 
 use ff_ext::ExtensionField;
-use gkr::{entered_span, exit_span, structs::Point};
 
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -9,7 +8,10 @@ use multilinear_extensions::{
     virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use sumcheck::structs::{IOPProverMessage, IOPProverStateV2};
+use sumcheck::{
+    entered_span, exit_span,
+    structs::{IOPProverMessage, IOPProverStateV2},
+};
 use transcript::Transcript;
 
 use crate::{
@@ -22,7 +24,7 @@ use crate::{
             wit_infer_by_expr,
         },
     },
-    structs::{TowerProofs, TowerProver, TowerProverSpec, VirtualPolynomials},
+    structs::{Point, TowerProofs, TowerProver, TowerProverSpec, VirtualPolynomials},
     utils::{get_challenge_pows, proper_num_threads},
 };
 
@@ -41,9 +43,9 @@ impl<E: ExtensionField> ZKVMProver<E> {
     /// major flow break down into
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
-    pub fn create_proof<'a>(
+    pub fn create_proof(
         &self,
-        witnesses: Vec<ArcMultilinearExtension<'a, E>>,
+        witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
@@ -69,7 +71,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             .chain(circuit.lk_expressions.par_iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&witnesses, &challenges, expr)
+                wit_infer_by_expr(&witnesses, challenges, expr)
             })
             .collect();
         let (r_records_wit, w_lk_records_wit) = records_wit.split_at(circuit.r_expressions.len());
@@ -200,7 +202,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         assert_eq!(
             rt_tower.len(),
             log2_num_instances
-                + vec![log2_r_count, log2_w_count, log2_lk_count]
+                + [log2_r_count, log2_w_count, log2_lk_count]
                     .iter()
                     .max()
                     .unwrap()
@@ -473,11 +475,11 @@ impl<E: ExtensionField> TowerProofs<E> {
     }
 
     pub fn prod_spec_size(&self) -> usize {
-        return self.prod_specs_eval.len();
+        self.prod_specs_eval.len()
     }
 
     pub fn logup_spec_size(&self) -> usize {
-        return self.logup_specs_eval.len();
+        self.logup_specs_eval.len()
     }
 }
 
@@ -495,7 +497,7 @@ impl TowerProver {
         assert_eq!(num_fanin, 2);
 
         let mut proofs = TowerProofs::new(prod_specs.len(), logup_specs.len());
-        assert!(prod_specs.len() > 0);
+        assert!(!prod_specs.is_empty());
         let log_num_fanin = ceil_log2(num_fanin);
         // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
         let max_round = prod_specs
@@ -534,21 +536,17 @@ impl TowerProver {
 
                     // sanity check
                     assert_eq!(layer_polys.len(), num_fanin);
-                    assert!(
-                        layer_polys
-                            .iter()
-                            .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round)))
-                    );
+                    assert!(layer_polys
+                        .iter()
+                        .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round))));
 
                     // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
                     for (thread_id, eq) in (0..num_threads).zip(eq_threads.iter()) {
-                        let layer_polys = virtual_polys.get_range_polys_by_thread_id(
-                            thread_id,
-                            layer_polys.iter().map(|x| x).collect(),
-                        );
+                        let layer_polys = virtual_polys
+                            .get_range_polys_by_thread_id(thread_id, layer_polys.iter().collect());
                         virtual_polys.add_mle_list(
                             thread_id,
-                            vec![vec![eq.clone()], layer_polys].concat(),
+                            [vec![eq.clone()], layer_polys].concat(),
                             *alpha,
                         )
                     }
@@ -563,19 +561,15 @@ impl TowerProver {
                     let layer_polys = &s.witness[round];
                     // sanity check
                     assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
-                    assert!(
-                        layer_polys
-                            .iter()
-                            .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
-                    );
+                    assert!(layer_polys
+                        .iter()
+                        .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),);
 
                     let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
 
                     for (thread_id, eq) in (0..num_threads).zip(eq_threads.iter()) {
-                        let mut layer_polys = virtual_polys.get_range_polys_by_thread_id(
-                            thread_id,
-                            layer_polys.iter().map(|x| x).collect(),
-                        );
+                        let mut layer_polys = virtual_polys
+                            .get_range_polys_by_thread_id(thread_id, layer_polys.iter().collect());
                         let (q2, q1, p2, p1) = (
                             layer_polys.pop().unwrap(),
                             layer_polys.pop().unwrap(),
@@ -616,7 +610,7 @@ impl TowerProver {
             let r_merge = (0..log_num_fanin)
                 .map(|_| transcript.get_and_append_challenge(b"merge").elements)
                 .collect_vec();
-            let rt_prime = vec![sumcheck_proofs.point, r_merge].concat();
+            let rt_prime = [sumcheck_proofs.point, r_merge].concat();
 
             let evals = state.get_mle_final_evaluations();
             let mut evals_iter = evals.iter();

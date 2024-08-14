@@ -1,6 +1,39 @@
+use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use transcript::Transcript;
+
+/// Compile time evaluated minimum function
+/// returns min(a, b)
+pub(crate) const fn const_min(a: usize, b: usize) -> usize {
+    if a <= b {
+        a
+    } else {
+        b
+    }
+}
+
+/// Assumes each limb < max_value
+/// adds 1 to the big value, while preserving the above constraint
+pub(crate) fn add_one_to_big_num<F: Field>(limb_modulo: F, limbs: &[F]) -> Vec<F> {
+    let mut should_add_one = true;
+    let mut result = vec![];
+
+    for limb in limbs {
+        let mut new_limb_value = *limb;
+        if should_add_one {
+            new_limb_value += F::ONE;
+            if new_limb_value == limb_modulo {
+                new_limb_value = F::ZERO;
+            } else {
+                should_add_one = false;
+            }
+        }
+        result.push(new_limb_value);
+    }
+
+    result
+}
 
 pub(crate) fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
     if x >= 0 {
@@ -34,8 +67,8 @@ pub fn u64vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
     assert!(C <= 64);
     let mut x = x;
     let mut ret = [0; W];
-    for i in 0..ret.len() {
-        ret[i] = x & ((1 << C) - 1);
+    for ret in ret.iter_mut() {
+        *ret = x & ((1 << C) - 1);
         x >>= C;
     }
     ret
@@ -46,7 +79,7 @@ pub fn u64vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
 pub fn proper_num_threads(num_vars: usize, expected_max_threads: usize) -> usize {
     let min_numvar_per_thread = 4;
     if num_vars <= min_numvar_per_thread {
-        return 1;
+        1
     } else {
         (1 << (num_vars - min_numvar_per_thread)).min(expected_max_threads)
     }
@@ -91,7 +124,7 @@ pub fn sel_eval<E: ExtensionField>(num_instances: usize, r: &[E]) -> E {
     let (bits, _) = (0..r.len()).fold((vec![], num_instances - 1), |(mut bits, mut cur_num), _| {
         let bit = cur_num & 1;
         bits.push(bit);
-        cur_num = cur_num >> 1;
+        cur_num >>= 1;
 
         (bits, cur_num)
     });

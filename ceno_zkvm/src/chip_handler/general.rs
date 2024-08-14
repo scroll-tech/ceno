@@ -9,6 +9,12 @@ use crate::{
     structs::ROMType,
 };
 
+impl<E: ExtensionField> Default for CircuitBuilder<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<E: ExtensionField> CircuitBuilder<E> {
     pub fn new() -> Self {
         Self {
@@ -97,9 +103,8 @@ impl<E: ExtensionField> CircuitBuilder<E> {
         if assert_zero_expr.degree() == 1 {
             self.assert_zero_expressions.push(assert_zero_expr);
         } else {
-            assert_eq!(
+            assert!(
                 assert_zero_expr.is_monomial_form(),
-                true,
                 "only support sumcheck in monomial form"
             );
             self.max_non_lc_degree = self.max_non_lc_degree.max(assert_zero_expr.degree());

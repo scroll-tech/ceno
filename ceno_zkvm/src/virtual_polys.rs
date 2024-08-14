@@ -1,9 +1,11 @@
 use std::{collections::BTreeSet, mem, sync::Arc};
 
 use ff_ext::ExtensionField;
-use gkr::util::ceil_log2;
 use itertools::Itertools;
-use multilinear_extensions::virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2};
+use multilinear_extensions::{
+    util::ceil_log2,
+    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+};
 
 use crate::{expression::Expression, structs::VirtualPolynomials};
 
@@ -87,7 +89,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             &|challenge_id, pow, scalar, offset| {
                 let challenge = challenges[challenge_id as usize];
                 vec![(
-                    challenge.pow(&[pow as u64]) * scalar + offset,
+                    challenge.pow([pow as u64]) * scalar + offset,
                     BTreeSet::new(),
                 )]
             },
@@ -134,25 +136,20 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 let sel = selector
                     .as_ref()
                     .map(|sel| vec![sel[thread_id].clone()])
-                    .unwrap_or(vec![]);
+                    .unwrap_or_default();
                 let terms_polys = monomial_term
                     .iter()
                     .map(|wit_id| wit_ins[*wit_id as usize][thread_id].clone())
                     .collect_vec();
 
-                self.add_mle_list(
-                    thread_id,
-                    vec![sel, terms_polys].concat(),
-                    *constant * alpha,
-                );
+                self.add_mle_list(thread_id, [sel, terms_polys].concat(), *constant * alpha);
             }
         }
 
-        let num_distinct_witins = monomial_terms
+        monomial_terms
             .into_iter()
             .flat_map(|(_, monomial_term)| monomial_term.into_iter().collect_vec())
-            .collect::<BTreeSet<u16>>();
-        num_distinct_witins
+            .collect::<BTreeSet<u16>>()
     }
 }
 

@@ -13,12 +13,9 @@ goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
 
-gkr = { path = "../gkr", features = ["parallel"] }
 transcript = { path = "../transcript" }
 mpcs = { path = "../mpcs" }
-simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
-sumcheck= { version = "0.1.0", path = "../sumcheck" }
-singer-utils = { version = "0.1.0", path = "../singer-utils" }
+sumcheck = { version = "0.1.0", path = "../sumcheck" }
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
 ff_ext = { path = "../ff_ext" }
 

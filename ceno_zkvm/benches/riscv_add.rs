@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use ark_std::test_rng;
 use ceno_zkvm::{
     circuit_builder::CircuitBuilder,
-    instructions::{riscv::add::AddInstruction, Instruction},
+    instructions::{riscv::addsub::AddInstruction, Instruction},
     scheme::prover::ZKVMProver,
 };
 use const_env::from_env;

@@ -1,11 +1,10 @@
 use ff_ext::ExtensionField;
-use singer_utils::structs::RAMType;
 
 use crate::{
-    circuit_builder::{self, CircuitBuilder},
+    circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    structs::{TSUInt, UInt64},
+    structs::{RAMType, TSUInt, UInt64},
 };
 
 use super::RegisterChipOperations;

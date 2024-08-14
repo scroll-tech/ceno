@@ -1,10 +1,3 @@
-use crate::error::UtilError;
-use ff::PrimeField;
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
-use itertools::Itertools;
-use simple_frontend::structs::{CellId, CircuitBuilder};
-
 // /// Given some data represented by n small cells of size s
 // /// this function represents the same data in m big cells of size b
 // /// where b >= s

@@ -1,8 +1,11 @@
 use std::marker::PhantomData;
 
-use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, uint::util::const_min};
+use crate::utils::const_min;
 
 use super::UInt;
+
+pub const RANGE_CHIP_BIT_WIDTH: usize = 16;
+pub const BYTE_BIT_WIDTH: usize = 8;
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     pub const M: usize = M;

@@ -32,10 +32,9 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
     let num_instances = 1 << log2_num_instances;
     assert!(num_limbs.is_power_of_two());
     assert!(!mles.is_empty());
-    assert!(
-        mles.iter()
-            .all(|mle| mle.evaluations().len() == num_instances)
-    );
+    assert!(mles
+        .iter()
+        .all(|mle| mle.evaluations().len() == num_instances));
     let per_fanin_len = (mles[0].evaluations().len() / num_limbs).max(1); // minimal size 1
     let log2_mle_size = ceil_log2(mles.len());
     let log2_num_limbs = ceil_log2(num_limbs);
@@ -75,9 +74,9 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
 
 /// infer logup witness from last layer
 /// return is the ([p1,p2], [q1,q2]) for each layer
-pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
-    q_mles: Vec<ArcMultilinearExtension<'a, E>>,
-) -> Vec<Vec<ArcMultilinearExtension<'a, E>>> {
+pub(crate) fn infer_tower_logup_witness<E: ExtensionField>(
+    q_mles: Vec<ArcMultilinearExtension<'_, E>>,
+) -> Vec<Vec<ArcMultilinearExtension<'_, E>>> {
     if cfg!(test) {
         assert_eq!(q_mles.len(), 2);
         assert!(q_mles.iter().map(|q| q.evaluations().len()).all_equal());
@@ -164,21 +163,21 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
                     vec![E::ONE; len].into_mle().into(),
                 ]
                 .into_iter()
-                .chain(q.into_iter())
+                .chain(q)
                 .collect()
             } else {
-                vec![p.unwrap(), q].concat()
+                [p.unwrap(), q].concat()
             }
         })
         .collect_vec()
 }
 
 /// infer tower witness from last layer
-pub(crate) fn infer_tower_product_witness<'a, E: ExtensionField>(
+pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     num_vars: usize,
-    last_layer: Vec<ArcMultilinearExtension<'a, E>>,
+    last_layer: Vec<ArcMultilinearExtension<'_, E>>,
     num_product_fanin: usize,
-) -> Vec<Vec<ArcMultilinearExtension<'a, E>>> {
+) -> Vec<Vec<ArcMultilinearExtension<'_, E>>> {
     assert!(last_layer.len() == num_product_fanin);
     let log2_num_product_fanin = ceil_log2(num_product_fanin);
     let mut wit_layers =
@@ -229,7 +228,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
             let challenge: ArcMultilinearExtension<E> =
                 Arc::new(DenseMultilinearExtension::from_evaluations_ext_vec(
                     0,
-                    vec![challenge.pow(&[pow as u64]) * scalar + offset],
+                    vec![challenge.pow([pow as u64]) * scalar + offset],
                 ));
             challenge
         },
@@ -331,7 +330,7 @@ pub(crate) fn eval_by_expr<'a, E: ExtensionField>(
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be aquire once for each power
             let challenge = challenges[challenge_id as usize];
-            challenge.pow(&[pow as u64]) * scalar + offset
+            challenge.pow([pow as u64]) * scalar + offset
         },
         &|a, b| a + b,
         &|a, b| a * b,
@@ -381,10 +380,9 @@ mod tests {
             })
             .product();
         assert_eq!(res.len(), num_vars);
-        assert!(
-            res.iter()
-                .all(|layer_wit| layer_wit.len() == num_product_fanin)
-        );
+        assert!(res
+            .iter()
+            .all(|layer_wit| layer_wit.len() == num_product_fanin));
         assert_eq!(final_product, expected_final_product);
     }
 
@@ -498,23 +496,23 @@ mod tests {
         assert_eq!(
             layer[0].evaluations().clone(),
             FieldType::<E>::Ext(vec![
-                vec![1 * 1 + 5 * 1].into_iter().map(E::from).sum::<E>(),
-                vec![2 * 1 + 6 * 1].into_iter().map(E::from).sum::<E>()
+                vec![1 + 5].into_iter().map(E::from).sum::<E>(),
+                vec![2 + 6].into_iter().map(E::from).sum::<E>()
             ])
         );
         // next layer p2
         assert_eq!(
             layer[1].evaluations().clone(),
             FieldType::<E>::Ext(vec![
-                vec![3 * 1 + 7 * 1].into_iter().map(E::from).sum::<E>(),
-                vec![4 * 1 + 8 * 1].into_iter().map(E::from).sum::<E>()
+                vec![3 + 7].into_iter().map(E::from).sum::<E>(),
+                vec![4 + 8].into_iter().map(E::from).sum::<E>()
             ])
         );
         // next layer q1
         assert_eq!(
             layer[2].evaluations().clone(),
             FieldType::<E>::Ext(vec![
-                vec![1 * 5].into_iter().map(E::from).sum::<E>(),
+                vec![5].into_iter().map(E::from).sum::<E>(),
                 vec![2 * 6].into_iter().map(E::from).sum::<E>()
             ])
         );
@@ -533,39 +531,34 @@ mod tests {
         assert_eq!(
             layer[0].evaluations().clone(),
             // p11 * q12 + p12 * q11
-            FieldType::<E>::Ext(vec![
-                vec![(1 * 1 + 5 * 1) * (3 * 7) + (3 * 1 + 7 * 1) * (1 * 5)]
-                    .into_iter()
-                    .map(E::from)
-                    .sum::<E>(),
-            ])
+            FieldType::<E>::Ext(vec![vec![(1 + 5) * (3 * 7) + (3 + 7) * 5]
+                .into_iter()
+                .map(E::from)
+                .sum::<E>(),])
         );
         // p2
         assert_eq!(
             layer[1].evaluations().clone(),
             // p21 * q22 + p22 * q21
-            FieldType::<E>::Ext(vec![
-                vec![(2 * 1 + 6 * 1) * (4 * 8) + (4 * 1 + 8 * 1) * (2 * 6)]
-                    .into_iter()
-                    .map(E::from)
-                    .sum::<E>(),
-            ])
+            FieldType::<E>::Ext(vec![vec![(2 + 6) * (4 * 8) + (4 + 8) * (2 * 6)]
+                .into_iter()
+                .map(E::from)
+                .sum::<E>(),])
         );
         // q1
         assert_eq!(
             layer[2].evaluations().clone(),
             // q12 * q11
-            FieldType::<E>::Ext(vec![
-                vec![(3 * 7) * (1 * 5)].into_iter().map(E::from).sum::<E>(),
-            ])
+            FieldType::<E>::Ext(vec![vec![(3 * 7) * 5].into_iter().map(E::from).sum::<E>(),])
         );
         // q2
         assert_eq!(
             layer[3].evaluations().clone(),
             // q22 * q22
-            FieldType::<E>::Ext(vec![
-                vec![(4 * 8) * (2 * 6)].into_iter().map(E::from).sum::<E>(),
-            ])
+            FieldType::<E>::Ext(vec![vec![(4 * 8) * (2 * 6)]
+                .into_iter()
+                .map(E::from)
+                .sum::<E>(),])
         );
     }
 }
