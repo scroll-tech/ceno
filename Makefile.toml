@@ -15,6 +15,10 @@ args = ["fmt", "--all", "--", "--check"]
 command = "cargo"
 args = ["fmt", "--all"]
 
-[tasks.clippy]
+[tasks.clippy-check]
 command = "cargo"
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
+
+[tasks.clippy]
+command = "cargo"
+args = ["clippy", "--all-features", "--all-targets", "--fix", "--", "-D", "warnings"]

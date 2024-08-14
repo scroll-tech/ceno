@@ -62,5 +62,5 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: make
-          args: clippy
+          args: clippy-check
 
