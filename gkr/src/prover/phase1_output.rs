@@ -56,9 +56,11 @@ impl<E: ExtensionField> IOPProverState<E> {
         let lo_num_vars = circuit.layers[self.layer_id as usize].num_vars;
         let hi_num_vars = circuit_witness.instance_num_vars();
 
-        self.phase1_layer_poly = circuit_witness
-            .layer_poly::<E>((self.layer_id).try_into().unwrap(), lo_num_vars, (0, 1))
-            .into();
+        self.phase1_layer_poly = circuit_witness.layer_poly::<E>(
+            (self.layer_id).try_into().unwrap(),
+            lo_num_vars,
+            (0, 1),
+        );
 
         // sigma = \sum_j( \alpha^j * subset[i][j](rt_j || ry_j) )
         // f1^{(j)}(y) = layers[i](rt_j || y)
@@ -136,7 +138,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         let mut g_last = vec![E::ZERO; 1 << lo_num_vars];
         circuit.assert_consts.iter().for_each(|gate| {
-            g_last[gate.idx_out as usize] = lo_eq_w_p[gate.idx_out as usize] * alpha_pow;
+            g_last[gate.idx_out] = lo_eq_w_p[gate.idx_out] * alpha_pow;
         });
 
         g1.push(DenseMultilinearExtension::from_evaluations_ext_vec(lo_num_vars, g_last).into());

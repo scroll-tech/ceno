@@ -6,15 +6,14 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        global_state::GlobalStateChip, range::RangeChip, stack::StackChip, ChipHandler,
     },
     chips::IntoEnumIterator,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     component::{BBFinalCircuit, BBFinalLayout, FromBBStart, FromPredInst, FromWitness},
@@ -56,7 +55,7 @@ impl BasicBlockFinal {
         // From inst pc.
         let (next_pc_id, next_pc) = circuit_builder.create_witness_in(PCUInt::N_OPERAND_CELLS);
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         let stack_ts = TSUInt::try_from(stack_ts)?;
         let stack_ts_add_witness = &phase0[Self::phase0_stack_ts_add()];

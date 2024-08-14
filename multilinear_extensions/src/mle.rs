@@ -28,6 +28,14 @@ impl<E: ExtensionField> FieldType<E> {
             FieldType::Unreachable => unreachable!(),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            FieldType::Base(content) => content.is_empty(),
+            FieldType::Ext(content) => content.is_empty(),
+            FieldType::Unreachable => unreachable!(),
+        }
+    }
 }
 
 /// Stores a multilinear polynomial in dense evaluation form.
@@ -92,6 +100,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
 
     /// Evaluate the MLE at a give point.
     /// Returns an error if the MLE length does not match the point.
+    #[allow(deprecated)]
     pub fn evaluate(&self, point: &[E]) -> E {
         // TODO: return error.
         assert_eq!(
@@ -146,7 +155,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         );
         let nv = self.num_vars;
         // evaluate single variable of partial point from left to right
-        for (i, point) in partial_point.iter().enumerate() {
+        for point in partial_point.iter() {
             // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
             match &mut self.evaluations {
                 FieldType::Base(evaluations) => {
@@ -284,7 +293,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             for e in multiplicands.iter_mut() {
                 let val = E::BaseField::random(&mut rng);
                 e.push(val);
-                product = product * &val;
+                product *= &val;
             }
             sum += product;
         }
@@ -326,6 +335,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         list
     }
 
+    #[allow(clippy::useless_conversion)]
     pub fn to_ext_field(&self) -> Self {
         op_mle!(self, |evaluations| {
             DenseMultilinearExtension::from_evaluations_ext_vec(

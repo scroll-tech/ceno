@@ -334,16 +334,13 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
     // Absorption
     state = izip!(
         state.iter(),
-        input
-            .into_iter()
-            .map(|input| Some(input))
-            .chain(iter::repeat(None))
+        input.into_iter().map(Some).chain(iter::repeat(None))
     )
     .map(|(state, input)| {
         if let Some(input) = input {
             xor(cb, state, &input)
         } else {
-            relay(cb, &state)
+            relay(cb, state)
         }
     })
     .collect_vec();
@@ -369,7 +366,6 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
                 // first layer => reduce size from 11 to 4
                 let xor_inputs = xor_inputs
                     .chunks(3)
-                    .into_iter()
                     .map(|chunk| {
                         let chunked_inputs = chunk.to_vec();
                         match chunked_inputs.len() {
@@ -384,7 +380,6 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
                 // second layer => reduce size from 4 to 2
                 let xor_inputs = xor_inputs
                     .chunks(2)
-                    .into_iter()
                     .map(|chunk| {
                         let chunked_inputs = chunk.to_vec();
                         assert!(chunked_inputs.len() == 2);
@@ -396,7 +391,6 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
                 // third layer => reduce size from 2 to 1
                 let xor_inputs = xor_inputs
                     .chunks(2)
-                    .into_iter()
                     .map(|chunk| {
                         let chunked_inputs = chunk.to_vec();
                         assert!(chunked_inputs.len() == 2);
@@ -471,9 +465,9 @@ pub fn prove_keccak256<E: ExtensionField>(
             vec![E::BaseField::ONE; 25 * 64],
             vec![E::BaseField::ZERO; 17 * 64],
         ];
-        let mut witness = CircuitWitness::new(&circuit, Vec::new());
-        witness.add_instance(&circuit, all_zero);
-        witness.add_instance(&circuit, all_one);
+        let mut witness = CircuitWitness::new(circuit, Vec::new());
+        witness.add_instance(circuit, all_zero);
+        witness.add_instance(circuit, all_one);
 
         izip!(
             &witness.witness_out_ref()[0].instances,
@@ -498,7 +492,7 @@ pub fn prove_keccak256<E: ExtensionField>(
     }
 
     let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
-    let mut witness = CircuitWitness::new(&circuit, Vec::new());
+    let mut witness = CircuitWitness::new(circuit, Vec::new());
     for _ in 0..1 << instance_num_vars {
         let [rand_state, rand_input] = [25 * 64, 17 * 64].map(|n| {
             iter::repeat_with(|| rng.gen_bool(0.5) as u64)
@@ -506,7 +500,7 @@ pub fn prove_keccak256<E: ExtensionField>(
                 .map(E::BaseField::from)
                 .collect_vec()
         });
-        witness.add_instance(&circuit, vec![rand_state, rand_input]);
+        witness.add_instance(circuit, vec![rand_state, rand_input]);
     }
 
     let lo_num_vars = witness.witness_out_ref()[0].instances[0]
@@ -530,7 +524,7 @@ pub fn prove_keccak256<E: ExtensionField>(
 
     let start = std::time::Instant::now();
     let (proof, _) = IOPProverState::prove_parallel(
-        &circuit,
+        circuit,
         &witness,
         vec![],
         vec![PointAndEval::new(output_point, output_eval)],
@@ -557,7 +551,7 @@ pub fn verify_keccak256<E: ExtensionField>(
     .collect_vec();
     let output_eval = output_mle.evaluate(&output_point);
     crate::structs::IOPVerifierState::verify_parallel(
-        &circuit,
+        circuit,
         &[],
         vec![],
         vec![PointAndEval::new(output_point, output_eval)],

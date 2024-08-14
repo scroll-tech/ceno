@@ -55,13 +55,13 @@ impl<E: ExtensionField> IOPProverState<E> {
                 .instances
                 .as_slice();
             let mut f1 = layer_in_vec.mle(lo_in_num_vars, hi_num_vars);
-            Arc::make_mut(&mut f1).fix_high_variables_in_place(&hi_point);
+            Arc::make_mut(&mut f1).fix_high_variables_in_place(hi_point);
 
             // g1(x1) = add(ry, x1)
             let g1 = {
                 let mut g1 = vec![E::ZERO; 1 << lo_in_num_vars];
                 layer.adds.iter().for_each(|gate| {
-                    g1[gate.idx_in[0]] += eq_y_ry[gate.idx_out] * &gate.scalar.eval(&challenges);
+                    g1[gate.idx_in[0]] += eq_y_ry[gate.idx_out] * &gate.scalar.eval(challenges);
                 });
                 DenseMultilinearExtension::from_evaluations_ext_vec(lo_in_num_vars, g1)
             };
@@ -97,7 +97,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     lo_in_num_vars + hi_num_vars,
                     f1_j,
                 );
-                f1_j.fix_high_variables_in_place(&hi_point);
+                f1_j.fix_high_variables_in_place(hi_point);
                 f1_j.into()
             });
             g1_vec.push(

@@ -33,19 +33,19 @@ pub fn prove<E: ExtensionField>(
                 .map(|node| {
                     match node {
                         NodeOutputType::OutputLayer(node_id) => vm_witness.0.node_witnesses
-                            [*node_id as usize]
+                            [*node_id]
                             .output_layer_witness_ref()
                             .instances
                             .iter()
-                            .cloned()
-                            .flatten(),
+                            .flatten()
+                            .cloned(),
                         NodeOutputType::WireOut(node_id, wit_id) => vm_witness.0.node_witnesses
-                            [*node_id as usize]
+                            [*node_id]
                             .witness_out_ref()[*wit_id as usize]
                             .instances
                             .iter()
-                            .cloned()
-                            .flatten(),
+                            .flatten()
+                            .cloned(),
                     }
                     .collect_vec()
                 })

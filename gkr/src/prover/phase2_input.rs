@@ -61,7 +61,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     let subset_wire_id = new_wire_id - l;
                     for s in 0..(1 << hi_num_vars) {
                         f[(s << max_lo_in_num_vars) ^ subset_wire_id] =
-                            wits_in[j as usize].instances[s][subset_wire_id];
+                            wits_in[j].instances[s][subset_wire_id];
                     }
                     g[subset_wire_id] = eq_y_ry[new_wire_id];
                 }
@@ -103,7 +103,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             max_lo_in_num_vars + hi_num_vars,
                             f,
                         );
-                        f.fix_high_variables_in_place(&hi_point);
+                        f.fix_high_variables_in_place(hi_point);
                         f.into()
                     },
                     DenseMultilinearExtension::from_evaluations_ext_vec(max_lo_in_num_vars, g)

@@ -5,15 +5,15 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip, stack::StackChip,
+        ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -48,7 +48,7 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -63,7 +63,7 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top,
             clk,
         );
@@ -131,12 +131,9 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
-    use gkr::structs::LayerWitness;
+
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
+
     use std::collections::BTreeMap;
 
     use crate::{
@@ -145,14 +142,6 @@ mod test {
         utils::u64vec,
     };
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
-    use std::time::Instant;
-    use transcript::Transcript;
-
-    use crate::{
-        instructions::{InstructionGraph, SingerCircuitBuilder},
-        scheme::GKRGraphProverState,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
-    };
 
     #[test]
     fn test_pop_construct_circuit() {

@@ -5,15 +5,14 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        global_state::GlobalStateChip, ram_handler::RAMHandler, range::RangeChip,
-        rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        global_state::GlobalStateChip, range::RangeChip, stack::StackChip, ChipHandler,
     },
     chips::IntoEnumIterator,
     register_multi_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
     component::{BBStartCircuit, BBStartLayout, FromWitness, ToBBFinal, ToSuccInst},
@@ -52,7 +51,7 @@ impl BasicBlockStart {
         let (phase0_wire_id, phase0) =
             circuit_builder.create_witness_in(Self::phase0_size(n_stack_items));
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = &phase0[Self::phase0_pc(n_stack_items)];
@@ -111,7 +110,7 @@ impl BasicBlockStart {
             stack_result_ids.push(stack_operand_id);
         }
         let (out_memory_ts_id, out_memory_ts) = circuit_builder.create_witness_out(memory_ts.len());
-        add_assign_each_cell(&mut circuit_builder, &out_memory_ts, &memory_ts);
+        add_assign_each_cell(&mut circuit_builder, &out_memory_ts, memory_ts);
 
         // To BB final
         let (out_stack_ts_id, out_stack_ts) =

@@ -5,15 +5,13 @@ use itertools::izip;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
-    chip_handler::{
-        bytecode::BytecodeChip, range::RangeChip, rom_handler::ROMHandler, ChipHandler,
-    },
+    chip_handler::{bytecode::BytecodeChip, range::RangeChip, ChipHandler},
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, PCUInt, StackUInt, TSUInt},
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
@@ -54,7 +52,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
         let (cond_values_id, cond_values) =
             circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Execution, cond_values_non_zero[i] = [cond_values[i] != 0]
         let cond_values_inv = &phase0[Self::phase0_cond_values_inv()];

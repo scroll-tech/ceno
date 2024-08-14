@@ -98,8 +98,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                 (layer_id + 1).try_into().unwrap(),
                 num_vars,
                 multi_threads_meta,
-            )
-            .into();
+            );
 
         // f1(s1 || x1) = layers[i + 1](s1 || x1)
         let f1 = phase2_next_layer_polys_v2.clone();
@@ -123,17 +122,17 @@ impl<E: ExtensionField> IOPProverState<E> {
                 eq[(s << lo_out_num_vars) ^ gate.idx_out]
                     * (&next_layer_vec[s][gate.idx_in[1]])
                     * (&next_layer_vec[s][gate.idx_in[2]])
-                    * (&gate.scalar.eval(&challenges))
+                    * (&gate.scalar.eval(challenges))
             },
             mul2s_fanin_mapping,
             |s, gate| {
                 eq[(s << lo_out_num_vars) ^ gate.idx_out]
                     * (&next_layer_vec[s][gate.idx_in[1]])
-                    * (&gate.scalar.eval(&challenges))
+                    * (&gate.scalar.eval(challenges))
             },
             adds_fanin_mapping,
             |s, gate| {
-                eq[(s << lo_out_num_vars) ^ gate.idx_out] * (&gate.scalar.eval(&challenges))
+                eq[(s << lo_out_num_vars) ^ gate.idx_out] * (&gate.scalar.eval(challenges))
             }
         );
         let g1 = DenseMultilinearExtension::from_evaluations_ext_vec(f1.num_vars, g1).into();
@@ -145,7 +144,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         let (f1_j, g1_j)= izip!(&layer.paste_from).map(|(j, paste_from)| {
             let paste_from_sources = circuit_witness.layers_ref();
             let old_wire_id = |old_layer_id: usize, subset_wire_id: usize| -> usize {
-                circuit.layers[old_layer_id].copy_to[&(layer_id as u32)][subset_wire_id]
+                circuit.layers[old_layer_id].copy_to[&{ layer_id }][subset_wire_id]
             };
 
             let mut f1_j = vec![0.into(); 1 << f1.num_vars];
@@ -282,13 +281,13 @@ impl<E: ExtensionField> IOPProverState<E> {
                     eq0[(s << lo_out_num_vars) ^ gate.idx_out]
                         * eq1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
                         * (&phase2_next_layer_vec[s][gate.idx_in[2]])
-                        * (&gate.scalar.eval(&challenges))
+                        * (&gate.scalar.eval(challenges))
                 },
                 mul2s_fanin_mapping,
                 |s, gate| {
                     eq0[(s << lo_out_num_vars) ^ gate.idx_out]
                         * eq1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
-                        * (&gate.scalar.eval(&challenges))
+                        * (&gate.scalar.eval(challenges))
                 },
             );
             DenseMultilinearExtension::from_evaluations_ext_vec(f2.num_vars, g2).into()
@@ -376,7 +375,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                 |s, gate| eq0[(s << lo_out_num_vars) ^ gate.idx_out]
                     * eq1[(s << lo_in_num_vars) ^ gate.idx_in[0]]
                     * eq2[(s << lo_in_num_vars) ^ gate.idx_in[1]]
-                    * (&gate.scalar.eval(&challenges))
+                    * (&gate.scalar.eval(challenges))
             );
             DenseMultilinearExtension::from_evaluations_ext_vec(f3.num_vars, g3).into()
         };

@@ -9,7 +9,7 @@ use singer_utils::{
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt, UInt64},
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
@@ -44,7 +44,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
         let (offset_id, offset) = circuit_builder.create_witness_in(UInt64::N_OPERAND_CELLS);
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // CallDataLoad check (offset, data)
         let data = &phase0[Self::phase0_data()];
@@ -52,7 +52,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
 
         // To successor instruction
         let (data_copy_id, data_copy) = circuit_builder.create_witness_out(data.len());
-        add_assign_each_cell(&mut circuit_builder, &data_copy, &data);
+        add_assign_each_cell(&mut circuit_builder, &data_copy, data);
         let (next_memory_ts_id, next_memory_ts) =
             circuit_builder.create_witness_out(TSUInt::N_OPERAND_CELLS);
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);

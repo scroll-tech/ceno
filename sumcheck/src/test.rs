@@ -30,7 +30,7 @@ fn test_sumcheck<E: ExtensionField>(
     let subclaim = IOPVerifierState::<E>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
     assert!(
         poly.evaluate(
-            &subclaim
+            subclaim
                 .point
                 .iter()
                 .map(|c| c.elements)
@@ -83,7 +83,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);
     assert!(
         poly.evaluate(
-            &subclaim
+            subclaim
                 .point
                 .iter()
                 .map(|c| c.elements)

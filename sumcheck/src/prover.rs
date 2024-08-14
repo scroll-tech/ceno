@@ -226,7 +226,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     proofs: prover_msgs,
                     ..Default::default()
                 },
-                prover_state.into(),
+                prover_state,
             );
         }
 
@@ -279,7 +279,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                 proofs: prover_msgs,
                 ..Default::default()
             },
-            prover_state.into(),
+            prover_state,
         )
     }
 
@@ -386,7 +386,6 @@ impl<E: ExtensionField> IOPProverState<E> {
                         op_mle! {
                             |f| {
                                 (0..f.len())
-                                    .into_iter()
                                     .step_by(2)
                                     .fold(AdditiveArray::<E, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
                                             acc.0[0] += f[b];
@@ -404,7 +403,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             &self.poly.flattened_ml_extensions[products[1]],
                         );
                         commutative_op_mle_pair!(
-                            |f, g| (0..f.len()).into_iter().step_by(2).fold(
+                            |f, g| (0..f.len()).step_by(2).fold(
                                 AdditiveArray::<E, 3>(array::from_fn(|_| 0.into())),
                                 |mut acc, b| {
                                     acc.0[0] += f[b] * g[b];
@@ -486,7 +485,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             return (
                 IOPProof::default(),
                 IOPProverState {
-                    poly: poly,
+                    poly,
                     ..Default::default()
                 },
             );
@@ -545,7 +544,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                 proofs: prover_msgs,
                 ..Default::default()
             },
-            prover_state.into(),
+            prover_state,
         )
     }
 

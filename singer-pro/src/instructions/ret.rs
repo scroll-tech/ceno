@@ -4,17 +4,14 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
-    chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
-    },
+    chip_handler::ChipHandler,
     chips::{IntoEnumIterator, SingerChipBuilder},
     constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{
     component::{
@@ -134,7 +131,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
         let (offset_id, offset) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Compute offset + counter
         let delta = circuit_builder.create_counter_in(0)[0];

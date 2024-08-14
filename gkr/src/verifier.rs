@@ -8,8 +8,7 @@ use transcript::Transcript;
 use crate::{
     error::GKRError,
     structs::{
-        Circuit, GKRInputClaims, IOPProof, IOPProverStepMessage, IOPVerifierState, PointAndEval,
-        SumcheckStepType,
+        Circuit, GKRInputClaims, IOPProof, IOPVerifierState, PointAndEval, SumcheckStepType,
     },
 };
 
@@ -50,7 +49,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             let timer = start_timer!(|| format!("Verify layer {}", layer_id));
             verifier_state.layer_id = layer_id as LayerId;
 
-            let layer = &circuit.layers[layer_id as usize];
+            let layer = &circuit.layers[layer_id];
             for (step, step_proof) in izip!(layer.sumcheck_steps.iter(), &mut sumcheck_proofs_iter)
             {
                 match step {

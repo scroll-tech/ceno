@@ -91,7 +91,7 @@ impl<E: ExtensionField> SingerGraphBuilder<E> {
         // calldata.
         let table_out_node_id = self.chip_builder.construct_lookup_table_graph_and_witness(
             &mut self.graph_builder,
-            &basic_blocks.iter().cloned().flatten().collect_vec(),
+            &basic_blocks.iter().flatten().cloned().collect_vec(),
             program_input,
             singer_wires_in.table_count_witnesses,
             &self.bb_builder.challenges,

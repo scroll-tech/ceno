@@ -4,10 +4,7 @@ use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
-    chip_handler::{
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
-        ChipHandler,
-    },
+    chip_handler::{ram_handler::RAMHandler, range::RangeChip, stack::StackChip, ChipHandler},
     chips::IntoEnumIterator,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
@@ -53,7 +50,7 @@ impl BasicBlockReturn {
         let (stack_top_id, stack_top) = circuit_builder.create_witness_in(1);
         let (clk_id, _) = circuit_builder.create_witness_in(1);
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Check the of stack_top + offset.
         let stack_top_expr = MixedCell::Cell(stack_top[0]);
@@ -127,7 +124,7 @@ impl BBReturnRestMemLoad {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
+        let ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges)));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
@@ -176,7 +173,7 @@ impl BBReturnRestMemStore {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
+        let ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges)));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
@@ -226,7 +223,7 @@ impl BBReturnRestStackPop {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Pop from stack
         let stack_top = circuit_builder.create_counter_in(0);

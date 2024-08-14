@@ -58,13 +58,11 @@ impl<E: ExtensionField> IOPProverState<E> {
         exit_span!(span);
 
         // f1^{(j)}(y) = layers[i](t || y)
-        let f1: Arc<DenseMultilinearExtension<E>> = circuit_witness
-            .layer_poly::<E>(
-                (layer_id).try_into().unwrap(),
-                lo_num_vars,
-                multi_threads_meta,
-            )
-            .into();
+        let f1: Arc<DenseMultilinearExtension<E>> = circuit_witness.layer_poly::<E>(
+            (layer_id).try_into().unwrap(),
+            lo_num_vars,
+            multi_threads_meta,
+        );
 
         assert_eq!(
             f1.evaluations.len(),

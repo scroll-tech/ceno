@@ -56,8 +56,7 @@ impl<F: SmallField> CircuitWitness<F> {
                 assert_eq!(wits_in.len(), circuit.paste_from_wits_in.len());
                 for (wit_id, (l, r)) in circuit.paste_from_wits_in.iter().enumerate() {
                     for i in *l..*r {
-                        layer_wit[instance_id][i] =
-                            wits_in[wit_id as usize].instances[instance_id][i - *l];
+                        layer_wit[instance_id][i] = wits_in[wit_id].instances[instance_id][i - *l];
                     }
                 }
                 for (constant, (l, r)) in circuit.paste_from_consts_in.iter() {
@@ -102,25 +101,25 @@ impl<F: SmallField> CircuitWitness<F> {
 
                     let last_layer_wit = &layer_wits[layer_id + 1].instances[instance_id];
                     for add_const in layer.add_consts.iter() {
-                        current_layer_wit[add_const.idx_out] += add_const.scalar.eval(&challenges);
+                        current_layer_wit[add_const.idx_out] += add_const.scalar.eval(challenges);
                     }
 
                     for add in layer.adds.iter() {
                         current_layer_wit[add.idx_out] +=
-                            last_layer_wit[add.idx_in[0]] * add.scalar.eval(&challenges);
+                            last_layer_wit[add.idx_in[0]] * add.scalar.eval(challenges);
                     }
 
                     for mul2 in layer.mul2s.iter() {
                         current_layer_wit[mul2.idx_out] += last_layer_wit[mul2.idx_in[0]]
                             * last_layer_wit[mul2.idx_in[1]]
-                            * mul2.scalar.eval(&challenges);
+                            * mul2.scalar.eval(challenges);
                     }
 
                     for mul3 in layer.mul3s.iter() {
                         current_layer_wit[mul3.idx_out] += last_layer_wit[mul3.idx_in[0]]
                             * last_layer_wit[mul3.idx_in[1]]
                             * last_layer_wit[mul3.idx_in[2]]
-                            * mul3.scalar.eval(&challenges);
+                            * mul3.scalar.eval(challenges);
                     }
                 },
             );
@@ -489,9 +488,8 @@ mod test {
         );
 
         circuit_builder.configure();
-        let circuit = Circuit::new(&circuit_builder);
 
-        circuit
+        Circuit::new(&circuit_builder)
     }
 
     fn copy_and_paste_witness<Ext: ExtensionField>() -> (
@@ -568,8 +566,8 @@ mod test {
         circuit_builder.mul2(root[0], inners[0], inners[1], Ext::BaseField::ONE);
 
         circuit_builder.configure();
-        let circuit = Circuit::new(&circuit_builder);
-        circuit
+
+        Circuit::new(&circuit_builder)
     }
 
     fn paste_from_wit_in_witness<Ext: ExtensionField>() -> (
@@ -659,9 +657,8 @@ mod test {
         circuit_builder.assert_const(root, 5005);
 
         circuit_builder.configure();
-        let circuit = Circuit::new(&circuit_builder);
 
-        circuit
+        Circuit::new(&circuit_builder)
     }
 
     fn copy_to_wit_out_witness<Ext: ExtensionField>() -> (
@@ -809,9 +806,8 @@ mod test {
         circuit_builder.mul2_ext(&roots[0], &inners[0], &inners[1], Ext::BaseField::ONE);
 
         circuit_builder.configure();
-        let circuit = Circuit::new(&circuit_builder);
 
-        circuit
+        Circuit::new(&circuit_builder)
     }
 
     fn rlc_witness_2<Ext>() -> (
@@ -837,7 +833,7 @@ mod test {
                                 challenge: i as u8,
                                 exp: j as u64,
                             },
-                            x.pow(&[j as u64]),
+                            x.pow([j as u64]),
                         )
                     })
                     .collect_vec()

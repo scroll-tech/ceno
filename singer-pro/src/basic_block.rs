@@ -134,7 +134,7 @@ impl<E: ExtensionField> BasicBlock<E> {
         pc_start: u64,
         challenges: ChipChallenges,
     ) -> Result<Self, ZKVMError> {
-        let mut stack_top = 0 as i64;
+        let mut stack_top = 0_i64;
         let mut pc = pc_start;
         let mut stack_offsets = HashSet::new();
 
@@ -393,7 +393,7 @@ impl<E: ExtensionField> BasicBlock<E> {
         let mut public_output_size = None;
 
         for opcode in self.bytecode.iter() {
-            let (inst_circuit, acc_circuits) = &inst_builder.insts_circuits.get(&opcode).unwrap();
+            let (inst_circuit, acc_circuits) = &inst_builder.insts_circuits.get(opcode).unwrap();
 
             let mode = StackOpMode::from(*opcode);
             let stack = local_stack.pop_node_outputs(mode);
@@ -479,28 +479,6 @@ impl<E: ExtensionField> BasicBlock<E> {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        basic_block::{
-            bb_final::BasicBlockFinal, bb_start::BasicBlockStart, BasicBlock, BasicBlockInfo,
-        },
-        instructions::{add::AddInstruction, SingerInstCircuitBuilder},
-        scheme::GKRGraphProverState,
-        BasicBlockWiresIn, SingerParams,
-    };
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
-    use gkr::structs::LayerWitness;
-    use gkr_graph::structs::CircuitGraphBuilder;
-    use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
-    use singer_utils::{
-        chips::SingerChipBuilder,
-        constants::OpcodeType,
-        structs::{ChipChallenges, PCUInt},
-    };
-    use std::time::Instant;
-    use transcript::Transcript;
 
     // A benchmark containing `n_adds_in_bb` ADD instructions in a basic block.
     #[cfg(not(debug_assertions))]

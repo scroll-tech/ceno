@@ -14,6 +14,12 @@ use crate::{
     },
 };
 
+impl<E: ExtensionField> Default for CircuitGraphBuilder<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<E: ExtensionField> CircuitGraphBuilder<E> {
     pub fn new() -> Self {
         Self {
@@ -45,9 +51,10 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
         assert!(num_instances.is_power_of_two());
         assert_eq!(sources.len(), circuit.n_witness_in);
         assert!(
-            !sources.iter().any(
-                |source| source.instances.len() != 0 && source.instances.len() != num_instances
-            ),
+            !sources
+                .iter()
+                .any(|source| !source.instances.is_empty()
+                    && source.instances.len() != num_instances),
             "node_id: {}, num_instances: {}, sources_num_instances: {:?}",
             id,
             num_instances,
@@ -81,8 +88,8 @@ impl<E: ExtensionField> CircuitGraphBuilder<E> {
                         PredType::PredWire(_) => {
                             let new_size = (old_num_instances * out[0].len()) / num_instances;
                             out.iter()
-                                .cloned()
                                 .flatten()
+                                .cloned()
                                 .chunks(new_size)
                                 .into_iter()
                                 .map(|c| c.collect_vec())

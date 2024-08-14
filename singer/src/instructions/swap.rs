@@ -5,15 +5,15 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip, stack::StackChip,
+        ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -62,7 +62,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -77,7 +77,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top,
             clk,
         );
@@ -97,7 +97,7 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top_expr,
             clk_expr.add(E::BaseField::ONE),
         );
@@ -188,24 +188,16 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
-    use gkr::structs::LayerWitness;
+
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
+
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
 
     use crate::{
-        instructions::{
-            ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder, SwapInstruction,
-        },
-        scheme::GKRGraphProverState,
+        instructions::{ChipChallenges, Instruction, SwapInstruction},
         test::{get_uint_params, test_opcode_circuit},
         utils::u64vec,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
     #[test]

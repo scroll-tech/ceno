@@ -6,15 +6,14 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, calldata::CalldataChip, global_state::GlobalStateChip,
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
-        ChipHandler,
+        range::RangeChip, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, StackUInt, TSUInt, UInt64},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -54,7 +53,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // instantiate memory handlers
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -69,7 +68,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top,
             clk,
         );
@@ -89,7 +88,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top_expr,
             clk_expr.add(E::BaseField::ONE),
         );
@@ -158,25 +157,16 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
-    use gkr::structs::LayerWitness;
+
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
+
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
 
     use crate::{
-        instructions::{
-            CalldataloadInstruction, ChipChallenges, Instruction, InstructionGraph,
-            SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
+        instructions::{CalldataloadInstruction, ChipChallenges, Instruction},
         test::{get_uint_params, test_opcode_circuit},
         utils::u64vec,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
     #[test]

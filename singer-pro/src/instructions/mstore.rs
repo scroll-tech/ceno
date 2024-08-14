@@ -5,18 +5,14 @@ use itertools::Itertools;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
-    chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, memory::MemoryChip,
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
-        ChipHandler,
-    },
+    chip_handler::{memory::MemoryChip, range::RangeChip, ChipHandler},
     chips::{IntoEnumIterator, SingerChipBuilder},
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{
     component::{
@@ -134,7 +130,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let (mem_value_id, mem_values) =
             circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Update memory timestamp.
         let memory_ts = TSUInt::try_from(memory_ts.as_slice())?;
@@ -155,7 +151,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         let mem_values = StackUInt::try_from(mem_values.as_slice())?;
         let mem_values_from_bytes =
-            StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
+            StackUInt::from_bytes_big_endian(&mut circuit_builder, mem_bytes)?;
         StackUInt::assert_eq(&mut circuit_builder, &mem_values_from_bytes, &mem_values)?;
 
         // To chips.
@@ -244,7 +240,7 @@ impl MstoreAccessory {
         // From witness.
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Compute offset, offset + 1, ..., offset + EVM_STACK_BYTE_WIDTH - 1.
         // Load previous memory bytes.

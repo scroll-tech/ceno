@@ -41,6 +41,12 @@ pub struct SingerGraphBuilder<E: ExtensionField> {
     pub public_output_size: Option<NodeOutputType>,
 }
 
+impl<E: ExtensionField> Default for SingerGraphBuilder<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<E: ExtensionField> SingerGraphBuilder<E> {
     pub fn new() -> Self {
         Self {
@@ -78,7 +84,7 @@ impl<E: ExtensionField> SingerGraphBuilder<E> {
                 opcode,
                 &mut self.graph_builder,
                 &mut self.chip_builder,
-                &inst_circuits,
+                inst_circuits,
                 wires_in,
                 real_challenges,
                 real_n_instances,
@@ -138,7 +144,7 @@ impl<E: ExtensionField> SingerGraphBuilder<E> {
                 *opcode,
                 &mut self.graph_builder,
                 &mut self.chip_builder,
-                &inst_circuits,
+                inst_circuits,
                 *real_n_instances,
                 &aux_info.singer_params,
             )?;
@@ -170,7 +176,7 @@ impl<E: ExtensionField> SingerGraphBuilder<E> {
             rom_input: mem::take(&mut output_wires_id[InstOutputType::ROMInput as usize]),
             rom_table: table_out_node_id,
 
-            public_output_size: public_output_size,
+            public_output_size,
         };
 
         let graph = graph_builder.finalize_graph_with_targets(&singer_wire_out_id.to_vec());

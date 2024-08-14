@@ -187,13 +187,13 @@ fn main() {
     let target_evals = graph.target_evals(&wit, &point);
 
     for _ in 0..5 {
-        let mut prover_transcript = &mut Transcript::new(b"Singer");
+        let prover_transcript = &mut Transcript::new(b"Singer");
         let timer = Instant::now();
         let proof = GKRGraphProverState::prove(
             &graph,
             &wit,
             &target_evals,
-            &mut prover_transcript,
+            prover_transcript,
             (1 << instance_num_vars).min(max_thread_id),
         )
         .expect("prove failed");
@@ -203,7 +203,7 @@ fn main() {
             timer.elapsed().as_secs_f64()
         );
         let mut verifier_transcript = Transcript::new(b"Singer");
-        let _ = GKRGraphVerifierState::verify(
+        GKRGraphVerifierState::verify(
             &graph,
             &real_challenges,
             &target_evals,

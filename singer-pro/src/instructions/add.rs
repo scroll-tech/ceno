@@ -3,17 +3,14 @@ use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
-    chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip,
-        rom_handler::ROMHandler, stack::StackChip, ChipHandler,
-    },
+    chip_handler::ChipHandler,
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
@@ -51,7 +48,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         let (addend_0_id, addend_0) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
         let (addend_1_id, addend_1) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Execution result = addend0 + addend1, with carry.
         let addend_0 = addend_0.try_into()?;

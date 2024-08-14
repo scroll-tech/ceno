@@ -39,9 +39,8 @@ fn copy_and_paste_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     );
 
     circuit_builder.configure();
-    let circuit = Circuit::new(&circuit_builder);
 
-    circuit
+    Circuit::new(&circuit_builder)
 }
 
 fn copy_and_paste_witness<Ext: ExtensionField>() -> (
@@ -118,8 +117,8 @@ fn paste_from_wit_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     circuit_builder.mul2(root[0], inners[0], inners[1], Ext::BaseField::ONE);
 
     circuit_builder.configure();
-    let circuit = Circuit::new(&circuit_builder);
-    circuit
+
+    Circuit::new(&circuit_builder)
 }
 
 fn paste_from_wit_in_witness<Ext: ExtensionField>() -> (
@@ -209,9 +208,8 @@ fn copy_to_wit_out_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     circuit_builder.assert_const(root, 5005);
 
     circuit_builder.configure();
-    let circuit = Circuit::new(&circuit_builder);
 
-    circuit
+    Circuit::new(&circuit_builder)
 }
 
 fn copy_to_wit_out_witness<Ext: ExtensionField>() -> (
@@ -359,9 +357,8 @@ fn rlc_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     circuit_builder.mul2_ext(&roots[0], &inners[0], &inners[1], Ext::BaseField::ONE);
 
     circuit_builder.configure();
-    let circuit = Circuit::new(&circuit_builder);
 
-    circuit
+    Circuit::new(&circuit_builder)
 }
 
 fn rlc_witness<Ext>() -> (
@@ -387,7 +384,7 @@ where
                             challenge: i as u8,
                             exp: j as u64,
                         },
-                        x.pow(&[j as u64]),
+                        x.pow([j as u64]),
                     )
                 })
                 .collect_vec()
@@ -448,8 +445,8 @@ where
     let root0 = inner00 * inner01;
     let root1 = inner10 * inner11;
     let roots = vec![
-        root0.as_bases().into_iter().cloned().collect_vec(),
-        root1.as_bases().into_iter().cloned().collect_vec(),
+        root0.as_bases().iter().cloned().collect_vec(),
+        root1.as_bases().iter().cloned().collect_vec(),
     ];
 
     let layers = vec![

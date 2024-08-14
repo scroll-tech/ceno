@@ -32,8 +32,8 @@ pub fn verify<E: ExtensionField>(
         public_output_size,
     } = vm_proof.singer_out_evals;
 
-    let ram_load_product: E = ram_load.iter().map(|x| E::from_limbs(&x)).product();
-    let ram_store_product = ram_store.iter().map(|x| E::from_limbs(&x)).product();
+    let ram_load_product: E = ram_load.iter().map(|x| E::from_limbs(x)).product();
+    let ram_store_product = ram_store.iter().map(|x| E::from_limbs(x)).product();
     if ram_load_product != ram_store_product {
         return Err(ZKVMError::VerifyError);
     }
@@ -88,7 +88,7 @@ pub fn verify<E: ExtensionField>(
 
     GKRGraphVerifierState::verify(
         &vm_circuit.0,
-        &challenges,
+        challenges,
         &target_evals,
         vm_proof.gkr_phase_proof,
         &aux_info.graph_aux_info,

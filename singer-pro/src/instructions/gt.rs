@@ -3,14 +3,14 @@ use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
-    chip_handler::{range::RangeChip, rom_handler::ROMHandler, ChipHandler},
+    chip_handler::ChipHandler,
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
@@ -48,7 +48,7 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
         let (operand_1_id, operand_1) =
             circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Execution operand_1 > operand_0.
         let operand_0 = operand_0.try_into()?;
