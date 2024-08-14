@@ -22,7 +22,7 @@ pub struct SubInstruction;
 pub struct InstructionConfig<E: ExtensionField> {
     pub pc: PCUInt,
     pub ts: TSUInt,
-    pub prev_rd_memory_value: UInt64,
+    pub prev_rd_value: UInt64,
     pub addend_0: UInt64,
     pub addend_1: UInt64,
     pub outcome: UInt64,
@@ -55,7 +55,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let next_pc = pc.add_const(circuit_builder, RISCV64_PC_STEP_SIZE.into())?;
 
     // Execution result = addend0 + addend1, with carry.
-    let prev_rd_memory_value = UInt64::new(circuit_builder);
+    let prev_rd_value = UInt64::new(circuit_builder);
     let addend_0 = UInt64::new(circuit_builder);
     let addend_1 = UInt64::new(circuit_builder);
     let outcome = UInt64::new(circuit_builder);
@@ -87,7 +87,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         &rd_id,
         &mut prev_rd_ts,
         &mut ts,
-        &prev_rd_memory_value,
+        &prev_rd_value,
         &computed_outcome,
     )?;
 
@@ -97,7 +97,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     Ok(InstructionConfig {
         pc,
         ts,
-        prev_rd_memory_value,
+        prev_rd_value,
         addend_0,
         addend_1,
         outcome,

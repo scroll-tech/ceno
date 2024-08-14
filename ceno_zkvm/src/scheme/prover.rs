@@ -238,17 +238,26 @@ impl<E: ExtensionField> ZKVMProver<E> {
             // TODO sel can be shared if expression count match
             let mut sel_r = build_eq_x_r_vec(&rt_r[log2_r_count..]);
             if num_instances < sel_r.len() {
-                sel_r.splice(num_instances..sel_r.len(), std::iter::repeat(E::ZERO));
+                sel_r.splice(
+                    num_instances..sel_r.len(),
+                    std::iter::repeat(E::ZERO).take(sel_r.len() - num_instances),
+                );
             }
 
             let mut sel_w = build_eq_x_r_vec(&rt_w[log2_w_count..]);
             if num_instances < sel_w.len() {
-                sel_w.splice(num_instances..sel_w.len(), std::iter::repeat(E::ZERO));
+                sel_w.splice(
+                    num_instances..sel_w.len(),
+                    std::iter::repeat(E::ZERO).take(sel_w.len() - num_instances),
+                );
             }
 
             let mut sel_lk = build_eq_x_r_vec(&rt_lk[log2_lk_count..]);
             if num_instances < sel_lk.len() {
-                sel_lk.splice(num_instances..sel_lk.len(), std::iter::repeat(E::ZERO));
+                sel_lk.splice(
+                    num_instances..sel_lk.len(),
+                    std::iter::repeat(E::ZERO).take(sel_lk.len() - num_instances),
+                );
             }
 
             (
@@ -536,9 +545,11 @@ impl TowerProver {
 
                     // sanity check
                     assert_eq!(layer_polys.len(), num_fanin);
-                    assert!(layer_polys
-                        .iter()
-                        .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round))));
+                    assert!(
+                        layer_polys
+                            .iter()
+                            .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round)))
+                    );
 
                     // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
                     for (thread_id, eq) in (0..num_threads).zip(eq_threads.iter()) {
@@ -561,9 +572,11 @@ impl TowerProver {
                     let layer_polys = &s.witness[round];
                     // sanity check
                     assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
-                    assert!(layer_polys
-                        .iter()
-                        .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),);
+                    assert!(
+                        layer_polys
+                            .iter()
+                            .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
+                    );
 
                     let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
 
