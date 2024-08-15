@@ -6,8 +6,12 @@ use num_integer::Integer;
 use std::{borrow::Borrow, iter};
 
 mod bh;
+mod hypercube;
 pub use bh::BooleanHypercube;
 pub use bitvec::field::BitField;
+pub use hypercube::{
+    interpolate_field_type_over_boolean_hypercube, interpolate_over_boolean_hypercube,
+};
 use num_bigint::BigUint;
 
 use itertools::Itertools;
@@ -182,4 +186,53 @@ pub fn div_rem(dividend: usize, divisor: usize) -> (usize, usize) {
 
 pub fn div_ceil(dividend: usize, divisor: usize) -> usize {
     Integer::div_ceil(&dividend, &divisor)
+}
+
+#[allow(unused)]
+pub fn interpolate2_weights_base<E: ExtensionField>(
+    points: [(E, E); 2],
+    weight: E::BaseField,
+    x: E,
+) -> E {
+    interpolate2_weights(points, E::from(weight), x)
+}
+
+pub fn interpolate2_weights<F: Field>(points: [(F, F); 2], weight: F, x: F) -> F {
+    // a0 -> a1
+    // b0 -> b1
+    // x  -> a1 + (x-a0)*(b1-a1)/(b0-a0)
+    let (a0, a1) = points[0];
+    let (b0, b1) = points[1];
+    if cfg!(feature = "sanity-check") {
+        assert_ne!(a0, b0);
+        assert_eq!(weight * (b0 - a0), F::ONE);
+    }
+    // Here weight = 1/(b0-a0). The reason for precomputing it is that inversion is expensive
+    a1 + (x - a0) * (b1 - a1) * weight
+}
+
+pub fn interpolate2<F: Field>(points: [(F, F); 2], x: F) -> F {
+    // a0 -> a1
+    // b0 -> b1
+    // x  -> a1 + (x-a0)*(b1-a1)/(b0-a0)
+    let (a0, a1) = points[0];
+    let (b0, b1) = points[1];
+    assert_ne!(a0, b0);
+    a1 + (x - a0) * (b1 - a1) * (b0 - a0).invert().unwrap()
+}
+
+pub fn degree_2_zero_plus_one<F: Field>(poly: &Vec<F>) -> F {
+    poly[0] + poly[0] + poly[1] + poly[2]
+}
+
+pub fn degree_2_eval<F: Field>(poly: &Vec<F>, point: F) -> F {
+    poly[0] + point * poly[1] + point * point * poly[2]
+}
+
+pub fn base_from_raw_bytes<E: ExtensionField>(bytes: &Vec<u8>) -> E::BaseField {
+    let mut res = E::BaseField::ZERO;
+    bytes.into_iter().for_each(|b| {
+        res += E::BaseField::from(u64::from(*b));
+    });
+    res
 }

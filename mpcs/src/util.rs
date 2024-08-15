@@ -12,14 +12,7 @@ use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub mod merkle_tree;
 use crate::{util::parallel::parallelize, Error};
-pub fn log2_strict(n: usize) -> usize {
-    let res = n.trailing_zeros();
-    assert!(n.wrapping_shr(res) == 1, "Not a power of two: {n}");
-    // Tell the optimizer about the semantics of `log2_strict`. i.e. it can replace `n` with
-    // `1 << res` and vice versa.
-
-    res as usize
-}
+pub use plonky2_util::log2_strict;
 
 pub fn ext_to_usize<E: ExtensionField>(x: &E) -> usize {
     let bases = x.as_bases();

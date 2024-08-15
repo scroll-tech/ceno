@@ -157,9 +157,8 @@ mod test {
     use crate::util::{arithmetic::BooleanHypercube, expression::Rotation};
 
     #[test]
-    #[ignore = "cause it takes some minutes to run with release profile"]
     fn boolean_hypercube_iter() {
-        for num_vars in 0..32 {
+        for num_vars in 0..18 {
             let bh = BooleanHypercube::new(num_vars);
             let mut set = vec![false; 1 << num_vars];
             for i in bh.iter() {
@@ -170,9 +169,8 @@ mod test {
     }
 
     #[test]
-    #[ignore = "cause it takes some minutes to run with release profile"]
     fn boolean_hypercube_prev() {
-        for num_vars in 0..32 {
+        for num_vars in 0..18 {
             let bh = BooleanHypercube::new(num_vars);
             for (b, b_next) in bh.iter().skip(1).zip(bh.iter().skip(2).chain(Some(1))) {
                 assert_eq!(b, bh.rotate(b_next, Rotation::prev()))
