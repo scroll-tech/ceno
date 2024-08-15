@@ -18,6 +18,7 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     fn fix_high_variables(&self, partial_point: &[E]) -> Self::Output;
     fn fix_high_variables_in_place(&mut self, partial_point: &[E]);
     fn evaluate(&self, point: &[E]) -> E;
+    fn evaluate_sequential(&self, point: &[E]) -> E;
     fn num_vars(&self) -> usize;
     fn evaluations(&self) -> &FieldType<E>;
     fn evaluations_range(&self) -> Option<(usize, usize)>; // start offset
@@ -555,6 +556,26 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
 
     /// Evaluate the MLE at a give point.
     /// Returns an error if the MLE length does not match the point.
+    fn evaluate_sequential(&self, point: &[E]) -> E {
+        // TODO: return error.
+        assert_eq!(
+            self.num_vars(),
+            point.len(),
+            "MLE size does not match the point"
+        );
+        let mle = self.fix_variables(point);
+        op_mle!(
+            mle,
+            |f| {
+                assert_eq!(f.len(), 1);
+                f[0]
+            },
+            |v| E::from(v)
+        )
+    }
+
+    /// Evaluate the MLE at a give point.
+    /// Returns an error if the MLE length does not match the point.
     fn evaluate(&self, point: &[E]) -> E {
         // TODO: return error.
         assert_eq!(
@@ -878,6 +899,10 @@ impl<'a, E: ExtensionField> MultilinearExtension<E> for RangedMultilinearExtensi
 
     fn fix_high_variables_in_place(&mut self, _partial_point: &[E]) {
         unimplemented!()
+    }
+
+    fn evaluate_sequential(&self, point: &[E]) -> E {
+        self.inner.evaluate_sequential(point)
     }
 
     fn evaluate(&self, point: &[E]) -> E {

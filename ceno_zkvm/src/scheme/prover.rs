@@ -438,15 +438,15 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         let r_records_in_evals = r_records_wit
             .par_iter()
-            .map(|r| r.evaluate(&input_open_point))
+            .map(|r| r.evaluate_sequential(&input_open_point))
             .collect();
         let w_records_in_evals = w_records_wit
             .par_iter()
-            .map(|w| w.evaluate(&input_open_point))
+            .map(|w| w.evaluate_sequential(&input_open_point))
             .collect();
         let lk_records_in_evals = lk_records_wit
             .par_iter()
-            .map(|lk| lk.evaluate(&input_open_point))
+            .map(|lk| lk.evaluate_sequential(&input_open_point))
             .collect();
 
         main_sel_evals_iter.next(); // skip sel_r
@@ -473,7 +473,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let span = entered_span!("witin::evals");
         let wits_in_evals = witnesses
             .par_iter()
-            .map(|poly| poly.evaluate(&input_open_point))
+            .map(|poly| poly.evaluate_sequential(&input_open_point))
             .collect();
         exit_span!(span);
 

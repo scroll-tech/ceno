@@ -264,9 +264,11 @@ impl TowerVerify {
         let log2_num_fanin = ceil_log2(num_fanin);
         // sanity check
         assert!(initial_prod_evals.len() == tower_proofs.prod_spec_size());
-        assert!(initial_prod_evals
-            .iter()
-            .all(|evals| evals.len() == num_fanin));
+        assert!(
+            initial_prod_evals
+                .iter()
+                .all(|evals| evals.len() == num_fanin)
+        );
         assert!(initial_logup_evals.len() == tower_proofs.logup_spec_size());
         assert!(initial_logup_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
@@ -285,7 +287,7 @@ impl TowerVerify {
         // out_j[rt] := (logup_q{j}[rt])
         let initial_prod_evals_len = initial_prod_evals.len();
         let initial_claim = izip!(initial_prod_evals, alpha_pows.iter())
-            .map(|(evals, alpha)| evals.into_mle().evaluate(&initial_rt) * alpha)
+            .map(|(evals, alpha)| evals.into_mle().evaluate_sequential(&initial_rt) * alpha)
             .sum::<E>()
             + izip!(
                 initial_logup_evals,
@@ -294,8 +296,8 @@ impl TowerVerify {
             .map(|(evals, alpha)| {
                 let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
                 let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
-                vec![p1, p2].into_mle().evaluate(&initial_rt) * alpha_numerator
-                    + vec![q1, q2].into_mle().evaluate(&initial_rt) * alpha_denominator
+                vec![p1, p2].into_mle().evaluate_sequential(&initial_rt) * alpha_numerator
+                    + vec![q1, q2].into_mle().evaluate_sequential(&initial_rt) * alpha_denominator
             })
             .sum::<E>();
 
