@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use ff_ext::ExtensionField;
 
+use ff::Field;
 use itertools::Itertools;
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::build_eq_x_r_vec,
@@ -17,11 +18,12 @@ use transcript::Transcript;
 use crate::{
     circuit_builder::Circuit,
     error::ZKVMError,
+    expression::Expression,
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
-            wit_infer_by_expr,
+            pointwise_merge_mles, wit_infer_by_expr,
         },
     },
     structs::{Point, TowerProofs, TowerProver, TowerProverSpec, VirtualPolynomials},
@@ -285,6 +287,47 @@ impl<E: ExtensionField> ZKVMProver<E> {
             }
         };
 
+        // process record aggregation first
+        let eq_r = build_eq_x_r_vec(&rt_r[..log2_r_count]);
+        let eq_w = build_eq_x_r_vec(&rt_w[..log2_w_count]);
+        let eq_lk = build_eq_x_r_vec(&rt_lk[..log2_lk_count]);
+
+        // \sum_i alpha_read * eq(rs, i) * record_r_{i}[t]
+        let mut r_expr: Expression<_> = 0.into();
+        for i in 0..r_counts_per_instance {
+            r_expr = r_expr
+                + Expression::ScaledSum(
+                    Expression::WitIn(i as u16).into(),
+                    Expression::Challenge(0, 1, eq_r[i] * alpha_read, E::ZERO).into(),
+                    Expression::Constant(E::BaseField::ZERO).into(),
+                );
+        }
+        let r_records_wit_sum = wit_infer_by_expr(&r_records_wit, &[E::ONE], &r_expr);
+
+        // \sum_i alpha_write * eq(rs, i) * record_w_{i}[t]
+        let mut w_expr: Expression<_> = 0.into();
+        for i in 0..w_counts_per_instance {
+            w_expr = w_expr
+                + Expression::ScaledSum(
+                    Expression::WitIn(i as u16).into(),
+                    Expression::Challenge(0, 1, eq_w[i] * alpha_write, E::ZERO).into(),
+                    Expression::Constant(E::BaseField::ZERO).into(),
+                );
+        }
+        let w_records_wit_sum = wit_infer_by_expr(&w_records_wit, &[E::ONE], &w_expr);
+
+        // \sum_i alpha_lk * eq(rs, i) * record_lk_{i}[t]
+        let mut lk_expr: Expression<_> = 0.into();
+        for i in 0..lk_counts_per_instance {
+            lk_expr = lk_expr
+                + Expression::ScaledSum(
+                    Expression::WitIn(i as u16).into(),
+                    Expression::Challenge(0, 1, eq_lk[i] * alpha_lk, E::ZERO).into(),
+                    Expression::Constant(E::BaseField::ZERO).into(),
+                );
+        }
+        let lk_records_wit_sum = wit_infer_by_expr(&lk_records_wit, &[E::ONE], &lk_expr);
+
         let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, log2_num_instances);
         let sel_r_threads = virtual_polys.get_all_range_polys(&sel_r);
         let sel_w_threads: Vec<ArcMultilinearExtension<'_, E>> =
@@ -292,24 +335,14 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let sel_lk_threads: Vec<ArcMultilinearExtension<'_, E>> =
             virtual_polys.get_all_range_polys(&sel_lk);
 
-        let eq_r = build_eq_x_r_vec(&rt_r[..log2_r_count]);
-        let eq_w = build_eq_x_r_vec(&rt_w[..log2_w_count]);
-        let eq_lk = build_eq_x_r_vec(&rt_lk[..log2_lk_count]);
-
         // read
         // rt_r := rt || rs
         for (thread_id, sel_r) in (0..num_threads).zip(sel_r_threads.iter()) {
-            for i in 0..r_counts_per_instance {
-                // \sum_t (sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[t] ))
-                let r_records_wit = virtual_polys
-                    .get_range_polys_by_thread_id(thread_id, vec![&r_records_wit[i]])
-                    .remove(0);
-                virtual_polys.add_mle_list(
-                    thread_id,
-                    vec![sel_r.clone(), r_records_wit],
-                    eq_r[i] * alpha_read,
-                );
-            }
+            let r_records_wit_sum = virtual_polys
+                .get_range_polys_by_thread_id(thread_id, vec![&r_records_wit_sum])
+                .remove(0);
+            // \sum_t sel(rt, t) * r_records_wit_sum[t]
+            virtual_polys.add_mle_list(thread_id, vec![sel_r.clone(), r_records_wit_sum], E::ONE);
             // \sum_t alpha_read * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
             virtual_polys.add_mle_list(
                 thread_id,
@@ -321,17 +354,11 @@ impl<E: ExtensionField> ZKVMProver<E> {
         // write
         // rt := rt || rs
         for (thread_id, sel_w) in (0..num_threads).zip(sel_w_threads.iter()) {
-            for i in 0..w_counts_per_instance {
-                // \sum_t (sel(rt, t) * (\sum_i alpha_write * eq(rs, i) * record_w[i] ))
-                let w_records_wit = virtual_polys
-                    .get_range_polys_by_thread_id(thread_id, vec![&w_records_wit[i]])
-                    .remove(0);
-                virtual_polys.add_mle_list(
-                    thread_id,
-                    vec![sel_w.clone(), w_records_wit],
-                    eq_w[i] * alpha_write,
-                );
-            }
+            let w_records_wit_sum = virtual_polys
+                .get_range_polys_by_thread_id(thread_id, vec![&w_records_wit_sum])
+                .remove(0);
+            // \sum_t sel(rt, t) * w_records_wit_sum[t]
+            virtual_polys.add_mle_list(thread_id, vec![sel_w.clone(), w_records_wit_sum], E::ONE);
             // \sum_t alpha_write * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
             virtual_polys.add_mle_list(
                 thread_id,
@@ -343,17 +370,12 @@ impl<E: ExtensionField> ZKVMProver<E> {
         // lk
         // rt := rt || rs
         for (thread_id, sel_lk) in (0..num_threads).zip(sel_lk_threads.iter()) {
-            for i in 0..lk_counts_per_instance {
-                // \sum_t (sel(rt, t) * (\sum_i alpha_lk* eq(rs, i) * record_w[i]))
-                let lk_records_wit = virtual_polys
-                    .get_range_polys_by_thread_id(thread_id, vec![&lk_records_wit[i]])
-                    .remove(0);
-                virtual_polys.add_mle_list(
-                    thread_id,
-                    vec![sel_lk.clone(), lk_records_wit.clone()],
-                    eq_lk[i] * alpha_lk,
-                );
-            }
+            let lk_records_wit_sum = virtual_polys
+                .get_range_polys_by_thread_id(thread_id, vec![&lk_records_wit_sum])
+                .remove(0);
+
+            // \sum_t sel(rt, t) * lk_records_wit_sum[t]
+            virtual_polys.add_mle_list(thread_id, vec![sel_lk.clone(), lk_records_wit_sum], E::ONE);
             // \sum_t alpha_lk * sel(rt, t) * chip_record_alpha * (\sum_i (eq(rs, i)) - 1)
             virtual_polys.add_mle_list(
                 thread_id,
@@ -400,29 +422,42 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let main_sel_evals = state.get_mle_final_evaluations();
         assert_eq!(
             main_sel_evals.len(),
-            r_counts_per_instance
-                + w_counts_per_instance
-                + lk_counts_per_instance
-                + 3
+            3 // 3 from [sel_r, sel_w, sel_lk]
+                + 3 // 3 from [r_records_wit, w_records_wit, lk_records_wit]
                 + if circuit.assert_zero_sumcheck_expressions.is_empty() {
                     0
                 } else {
                     distrinct_zerocheck_terms_set.len() + 1 // 1 from sel_non_lc_zero_sumcheck
                 }
-        ); // 3 from [sel_r, sel_w, sel_lk]
-        let mut main_sel_evals_iter = main_sel_evals.into_iter();
+        );
+
+        let input_open_point = main_sel_sumcheck_proofs.point.clone();
+        assert!(input_open_point.len() == log2_num_instances);
+
+        let mut main_sel_evals_iter = main_sel_evals.iter();
+
+        let r_records_in_evals = r_records_wit
+            .par_iter()
+            .map(|r| r.evaluate(&input_open_point))
+            .collect();
+        let w_records_in_evals = w_records_wit
+            .par_iter()
+            .map(|w| w.evaluate(&input_open_point))
+            .collect();
+        let lk_records_in_evals = lk_records_wit
+            .par_iter()
+            .map(|lk| lk.evaluate(&input_open_point))
+            .collect();
+
         main_sel_evals_iter.next(); // skip sel_r
-        let r_records_in_evals = (0..r_counts_per_instance)
-            .map(|_| main_sel_evals_iter.next().unwrap())
-            .collect_vec();
-        main_sel_evals_iter.next(); // skip sel_w
-        let w_records_in_evals = (0..w_counts_per_instance)
-            .map(|_| main_sel_evals_iter.next().unwrap())
-            .collect_vec();
+        main_sel_evals_iter.next(); // skip r_records_wit_sum
+
         main_sel_evals_iter.next(); // skip sel_lk
-        let lk_records_in_evals = (0..lk_counts_per_instance)
-            .map(|_| main_sel_evals_iter.next().unwrap())
-            .collect_vec();
+        main_sel_evals_iter.next(); // skip w_records_wit_sum
+
+        main_sel_evals_iter.next(); // skip sel_lk
+        main_sel_evals_iter.next(); // skip lk_records_wit_sum
+
         assert!(
             // we can skip all the rest of degree > 1 monomial terms because all the witness evaluation will be evaluated at last step
             // and pass to verifier
@@ -433,8 +468,6 @@ impl<E: ExtensionField> ZKVMProver<E> {
                     distrinct_zerocheck_terms_set.len() + 1
                 }
         );
-        let input_open_point = main_sel_sumcheck_proofs.point.clone();
-        assert!(input_open_point.len() == log2_num_instances);
         exit_span!(span);
 
         let span = entered_span!("witin::evals");
