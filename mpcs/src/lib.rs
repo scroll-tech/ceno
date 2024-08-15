@@ -9,7 +9,6 @@ use util::{
     transcript::{InMemoryTranscript, PoseidonTranscript, TranscriptRead, TranscriptWrite},
 };
 
-// pub mod poly;
 pub mod sum_check;
 pub mod util;
 
