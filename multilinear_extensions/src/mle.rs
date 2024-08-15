@@ -166,16 +166,20 @@ fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
 
 impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// This function can tell T being Field or ExtensionField and invoke respective function
+    #[tracing::instrument(
+        skip_all,
+        name = "DenseMultilinearExtension::from_evaluation_vec_smart"
+    )]
     pub fn from_evaluation_vec_smart<T: Clone + 'static>(
         num_vars: usize,
         evaluations: Vec<T>,
     ) -> Self {
         if TypeId::of::<T>() == TypeId::of::<E>() {
-            return Self::from_evaluations_ext_vec(num_vars, cast_vec(evaluations.to_vec()));
+            return Self::from_evaluations_ext_vec(num_vars, cast_vec(evaluations));
         }
 
         if TypeId::of::<T>() == TypeId::of::<E::BaseField>() {
-            return Self::from_evaluations_vec(num_vars, cast_vec(evaluations.to_vec()));
+            return Self::from_evaluations_vec(num_vars, cast_vec(evaluations));
         }
 
         unimplemented!("type not support")

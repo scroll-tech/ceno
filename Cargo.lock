@@ -815,6 +815,8 @@ dependencies = [
  "rayon",
  "serde",
  "tracing",
+ "tracing-flame",
+ "tracing-subscriber",
 ]
 
 [[package]]
