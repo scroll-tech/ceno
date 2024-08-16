@@ -388,12 +388,6 @@ impl<E: ExtensionField> ToExpr<E> for WitIn {
     }
 }
 
-// impl<E: Expression> From<E> for WitIn {
-//     fn from(expr: E) -> Self {
-//         WitIn
-//     }
-// }
-
 impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     fn expr(&self) -> Expression<E> {
         Expression::Constant(*self)

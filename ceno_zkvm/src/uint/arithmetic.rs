@@ -36,10 +36,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                 .zip((*addend2).iter())
                 .enumerate()
                 .map(|(i, (a, b))| {
-                    let carry =
-                        c.carries.as_ref().unwrap()[i].expr() * 2_usize.pow(C as u32).into();
-                    if i != 0 {
-                        a.clone() + b.clone() + c.carries.as_ref().unwrap()[i - 1].expr() - carry
+                    let carries = c.carries.as_ref().unwrap();
+                    let carry = carries[i].expr() * 2_usize.pow(C as u32).into();
+                    if i > 0 {
+                        a.clone() + b.clone() + carries[i - 1].expr() - carry
                     } else {
                         a.clone() + b.clone() - carry
                     }
@@ -128,7 +128,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         // t0 - t4 are degree 2, but we only support monomial form now.
         // So, we do a small trick here, constrain that intermediate witness equals the expression (t1 - t4)
         // And then using the intermediate witness for the following computations.
-        let mut inter_wits = UInt::<M, C, E>::new(circuit_builder).expr();
+        let inter_wits = UInt::<M, C, E>::new(circuit_builder).expr();
         circuit_builder
             .require_equal(inter_wits[0].clone(), t0)
             .unwrap();
@@ -196,7 +196,7 @@ mod tests {
 
         type E = GoldilocksExt2;
         #[test]
-        fn test_uint_add_no_carries() {
+        fn test_add_no_carries() {
             let mut circuit_builder = CircuitBuilder::<E>::new();
 
             // a = 1 + 1 * 2^16
@@ -236,7 +236,7 @@ mod tests {
         }
 
         #[test]
-        fn test_uint_add_w_carry() {
+        fn test_add_w_carry() {
             type E = GoldilocksExt2;
             let mut circuit_builder = CircuitBuilder::<E>::new();
 
@@ -277,7 +277,7 @@ mod tests {
         }
 
         #[test]
-        fn test_uint_add_w_carries() {
+        fn test_add_w_carries() {
             let mut circuit_builder = CircuitBuilder::<E>::new();
 
             // a = 65535 + 65534 * 2^16
@@ -317,8 +317,7 @@ mod tests {
         }
 
         #[test]
-        fn test_uint_add_w_overflow() {
-            type E = GoldilocksExt2;
+        fn test_add_w_overflow() {
             let mut circuit_builder = CircuitBuilder::<E>::new();
 
             // a = 1 + 1 * 2^16 + 0 + 65535 * 2^48
@@ -358,8 +357,7 @@ mod tests {
         }
 
         #[test]
-        fn test_uint_add_const_no_carries() {
-            type E = GoldilocksExt2;
+        fn test_add_const_no_carries() {
             let mut circuit_builder = CircuitBuilder::<E>::new();
 
             // a = 1 + 1 * 2^16
@@ -398,8 +396,7 @@ mod tests {
         }
 
         #[test]
-        fn test_uint_add_const_w_carries() {
-            type E = GoldilocksExt2;
+        fn test_add_const_w_carries() {
             let mut circuit_builder = CircuitBuilder::<E>::new();
 
             // a = 65535 + 65534 * 2^16
@@ -451,7 +448,7 @@ mod tests {
         // 18446744069414584321
 
         #[test]
-        fn test_uint_mul_no_carries() {
+        fn test_mul_no_carries() {
             // a = 1 + 1 * 2^16
             // b = 2 + 1 * 2^16
             // c = 2 + 3 * 2^16 + 1 * 2^32 = 4,295,163,906
@@ -476,7 +473,7 @@ mod tests {
         }
 
         #[test]
-        fn test_uint_mul_w_carry() {
+        fn test_mul_w_carry() {
             // a = 256 + 1 * 2^16
             // b = 257 + 1 * 2^16
             // c = 256 + 514 * 2^16 + 1 * 2^32 = 4,328,653,056
@@ -501,7 +498,7 @@ mod tests {
         }
 
         #[test]
-        fn test_uint_mul_w_carries() {
+        fn test_mul_w_carries() {
             // a = 256 + 256 * 2^16 = 16,777,472
             // b = 257 + 256 * 2^16 = 16,777,473
             // c = 256 + 257 * 2^16 + 2 * 2^32 + 1 * 2^48 = 281,483,583,488,256
