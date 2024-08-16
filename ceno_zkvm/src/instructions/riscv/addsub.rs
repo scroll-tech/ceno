@@ -20,18 +20,18 @@ pub struct AddInstruction;
 pub struct SubInstruction;
 
 pub struct InstructionConfig<E: ExtensionField> {
-    pub pc: PCUInt,
-    pub ts: TSUInt,
-    pub prev_rd_value: UInt64,
-    pub addend_0: UInt64,
-    pub addend_1: UInt64,
-    pub outcome: UInt64,
+    pub pc: PCUInt<E>,
+    pub ts: TSUInt<E>,
+    pub prev_rd_value: UInt64<E>,
+    pub addend_0: UInt64<E>,
+    pub addend_1: UInt64<E>,
+    pub outcome: UInt64<E>,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
-    pub prev_rs1_ts: TSUInt,
-    pub prev_rs2_ts: TSUInt,
-    pub prev_rd_ts: TSUInt,
+    pub prev_rs1_ts: TSUInt<E>,
+    pub prev_rs2_ts: TSUInt<E>,
+    pub prev_rd_ts: TSUInt<E>,
     phantom: PhantomData<E>,
 }
 

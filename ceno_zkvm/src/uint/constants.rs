@@ -8,10 +8,6 @@ pub const RANGE_CHIP_BIT_WIDTH: usize = 16;
 pub const BYTE_BIT_WIDTH: usize = 8;
 
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
-use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, uint::util::const_min};
-
-use super::UInt;
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     pub const M: usize = M;

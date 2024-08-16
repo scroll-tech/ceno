@@ -8,7 +8,6 @@ use crate::{
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
-use singer_utils::{constants::BYTE_BIT_WIDTH, uint::util::add_one_to_big_num};
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
@@ -60,10 +59,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                         .iter()
                         .enumerate()
                         .map(|(i, limb)| {
-                            // let carry = carries[i].expr() * 2_usize.pow(C as u32).into();
+                            // we don't need to minus (carries[i] * 2^16) here
+                            // because the limbs come from witness and we won't assign a overflow witness
                             if i > 0 {
-                                (limb.clone() + carries[i - 1].expr())
-                                // * 2_usize.pow((i * C) as u32).into()
+                                limb.clone() + carries[i - 1].expr()
                             } else {
                                 limb.clone()
                             }
