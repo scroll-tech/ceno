@@ -407,7 +407,7 @@ impl<F: SmallField, E: ExtensionField<BaseField = F>> From<usize> for Expression
 mod tests {
     use goldilocks::GoldilocksExt2;
 
-    use crate::circuit_builder::CircuitBuilder;
+    use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
 
     use super::{Expression, ToExpr};
     use ff::Field;
@@ -415,8 +415,9 @@ mod tests {
     #[test]
     fn test_expression_arithmetics() {
         type E = GoldilocksExt2;
-        let mut cb = CircuitBuilder::<E>::new();
-        let x = cb.create_witin();
+        let mut cs = ConstraintSystem::new(|| "test_root");
+        let mut cb = CircuitBuilder::<E>::new(&mut cs);
+        let x = cb.create_witin(|| "x").unwrap();
 
         // scaledsum * challenge
         // 3 * x + 2
@@ -480,10 +481,11 @@ mod tests {
     #[test]
     fn test_is_monomial_form() {
         type E = GoldilocksExt2;
-        let mut cb = CircuitBuilder::<E>::new();
-        let x = cb.create_witin();
-        let y = cb.create_witin();
-        let z = cb.create_witin();
+        let mut cs = ConstraintSystem::new(|| "test_root");
+        let mut cb = CircuitBuilder::<E>::new(&mut cs);
+        let x = cb.create_witin(|| "x").unwrap();
+        let y = cb.create_witin(|| "y").unwrap();
+        let z = cb.create_witin(|| "z").unwrap();
         // scaledsum * challenge
         // 3 * x + 2
         let expr: Expression<E> =
@@ -521,9 +523,10 @@ mod tests {
     #[test]
     fn test_not_monomial_form() {
         type E = GoldilocksExt2;
-        let mut cb = CircuitBuilder::<E>::new();
-        let x = cb.create_witin();
-        let y = cb.create_witin();
+        let mut cs = ConstraintSystem::new(|| "test_root");
+        let mut cb = CircuitBuilder::<E>::new(&mut cs);
+        let x = cb.create_witin(|| "x").unwrap();
+        let y = cb.create_witin(|| "y").unwrap();
         // scaledsum * challenge
         // (x + 1) * (y + 1)
         let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr())

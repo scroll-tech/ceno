@@ -9,14 +9,18 @@ use crate::{
 
 use super::RegisterChipOperations;
 
-impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
+impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperations<E, NR, N>
+    for CircuitBuilder<'a, E>
+{
     fn register_read<V: ToExpr<E, Output = Vec<Expression<E>>>>(
         &mut self,
+        name_fn: N,
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         values: &V,
     ) -> Result<Expression<E>, ZKVMError> {
+        let n: String = name_fn().into();
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
@@ -41,8 +45,8 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
             ]
             .concat(),
         );
-        self.read_record(read_record)?;
-        self.write_record(write_record)?;
+        self.read_record(|| n.clone() + "::read_record", read_record)?;
+        self.write_record(|| n.clone() + "::write_record", write_record)?;
 
         // assert prev_ts < current_ts
         // TODO implement lt gadget
@@ -55,12 +59,14 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
 
     fn register_write<V: ToExpr<E, Output = Vec<Expression<E>>>>(
         &mut self,
+        name_fn: N,
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: &V,
         values: &V,
     ) -> Result<Expression<E>, ZKVMError> {
+        let n: String = name_fn().into();
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
@@ -85,8 +91,8 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
             ]
             .concat(),
         );
-        self.read_record(read_record)?;
-        self.write_record(write_record)?;
+        self.read_record(|| n.clone() + "::read_record", read_record)?;
+        self.write_record(|| n.clone() + "::write_record", write_record)?;
 
         // assert prev_ts < current_ts
         // TODO implement lt gadget

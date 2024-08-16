@@ -10,7 +10,7 @@ use crate::{
 
 use super::{UInt, UintLimb};
 
-impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField, NR, N> UInt<M, C, E, NR, N> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
     const LIMB_BIT_MASK: u64 = (1 << C) - 1;
 
@@ -186,7 +186,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         rhs: &UInt<M, C, E>,
     ) -> Result<(), ZKVMError> {
         izip!(self.expr(), rhs.expr())
-            .try_for_each(|(lhs, rhs)| circuit_builder.require_equal(lhs, rhs))
+            .try_for_each(|(lhs, rhs)| circuit_builder.require_equal(|| "uint_eq", lhs, rhs))
     }
 
     pub fn lt(

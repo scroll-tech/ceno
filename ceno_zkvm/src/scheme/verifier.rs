@@ -13,7 +13,7 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::Circuit,
+    circuit_builder::VerifyingKey,
     error::ZKVMError,
     scheme::constants::{NUM_FANIN, SEL_DEGREE},
     structs::{Point, PointAndEval, TowerProofs},
@@ -23,12 +23,12 @@ use crate::{
 use super::{constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMProof};
 
 pub struct ZKVMVerifier<E: ExtensionField> {
-    circuit: Circuit<E>,
+    vk: VerifyingKey<E>,
 }
 
 impl<E: ExtensionField> ZKVMVerifier<E> {
-    pub fn new(circuit: Circuit<E>) -> Self {
-        ZKVMVerifier { circuit }
+    pub fn new(vk: VerifyingKey<E>) -> Self {
+        ZKVMVerifier { vk }
     }
 
     /// verify proof and return input opening point
@@ -40,10 +40,11 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
+        let cs = self.vk.get_cs();
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
-            self.circuit.r_expressions.len(),
-            self.circuit.w_expressions.len(),
-            self.circuit.lk_expressions.len(),
+            cs.r_expressions.len(),
+            cs.w_expressions.len(),
+            cs.lk_expressions.len(),
         );
         let (log2_r_count, log2_w_count, log2_lk_count) = (
             ceil_log2(r_counts_per_instance),
@@ -101,7 +102,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         );
 
         let alpha_pow = get_challenge_pows(
-            MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + self.circuit.assert_zero_sumcheck_expressions.len(),
+            MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
             transcript,
         );
         let mut alpha_pow_iter = alpha_pow.iter();
@@ -122,7 +123,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 proofs: proof.main_sel_sumcheck_proofs.clone(),
             },
             &VPAuxInfo {
-                max_degree: SEL_DEGREE.max(self.circuit.max_non_lc_degree),
+                max_degree: SEL_DEGREE.max(cs.max_non_lc_degree),
                 num_variables: log2_num_instances,
                 phantom: PhantomData,
             },
@@ -152,7 +153,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 // only initialize when circuit got non empty assert_zero_sumcheck_expressions
                 {
                     let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
-                    if !self.circuit.assert_zero_sumcheck_expressions.is_empty() {
+                    if !cs.assert_zero_sumcheck_expressions.is_empty() {
                         Some(
                             eq_eval(&rt_non_lc_sumcheck, &input_opening_point)
                                 * sel_eval(num_instances, &rt_non_lc_sumcheck),
@@ -193,9 +194,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             {
                 // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))
                 sel_non_lc_zero_sumcheck.unwrap_or(E::ZERO)
-                    * self
-                        .circuit
-                        .assert_zero_sumcheck_expressions
+                    * cs.assert_zero_sumcheck_expressions
                         .iter()
                         .zip_eq(alpha_pow_iter)
                         .map(|(expr, alpha)| {
@@ -213,12 +212,11 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             ));
         }
         // verify records (degree = 1) statement, thus no sumcheck
-        if self
-            .circuit
+        if cs
             .r_expressions
             .iter()
-            .chain(self.circuit.w_expressions.iter())
-            .chain(self.circuit.lk_expressions.iter())
+            .chain(cs.w_expressions.iter())
+            .chain(cs.lk_expressions.iter())
             .zip_eq(
                 proof.r_records_in_evals[..r_counts_per_instance]
                     .iter()
@@ -233,8 +231,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         }
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
-        if self
-            .circuit
+        if cs
             .assert_zero_expressions
             .iter()
             .any(|expr| eval_by_expr(&proof.wits_in_evals, challenges, expr) != E::ZERO)

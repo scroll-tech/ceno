@@ -171,7 +171,7 @@ mod tests {
     use multilinear_extensions::{mle::IntoMLE, virtual_poly_v2::ArcMultilinearExtension};
 
     use crate::{
-        circuit_builder::CircuitBuilder,
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
         expression::{Expression, ToExpr},
         virtual_polys::VirtualPolynomials,
     };
@@ -179,11 +179,12 @@ mod tests {
     #[test]
     fn test_add_mle_list_by_expr() {
         type E = GoldilocksExt2;
-        let mut cb = CircuitBuilder::<E>::new();
-        let x = cb.create_witin();
-        let y = cb.create_witin();
+        let mut cs = ConstraintSystem::new(|| "test_root");
+        let mut cb = CircuitBuilder::<E>::new(&mut cs);
+        let x = cb.create_witin(|| "x").unwrap();
+        let y = cb.create_witin(|| "y").unwrap();
 
-        let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cb.num_witin as usize)
+        let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
             .map(|_| vec![Goldilocks::from(1)].into_mle().into())
             .collect();
 

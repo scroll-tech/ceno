@@ -1,11 +1,8 @@
-#![allow(clippy::manual_memcpy)]
-#![allow(clippy::needless_range_loop)]
-
 use std::time::{Duration, Instant};
 
 use ark_std::test_rng;
 use ceno_zkvm::{
-    circuit_builder::CircuitBuilder,
+    circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
     instructions::{riscv::addsub::AddInstruction, Instruction},
     scheme::prover::ZKVMProver,
 };
@@ -65,12 +62,14 @@ fn bench_add(c: &mut Criterion) {
             RAYON_NUM_THREADS
         }
     };
-    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+    let mut cs = ConstraintSystem::new(|| "risv_add");
+    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
     let _ = AddInstruction::construct_circuit(&mut circuit_builder);
-    let circuit = circuit_builder.finalize_circuit();
-    let num_witin = circuit.num_witin;
+    let vk = cs.key_gen();
+    let pk = ProvingKey::create_pk(vk);
+    let num_witin = pk.get_cs().num_witin;
 
-    let prover = ZKVMProver::new(circuit); // circuit clone due to verifier alos need circuit reference
+    let prover = ZKVMProver::new(pk);
     let mut transcript = Transcript::new(b"riscv");
 
     for instance_num_vars in 20..22 {
