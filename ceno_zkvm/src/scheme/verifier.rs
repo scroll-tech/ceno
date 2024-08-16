@@ -90,7 +90,13 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         assert!(logup_q_evals.len() == 1, "[lk_q_record]");
         assert!(logup_p_evals.len() == 1, "[lk_p_record]");
 
-        // TODO verify _lk_p_evals individually
+        // verify LogUp witness nominator p(x) ?= constant vector 1
+        // index 0 is LogUp witness for Fixed Lookup table
+        if logup_p_evals[0] != E::ONE {
+            return Err(ZKVMError::VerifyError(
+                "Lookup table witness p(x) != constant 1",
+            ));
+        }
 
         // verify zero statement (degree > 1) + sel sumcheck
         let (rt_r, rt_w, rt_lk): (Vec<E>, Vec<E>, Vec<E>) = (
@@ -264,9 +270,11 @@ impl TowerVerify {
         let log2_num_fanin = ceil_log2(num_fanin);
         // sanity check
         assert!(initial_prod_evals.len() == tower_proofs.prod_spec_size());
-        assert!(initial_prod_evals
-            .iter()
-            .all(|evals| evals.len() == num_fanin));
+        assert!(
+            initial_prod_evals
+                .iter()
+                .all(|evals| evals.len() == num_fanin)
+        );
         assert!(initial_logup_evals.len() == tower_proofs.logup_spec_size());
         assert!(initial_logup_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
