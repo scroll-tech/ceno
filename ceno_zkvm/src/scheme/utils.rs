@@ -157,7 +157,9 @@ pub(crate) fn infer_tower_logup_witness<E: ExtensionField>(
         .into_iter()
         .map(|(p, q)| {
             // input layer p are all 1
-            if p.is_none() {
+            if let Some(p) = p {
+                [p, q].concat()
+            } else {
                 let len = q[0].evaluations().len();
                 vec![
                     vec![E::ONE; len].into_mle().into(),
@@ -166,8 +168,6 @@ pub(crate) fn infer_tower_logup_witness<E: ExtensionField>(
                 .into_iter()
                 .chain(q)
                 .collect()
-            } else {
-                [p.unwrap(), q].concat()
             }
         })
         .collect_vec()
@@ -320,7 +320,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     )
 }
 
-pub(crate) fn eval_by_expr<'a, E: ExtensionField>(
+pub(crate) fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
     challenges: &[E],
     expr: &Expression<E>,
@@ -469,7 +469,7 @@ mod tests {
                 .into_mle()
                 .into(),
         ];
-        let mut res = infer_tower_logup_witness(q.try_into().unwrap());
+        let mut res = infer_tower_logup_witness(q);
         assert_eq!(num_vars + 1, res.len());
         // input layer
         let layer = res.pop().unwrap();
