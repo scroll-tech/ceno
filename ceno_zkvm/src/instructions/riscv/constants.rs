@@ -8,11 +8,13 @@ pub enum OPType {
     OPIMM,
     JAL,
     JALR,
+    BRANCH,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum OpcodeType {
     RType(OPType, usize, usize), // (OP, func3, func7)
+    BType(OPType, usize),        // (OP, func3)
 }
 
 impl fmt::Display for OpcodeType {
