@@ -753,14 +753,16 @@ mod test {
     fn commit_open_verify_goldilocks_base() {
         // Challenge is over extension field, poly over the base field
         run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<GoldilocksExt2>>(
-            true,
+            true, 20, 21,
         );
     }
 
     #[test]
     fn commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(false);
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
+            false, 20, 21,
+        );
     }
 
     #[test]

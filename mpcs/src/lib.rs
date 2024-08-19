@@ -424,14 +424,17 @@ mod test {
         assert_eq!(comm.num_vars().unwrap(), num_vars);
     }
 
-    pub(super) fn run_commit_open_verify<E: ExtensionField, Pcs, T>(base: bool)
-    where
+    pub(super) fn run_commit_open_verify<E: ExtensionField, Pcs, T>(
+        base: bool,
+        num_vars_start: usize,
+        num_vars_end: usize,
+    ) where
         Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
         T: TranscriptRead<Pcs::CommitmentChunk, E>
             + TranscriptWrite<Pcs::CommitmentChunk, E>
             + InMemoryTranscript<E>,
     {
-        for num_vars in 10..18 {
+        for num_vars in num_vars_start..num_vars_end {
             println!("k {:?}", num_vars);
             // Setup
             let (pp, vp) = {
