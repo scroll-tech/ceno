@@ -60,9 +60,15 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let addend_1 = UInt64::new(circuit_builder);
     let outcome = UInt64::new(circuit_builder);
 
-    // TODO IS_ADD to deal with add/sub
-    let computed_outcome = addend_0.add(circuit_builder, &addend_1)?;
-    outcome.eq(circuit_builder, &computed_outcome)?;
+    let computed_outcome;
+    if IS_ADD {
+        computed_outcome = addend_0.add(circuit_builder, &addend_1)?;
+        outcome.eq(circuit_builder, &computed_outcome)?;
+    } else {
+        computed_outcome = outcome.clone();
+        let a = addend_1.add(circuit_builder, &outcome)?;
+        addend_0.eq(circuit_builder, &a)?;
+    }
 
     // TODO rs1_id, rs2_id, rd_id should be bytecode lookup
     let rs1_id = circuit_builder.create_witin();
