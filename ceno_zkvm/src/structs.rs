@@ -27,7 +27,8 @@ pub type PCUInt = UInt64;
 pub type TSUInt = UInt<48, 48>;
 
 pub enum ROMType {
-    U5, // 2^5=32
+    U5,  // 2^5=32
+    U12, // 2^12
 }
 
 #[derive(Clone, Debug, Copy)]

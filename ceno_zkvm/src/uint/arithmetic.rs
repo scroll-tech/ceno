@@ -1,7 +1,11 @@
 use ff_ext::ExtensionField;
 use itertools::izip;
 
-use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, expression::Expression};
+use crate::{
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{Expression, ToExpr, WitIn},
+};
 
 use super::UInt;
 
@@ -41,5 +45,18 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         _rhs: &UInt<M, C>,
     ) -> Result<Expression<E>, ZKVMError> {
         Ok(self.expr().remove(0) + 1.into())
+    }
+
+    /// borrow*(1<<shift) + a - b = diff
+    /// return borrow
+    pub fn sub_with_borrow<E: ExtensionField>(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        _rhs: &UInt<M, C>,
+    ) -> Result<WitIn, ZKVMError> {
+        // TODO
+        let borrow = circuit_builder.create_witin();
+        circuit_builder.assert_bit(borrow.expr())?;
+        Ok(borrow)
     }
 }

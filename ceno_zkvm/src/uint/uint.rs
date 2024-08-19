@@ -33,6 +33,17 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             .collect::<Vec<Expression<E>>>()
     }
 
+    /// expression of values[0] + values[1] * 2^C + ...
+    pub fn value_expr<E: ExtensionField>(&self) -> Expression<E> {
+        self.values
+            .iter()
+            .map(ToExpr::expr)
+            .enumerate()
+            .fold(Expression::from(0), |acc, (i, expr)| {
+                acc + expr * Expression::from(1 << (C * i))
+            })
+    }
+
     /// Return the `UInt` underlying cell id's
     pub fn wits_in(&self) -> &[WitIn] {
         &self.values
