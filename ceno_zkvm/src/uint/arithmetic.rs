@@ -15,6 +15,9 @@ use crate::{
 use super::{uint::UintLimb, UInt};
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
+    const POW_OF_C: usize = 2_usize.pow(C as u32);
+    const POW_OF_2C: usize = 2_usize.pow(C as u32);
+
     fn internal_add(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
@@ -23,10 +26,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     ) -> Result<UInt<M, C, E>, ZKVMError> {
         let mut c = UInt::<M, C, E>::new_expr(circuit_builder);
 
-        // allocate witness cells for carries
-        c.carries = (0..Self::NUM_CELLS)
-            .map(|_| Some(circuit_builder.create_witin()))
-            .collect();
+        // allocate witness cells and do range checks for carries
+        c.create_carry_witin(circuit_builder);
 
         // perform add operation
         // c[i] = a[i] + b[i] + carry[i-1] - carry[i] * 2 ^ C
@@ -68,16 +69,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         constant: Expression<E>,
     ) -> Result<Self, ZKVMError> {
-        let mut b: u64 = 0;
-        if let Expression::Constant(c) = constant {
-            b = c.to_canonical_u64();
-        } else {
-            assert!(false, "addend is not a constant type")
-        }
+        let Expression::Constant(c) = constant else {
+            panic!("addend is not a constant type");
+        };
+        let c = c.to_canonical_u64();
 
         // convert Expression::Constant to limbs
         let b_limbs = (0..Self::NUM_CELLS)
-            .map(|i| Expression::Constant(E::BaseField::from((b >> C * i) & 0xFFFF)))
+            .map(|i| Expression::Constant(E::BaseField::from((c >> C * i) & 0xFFFF)))
             .collect_vec();
 
         self.internal_add(circuit_builder, &self.expr(), &b_limbs)
@@ -98,11 +97,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         multiplier: &UInt<M, C, E>,
     ) -> Result<UInt<M, C, E>, ZKVMError> {
         let mut c = UInt::<M, C, E>::new(circuit_builder);
+        // allocate witness cells and do range checks for carries
+        c.create_carry_witin(circuit_builder);
 
-        // allocate witness cells for carries
-        c.carries = (0..Self::NUM_CELLS)
-            .map(|_| Some(circuit_builder.create_witin()))
-            .collect();
         let c_carries = c.carries.as_ref().unwrap();
 
         let a_expr = self.expr();
@@ -110,20 +107,19 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         let c_expr = c.expr();
 
         // perform mul operation
-        let pow_of_C = 2_usize.pow(C as u32);
-        let pow_of_2C = 2_usize.pow(2 * C as u32);
-        let t0 = a_expr[0].clone() * b_expr[0].clone() - c_carries[0].expr() * pow_of_C.into();
+        let t0 =
+            a_expr[0].clone() * b_expr[0].clone() - c_carries[0].expr() * Self::POW_OF_C.into();
         let t1 = a_expr[0].clone() * b_expr[1].clone() + a_expr[1].clone() * b_expr[0].clone()
-            - c_carries[1].expr() * pow_of_C.into();
+            - c_carries[1].expr() * Self::POW_OF_C.into();
         let t2 = a_expr[0].clone() * b_expr[2].clone()
             + a_expr[1].clone() * b_expr[1].clone()
             + a_expr[2].clone() * b_expr[0].clone()
-            - c_carries[2].expr() * pow_of_C.into();
+            - c_carries[2].expr() * Self::POW_OF_C.into();
         let t3 = a_expr[0].clone() * b_expr[3].clone()
             + a_expr[1].clone() * b_expr[2].clone()
             + a_expr[2].clone() * b_expr[1].clone()
             + a_expr[3].clone() * b_expr[0].clone()
-            - c_carries[3].expr() * pow_of_C.into();
+            - c_carries[3].expr() * Self::POW_OF_C.into();
 
         // t0 - t4 are degree 2, but we only support monomial form now.
         // So, we do a small trick here, constrain that intermediate witness equals the expression (t1 - t4)
@@ -145,18 +141,18 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         // result check
         circuit_builder
             .require_equal(
-                c_expr[0].clone() + c_expr[1].clone() * pow_of_C.into(),
+                c_expr[0].clone() + c_expr[1].clone() * Self::POW_OF_C.into(),
                 inter_wits[0].clone()
-                    + (c_carries[0].expr() + inter_wits[1].clone()) * pow_of_C.into()
-                    - c_carries[1].expr() * pow_of_2C.into(),
+                    + (c_carries[0].expr() + inter_wits[1].clone()) * Self::POW_OF_C.into()
+                    - c_carries[1].expr() * Self::POW_OF_2C.into(),
             )
             .unwrap();
         circuit_builder
             .require_equal(
-                c_expr[2].clone() + c_expr[3].clone() * pow_of_C.into(),
+                c_expr[2].clone() + c_expr[3].clone() * Self::POW_OF_C.into(),
                 inter_wits[2].clone()
-                    + (c_carries[2].expr() + inter_wits[3].clone()) * pow_of_C.into()
-                    - c_carries[3].expr() * pow_of_2C.into(),
+                    + (c_carries[2].expr() + inter_wits[3].clone()) * Self::POW_OF_C.into()
+                    - c_carries[3].expr() * Self::POW_OF_2C.into(),
             )
             .unwrap();
 
@@ -444,6 +440,7 @@ mod tests {
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
 
+        const POW_OF_C: u64 = 2_usize.pow(16 as u32) as u64;
         type E = GoldilocksExt2;
         // 18446744069414584321
 
@@ -559,20 +556,20 @@ mod tests {
             );
 
             // verify the intermediate witness constraints
-            let pow_of_C = 2_usize.pow(16 as u32) as u64;
+
             let t0 = a[0].clone() * b[0].clone()
-                - Expression::Constant((wit_carries.clone()[0] * pow_of_C).into());
+                - Expression::Constant((wit_carries.clone()[0] * POW_OF_C).into());
             let t1 = a[0].clone() * b[1].clone() + a[1].clone() * b[0].clone()
-                - Expression::Constant((wit_carries.clone()[1] * pow_of_C).into());
+                - Expression::Constant((wit_carries.clone()[1] * POW_OF_C).into());
             let t2 = a[0].clone() * b[2].clone()
                 + a[1].clone() * b[1].clone()
                 + a[2].clone() * b[0].clone()
-                - Expression::Constant((wit_carries.clone()[2] * pow_of_C).into());
+                - Expression::Constant((wit_carries.clone()[2] * POW_OF_C).into());
             let t3 = a[0].clone() * b[3].clone()
                 + a[1].clone() * b[2].clone()
                 + a[2].clone() * b[1].clone()
                 + a[3].clone() * b[0].clone()
-                - Expression::Constant((wit_carries.clone()[3] * pow_of_C).into());
+                - Expression::Constant((wit_carries.clone()[3] * POW_OF_C).into());
             assert_eq!(
                 eval_by_expr(&witness_values, &challenges, &t0),
                 E::from(wit_inter_values[0])

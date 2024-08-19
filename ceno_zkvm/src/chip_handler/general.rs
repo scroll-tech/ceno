@@ -135,6 +135,16 @@ impl<E: ExtensionField> CircuitBuilder<E> {
         Ok(())
     }
 
+    pub(crate) fn assert_u16(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
+            expr,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(rlc_record)?;
+        Ok(())
+    }
+
     pub fn finalize_circuit(&self) -> Circuit<E> {
         Circuit {
             num_witin: self.num_witin,
