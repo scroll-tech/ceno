@@ -47,7 +47,7 @@ where
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let mut running_oracle = field_type_iter_ext(comm.get_codeword()).collect_vec();
-    let mut running_evals = comm.bh_evals.clone();
+    let mut running_evals = comm.polynomials_bh_evals[0].clone();
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_timer = start_timer!(|| "Basefold::open");
@@ -128,7 +128,7 @@ where
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 pub fn batch_commit_phase<E: ExtensionField>(
     point: &[E],
-    comms: &[&BasefoldCommitmentWithData<E>],
+    comms: &[BasefoldCommitmentWithData<E>],
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
     num_vars: usize,
     num_rounds: usize,
@@ -178,8 +178,8 @@ where
                 // together. So each element is repeated by
                 // sum_of_all_evals_for_sumcheck.len() / bh_evals.len() times
                 *r += E::from(field_type_index_ext(
-                    &comm.bh_evals,
-                    pos >> (num_vars - log2_strict(comm.bh_evals.len())),
+                    &comm.polynomials_bh_evals[0],
+                    pos >> (num_vars - log2_strict(comm.polynomials_bh_evals[0].len())),
                 )) * coeffs[index]
             });
     });

@@ -51,9 +51,10 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) codeword_tree: MerkleTree<E>,
-    pub(crate) bh_evals: FieldType<E>,
+    pub(crate) polynomials_bh_evals: Vec<FieldType<E>>,
     pub(crate) num_vars: usize,
     pub(crate) is_base: bool,
+    pub(crate) num_polys: usize,
 }
 
 impl<E: ExtensionField> BasefoldCommitmentWithData<E>
@@ -85,7 +86,7 @@ where
     }
 
     pub fn poly_size(&self) -> usize {
-        self.bh_evals.len()
+        1 << self.num_vars
     }
 
     pub fn get_codeword_entry_base(&self, index: usize) -> E::BaseField {
@@ -168,7 +169,8 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.get_codeword().eq(other.get_codeword()) && self.bh_evals.eq(&other.bh_evals)
+        self.get_codeword().eq(other.get_codeword())
+            && self.polynomials_bh_evals.eq(&other.polynomials_bh_evals)
     }
 }
 

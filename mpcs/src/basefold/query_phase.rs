@@ -103,7 +103,7 @@ where
 }
 
 fn batch_basefold_get_query<E: ExtensionField>(
-    comms: &[&BasefoldCommitmentWithData<E>],
+    comms: &[BasefoldCommitmentWithData<E>],
     oracles: &Vec<Vec<E>>,
     codeword_size: usize,
     x_index: usize,
@@ -745,7 +745,7 @@ where
     pub fn from_batched_single_query_result(
         batched_single_query_result: BatchedSingleQueryResult<E>,
         oracle_trees: &Vec<MerkleTree<E>>,
-        commitments: &Vec<&BasefoldCommitmentWithData<E>>,
+        commitments: &Vec<BasefoldCommitmentWithData<E>>,
     ) -> Self {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
@@ -942,7 +942,7 @@ where
     pub fn from_batched_query_result(
         batched_query_result: BatchedQueriesResult<E>,
         oracle_trees: &Vec<MerkleTree<E>>,
-        commitments: &Vec<&BasefoldCommitmentWithData<E>>,
+        commitments: &Vec<BasefoldCommitmentWithData<E>>,
     ) -> Self {
         Self {
             inner: batched_query_result
@@ -1186,7 +1186,7 @@ where
 pub fn batch_query_phase<E: ExtensionField>(
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
     codeword_size: usize,
-    comms: &[&BasefoldCommitmentWithData<E>],
+    comms: &[BasefoldCommitmentWithData<E>],
     oracles: &Vec<Vec<E>>,
     num_verifier_queries: usize,
 ) -> BatchedQueriesResult<E>

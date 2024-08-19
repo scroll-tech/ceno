@@ -159,9 +159,10 @@ where
 
         Ok(Self::CommitmentWithData {
             codeword_tree,
-            bh_evals,
+            polynomials_bh_evals: vec![bh_evals],
             num_vars,
             is_base,
+            num_polys: 1,
         })
     }
 
@@ -197,6 +198,9 @@ where
             .collect()
     }
 
+    /// Open a single polynomial commitment at one point. If the given
+    /// commitment with data contains more than one polynomial, this function
+    /// will panic.
     fn open(
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
@@ -208,6 +212,7 @@ where
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
         assert!(comm.num_vars >= V::get_basecode());
+        assert!(comm.num_polys == 1);
         let (trees, oracles) = commit_phase(
             &point,
             &comm,
@@ -251,7 +256,6 @@ where
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
-        let comms = comms.into_iter().collect_vec();
         let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
         assert!(min_num_vars >= V::get_basecode());
 
