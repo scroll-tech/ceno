@@ -24,7 +24,7 @@ use crate::{
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use query::{
+use query_phase::{
     batch_query_phase, batch_verifier_query_phase, query_phase, verifier_query_phase,
     BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
 };
@@ -53,9 +53,9 @@ pub use structure::{
     BasefoldDefaultParams, BasefoldExtParams, BasefoldParams, BasefoldProverParams,
     BasefoldVerifierParams,
 };
-mod commit;
-use commit::{batch_commit_phase, commit_phase};
-mod query;
+mod commit_phase;
+use commit_phase::{batch_commit_phase, commit_phase};
+mod query_phase;
 // This sumcheck module is different from the mpcs::sumcheck module, in that
 // it deals only with the special case of the form \sum eq(r_i)f_i().
 mod sumcheck;
