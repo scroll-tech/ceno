@@ -62,7 +62,12 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
-        BasefoldCommitment::new(self.codeword_tree.root(), self.num_vars, self.is_base)
+        BasefoldCommitment::new(
+            self.codeword_tree.root(),
+            self.num_vars,
+            self.is_base,
+            self.num_polys,
+        )
     }
 
     pub fn get_root_ref(&self) -> &Digest<E::BaseField> {
@@ -129,17 +134,24 @@ where
     pub(super) root: Digest<E::BaseField>,
     pub(super) num_vars: Option<usize>,
     pub(super) is_base: bool,
+    pub(super) num_polys: Option<usize>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn new(root: Digest<E::BaseField>, num_vars: usize, is_base: bool) -> Self {
+    pub fn new(
+        root: Digest<E::BaseField>,
+        num_vars: usize,
+        is_base: bool,
+        num_polys: usize,
+    ) -> Self {
         Self {
             root,
             num_vars: Some(num_vars),
             is_base,
+            num_polys: Some(num_polys),
         }
     }
 
@@ -153,14 +165,6 @@ where
 
     pub fn is_base(&self) -> bool {
         self.is_base
-    }
-
-    pub fn as_challenge_field(&self) -> BasefoldCommitment<E> {
-        BasefoldCommitment::<E> {
-            root: Digest::<E::BaseField>(self.root().0),
-            num_vars: self.num_vars,
-            is_base: self.is_base,
-        }
     }
 }
 

@@ -181,6 +181,9 @@ where
             transcript
                 .write_field_element_base(&u32_to_field::<E>(comm.is_base as u32))
                 .unwrap();
+            transcript
+                .write_field_element_base(&u32_to_field::<E>(comm.num_polys as u32))
+                .unwrap();
         });
         end_timer!(timer);
         Ok(comms)
@@ -245,6 +248,11 @@ where
         Ok(())
     }
 
+    /// Open a batch of polynomial commitments at several points.
+    /// The current version only supports one polynomial per commitment.
+    /// Because otherwise it is complex to match the polynomials and
+    /// the commitments, and because currently this high flexibility is
+    /// not very useful in ceno.
     fn batch_open(
         pp: &Self::ProverParam,
         polys: &Vec<DenseMultilinearExtension<E>>,
@@ -258,6 +266,10 @@ where
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
         let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
         assert!(min_num_vars >= V::get_basecode());
+
+        comms.iter().for_each(|comm| {
+            assert!(comm.num_polys == 1);
+        });
 
         if cfg!(feature = "sanity-check") {
             evals.iter().for_each(|eval| {
@@ -465,14 +477,15 @@ where
                 let num_vars = base_to_usize::<E>(&transcript.read_field_element_base().unwrap());
                 let is_base =
                     base_to_usize::<E>(&transcript.read_field_element_base().unwrap()) != 0;
-                (num_vars, commitment, is_base)
+                let num_polys = base_to_usize::<E>(&transcript.read_field_element_base().unwrap());
+                (num_vars, commitment, is_base, num_polys)
             })
             .collect_vec();
 
         Ok(roots
             .iter()
-            .map(|(num_vars, commitment, is_base)| {
-                BasefoldCommitment::new(commitment.clone(), *num_vars, *is_base)
+            .map(|(num_vars, commitment, is_base, num_polys)| {
+                BasefoldCommitment::new(commitment.clone(), *num_vars, *is_base, *num_polys)
             })
             .collect_vec())
     }
@@ -487,6 +500,7 @@ where
         transcript.write_commitment(&comm.get_root_as())?;
         transcript.write_field_element_base(&u32_to_field::<E>(comm.num_vars as u32))?;
         transcript.write_field_element_base(&u32_to_field::<E>(comm.is_base as u32))?;
+        transcript.write_field_element_base(&u32_to_field::<E>(comm.num_polys as u32))?;
 
         Ok(comm)
     }
