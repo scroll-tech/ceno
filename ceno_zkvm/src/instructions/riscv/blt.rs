@@ -3,16 +3,15 @@ use std::marker::PhantomData;
 use ff_ext::ExtensionField;
 
 use crate::{
-    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
+    expression::WitIn,
     instructions::Instruction,
     structs::{PCUInt, TSUInt, UInt64},
 };
 
 use super::{
-    constants::{OPType, OpcodeType, RISCV64_PC_STEP_SIZE},
+    constants::{OPType, OpcodeType},
     RIVInstruction,
 };
 
@@ -32,11 +31,11 @@ pub struct InstructionConfig<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for BltInstruction {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::BType(OPType::BRANCH, 0x004);
+    const OPCODE_TYPE: OpcodeType = OpcodeType::BType(OPType::Branch, 0x004);
 }
 
 fn blt_gadget<E: ExtensionField, const IS_ADD: bool>(
-    circuit_builder: &mut CircuitBuilder<E>,
+    _circuit_builder: &mut CircuitBuilder<E>,
 ) -> Result<InstructionConfig<E>, ZKVMError> {
     todo!()
 }

@@ -36,11 +36,11 @@ pub struct InstructionConfig<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for AddInstruction {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::OP, 0x000, 0x0000000);
+    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0000000);
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for SubInstruction {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::OP, 0x000, 0x0100000);
+    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0100000);
 }
 
 fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(

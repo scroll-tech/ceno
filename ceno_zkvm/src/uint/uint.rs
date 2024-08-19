@@ -41,8 +41,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     /// Builds a `UInt` instance from a set of cells that represent `RANGE_VALUES`
     /// assumes range_values are represented in little endian form
     pub fn from_range_wits_in<E: ExtensionField>(
-        circuit_builder: &mut CircuitBuilder<E>,
-        range_values: &[WitIn],
+        _circuit_builder: &mut CircuitBuilder<E>,
+        _range_values: &[WitIn],
     ) -> Result<Self, UtilError> {
         // Self::from_different_sized_cell_values(
         //     circuit_builder,
@@ -85,10 +85,10 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     /// Builds a `UInt` instance from a set of cell values of a certain `CELL_WIDTH`
     fn from_different_sized_cell_values<E: ExtensionField>(
-        circuit_builder: &mut CircuitBuilder<E>,
-        wits_in: &[WitIn],
-        cell_width: usize,
-        is_little_endian: bool,
+        _circuit_builder: &mut CircuitBuilder<E>,
+        _wits_in: &[WitIn],
+        _cell_width: usize,
+        _is_little_endian: bool,
     ) -> Result<Self, UtilError> {
         todo!()
         // let mut values = convert_decomp(

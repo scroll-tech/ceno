@@ -4,11 +4,11 @@ pub(crate) const PC_STEP_SIZE: usize = 4;
 
 #[derive(Debug, Clone, Copy)]
 pub enum OPType {
-    OP,
-    OPIMM,
-    JAL,
-    JALR,
-    BRANCH,
+    Op,
+    Opimm,
+    Jal,
+    Jalr,
+    Branch,
 }
 
 #[derive(Debug, Clone, Copy)]

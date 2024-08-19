@@ -18,8 +18,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     /// Little-endian addition.
     pub fn add<E: ExtensionField>(
         &self,
-        circuit_builder: &mut CircuitBuilder<E>,
-        addend_1: &UInt<M, C>,
+        _circuit_builder: &mut CircuitBuilder<E>,
+        _addend_1: &UInt<M, C>,
     ) -> Result<UInt<M, C>, ZKVMError> {
         // TODO
         Ok(self.clone())
@@ -37,8 +37,8 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     pub fn lt<E: ExtensionField>(
         &self,
-        circuit_builder: &mut CircuitBuilder<E>,
-        rhs: &UInt<M, C>,
+        _circuit_builder: &mut CircuitBuilder<E>,
+        _rhs: &UInt<M, C>,
     ) -> Result<Expression<E>, ZKVMError> {
         Ok(self.expr().remove(0) + 1.into())
     }

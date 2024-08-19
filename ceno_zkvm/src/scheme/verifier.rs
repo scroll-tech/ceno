@@ -254,6 +254,7 @@ pub type TowerVerifyResult<E> = Result<(Point<E>, Vec<E>, Vec<E>, Vec<E>), ZKVME
 
 impl TowerVerify {
     // TODO review hyper parameter usage and trust less from prover
+    #[allow(clippy::type_complexity)]
     pub fn verify<E: ExtensionField>(
         initial_prod_evals: Vec<Vec<E>>,
         initial_logup_evals: Vec<Vec<E>>,
