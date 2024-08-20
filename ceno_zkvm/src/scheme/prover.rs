@@ -476,8 +476,7 @@ impl TowerProver {
             .unwrap()
             - 1;
 
-        // generate shared alpha challenge
-        // TODO soundness question: should we generate new alpha for each layer?
+        // generate alpha challenge
         let alpha_pows = get_challenge_pows(
             prod_specs.len() +
             // logup occupy 2 sumcheck: numerator and denominator
@@ -488,104 +487,114 @@ impl TowerProver {
             .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
             .collect_vec();
 
-        let next_rt = (1..=max_round).fold(initial_rt, |out_rt, round| {
-            // in first few round we just run on single thread
-            let num_threads = proper_num_threads(out_rt.len(), max_threads);
+        let (next_rt, _) =
+            (1..=max_round).fold((initial_rt, alpha_pows), |(out_rt, alpha_pows), round| {
+                // in first few round we just run on single thread
+                let num_threads = proper_num_threads(out_rt.len(), max_threads);
 
-            let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
-            let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, out_rt.len());
+                let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
+                let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, out_rt.len());
 
-            for (s, alpha) in prod_specs.iter().zip(alpha_pows.iter()) {
-                if round < s.witness.len() {
-                    let layer_polys = &s.witness[round];
+                for (s, alpha) in prod_specs.iter().zip(alpha_pows.iter()) {
+                    if round < s.witness.len() {
+                        let layer_polys = &s.witness[round];
 
-                    // sanity check
-                    assert_eq!(layer_polys.len(), num_fanin);
-                    assert!(
-                        layer_polys
-                            .iter()
-                            .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round)))
-                    );
+                        // sanity check
+                        assert_eq!(layer_polys.len(), num_fanin);
+                        assert!(
+                            layer_polys
+                                .iter()
+                                .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round)))
+                        );
 
-                    // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
-                    virtual_polys
-                        .add_mle_list([vec![&eq], layer_polys.iter().collect()].concat(), *alpha)
+                        // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
+                        virtual_polys.add_mle_list(
+                            [vec![&eq], layer_polys.iter().collect()].concat(),
+                            *alpha,
+                        )
+                    }
                 }
-            }
 
-            for (s, alpha) in logup_specs
-                .iter()
-                .zip(alpha_pows[prod_specs.len()..].chunks(2))
-            {
-                if round < s.witness.len() {
-                    let layer_polys = &s.witness[round];
-                    // sanity check
-                    assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
-                    assert!(
-                        layer_polys
-                            .iter()
-                            .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
-                    );
+                for (s, alpha) in logup_specs
+                    .iter()
+                    .zip(alpha_pows[prod_specs.len()..].chunks(2))
+                {
+                    if round < s.witness.len() {
+                        let layer_polys = &s.witness[round];
+                        // sanity check
+                        assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
+                        assert!(
+                            layer_polys
+                                .iter()
+                                .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
+                        );
 
-                    let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
+                        let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
 
-                    let (q2, q1, p2, p1) = (
-                        &layer_polys[3],
-                        &layer_polys[2],
-                        &layer_polys[1],
-                        &layer_polys[0],
-                    );
+                        let (q2, q1, p2, p1) = (
+                            &layer_polys[3],
+                            &layer_polys[2],
+                            &layer_polys[1],
+                            &layer_polys[0],
+                        );
 
-                    // \sum_s eq(rt, s) * alpha_numerator^{i} * (p1 * q2 + p2 * q1)
-                    virtual_polys.add_mle_list(vec![&eq, &p1, &q2], *alpha_numerator);
-                    virtual_polys.add_mle_list(vec![&eq, &p2, &q1], *alpha_numerator);
+                        // \sum_s eq(rt, s) * alpha_numerator^{i} * (p1 * q2 + p2 * q1)
+                        virtual_polys.add_mle_list(vec![&eq, &p1, &q2], *alpha_numerator);
+                        virtual_polys.add_mle_list(vec![&eq, &p2, &q1], *alpha_numerator);
 
-                    // \sum_s eq(rt, s) * alpha_denominator^{i} * (q1 * q2)
-                    virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
+                        // \sum_s eq(rt, s) * alpha_denominator^{i} * (q1 * q2)
+                        virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
+                    }
                 }
-            }
 
-            let (sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
-                num_threads,
-                virtual_polys.get_batched_polys(),
-                transcript,
-            );
-            proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
+                let (sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
+                    num_threads,
+                    virtual_polys.get_batched_polys(),
+                    transcript,
+                );
+                proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
 
-            // rt' = r_merge || rt
-            let r_merge = (0..log_num_fanin)
-                .map(|_| transcript.get_and_append_challenge(b"merge").elements)
-                .collect_vec();
-            let rt_prime = [sumcheck_proofs.point, r_merge].concat();
+                // generate next round challenge
+                let next_alpha_pows = get_challenge_pows(
+                    prod_specs.len() +
+                                    // logup occupy 2 sumcheck: numerator and denominator
+                                    logup_specs.len() * 2,
+                    transcript,
+                );
+                // rt' = r_merge || rt
+                let r_merge = (0..log_num_fanin)
+                    .map(|_| transcript.get_and_append_challenge(b"merge").elements)
+                    .collect_vec();
+                let rt_prime = [sumcheck_proofs.point, r_merge].concat();
 
-            let evals = state.get_mle_final_evaluations();
-            let mut evals_iter = evals.iter();
-            evals_iter.next(); // skip first eq
-            for (i, s) in prod_specs.iter().enumerate() {
-                if round < s.witness.len() {
-                    // collect evals belong to current spec
-                    proofs.push_prod_evals(
-                        i,
-                        (0..num_fanin)
-                            .map(|_| *evals_iter.next().expect("insufficient evals length"))
-                            .collect::<Vec<E>>(),
-                    );
+                let evals = state.get_mle_final_evaluations();
+                let mut evals_iter = evals.iter();
+                evals_iter.next(); // skip first eq
+                for (i, s) in prod_specs.iter().enumerate() {
+                    if round < s.witness.len() {
+                        // collect evals belong to current spec
+                        proofs.push_prod_evals(
+                            i,
+                            (0..num_fanin)
+                                .map(|_| *evals_iter.next().expect("insufficient evals length"))
+                                .collect::<Vec<E>>(),
+                        );
+                    }
                 }
-            }
-            for (i, s) in logup_specs.iter().enumerate() {
-                if round < s.witness.len() {
-                    // collect evals belong to current spec
-                    // p1, q2, p2, q1
-                    let p1 = *evals_iter.next().expect("insufficient evals length");
-                    let q2 = *evals_iter.next().expect("insufficient evals length");
-                    let p2 = *evals_iter.next().expect("insufficient evals length");
-                    let q1 = *evals_iter.next().expect("insufficient evals length");
-                    proofs.push_logup_evals(i, vec![p1, p2, q1, q2]);
+                for (i, s) in logup_specs.iter().enumerate() {
+                    if round < s.witness.len() {
+                        // collect evals belong to current spec
+                        // p1, q2, p2, q1
+                        let p1 = *evals_iter.next().expect("insufficient evals length");
+                        let q2 = *evals_iter.next().expect("insufficient evals length");
+                        let p2 = *evals_iter.next().expect("insufficient evals length");
+                        let q1 = *evals_iter.next().expect("insufficient evals length");
+                        proofs.push_logup_evals(i, vec![p1, p2, q1, q2]);
+                    }
                 }
-            }
-            assert_eq!(evals_iter.next(), None);
-            rt_prime
-        });
+                assert_eq!(evals_iter.next(), None);
+                (rt_prime, next_alpha_pows)
+            });
 
         (next_rt, proofs)
     }
