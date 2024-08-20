@@ -22,7 +22,8 @@ impl<E: ExtensionField> MockProverError<E> {
                 name,
             } => {
                 println!(
-                    "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\nExpression: {expression:?}\nEvaluation: {evaluated:?}\n",
+                    "\nLookupError {name:#?}: Evaluated expression does not exist in T \
+                    vector\nExpression: {expression:?}\nEvaluation: {evaluated:?}\n",
                 );
             }
         }
@@ -53,7 +54,6 @@ impl<'a, E: ExtensionField> MockProver<E> {
             .iter()
             .zip(cb.cs.lk_expressions_namespace_map.iter())
         {
-            // lookup expr already has correct challenge applied
             let expr_evaluated = wit_infer_by_expr(wits_in, &challenge, lookup_expr);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
@@ -137,8 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn test_1() {
-        let mut cs = ConstraintSystem::new(|| "test_1");
+    fn test_lookup_1() {
+        let mut cs = ConstraintSystem::new(|| "test_lookup_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
