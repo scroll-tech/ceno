@@ -58,13 +58,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        // check read/write set equality
-        if proof.record_r_out_evals.iter().product::<E>()
-            != proof.record_w_out_evals.iter().product()
-        {
-            // TODO add me back
-            // return Err(ZKVMError::VerifyError("rw set equality check failed"));
-        }
+        // TODO check rw_set equality across all proofs
+        // TODO check logup relation across all proofs
+
         let expected_max_round = log2_num_instances
             + [log2_r_count, log2_w_count, log2_lk_count]
                 .iter()
@@ -146,13 +142,14 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
         let (sel_r, sel_w, sel_lk, sel_non_lc_zero_sumcheck) = {
+            // sel(rt, t) = eq(rt, t) x sel(t)
             (
                 eq_eval(&rt_r[log2_r_count..], &input_opening_point)
-                    * sel_eval(num_instances, &rt_r[log2_r_count..]),
+                    * sel_eval(num_instances, &input_opening_point),
                 eq_eval(&rt_w[log2_w_count..], &input_opening_point)
-                    * sel_eval(num_instances, &rt_w[log2_w_count..]),
+                    * sel_eval(num_instances, &input_opening_point),
                 eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
-                    * sel_eval(num_instances, &rt_lk[log2_lk_count..]),
+                    * sel_eval(num_instances, &input_opening_point),
                 // only initialize when circuit got non empty assert_zero_sumcheck_expressions
                 {
                     let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
