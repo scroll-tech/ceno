@@ -554,19 +554,17 @@ impl TowerProver {
                 );
                 proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
 
-                // generate next round challenge
-                let next_alpha_pows = get_challenge_pows(
-                    prod_specs.len() +
-                                    // logup occupy 2 sumcheck: numerator and denominator
-                                    logup_specs.len() * 2,
-                    transcript,
-                );
                 // rt' = r_merge || rt
                 let r_merge = (0..log_num_fanin)
                     .map(|_| transcript.get_and_append_challenge(b"merge").elements)
                     .collect_vec();
                 let rt_prime = [sumcheck_proofs.point, r_merge].concat();
 
+                // generate next round challenge
+                let next_alpha_pows = get_challenge_pows(
+                    prod_specs.len() +logup_specs.len() * 2, // logup occupy 2 sumcheck: numerator and denominator
+                    transcript,
+                );
                 let evals = state.get_mle_final_evaluations();
                 let mut evals_iter = evals.iter();
                 evals_iter.next(); // skip first eq

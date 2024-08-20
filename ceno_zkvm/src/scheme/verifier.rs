@@ -367,11 +367,6 @@ impl TowerVerify {
                     return Err(ZKVMError::VerifyError("mismatch tower evaluation"));
                 }
 
-                // generate next round challenge
-                let next_alpha_pows = get_challenge_pows(
-                    initial_prod_evals_len + initial_logup_evals_len * 2, /* logup occupy 2 sumcheck: numerator and denominator */
-                    transcript,
-                );
                 // derive single eval
                 // rt' = r_merge || rt
                 // r_merge.len() == ceil_log2(num_product_fanin)
@@ -382,6 +377,11 @@ impl TowerVerify {
                 assert_eq!(coeffs.len(), num_fanin);
                 let rt_prime = [rt, r_merge].concat();
 
+                // generate next round challenge
+                let next_alpha_pows = get_challenge_pows(
+                    initial_prod_evals_len + initial_logup_evals_len * 2, // logup occupy 2 sumcheck: numerator and denominator
+                    transcript,
+                );
                 let prod_spec_evals = (0..tower_proofs.prod_spec_size())
                     .zip(next_alpha_pows.iter())
                     .map(|(spec_index, alpha)| {
