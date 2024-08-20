@@ -330,6 +330,7 @@ mod tests {
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
+    use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
     use simple_frontend::structs::CircuitBuilder;
 
     #[test]
@@ -389,10 +390,10 @@ mod tests {
             .map(|v| Goldilocks::from(v))
             .collect_vec();
 
-        let mut wires_in = vec![vec![]; circuit.n_witness_in];
-        wires_in[addend_0_id as usize] = addend_0_witness;
-        wires_in[addend_1_id as usize] = addend_1_witness;
-        wires_in[carry_id as usize] = carry_witness;
+        let mut wires_in = vec![DenseMultilinearExtension::default(); circuit.n_witness_in];
+        wires_in[addend_0_id as usize] = addend_0_witness.into_mle();
+        wires_in[addend_1_id as usize] = addend_1_witness.into_mle();
+        wires_in[carry_id as usize] = carry_witness.into_mle();
 
         let circuit_witness = {
             let challenges = vec![GoldilocksExt2::from(2)];
@@ -404,7 +405,9 @@ mod tests {
         circuit_witness.check_correctness(&circuit);
 
         // check the result correctness
-        let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
+        let result_values = circuit_witness
+            .output_layer_witness_ref()
+            .get_base_field_vec();
         assert_eq!(
             result_values,
             [14, 17, 31, 14]
@@ -463,9 +466,9 @@ mod tests {
             .map(|v| Goldilocks::from(v))
             .collect_vec();
 
-        let mut wires_in = vec![vec![]; circuit.n_witness_in];
-        wires_in[addend_0_id as usize] = addend_0_witness;
-        wires_in[carry_id as usize] = carry_witness;
+        let mut wires_in = vec![DenseMultilinearExtension::default(); circuit.n_witness_in];
+        wires_in[addend_0_id as usize] = addend_0_witness.into_mle();
+        wires_in[carry_id as usize] = carry_witness.into_mle();
 
         let circuit_witness = {
             let challenges = vec![GoldilocksExt2::from(2)];
@@ -477,7 +480,9 @@ mod tests {
         circuit_witness.check_correctness(&circuit);
 
         // check the result correctness
-        let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
+        let result_values = circuit_witness
+            .output_layer_witness_ref()
+            .get_base_field_vec();
         assert_eq!(
             result_values,
             [22, 2, 0, 15]
@@ -541,10 +546,10 @@ mod tests {
             .map(|v| Goldilocks::from(v))
             .collect_vec();
 
-        let mut wires_in = vec![vec![]; circuit.n_witness_in];
-        wires_in[addend_0_id as usize] = addend_0_witness;
-        wires_in[small_value_id as usize] = small_value_witness;
-        wires_in[carry_id as usize] = carry_witness;
+        let mut wires_in = vec![DenseMultilinearExtension::default(); circuit.n_witness_in];
+        wires_in[addend_0_id as usize] = addend_0_witness.into_mle();
+        wires_in[small_value_id as usize] = small_value_witness.into_mle();
+        wires_in[carry_id as usize] = carry_witness.into_mle();
 
         let circuit_witness = {
             let challenges = vec![GoldilocksExt2::from(2)];
@@ -556,7 +561,9 @@ mod tests {
         circuit_witness.check_correctness(&circuit);
 
         // check the result correctness
-        let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
+        let result_values = circuit_witness
+            .output_layer_witness_ref()
+            .get_base_field_vec();
         assert_eq!(
             result_values,
             [22, 2, 0, 15]
@@ -609,17 +616,17 @@ mod tests {
             .into_iter()
             .rev()
             .map(|v| Goldilocks::from(v))
-            .collect();
+            .collect_vec();
         let borrow_witness = vec![0, 1, 1, 0]
             .into_iter()
             .rev()
             .map(|v| Goldilocks::from(v))
             .collect_vec();
 
-        let mut wires_in = vec![vec![]; circuit.n_witness_in];
-        wires_in[minuend_id as usize] = minuend_witness;
-        wires_in[subtrahend_id as usize] = subtrahend_witness;
-        wires_in[borrow_id as usize] = borrow_witness;
+        let mut wires_in = vec![DenseMultilinearExtension::default(); circuit.n_witness_in];
+        wires_in[minuend_id as usize] = minuend_witness.into_mle();
+        wires_in[subtrahend_id as usize] = subtrahend_witness.into_mle();
+        wires_in[borrow_id as usize] = borrow_witness.into_mle();
 
         let circuit_witness = {
             let challenges = vec![GoldilocksExt2::from(2)];
@@ -631,7 +638,9 @@ mod tests {
         circuit_witness.check_correctness(&circuit);
 
         // check the result correctness
-        let result_values = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
+        let result_values = circuit_witness
+            .output_layer_witness_ref()
+            .get_base_field_vec();
         assert_eq!(
             result_values,
             [20, 30, 21, 3]

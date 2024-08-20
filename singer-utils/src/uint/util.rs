@@ -75,11 +75,7 @@ pub fn pad_cells<E: ExtensionField>(
 /// Compile time evaluated minimum function
 /// returns min(a, b)
 pub const fn const_min(a: usize, b: usize) -> usize {
-    if a <= b {
-        a
-    } else {
-        b
-    }
+    if a <= b { a } else { b }
 }
 
 /// Assumes each limb < max_value
@@ -110,6 +106,7 @@ mod tests {
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
+    use multilinear_extensions::mle::IntoMLE;
     use simple_frontend::structs::CircuitBuilder;
 
     #[test]
@@ -184,13 +181,15 @@ mod tests {
             .collect::<Vec<_>>();
         let circuit_witness = {
             let mut circuit_witness = CircuitWitness::new(&circuit, vec![]);
-            circuit_witness.add_instance(&circuit, vec![witness_values]);
+            circuit_witness.add_instance(&circuit, vec![witness_values.into_mle()]);
             circuit_witness
         };
 
         circuit_witness.check_correctness(&circuit);
 
-        let output = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
+        let output = circuit_witness
+            .output_layer_witness_ref()
+            .get_base_field_vec();
 
         assert_eq!(
             &output[..3],

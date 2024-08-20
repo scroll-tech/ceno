@@ -134,6 +134,7 @@ mod tests {
     use gkr::structs::{Circuit, CircuitWitness};
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
+    use multilinear_extensions::mle::IntoMLE;
     use simple_frontend::structs::CircuitBuilder;
 
     #[test]
@@ -179,12 +180,14 @@ mod tests {
         let circuit_witness = {
             let challenges = vec![GoldilocksExt2::from(2)];
             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
-            circuit_witness.add_instance(&circuit, vec![witness_values]);
+            circuit_witness.add_instance(&circuit, vec![witness_values.into_mle()]);
             circuit_witness
         };
         circuit_witness.check_correctness(&circuit);
 
-        let output = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
+        let output = circuit_witness
+            .output_layer_witness_ref()
+            .get_base_field_vec();
         assert_eq!(
             &output[..5],
             vec![35, 39, 5, 0, 0]

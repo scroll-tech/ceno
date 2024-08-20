@@ -11,6 +11,18 @@ members = [
     "sumcheck",
     "transcript",
 ]
+ # "singer-pro" not included by default due to pending for build failed fix
+default-members = [
+    "gkr",
+    "gkr-graph",
+    "mpcs",
+    "multilinear_extensions",
+    "simple-frontend",
+    "singer",
+    "singer-utils",
+    "sumcheck",
+    "transcript"
+]
 
 [workspace.package]
 version = "0.1.0"
