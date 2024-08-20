@@ -6,6 +6,11 @@ use std::marker::PhantomData;
 
 #[derive(Debug, PartialEq, Clone)]
 enum MockProverError<E: ExtensionField> {
+    AssertZeroError {
+        expression: Expression<E>,
+        evaluated: E,
+        name: String,
+    },
     LookupError {
         expression: Expression<E>,
         evaluated: E,
@@ -16,6 +21,16 @@ enum MockProverError<E: ExtensionField> {
 impl<E: ExtensionField> MockProverError<E> {
     pub fn print(&self) {
         match self {
+            MockProverError::AssertZeroError {
+                expression,
+                evaluated,
+                name,
+            } => {
+                println!(
+                    "\nAssertZeroError {name:#?}: Evaluated expression is not zero\nExpression: \
+                    {expression:?}\nEvaluation: {evaluated:?}\n",
+                );
+            }
             MockProverError::LookupError {
                 expression,
                 evaluated,
@@ -42,26 +57,47 @@ impl<'a, E: ExtensionField> MockProver<E> {
     ) -> Result<(), Vec<MockProverError<E>>> {
         let challenge = challenge.unwrap_or([E::ONE, E::ONE]);
 
+        let mut errors = vec![];
+
+        // assert zero expressions
+        for (expr, name) in cb
+            .cs
+            .assert_zero_expressions
+            .iter()
+            .zip(cb.cs.assert_zero_expressions_namespace_map.iter())
+        {
+            let expr_evaluated = wit_infer_by_expr(wits_in, &challenge, expr);
+            let expr_evaluated = expr_evaluated.get_ext_field_vec();
+
+            for element in expr_evaluated {
+                if *element != E::ZERO {
+                    errors.push(MockProverError::AssertZeroError {
+                        expression: expr.clone(),
+                        evaluated: *element,
+                        name: name.clone(),
+                    });
+                }
+            }
+        }
+
         let mut t = vec![];
         load_u5_table(&mut t, cb, challenge);
 
-        let mut errors = vec![];
-
-        // evaluate all lookup expressions
-        for (lookup_expr, name) in cb
+        // lookup expressions
+        for (expr, name) in cb
             .cs
             .lk_expressions
             .iter()
             .zip(cb.cs.lk_expressions_namespace_map.iter())
         {
-            let expr_evaluated = wit_infer_by_expr(wits_in, &challenge, lookup_expr);
+            let expr_evaluated = wit_infer_by_expr(wits_in, &challenge, expr);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
             // check each lookup expr exists in t vec
             for element in expr_evaluated {
                 if !t.contains(element) {
                     errors.push(MockProverError::LookupError {
-                        expression: lookup_expr.clone(),
+                        expression: expr.clone(),
                         evaluated: *element,
                         name: name.clone(),
                     });
@@ -119,6 +155,51 @@ mod tests {
     };
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use multilinear_extensions::mle::IntoMLE;
+
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    struct AssertZeroCircuit {
+        pub a: WitIn,
+        pub b: WitIn,
+        pub c: WitIn,
+    }
+
+    impl AssertZeroCircuit {
+        pub fn construct_circuit(
+            cb: &mut CircuitBuilder<GoldilocksExt2>,
+        ) -> Result<Self, ZKVMError> {
+            let a = cb.create_witin(|| "a")?;
+            let b = cb.create_witin(|| "b")?;
+            let c = cb.create_witin(|| "c")?;
+
+            cb.require_equal(|| "a + 1 = b", b.expr(), a.expr() + 1.into())?;
+            cb.require_equal(|| "a * 2 = c", c.expr(), a.expr() * 2.into())?;
+
+            Ok(Self { a, b, c })
+        }
+    }
+
+    #[test]
+    fn test_assert_zero_1() {
+        let mut cs = ConstraintSystem::new(|| "test_assert_zero_1");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let _ = AssertZeroCircuit::construct_circuit(&mut builder).unwrap();
+
+        let wits_in = vec![
+            vec![Goldilocks::from(3), Goldilocks::from(500)]
+                .into_mle()
+                .into(),
+            vec![Goldilocks::from(4), Goldilocks::from(501)]
+                .into_mle()
+                .into(),
+            vec![Goldilocks::from(6), Goldilocks::from(1000)]
+                .into_mle()
+                .into(),
+        ];
+
+        MockProver::assert_satisfied(&mut builder, &wits_in, None);
+    }
 
     #[derive(Debug)]
     struct RangeCheckCircuit {
