@@ -78,8 +78,12 @@ where
         Digest::<E::BaseField>(self.get_root_ref().0)
     }
 
-    pub fn get_codeword(&self) -> &FieldType<E> {
+    pub fn get_codewords(&self) -> &Vec<FieldType<E>> {
         self.codeword_tree.leaves()
+    }
+
+    pub fn batch_codewords(&self, coeffs: &Vec<E>) -> Vec<E> {
+        self.codeword_tree.batch_leaves(coeffs)
     }
 
     pub fn codeword_size(&self) -> usize {
@@ -94,11 +98,11 @@ where
         1 << self.num_vars
     }
 
-    pub fn get_codeword_entry_base(&self, index: usize) -> E::BaseField {
+    pub fn get_codeword_entry_base(&self, index: usize) -> Vec<E::BaseField> {
         self.codeword_tree.get_leaf_as_base(index)
     }
 
-    pub fn get_codeword_entry_ext(&self, index: usize) -> E {
+    pub fn get_codeword_entry_ext(&self, index: usize) -> Vec<E> {
         self.codeword_tree.get_leaf_as_extension(index)
     }
 
@@ -173,7 +177,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.get_codeword().eq(other.get_codeword())
+        self.get_codewords().eq(other.get_codewords())
             && self.polynomials_bh_evals.eq(&other.polynomials_bh_evals)
     }
 }

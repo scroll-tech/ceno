@@ -6,7 +6,11 @@ use rayon::{
 };
 
 use crate::util::{
-    hash::{hash_two_digests, hash_two_leaves_base, hash_two_leaves_ext, Digest, Hasher},
+    field_type_index_base, field_type_index_ext,
+    hash::{
+        hash_two_digests, hash_two_leaves_base, hash_two_leaves_batch_base,
+        hash_two_leaves_batch_ext, hash_two_leaves_ext, Digest, Hasher,
+    },
     log2_strict,
     transcript::{TranscriptRead, TranscriptWrite},
     Deserialize, DeserializeOwned, Serialize,
@@ -21,7 +25,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     inner: Vec<Vec<Digest<E::BaseField>>>,
-    leaves: FieldType<E>,
+    leaves: Vec<FieldType<E>>,
 }
 
 impl<E: ExtensionField> MerkleTree<E>
@@ -30,7 +34,14 @@ where
 {
     pub fn from_leaves(leaves: FieldType<E>, hasher: &Hasher<E::BaseField>) -> Self {
         Self {
-            inner: merkelize::<E>(&leaves, hasher),
+            inner: merkelize::<E>(&vec![&leaves], hasher),
+            leaves: vec![leaves],
+        }
+    }
+
+    pub fn from_batch_leaves(leaves: Vec<FieldType<E>>, hasher: &Hasher<E::BaseField>) -> Self {
+        Self {
+            inner: merkelize::<E>(&leaves.iter().collect(), hasher),
             leaves,
         }
     }
@@ -47,26 +58,46 @@ where
         self.inner.len()
     }
 
-    pub fn leaves(&self) -> &FieldType<E> {
+    pub fn leaves(&self) -> &Vec<FieldType<E>> {
         &self.leaves
+    }
+
+    pub fn batch_leaves(&self, coeffs: &Vec<E>) -> Vec<E> {
+        (0..self.leaves[0].len())
+            .map(|i| {
+                self.leaves
+                    .iter()
+                    .zip(coeffs)
+                    .map(|(leaf, coeff)| field_type_index_ext(leaf, i) * *coeff)
+                    .sum()
+            })
+            .collect()
     }
 
     pub fn size(&self) -> usize {
         self.leaves.len()
     }
 
-    pub fn get_leaf_as_base(&self, index: usize) -> E::BaseField {
-        match &self.leaves {
-            FieldType::Base(leaves) => leaves[index],
+    pub fn get_leaf_as_base(&self, index: usize) -> Vec<E::BaseField> {
+        match &self.leaves[0] {
+            FieldType::Base(_) => self.leaves.iter().map(|leaves| field_type_index_base(leaves, index)).collect(),
             FieldType::Ext(_) => panic!("Mismatching field type, calling get_leaf_as_base on a Merkle tree over extension fields"),
             FieldType::Unreachable => unreachable!(),
         }
     }
 
-    pub fn get_leaf_as_extension(&self, index: usize) -> E {
-        match &self.leaves {
-            FieldType::Base(leaves) => E::from(leaves[index]),
-            FieldType::Ext(leaves) => leaves[index],
+    pub fn get_leaf_as_extension(&self, index: usize) -> Vec<E> {
+        match &self.leaves[0] {
+            FieldType::Base(_) => self
+                .leaves
+                .iter()
+                .map(|leaves| field_type_index_ext(leaves, index))
+                .collect(),
+            FieldType::Ext(_) => self
+                .leaves
+                .iter()
+                .map(|leaves| field_type_index_ext(leaves, index))
+                .collect(),
             FieldType::Unreachable => unreachable!(),
         }
     }
@@ -164,10 +195,46 @@ where
             hasher,
         )
     }
+
+    pub fn authenticate_batch_leaves_root_ext(
+        &self,
+        left: Vec<E>,
+        right: Vec<E>,
+        index: usize,
+        root: &Digest<E::BaseField>,
+        hasher: &Hasher<E::BaseField>,
+    ) {
+        authenticate_merkle_path_root_batch::<E>(
+            &self.inner,
+            FieldType::Ext(left),
+            FieldType::Ext(right),
+            index,
+            root,
+            hasher,
+        )
+    }
+
+    pub fn authenticate_batch_leaves_root_base(
+        &self,
+        left: Vec<E::BaseField>,
+        right: Vec<E::BaseField>,
+        index: usize,
+        root: &Digest<E::BaseField>,
+        hasher: &Hasher<E::BaseField>,
+    ) {
+        authenticate_merkle_path_root_batch::<E>(
+            &self.inner,
+            FieldType::Base(left),
+            FieldType::Base(right),
+            index,
+            root,
+            hasher,
+        )
+    }
 }
 
 fn merkelize<E: ExtensionField>(
-    values: &FieldType<E>,
+    values: &Vec<&FieldType<E>>,
     hasher: &Hasher<E::BaseField>,
 ) -> Vec<Vec<Digest<E::BaseField>>> {
     let timer = start_timer!(|| format!("merkelize {} values", values.len()));
@@ -175,17 +242,47 @@ fn merkelize<E: ExtensionField>(
     let mut tree = Vec::with_capacity(log_v);
     // The first layer of hashes, half the number of leaves
     let mut hashes = vec![Digest::default(); values.len() >> 1];
-    hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
-        *hash = match values {
-            FieldType::Base(values) => {
-                hash_two_leaves_base::<E>(&values[i << 1], &values[(i << 1) + 1], hasher)
-            }
-            FieldType::Ext(values) => {
-                hash_two_leaves_ext::<E>(&values[i << 1], &values[(i << 1) + 1], hasher)
-            }
-            FieldType::Unreachable => unreachable!(),
-        };
-    });
+    if values.len() == 1 {
+        hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
+            *hash = match &values[0] {
+                FieldType::Base(values) => {
+                    hash_two_leaves_base::<E>(&values[i << 1], &values[(i << 1) + 1], hasher)
+                }
+                FieldType::Ext(values) => {
+                    hash_two_leaves_ext::<E>(&values[i << 1], &values[(i << 1) + 1], hasher)
+                }
+                FieldType::Unreachable => unreachable!(),
+            };
+        });
+    } else {
+        hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
+            *hash = match &values[0] {
+                FieldType::Base(_) => hash_two_leaves_batch_base::<E>(
+                    &values
+                        .iter()
+                        .map(|values| field_type_index_base(values, i << 1))
+                        .collect(),
+                    &values
+                        .iter()
+                        .map(|values| field_type_index_base(values, (i << 1) + 1))
+                        .collect(),
+                    hasher,
+                ),
+                FieldType::Ext(_) => hash_two_leaves_batch_ext::<E>(
+                    &values
+                        .iter()
+                        .map(|values| field_type_index_ext(values, i << 1))
+                        .collect(),
+                    &values
+                        .iter()
+                        .map(|values| field_type_index_ext(values, (i << 1) + 1))
+                        .collect(),
+                    hasher,
+                ),
+                FieldType::Unreachable => unreachable!(),
+            };
+        });
+    }
 
     tree.push(hashes);
 
@@ -214,6 +311,38 @@ fn authenticate_merkle_path_root<E: ExtensionField>(
         FieldType::Base(leaves) => hash_two_leaves_base::<E>(&leaves[0], &leaves[1], hasher),
         FieldType::Ext(leaves) => hash_two_leaves_ext(&leaves[0], &leaves[1], hasher),
         FieldType::Unreachable => unreachable!(),
+    };
+
+    // The lowest bit in the index is ignored. It can point to either leaves
+    x_index >>= 1;
+    for i in 0..path.len() {
+        hash = if x_index & 1 == 0 {
+            hash_two_digests(&hash, &path[i], hasher)
+        } else {
+            hash_two_digests(&path[i], &hash, hasher)
+        };
+        x_index >>= 1;
+    }
+    assert_eq!(&hash, root);
+}
+
+fn authenticate_merkle_path_root_batch<E: ExtensionField>(
+    path: &Vec<Digest<E::BaseField>>,
+    left: FieldType<E>,
+    right: FieldType<E>,
+    x_index: usize,
+    root: &Digest<E::BaseField>,
+    hasher: &Hasher<E::BaseField>,
+) {
+    let mut x_index = x_index;
+    let mut hash = match (left, right) {
+        (FieldType::Base(left), FieldType::Base(right)) => {
+            hash_two_leaves_batch_base::<E>(&left, &right, hasher)
+        }
+        (FieldType::Ext(left), FieldType::Ext(right)) => {
+            hash_two_leaves_batch_ext::<E>(&left, &right, hasher)
+        }
+        _ => unreachable!(),
     };
 
     // The lowest bit in the index is ignored. It can point to either leaves

@@ -4,7 +4,7 @@ use crate::util::{
         degree_2_eval, degree_2_zero_plus_one, inner_product, interpolate2,
         interpolate_over_boolean_hypercube,
     },
-    ext_to_usize,
+    ext_to_usize, field_type_index_base, field_type_index_ext,
     hash::{Digest, Hasher},
     log2_strict,
     merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree},
@@ -28,7 +28,7 @@ use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use super::structure::{BasefoldCommitment, BasefoldCommitmentWithData};
 
-pub fn query_phase<E: ExtensionField>(
+pub fn prover_query_phase<E: ExtensionField>(
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
     comm: &BasefoldCommitmentWithData<E>,
     oracles: &Vec<Vec<E>>,
@@ -51,11 +51,324 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    basefold_get_query::<E>(comm.get_codeword(), &oracles, *x_index),
+                    basefold_get_query::<E>(&comm.get_codewords()[0], &oracles, *x_index),
                 )
             })
             .collect(),
     }
+}
+
+pub fn batch_prover_query_phase<E: ExtensionField>(
+    transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
+    codeword_size: usize,
+    comms: &[BasefoldCommitmentWithData<E>],
+    oracles: &Vec<Vec<E>>,
+    num_verifier_queries: usize,
+) -> BatchedQueriesResult<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    let queries = transcript.squeeze_challenges(num_verifier_queries);
+
+    // Transform the challenge queries from field elements into integers
+    let queries_usize: Vec<usize> = queries
+        .iter()
+        .map(|x_index| ext_to_usize(x_index) % codeword_size)
+        .collect_vec();
+
+    BatchedQueriesResult {
+        inner: queries_usize
+            .par_iter()
+            .map(|x_index| {
+                (
+                    *x_index,
+                    batch_basefold_get_query::<E>(comms, &oracles, codeword_size, *x_index),
+                )
+            })
+            .collect(),
+    }
+}
+
+pub fn simple_batch_prover_query_phase<E: ExtensionField>(
+    transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
+    comm: &BasefoldCommitmentWithData<E>,
+    oracles: &Vec<Vec<E>>,
+    num_verifier_queries: usize,
+) -> SimpleBatchQueriesResult<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    let queries = transcript.squeeze_challenges(num_verifier_queries);
+
+    // Transform the challenge queries from field elements into integers
+    let queries_usize: Vec<usize> = queries
+        .iter()
+        .map(|x_index| ext_to_usize(x_index) % comm.codeword_size())
+        .collect_vec();
+
+    SimpleBatchQueriesResult {
+        inner: queries_usize
+            .par_iter()
+            .map(|x_index| {
+                (
+                    *x_index,
+                    simple_batch_basefold_get_query::<E>(comm.get_codewords(), &oracles, *x_index),
+                )
+            })
+            .collect(),
+    }
+}
+
+pub fn verifier_query_phase<E: ExtensionField>(
+    queries: &QueriesResultWithMerklePath<E>,
+    sum_check_messages: &Vec<Vec<E>>,
+    fold_challenges: &Vec<E>,
+    num_rounds: usize,
+    num_vars: usize,
+    log_rate: usize,
+    final_message: &Vec<E>,
+    roots: &Vec<Digest<E::BaseField>>,
+    comm: &BasefoldCommitment<E>,
+    partial_eq: &[E],
+    rng: ChaCha8Rng,
+    eval: &E,
+    hasher: &Hasher<E::BaseField>,
+) where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    let timer = start_timer!(|| "Verifier query phase");
+
+    let encode_timer = start_timer!(|| "Encode final codeword");
+    let mut message = final_message.clone();
+    interpolate_over_boolean_hypercube(&mut message);
+    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
+    assert_eq!(final_codeword.len(), 1);
+    let mut final_codeword = final_codeword.remove(0);
+    reverse_index_bits_in_place(&mut final_codeword);
+    end_timer!(encode_timer);
+
+    // For computing the weights on the fly, because the verifier is incapable of storing
+    // the weights.
+    let aes_timer = start_timer!(|| "Initialize AES");
+    let mut key: [u8; 16] = [0u8; 16];
+    let mut iv: [u8; 16] = [0u8; 16];
+    let mut rng = rng.clone();
+    rng.set_word_pos(0);
+    rng.fill_bytes(&mut key);
+    rng.fill_bytes(&mut iv);
+
+    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
+    let cipher = Aes128Ctr64LE::new(
+        GenericArray::from_slice(&key[..]),
+        GenericArray::from_slice(&iv[..]),
+    );
+    end_timer!(aes_timer);
+
+    queries.check(
+        fold_challenges,
+        num_rounds,
+        num_vars,
+        log_rate,
+        &final_codeword,
+        roots,
+        comm,
+        cipher,
+        hasher,
+    );
+
+    let final_timer = start_timer!(|| "Final checks");
+    assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
+
+    // The sum-check part of the protocol
+    for i in 0..fold_challenges.len() - 1 {
+        assert_eq!(
+            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
+            degree_2_zero_plus_one(&sum_check_messages[i + 1])
+        );
+    }
+
+    // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
+    // sent from the prover
+    assert_eq!(
+        degree_2_eval(
+            &sum_check_messages[fold_challenges.len() - 1],
+            fold_challenges[fold_challenges.len() - 1]
+        ),
+        inner_product(final_message, partial_eq)
+    );
+    end_timer!(final_timer);
+
+    end_timer!(timer);
+}
+
+pub fn batch_verifier_query_phase<E: ExtensionField>(
+    queries: &BatchedQueriesResultWithMerklePath<E>,
+    sum_check_messages: &Vec<Vec<E>>,
+    fold_challenges: &Vec<E>,
+    num_rounds: usize,
+    num_vars: usize,
+    log_rate: usize,
+    final_message: &Vec<E>,
+    roots: &Vec<Digest<E::BaseField>>,
+    comms: &Vec<&BasefoldCommitment<E>>,
+    coeffs: &[E],
+    partial_eq: &[E],
+    rng: ChaCha8Rng,
+    eval: &E,
+    hasher: &Hasher<E::BaseField>,
+) where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    let timer = start_timer!(|| "Verifier batch query phase");
+    let encode_timer = start_timer!(|| "Encode final codeword");
+    let mut message = final_message.clone();
+    interpolate_over_boolean_hypercube(&mut message);
+    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
+    assert_eq!(final_codeword.len(), 1);
+    let mut final_codeword = final_codeword.remove(0);
+    reverse_index_bits_in_place(&mut final_codeword);
+    end_timer!(encode_timer);
+
+    // For computing the weights on the fly, because the verifier is incapable of storing
+    // the weights.
+    let aes_timer = start_timer!(|| "Initialize AES");
+    let mut key: [u8; 16] = [0u8; 16];
+    let mut iv: [u8; 16] = [0u8; 16];
+    let mut rng = rng.clone();
+    rng.set_word_pos(0);
+    rng.fill_bytes(&mut key);
+    rng.fill_bytes(&mut iv);
+
+    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
+    let cipher = Aes128Ctr64LE::new(
+        GenericArray::from_slice(&key[..]),
+        GenericArray::from_slice(&iv[..]),
+    );
+    end_timer!(aes_timer);
+
+    queries.check(
+        fold_challenges,
+        num_rounds,
+        num_vars,
+        log_rate,
+        &final_codeword,
+        roots,
+        comms,
+        coeffs,
+        cipher,
+        hasher,
+    );
+
+    #[allow(unused)]
+    let final_timer = start_timer!(|| "Final checks");
+    assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
+
+    // The sum-check part of the protocol
+    for i in 0..fold_challenges.len() - 1 {
+        assert_eq!(
+            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
+            degree_2_zero_plus_one(&sum_check_messages[i + 1])
+        );
+    }
+
+    // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
+    // sent from the prover
+    assert_eq!(
+        degree_2_eval(
+            &sum_check_messages[fold_challenges.len() - 1],
+            fold_challenges[fold_challenges.len() - 1]
+        ),
+        inner_product(final_message, partial_eq)
+    );
+    end_timer!(final_timer);
+    end_timer!(timer);
+}
+
+pub fn simple_batch_verifier_query_phase<E: ExtensionField>(
+    queries: &SimpleBatchQueriesResultWithMerklePath<E>,
+    sum_check_messages: &Vec<Vec<E>>,
+    fold_challenges: &Vec<E>,
+    batch_coeffs: &Vec<E>,
+    num_rounds: usize,
+    num_vars: usize,
+    log_rate: usize,
+    final_message: &Vec<E>,
+    roots: &Vec<Digest<E::BaseField>>,
+    comm: &BasefoldCommitment<E>,
+    partial_eq: &[E],
+    rng: ChaCha8Rng,
+    evals: &[E],
+    hasher: &Hasher<E::BaseField>,
+) where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    let timer = start_timer!(|| "Verifier query phase");
+
+    let encode_timer = start_timer!(|| "Encode final codeword");
+    let mut message = final_message.clone();
+    interpolate_over_boolean_hypercube(&mut message);
+    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
+    assert_eq!(final_codeword.len(), 1);
+    let mut final_codeword = final_codeword.remove(0);
+    reverse_index_bits_in_place(&mut final_codeword);
+    end_timer!(encode_timer);
+
+    // For computing the weights on the fly, because the verifier is incapable of storing
+    // the weights.
+    let aes_timer = start_timer!(|| "Initialize AES");
+    let mut key: [u8; 16] = [0u8; 16];
+    let mut iv: [u8; 16] = [0u8; 16];
+    let mut rng = rng.clone();
+    rng.set_word_pos(0);
+    rng.fill_bytes(&mut key);
+    rng.fill_bytes(&mut iv);
+
+    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
+    let cipher = Aes128Ctr64LE::new(
+        GenericArray::from_slice(&key[..]),
+        GenericArray::from_slice(&iv[..]),
+    );
+    end_timer!(aes_timer);
+
+    queries.check(
+        fold_challenges,
+        batch_coeffs,
+        num_rounds,
+        num_vars,
+        log_rate,
+        &final_codeword,
+        roots,
+        comm,
+        cipher,
+        hasher,
+    );
+
+    let final_timer = start_timer!(|| "Final checks");
+    assert_eq!(
+        &inner_product(batch_coeffs, evals),
+        &degree_2_zero_plus_one(&sum_check_messages[0])
+    );
+
+    // The sum-check part of the protocol
+    for i in 0..fold_challenges.len() - 1 {
+        assert_eq!(
+            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
+            degree_2_zero_plus_one(&sum_check_messages[i + 1])
+        );
+    }
+
+    // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
+    // sent from the prover
+    assert_eq!(
+        degree_2_eval(
+            &sum_check_messages[fold_challenges.len() - 1],
+            fold_challenges[fold_challenges.len() - 1]
+        ),
+        inner_product(final_message, partial_eq)
+    );
+    end_timer!(final_timer);
+
+    end_timer!(timer);
 }
 
 fn basefold_get_query<E: ExtensionField>(
@@ -133,7 +446,7 @@ where
             let x_index = x_index >> (log2_strict(codeword_size) - comm.codeword_size_log());
             let p1 = x_index | 1;
             let p0 = p1 - 1;
-            match comm.get_codeword() {
+            match &comm.get_codewords()[0] {
                 FieldType::Ext(poly_codeword) => {
                     CodewordSingleQueryResult::new_ext(poly_codeword[p0], poly_codeword[p1], p0)
                 }
@@ -155,6 +468,66 @@ where
     }
 }
 
+fn simple_batch_basefold_get_query<E: ExtensionField>(
+    poly_codewords: &Vec<FieldType<E>>,
+    oracles: &Vec<Vec<E>>,
+    x_index: usize,
+) -> SimpleBatchSingleQueryResult<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    let mut index = x_index;
+    let p1 = index | 1;
+    let p0 = p1 - 1;
+
+    let commitment_query = match poly_codewords[0] {
+        FieldType::Ext(_) => SimpleBatchCommitmentSingleQueryResult::new_ext(
+            poly_codewords
+                .iter()
+                .map(|c| field_type_index_ext(c, p0))
+                .collect(),
+            poly_codewords
+                .iter()
+                .map(|c| field_type_index_ext(c, p1))
+                .collect(),
+            p0,
+        ),
+        FieldType::Base(_) => SimpleBatchCommitmentSingleQueryResult::new_base(
+            poly_codewords
+                .iter()
+                .map(|c| field_type_index_base(c, p0))
+                .collect(),
+            poly_codewords
+                .iter()
+                .map(|c| field_type_index_base(c, p1))
+                .collect(),
+            p0,
+        ),
+        _ => unreachable!(),
+    };
+    index >>= 1;
+
+    let mut oracle_queries = Vec::with_capacity(oracles.len() + 1);
+    for oracle in oracles {
+        let p1 = index | 1;
+        let p0 = p1 - 1;
+
+        oracle_queries.push(CodewordSingleQueryResult::new_ext(
+            oracle[p0], oracle[p1], p0,
+        ));
+        index >>= 1;
+    }
+
+    let oracle_query = OracleListQueryResult {
+        inner: oracle_queries,
+    };
+
+    return SimpleBatchSingleQueryResult {
+        oracle_query,
+        commitment_query,
+    };
+}
+
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 enum CodewordPointPair<E: ExtensionField> {
     Ext(E, E),
@@ -166,6 +539,51 @@ impl<E: ExtensionField> CodewordPointPair<E> {
         match self {
             CodewordPointPair::Ext(x, y) => (*x, *y),
             CodewordPointPair::Base(x, y) => (E::from(*x), E::from(*y)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum SimpleBatchLeavesPair<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    Ext(Vec<(E, E)>),
+    Base(Vec<(E::BaseField, E::BaseField)>),
+}
+
+impl<E: ExtensionField> SimpleBatchLeavesPair<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    #[allow(unused)]
+    pub fn as_ext(&self) -> Vec<(E, E)> {
+        match self {
+            SimpleBatchLeavesPair::Ext(x) => x.clone(),
+            SimpleBatchLeavesPair::Base(x) => {
+                x.iter().map(|(x, y)| ((*x).into(), (*y).into())).collect()
+            }
+        }
+    }
+
+    pub fn batch(&self, coeffs: &Vec<E>) -> (E, E) {
+        match self {
+            SimpleBatchLeavesPair::Ext(x) => {
+                let mut result = (E::ZERO, E::ZERO);
+                for (i, (x, y)) in x.iter().enumerate() {
+                    result.0 += coeffs[i] * *x;
+                    result.1 += coeffs[i] * *y;
+                }
+                result
+            }
+            SimpleBatchLeavesPair::Base(x) => {
+                let mut result = (E::ZERO, E::ZERO);
+                for (i, (x, y)) in x.iter().enumerate() {
+                    result.0 += coeffs[i] * *x;
+                    result.1 += coeffs[i] * *y;
+                }
+                result
+            }
         }
     }
 }
@@ -720,6 +1138,136 @@ where
     }
 }
 
+pub struct QueriesResult<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<(usize, SingleQueryResult<E>)>,
+}
+
+pub struct QueriesResultWithMerklePath<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<(usize, SingleQueryResultWithMerklePath<E>)>,
+}
+
+impl<E: ExtensionField> QueriesResultWithMerklePath<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn from_query_result(
+        query_result: QueriesResult<E>,
+        oracle_trees: &Vec<MerkleTree<E>>,
+        commitment: &BasefoldCommitmentWithData<E>,
+    ) -> Self {
+        Self {
+            inner: query_result
+                .inner
+                .into_iter()
+                .map(|(i, q)| {
+                    (
+                        i,
+                        SingleQueryResultWithMerklePath::from_single_query_result(
+                            q,
+                            oracle_trees,
+                            commitment,
+                        ),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+        self.inner
+            .iter()
+            .for_each(|(_, q)| q.write_transcript(transcript));
+    }
+
+    pub fn read_transcript_base(
+        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
+        num_rounds: usize,
+        log_rate: usize,
+        poly_num_vars: usize,
+        indices: &[usize],
+    ) -> Self {
+        Self {
+            inner: indices
+                .iter()
+                .map(|index| {
+                    (
+                        *index,
+                        SingleQueryResultWithMerklePath::read_transcript_base(
+                            transcript,
+                            num_rounds,
+                            log_rate,
+                            poly_num_vars,
+                            *index,
+                        ),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn read_transcript_ext(
+        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
+        num_rounds: usize,
+        log_rate: usize,
+        poly_num_vars: usize,
+        indices: &[usize],
+    ) -> Self {
+        Self {
+            inner: indices
+                .iter()
+                .map(|index| {
+                    (
+                        *index,
+                        SingleQueryResultWithMerklePath::read_transcript_ext(
+                            transcript,
+                            num_rounds,
+                            log_rate,
+                            poly_num_vars,
+                            *index,
+                        ),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn check(
+        &self,
+        fold_challenges: &Vec<E>,
+        num_rounds: usize,
+        num_vars: usize,
+        log_rate: usize,
+        final_codeword: &Vec<E>,
+        roots: &Vec<Digest<E::BaseField>>,
+        comm: &BasefoldCommitment<E>,
+        cipher: ctr::Ctr32LE<aes::Aes128>,
+        hasher: &Hasher<E::BaseField>,
+    ) {
+        let timer = start_timer!(|| "QueriesResult::check");
+        self.inner.par_iter().for_each(|(index, query)| {
+            query.check(
+                fold_challenges,
+                num_rounds,
+                num_vars,
+                log_rate,
+                final_codeword,
+                roots,
+                comm,
+                cipher.clone(),
+                *index,
+                hasher,
+            );
+        });
+        end_timer!(timer);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BatchedSingleQueryResult<E: ExtensionField>
 where
@@ -1053,26 +1601,377 @@ where
     }
 }
 
-pub struct QueriesResult<E: ExtensionField>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SimpleBatchCommitmentSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    inner: Vec<(usize, SingleQueryResult<E>)>,
+    leaves: SimpleBatchLeavesPair<E>,
+    index: usize,
 }
 
-pub struct QueriesResultWithMerklePath<E: ExtensionField>
+impl<E: ExtensionField> SimpleBatchCommitmentSingleQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    inner: Vec<(usize, SingleQueryResultWithMerklePath<E>)>,
+    fn new_ext(left: Vec<E>, right: Vec<E>, index: usize) -> Self {
+        Self {
+            leaves: SimpleBatchLeavesPair::Ext(left.into_iter().zip(right).collect()),
+            index,
+        }
+    }
+
+    fn new_base(left: Vec<E::BaseField>, right: Vec<E::BaseField>, index: usize) -> Self {
+        Self {
+            leaves: SimpleBatchLeavesPair::Base(left.into_iter().zip(right).collect()),
+            index,
+        }
+    }
+
+    #[allow(unused)]
+    fn left_ext(&self) -> Vec<E> {
+        match &self.leaves {
+            SimpleBatchLeavesPair::Ext(x) => x.iter().map(|(x, _)| *x).collect(),
+            SimpleBatchLeavesPair::Base(x) => x.iter().map(|(x, _)| E::from(*x)).collect(),
+        }
+    }
+
+    #[allow(unused)]
+    fn right_ext(&self) -> Vec<E> {
+        match &self.leaves {
+            SimpleBatchLeavesPair::Ext(x) => x.iter().map(|(_, x)| *x).collect(),
+            SimpleBatchLeavesPair::Base(x) => x.iter().map(|(_, x)| E::from(*x)).collect(),
+        }
+    }
+
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+        match &self.leaves {
+            SimpleBatchLeavesPair::Ext(x) => {
+                x.iter().for_each(|(x, y)| {
+                    transcript.write_field_element_ext(x).unwrap();
+                    transcript.write_field_element_ext(y).unwrap();
+                });
+            }
+            SimpleBatchLeavesPair::Base(x) => {
+                x.iter().for_each(|(x, y)| {
+                    transcript.write_field_element_base(x).unwrap();
+                    transcript.write_field_element_base(y).unwrap();
+                });
+            }
+        };
+    }
+
+    pub fn read_transcript_ext(
+        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
+        full_codeword_size_log: usize,
+        codeword_size_log: usize,
+        index: usize,
+        batch_size: usize,
+    ) -> Self {
+        let mut left = vec![];
+        let mut right = vec![];
+        (0..batch_size).for_each(|_| {
+            left.push(transcript.read_field_element_ext().unwrap());
+            right.push(transcript.read_field_element_ext().unwrap());
+        });
+        Self::new_ext(
+            left,
+            right,
+            index >> (full_codeword_size_log - codeword_size_log),
+        )
+    }
+
+    pub fn read_transcript_base(
+        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
+        full_codeword_size_log: usize,
+        codeword_size_log: usize,
+        index: usize,
+        batch_size: usize,
+    ) -> Self {
+        let mut left = vec![];
+        let mut right = vec![];
+        (0..batch_size).for_each(|_| {
+            left.push(transcript.read_field_element_base().unwrap());
+            right.push(transcript.read_field_element_base().unwrap());
+        });
+        Self::new_base(
+            left,
+            right,
+            index >> (full_codeword_size_log - codeword_size_log),
+        )
+    }
 }
 
-impl<E: ExtensionField> QueriesResultWithMerklePath<E>
+#[derive(Debug, Clone)]
+struct SimpleBatchCommitmentSingleQueryResultWithMerklePath<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    query: SimpleBatchCommitmentSingleQueryResult<E>,
+    merkle_path: MerklePathWithoutLeafOrRoot<E>,
+}
+
+impl<E: ExtensionField> SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+        self.query.write_transcript(transcript);
+        self.merkle_path.write_transcript(transcript);
+    }
+
+    pub fn read_transcript_base(
+        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
+        full_codeword_size_log: usize,
+        codeword_size_log: usize,
+        index: usize,
+        batch_size: usize,
+    ) -> Self {
+        Self {
+            query: SimpleBatchCommitmentSingleQueryResult::read_transcript_base(
+                transcript,
+                full_codeword_size_log,
+                codeword_size_log,
+                index,
+                batch_size,
+            ),
+            merkle_path: MerklePathWithoutLeafOrRoot::read_transcript(
+                transcript,
+                codeword_size_log,
+            ),
+        }
+    }
+
+    pub fn read_transcript_ext(
+        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
+        full_codeword_size_log: usize,
+        codeword_size_log: usize,
+        index: usize,
+        batch_size: usize,
+    ) -> Self {
+        Self {
+            query: SimpleBatchCommitmentSingleQueryResult::read_transcript_ext(
+                transcript,
+                full_codeword_size_log,
+                codeword_size_log,
+                index,
+                batch_size,
+            ),
+            merkle_path: MerklePathWithoutLeafOrRoot::read_transcript(
+                transcript,
+                codeword_size_log,
+            ),
+        }
+    }
+
+    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>, hasher: &Hasher<E::BaseField>) {
+        // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
+        match &self.query.leaves {
+            SimpleBatchLeavesPair::Ext(inner) => {
+                self.merkle_path.authenticate_batch_leaves_root_ext(
+                    inner.iter().map(|(x, _)| *x).collect(),
+                    inner.iter().map(|(_, x)| *x).collect(),
+                    self.query.index,
+                    root,
+                    hasher,
+                );
+            }
+            SimpleBatchLeavesPair::Base(inner) => {
+                self.merkle_path.authenticate_batch_leaves_root_base(
+                    inner.iter().map(|(x, _)| *x).collect(),
+                    inner.iter().map(|(_, x)| *x).collect(),
+                    self.query.index,
+                    root,
+                    hasher,
+                );
+            }
+        }
+        // end_timer!(timer);
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SimpleBatchSingleQueryResult<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    oracle_query: OracleListQueryResult<E>,
+    commitment_query: SimpleBatchCommitmentSingleQueryResult<E>,
+}
+
+#[derive(Debug, Clone)]
+struct SimpleBatchSingleQueryResultWithMerklePath<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    oracle_query: OracleListQueryResultWithMerklePath<E>,
+    commitment_query: SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>,
+}
+
+impl<E: ExtensionField> SimpleBatchSingleQueryResultWithMerklePath<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn from_single_query_result(
+        single_query_result: SimpleBatchSingleQueryResult<E>,
+        oracle_trees: &Vec<MerkleTree<E>>,
+        commitment: &BasefoldCommitmentWithData<E>,
+    ) -> Self {
+        Self {
+            oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
+                single_query_result.oracle_query,
+                |i, j| oracle_trees[i].merkle_path_without_leaf_sibling_or_root(j),
+            ),
+            commitment_query: SimpleBatchCommitmentSingleQueryResultWithMerklePath {
+                query: single_query_result.commitment_query.clone(),
+                merkle_path: commitment
+                    .codeword_tree
+                    .merkle_path_without_leaf_sibling_or_root(
+                        single_query_result.commitment_query.index,
+                    ),
+            },
+        }
+    }
+
+    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+        self.oracle_query.write_transcript(transcript);
+        self.commitment_query.write_transcript(transcript);
+    }
+
+    pub fn read_transcript_base(
+        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
+        num_rounds: usize,
+        log_rate: usize,
+        num_vars: usize,
+        index: usize,
+        batch_size: usize,
+    ) -> Self {
+        Self {
+            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
+                transcript,
+                num_rounds,
+                num_vars + log_rate,
+                index,
+            ),
+            commitment_query:
+                SimpleBatchCommitmentSingleQueryResultWithMerklePath::read_transcript_base(
+                    transcript,
+                    num_vars + log_rate,
+                    num_vars + log_rate,
+                    index,
+                    batch_size,
+                ),
+        }
+    }
+
+    pub fn read_transcript_ext(
+        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
+        num_rounds: usize,
+        log_rate: usize,
+        num_vars: usize,
+        index: usize,
+        batch_size: usize,
+    ) -> Self {
+        Self {
+            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
+                transcript,
+                num_rounds,
+                num_vars + log_rate,
+                index,
+            ),
+            commitment_query:
+                SimpleBatchCommitmentSingleQueryResultWithMerklePath::read_transcript_ext(
+                    transcript,
+                    num_vars + log_rate,
+                    num_vars + log_rate,
+                    index,
+                    batch_size,
+                ),
+        }
+    }
+
+    pub fn check(
+        &self,
+        fold_challenges: &Vec<E>,
+        batch_coeffs: &Vec<E>,
+        num_rounds: usize,
+        num_vars: usize,
+        log_rate: usize,
+        final_codeword: &Vec<E>,
+        roots: &Vec<Digest<E::BaseField>>,
+        comm: &BasefoldCommitment<E>,
+        mut cipher: ctr::Ctr32LE<aes::Aes128>,
+        index: usize,
+        hasher: &Hasher<E::BaseField>,
+    ) {
+        let timer = start_timer!(|| "Checking codeword single query");
+        self.oracle_query.check_merkle_paths(roots, hasher);
+        self.commitment_query
+            .check_merkle_path(&Digest(comm.root().0.try_into().unwrap()), hasher);
+
+        let (mut curr_left, mut curr_right) =
+            self.commitment_query.query.leaves.batch(batch_coeffs);
+
+        let mut right_index = index | 1;
+        let mut left_index = right_index - 1;
+
+        for i in 0..num_rounds {
+            // let round_timer = start_timer!(|| format!("SingleQueryResult::round {}", i));
+            let ri0 = reverse_bits(left_index, num_vars + log_rate - i);
+
+            let x0 = E::from(query_point::<E>(
+                1 << (num_vars + log_rate - i),
+                ri0,
+                num_vars + log_rate - i - 1,
+                &mut cipher,
+            ));
+            let x1 = -x0;
+
+            let res = interpolate2([(x0, curr_left), (x1, curr_right)], fold_challenges[i]);
+
+            let next_index = right_index >> 1;
+            let next_oracle_value = if i < num_rounds - 1 {
+                right_index = next_index | 1;
+                left_index = right_index - 1;
+                let next_oracle_query = self.oracle_query.get_inner()[i].clone();
+                (curr_left, curr_right) = next_oracle_query.query.codepoints.as_ext();
+                if next_index & 1 == 0 {
+                    curr_left
+                } else {
+                    curr_right
+                }
+            } else {
+                // Note that final_codeword has been bit-reversed, so no need to bit-reverse
+                // next_index here.
+                final_codeword[next_index]
+            };
+            assert_eq!(res, next_oracle_value, "Failed at round {}", i);
+            // end_timer!(round_timer);
+        }
+        end_timer!(timer);
+    }
+}
+
+pub struct SimpleBatchQueriesResult<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<(usize, SimpleBatchSingleQueryResult<E>)>,
+}
+
+pub struct SimpleBatchQueriesResultWithMerklePath<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    inner: Vec<(usize, SimpleBatchSingleQueryResultWithMerklePath<E>)>,
+}
+
+impl<E: ExtensionField> SimpleBatchQueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn from_query_result(
-        query_result: QueriesResult<E>,
+        query_result: SimpleBatchQueriesResult<E>,
         oracle_trees: &Vec<MerkleTree<E>>,
         commitment: &BasefoldCommitmentWithData<E>,
     ) -> Self {
@@ -1083,7 +1982,7 @@ where
                 .map(|(i, q)| {
                     (
                         i,
-                        SingleQueryResultWithMerklePath::from_single_query_result(
+                        SimpleBatchSingleQueryResultWithMerklePath::from_single_query_result(
                             q,
                             oracle_trees,
                             commitment,
@@ -1106,6 +2005,7 @@ where
         log_rate: usize,
         poly_num_vars: usize,
         indices: &[usize],
+        batch_size: usize,
     ) -> Self {
         Self {
             inner: indices
@@ -1113,12 +2013,13 @@ where
                 .map(|index| {
                     (
                         *index,
-                        SingleQueryResultWithMerklePath::read_transcript_base(
+                        SimpleBatchSingleQueryResultWithMerklePath::read_transcript_base(
                             transcript,
                             num_rounds,
                             log_rate,
                             poly_num_vars,
                             *index,
+                            batch_size,
                         ),
                     )
                 })
@@ -1132,6 +2033,7 @@ where
         log_rate: usize,
         poly_num_vars: usize,
         indices: &[usize],
+        batch_size: usize,
     ) -> Self {
         Self {
             inner: indices
@@ -1139,12 +2041,13 @@ where
                 .map(|index| {
                     (
                         *index,
-                        SingleQueryResultWithMerklePath::read_transcript_ext(
+                        SimpleBatchSingleQueryResultWithMerklePath::read_transcript_ext(
                             transcript,
                             num_rounds,
                             log_rate,
                             poly_num_vars,
                             *index,
+                            batch_size,
                         ),
                     )
                 })
@@ -1155,6 +2058,7 @@ where
     pub fn check(
         &self,
         fold_challenges: &Vec<E>,
+        batch_coeffs: &Vec<E>,
         num_rounds: usize,
         num_vars: usize,
         log_rate: usize,
@@ -1168,6 +2072,7 @@ where
         self.inner.par_iter().for_each(|(index, query)| {
             query.check(
                 fold_challenges,
+                batch_coeffs,
                 num_rounds,
                 num_vars,
                 log_rate,
@@ -1181,200 +2086,4 @@ where
         });
         end_timer!(timer);
     }
-}
-
-pub fn batch_query_phase<E: ExtensionField>(
-    transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
-    codeword_size: usize,
-    comms: &[BasefoldCommitmentWithData<E>],
-    oracles: &Vec<Vec<E>>,
-    num_verifier_queries: usize,
-) -> BatchedQueriesResult<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let queries = transcript.squeeze_challenges(num_verifier_queries);
-
-    // Transform the challenge queries from field elements into integers
-    let queries_usize: Vec<usize> = queries
-        .iter()
-        .map(|x_index| ext_to_usize(x_index) % codeword_size)
-        .collect_vec();
-
-    BatchedQueriesResult {
-        inner: queries_usize
-            .par_iter()
-            .map(|x_index| {
-                (
-                    *x_index,
-                    batch_basefold_get_query::<E>(comms, &oracles, codeword_size, *x_index),
-                )
-            })
-            .collect(),
-    }
-}
-
-pub fn verifier_query_phase<E: ExtensionField>(
-    queries: &QueriesResultWithMerklePath<E>,
-    sum_check_messages: &Vec<Vec<E>>,
-    fold_challenges: &Vec<E>,
-    num_rounds: usize,
-    num_vars: usize,
-    log_rate: usize,
-    final_message: &Vec<E>,
-    roots: &Vec<Digest<E::BaseField>>,
-    comm: &BasefoldCommitment<E>,
-    partial_eq: &[E],
-    rng: ChaCha8Rng,
-    eval: &E,
-    hasher: &Hasher<E::BaseField>,
-) where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let timer = start_timer!(|| "Verifier query phase");
-
-    let encode_timer = start_timer!(|| "Encode final codeword");
-    let mut message = final_message.clone();
-    interpolate_over_boolean_hypercube(&mut message);
-    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
-    assert_eq!(final_codeword.len(), 1);
-    let mut final_codeword = final_codeword.remove(0);
-    reverse_index_bits_in_place(&mut final_codeword);
-    end_timer!(encode_timer);
-
-    // For computing the weights on the fly, because the verifier is incapable of storing
-    // the weights.
-    let aes_timer = start_timer!(|| "Initialize AES");
-    let mut key: [u8; 16] = [0u8; 16];
-    let mut iv: [u8; 16] = [0u8; 16];
-    let mut rng = rng.clone();
-    rng.set_word_pos(0);
-    rng.fill_bytes(&mut key);
-    rng.fill_bytes(&mut iv);
-
-    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
-    let cipher = Aes128Ctr64LE::new(
-        GenericArray::from_slice(&key[..]),
-        GenericArray::from_slice(&iv[..]),
-    );
-    end_timer!(aes_timer);
-
-    queries.check(
-        fold_challenges,
-        num_rounds,
-        num_vars,
-        log_rate,
-        &final_codeword,
-        roots,
-        comm,
-        cipher,
-        hasher,
-    );
-
-    let final_timer = start_timer!(|| "Final checks");
-    assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
-
-    // The sum-check part of the protocol
-    for i in 0..fold_challenges.len() - 1 {
-        assert_eq!(
-            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
-            degree_2_zero_plus_one(&sum_check_messages[i + 1])
-        );
-    }
-
-    // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
-    // sent from the prover
-    assert_eq!(
-        degree_2_eval(
-            &sum_check_messages[fold_challenges.len() - 1],
-            fold_challenges[fold_challenges.len() - 1]
-        ),
-        inner_product(final_message, partial_eq)
-    );
-    end_timer!(final_timer);
-
-    end_timer!(timer);
-}
-
-pub fn batch_verifier_query_phase<E: ExtensionField>(
-    queries: &BatchedQueriesResultWithMerklePath<E>,
-    sum_check_messages: &Vec<Vec<E>>,
-    fold_challenges: &Vec<E>,
-    num_rounds: usize,
-    num_vars: usize,
-    log_rate: usize,
-    final_message: &Vec<E>,
-    roots: &Vec<Digest<E::BaseField>>,
-    comms: &Vec<&BasefoldCommitment<E>>,
-    coeffs: &[E],
-    partial_eq: &[E],
-    rng: ChaCha8Rng,
-    eval: &E,
-    hasher: &Hasher<E::BaseField>,
-) where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let timer = start_timer!(|| "Verifier batch query phase");
-    let encode_timer = start_timer!(|| "Encode final codeword");
-    let mut message = final_message.clone();
-    interpolate_over_boolean_hypercube(&mut message);
-    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
-    assert_eq!(final_codeword.len(), 1);
-    let mut final_codeword = final_codeword.remove(0);
-    reverse_index_bits_in_place(&mut final_codeword);
-    end_timer!(encode_timer);
-
-    // For computing the weights on the fly, because the verifier is incapable of storing
-    // the weights.
-    let aes_timer = start_timer!(|| "Initialize AES");
-    let mut key: [u8; 16] = [0u8; 16];
-    let mut iv: [u8; 16] = [0u8; 16];
-    let mut rng = rng.clone();
-    rng.set_word_pos(0);
-    rng.fill_bytes(&mut key);
-    rng.fill_bytes(&mut iv);
-
-    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
-    let cipher = Aes128Ctr64LE::new(
-        GenericArray::from_slice(&key[..]),
-        GenericArray::from_slice(&iv[..]),
-    );
-    end_timer!(aes_timer);
-
-    queries.check(
-        fold_challenges,
-        num_rounds,
-        num_vars,
-        log_rate,
-        &final_codeword,
-        roots,
-        comms,
-        coeffs,
-        cipher,
-        hasher,
-    );
-
-    #[allow(unused)]
-    let final_timer = start_timer!(|| "Final checks");
-    assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
-
-    // The sum-check part of the protocol
-    for i in 0..fold_challenges.len() - 1 {
-        assert_eq!(
-            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
-            degree_2_zero_plus_one(&sum_check_messages[i + 1])
-        );
-    }
-
-    // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
-    // sent from the prover
-    assert_eq!(
-        degree_2_eval(
-            &sum_check_messages[fold_challenges.len() - 1],
-            fold_challenges[fold_challenges.len() - 1]
-        ),
-        inner_product(final_message, partial_eq)
-    );
-    end_timer!(final_timer);
-    end_timer!(timer);
 }
