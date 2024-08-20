@@ -28,6 +28,20 @@ impl<E: ExtensionField> FieldType<E> {
             FieldType::Unreachable => unreachable!(),
         }
     }
+
+    pub fn get_base_ref(&self) -> Option<&[E::BaseField]> {
+        match self {
+            FieldType::Base(content) => Some(content.as_slice()),
+            _ => None
+        }
+    }
+
+    pub fn get_ext_ref(&self) -> Option<&[E]> {
+        match self {
+            FieldType::Ext(content) => Some(content.as_slice()),
+            _ => None
+        }
+    }
 }
 
 /// Stores a multilinear polynomial in dense evaluation form.

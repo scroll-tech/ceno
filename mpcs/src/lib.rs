@@ -51,7 +51,7 @@ pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     polys: &Vec<DenseMultilinearExtension<E>>,
-) -> Result<Vec<Pcs::CommitmentWithData>, Error> {
+) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::batch_commit(pp, polys)
 }
 
@@ -59,7 +59,7 @@ pub fn pcs_batch_commit_and_write<'a, E: ExtensionField, Pcs: PolynomialCommitme
     pp: &Pcs::ProverParam,
     polys: &Vec<DenseMultilinearExtension<E>>,
     transcript: &mut impl TranscriptWrite<Pcs::CommitmentChunk, E>,
-) -> Result<Vec<Pcs::CommitmentWithData>, Error> {
+) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::batch_commit_and_write(pp, polys, transcript)
 }
 
@@ -152,13 +152,13 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     fn batch_commit(
         pp: &Self::ProverParam,
         polys: &Vec<DenseMultilinearExtension<E>>,
-    ) -> Result<Vec<Self::CommitmentWithData>, Error>;
+    ) -> Result<Self::CommitmentWithData, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
         polys: &Vec<DenseMultilinearExtension<E>>,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, E>,
-    ) -> Result<Vec<Self::CommitmentWithData>, Error>;
+    ) -> Result<Self::CommitmentWithData, Error>;
 
     fn open(
         pp: &Self::ProverParam,
