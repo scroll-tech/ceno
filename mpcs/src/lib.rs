@@ -608,10 +608,10 @@ mod test {
     // }
 
     pub(super) fn run_simple_batch_commit_open_verify<E, Pcs, T>(base: bool)
-        where
-            E: ExtensionField,
-            Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
-            T: TranscriptRead<Pcs::CommitmentChunk, E>
+    where
+        E: ExtensionField,
+        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        T: TranscriptRead<Pcs::CommitmentChunk, E>
             + TranscriptWrite<Pcs::CommitmentChunk, E>
             + InMemoryTranscript<E>,
     {
@@ -631,8 +631,8 @@ mod test {
                 (0..num_points).map(|point| (point * 2, point)), // Every point matches two polys
                 (0..num_points).map(|point| (point * 2 + 1, point)),
             ]
-                .unique()
-                .collect_vec();
+            .unique()
+            .collect_vec();
 
             let proof = {
                 let mut transcript = T::new();
@@ -652,56 +652,39 @@ mod test {
                 let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
                 println!("commit {:?}", now.elapsed());
 
-                // let point = transcript.squeeze_challenges(num_vars);
-                //
-                // // let points = (0..num_points)
-                // //     .map(|i| transcript.squeeze_challenges(num_vars - i))
-                // //     .take(num_points)
-                // //     .collect_vec();
-                //
-                // let evals = (0..batch_size).map(|i| {
-                //     polys[i].evaluate(&point)
-                // }).collect_vec();
-                //
-                // // let evals = evals
-                // //     .iter()
-                // //     .copied()
-                // //     .map(|(poly,_)| poly)
-                // //     .collect_vec();
-                // transcript
-                //     .write_field_elements_ext(&evals)
-                //     .unwrap();
-                // let now = Instant::now();
-                // Pcs::simple_batch_open(&pp, &polys, &comms, &point, &evals, &mut transcript).unwrap();
-                // println!("batch open {:?}", now.elapsed());
-                // transcript.into_proof()
+                let point = transcript.squeeze_challenges(num_vars);
+
+                let evals = (0..batch_size)
+                    .map(|i| polys[i].evaluate(&point))
+                    .collect_vec();
+
+                transcript.write_field_elements_ext(&evals).unwrap();
+                let now = Instant::now();
+                Pcs::simple_batch_open(&pp, &polys, &comms, &point, &evals, &mut transcript)
+                    .unwrap();
+                println!("batch open {:?}", now.elapsed());
+                transcript.into_proof()
             };
             // Batch verify
-            // let result = {
-            //     let mut transcript = T::from_proof(proof.as_slice());
-            //     let comms = &Pcs::read_commitment(&vp, &mut transcript).unwrap();
-            //
-            //     // let points = (0..num_points)
-            //     //     .map(|i| transcript.squeeze_challenges(num_vars - i))
-            //     //     .take(num_points)
-            //     //     .collect_vec();
-            //     let point = transcript.squeeze_challenges(num_vars);
-            //
-            //     let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
-            //
-            //     let now = Instant::now();
-            //     let result = Pcs::simple_batch_verify(
-            //         &vp,
-            //         comms,
-            //         &point,
-            //         &evals2,
-            //         &mut transcript,
-            //     );
-            //     println!("batch verify {:?}", now.elapsed());
-            //     result
-            // };
-            //
-            // result.unwrap();
+            let result = {
+                let mut transcript = T::from_proof(proof.as_slice());
+                let comms = &Pcs::read_commitment(&vp, &mut transcript).unwrap();
+
+                // let points = (0..num_points)
+                //     .map(|i| transcript.squeeze_challenges(num_vars - i))
+                //     .take(num_points)
+                //     .collect_vec();
+                let point = transcript.squeeze_challenges(num_vars);
+
+                let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
+
+                let now = Instant::now();
+                let result = Pcs::simple_batch_verify(&vp, comms, &point, &evals2, &mut transcript);
+                println!("batch verify {:?}", now.elapsed());
+                result
+            };
+
+            result.unwrap();
         }
     }
 
