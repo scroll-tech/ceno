@@ -1022,7 +1022,7 @@ where
 mod test {
     use crate::{
         basefold::Basefold,
-        test::{run_batch_commit_open_verify, run_commit_open_verify},
+        test::{run_simple_batch_commit_open_verify, run_commit_open_verify},
         util::transcript::PoseidonTranscript,
     };
     use goldilocks::GoldilocksExt2;
@@ -1067,7 +1067,7 @@ mod test {
     #[test]
     fn batch_commit_open_verify_goldilocks_base() {
         // Both challenge and poly are over base field
-        run_batch_commit_open_verify::<
+        run_simple_batch_commit_open_verify::<
             GoldilocksExt2,
             PcsGoldilocks,
             PoseidonTranscript<GoldilocksExt2>,
@@ -1077,6 +1077,6 @@ mod test {
     #[test]
     fn batch_commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(false);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(false);
     }
 }
