@@ -548,7 +548,7 @@ pub mod test_util {
     //     }
     // }
 
-    pub(super) fn run_simple_batch_commit_open_verify<E, Pcs, T>(base: bool)
+    pub(super) fn run_simple_batch_commit_open_verify<E, Pcs, T>(base: bool, num_vars_start: usize, num_vars_end: usize)
     where
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
