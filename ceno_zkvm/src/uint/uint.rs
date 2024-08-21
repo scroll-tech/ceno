@@ -21,15 +21,13 @@ pub enum UintLimb<E: ExtensionField> {
 #[derive(Clone)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
-pub struct UInt<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool> {
+pub struct UInt<const M: usize, const C: usize, E: ExtensionField> {
     pub limbs: UintLimb<E>,
     // We don't need `overflow` witness since the last element of `carries` represents it.
     pub carries: Option<Vec<WitIn>>,
 }
 
-impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
-    UInt<M, C, E, IS_OVERFLOW>
-{
+impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     pub fn new(circuit_builder: &mut CircuitBuilder<E>) -> Self {
         Self {
             limbs: UintLimb::WitIn(
@@ -184,9 +182,7 @@ impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
 }
 
 /// Construct `UInt` from `Vec<CellId>`
-impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool> TryFrom<Vec<WitIn>>
-    for UInt<M, C, E, IS_OVERFLOW>
-{
+impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for UInt<M, C, E> {
     type Error = UtilError;
 
     fn try_from(limbs: Vec<WitIn>) -> Result<Self, Self::Error> {
@@ -208,9 +204,7 @@ impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
 }
 
 /// Construct `UInt` from `$[CellId]`
-impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool> TryFrom<&[WitIn]>
-    for UInt<M, C, E, IS_OVERFLOW>
-{
+impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UInt<M, C, E> {
     type Error = UtilError;
 
     fn try_from(values: &[WitIn]) -> Result<Self, Self::Error> {

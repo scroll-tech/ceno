@@ -14,9 +14,7 @@ use crate::{
 
 use super::{uint::UintLimb, UInt};
 
-impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
-    UInt<M, C, E, IS_OVERFLOW>
-{
+impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
 
     fn internal_add(
@@ -24,8 +22,8 @@ impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
         circuit_builder: &mut CircuitBuilder<E>,
         addend1: &Vec<Expression<E>>,
         addend2: &Vec<Expression<E>>,
-    ) -> Result<UInt<M, C, E, IS_OVERFLOW>, ZKVMError> {
-        let mut c = UInt::<M, C, E, IS_OVERFLOW>::new_expr(circuit_builder);
+    ) -> Result<UInt<M, C, E>, ZKVMError> {
+        let mut c = UInt::<M, C, E>::new_expr(circuit_builder);
 
         // allocate witness cells and do range checks for carries
         c.create_carry_witin(circuit_builder);
@@ -50,10 +48,7 @@ impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
         );
 
         // overflow check
-        circuit_builder.require_equal(
-            (IS_OVERFLOW as usize).into(),
-            c.carries.as_ref().unwrap()[3].expr(),
-        )?;
+        circuit_builder.require_zero(c.carries.as_ref().unwrap().last().unwrap().expr())?;
 
         Ok(c)
     }
@@ -99,26 +94,26 @@ impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
     pub fn add(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
-        addend: &UInt<M, C, E, IS_OVERFLOW>,
-    ) -> Result<UInt<M, C, E, IS_OVERFLOW>, ZKVMError> {
+        addend: &UInt<M, C, E>,
+    ) -> Result<UInt<M, C, E>, ZKVMError> {
         self.internal_add(circuit_builder, &self.expr(), &addend.expr())
     }
 
     pub fn mul(
         &mut self,
         circuit_builder: &mut CircuitBuilder<E>,
-        multiplier: &mut UInt<M, C, E, IS_OVERFLOW>,
-    ) -> Result<UInt<M, C, E, IS_OVERFLOW>, ZKVMError> {
-        let mut c = UInt::<M, C, E, IS_OVERFLOW>::new(circuit_builder);
+        multiplier: &mut UInt<M, C, E>,
+    ) -> Result<UInt<M, C, E>, ZKVMError> {
+        let mut c = UInt::<M, C, E>::new(circuit_builder);
         // allocate witness cells and do range checks for carries
         c.create_carry_witin(circuit_builder);
 
         // We only allow expressions are in monomial form
         // if any of a or b is in Expression term, it would cause error.
         // So a small trick here, creating a witness and constrain the witness and the expression is equal
-        let mut create_expr = |u: &UInt<M, C, E, IS_OVERFLOW>| {
+        let mut create_expr = |u: &UInt<M, C, E>| {
             if u.is_expr() {
-                let mut tmp = UInt::<M, C, E, IS_OVERFLOW>::new(circuit_builder);
+                let mut tmp = UInt::<M, C, E>::new(circuit_builder);
                 tmp.create_carry_witin(circuit_builder);
                 tmp.eq(circuit_builder, u).unwrap();
                 tmp.expr()
@@ -165,7 +160,7 @@ impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
         )?;
 
         // overflow check
-        circuit_builder.require_equal((IS_OVERFLOW as usize).into(), c_carries[3].expr())?;
+        circuit_builder.require_zero(c.carries.as_ref().unwrap().last().unwrap().expr())?;
 
         Ok(c)
     }
@@ -174,7 +169,7 @@ impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
     pub fn eq(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
-        rhs: &UInt<M, C, E, IS_OVERFLOW>,
+        rhs: &UInt<M, C, E>,
     ) -> Result<(), ZKVMError> {
         izip!(self.expr(), rhs.expr())
             .try_for_each(|(lhs, rhs)| circuit_builder.require_equal(lhs, rhs))
@@ -183,7 +178,7 @@ impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
     pub fn lt(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
-        rhs: &UInt<M, C, E, IS_OVERFLOW>,
+        rhs: &UInt<M, C, E>,
     ) -> Result<Expression<E>, ZKVMError> {
         Ok(self.expr().remove(0) + 1.into())
     }
@@ -219,8 +214,8 @@ mod tests {
                 .collect_vec();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let a = UInt::<64, 16, E, false>::new(&mut circuit_builder);
-            let b = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
             let c = a.add(&mut circuit_builder, &b).unwrap();
 
             // verify limb_c[] = limb_a[] + limb_b[]
@@ -260,8 +255,8 @@ mod tests {
                 .collect_vec();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let a = UInt::<64, 16, E, false>::new(&mut circuit_builder);
-            let b = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
             let c = a.add(&mut circuit_builder, &b).unwrap();
 
             // verify limb_c[] = limb_a[] + limb_b[]
@@ -300,8 +295,8 @@ mod tests {
                 .collect_vec();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let a = UInt::<64, 16, E, false>::new(&mut circuit_builder);
-            let b = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
             let c = a.add(&mut circuit_builder, &b).unwrap();
 
             // verify limb_c[] = limb_a[] + limb_b[]
@@ -340,8 +335,8 @@ mod tests {
                 .collect_vec();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let a = UInt::<64, 16, E, false>::new(&mut circuit_builder);
-            let b = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let b = UInt::<64, 16, E>::new(&mut circuit_builder);
             let c = a.add(&mut circuit_builder, &b).unwrap();
 
             // verify limb_c[] = limb_a[] + limb_b[]
@@ -379,7 +374,7 @@ mod tests {
                 .collect_vec();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let a = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
             let b = Expression::Constant(2.into());
             let c = a.add_const(&mut circuit_builder, b).unwrap();
 
@@ -418,7 +413,7 @@ mod tests {
                 .collect_vec();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let a = UInt::<64, 16, E, true>::new(&mut circuit_builder);
+            let a = UInt::<64, 16, E>::new(&mut circuit_builder);
             let b = Expression::Constant(65538.into());
             let c = a.add_const(&mut circuit_builder, b).unwrap();
 
@@ -517,8 +512,8 @@ mod tests {
             let mut circuit_builder = CircuitBuilder::<E>::new();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let mut uint_a = UInt::<64, 16, E, false>::new(&mut circuit_builder);
-            let mut uint_b = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let mut uint_a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let mut uint_b = UInt::<64, 16, E>::new(&mut circuit_builder);
             let uint_c = uint_a.mul(&mut circuit_builder, &mut uint_b).unwrap();
 
             let c = uint_c.expr();
@@ -607,10 +602,10 @@ mod tests {
             let mut circuit_builder = CircuitBuilder::<E>::new();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let uint_a = UInt::<64, 16, E, false>::new(&mut circuit_builder);
-            let mut uint_b = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let uint_a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let mut uint_b = UInt::<64, 16, E>::new(&mut circuit_builder);
             let mut uint_c = uint_a.add(&mut circuit_builder, &mut uint_b).unwrap();
-            let mut uint_d = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let mut uint_d = UInt::<64, 16, E>::new(&mut circuit_builder);
             let uint_e = uint_c.mul(&mut circuit_builder, &mut uint_d).unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
@@ -677,11 +672,11 @@ mod tests {
             let mut circuit_builder = CircuitBuilder::<E>::new();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let uint_a = UInt::<64, 16, E, false>::new(&mut circuit_builder);
-            let mut uint_b = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let uint_a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let mut uint_b = UInt::<64, 16, E>::new(&mut circuit_builder);
             let mut uint_c = uint_a.add(&mut circuit_builder, &mut uint_b).unwrap();
-            let uint_d = UInt::<64, 16, E, false>::new(&mut circuit_builder);
-            let mut uint_e = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let uint_d = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let mut uint_e = UInt::<64, 16, E>::new(&mut circuit_builder);
             let mut uint_f = uint_d.add(&mut circuit_builder, &mut uint_e).unwrap();
             let uint_g = uint_c.mul(&mut circuit_builder, &mut uint_f).unwrap();
 
@@ -735,10 +730,10 @@ mod tests {
             let mut circuit_builder = CircuitBuilder::<E>::new();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let mut uint_a = UInt::<64, 16, E, false>::new(&mut circuit_builder);
-            let mut uint_b = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let mut uint_a = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let mut uint_b = UInt::<64, 16, E>::new(&mut circuit_builder);
             let uint_c = uint_a.mul(&mut circuit_builder, &mut uint_b).unwrap();
-            let mut uint_d = UInt::<64, 16, E, false>::new(&mut circuit_builder);
+            let mut uint_d = UInt::<64, 16, E>::new(&mut circuit_builder);
             let uint_e = uint_c.add(&mut circuit_builder, &mut uint_d).unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
