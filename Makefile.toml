@@ -5,7 +5,7 @@ RAYON_NUM_THREADS = "${CORE}"
 
 [tasks.tests]
 command = "cargo"
-args = ["test", "--lib", "--release", "--all"]
+args = ["test-all-features", "--lib", "--release", "--all"]
 
 [tasks.fmt-check]
 command = "cargo"

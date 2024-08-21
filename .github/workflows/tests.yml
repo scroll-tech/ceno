@@ -44,9 +44,9 @@ jobs:
             target/
           key: lint-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install cargo make
+      - name: Install cargo tools
         run: |
-          cargo install --force cargo-make
+          cargo install --force cargo-make cargo-all-features
       - name: run test
         uses: actions-rs/cargo@v1
         with:
