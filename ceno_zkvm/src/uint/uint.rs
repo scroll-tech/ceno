@@ -51,13 +51,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     }
 
     pub fn create_carry_witin(&mut self, circuit_builder: &mut CircuitBuilder<E>) {
-        self.carries = (0..Self::NUM_CELLS)
-            .map(|_| {
-                let w = circuit_builder.create_witin();
-                circuit_builder.assert_u16(w.expr()).unwrap();
-                Some(w)
-            })
-            .collect();
+        if self.carries.is_none() {
+            self.carries = (0..Self::NUM_CELLS)
+                .map(|_| {
+                    let w = circuit_builder.create_witin();
+                    circuit_builder.assert_u16(w.expr()).unwrap();
+                    Some(w)
+                })
+                .collect();
+        }
     }
 
     pub fn expr(&self) -> Vec<Expression<E>> {
