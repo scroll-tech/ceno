@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    constants::{OPType, OpcodeType, RISCV64_PC_STEP_SIZE},
+    constants::{OPType, OpcodeType, PC_STEP_SIZE},
     RIVInstruction,
 };
 
@@ -52,7 +52,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     // state in
     circuit_builder.state_in(&pc, &ts)?;
 
-    let next_pc = pc.add_const(circuit_builder, RISCV64_PC_STEP_SIZE.into())?;
+    let next_pc = pc.add_const(circuit_builder, PC_STEP_SIZE.into())?;
 
     // Execution result = addend0 + addend1, with carry.
     let prev_rd_value = UInt64::new(circuit_builder);
