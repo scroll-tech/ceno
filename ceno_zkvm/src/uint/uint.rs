@@ -60,28 +60,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             .collect();
     }
 
-    /// Return limbs + carries (if not empty), so the length could be (2 * len(limbs))
     pub fn expr(&self) -> Vec<Expression<E>> {
         match &self.limbs {
-            UintLimb::WitIn(limbs) => {
-                let mut expr = limbs
-                    .iter()
-                    .map(ToExpr::expr)
-                    .collect::<Vec<Expression<E>>>();
-
-                if let Some(carries) = &self.carries {
-                    let c = carries
-                        .iter()
-                        .map(ToExpr::expr)
-                        .collect::<Vec<Expression<E>>>();
-                    expr.append(&mut c.clone());
-                }
-                expr
-            }
-            UintLimb::Expression(e) => {
-                assert!(self.carries.is_some(), "carries should not be None");
-                e.clone()
-            }
+            UintLimb::WitIn(limbs) => limbs
+                .iter()
+                .map(ToExpr::expr)
+                .collect::<Vec<Expression<E>>>(),
+            UintLimb::Expression(e) => e.clone(),
         }
     }
 
