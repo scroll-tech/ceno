@@ -922,37 +922,20 @@ where
 mod test {
     use crate::{
         basefold::Basefold,
-        test::{run_batch_commit_open_verify, run_commit_open_verify},
+        test_util::{run_batch_commit_open_verify, run_commit_open_verify},
         util::transcript::PoseidonTranscript,
     };
     use goldilocks::GoldilocksExt2;
 
-    use crate::BasefoldExtParams;
+    use super::BasefoldDefaultParams;
 
-    type PcsGoldilocks = Basefold<GoldilocksExt2, Five>;
-
-    #[derive(Debug)]
-    pub struct Five {}
-
-    impl BasefoldExtParams for Five {
-        fn get_reps() -> usize {
-            return 260;
-        }
-
-        fn get_rate() -> usize {
-            return 3;
-        }
-
-        fn get_basecode() -> usize {
-            return 7;
-        }
-    }
+    type PcsGoldilocks = Basefold<GoldilocksExt2, BasefoldDefaultParams>;
 
     #[test]
     fn commit_open_verify_goldilocks_base() {
         // Challenge is over extension field, poly over the base field
         run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<GoldilocksExt2>>(
-            true, 20, 21,
+            true, 10, 11,
         );
     }
 
@@ -960,7 +943,7 @@ mod test {
     fn commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
         run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
-            false, 20, 21,
+            false, 10, 11,
         );
     }
 
@@ -971,12 +954,14 @@ mod test {
             GoldilocksExt2,
             PcsGoldilocks,
             PoseidonTranscript<GoldilocksExt2>,
-        >(true);
+        >(true, 10, 11);
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(false);
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
+            false, 10, 11,
+        );
     }
 }
