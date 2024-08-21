@@ -1011,6 +1011,7 @@ where
         oracle_trees: &Vec<MerkleTree<E>>,
         commitment: &BasefoldCommitmentWithData<E>,
     ) -> Self {
+        assert!(commitment.codeword_tree.height() > 0);
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
                 single_query_result.oracle_query,
@@ -1180,9 +1181,9 @@ where
     }
 
     pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
-        self.inner
-            .iter()
-            .for_each(|(_, q)| q.write_transcript(transcript));
+        self.inner.iter().for_each(|(_, q)| {
+            q.write_transcript(transcript);
+        });
     }
 
     pub fn read_transcript_base(

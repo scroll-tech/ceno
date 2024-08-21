@@ -74,8 +74,8 @@ where
             .collect()
     }
 
-    pub fn size(&self) -> usize {
-        self.leaves.len()
+    pub fn size(&self) -> (usize, usize) {
+        (self.leaves.len(), self.leaves[0].len())
     }
 
     pub fn get_leaf_as_base(&self, index: usize) -> Vec<E::BaseField> {
@@ -106,7 +106,7 @@ where
         &self,
         leaf_index: usize,
     ) -> MerklePathWithoutLeafOrRoot<E> {
-        assert!(leaf_index < self.size());
+        assert!(leaf_index < self.size().1);
         MerklePathWithoutLeafOrRoot::<E>::new(
             self.inner
                 .iter()
@@ -237,11 +237,11 @@ fn merkelize<E: ExtensionField>(
     values: &Vec<&FieldType<E>>,
     hasher: &Hasher<E::BaseField>,
 ) -> Vec<Vec<Digest<E::BaseField>>> {
-    let timer = start_timer!(|| format!("merkelize {} values", values.len()));
-    let log_v = log2_strict(values.len());
+    let timer = start_timer!(|| format!("merkelize {} values", values[0].len() * values.len()));
+    let log_v = log2_strict(values[0].len());
     let mut tree = Vec::with_capacity(log_v);
     // The first layer of hashes, half the number of leaves
-    let mut hashes = vec![Digest::default(); values.len() >> 1];
+    let mut hashes = vec![Digest::default(); values[0].len() >> 1];
     if values.len() == 1 {
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
             *hash = match &values[0] {
