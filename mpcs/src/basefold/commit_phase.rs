@@ -43,11 +43,17 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     let timer = start_timer!(|| "Commit phase");
+    #[cfg(feature = "sanity-check")]
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let mut running_oracle = field_type_iter_ext(&comm.get_codewords()[0]).collect_vec();
     let mut running_evals = comm.polynomials_bh_evals[0].clone();
+
+    #[cfg(feature = "sanity-check")]
+    assert_eq!(running_oracle.len(), running_evals.len() << log_rate);
+    #[cfg(feature = "sanity-check")]
+    assert_eq!(running_evals.len(), 1 << num_vars);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_timer = start_timer!(|| "Basefold::open");
@@ -58,6 +64,9 @@ where
     let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round_field_type(&mut eq, &mut running_evals);
     end_timer!(sumcheck_timer);
+
+    #[cfg(feature = "sanity-check")]
+    assert_eq!(last_sumcheck_message.len(), 3);
 
     let mut running_evals = match running_evals {
         FieldType::Ext(evals) => evals,

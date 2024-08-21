@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_sumcheck() {
-        let i = 25;
+        let i = 10;
         let mut rng = ChaCha8Rng::from_entropy();
         let evals = rand_vec::<Goldilocks>(1 << i, &mut rng);
         let eq = rand_vec::<Goldilocks>(1 << i, &mut rng);

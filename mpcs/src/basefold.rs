@@ -598,6 +598,9 @@ where
         let hasher = new_hasher::<E::BaseField>();
 
         let num_vars = point.len();
+        if let Some(comm_num_vars) = comm.num_vars() {
+            assert_eq!(num_vars, comm_num_vars);
+        }
         let num_rounds = num_vars - V::get_basecode();
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(vp.max_num_vars);
