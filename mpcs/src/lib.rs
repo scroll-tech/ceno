@@ -349,82 +349,20 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
     })
 }
 
-#[cfg(test)]
-mod test {
+#[cfg(any(test, feature = "benchmark"))]
+pub mod test_util {
     use crate::{
-        basefold::{Basefold, BasefoldExtParams},
-        util::transcript::{
-            FieldTranscript, InMemoryTranscript, PoseidonTranscript, TranscriptRead,
-            TranscriptWrite,
-        },
+        util::transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},
         Evaluation, PolynomialCommitmentScheme,
     };
     use ff_ext::ExtensionField;
-    use goldilocks::GoldilocksExt2;
     use itertools::{chain, Itertools};
     use multilinear_extensions::mle::DenseMultilinearExtension;
     use rand::{prelude::*, rngs::OsRng};
     use rand_chacha::ChaCha8Rng;
     use std::time::Instant;
-    #[test]
-    fn test_transcript() {
-        #[derive(Debug)]
-        pub struct Five {}
 
-        impl BasefoldExtParams for Five {
-            fn get_reps() -> usize {
-                return 5;
-            }
-            fn get_rate() -> usize {
-                return 3;
-            }
-            fn get_basecode() -> usize {
-                return 2;
-            }
-        }
-
-        type Pcs = Basefold<GoldilocksExt2, Five>;
-        let num_vars = 10;
-        let rng = ChaCha8Rng::from_seed([0u8; 32]);
-        let poly_size = 1 << num_vars;
-        let mut transcript = PoseidonTranscript::new();
-        let poly = DenseMultilinearExtension::random(num_vars, &mut OsRng);
-        let param =
-            <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::setup(poly_size, &rng).unwrap();
-
-        let (pp, vp) = <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::trim(&param).unwrap();
-        println!("before commit");
-        let comm = <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::commit_and_write(
-            &pp,
-            &poly,
-            &mut transcript,
-        )
-        .unwrap();
-        let point = transcript.squeeze_challenges(num_vars);
-        let eval = poly.evaluate(point.as_slice());
-        <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::open(
-            &pp,
-            &poly,
-            &comm,
-            &point,
-            &eval,
-            &mut transcript,
-        )
-        .unwrap();
-        let proof = transcript.into_proof();
-        println!("transcript commit len {:?}", proof.len() * 8);
-        assert!(comm.is_base());
-        let mut transcript = PoseidonTranscript::<GoldilocksExt2>::from_proof(proof.as_slice());
-        let comm = <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::read_commitment(
-            &vp,
-            &mut transcript,
-        )
-        .unwrap();
-        assert!(comm.is_base());
-        assert_eq!(comm.num_vars().unwrap(), num_vars);
-    }
-
-    pub(super) fn run_commit_open_verify<E: ExtensionField, Pcs, T>(
+    pub fn run_commit_open_verify<E: ExtensionField, Pcs, T>(
         base: bool,
         num_vars_start: usize,
         num_vars_end: usize,
@@ -486,15 +424,18 @@ mod test {
         }
     }
 
-    pub(super) fn run_batch_commit_open_verify<E, Pcs, T>(base: bool)
-    where
+    pub fn run_batch_commit_open_verify<E, Pcs, T>(
+        base: bool,
+        num_vars_start: usize,
+        num_vars_end: usize,
+    ) where
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
         T: TranscriptRead<Pcs::CommitmentChunk, E>
             + TranscriptWrite<Pcs::CommitmentChunk, E>
             + InMemoryTranscript<E>,
     {
-        for num_vars in 10..18 {
+        for num_vars in num_vars_start..num_vars_end {
             println!("k {:?}", num_vars);
             let batch_size = 2;
             let num_points = batch_size >> 1;
@@ -584,6 +525,76 @@ mod test {
 
             result.unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        basefold::{Basefold, BasefoldExtParams},
+        util::transcript::{FieldTranscript, InMemoryTranscript, PoseidonTranscript},
+        PolynomialCommitmentScheme,
+    };
+    use goldilocks::GoldilocksExt2;
+    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use rand::{prelude::*, rngs::OsRng};
+    use rand_chacha::ChaCha8Rng;
+    #[test]
+    fn test_transcript() {
+        #[derive(Debug)]
+        pub struct Five {}
+
+        impl BasefoldExtParams for Five {
+            fn get_reps() -> usize {
+                return 5;
+            }
+            fn get_rate() -> usize {
+                return 3;
+            }
+            fn get_basecode() -> usize {
+                return 2;
+            }
+        }
+
+        type Pcs = Basefold<GoldilocksExt2, Five>;
+        let num_vars = 10;
+        let rng = ChaCha8Rng::from_seed([0u8; 32]);
+        let poly_size = 1 << num_vars;
+        let mut transcript = PoseidonTranscript::new();
+        let poly = DenseMultilinearExtension::random(num_vars, &mut OsRng);
+        let param =
+            <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::setup(poly_size, &rng).unwrap();
+
+        let (pp, vp) = <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::trim(&param).unwrap();
+        println!("before commit");
+        let comm = <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::commit_and_write(
+            &pp,
+            &poly,
+            &mut transcript,
+        )
+        .unwrap();
+        let point = transcript.squeeze_challenges(num_vars);
+        let eval = poly.evaluate(point.as_slice());
+        <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::open(
+            &pp,
+            &poly,
+            &comm,
+            &point,
+            &eval,
+            &mut transcript,
+        )
+        .unwrap();
+        let proof = transcript.into_proof();
+        println!("transcript commit len {:?}", proof.len() * 8);
+        assert!(comm.is_base());
+        let mut transcript = PoseidonTranscript::<GoldilocksExt2>::from_proof(proof.as_slice());
+        let comm = <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::read_commitment(
+            &vp,
+            &mut transcript,
+        )
+        .unwrap();
+        assert!(comm.is_base());
+        assert_eq!(comm.num_vars().unwrap(), num_vars);
     }
 
     // use gkr::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState};
