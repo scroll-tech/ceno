@@ -155,4 +155,16 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.lk_record(name_fn, rlc_record)?;
         Ok(())
     }
+
+    /// create namespace to prefix all constraints define under the scope
+    pub fn namespace<NR: Into<String>, N: FnOnce() -> NR, T>(
+        &mut self,
+        name_fn: N,
+        cb: impl Fn(&mut CircuitBuilder<E>) -> Result<T, ZKVMError>,
+    ) -> Result<T, ZKVMError> {
+        self.cs.namespace(name_fn, |cs| {
+            let mut inner_circuit_builder = CircuitBuilder::new(cs);
+            cb(&mut inner_circuit_builder)
+        })
+    }
 }

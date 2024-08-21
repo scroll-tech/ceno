@@ -20,41 +20,42 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         ts: Expression<E>,
         values: &V,
     ) -> Result<Expression<E>, ZKVMError> {
-        let n: String = name_fn().into();
-        // READ (a, v, t)
-        let read_record = self.rlc_chip_record(
-            [
-                vec![Expression::<E>::Constant(E::BaseField::from(
-                    RAMType::Register as u64,
-                ))],
-                vec![register_id.expr()],
-                values.expr(),
-                vec![prev_ts],
-            ]
-            .concat(),
-        );
-        // Write (a, v, t)
-        let write_record = self.rlc_chip_record(
-            [
-                vec![Expression::<E>::Constant(E::BaseField::from(
-                    RAMType::Register as u64,
-                ))],
-                vec![register_id.expr()],
-                values.expr(),
-                vec![ts.clone()],
-            ]
-            .concat(),
-        );
-        self.read_record(|| n.clone() + "::read_record", read_record)?;
-        self.write_record(|| n.clone() + "::write_record", write_record)?;
+        self.namespace(name_fn, |cb| {
+            // READ (a, v, t)
+            let read_record = self.rlc_chip_record(
+                [
+                    vec![Expression::<E>::Constant(E::BaseField::from(
+                        RAMType::Register as u64,
+                    ))],
+                    vec![register_id.expr()],
+                    values.expr(),
+                    vec![prev_ts],
+                ]
+                .concat(),
+            );
+            // Write (a, v, t)
+            let write_record = self.rlc_chip_record(
+                [
+                    vec![Expression::<E>::Constant(E::BaseField::from(
+                        RAMType::Register as u64,
+                    ))],
+                    vec![register_id.expr()],
+                    values.expr(),
+                    vec![ts.clone()],
+                ]
+                .concat(),
+            );
+            self.read_record(|| "read_record", read_record)?;
+            self.write_record(|| "write_record", write_record)?;
 
-        // assert prev_ts < current_ts
-        // TODO implement lt gadget
-        // let is_lt = prev_ts.lt(self, ts)?;
-        // self.require_one(is_lt)?;
-        let next_ts = ts + 1.into();
+            // assert prev_ts < current_ts
+            // TODO implement lt gadget
+            // let is_lt = prev_ts.lt(self, ts)?;
+            // self.require_one(is_lt)?;
+            let next_ts = ts + 1.into();
 
-        Ok(next_ts)
+            Ok(next_ts)
+        })
     }
 
     fn register_write<V: ToExpr<E, Output = Vec<Expression<E>>>>(
@@ -66,40 +67,41 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         prev_values: &V,
         values: &V,
     ) -> Result<Expression<E>, ZKVMError> {
-        let n: String = name_fn().into();
-        // READ (a, v, t)
-        let read_record = self.rlc_chip_record(
-            [
-                vec![Expression::<E>::Constant(E::BaseField::from(
-                    RAMType::Register as u64,
-                ))],
-                vec![register_id.expr()],
-                prev_values.expr(),
-                vec![prev_ts],
-            ]
-            .concat(),
-        );
-        // Write (a, v, t)
-        let write_record = self.rlc_chip_record(
-            [
-                vec![Expression::<E>::Constant(E::BaseField::from(
-                    RAMType::Register as u64,
-                ))],
-                vec![register_id.expr()],
-                values.expr(),
-                vec![ts.clone()],
-            ]
-            .concat(),
-        );
-        self.read_record(|| n.clone() + "::read_record", read_record)?;
-        self.write_record(|| n.clone() + "::write_record", write_record)?;
+        self.namespace(name_fn, |cb| {
+            // READ (a, v, t)
+            let read_record = self.rlc_chip_record(
+                [
+                    vec![Expression::<E>::Constant(E::BaseField::from(
+                        RAMType::Register as u64,
+                    ))],
+                    vec![register_id.expr()],
+                    prev_values.expr(),
+                    vec![prev_ts],
+                ]
+                .concat(),
+            );
+            // Write (a, v, t)
+            let write_record = self.rlc_chip_record(
+                [
+                    vec![Expression::<E>::Constant(E::BaseField::from(
+                        RAMType::Register as u64,
+                    ))],
+                    vec![register_id.expr()],
+                    values.expr(),
+                    vec![ts.clone()],
+                ]
+                .concat(),
+            );
+            self.read_record(|| "read_record", read_record)?;
+            self.write_record(|| "write_record", write_record)?;
 
-        // assert prev_ts < current_ts
-        // TODO implement lt gadget
-        // let is_lt = prev_ts.lt(self, ts)?;
-        // self.require_one(is_lt)?;
-        let next_ts = ts + 1.into();
+            // assert prev_ts < current_ts
+            // TODO implement lt gadget
+            // let is_lt = prev_ts.lt(self, ts)?;
+            // self.require_one(is_lt)?;
+            let next_ts = ts + 1.into();
 
-        Ok(next_ts)
+            Ok(next_ts)
+        })
     }
 }
