@@ -9,7 +9,9 @@ pub const BYTE_BIT_WIDTH: usize = 8;
 
 use ff_ext::ExtensionField;
 
-impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
+    UInt<M, C, E, IS_OVERFLOW>
+{
     pub const M: usize = M;
     pub const C: usize = C;
 

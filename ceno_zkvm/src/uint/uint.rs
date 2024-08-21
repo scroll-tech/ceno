@@ -21,13 +21,15 @@ pub enum UintLimb<E: ExtensionField> {
 #[derive(Clone)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
-pub struct UInt<const M: usize, const C: usize, E: ExtensionField> {
+pub struct UInt<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool> {
     pub limbs: UintLimb<E>,
     // We don't need `overflow` witness since the last element of `carries` represents it.
     pub carries: Option<Vec<WitIn>>,
 }
 
-impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
+    UInt<M, C, E, IS_OVERFLOW>
+{
     pub fn new(circuit_builder: &mut CircuitBuilder<E>) -> Self {
         Self {
             limbs: UintLimb::WitIn(
@@ -60,6 +62,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             .collect();
     }
 
+    /// Return limbs + carries (if not empty), so the length could be (2 * len(limbs))
     pub fn expr(&self) -> Vec<Expression<E>> {
         match &self.limbs {
             UintLimb::WitIn(limbs) => {
@@ -69,19 +72,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                     .collect::<Vec<Expression<E>>>();
 
                 if let Some(carries) = &self.carries {
-                    expr = expr
+                    let c = carries
                         .iter()
-                        .enumerate()
-                        .map(|(i, limb)| {
-                            // we don't need to minus (carries[i] * 2^16) here
-                            // because the limbs come from witness and we won't assign a overflow witness
-                            if i > 0 {
-                                limb.clone() + carries[i - 1].expr()
-                            } else {
-                                limb.clone()
-                            }
-                        })
-                        .collect_vec();
+                        .map(ToExpr::expr)
+                        .collect::<Vec<Expression<E>>>();
+                    expr.append(&mut c.clone());
                 }
                 expr
             }
@@ -89,6 +84,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                 assert!(self.carries.is_some(), "carries should not be None");
                 e.clone()
             }
+        }
+    }
+
+    pub fn is_expr(&self) -> bool {
+        match &self.limbs {
+            UintLimb::Expression(_) => true,
+            _ => false,
         }
     }
 
@@ -182,7 +184,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 }
 
 /// Construct `UInt` from `Vec<CellId>`
-impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for UInt<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool> TryFrom<Vec<WitIn>>
+    for UInt<M, C, E, IS_OVERFLOW>
+{
     type Error = UtilError;
 
     fn try_from(limbs: Vec<WitIn>) -> Result<Self, Self::Error> {
@@ -204,7 +208,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for 
 }
 
 /// Construct `UInt` from `$[CellId]`
-impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UInt<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool> TryFrom<&[WitIn]>
+    for UInt<M, C, E, IS_OVERFLOW>
+{
     type Error = UtilError;
 
     fn try_from(values: &[WitIn]) -> Result<Self, Self::Error> {
