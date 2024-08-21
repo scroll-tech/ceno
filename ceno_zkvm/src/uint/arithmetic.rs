@@ -66,12 +66,31 @@ impl<const M: usize, const C: usize, E: ExtensionField, const IS_OVERFLOW: bool>
         let Expression::Constant(c) = constant else {
             panic!("addend is not a constant type");
         };
-        let c = c.to_canonical_u64();
+        let b = c.to_canonical_u64();
 
         // convert Expression::Constant to limbs
         let b_limbs = (0..Self::NUM_CELLS)
-            .map(|i| Expression::Constant(E::BaseField::from((c >> C * i) & 0xFFFF)))
+            .map(|i| {
+                let x = ((b >> C * i) & 0xFFFF) as u16;
+                Expression::Constant(E::BaseField::from(x as u64))
+            })
             .collect_vec();
+
+        // verify the above conversion is correct
+        let computed_b = b_limbs
+            .iter()
+            .rev()
+            .fold(E::BaseField::from(0), |acc, limb| {
+                let Expression::Constant(x) = limb else {
+                    panic!("not a constant type");
+                };
+                acc * E::BaseField::from(Self::POW_OF_C as u64) + x
+            });
+        assert_eq!(
+            computed_b.to_canonical_u64(),
+            b,
+            "inconsistent limbs and constant value"
+        );
 
         self.internal_add(circuit_builder, &self.expr(), &b_limbs)
     }
