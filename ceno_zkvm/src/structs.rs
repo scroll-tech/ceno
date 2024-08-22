@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2};
+use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use sumcheck::structs::IOPProverMessage;
 
 use crate::uint::UInt;
@@ -35,11 +35,6 @@ pub enum ROMType {
 pub enum RAMType {
     GlobalState,
     Register,
-}
-
-pub struct VirtualPolynomials<'a, E: ExtensionField> {
-    pub num_threads: usize,
-    pub polys: Vec<VirtualPolynomialV2<'a, E>>,
 }
 
 /// A point is a vector of num_var length

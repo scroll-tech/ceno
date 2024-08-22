@@ -1,6 +1,6 @@
 use std::fmt;
 
-pub(crate) const RISCV64_PC_STEP_SIZE: usize = 4;
+pub(crate) const PC_STEP_SIZE: usize = 4;
 
 #[derive(Debug, Clone, Copy)]
 pub enum OPType {

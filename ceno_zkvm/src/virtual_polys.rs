@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, mem, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    mem,
+    sync::Arc,
+};
 
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -7,7 +11,14 @@ use multilinear_extensions::{
     virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
 };
 
-use crate::{expression::Expression, structs::VirtualPolynomials};
+use crate::{expression::Expression, utils::transpose};
+
+pub struct VirtualPolynomials<'a, E: ExtensionField> {
+    num_threads: usize,
+    polys: Vec<VirtualPolynomialV2<'a, E>>,
+    /// a storage to keep thread based mles, specific to multi-thread logic
+    thread_based_mles_storage: HashMap<usize, Vec<ArcMultilinearExtension<'a, E>>>,
+}
 
 impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     pub fn new(num_threads: usize, num_variables: usize) -> Self {
@@ -16,10 +27,11 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             polys: (0..num_threads)
                 .map(|_| VirtualPolynomialV2::new(num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
+            thread_based_mles_storage: HashMap::new(),
         }
     }
 
-    pub fn get_range_polys_by_thread_id(
+    fn get_range_polys_by_thread_id(
         &self,
         thread_id: usize,
         polys: Vec<&'a ArcMultilinearExtension<'a, E>>,
@@ -34,26 +46,34 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .collect_vec()
     }
 
-    pub fn get_all_range_polys(
-        &self,
-        poly: &'a ArcMultilinearExtension<'a, E>,
-    ) -> Vec<ArcMultilinearExtension<'a, E>> {
-        (0..self.num_threads)
-            .map(|thread_id| {
-                self.get_range_polys_by_thread_id(thread_id, vec![poly])
-                    .remove(0)
+    pub fn add_mle_list(&mut self, polys: Vec<&'a ArcMultilinearExtension<'a, E>>, coeff: E) {
+        let polys = polys
+            .into_iter()
+            .map(|p| {
+                let mle_ptr: usize = Arc::as_ptr(p) as *const () as usize;
+                if let Some(mles) = self.thread_based_mles_storage.get(&mle_ptr) {
+                    mles.clone()
+                } else {
+                    let mles = (0..self.num_threads)
+                        .map(|thread_id| {
+                            self.get_range_polys_by_thread_id(thread_id, vec![p])
+                                .remove(0)
+                        })
+                        .collect_vec();
+                    let mles_cloned = mles.clone();
+                    self.thread_based_mles_storage.insert(mle_ptr, mles);
+                    mles_cloned
+                }
             })
-            .collect_vec()
-    }
+            .collect_vec();
 
-    pub fn add_mle_list(
-        &mut self,
-        thread_id: usize,
-        polys: Vec<ArcMultilinearExtension<'a, E>>,
-        coeff: E,
-    ) {
-        assert!(thread_id < self.polys.len());
-        self.polys[thread_id].add_mle_list(polys, coeff);
+        // poly -> thread to thread -> poly
+        let polys = transpose(polys);
+        (0..self.num_threads)
+            .zip_eq(polys)
+            .for_each(|(thread_id, polys)| {
+                self.polys[thread_id].add_mle_list(polys, coeff);
+            });
     }
 
     pub fn get_batched_polys(self) -> Vec<VirtualPolynomialV2<'a, E>> {
@@ -64,18 +84,13 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     /// return distinct witin in set
     pub fn add_mle_list_by_expr(
         &mut self,
-        // thread_based selector
-        selector: Option<Vec<ArcMultilinearExtension<'a, E>>>,
-        // witin_id -> thread_id
-        wit_ins: &[Vec<ArcMultilinearExtension<'a, E>>],
+        selector: Option<&'a ArcMultilinearExtension<'a, E>>,
+        wit_ins: Vec<&'a ArcMultilinearExtension<'a, E>>,
         expr: &Expression<E>,
         challenges: &[E],
         // sumcheck batch challenge
         alpha: E,
     ) -> BTreeSet<u16> {
-        if let Some(sel) = &selector {
-            assert_eq!(sel.len(), self.num_threads);
-        }
         assert!(expr.is_monomial_form());
         let monomial_terms = expr.evaluate(
             &|witness_id| {
@@ -132,18 +147,13 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             if *constant != E::ZERO && monomial_term.is_empty() {
                 todo!("make virtual poly support pure constant")
             }
-            for thread_id in 0..self.num_threads {
-                let sel = selector
-                    .as_ref()
-                    .map(|sel| vec![sel[thread_id].clone()])
-                    .unwrap_or_default();
-                let terms_polys = monomial_term
-                    .iter()
-                    .map(|wit_id| wit_ins[*wit_id as usize][thread_id].clone())
-                    .collect_vec();
+            let sel = selector.map(|sel| vec![sel]).unwrap_or_default();
+            let terms_polys = monomial_term
+                .iter()
+                .map(|wit_id| wit_ins[*wit_id as usize])
+                .collect_vec();
 
-                self.add_mle_list(thread_id, [sel, terms_polys].concat(), *constant * alpha);
-            }
+            self.add_mle_list([sel, terms_polys].concat(), *constant * alpha);
         }
 
         monomial_terms
@@ -157,12 +167,13 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 mod tests {
 
     use goldilocks::{Goldilocks, GoldilocksExt2};
+    use itertools::Itertools;
     use multilinear_extensions::{mle::IntoMLE, virtual_poly_v2::ArcMultilinearExtension};
 
     use crate::{
         circuit_builder::CircuitBuilder,
         expression::{Expression, ToExpr},
-        structs::VirtualPolynomials,
+        virtual_polys::VirtualPolynomials,
     };
 
     #[test]
@@ -177,17 +188,18 @@ mod tests {
             .collect();
 
         let mut virtual_polys = VirtualPolynomials::new(1, 0);
-        let wits_threads: Vec<Vec<ArcMultilinearExtension<E>>> = wits_in
-            .iter()
-            .map(|wit_poly| virtual_polys.get_all_range_polys(wit_poly))
-            .collect();
 
         // 3xy + 2y
         let expr: Expression<E> =
             Expression::from(3) * x.expr() * y.expr() + Expression::from(2) * y.expr();
 
-        let distrinct_zerocheck_terms_set =
-            virtual_polys.add_mle_list_by_expr(None, &wits_threads, &expr, &[], 1.into());
+        let distrinct_zerocheck_terms_set = virtual_polys.add_mle_list_by_expr(
+            None,
+            wits_in.iter().collect_vec(),
+            &expr,
+            &[],
+            1.into(),
+        );
         assert!(distrinct_zerocheck_terms_set.len() == 2);
     }
 }

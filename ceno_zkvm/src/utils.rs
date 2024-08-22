@@ -6,11 +6,7 @@ use transcript::Transcript;
 /// Compile time evaluated minimum function
 /// returns min(a, b)
 pub(crate) const fn const_min(a: usize, b: usize) -> usize {
-    if a <= b {
-        a
-    } else {
-        b
-    }
+    if a <= b { a } else { b }
 }
 
 /// Assumes each limb < max_value
@@ -141,6 +137,21 @@ pub fn sel_eval<E: ExtensionField>(num_instances: usize, r: &[E]) -> E {
     }
     sum += acc; // final term
     sum
+}
+
+/// transpose 2d vector without clone
+pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
+    assert!(!v.is_empty());
+    let len = v[0].len();
+    let mut iters: Vec<_> = v.into_iter().map(|n| n.into_iter()).collect();
+    (0..len)
+        .map(|_| {
+            iters
+                .iter_mut()
+                .map(|n| n.next().unwrap())
+                .collect::<Vec<T>>()
+        })
+        .collect()
 }
 
 #[cfg(test)]

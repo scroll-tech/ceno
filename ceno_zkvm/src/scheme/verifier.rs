@@ -58,13 +58,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        // check read/write set equality
-        if proof.record_r_out_evals.iter().product::<E>()
-            != proof.record_w_out_evals.iter().product()
-        {
-            // TODO add me back
-            // return Err(ZKVMError::VerifyError("rw set equality check failed"));
-        }
+        // TODO check rw_set equality across all proofs
+        // TODO check logup relation across all proofs
+
         let expected_max_round = log2_num_instances
             + [log2_r_count, log2_w_count, log2_lk_count]
                 .iter()
@@ -90,7 +86,13 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         assert!(logup_q_evals.len() == 1, "[lk_q_record]");
         assert!(logup_p_evals.len() == 1, "[lk_p_record]");
 
-        // TODO verify _lk_p_evals individually
+        // verify LogUp witness nominator p(x) ?= constant vector 1
+        // index 0 is LogUp witness for Fixed Lookup table
+        if logup_p_evals[0] != E::ONE {
+            return Err(ZKVMError::VerifyError(
+                "Lookup table witness p(x) != constant 1",
+            ));
+        }
 
         // verify zero statement (degree > 1) + sel sumcheck
         let (rt_r, rt_w, rt_lk): (Vec<E>, Vec<E>, Vec<E>) = (
@@ -140,13 +142,14 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
         let (sel_r, sel_w, sel_lk, sel_non_lc_zero_sumcheck) = {
+            // sel(rt, t) = eq(rt, t) x sel(t)
             (
                 eq_eval(&rt_r[log2_r_count..], &input_opening_point)
-                    * sel_eval(num_instances, &rt_r[log2_r_count..]),
+                    * sel_eval(num_instances, &input_opening_point),
                 eq_eval(&rt_w[log2_w_count..], &input_opening_point)
-                    * sel_eval(num_instances, &rt_w[log2_w_count..]),
+                    * sel_eval(num_instances, &input_opening_point),
                 eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
-                    * sel_eval(num_instances, &rt_lk[log2_lk_count..]),
+                    * sel_eval(num_instances, &input_opening_point),
                 // only initialize when circuit got non empty assert_zero_sumcheck_expressions
                 {
                     let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
@@ -260,20 +263,24 @@ impl TowerVerify {
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
         // TODO mayber give a better naming?
         assert_eq!(num_fanin, 2);
+        let initial_prod_evals_len = initial_prod_evals.len();
+        let initial_logup_evals_len = initial_logup_evals.len();
 
         let log2_num_fanin = ceil_log2(num_fanin);
         // sanity check
-        assert!(initial_prod_evals.len() == tower_proofs.prod_spec_size());
-        assert!(initial_prod_evals
-            .iter()
-            .all(|evals| evals.len() == num_fanin));
-        assert!(initial_logup_evals.len() == tower_proofs.logup_spec_size());
+        assert!(initial_prod_evals_len == tower_proofs.prod_spec_size());
+        assert!(
+            initial_prod_evals
+                .iter()
+                .all(|evals| evals.len() == num_fanin)
+        );
+        assert!(initial_logup_evals_len == tower_proofs.logup_spec_size());
         assert!(initial_logup_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
         }));
 
         let alpha_pows = get_challenge_pows(
-            initial_prod_evals.len() + initial_logup_evals.len() * 2, /* logup occupy 2 sumcheck: numerator and denominator */
+            initial_prod_evals.len() + initial_logup_evals_len * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
         let initial_rt: Point<E> = (0..log2_num_fanin)
@@ -283,7 +290,6 @@ impl TowerVerify {
         // out_j[rt] := (record_{j}[rt])
         // out_j[rt] := (logup_p{j}[rt])
         // out_j[rt] := (logup_q{j}[rt])
-        let initial_prod_evals_len = initial_prod_evals.len();
         let initial_claim = izip!(initial_prod_evals, alpha_pows.iter())
             .map(|(evals, alpha)| evals.into_mle().evaluate(&initial_rt) * alpha)
             .sum::<E>()
@@ -304,12 +310,15 @@ impl TowerVerify {
         let mut logup_spec_p_input_layer_eval = vec![E::ZERO; tower_proofs.logup_spec_size()];
         let mut logup_spec_q_input_layer_eval = vec![E::ZERO; tower_proofs.logup_spec_size()];
 
-        let next_rt = (0..(expected_max_round - 1)).try_fold(
-            PointAndEval {
-                point: initial_rt,
-                eval: initial_claim,
-            },
-            |point_and_eval, round| {
+        let (next_rt, _) = (0..(expected_max_round - 1)).try_fold(
+            (
+                PointAndEval {
+                    point: initial_rt,
+                    eval: initial_claim,
+                },
+                alpha_pows,
+            ),
+            |(point_and_eval, alpha_pows), round| {
                 let (out_rt, out_claim) = (&point_and_eval.point, &point_and_eval.eval);
                 let sumcheck_claim = IOPVerifierState::verify(
                     *out_claim,
@@ -368,8 +377,13 @@ impl TowerVerify {
                 assert_eq!(coeffs.len(), num_fanin);
                 let rt_prime = [rt, r_merge].concat();
 
+                // generate next round challenge
+                let next_alpha_pows = get_challenge_pows(
+                    initial_prod_evals_len + initial_logup_evals_len * 2, // logup occupy 2 sumcheck: numerator and denominator
+                    transcript,
+                );
                 let prod_spec_evals = (0..tower_proofs.prod_spec_size())
-                    .zip(alpha_pows.iter())
+                    .zip(next_alpha_pows.iter())
                     .map(|(spec_index, alpha)| {
                         if round < tower_proofs.prod_specs_eval[spec_index].len() {
                             // merged evaluation
@@ -388,7 +402,7 @@ impl TowerVerify {
                     })
                     .sum::<E>();
                 let logup_spec_evals = (0..tower_proofs.logup_spec_size())
-                    .zip(alpha_pows[initial_prod_evals_len..].chunks(2))
+                    .zip(next_alpha_pows[initial_prod_evals_len..].chunks(2))
                     .map(|(spec_index, alpha)| {
                         if round < tower_proofs.logup_specs_eval[spec_index].len() {
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
@@ -419,10 +433,10 @@ impl TowerVerify {
                     .sum::<E>();
                 // sum evaluation from different specs
                 let next_eval = prod_spec_evals + logup_spec_evals;
-                Ok(PointAndEval {
+                Ok((PointAndEval {
                     point: rt_prime,
                     eval: next_eval,
-                })
+                }, next_alpha_pows))
             },
         )?;
 

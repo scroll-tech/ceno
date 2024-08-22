@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    constants::{OPType, OpcodeType, RISCV64_PC_STEP_SIZE},
+    constants::{OPType, OpcodeType, PC_STEP_SIZE},
     RIVInstruction,
 };
 
@@ -52,7 +52,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     // state in
     circuit_builder.state_in(&pc, &ts)?;
 
-    let next_pc = pc.add_const(circuit_builder, RISCV64_PC_STEP_SIZE.into())?;
+    let next_pc = pc.add_const(circuit_builder, PC_STEP_SIZE.into())?;
 
     // Execution result = addend0 + addend1, with carry.
     let prev_rd_value = UInt64::new(circuit_builder);
@@ -182,7 +182,7 @@ mod test {
         let mut transcript = Transcript::new(b"riscv");
         let challenges = [1.into(), 2.into()];
 
-        let mut proof = prover
+        let proof = prover
             .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
             .expect("create_proof failed");
 
@@ -190,7 +190,7 @@ mod test {
         let mut v_transcript = Transcript::new(b"riscv");
         let _rt_input = verifier
             .verify(
-                &mut proof,
+                &proof,
                 &mut v_transcript,
                 NUM_FANIN,
                 &PointAndEval::default(),
