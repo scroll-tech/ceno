@@ -955,6 +955,7 @@ dependencies = [
  "bitvec",
  "blake2",
  "blake2b_simd",
+ "criterion",
  "ctr",
  "ff",
  "ff_ext",

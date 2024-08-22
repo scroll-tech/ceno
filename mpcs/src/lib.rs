@@ -360,7 +360,6 @@ pub mod test_util {
     use multilinear_extensions::mle::DenseMultilinearExtension;
     use rand::{prelude::*, rngs::OsRng};
     use rand_chacha::ChaCha8Rng;
-    use std::time::Instant;
 
     pub fn run_commit_open_verify<E: ExtensionField, Pcs, T>(
         base: bool,
@@ -373,7 +372,6 @@ pub mod test_util {
             + InMemoryTranscript<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
-            println!("k {:?}", num_vars);
             // Setup
             let (pp, vp) = {
                 let rng = ChaCha8Rng::from_seed([0u8; 32]);
@@ -392,23 +390,18 @@ pub mod test_util {
                         (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
                     )
                 };
-                let now = Instant::now();
 
                 let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
-                println!("commit time {:?}", now.elapsed());
                 let point = transcript.squeeze_challenges(num_vars);
                 let eval = poly.evaluate(point.as_slice());
                 transcript.write_field_element_ext(&eval).unwrap();
-                let now = Instant::now();
                 Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
-                println!("proof time {:?}", now.elapsed());
 
                 transcript.into_proof()
             };
             // Verify
             let result = {
                 let mut transcript = T::from_proof(proof.as_slice());
-                let now = Instant::now();
                 let result = Pcs::verify(
                     &vp,
                     &Pcs::read_commitment(&vp, &mut transcript).unwrap(),
@@ -416,7 +409,6 @@ pub mod test_util {
                     &transcript.read_field_element_ext().unwrap(),
                     &mut transcript,
                 );
-                println!("verify time {:?}", now.elapsed());
 
                 result
             };
@@ -436,7 +428,6 @@ pub mod test_util {
             + InMemoryTranscript<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
-            println!("k {:?}", num_vars);
             let batch_size = 2;
             let num_points = batch_size >> 1;
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
@@ -468,9 +459,7 @@ pub mod test_util {
                         }
                     })
                     .collect_vec();
-                let now = Instant::now();
                 let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
-                println!("commit {:?}", now.elapsed());
 
                 let points = (0..num_points)
                     .map(|i| transcript.squeeze_challenges(num_vars - i))
@@ -489,9 +478,7 @@ pub mod test_util {
                 transcript
                     .write_field_elements_ext(evals.iter().map(Evaluation::value))
                     .unwrap();
-                let now = Instant::now();
                 Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
-                println!("batch open {:?}", now.elapsed());
                 transcript.into_proof()
             };
             // Batch verify
@@ -506,7 +493,6 @@ pub mod test_util {
 
                 let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
 
-                let now = Instant::now();
                 let result = Pcs::batch_verify(
                     &vp,
                     comms,
@@ -519,7 +505,6 @@ pub mod test_util {
                         .collect_vec(),
                     &mut transcript,
                 );
-                println!("batch verify {:?}", now.elapsed());
                 result
             };
 
