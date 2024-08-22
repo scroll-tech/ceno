@@ -282,11 +282,11 @@ where
             .collect::<(Vec<FieldType<E>>, Vec<FieldType<E>>)>();
 
         // transpose the codewords, to group evaluations at the same point
-        let leaves = Self::transpose_field_type::<E>(code_words.as_slice())?;
+        // let leaves = Self::transpose_field_type::<E>(code_words.as_slice())?;
 
         // build merkle tree from leaves
         let hasher = new_hasher::<E::BaseField>();
-        let codeword_tree = MerkleTree::<E>::from_batch_leaves(leaves, &hasher);
+        let codeword_tree = MerkleTree::<E>::from_batch_leaves(code_words, &hasher);
 
         let is_base = match polys[0].evaluations {
             FieldType::Ext(_) => false,
