@@ -36,6 +36,7 @@ plonky2 = "0.2.0"
 [dev-dependencies]
 simple-frontend = { path = "../simple-frontend" }
 gkr = { path = "../gkr" }
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
 default = ["parallel"]   # Add "sanity-check" to debug
