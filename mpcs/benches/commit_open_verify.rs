@@ -209,7 +209,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
 
             let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
 
-            let mut backup_transcript = transcript.clone();
+            let backup_transcript = transcript.clone();
 
             Pcs::batch_verify(
                 &vp,
