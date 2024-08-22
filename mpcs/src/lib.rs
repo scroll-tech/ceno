@@ -540,6 +540,7 @@ pub mod test_util {
         base: bool,
         num_vars_start: usize,
         num_vars_end: usize,
+        batch_size: usize,
     ) where
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
@@ -548,7 +549,6 @@ pub mod test_util {
             + InMemoryTranscript<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
-            let batch_size = 2;
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
             // Setup
             let (pp, vp) = {
@@ -560,9 +560,9 @@ pub mod test_util {
             let proof = {
                 let mut transcript = T::new();
                 let polys = (0..batch_size)
-                    .map(|i| {
+                    .map(|_| {
                         if base {
-                            DenseMultilinearExtension::random(num_vars - (i >> 1), &mut rng.clone())
+                            DenseMultilinearExtension::random(num_vars, &mut rng.clone())
                         } else {
                             DenseMultilinearExtension::from_evaluations_ext_vec(
                                 num_vars,

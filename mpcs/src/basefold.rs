@@ -73,7 +73,7 @@ where
 {
     /// Converts a polynomial to a code word, also returns the evaluations over the boolean hypercube
     /// for said polynomial
-    fn get_poly_bh_evals_and_code_word(
+    fn get_poly_bh_evals_and_codeword(
         pp: &BasefoldProverParams<E>,
         poly: &DenseMultilinearExtension<E>,
     ) -> (FieldType<E>, FieldType<E>) {
@@ -215,7 +215,7 @@ where
     ) -> Result<Self::CommitmentWithData, Error> {
         let timer = start_timer!(|| "Basefold::commit");
 
-        let (bh_evals, codeword) = Self::get_poly_bh_evals_and_code_word(pp, poly);
+        let (bh_evals, codeword) = Self::get_poly_bh_evals_and_codeword(pp, poly);
 
         // Compute and store all the layers of the Merkle tree
         let hasher = new_hasher::<E::BaseField>();
@@ -274,18 +274,27 @@ where
             ));
         }
 
+        for i in 1..polys.len() {
+            if polys[i].num_vars != polys[0].num_vars {
+                return Err(Error::InvalidPcsParam(
+                    "cannot batch commit to polynomials with different number of variables"
+                        .to_string(),
+                ));
+            }
+        }
+
         // convert each polynomial to a code word
-        let (bh_evals, code_words) = polys
+        let (bh_evals, codewords) = polys
             .par_iter()
-            .map(|poly| Self::get_poly_bh_evals_and_code_word(pp, poly))
+            .map(|poly| Self::get_poly_bh_evals_and_codeword(pp, poly))
             .collect::<(Vec<FieldType<E>>, Vec<FieldType<E>>)>();
 
         // transpose the codewords, to group evaluations at the same point
-        // let leaves = Self::transpose_field_type::<E>(code_words.as_slice())?;
+        // let leaves = Self::transpose_field_type::<E>(codewords.as_slice())?;
 
         // build merkle tree from leaves
         let hasher = new_hasher::<E::BaseField>();
-        let codeword_tree = MerkleTree::<E>::from_batch_leaves(code_words, &hasher);
+        let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, &hasher);
 
         let is_base = match polys[0].evaluations {
             FieldType::Ext(_) => false,
@@ -1060,14 +1069,14 @@ mod test {
             GoldilocksExt2,
             PcsGoldilocks,
             PoseidonTranscript<GoldilocksExt2>,
-        >(true, 10, 11);
+        >(true, 10, 11, 4);
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
-            false, 10, 11,
+            false, 10, 11, 4,
         );
     }
 

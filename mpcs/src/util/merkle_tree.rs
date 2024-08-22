@@ -237,6 +237,10 @@ fn merkelize<E: ExtensionField>(
     values: &Vec<&FieldType<E>>,
     hasher: &Hasher<E::BaseField>,
 ) -> Vec<Vec<Digest<E::BaseField>>> {
+    #[cfg(feature = "sanity-check")]
+    for i in 0..(values.len() - 1) {
+        assert_eq!(values[i].len(), values[i + 1].len());
+    }
     let timer = start_timer!(|| format!("merkelize {} values", values[0].len() * values.len()));
     let log_v = log2_strict(values[0].len());
     let mut tree = Vec::with_capacity(log_v);
