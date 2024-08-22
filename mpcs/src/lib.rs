@@ -349,7 +349,7 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
     })
 }
 
-#[cfg(any(test, feature = "benchmark"))]
+#[cfg(test)]
 pub mod test_util {
     use crate::{
         util::transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},

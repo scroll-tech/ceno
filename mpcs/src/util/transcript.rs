@@ -165,7 +165,7 @@ impl<T: Copy> Stream<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PoseidonTranscript<E: ExtensionField> {
     state: Hasher<E::BaseField>,
     stream: Stream<E::BaseField>,
