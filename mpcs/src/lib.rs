@@ -445,108 +445,108 @@ pub mod test_util {
         }
     }
 
-    // pub fn run_batch_commit_open_verify<E, Pcs, T>(
-    //     base: bool,
-    //     num_vars_start: usize,
-    //     num_vars_end: usize,
-    // ) where
-    //     E: ExtensionField,
-    //     Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
-    //     T: TranscriptRead<Pcs::CommitmentChunk, E>
-    //         + TranscriptWrite<Pcs::CommitmentChunk, E>
-    //         + InMemoryTranscript<E>,
-    // {
-    //     for num_vars in 10..18 {
-    //         println!("k {:?}", num_vars);
-    //         let batch_size = 2;
-    //         let num_points = batch_size >> 1;
-    //         let rng = ChaCha8Rng::from_seed([0u8; 32]);
-    //         // Setup
-    //         let (pp, vp) = {
-    //             let poly_size = 1 << num_vars;
-    //             let param = Pcs::setup(poly_size, &rng).unwrap();
-    //             Pcs::trim(&param).unwrap()
-    //         };
-    //         // Batch commit and open
-    //         let evals = chain![
-    //             (0..num_points).map(|point| (point * 2, point)), // Every point matches two polys
-    //             (0..num_points).map(|point| (point * 2 + 1, point)),
-    //         ]
-    //         .unique()
-    //         .collect_vec();
-    //
-    //         let proof = {
-    //             let mut transcript = T::new();
-    //             let polys = (0..batch_size)
-    //                 .map(|i| {
-    //                     if base {
-    //                         DenseMultilinearExtension::random(num_vars - (i >> 1), &mut rng.clone())
-    //                     } else {
-    //                         DenseMultilinearExtension::from_evaluations_ext_vec(
-    //                             num_vars,
-    //                             (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
-    //                         )
-    //                     }
-    //                 })
-    //                 .collect_vec();
-    //             let now = Instant::now();
-    //             let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
-    //             println!("commit {:?}", now.elapsed());
-    //
-    //             let points = (0..num_points)
-    //                 .map(|i| transcript.squeeze_challenges(num_vars - i))
-    //                 .take(num_points)
-    //                 .collect_vec();
-    //
-    //             let evals = evals
-    //                 .iter()
-    //                 .copied()
-    //                 .map(|(poly, point)| Evaluation {
-    //                     poly,
-    //                     point,
-    //                     value: polys[poly].evaluate(&points[point]),
-    //                 })
-    //                 .collect_vec();
-    //             transcript
-    //                 .write_field_elements_ext(evals.iter().map(Evaluation::value))
-    //                 .unwrap();
-    //             let now = Instant::now();
-    //             Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
-    //             println!("batch open {:?}", now.elapsed());
-    //             transcript.into_proof()
-    //         };
-    //         // Batch verify
-    //         let result = {
-    //             let mut transcript = T::from_proof(proof.as_slice());
-    //             let comms = &Pcs::read_commitments(&vp, batch_size, &mut transcript).unwrap();
-    //
-    //             let points = (0..num_points)
-    //                 .map(|i| transcript.squeeze_challenges(num_vars - i))
-    //                 .take(num_points)
-    //                 .collect_vec();
-    //
-    //             let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
-    //
-    //             let now = Instant::now();
-    //             let result = Pcs::batch_verify(
-    //                 &vp,
-    //                 comms,
-    //                 &points,
-    //                 &evals
-    //                     .iter()
-    //                     .copied()
-    //                     .zip(evals2)
-    //                     .map(|((poly, point), eval)| Evaluation::new(poly, point, eval))
-    //                     .collect_vec(),
-    //                 &mut transcript,
-    //             );
-    //             println!("batch verify {:?}", now.elapsed());
-    //             result
-    //         };
-    //
-    //         result.unwrap();
-    //     }
-    // }
+    pub fn run_batch_commit_open_verify<E, Pcs, T>(
+        base: bool,
+        num_vars_start: usize,
+        num_vars_end: usize,
+    ) where
+        E: ExtensionField,
+        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        T: TranscriptRead<Pcs::CommitmentChunk, E>
+            + TranscriptWrite<Pcs::CommitmentChunk, E>
+            + InMemoryTranscript<E>,
+    {
+        for num_vars in 10..18 {
+            println!("k {:?}", num_vars);
+            let batch_size = 2;
+            let num_points = batch_size >> 1;
+            let rng = ChaCha8Rng::from_seed([0u8; 32]);
+            // Setup
+            let (pp, vp) = {
+                let poly_size = 1 << num_vars;
+                let param = Pcs::setup(poly_size, &rng).unwrap();
+                Pcs::trim(&param).unwrap()
+            };
+            // Batch commit and open
+            let evals = chain![
+                (0..num_points).map(|point| (point * 2, point)), // Every point matches two polys
+                (0..num_points).map(|point| (point * 2 + 1, point)),
+            ]
+            .unique()
+            .collect_vec();
+
+            let proof = {
+                let mut transcript = T::new();
+                let polys = (0..batch_size)
+                    .map(|i| {
+                        if base {
+                            DenseMultilinearExtension::random(num_vars - (i >> 1), &mut rng.clone())
+                        } else {
+                            DenseMultilinearExtension::from_evaluations_ext_vec(
+                                num_vars,
+                                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                            )
+                        }
+                    })
+                    .collect_vec();
+                let now = Instant::now();
+                let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                println!("commit {:?}", now.elapsed());
+
+                let points = (0..num_points)
+                    .map(|i| transcript.squeeze_challenges(num_vars - i))
+                    .take(num_points)
+                    .collect_vec();
+
+                let evals = evals
+                    .iter()
+                    .copied()
+                    .map(|(poly, point)| Evaluation {
+                        poly,
+                        point,
+                        value: polys[poly].evaluate(&points[point]),
+                    })
+                    .collect_vec();
+                transcript
+                    .write_field_elements_ext(evals.iter().map(Evaluation::value))
+                    .unwrap();
+                let now = Instant::now();
+                Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
+                println!("batch open {:?}", now.elapsed());
+                transcript.into_proof()
+            };
+            // Batch verify
+            let result = {
+                let mut transcript = T::from_proof(proof.as_slice());
+                let comms = &Pcs::read_commitments(&vp, batch_size, &mut transcript).unwrap();
+
+                let points = (0..num_points)
+                    .map(|i| transcript.squeeze_challenges(num_vars - i))
+                    .take(num_points)
+                    .collect_vec();
+
+                let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
+
+                let now = Instant::now();
+                let result = Pcs::batch_verify(
+                    &vp,
+                    comms,
+                    &points,
+                    &evals
+                        .iter()
+                        .copied()
+                        .zip(evals2)
+                        .map(|((poly, point), eval)| Evaluation::new(poly, point, eval))
+                        .collect_vec(),
+                    &mut transcript,
+                );
+                println!("batch verify {:?}", now.elapsed());
+                result
+            };
+
+            result.unwrap();
+        }
+    }
 
     pub(super) fn run_simple_batch_commit_open_verify<E, Pcs, T>(base: bool, num_vars_start: usize, num_vars_end: usize)
     where
