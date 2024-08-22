@@ -20,7 +20,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         addend2: &Vec<Expression<E>>,
         check_overflow: bool,
     ) -> Result<UInt<M, C, E>, ZKVMError> {
-        let mut c = UInt::<M, C, E>::new_expr(circuit_builder);
+        let mut c = UInt::<M, C, E>::new_limb_as_expr(circuit_builder);
 
         // allocate witness cells and do range checks for carries
         c.create_carry_witin(circuit_builder);
@@ -64,27 +64,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
         // convert Expression::Constant to limbs
         let b_limbs = (0..Self::NUM_CELLS)
-            .map(|i| {
-                let x = ((b >> C * i) & 0xFFFF) as u16;
-                Expression::Constant(E::BaseField::from(x as u64))
-            })
+            .map(|i| Expression::Constant(E::BaseField::from((b >> C * i) & 0xFFFF)))
             .collect_vec();
-
-        // verify the above conversion is correct
-        let computed_b = b_limbs
-            .iter()
-            .rev()
-            .fold(E::BaseField::from(0), |acc, limb| {
-                let Expression::Constant(x) = limb else {
-                    panic!("not a constant type");
-                };
-                acc * E::BaseField::from(Self::POW_OF_C as u64) + x
-            });
-        assert_eq!(
-            computed_b.to_canonical_u64(),
-            b,
-            "inconsistent limbs and constant value"
-        );
 
         self.internal_add(circuit_builder, &self.expr(), &b_limbs, true)
     }
@@ -120,16 +101,18 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         // We only allow expressions are in monomial form
         // if any of a or b is in Expression term, it would cause error.
         // So a small trick here, creating a witness and constrain the witness and the expression is equal
-        let mut create_expr = |u: &UInt<M, C, E>| {
+        let mut create_expr = |u: &mut UInt<M, C, E>| {
             if u.is_expr() {
-                let mut tmp = UInt::<M, C, E>::new(circuit_builder);
-                tmp.create_carry_witin(circuit_builder);
-                tmp.eq(circuit_builder, u).unwrap();
-                tmp.expr()
-            } else {
-                u.expr()
+                let existing_expr = u.expr();
+                // this will overwrite existing expressions
+                u.create_witin(circuit_builder);
+                // check if the new witness equals the existing expression
+                izip!(u.expr(), existing_expr)
+                    .try_for_each(|(lhs, rhs)| circuit_builder.require_equal(lhs, rhs));
             }
+            u.expr()
         };
+
         let a_expr = create_expr(self);
         let b_expr = create_expr(multiplier);
 
@@ -483,7 +466,7 @@ mod tests {
             let wit_b = vec![2, 1, 0, 0];
             let wit_c = vec![2, 3, 1, 0];
             let wit_carries = vec![0, 0, 0, 0];
-            let witness_values = [wit_a, wit_b, wit_c.clone(), wit_carries.clone()].concat();
+            let witness_values = [wit_a, wit_b, wit_c, wit_carries].concat();
             verify::<E>(witness_values);
         }
 
@@ -496,7 +479,7 @@ mod tests {
             let wit_b = vec![257, 1, 0, 0];
             let wit_c = vec![256, 514, 1, 0];
             let wit_carries = vec![1, 0, 0, 0];
-            let witness_values = [wit_a, wit_b, wit_c.clone(), wit_carries.clone()].concat();
+            let witness_values = [wit_a, wit_b, wit_c, wit_carries].concat();
             verify::<E>(witness_values);
         }
 
@@ -512,7 +495,7 @@ mod tests {
             // so we get wit_c = [256, 256, 0, 0] and carries = [1, 2, 1, 0]
             let wit_c = vec![256, 257, 2, 1];
             let wit_carries = vec![1, 2, 1, 0];
-            let witness_values = [wit_a, wit_b, wit_c.clone(), wit_carries.clone()].concat();
+            let witness_values = [wit_a, wit_b, wit_c, wit_carries].concat();
             verify::<E>(witness_values);
         }
 
@@ -569,8 +552,8 @@ mod tests {
             let b = vec![2, 1, 0, 0];
             let c_carries = vec![0; 4];
             // witness of e = c * d
-            let inter_c = vec![3, 2, 0, 0];
-            let inter_c_carries = vec![0; 4];
+            let new_c = vec![3, 2, 0, 0];
+            let new_c_carries = c_carries.clone();
             let d = vec![1, 1, 0, 0];
             let e = vec![3, 5, 2, 0];
             let e_carries = vec![0; 4];
@@ -579,11 +562,12 @@ mod tests {
                 a,
                 b,
                 c_carries.clone(),
-                d.clone(),
+                // e = c * d
+                d,
                 e.clone(),
                 e_carries.clone(),
-                inter_c.clone(),
-                inter_c_carries,
+                new_c,
+                new_c_carries,
             ]
             .concat()
             .iter()
@@ -625,8 +609,8 @@ mod tests {
             let b = vec![2, 1, 0, 0];
             let c_carries = vec![0; 4];
             // witness of g = c * f
-            let inter_c = vec![3, 2, 0, 0];
-            let inter_c_carries = vec![0; 4];
+            let new_c = vec![3, 2, 0, 0];
+            let new_c_carries = c_carries.clone();
             let g = vec![9, 12, 4, 0];
             let g_carries = vec![0; 4];
 
@@ -636,16 +620,16 @@ mod tests {
                 b.clone(),
                 c_carries.clone(),
                 // f = d + e
-                a.clone(),
-                b.clone(),
+                a,
+                b,
                 c_carries.clone(),
                 // g = c * f
                 g.clone(),
-                g_carries.clone(),
-                inter_c.clone(),
-                inter_c_carries.clone(),
-                inter_c.clone(),
-                inter_c_carries,
+                g_carries,
+                new_c.clone(),
+                new_c_carries.clone(),
+                new_c,
+                new_c_carries,
             ]
             .concat()
             .iter()
@@ -681,26 +665,21 @@ mod tests {
             // b = 2 + 1 * 2^16
             // ==> c = 2 + 3 * 2^16 + 1 * 2^32
             // d = 1 + 1 * 2^16
-            // ==> e = 3 + 4 * 2^16
+            // ==> e = 3 + 4 * 2^16 + 1 * 2^32
             let a = vec![1, 1, 0, 0];
             let b = vec![2, 1, 0, 0];
+            let c = vec![2, 3, 1, 0];
             let c_carries = vec![0; 4];
+            // e = c + d
             let d = vec![1, 1, 0, 0];
-            let e = vec![3, 4, 0, 0];
+            let e = vec![3, 4, 1, 0];
             let e_carries = vec![0; 4];
 
-            let witness_values: Vec<E> = [
-                a,
-                b,
-                c_carries.clone(),
-                d.clone(),
-                e.clone(),
-                e_carries.clone(),
-            ]
-            .concat()
-            .iter()
-            .map(|&a| a.into())
-            .collect_vec();
+            let witness_values: Vec<E> = [a, b, c, c_carries, d, e_carries]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
 
             let mut circuit_builder = CircuitBuilder::<E>::new();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();

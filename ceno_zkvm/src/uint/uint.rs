@@ -43,10 +43,25 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
-    pub fn new_expr(circuit_builder: &mut CircuitBuilder<E>) -> Self {
+    pub fn new_limb_as_expr(circuit_builder: &mut CircuitBuilder<E>) -> Self {
         Self {
             limbs: UintLimb::Expression(Vec::new()),
             carries: None,
+        }
+    }
+    // Create witIn for limbs
+    // WARNING: it will replace the existing limbs if the limbs are Expression
+    pub fn create_witin(&mut self, circuit_builder: &mut CircuitBuilder<E>) {
+        if let UintLimb::Expression(_) = self.limbs {
+            self.limbs = UintLimb::WitIn(
+                (0..Self::NUM_CELLS)
+                    .map(|_| {
+                        let w = circuit_builder.create_witin();
+                        circuit_builder.assert_u16(w.expr()).unwrap();
+                        w
+                    })
+                    .collect_vec(),
+            )
         }
     }
 
