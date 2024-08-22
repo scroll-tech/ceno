@@ -40,7 +40,6 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
 };
 
-use plonky2::util::transpose;
 use rand_chacha::ChaCha8Rng;
 use rayon::{
     iter::IntoParallelIterator,
@@ -1025,7 +1024,10 @@ where
 mod test {
     use crate::{
         basefold::Basefold,
-        test_util::{run_commit_open_verify, run_simple_batch_commit_open_verify},
+        test_util::{
+            run_batch_commit_open_verify, run_commit_open_verify,
+            run_simple_batch_commit_open_verify,
+        },
         util::transcript::PoseidonTranscript,
     };
     use goldilocks::GoldilocksExt2;
@@ -1051,7 +1053,7 @@ mod test {
     }
 
     #[test]
-    fn batch_commit_open_verify_goldilocks_base() {
+    fn simple_batch_commit_open_verify_goldilocks_base() {
         // Both challenge and poly are over base field
         run_simple_batch_commit_open_verify::<
             GoldilocksExt2,
@@ -1061,9 +1063,27 @@ mod test {
     }
 
     #[test]
-    fn batch_commit_open_verify_goldilocks_2() {
+    fn simple_batch_commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
+            false, 10, 11,
+        );
+    }
+
+    #[test]
+    fn batch_commit_open_verify_goldilocks_base() {
+        // Both challenge and poly are over base field
+        run_batch_commit_open_verify::<
+            GoldilocksExt2,
+            PcsGoldilocks,
+            PoseidonTranscript<GoldilocksExt2>,
+        >(true, 10, 11);
+    }
+
+    #[test]
+    fn batch_commit_open_verify_goldilocks_2() {
+        // Both challenge and poly are over extension field
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
             false, 10, 11,
         );
     }

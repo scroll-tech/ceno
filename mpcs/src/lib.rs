@@ -484,7 +484,6 @@ pub mod test_util {
                     .iter()
                     .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
                     .collect_vec();
-                println!("commit {:?}", now.elapsed());
 
                 let points = (0..num_points)
                     .map(|i| transcript.squeeze_challenges(num_vars - i))
@@ -549,7 +548,6 @@ pub mod test_util {
             + InMemoryTranscript<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
-            println!("k {:?}", num_vars);
             let batch_size = 2;
             let num_points = batch_size >> 1;
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
@@ -581,10 +579,7 @@ pub mod test_util {
                         }
                     })
                     .collect_vec();
-                let now = Instant::now();
                 let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
-
-                println!("commit {:?}", now.elapsed());
 
                 let point = transcript.squeeze_challenges(num_vars);
 
@@ -593,10 +588,8 @@ pub mod test_util {
                     .collect_vec();
 
                 transcript.write_field_elements_ext(&evals).unwrap();
-                let now = Instant::now();
                 Pcs::simple_batch_open(&pp, &polys, &comms, &point, &evals, &mut transcript)
                     .unwrap();
-                println!("batch open {:?}", now.elapsed());
                 transcript.into_proof()
             };
             // Batch verify
@@ -612,9 +605,7 @@ pub mod test_util {
 
                 let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
 
-                let now = Instant::now();
                 let result = Pcs::simple_batch_verify(&vp, comms, &point, &evals2, &mut transcript);
-                println!("batch verify {:?}", now.elapsed());
                 result
             };
 

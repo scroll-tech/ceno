@@ -1,4 +1,3 @@
-use ark_std::{end_timer, start_timer};
 use ff::Field;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
