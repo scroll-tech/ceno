@@ -1025,7 +1025,7 @@ where
 mod test {
     use crate::{
         basefold::Basefold,
-        test_util::{run_simple_batch_commit_open_verify, run_commit_open_verify},
+        test_util::{run_commit_open_verify, run_simple_batch_commit_open_verify},
         util::transcript::PoseidonTranscript,
     };
     use goldilocks::GoldilocksExt2;

@@ -490,7 +490,10 @@ pub mod test_util {
                     })
                     .collect_vec();
                 let now = Instant::now();
-                let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                let comms = polys
+                    .iter()
+                    .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
+                    .collect_vec();
                 println!("commit {:?}", now.elapsed());
 
                 let points = (0..num_points)
@@ -548,8 +551,11 @@ pub mod test_util {
         }
     }
 
-    pub(super) fn run_simple_batch_commit_open_verify<E, Pcs, T>(base: bool, num_vars_start: usize, num_vars_end: usize)
-    where
+    pub(super) fn run_simple_batch_commit_open_verify<E, Pcs, T>(
+        base: bool,
+        num_vars_start: usize,
+        num_vars_end: usize,
+    ) where
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
         T: TranscriptRead<Pcs::CommitmentChunk, E>
@@ -590,10 +596,7 @@ pub mod test_util {
                     })
                     .collect_vec();
                 let now = Instant::now();
-                let comms = polys
-                    .iter()
-                    .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
-                    .collect_vec();
+                let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
 
                 println!("commit {:?}", now.elapsed());
 
