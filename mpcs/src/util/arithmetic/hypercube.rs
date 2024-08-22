@@ -15,7 +15,7 @@ pub fn interpolate_field_type_over_boolean_hypercube<E: ExtensionField>(evals: &
 }
 
 pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut Vec<F>) {
-    let timer = start_timer!(|| "interpolate_over_hypercube");
+    // let timer = start_timer!(|| "interpolate_over_hypercube");
     // iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
     let n = log2_strict(evals.len());
 
@@ -34,5 +34,5 @@ pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut Vec<F>) {
             }
         });
     }
-    end_timer!(timer);
+    // end_timer!(timer);
 }

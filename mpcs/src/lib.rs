@@ -590,7 +590,11 @@ pub mod test_util {
                     })
                     .collect_vec();
                 let now = Instant::now();
-                let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                let comms = polys
+                    .iter()
+                    .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
+                    .collect_vec();
+
                 println!("commit {:?}", now.elapsed());
 
                 let point = transcript.squeeze_challenges(num_vars);
