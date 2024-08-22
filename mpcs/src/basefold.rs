@@ -934,6 +934,7 @@ where
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = transcript.squeeze_challenges(batch_size_log);
+        let eq_xt = build_eq_x_r_vec(&t)[..evals.len()].to_vec();
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(vp.max_num_vars);
         let mut roots = Vec::new();
@@ -995,7 +996,7 @@ where
             &query_result_with_merkle_path,
             &sumcheck_messages,
             &fold_challenges,
-            &t,
+            &eq_xt,
             num_rounds,
             num_vars,
             vp.log_rate,
