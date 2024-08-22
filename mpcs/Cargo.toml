@@ -43,7 +43,7 @@ default = ["parallel"]   # Add "sanity-check" to debug
 parallel = ["dep:rayon"]
 benchmark = ["parallel"]
 sanity-check = []
-# print-trace = [ "ark-std/print-trace" ]
+print-trace = [ "ark-std/print-trace" ]
 
 [[bench]]
 name = "commit_open_verify"

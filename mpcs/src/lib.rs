@@ -480,6 +480,7 @@ pub mod test_util {
                         }
                     })
                     .collect_vec();
+
                 let comms = polys
                     .iter()
                     .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
