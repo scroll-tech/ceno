@@ -69,7 +69,7 @@ fn bench_batch_commit_open_verify_goldilocks_base(c: &mut Criterion) {
     // Challenge is over extension field, poly over the base field
     for num_vars in 10..=20 {
         group.bench_function(
-            BenchmarkId::new("run_commit_open_verify", format!("{}", num_vars)),
+            BenchmarkId::new("run_batch_commit_open_verify", format!("{}", num_vars)),
             |b| {
                 b.iter(|| {
                     run_batch_commit_open_verify::<
