@@ -56,19 +56,26 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
 
     // Execution result = addend0 + addend1, with carry.
     let prev_rd_value = UInt64::new(circuit_builder);
-    let addend_0 = UInt64::new(circuit_builder);
-    let addend_1 = UInt64::new(circuit_builder);
-    let outcome = UInt64::new(circuit_builder);
 
-    let computed_outcome;
-    if IS_ADD {
-        computed_outcome = addend_0.add(circuit_builder, &addend_1)?;
-        outcome.eq(circuit_builder, &computed_outcome)?;
+    let (addend_0, addend_1, outcome) = if IS_ADD {
+        // outcome = addend_0 + addend_1
+        let addend_0 = UInt64::new(circuit_builder);
+        let addend_1 = UInt64::new(circuit_builder);
+        (
+            addend_0.clone(),
+            addend_1.clone(),
+            addend_0.add(circuit_builder, &addend_1)?,
+        )
     } else {
-        computed_outcome = outcome.clone();
-        let a = addend_1.add(circuit_builder, &outcome)?;
-        addend_0.eq(circuit_builder, &a)?;
-    }
+        // outcome + addend_1 = addend_0
+        let outcome = UInt64::new(circuit_builder);
+        let addend_1 = UInt64::new(circuit_builder);
+        (
+            addend_1.clone().add(circuit_builder, &outcome.clone())?,
+            addend_1,
+            outcome,
+        )
+    };
 
     // TODO rs1_id, rs2_id, rd_id should be bytecode lookup
     let rs1_id = circuit_builder.create_witin();
@@ -94,7 +101,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         &mut prev_rd_ts,
         &mut ts,
         &prev_rd_value,
-        &computed_outcome,
+        &outcome,
     )?;
 
     let next_ts = ts.add_const(circuit_builder, 1.into())?;
