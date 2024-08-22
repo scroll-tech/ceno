@@ -1,10 +1,6 @@
-use std::ops::Mul;
-
-use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
-use rayon::iter;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -22,6 +18,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         addend1: &Vec<Expression<E>>,
         addend2: &Vec<Expression<E>>,
+        check_overflow: bool,
     ) -> Result<UInt<M, C, E>, ZKVMError> {
         let mut c = UInt::<M, C, E>::new_expr(circuit_builder);
 
@@ -48,7 +45,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         );
 
         // overflow check
-        circuit_builder.require_zero(c.carries.as_ref().unwrap().last().unwrap().expr())?;
+        if check_overflow {
+            circuit_builder.require_zero(c.carries.as_ref().unwrap().last().unwrap().expr())?;
+        }
 
         Ok(c)
     }
@@ -87,7 +86,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             "inconsistent limbs and constant value"
         );
 
-        self.internal_add(circuit_builder, &self.expr(), &b_limbs)
+        self.internal_add(circuit_builder, &self.expr(), &b_limbs, true)
     }
 
     /// Little-endian addition.
@@ -96,13 +95,23 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         addend: &UInt<M, C, E>,
     ) -> Result<UInt<M, C, E>, ZKVMError> {
-        self.internal_add(circuit_builder, &self.expr(), &addend.expr())
+        self.internal_add(circuit_builder, &self.expr(), &addend.expr(), true)
     }
 
-    pub fn mul(
+    /// Little-endian addition without overflow check
+    pub fn add_unsafe(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        addend: &UInt<M, C, E>,
+    ) -> Result<UInt<M, C, E>, ZKVMError> {
+        self.internal_add(circuit_builder, &self.expr(), &addend.expr(), false)
+    }
+
+    fn internal_mul(
         &mut self,
         circuit_builder: &mut CircuitBuilder<E>,
         multiplier: &mut UInt<M, C, E>,
+        check_overflow: bool,
     ) -> Result<UInt<M, C, E>, ZKVMError> {
         let mut c = UInt::<M, C, E>::new(circuit_builder);
         // allocate witness cells and do range checks for carries
@@ -160,12 +169,30 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         )?;
 
         // overflow check
-        circuit_builder.require_zero(c.carries.as_ref().unwrap().last().unwrap().expr())?;
+        if check_overflow {
+            circuit_builder.require_zero(c.carries.as_ref().unwrap().last().unwrap().expr())?;
+        }
 
         Ok(c)
     }
 
-    /// Little-endian addition.
+    pub fn mul(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        multiplier: &mut UInt<M, C, E>,
+    ) -> Result<UInt<M, C, E>, ZKVMError> {
+        self.internal_mul(circuit_builder, multiplier, true)
+    }
+
+    pub fn mul_unsafe(
+        &mut self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        multiplier: &mut UInt<M, C, E>,
+    ) -> Result<UInt<M, C, E>, ZKVMError> {
+        self.internal_mul(circuit_builder, multiplier, true)
+    }
+
+    /// Check two UInt are equal
     pub fn eq(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
@@ -439,8 +466,7 @@ mod tests {
 
     mod mul {
         use crate::{
-            circuit_builder::CircuitBuilder, expression::Expression, scheme::utils::eval_by_expr,
-            uint::uint::UInt,
+            circuit_builder::CircuitBuilder, scheme::utils::eval_by_expr, uint::uint::UInt,
         };
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
@@ -458,7 +484,7 @@ mod tests {
             let wit_c = vec![2, 3, 1, 0];
             let wit_carries = vec![0, 0, 0, 0];
             let witness_values = [wit_a, wit_b, wit_c.clone(), wit_carries.clone()].concat();
-            verify::<E>(witness_values, wit_c, wit_carries);
+            verify::<E>(witness_values);
         }
 
         #[test]
@@ -471,7 +497,7 @@ mod tests {
             let wit_c = vec![256, 514, 1, 0];
             let wit_carries = vec![1, 0, 0, 0];
             let witness_values = [wit_a, wit_b, wit_c.clone(), wit_carries.clone()].concat();
-            verify::<E>(witness_values, wit_c, wit_carries);
+            verify::<E>(witness_values);
         }
 
         #[test]
@@ -487,14 +513,10 @@ mod tests {
             let wit_c = vec![256, 257, 2, 1];
             let wit_carries = vec![1, 2, 1, 0];
             let witness_values = [wit_a, wit_b, wit_c.clone(), wit_carries.clone()].concat();
-            verify::<E>(witness_values, wit_c, wit_carries);
+            verify::<E>(witness_values);
         }
 
-        fn verify<E: ExtensionField>(
-            witness_values: Vec<u64>,
-            wit_c: Vec<u64>,
-            wit_carries: Vec<u64>,
-        ) {
+        fn verify<E: ExtensionField>(witness_values: Vec<u64>) {
             let mut circuit_builder = CircuitBuilder::<E>::new();
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
@@ -527,10 +549,8 @@ mod tests {
 
     mod mul_add {
         use crate::{
-            circuit_builder::CircuitBuilder, expression::Expression, scheme::utils::eval_by_expr,
-            uint::uint::UInt,
+            circuit_builder::CircuitBuilder, scheme::utils::eval_by_expr, uint::uint::UInt,
         };
-        use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
 
@@ -580,19 +600,11 @@ mod tests {
             let uint_e = uint_c.mul(&mut circuit_builder, &mut uint_d).unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
-                if i < 4 {
-                    // limbs check
-                    assert_eq!(
-                        eval_by_expr(&witness_values, &challenges, ret),
-                        E::from(e.clone()[i])
-                    );
-                } else {
-                    // carries check
-                    assert_eq!(
-                        eval_by_expr(&witness_values, &challenges, ret),
-                        E::from(e_carries.clone()[i - 4])
-                    );
-                }
+                // limbs check
+                assert_eq!(
+                    eval_by_expr(&witness_values, &challenges, ret),
+                    E::from(e.clone()[i])
+                );
             });
         }
 
@@ -652,19 +664,11 @@ mod tests {
             let uint_g = uint_c.mul(&mut circuit_builder, &mut uint_f).unwrap();
 
             uint_g.expr().iter().enumerate().for_each(|(i, ret)| {
-                if i < 4 {
-                    // limbs check
-                    assert_eq!(
-                        eval_by_expr(&witness_values, &challenges, ret),
-                        E::from(g.clone()[i])
-                    );
-                } else {
-                    // carries check
-                    assert_eq!(
-                        eval_by_expr(&witness_values, &challenges, ret),
-                        E::from(g_carries.clone()[i - 4])
-                    );
-                }
+                // limbs check
+                assert_eq!(
+                    eval_by_expr(&witness_values, &challenges, ret),
+                    E::from(g.clone()[i])
+                );
             });
         }
 
@@ -708,8 +712,6 @@ mod tests {
             let uint_e = uint_c.add(&mut circuit_builder, &mut uint_d).unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
-                println!("e: {:?}", ret);
-
                 // limbs check
                 assert_eq!(
                     eval_by_expr(&witness_values, &challenges, ret),

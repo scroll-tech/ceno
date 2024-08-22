@@ -50,6 +50,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
+    // Create witIn for carries
     pub fn create_carry_witin(&mut self, circuit_builder: &mut CircuitBuilder<E>) {
         if self.carries.is_none() {
             self.carries = (0..Self::NUM_CELLS)
@@ -62,6 +63,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
+    /// Return limbs in Expression form
     pub fn expr(&self) -> Vec<Expression<E>> {
         match &self.limbs {
             UintLimb::WitIn(limbs) => limbs
@@ -72,6 +74,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
+    /// Return if the limbs are in Expression form or not.
     pub fn is_expr(&self) -> bool {
         match &self.limbs {
             UintLimb::Expression(_) => true,
