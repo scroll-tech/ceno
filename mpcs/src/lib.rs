@@ -549,7 +549,6 @@ pub mod test_util {
     {
         for num_vars in num_vars_start..num_vars_end {
             let batch_size = 2;
-            let num_points = batch_size >> 1;
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
             // Setup
             let (pp, vp) = {
@@ -557,13 +556,6 @@ pub mod test_util {
                 let param = Pcs::setup(poly_size, &rng).unwrap();
                 Pcs::trim(&param).unwrap()
             };
-            // Batch commit and open
-            let evals = chain![
-                (0..num_points).map(|point| (point * 2, point)), // Every point matches two polys
-                (0..num_points).map(|point| (point * 2 + 1, point)),
-            ]
-            .unique()
-            .collect_vec();
 
             let proof = {
                 let mut transcript = T::new();
@@ -579,7 +571,7 @@ pub mod test_util {
                         }
                     })
                     .collect_vec();
-                let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
 
                 let point = transcript.squeeze_challenges(num_vars);
 
@@ -588,7 +580,7 @@ pub mod test_util {
                     .collect_vec();
 
                 transcript.write_field_elements_ext(&evals).unwrap();
-                Pcs::simple_batch_open(&pp, &polys, &comms, &point, &evals, &mut transcript)
+                Pcs::simple_batch_open(&pp, &polys, &comm, &point, &evals, &mut transcript)
                     .unwrap();
                 transcript.into_proof()
             };
@@ -597,15 +589,10 @@ pub mod test_util {
                 let mut transcript = T::from_proof(proof.as_slice());
                 let comms = &Pcs::read_commitment(&vp, &mut transcript).unwrap();
 
-                // let points = (0..num_points)
-                //     .map(|i| transcript.squeeze_challenges(num_vars - i))
-                //     .take(num_points)
-                //     .collect_vec();
                 let point = transcript.squeeze_challenges(num_vars);
+                let evals = transcript.read_field_elements_ext(batch_size).unwrap();
 
-                let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
-
-                let result = Pcs::simple_batch_verify(&vp, comms, &point, &evals2, &mut transcript);
+                let result = Pcs::simple_batch_verify(&vp, comms, &point, &evals, &mut transcript);
                 result
             };
 
