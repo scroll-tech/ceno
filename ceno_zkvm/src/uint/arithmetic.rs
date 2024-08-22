@@ -12,6 +12,7 @@ use super::{uint::UintLimb, UInt};
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
+    const LIMB_BIT_MASK: u64 = 0xFFFFFFFFFFFFFFFF >> (M - C);
 
     fn internal_add(
         &self,
@@ -64,7 +65,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
         // convert Expression::Constant to limbs
         let b_limbs = (0..Self::NUM_CELLS)
-            .map(|i| Expression::Constant(E::BaseField::from((b >> C * i) & 0xFFFF)))
+            .map(|i| Expression::Constant(E::BaseField::from((b >> C * i) & Self::LIMB_BIT_MASK)))
             .collect_vec();
 
         self.internal_add(circuit_builder, &self.expr(), &b_limbs, true)
