@@ -40,9 +40,14 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
 };
 
+use plonky2::util::transpose;
 use rand_chacha::ChaCha8Rng;
-use rayon::prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::{
+    iter::IntoParallelIterator,
+    prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
+};
 use std::borrow::Cow;
+
 type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 
 mod basecode;
@@ -61,6 +66,104 @@ mod query_phase;
 // This sumcheck module is different from the mpcs::sumcheck module, in that
 // it deals only with the special case of the form \sum eq(r_i)f_i().
 mod sumcheck;
+
+impl<E: ExtensionField, V: BasefoldExtParams> Basefold<E, V>
+where
+    E: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    /// Converts a polynomial to a code word, also returns the evaluations over the boolean hypercube
+    /// for said polynomial
+    fn get_poly_bh_evals_and_code_word(
+        pp: &BasefoldProverParams<E>,
+        poly: &DenseMultilinearExtension<E>,
+    ) -> (FieldType<E>, FieldType<E>) {
+        // bh_evals is just a copy of poly.evals().
+        // Note that this function implicitly assumes that the size of poly.evals() is a
+        // power of two. Otherwise, the function crashes with index out of bound.
+        let mut bh_evals = poly.evaluations.clone();
+        let num_vars = poly.num_vars;
+        assert!(num_vars <= pp.max_num_vars && num_vars >= V::get_basecode());
+
+        // Switch to coefficient form
+        let mut coeffs = bh_evals.clone();
+        interpolate_field_type_over_boolean_hypercube(&mut coeffs);
+
+        // Split the input into chunks of message size, encode each message, and return the codewords
+        let basecode =
+            encode_field_type_rs_basecode(&coeffs, 1 << pp.log_rate, 1 << V::get_basecode());
+
+        // Apply the recursive definition of the BaseFold code to the list of base codewords,
+        // and produce the final codeword
+        let mut codeword = evaluate_over_foldable_domain_generic_basecode::<E>(
+            1 << V::get_basecode(),
+            coeffs.len(),
+            pp.log_rate,
+            basecode,
+            &pp.table,
+        );
+
+        // If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
+        //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
+
+        // The sum-check protocol starts from the first variable, but the FRI part
+        // will eventually produce the evaluation at (alpha_k, ..., alpha_1), so apply
+        // the bit-reversion to reverse the variable indices of the polynomial.
+        // In short: store the poly and codeword in big endian
+        reverse_index_bits_in_place_field_type(&mut bh_evals);
+        reverse_index_bits_in_place_field_type(&mut codeword);
+
+        (bh_evals, codeword)
+    }
+
+    /// Transpose a matrix of field elements, generic over the type of field element
+    pub fn transpose_field_type<T: Send + Sync + Copy>(
+        matrix: &[FieldType<E>],
+    ) -> Result<Vec<FieldType<E>>, Error> {
+        let transpose_fn = match matrix[0] {
+            FieldType::Ext(_) => Self::get_column_ext,
+            FieldType::Base(_) => Self::get_column_base,
+            FieldType::Unreachable => unreachable!(),
+        };
+
+        let len = matrix[0].len();
+        (0..len)
+            .into_par_iter()
+            .map(|i| (transpose_fn)(matrix, i))
+            .collect()
+    }
+
+    fn get_column_base(
+        matrix: &[FieldType<E>],
+        column_index: usize,
+    ) -> Result<FieldType<E>, Error> {
+        Ok(FieldType::Base(
+            matrix
+                .par_iter()
+                .map(|row| match row {
+                    FieldType::Base(content) => Ok(content[column_index]),
+                    _ => Err(Error::InvalidPcsParam(
+                        "expected base field type".to_string(),
+                    )),
+                })
+                .collect::<Result<Vec<E::BaseField>, Error>>()?,
+        ))
+    }
+
+    fn get_column_ext(matrix: &[FieldType<E>], column_index: usize) -> Result<FieldType<E>, Error> {
+        Ok(FieldType::Ext(
+            matrix
+                .par_iter()
+                .map(|row| match row {
+                    FieldType::Ext(content) => Ok(content[column_index]),
+                    _ => Err(Error::InvalidPcsParam(
+                        "expected ext field type".to_string(),
+                    )),
+                })
+                .collect::<Result<Vec<E>, Error>>()?,
+        ))
+    }
+}
 
 impl<E: ExtensionField, V: BasefoldExtParams> PolynomialCommitmentScheme<E> for Basefold<E, V>
 where
@@ -112,40 +215,8 @@ where
         poly: &DenseMultilinearExtension<E>,
     ) -> Result<Self::CommitmentWithData, Error> {
         let timer = start_timer!(|| "Basefold::commit");
-        // bh_evals is just a copy of poly.evals().
-        // Note that this function implicitly assumes that the size of poly.evals() is a
-        // power of two. Otherwise, the function crashes with index out of bound.
-        let mut bh_evals = poly.evaluations.clone();
-        let num_vars = log2_strict(bh_evals.len());
-        assert!(num_vars <= pp.max_num_vars && num_vars >= V::get_basecode());
 
-        // Switch to coefficient form
-        let mut coeffs = bh_evals.clone();
-        interpolate_field_type_over_boolean_hypercube(&mut coeffs);
-
-        // Split the input into chunks of message size, encode each message, and return the codewords
-        let basecode =
-            encode_field_type_rs_basecode(&coeffs, 1 << pp.log_rate, 1 << V::get_basecode());
-
-        // Apply the recursive definition of the BaseFold code to the list of base codewords,
-        // and produce the final codeword
-        let mut codeword = evaluate_over_foldable_domain_generic_basecode::<E>(
-            1 << V::get_basecode(),
-            coeffs.len(),
-            pp.log_rate,
-            basecode,
-            &pp.table,
-        );
-
-        // If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
-        //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
-
-        // The sum-check protocol starts from the first variable, but the FRI part
-        // will eventually produce the evaluation at (alpha_k, ..., alpha_1), so apply
-        // the bit-reversion to reverse the variable indices of the polynomial.
-        // In short: store the poly and codeword in big endian
-        reverse_index_bits_in_place_field_type(&mut bh_evals);
-        reverse_index_bits_in_place_field_type(&mut codeword);
+        let (bh_evals, codeword) = Self::get_poly_bh_evals_and_code_word(pp, poly);
 
         // Compute and store all the layers of the Merkle tree
         let hasher = new_hasher::<E::BaseField>();
@@ -162,7 +233,7 @@ where
         Ok(Self::CommitmentWithData {
             codeword_tree,
             polynomials_bh_evals: vec![bh_evals],
-            num_vars,
+            num_vars: poly.num_vars,
             is_base,
             num_polys: 1,
         })
@@ -172,35 +243,64 @@ where
         pp: &Self::ProverParam,
         polys: &Vec<DenseMultilinearExtension<E>>,
         transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, E>,
-    ) -> Result<Vec<Self::CommitmentWithData>, Error> {
+    ) -> Result<Self::CommitmentWithData, Error> {
         let timer = start_timer!(|| "Basefold::batch_commit_and_write");
-        let comms = Self::batch_commit(pp, polys)?;
-        comms.iter().for_each(|comm| {
-            transcript.write_commitment(&comm.get_root_as()).unwrap();
-            transcript
-                .write_field_element_base(&u32_to_field::<E>(comm.num_vars as u32))
-                .unwrap();
-            transcript
-                .write_field_element_base(&u32_to_field::<E>(comm.is_base as u32))
-                .unwrap();
-            transcript
-                .write_field_element_base(&u32_to_field::<E>(comm.num_polys as u32))
-                .unwrap();
-        });
+        let comm = Self::batch_commit(pp, polys)?;
+        transcript.write_commitment(&comm.get_root_as()).unwrap();
+        transcript
+            .write_field_element_base(&u32_to_field::<E>(comm.num_vars as u32))
+            .unwrap();
+        transcript
+            .write_field_element_base(&u32_to_field::<E>(comm.is_base as u32))
+            .unwrap();
+        transcript
+            .write_field_element_base(&u32_to_field::<E>(comm.num_polys as u32))
+            .unwrap();
         end_timer!(timer);
-        Ok(comms)
+        Ok(comm)
     }
 
     fn batch_commit(
         pp: &Self::ProverParam,
         polys: &Vec<DenseMultilinearExtension<E>>,
-    ) -> Result<Vec<Self::CommitmentWithData>, Error> {
-        let polys_vec: Vec<&DenseMultilinearExtension<E>> =
-            polys.into_iter().map(|poly| poly).collect();
-        polys_vec
+    ) -> Result<Self::CommitmentWithData, Error> {
+        // assumptions
+        // 1. there must be at least one polynomial
+        // 2. all polynomials must exist in the same field type
+        // 3. all polynomials must have the same number of variables
+
+        if polys.len() == 0 {
+            return Err(Error::InvalidPcsParam(
+                "cannot batch commit to zero polynomials".to_string(),
+            ));
+        }
+
+        // convert each polynomial to a code word
+        let (bh_evals, code_words) = polys
             .par_iter()
-            .map(|poly| Self::commit(pp, poly))
-            .collect()
+            .map(|poly| Self::get_poly_bh_evals_and_code_word(pp, poly))
+            .collect::<(Vec<FieldType<E>>, Vec<FieldType<E>>)>();
+
+        // transpose the codewords, to group evaluations at the same point
+        // let leaves = Self::transpose_field_type::<E>(code_words.as_slice())?;
+
+        // build merkle tree from leaves
+        let hasher = new_hasher::<E::BaseField>();
+        let codeword_tree = MerkleTree::<E>::from_batch_leaves(code_words, &hasher);
+
+        let is_base = match polys[0].evaluations {
+            FieldType::Ext(_) => false,
+            FieldType::Base(_) => true,
+            _ => unreachable!(),
+        };
+
+        Ok(Self::CommitmentWithData {
+            codeword_tree,
+            polynomials_bh_evals: bh_evals,
+            num_vars: polys[0].num_vars,
+            is_base,
+            num_polys: polys.len(),
+        })
     }
 
     /// Open a single polynomial commitment at one point. If the given
@@ -925,7 +1025,7 @@ where
 mod test {
     use crate::{
         basefold::Basefold,
-        test_util::{run_batch_commit_open_verify, run_commit_open_verify},
+        test_util::{run_commit_open_verify, run_simple_batch_commit_open_verify},
         util::transcript::PoseidonTranscript,
     };
     use goldilocks::GoldilocksExt2;
@@ -953,7 +1053,7 @@ mod test {
     #[test]
     fn batch_commit_open_verify_goldilocks_base() {
         // Both challenge and poly are over base field
-        run_batch_commit_open_verify::<
+        run_simple_batch_commit_open_verify::<
             GoldilocksExt2,
             PcsGoldilocks,
             PoseidonTranscript<GoldilocksExt2>,
@@ -963,7 +1063,7 @@ mod test {
     #[test]
     fn batch_commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
             false, 10, 11,
         );
     }
