@@ -24,7 +24,7 @@ use crate::{
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use query::{
+use query_phase::{
     batch_query_phase, batch_verifier_query_phase, query_phase, verifier_query_phase,
     BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
 };
@@ -53,9 +53,9 @@ pub use structure::{
     BasefoldDefaultParams, BasefoldExtParams, BasefoldParams, BasefoldProverParams,
     BasefoldVerifierParams,
 };
-mod commit;
-use commit::{batch_commit_phase, commit_phase};
-mod query;
+mod commit_phase;
+use commit_phase::{batch_commit_phase, commit_phase};
+mod query_phase;
 // This sumcheck module is different from the mpcs::sumcheck module, in that
 // it deals only with the special case of the form \sum eq(r_i)f_i().
 mod sumcheck;
@@ -723,44 +723,29 @@ where
 mod test {
     use crate::{
         basefold::Basefold,
-        test::{run_batch_commit_open_verify, run_commit_open_verify},
+        test_util::{run_batch_commit_open_verify, run_commit_open_verify},
         util::transcript::PoseidonTranscript,
     };
     use goldilocks::GoldilocksExt2;
 
-    use crate::BasefoldExtParams;
+    use super::BasefoldDefaultParams;
 
-    type PcsGoldilocks = Basefold<GoldilocksExt2, Five>;
-
-    #[derive(Debug)]
-    pub struct Five {}
-
-    impl BasefoldExtParams for Five {
-        fn get_reps() -> usize {
-            return 260;
-        }
-
-        fn get_rate() -> usize {
-            return 3;
-        }
-
-        fn get_basecode() -> usize {
-            return 7;
-        }
-    }
+    type PcsGoldilocks = Basefold<GoldilocksExt2, BasefoldDefaultParams>;
 
     #[test]
     fn commit_open_verify_goldilocks_base() {
         // Challenge is over extension field, poly over the base field
         run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<GoldilocksExt2>>(
-            true,
+            true, 10, 11,
         );
     }
 
     #[test]
     fn commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(false);
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
+            false, 10, 11,
+        );
     }
 
     #[test]
@@ -770,12 +755,14 @@ mod test {
             GoldilocksExt2,
             PcsGoldilocks,
             PoseidonTranscript<GoldilocksExt2>,
-        >(true);
+        >(true, 10, 11);
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(false);
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
+            false, 10, 11,
+        );
     }
 }

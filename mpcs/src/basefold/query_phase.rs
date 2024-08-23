@@ -673,7 +673,7 @@ where
         index: usize,
         hasher: &Hasher<E::BaseField>,
     ) {
-        let timer = start_timer!(|| "Checking codeword single query");
+        // let timer = start_timer!(|| "Checking codeword single query");
         self.oracle_query.check_merkle_paths(roots, hasher);
         self.commitment_query
             .check_merkle_path(&Digest(comm.root().0.try_into().unwrap()), hasher);
@@ -716,7 +716,7 @@ where
             assert_eq!(res, next_oracle_value, "Failed at round {}", i);
             // end_timer!(round_timer);
         }
-        end_timer!(timer);
+        // end_timer!(timer);
     }
 }
 

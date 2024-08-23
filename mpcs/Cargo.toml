@@ -36,12 +36,15 @@ plonky2 = "0.2.0"
 [dev-dependencies]
 simple-frontend = { path = "../simple-frontend" }
 gkr = { path = "../gkr" }
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
 default = ["parallel"]   # Add "sanity-check" to debug
 parallel = ["dep:rayon"]
 benchmark = ["parallel"]
 sanity-check = []
-use-plonky2 = []
 print-trace = [ "ark-std/print-trace" ]
-timer = []
+
+[[bench]]
+name = "commit_open_verify"
+harness = false

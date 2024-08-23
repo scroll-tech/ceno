@@ -350,22 +350,180 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test_util {
     use crate::{
-        basefold::{Basefold, BasefoldExtParams},
-        util::transcript::{
-            FieldTranscript, InMemoryTranscript, PoseidonTranscript, TranscriptRead,
-            TranscriptWrite,
-        },
+        util::transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},
         Evaluation, PolynomialCommitmentScheme,
     };
     use ff_ext::ExtensionField;
-    use goldilocks::GoldilocksExt2;
     use itertools::{chain, Itertools};
     use multilinear_extensions::mle::DenseMultilinearExtension;
     use rand::{prelude::*, rngs::OsRng};
     use rand_chacha::ChaCha8Rng;
-    use std::time::Instant;
+
+    pub fn run_commit_open_verify<E: ExtensionField, Pcs, T>(
+        base: bool,
+        num_vars_start: usize,
+        num_vars_end: usize,
+    ) where
+        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        T: TranscriptRead<Pcs::CommitmentChunk, E>
+            + TranscriptWrite<Pcs::CommitmentChunk, E>
+            + InMemoryTranscript<E>,
+    {
+        for num_vars in num_vars_start..num_vars_end {
+            // Setup
+            let (pp, vp) = {
+                let rng = ChaCha8Rng::from_seed([0u8; 32]);
+                let poly_size = 1 << num_vars;
+                let param = Pcs::setup(poly_size, &rng).unwrap();
+                Pcs::trim(&param).unwrap()
+            };
+            // Commit and open
+            let proof = {
+                let mut transcript = T::new();
+                let poly = if base {
+                    DenseMultilinearExtension::random(num_vars, &mut OsRng)
+                } else {
+                    DenseMultilinearExtension::from_evaluations_ext_vec(
+                        num_vars,
+                        (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                    )
+                };
+
+                let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
+                let point = transcript.squeeze_challenges(num_vars);
+                let eval = poly.evaluate(point.as_slice());
+                transcript.write_field_element_ext(&eval).unwrap();
+                Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
+
+                transcript.into_proof()
+            };
+            // Verify
+            let result = {
+                let mut transcript = T::from_proof(proof.as_slice());
+                let result = Pcs::verify(
+                    &vp,
+                    &Pcs::read_commitment(&vp, &mut transcript).unwrap(),
+                    &transcript.squeeze_challenges(num_vars),
+                    &transcript.read_field_element_ext().unwrap(),
+                    &mut transcript,
+                );
+
+                result
+            };
+            result.unwrap();
+        }
+    }
+
+    pub fn run_batch_commit_open_verify<E, Pcs, T>(
+        base: bool,
+        num_vars_start: usize,
+        num_vars_end: usize,
+    ) where
+        E: ExtensionField,
+        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        T: TranscriptRead<Pcs::CommitmentChunk, E>
+            + TranscriptWrite<Pcs::CommitmentChunk, E>
+            + InMemoryTranscript<E>,
+    {
+        for num_vars in num_vars_start..num_vars_end {
+            let batch_size = 2;
+            let num_points = batch_size >> 1;
+            let rng = ChaCha8Rng::from_seed([0u8; 32]);
+            // Setup
+            let (pp, vp) = {
+                let poly_size = 1 << num_vars;
+                let param = Pcs::setup(poly_size, &rng).unwrap();
+                Pcs::trim(&param).unwrap()
+            };
+            // Batch commit and open
+            let evals = chain![
+                (0..num_points).map(|point| (point * 2, point)), // Every point matches two polys
+                (0..num_points).map(|point| (point * 2 + 1, point)),
+            ]
+            .unique()
+            .collect_vec();
+
+            let proof = {
+                let mut transcript = T::new();
+                let polys = (0..batch_size)
+                    .map(|i| {
+                        if base {
+                            DenseMultilinearExtension::random(num_vars - (i >> 1), &mut rng.clone())
+                        } else {
+                            DenseMultilinearExtension::from_evaluations_ext_vec(
+                                num_vars,
+                                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                            )
+                        }
+                    })
+                    .collect_vec();
+                let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+
+                let points = (0..num_points)
+                    .map(|i| transcript.squeeze_challenges(num_vars - i))
+                    .take(num_points)
+                    .collect_vec();
+
+                let evals = evals
+                    .iter()
+                    .copied()
+                    .map(|(poly, point)| Evaluation {
+                        poly,
+                        point,
+                        value: polys[poly].evaluate(&points[point]),
+                    })
+                    .collect_vec();
+                transcript
+                    .write_field_elements_ext(evals.iter().map(Evaluation::value))
+                    .unwrap();
+                Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
+                transcript.into_proof()
+            };
+            // Batch verify
+            let result = {
+                let mut transcript = T::from_proof(proof.as_slice());
+                let comms = &Pcs::read_commitments(&vp, batch_size, &mut transcript).unwrap();
+
+                let points = (0..num_points)
+                    .map(|i| transcript.squeeze_challenges(num_vars - i))
+                    .take(num_points)
+                    .collect_vec();
+
+                let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
+
+                let result = Pcs::batch_verify(
+                    &vp,
+                    comms,
+                    &points,
+                    &evals
+                        .iter()
+                        .copied()
+                        .zip(evals2)
+                        .map(|((poly, point), eval)| Evaluation::new(poly, point, eval))
+                        .collect_vec(),
+                    &mut transcript,
+                );
+                result
+            };
+
+            result.unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        basefold::{Basefold, BasefoldExtParams},
+        util::transcript::{FieldTranscript, InMemoryTranscript, PoseidonTranscript},
+        PolynomialCommitmentScheme,
+    };
+    use goldilocks::GoldilocksExt2;
+    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use rand::{prelude::*, rngs::OsRng};
+    use rand_chacha::ChaCha8Rng;
     #[test]
     fn test_transcript() {
         #[derive(Debug)]
@@ -422,165 +580,6 @@ mod test {
         .unwrap();
         assert!(comm.is_base());
         assert_eq!(comm.num_vars().unwrap(), num_vars);
-    }
-
-    pub(super) fn run_commit_open_verify<E: ExtensionField, Pcs, T>(base: bool)
-    where
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
-        T: TranscriptRead<Pcs::CommitmentChunk, E>
-            + TranscriptWrite<Pcs::CommitmentChunk, E>
-            + InMemoryTranscript<E>,
-    {
-        for num_vars in 10..18 {
-            println!("k {:?}", num_vars);
-            // Setup
-            let (pp, vp) = {
-                let rng = ChaCha8Rng::from_seed([0u8; 32]);
-                let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, &rng).unwrap();
-                Pcs::trim(&param).unwrap()
-            };
-            // Commit and open
-            let proof = {
-                let mut transcript = T::new();
-                let poly = if base {
-                    DenseMultilinearExtension::random(num_vars, &mut OsRng)
-                } else {
-                    DenseMultilinearExtension::from_evaluations_ext_vec(
-                        num_vars,
-                        (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
-                    )
-                };
-                let now = Instant::now();
-
-                let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
-                println!("commit time {:?}", now.elapsed());
-                let point = transcript.squeeze_challenges(num_vars);
-                let eval = poly.evaluate(point.as_slice());
-                transcript.write_field_element_ext(&eval).unwrap();
-                let now = Instant::now();
-                Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
-                println!("proof time {:?}", now.elapsed());
-
-                transcript.into_proof()
-            };
-            // Verify
-            let result = {
-                let mut transcript = T::from_proof(proof.as_slice());
-                let now = Instant::now();
-                let result = Pcs::verify(
-                    &vp,
-                    &Pcs::read_commitment(&vp, &mut transcript).unwrap(),
-                    &transcript.squeeze_challenges(num_vars),
-                    &transcript.read_field_element_ext().unwrap(),
-                    &mut transcript,
-                );
-                println!("verify time {:?}", now.elapsed());
-
-                result
-            };
-            result.unwrap();
-        }
-    }
-
-    pub(super) fn run_batch_commit_open_verify<E, Pcs, T>(base: bool)
-    where
-        E: ExtensionField,
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
-        T: TranscriptRead<Pcs::CommitmentChunk, E>
-            + TranscriptWrite<Pcs::CommitmentChunk, E>
-            + InMemoryTranscript<E>,
-    {
-        for num_vars in 10..18 {
-            println!("k {:?}", num_vars);
-            let batch_size = 2;
-            let num_points = batch_size >> 1;
-            let rng = ChaCha8Rng::from_seed([0u8; 32]);
-            // Setup
-            let (pp, vp) = {
-                let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, &rng).unwrap();
-                Pcs::trim(&param).unwrap()
-            };
-            // Batch commit and open
-            let evals = chain![
-                (0..num_points).map(|point| (point * 2, point)), // Every point matches two polys
-                (0..num_points).map(|point| (point * 2 + 1, point)),
-            ]
-            .unique()
-            .collect_vec();
-
-            let proof = {
-                let mut transcript = T::new();
-                let polys = (0..batch_size)
-                    .map(|i| {
-                        if base {
-                            DenseMultilinearExtension::random(num_vars - (i >> 1), &mut rng.clone())
-                        } else {
-                            DenseMultilinearExtension::from_evaluations_ext_vec(
-                                num_vars,
-                                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
-                            )
-                        }
-                    })
-                    .collect_vec();
-                let now = Instant::now();
-                let comms = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
-                println!("commit {:?}", now.elapsed());
-
-                let points = (0..num_points)
-                    .map(|i| transcript.squeeze_challenges(num_vars - i))
-                    .take(num_points)
-                    .collect_vec();
-
-                let evals = evals
-                    .iter()
-                    .copied()
-                    .map(|(poly, point)| Evaluation {
-                        poly,
-                        point,
-                        value: polys[poly].evaluate(&points[point]),
-                    })
-                    .collect_vec();
-                transcript
-                    .write_field_elements_ext(evals.iter().map(Evaluation::value))
-                    .unwrap();
-                let now = Instant::now();
-                Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
-                println!("batch open {:?}", now.elapsed());
-                transcript.into_proof()
-            };
-            // Batch verify
-            let result = {
-                let mut transcript = T::from_proof(proof.as_slice());
-                let comms = &Pcs::read_commitments(&vp, batch_size, &mut transcript).unwrap();
-
-                let points = (0..num_points)
-                    .map(|i| transcript.squeeze_challenges(num_vars - i))
-                    .take(num_points)
-                    .collect_vec();
-
-                let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
-
-                let now = Instant::now();
-                let result = Pcs::batch_verify(
-                    &vp,
-                    comms,
-                    &points,
-                    &evals
-                        .iter()
-                        .copied()
-                        .zip(evals2)
-                        .map(|((poly, point), eval)| Evaluation::new(poly, point, eval))
-                        .collect_vec(),
-                    &mut transcript,
-                );
-                println!("batch verify {:?}", now.elapsed());
-                result
-            };
-
-            result.unwrap();
-        }
     }
 
     // use gkr::structs::{Circuit, CircuitWitness, IOPProverState, IOPVerifierState};

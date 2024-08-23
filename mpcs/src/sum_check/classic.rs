@@ -259,7 +259,7 @@ impl<E: ExtensionField, P: ClassicSumCheckProver<E>> SumCheck<E> for ClassicSumC
             let challenge = transcript.squeeze_challenge();
             challenges.push(challenge);
 
-            let timer = start_timer!(|| format!("sum_check_next_round-{round}"));
+            let timer = start_timer!(|| format!("sum_check_next_round-{_round}"));
             state.next_round(msg.evaluate(&aux, &challenge), &challenge);
             end_timer!(timer);
         }
