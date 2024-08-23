@@ -4,8 +4,9 @@ use ff_ext::ExtensionField;
 
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly::build_eq_x_r_vec,
-    virtual_poly::ArcMultilinearExtension,
+    mle::IntoMLE,
+    util::ceil_log2,
+    virtual_poly::{build_eq_x_r_vec, ArcMultilinearExtension},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
