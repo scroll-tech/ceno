@@ -262,7 +262,6 @@ dependencies = [
  "ff_ext",
  "goldilocks",
  "itertools 0.12.1",
- "mpcs",
  "multilinear_extensions",
  "paste",
  "pprof",
@@ -1016,8 +1015,6 @@ dependencies = [
  "rayon",
  "serde",
  "tracing",
- "tracing-flame",
- "tracing-subscriber",
 ]
 
 [[package]]

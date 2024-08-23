@@ -86,9 +86,9 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         let scoped_fn = |s: &Scope<'a>| {
             // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last
             // work thread
-            for thread_id in 0..(max_thread_id - 1) {
+            for (thread_id, poly) in polys.iter_mut().enumerate().take(max_thread_id - 1) {
                 let mut prover_state = Self::prover_init_with_extrapolation_aux(
-                    mem::take(&mut polys[thread_id]),
+                    mem::take(poly),
                     extrapolation_aux.clone(),
                 );
                 let tx_prover_state = tx_prover_state.clone();
@@ -254,9 +254,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         .map(|challenge| challenge.elements)
                         .collect(),
                     proofs: prover_msgs,
-                    ..Default::default()
                 },
-                prover_state.into(),
+                prover_state,
             );
         }
 
@@ -313,9 +312,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 .map(|challenge| challenge.elements)
                 .collect(),
                 proofs: prover_msgs,
-                ..Default::default()
             },
-            prover_state.into(),
+            prover_state,
         )
     }
 
@@ -421,7 +419,6 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         op_mle! {
                             |f| {
                                 (0..f.len())
-                                    .into_iter()
                                     .step_by(2)
                                     .fold(AdditiveArray::<E, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
                                             acc.0[0] += f[b];
@@ -439,7 +436,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             &self.poly.flattened_ml_extensions[products[1]],
                         );
                         commutative_op_mle_pair!(
-                            |f, g| (0..f.len()).into_iter().step_by(2).fold(
+                            |f, g| (0..f.len()).step_by(2).fold(
                                 AdditiveArray::<E, 3>(array::from_fn(|_| 0.into())),
                                 |mut acc, b| {
                                     acc.0[0] += f[b] * g[b];
@@ -461,7 +458,6 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         );
                         op_mle_3!(
                             |f1, f2, f3| (0..f1.len())
-                                .into_iter()
                                 .step_by(2)
                                 .map(|b| {
                                     // f = c x + d
@@ -510,7 +506,6 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         IOPProverMessage {
             evaluations: products_sum,
-            ..Default::default()
         }
     }
 
@@ -611,9 +606,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     .map(|challenge| challenge.elements)
                     .collect(),
                 proofs: prover_msgs,
-                ..Default::default()
             },
-            prover_state.into(),
+            prover_state,
         )
     }
 
@@ -770,7 +764,6 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             );
                             op_mle_3!(
                                 |f1, f2, f3| (0..f1.len())
-                                    .into_iter()
                                     .step_by(2)
                                     .map(|b| {
                                         // f = c x + d
@@ -821,7 +814,6 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         IOPProverMessage {
             evaluations: products_sum,
-            ..Default::default()
         }
     }
 }

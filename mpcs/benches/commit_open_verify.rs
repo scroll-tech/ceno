@@ -13,7 +13,7 @@ use mpcs::{
     Basefold, BasefoldDefaultParams, Evaluation, PolynomialCommitmentScheme,
 };
 
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
