@@ -82,7 +82,18 @@ where
         // power of two. Otherwise, the function crashes with index out of bound.
         let mut bh_evals = poly.evaluations.clone();
         let num_vars = poly.num_vars;
-        assert!(num_vars <= pp.max_num_vars && num_vars >= V::get_basecode());
+        assert!(
+            num_vars <= pp.max_num_vars,
+            "num_vars {} > pp.max_num_vars {}",
+            num_vars,
+            pp.max_num_vars
+        );
+        assert!(
+            num_vars >= V::get_basecode(),
+            "num_vars {} < V::get_basecode() {}",
+            num_vars,
+            V::get_basecode()
+        );
 
         // Switch to coefficient form
         let mut coeffs = bh_evals.clone();
