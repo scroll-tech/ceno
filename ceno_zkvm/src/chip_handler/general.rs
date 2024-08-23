@@ -88,7 +88,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.require_zero(name_fn, assert_zero_expr)
+        self.cs.ns.push_namespace("require_zero".to_string());
+        let result = self.cs.require_zero(name_fn, assert_zero_expr);
+        self.cs.ns.pop_namespace();
+        result
     }
 
     pub fn require_equal<NR, N>(
@@ -101,7 +104,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.require_zero(name_fn, target - rlc_record)
+        self.cs.ns.push_namespace("require_equal".to_string());
+        let result = self.cs.require_zero(name_fn, target - rlc_record);
+        self.cs.ns.pop_namespace();
+        result
     }
 
     pub fn require_one<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
@@ -109,7 +115,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.require_zero(name_fn, Expression::from(1) - expr)
+        self.cs.ns.push_namespace("require_one".to_string());
+        let result = self.require_zero(name_fn, Expression::from(1) - expr);
+        self.cs.ns.pop_namespace();
+        result
     }
 
     pub(crate) fn assert_ux<NR, N, const C: usize>(
