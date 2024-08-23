@@ -85,7 +85,7 @@ pub fn add_one_to_big_num<F: SmallField>(limb_modulo: F, limbs: &[F]) -> Vec<F> 
     let mut result = vec![];
 
     for limb in limbs {
-        let mut new_limb_value = limb.clone();
+        let mut new_limb_value = *limb;
         if should_add_one {
             new_limb_value += F::ONE;
             if new_limb_value == limb_modulo {

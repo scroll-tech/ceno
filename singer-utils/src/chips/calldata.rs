@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{sync::Arc};
 
 use crate::{
     error::UtilError,
@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::ChipCircuitGadgets;
-use crate::chip_handler::{calldata::CalldataChip, rom_handler::ROMHandler, ChipHandler};
+use crate::chip_handler::{calldata::CalldataChip, ChipHandler};
 use ff::Field;
 use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
@@ -21,7 +21,7 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
     let (_, id_cells) = circuit_builder.create_witness_in(UInt64::N_OPERAND_CELLS);
     let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 
-    let mut chip_handler = ChipHandler::new(challenges.clone());
+    let mut chip_handler = ChipHandler::new(*challenges);
 
     CalldataChip::load(
         &mut chip_handler,
