@@ -18,3 +18,11 @@ args = ["fmt", "--all"]
 [tasks.clippy]
 command = "cargo"
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
+
+[tasks.fmt-check-selected-packages]
+command = "cargo"
+args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
+
+[tasks.clippy-check-selected-packages]
+command = "cargo"
+args = ["clippy", "-p", "ceno_zkvm", "--", "-D", "warnings"]

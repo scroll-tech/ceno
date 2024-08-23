@@ -206,7 +206,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
         let mut virtual_poly_1 = VirtualPolynomialV2::new(f[0].num_vars());
         for (f, g) in f.into_iter().zip(g.into_iter()) {
-            let mut tmp = VirtualPolynomialV2::new_from_mle(f, E::BaseField::ONE);
+            let mut tmp = VirtualPolynomialV2::new_from_mle(f, E::ONE);
             tmp.mul_by_mle(g, E::BaseField::ONE);
             virtual_poly_1.merge(&tmp);
         }
@@ -326,7 +326,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         end_timer!(timer);
 
         // sumcheck: sigma = \sum_{s2 || x2} f2(s2 || x2) * g2(s2 || x2)
-        let mut virtual_poly_2 = VirtualPolynomialV2::new_from_mle(f2, E::BaseField::ONE);
+        let mut virtual_poly_2 = VirtualPolynomialV2::new_from_mle(f2, E::ONE);
         virtual_poly_2.mul_by_mle(g2, E::BaseField::ONE);
 
         virtual_poly_2
@@ -416,7 +416,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             DenseMultilinearExtension::from_evaluations_ext_vec(f3.num_vars(), g3).into()
         };
 
-        let mut virtual_poly_3 = VirtualPolynomialV2::new_from_mle(f3, E::BaseField::ONE);
+        let mut virtual_poly_3 = VirtualPolynomialV2::new_from_mle(f3, E::ONE);
         virtual_poly_3.mul_by_mle(g3, E::BaseField::ONE);
 
         exit_span!(span);

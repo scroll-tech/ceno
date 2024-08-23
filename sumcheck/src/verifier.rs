@@ -20,7 +20,6 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             return SumCheckSubClaim {
                 point: vec![],
                 expected_evaluation: claimed_sum,
-                ..Default::default()
             };
         }
         let start = start_timer!(|| "sum check verify");
@@ -168,7 +167,6 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             // the last expected value (not checked within this function) will be included in the
             // subclaim
             expected_evaluation: expected_vec[self.num_vars],
-            ..Default::default()
         }
     }
 }

@@ -3,10 +3,11 @@ use std::{array, mem, sync::Arc};
 use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, MultilinearExtension},
-    op_mle,
+    op_mle, op_mle_3,
     virtual_poly_v2::VirtualPolynomialV2,
 };
 use rayon::{
@@ -43,14 +44,16 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         assert_eq!(polys.len(), max_thread_id);
 
         let log2_max_thread_id = ceil_log2(max_thread_id); // do not support SIZE not power of 2
+        assert!(
+            polys
+                .iter()
+                .map(|poly| (poly.aux_info.num_variables, poly.aux_info.max_degree))
+                .all_equal()
+        );
         let (num_variables, max_degree) = (
             polys[0].aux_info.num_variables,
             polys[0].aux_info.max_degree,
         );
-        for poly in polys[1..].iter() {
-            assert!(poly.aux_info.num_variables == num_variables);
-            assert!(poly.aux_info.max_degree == max_degree);
-        }
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
@@ -83,9 +86,9 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         let scoped_fn = |s: &Scope<'a>| {
             // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last
             // work thread
-            for thread_id in 0..(max_thread_id - 1) {
+            for (thread_id, poly) in polys.iter_mut().enumerate().take(max_thread_id - 1) {
                 let mut prover_state = Self::prover_init_with_extrapolation_aux(
-                    mem::take(&mut polys[thread_id]),
+                    mem::take(poly),
                     extrapolation_aux.clone(),
                 );
                 let tx_prover_state = tx_prover_state.clone();
@@ -251,9 +254,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         .map(|challenge| challenge.elements)
                         .collect(),
                     proofs: prover_msgs,
-                    ..Default::default()
                 },
-                prover_state.into(),
+                prover_state,
             );
         }
 
@@ -310,9 +312,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 .map(|challenge| challenge.elements)
                 .collect(),
                 proofs: prover_msgs,
-                ..Default::default()
             },
-            prover_state.into(),
+            prover_state,
         )
     }
 
@@ -418,7 +419,6 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         op_mle! {
                             |f| {
                                 (0..f.len())
-                                    .into_iter()
                                     .step_by(2)
                                     .fold(AdditiveArray::<E, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
                                             acc.0[0] += f[b];
@@ -436,7 +436,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             &self.poly.flattened_ml_extensions[products[1]],
                         );
                         commutative_op_mle_pair!(
-                            |f, g| (0..f.len()).into_iter().step_by(2).fold(
+                            |f, g| (0..f.len()).step_by(2).fold(
                                 AdditiveArray::<E, 3>(array::from_fn(|_| 0.into())),
                                 |mut acc, b| {
                                     acc.0[0] += f[b] * g[b];
@@ -450,7 +450,35 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         )
                         .to_vec()
                     }
-                    _ => unimplemented!("do not support degree > 2"),
+                    3 => {
+                        let (f1, f2, f3) = (
+                            &self.poly.flattened_ml_extensions[products[0]],
+                            &self.poly.flattened_ml_extensions[products[1]],
+                            &self.poly.flattened_ml_extensions[products[2]],
+                        );
+                        op_mle_3!(
+                            |f1, f2, f3| (0..f1.len())
+                                .step_by(2)
+                                .map(|b| {
+                                    // f = c x + d
+                                    let c1 = f1[b + 1] - f1[b];
+                                    let c2 = f2[b + 1] - f2[b];
+                                    let c3 = f3[b + 1] - f3[b];
+                                    AdditiveArray([
+                                        f1[b] * (f2[b] * f3[b]),
+                                        f1[b + 1] * (f2[b + 1] * f3[b + 1]),
+                                        (c1 + f1[b + 1])
+                                            * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
+                                        (c1 + c1 + f1[b + 1])
+                                            * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
+                                    ])
+                                })
+                                .sum::<AdditiveArray<_, 4>>(),
+                            |sum| AdditiveArray(sum.0.map(E::from))
+                        )
+                        .to_vec()
+                    }
+                    _ => unimplemented!("do not support degree > 3"),
                 };
                 exit_span!(span);
                 sum.iter_mut().for_each(|sum| *sum *= coefficient);
@@ -478,7 +506,6 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         IOPProverMessage {
             evaluations: products_sum,
-            ..Default::default()
         }
     }
 
@@ -518,7 +545,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             return (
                 IOPProof::default(),
                 IOPProverStateV2 {
-                    poly: poly,
+                    poly,
                     ..Default::default()
                 },
             );
@@ -560,9 +587,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 .flattened_ml_extensions
                 .par_iter_mut()
                 .for_each(|mle| {
-                    Arc::get_mut(mle)
-                        .unwrap()
-                        .fix_variables_in_place_parallel(&[p.elements]);
+                    if let Some(mle) = Arc::get_mut(mle) {
+                        mle.fix_variables_in_place_parallel(&[p.elements])
+                    } else {
+                        *mle = mle.fix_variables(&[p.elements]).into()
+                    }
                 });
         };
         exit_span!(span);
@@ -577,9 +606,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     .map(|challenge| challenge.elements)
                     .collect(),
                 proofs: prover_msgs,
-                ..Default::default()
             },
-            prover_state.into(),
+            prover_state,
         )
     }
 
@@ -728,7 +756,35 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             )
                             .to_vec()
                         }
-                        _ => unimplemented!("do not support degree > 2"),
+                        3 => {
+                            let (f1, f2, f3) = (
+                                &self.poly.flattened_ml_extensions[products[0]],
+                                &self.poly.flattened_ml_extensions[products[1]],
+                                &self.poly.flattened_ml_extensions[products[2]],
+                            );
+                            op_mle_3!(
+                                |f1, f2, f3| (0..f1.len())
+                                    .step_by(2)
+                                    .map(|b| {
+                                        // f = c x + d
+                                        let c1 = f1[b + 1] - f1[b];
+                                        let c2 = f2[b + 1] - f2[b];
+                                        let c3 = f3[b + 1] - f3[b];
+                                        AdditiveArray([
+                                            f1[b] * (f2[b] * f3[b]),
+                                            f1[b + 1] * (f2[b + 1] * f3[b + 1]),
+                                            (c1 + f1[b + 1])
+                                                * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
+                                            (c1 + c1 + f1[b + 1])
+                                                * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
+                                        ])
+                                    })
+                                    .sum::<AdditiveArray<_, 4>>(),
+                                |sum| AdditiveArray(sum.0.map(E::from))
+                            )
+                            .to_vec()
+                        }
+                        _ => unimplemented!("do not support degree > 3"),
                     };
                     exit_span!(span);
                     sum.iter_mut().for_each(|sum| *sum *= coefficient);
@@ -758,7 +814,6 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         IOPProverMessage {
             evaluations: products_sum,
-            ..Default::default()
         }
     }
 }

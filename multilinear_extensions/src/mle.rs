@@ -1,4 +1,4 @@
-use std::{borrow::Cow, mem, sync::Arc};
+use std::{any::TypeId, borrow::Cow, mem, sync::Arc};
 
 use crate::{op_mle, util::ceil_log2};
 use ark_std::{end_timer, rand::RngCore, start_timer};
@@ -21,14 +21,13 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     fn num_vars(&self) -> usize;
     fn evaluations(&self) -> &FieldType<E>;
     fn evaluations_range(&self) -> Option<(usize, usize)>; // start offset
-    fn get_base_field_vec(&self) -> &[E::BaseField];
     fn evaluations_to_owned(self) -> FieldType<E>;
     fn merge(&mut self, rhs: Self::Output);
-    fn get_ranged_mle<'a>(
-        &'a self,
+    fn get_ranged_mle(
+        &self,
         num_range: usize,
         range_index: usize,
-    ) -> RangedMultilinearExtension<'a, E>;
+    ) -> RangedMultilinearExtension<'_, E>;
     #[deprecated = "TODO try to redesign this api for it's costly and create a new DenseMultilinearExtension "]
     fn resize_ranged(
         &self,
@@ -43,6 +42,26 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     fn fix_variables_in_place_parallel(&mut self, partial_point: &[E]);
 
     fn name(&self) -> &'static str;
+
+    fn get_ext_field_vec(&self) -> &[E] {
+        match &self.evaluations() {
+            FieldType::Ext(evaluations) => {
+                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
+                &evaluations[start..][..offset]
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn get_base_field_vec(&self) -> &[E::BaseField] {
+        match &self.evaluations() {
+            FieldType::Base(evaluations) => {
+                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
+                &evaluations[start..][..offset]
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> {
@@ -51,14 +70,14 @@ impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMult
     }
 }
 
-impl<E: ExtensionField> Into<DenseMultilinearExtension<E>> for Vec<Vec<E::BaseField>> {
-    fn into(self) -> DenseMultilinearExtension<E> {
-        let per_instance_size = self[0].len();
+impl<E: ExtensionField> From<Vec<Vec<E::BaseField>>> for DenseMultilinearExtension<E> {
+    fn from(val: Vec<Vec<E::BaseField>>) -> Self {
+        let per_instance_size = val[0].len();
         let next_pow2_per_instance_size = ceil_log2(per_instance_size);
-        let evaluations = self
+        let evaluations = val
             .into_iter()
             .enumerate()
-            .map(|(i, mut instance)| {
+            .flat_map(|(i, mut instance)| {
                 assert_eq!(
                     instance.len(),
                     per_instance_size,
@@ -70,7 +89,6 @@ impl<E: ExtensionField> Into<DenseMultilinearExtension<E>> for Vec<Vec<E::BaseFi
                 instance.resize(1 << next_pow2_per_instance_size, E::BaseField::ZERO);
                 instance
             })
-            .flatten()
             .collect::<Vec<E::BaseField>>();
         assert!(evaluations.len().is_power_of_two());
         let num_vars = ceil_log2(evaluations.len());
@@ -84,11 +102,11 @@ pub trait IntoMLE<T>: Sized {
     fn into_mle(self) -> T;
 }
 
-impl<E: ExtensionField> IntoMLE<DenseMultilinearExtension<E>> for Vec<E::BaseField> {
+impl<F: Field, E: ExtensionField> IntoMLE<DenseMultilinearExtension<E>> for Vec<F> {
     fn into_mle(mut self) -> DenseMultilinearExtension<E> {
         let next_pow2 = self.len().next_power_of_two();
-        self.resize(next_pow2, E::BaseField::ZERO);
-        DenseMultilinearExtension::from_evaluations_vec(ceil_log2(next_pow2), self)
+        self.resize(next_pow2, F::ZERO);
+        DenseMultilinearExtension::from_evaluation_vec_smart::<F>(ceil_log2(next_pow2), self)
     }
 }
 
@@ -110,6 +128,14 @@ impl<E: ExtensionField> FieldType<E> {
             FieldType::Unreachable => 0,
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            FieldType::Base(content) => content.is_empty(),
+            FieldType::Ext(content) => content.is_empty(),
+            FieldType::Unreachable => true,
+        }
+    }
 }
 
 /// Stores a multilinear polynomial in dense evaluation form.
@@ -121,17 +147,49 @@ pub struct DenseMultilinearExtension<E: ExtensionField> {
     pub num_vars: usize,
 }
 
-impl<E: ExtensionField> Into<Arc<dyn MultilinearExtension<E, Output = Self>>>
-    for DenseMultilinearExtension<E>
+impl<E: ExtensionField> From<DenseMultilinearExtension<E>>
+    for Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>>
 {
-    fn into(self) -> Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>> {
-        Arc::new(self)
+    fn from(
+        mle: DenseMultilinearExtension<E>,
+    ) -> Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>> {
+        Arc::new(mle)
     }
 }
 
 pub type ArcDenseMultilinearExtension<E> = Arc<DenseMultilinearExtension<E>>;
 
+fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
+    let length = vec.len();
+    let capacity = vec.capacity();
+    let ptr = vec.as_mut_ptr();
+    // Prevent `vec` from dropping its contents
+    mem::forget(vec);
+
+    // Convert the pointer to the new type
+    let new_ptr = ptr as *mut B;
+
+    // Create a new vector with the same length and capacity, but different type
+    unsafe { Vec::from_raw_parts(new_ptr, length, capacity) }
+}
+
 impl<E: ExtensionField> DenseMultilinearExtension<E> {
+    /// This function can tell T being Field or ExtensionField and invoke respective function
+    pub fn from_evaluation_vec_smart<T: Clone + 'static>(
+        num_vars: usize,
+        evaluations: Vec<T>,
+    ) -> Self {
+        if TypeId::of::<T>() == TypeId::of::<E>() {
+            return Self::from_evaluations_ext_vec(num_vars, cast_vec(evaluations));
+        }
+
+        if TypeId::of::<T>() == TypeId::of::<E::BaseField>() {
+            return Self::from_evaluations_vec(num_vars, cast_vec(evaluations));
+        }
+
+        unimplemented!("type not support")
+    }
+
     /// Construct a new polynomial from a list of evaluations where the index
     /// represents a point in {0,1}^`num_vars` in little endian form. For
     /// example, `0b1011` represents `P(1,1,0,1)`
@@ -210,7 +268,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             for e in multiplicands.iter_mut() {
                 let val = E::BaseField::random(&mut rng);
                 e.push(val);
-                product = product * &val;
+                product *= val
             }
             sum += product;
         }
@@ -256,18 +314,20 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         op_mle!(self, |evaluations| {
             DenseMultilinearExtension::from_evaluations_ext_vec(
                 self.num_vars(),
-                evaluations.iter().map(|f| E::from(*f)).collect(),
+                evaluations.iter().cloned().map(E::from).collect(),
             )
         })
     }
 }
 
+#[allow(clippy::wrong_self_convention)]
 pub trait IntoInstanceIter<'a, T> {
     type Item;
     type IntoIter: Iterator<Item = Self::Item>;
     fn into_instance_iter(&self, n_instances: usize) -> Self::IntoIter;
 }
 
+#[allow(clippy::wrong_self_convention)]
 pub trait IntoInstanceIterMut<'a, T> {
     type ItemMut;
     type IntoIterMut: Iterator<Item = Self::ItemMut>;
@@ -344,7 +404,7 @@ impl<'a, T: 'a> IntoInstanceIterMut<'a, T> for Vec<T> {
             evaluations: self,
             start: 0,
             offset,
-            origin_len: origin_len,
+            origin_len,
         }
     }
 }
@@ -514,7 +574,14 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
             "MLE size does not match the point"
         );
         let mle = self.fix_variables_parallel(point);
-        op_mle!(mle, |f| f[0], |v| E::from(v))
+        op_mle!(
+            mle,
+            |f| {
+                assert_eq!(f.len(), 1);
+                f[0]
+            },
+            |v| E::from(v)
+        )
     }
 
     fn num_vars(&self) -> usize {
@@ -660,15 +727,15 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
     }
 
     /// get ranged multiliear extention
-    fn get_ranged_mle<'a>(
-        &'a self,
+    fn get_ranged_mle(
+        &self,
         num_range: usize,
         range_index: usize,
-    ) -> RangedMultilinearExtension<'a, E> {
+    ) -> RangedMultilinearExtension<'_, E> {
         assert!(num_range > 0);
         let offset = self.evaluations.len() / num_range;
         let start = offset * range_index;
-        RangedMultilinearExtension::new(&self, start, offset)
+        RangedMultilinearExtension::new(self, start, offset)
     }
 
     /// resize to new size (num_instances * new_size_per_instance / num_range)
@@ -948,6 +1015,104 @@ macro_rules! op_mle {
     };
 }
 
+#[macro_export]
+macro_rules! op_mle_3 {
+    (|$f1:ident, $f2:ident, $f3:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
+        match (&$f1.evaluations(), &$f2.evaluations(), &$f3.evaluations()) {
+            (
+                $crate::mle::FieldType::Base(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                let $bb_out = $op;
+                $op_bb_out
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Ext(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            _ => unreachable!(),
+        }
+    };
+}
+
 /// macro support op(a, b) and tackles type matching internally.
 /// Please noted that op must satisfy commutative rule w.r.t op(b, a) operand swap.
 #[macro_export]
@@ -955,7 +1120,6 @@ macro_rules! commutative_op_mle_pair {
     (|$first:ident, $second:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$first.evaluations(), &$second.evaluations()) {
             ($crate::mle::FieldType::Base(base1), $crate::mle::FieldType::Base(base2)) => {
-                println!("hihih");
                 let $first = if let Some((start, offset)) = $first.evaluations_range() {
                     &base1[start..][..offset]
                 } else {

@@ -1,104 +1,98 @@
-use crate::error::UtilError;
-use ff::PrimeField;
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
-use simple_frontend::structs::{CellId, CircuitBuilder};
+// /// Given some data represented by n small cells of size s
+// /// this function represents the same data in m big cells of size b
+// /// where b >= s
+// /// e.g.
+// /// information = 1100
+// /// represented with 2 small cells of size 2 each
+// /// small -> 11 | 00
+// /// we can pack this into a single big cell of size 4
+// /// big -> 1100
+// pub fn convert_decomp<E: ExtensionField>(
+//     circuit_builder: &mut CircuitBuilder<E>,
+//     small_wits_in: &[WitIn],
+//     small_wits_in_bit_width: usize,
+//     big_witin_bit_width: usize,
+//     is_little_endian: bool,
+// ) -> Result<Vec<WitIn>, UtilError> {
+//     assert!(E::BaseField::NUM_BITS >= big_witin_bit_width as u32);
 
-/// Given some data represented by n small cells of size s
-/// this function represents the same data in m big cells of size b
-/// where b >= s
-/// e.g.
-/// information = 1100
-/// represented with 2 small cells of size 2 each
-/// small -> 11 | 00
-/// we can pack this into a single big cell of size 4
-/// big -> 1100
-pub fn convert_decomp<E: ExtensionField>(
-    circuit_builder: &mut CircuitBuilder<E>,
-    small_cells: &[CellId],
-    small_cell_bit_width: usize,
-    big_cell_bit_width: usize,
-    is_little_endian: bool,
-) -> Result<Vec<CellId>, UtilError> {
-    assert!(E::BaseField::NUM_BITS >= big_cell_bit_width as u32);
+//     if small_wits_in_bit_width > big_witin_bit_width {
+//         return Err(UtilError::UIntError(
+//             "cannot pack bigger width cells into smaller width cells".to_string(),
+//         ));
+//     }
 
-    if small_cell_bit_width > big_cell_bit_width {
-        return Err(UtilError::UIntError(
-            "cannot pack bigger width cells into smaller width cells".to_string(),
-        ));
-    }
+//     if small_wits_in_bit_width == big_witin_bit_width {
+//         return Ok(small_wits_in.to_vec());
+//     }
 
-    if small_cell_bit_width == big_cell_bit_width {
-        return Ok(small_cells.to_vec());
-    }
+//     // ensure the small cell values are in little endian form
+//     let small_cells = if !is_little_endian {
+//         small_wits_in.to_vec().into_iter().rev().collect()
+//     } else {
+//         small_wits_in.to_vec()
+//     };
 
-    // ensure the small cell values are in little endian form
-    let small_cells = if !is_little_endian {
-        small_cells.to_vec().into_iter().rev().collect()
-    } else {
-        small_cells.to_vec()
-    };
+//     // compute the number of small cells that can fit into each big cell
+//     let small_cell_count_per_big_cell = big_witin_bit_width / small_wits_in_bit_width;
 
-    // compute the number of small cells that can fit into each big cell
-    let small_cell_count_per_big_cell = big_cell_bit_width / small_cell_bit_width;
+//     let mut new_cell_ids = vec![];
 
-    let mut new_cell_ids = vec![];
+//     // iteratively take and pack n small cells into 1 big cell
+//     for values in small_cells.chunks(small_cell_count_per_big_cell) {
+//         let big_cell = circuit_builder.create_cell();
+//         for (small_chunk_index, small_bit_cell) in values.iter().enumerate() {
+//             let shift_size = small_chunk_index * small_wits_in_bit_width;
+//             circuit_builder.add(
+//                 big_cell,
+//                 *small_bit_cell,
+//                 E::BaseField::from(1 << shift_size),
+//             );
+//         }
+//         new_cell_ids.push(big_cell);
+//     }
 
-    // iteratively take and pack n small cells into 1 big cell
-    for values in small_cells.chunks(small_cell_count_per_big_cell) {
-        let big_cell = circuit_builder.create_cell();
-        for (small_chunk_index, small_bit_cell) in values.iter().enumerate() {
-            let shift_size = small_chunk_index * small_cell_bit_width;
-            circuit_builder.add(
-                big_cell,
-                *small_bit_cell,
-                E::BaseField::from(1 << shift_size),
-            );
-        }
-        new_cell_ids.push(big_cell);
-    }
+//     Ok(new_cell_ids)
+// }
 
-    Ok(new_cell_ids)
-}
+// /// Pads a `Vec<CellId>` with new cells to reach some given size n
+// pub fn pad_cells<E: ExtensionField>(
+//     circuit_builder: &mut CircuitBuilder<E>,
+//     cells: &mut Vec<CellId>,
+//     size: usize,
+// ) {
+//     if cells.len() < size {
+//         cells.extend(circuit_builder.create_cells(size - cells.len()))
+//     }
+// }
 
-/// Pads a `Vec<CellId>` with new cells to reach some given size n
-pub fn pad_cells<E: ExtensionField>(
-    circuit_builder: &mut CircuitBuilder<E>,
-    cells: &mut Vec<CellId>,
-    size: usize,
-) {
-    if cells.len() < size {
-        cells.extend(circuit_builder.create_cells(size - cells.len()))
-    }
-}
+// /// Compile time evaluated minimum function
+// /// returns min(a, b)
+// pub const fn const_min(a: usize, b: usize) -> usize {
+//     if a <= b { a } else { b }
+// }
 
-/// Compile time evaluated minimum function
-/// returns min(a, b)
-pub const fn const_min(a: usize, b: usize) -> usize {
-    if a <= b { a } else { b }
-}
+// /// Assumes each limb < max_value
+// /// adds 1 to the big value, while preserving the above constraint
+// pub fn add_one_to_big_num<F: SmallField>(limb_modulo: F, limbs: &[F]) -> Vec<F> {
+//     let mut should_add_one = true;
+//     let mut result = vec![];
 
-/// Assumes each limb < max_value
-/// adds 1 to the big value, while preserving the above constraint
-pub fn add_one_to_big_num<F: SmallField>(limb_modulo: F, limbs: &[F]) -> Vec<F> {
-    let mut should_add_one = true;
-    let mut result = vec![];
+//     for limb in limbs {
+//         let mut new_limb_value = limb.clone();
+//         if should_add_one {
+//             new_limb_value += F::ONE;
+//             if new_limb_value == limb_modulo {
+//                 new_limb_value = F::ZERO;
+//             } else {
+//                 should_add_one = false;
+//             }
+//         }
+//         result.push(new_limb_value);
+//     }
 
-    for limb in limbs {
-        let mut new_limb_value = limb.clone();
-        if should_add_one {
-            new_limb_value += F::ONE;
-            if new_limb_value == limb_modulo {
-                new_limb_value = F::ZERO;
-            } else {
-                should_add_one = false;
-            }
-        }
-        result.push(new_limb_value);
-    }
-
-    result
-}
+//     result
+// }
 
 // #[cfg(test)]
 // mod tests {
@@ -106,7 +100,6 @@ pub fn add_one_to_big_num<F: SmallField>(limb_modulo: F, limbs: &[F]) -> Vec<F> 
 //     use gkr::structs::{Circuit, CircuitWitness};
 //     use goldilocks::{Goldilocks, GoldilocksExt2};
 //     use itertools::Itertools;
-//     use multilinear_extensions::mle::IntoMLE;
 //     use simple_frontend::structs::CircuitBuilder;
 
 //     #[test]
@@ -116,7 +109,7 @@ pub fn add_one_to_big_num<F: SmallField>(limb_modulo: F, limbs: &[F]) -> Vec<F> 
 //         let (_, big_values) = circuit_builder.create_witness_in(5);
 //         let big_bit_width = 5;
 //         let small_bit_width = 2;
-//         let _ = convert_decomp(
+//         let cell_packing_result = convert_decomp(
 //             &mut circuit_builder,
 //             &big_values,
 //             big_bit_width,

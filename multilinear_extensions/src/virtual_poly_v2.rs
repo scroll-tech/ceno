@@ -42,7 +42,7 @@ pub struct VirtualPolynomialV2<'a, E: ExtensionField> {
     /// Aux information about the multilinear polynomial
     pub aux_info: VPAuxInfo<E>,
     /// list of reference to products (as usize) of multilinear extension
-    pub products: Vec<(E::BaseField, Vec<usize>)>,
+    pub products: Vec<(E, Vec<usize>)>,
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
     pub flattened_ml_extensions: Vec<ArcMultilinearExtension<'a, E>>,
@@ -75,7 +75,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
             aux_info: VPAuxInfo {
                 max_degree: 0,
                 num_variables,
-                phantom: PhantomData::default(),
+                phantom: PhantomData,
             },
             products: Vec::new(),
             flattened_ml_extensions: Vec::new(),
@@ -84,7 +84,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     }
 
     /// Creates an new virtual polynomial from a MLE and its coefficient.
-    pub fn new_from_mle(mle: ArcMultilinearExtension<'a, E>, coefficient: E::BaseField) -> Self {
+    pub fn new_from_mle(mle: ArcMultilinearExtension<'a, E>, coefficient: E) -> Self {
         let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
         let mut hm = HashMap::new();
         hm.insert(mle_ptr, 0);
@@ -94,7 +94,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
                 // The max degree is the max degree of any individual variable
                 max_degree: 1,
                 num_variables: mle.num_vars(),
-                phantom: PhantomData::default(),
+                phantom: PhantomData,
             },
             // here `0` points to the first polynomial of `flattened_ml_extensions`
             products: vec![(coefficient, vec![0])],
@@ -109,11 +109,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
     /// `coefficient`.
-    pub fn add_mle_list(
-        &mut self,
-        mle_list: Vec<ArcMultilinearExtension<'a, E>>,
-        coefficient: E::BaseField,
-    ) {
+    pub fn add_mle_list(&mut self, mle_list: Vec<ArcMultilinearExtension<'a, E>>, coefficient: E) {
         let mle_list: Vec<ArcMultilinearExtension<E>> = mle_list.into_iter().collect();
         let mut indexed_product = Vec::with_capacity(mle_list.len());
 
