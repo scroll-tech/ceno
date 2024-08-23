@@ -2,13 +2,21 @@ use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{circuit_builder::CircuitBuilder, expression::Expression, structs::ROMType};
 use ff_ext::ExtensionField;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Neg};
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
 enum MockProverError<E: ExtensionField> {
     AssertZeroError {
         expression: Expression<E>,
         evaluated: E,
+        name: String,
+    },
+    AssertEqualError {
+        left_expression: Expression<E>,
+        right_expression: Expression<E>,
+        left: E,
+        right: E,
         name: String,
     },
     LookupError {
@@ -21,7 +29,7 @@ enum MockProverError<E: ExtensionField> {
 impl<E: ExtensionField> MockProverError<E> {
     pub fn print(&self) {
         match self {
-            MockProverError::AssertZeroError {
+            Self::AssertZeroError {
                 expression,
                 evaluated,
                 name,
@@ -31,7 +39,21 @@ impl<E: ExtensionField> MockProverError<E> {
                     {expression:?}\nEvaluation: {evaluated:?}\n",
                 );
             }
-            MockProverError::LookupError {
+            Self::AssertEqualError {
+                left_expression,
+                right_expression,
+                left,
+                right,
+                name,
+            } => {
+                println!(
+                    "\nAssertEqualError {name:#?}: Left != Right\n\
+                    Left: {left:?}\nRight: {right:?}\n\
+                    Left Expression: {left_expression:?}\n\
+                    Right Expression: {right_expression:?}\n",
+                );
+            }
+            Self::LookupError {
                 expression,
                 evaluated,
                 name,
@@ -59,23 +81,49 @@ impl<'a, E: ExtensionField> MockProver<E> {
 
         let mut errors = vec![];
 
-        // assert zero expressions
+        // Assert zero expressions
         for (expr, name) in cb
             .cs
             .assert_zero_expressions
             .iter()
             .zip(cb.cs.assert_zero_expressions_namespace_map.iter())
         {
-            let expr_evaluated = wit_infer_by_expr(wits_in, &challenge, expr);
-            let expr_evaluated = expr_evaluated.get_ext_field_vec();
+            if name.contains("require_equal") {
+                let (left, right) = expr.unpack_sum().unwrap();
 
-            for element in expr_evaluated {
-                if *element != E::ZERO {
-                    errors.push(MockProverError::AssertZeroError {
-                        expression: expr.clone(),
-                        evaluated: *element,
-                        name: name.clone(),
-                    });
+                let left = left.neg().neg(); // TODO get_ext_field_vec doesn't work without this
+                let right = right.neg();
+
+                let left_evaluated = wit_infer_by_expr(wits_in, &challenge, &left);
+                let left_evaluated = left_evaluated.get_ext_field_vec();
+
+                let right_evaluated = wit_infer_by_expr(wits_in, &challenge, &right);
+                let right_evaluated = right_evaluated.get_ext_field_vec();
+
+                for (left_element, right_element) in left_evaluated.iter().zip(right_evaluated) {
+                    if *left_element != *right_element {
+                        errors.push(MockProverError::AssertEqualError {
+                            left_expression: left.clone(),
+                            right_expression: right.clone(),
+                            left: *left_element,
+                            right: *right_element,
+                            name: name.clone(),
+                        });
+                    }
+                }
+            } else {
+                let expr = expr.clone().neg().neg(); // TODO get_ext_field_vec doesn't work without this
+                let expr_evaluated = wit_infer_by_expr(wits_in, &challenge, &expr);
+                let expr_evaluated = expr_evaluated.get_ext_field_vec();
+
+                for element in expr_evaluated {
+                    if *element != E::ZERO {
+                        errors.push(MockProverError::AssertZeroError {
+                            expression: expr.clone(),
+                            evaluated: *element,
+                            name: name.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -83,7 +131,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
         let mut t = vec![];
         load_u5_table(&mut t, cb, challenge);
 
-        // lookup expressions
+        // Lookup expressions
         for (expr, name) in cb
             .cs
             .lk_expressions
@@ -93,7 +141,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
             let expr_evaluated = wit_infer_by_expr(wits_in, &challenge, expr);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
-            // check each lookup expr exists in t vec
+            // Check each lookup expr exists in t vec
             for element in expr_evaluated {
                 if !t.contains(element) {
                     errors.push(MockProverError::LookupError {
@@ -172,8 +220,8 @@ mod tests {
             let b = cb.create_witin(|| "b")?;
             let c = cb.create_witin(|| "c")?;
 
-            cb.require_equal(|| "a + 1 = b", b.expr(), a.expr() + 1.into())?;
-            cb.require_equal(|| "a * 2 = c", c.expr(), a.expr() * 2.into())?;
+            cb.require_equal(|| "a + 1 == b", b.expr(), a.expr() + 1.into())?;
+            cb.require_zero(|| "c - 2 == 0", c.expr() - 2.into())?;
 
             Ok(Self { a, b, c })
         }
@@ -193,7 +241,7 @@ mod tests {
             vec![Goldilocks::from(4), Goldilocks::from(501)]
                 .into_mle()
                 .into(),
-            vec![Goldilocks::from(6), Goldilocks::from(1000)]
+            vec![Goldilocks::from(2), Goldilocks::from(2)]
                 .into_mle()
                 .into(),
         ];
