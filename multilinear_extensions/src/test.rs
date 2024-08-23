@@ -1,4 +1,4 @@
-use ark_std::{end_timer, rand::Rng, start_timer, test_rng};
+use ark_std::test_rng;
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
