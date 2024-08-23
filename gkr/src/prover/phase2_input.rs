@@ -106,7 +106,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             max_lo_in_num_vars + hi_num_vars,
                             f,
                         );
-                        f.fix_high_variables_in_place(&hi_point);
+                        f.fix_high_variables_in_place(hi_point);
                         f.into()
                     },
                     DenseMultilinearExtension::from_evaluations_ext_vec(max_lo_in_num_vars, g)

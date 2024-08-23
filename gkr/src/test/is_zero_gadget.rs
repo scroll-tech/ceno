@@ -109,7 +109,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];
     let instance_num_vars = 1_u32.ilog2() as usize;
-    for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
+    for wire_out_id in [cond_wire_out_id, is_zero_wire_out_id] {
         let output_mle = &wits_out[wire_out_id as usize];
         let prover_output_point = iter::repeat_with(|| {
             prover_transcript
@@ -260,7 +260,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];
     let instance_num_vars = 1_u32.ilog2() as usize;
-    for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
+    for wire_out_id in [cond_wire_out_id, is_zero_wire_out_id] {
         let output_mle = &wits_out[wire_out_id as usize];
         let prover_output_point = iter::repeat_with(|| {
             prover_transcript
