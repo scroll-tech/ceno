@@ -357,7 +357,7 @@ pub mod test_util {
     };
     use ff_ext::ExtensionField;
     use itertools::{chain, Itertools};
-    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
     use rand::{prelude::*, rngs::OsRng};
     use rand_chacha::ChaCha8Rng;
 
@@ -521,7 +521,7 @@ mod test {
         PolynomialCommitmentScheme,
     };
     use goldilocks::GoldilocksExt2;
-    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
     use rand::{prelude::*, rngs::OsRng};
     use rand_chacha::ChaCha8Rng;
     #[test]

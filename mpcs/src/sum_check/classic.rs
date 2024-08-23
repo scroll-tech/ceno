@@ -16,7 +16,10 @@ use itertools::Itertools;
 use num_integer::Integer;
 use std::{borrow::Cow, collections::HashMap, fmt::Debug, marker::PhantomData};
 mod coeff;
-use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::build_eq_x_r_vec};
+use multilinear_extensions::{
+    mle::{DenseMultilinearExtension, MultilinearExtension},
+    virtual_poly::build_eq_x_r_vec,
+};
 
 pub use coeff::CoefficientsProver;
 
@@ -182,7 +185,7 @@ pub trait ClassicSumCheckRoundMessage<E: ExtensionField>: Sized + Debug {
     ) -> Result<Self, Error>;
 
     fn read_ext(degree: usize, transcript: &mut impl FieldTranscriptRead<E>)
-        -> Result<Self, Error>;
+    -> Result<Self, Error>;
 
     fn sum(&self) -> E;
 
