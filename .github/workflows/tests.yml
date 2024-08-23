@@ -21,6 +21,7 @@ jobs:
           cancel_others: 'true'
           concurrent_skipping: 'same_content_newer'
           paths_ignore: '["**/README.md"]'
+          do_not_skip: '["pull_request", "workflow_dispatch", "schedule", "merge_group"]'
 
   tests:
     needs: [skip_check]

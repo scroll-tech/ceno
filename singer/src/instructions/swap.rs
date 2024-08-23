@@ -5,15 +5,15 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RangeChipOperations, StackChipOperations,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
-    structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    structs::{PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -61,8 +61,8 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut ram_handler = RAMHandler::new(&challenges);
-        let mut rom_handler = ROMHandler::new(&challenges);
+
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -72,7 +72,8 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        ram_handler.state_in(
+        GlobalStateChip::state_in(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -82,15 +83,17 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
         );
 
         let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        let next_stack_ts = rom_handler.add_ts_with_const(
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        let next_stack_ts = RangeChip::add_ts_with_const(
+            &mut chip_handler,
             &mut circuit_builder,
             &stack_ts,
             1,
             &phase0[Self::phase0_stack_ts_add()],
         )?;
 
-        ram_handler.state_out(
+        GlobalStateChip::state_out(
+            &mut chip_handler,
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
@@ -100,7 +103,8 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
         );
 
         // Check the range of stack_top - (N + 1) is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        rom_handler.range_check_stack_top(
+        RangeChip::range_check_stack_top(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(N as u64 + 1)),
         )?;
@@ -109,13 +113,14 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
         let old_stack_ts_n_plus_1 = (&phase0[Self::phase0_old_stack_ts_n_plus_1()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut chip_handler,
             &old_stack_ts_n_plus_1,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_n_plus_1()],
         )?;
         let stack_values_n_plus_1 = &phase0[Self::phase0_stack_values_n_plus_1()];
-        ram_handler.stack_pop(
+        StackChip::pop(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(N as u64 + 1)),
             old_stack_ts_n_plus_1.values(),
@@ -126,13 +131,14 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
         let old_stack_ts_1 = (&phase0[Self::phase0_old_stack_ts_1()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut chip_handler,
             &old_stack_ts_1,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_1()],
         )?;
         let stack_values_1 = &phase0[Self::phase0_stack_values_1()];
-        ram_handler.stack_pop(
+        StackChip::pop(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts_1.values(),
@@ -140,14 +146,16 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
         );
 
         // Push stack_1 to the stack at top - (N + 1)
-        ram_handler.stack_push(
+        StackChip::push(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(N as u64 + 1)),
             stack_ts.values(),
             stack_values_1,
         );
         // Push stack_n_plus_1 to the stack at top - 1
-        ram_handler.stack_push(
+        StackChip::push(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::ONE),
             stack_ts.values(),
@@ -155,14 +163,14 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for SwapInstruction<N> {
         );
 
         // Bytecode check for (pc, SWAP{N}).
-        rom_handler.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
         );
 
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
@@ -314,6 +322,7 @@ mod test {
         );
     }
 
+    #[cfg(not(debug_assertions))]
     fn bench_swap_instruction_helper<E: ExtensionField, const N: usize>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
@@ -375,11 +384,13 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_swap2_instruction() {
         bench_swap_instruction_helper::<GoldilocksExt2, 2>(10);
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_swap4_instruction() {
         bench_swap_instruction_helper::<GoldilocksExt2, 4>(10);
     }

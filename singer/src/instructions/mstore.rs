@@ -6,16 +6,17 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, MemoryChipOperations, OAMOperations,
-        ROMOperations, RangeChipOperations, StackChipOperations,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, memory::MemoryChip,
+        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        ChipHandler,
     },
     chips::SingerChipBuilder,
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
-    structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    structs::{PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{collections::BTreeMap, mem, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
 
 use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 
@@ -164,8 +165,8 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut ram_handler = RAMHandler::new(&challenges);
-        let mut rom_handler = ROMHandler::new(&challenges);
+
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -175,7 +176,8 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        ram_handler.state_in(
+        GlobalStateChip::state_in(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -185,14 +187,16 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         );
 
         let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        let next_memory_ts = rom_handler.add_ts_with_const(
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        let next_memory_ts = RangeChip::add_ts_with_const(
+            &mut chip_handler,
             &mut circuit_builder,
             &memory_ts,
             1,
             &phase0[Self::phase0_memory_ts_add()],
         )?;
-        ram_handler.state_out(
+        GlobalStateChip::state_out(
+            &mut chip_handler,
             &mut circuit_builder,
             next_pc.values(),
             stack_ts.values(),
@@ -201,7 +205,8 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
             clk_expr.add(E::BaseField::ONE),
         );
 
-        rom_handler.range_check_stack_top(
+        RangeChip::range_check_stack_top(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
         )?;
@@ -211,12 +216,13 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let old_stack_ts_offset = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_offset()])?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut chip_handler,
             &old_stack_ts_offset,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_offset()],
         )?;
-        ram_handler.stack_pop(
+        StackChip::pop(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::ONE),
             old_stack_ts_offset.values(),
@@ -225,18 +231,19 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         // Pop mem_bytes from stack
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
-        rom_handler.range_check_bytes(&mut circuit_builder, mem_bytes)?;
+        RangeChip::range_check_bytes(&mut chip_handler, &mut circuit_builder, mem_bytes)?;
 
         let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
         let old_stack_ts_value = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_value()])?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut chip_handler,
             &old_stack_ts_value,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_value()],
         )?;
-        ram_handler.stack_pop(
+        StackChip::pop(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
             old_stack_ts_value.values(),
@@ -244,7 +251,8 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         );
 
         // Bytecode check for (pc, mstore)
-        rom_handler.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
@@ -268,8 +276,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
             .create_witness_out(MstoreAccessory::pred_ooo_size() * EVM_STACK_BYTE_WIDTH);
         add_assign_each_cell(&mut circuit_builder, &to_acc_ooo, mem_bytes);
 
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
@@ -320,8 +327,7 @@ impl MstoreAccessory {
         // From witness.
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut ram_handler = RAMHandler::new(&challenges);
-        let mut rom_handler = ROMHandler::new(&challenges);
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // Compute offset, offset + 1, ..., offset + EVM_STACK_BYTE_WIDTH - 1.
         // Load previous memory bytes.
@@ -333,14 +339,14 @@ impl MstoreAccessory {
         let delta = circuit_builder.create_counter_in(0)[0];
         let offset_plus_delta = StackUInt::add_cell(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut chip_handler,
             &offset,
             delta,
             offset_add_delta,
         )?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut chip_handler,
             &old_memory_ts,
             &memory_ts,
             old_memory_ts_lt,
@@ -348,7 +354,8 @@ impl MstoreAccessory {
 
         let mem_byte = pred_ooo[Self::pred_ooo_mem_bytes().start];
         let prev_mem_byte = phase0[Self::phase0_prev_mem_bytes().start];
-        ram_handler.mem_store(
+        MemoryChip::write(
+            &mut chip_handler,
             &mut circuit_builder,
             offset_plus_delta.values(),
             old_memory_ts.values(),
@@ -357,8 +364,7 @@ impl MstoreAccessory {
             mem_byte,
         );
 
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
@@ -460,7 +466,6 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                // Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64), // borrow
             ],
         );
@@ -480,7 +485,6 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                // Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64), // borrow
             ],
         );
@@ -500,6 +504,7 @@ mod test {
         );
     }
 
+    #[cfg(not(debug_assertions))]
     fn bench_mstore_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
@@ -571,6 +576,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_mstore_instruction() {
         bench_mstore_instruction_helper::<GoldilocksExt2>(5);
     }

@@ -550,7 +550,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             return (
                 IOPProof::default(),
                 IOPProverStateV2 {
-                    poly: poly,
+                    poly,
                     ..Default::default()
                 },
             );

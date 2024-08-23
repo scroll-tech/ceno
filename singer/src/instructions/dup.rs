@@ -5,15 +5,15 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
-        RangeChipOperations, StackChipOperations,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
-    structs::{PCUInt, RAMHandler, ROMHandler, StackUInt, TSUInt},
+    structs::{PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -57,8 +57,8 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut ram_handler = RAMHandler::new(&challenges);
-        let mut rom_handler = ROMHandler::new(&challenges);
+
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -68,7 +68,8 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        ram_handler.state_in(
+        GlobalStateChip::state_in(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -78,15 +79,17 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         );
 
         let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        let next_stack_ts = rom_handler.add_ts_with_const(
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        let next_stack_ts = RangeChip::add_ts_with_const(
+            &mut chip_handler,
             &mut circuit_builder,
             &stack_ts,
             1,
             &phase0[Self::phase0_stack_ts_add()],
         )?;
 
-        ram_handler.state_out(
+        GlobalStateChip::state_out(
+            &mut chip_handler,
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
@@ -96,7 +99,8 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         );
 
         // Check the range of stack_top - N is within [0, 1 << STACK_TOP_BIT_WIDTH).
-        rom_handler.range_check_stack_top(
+        RangeChip::range_check_stack_top(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(N as u64)),
         )?;
@@ -105,13 +109,14 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
         TSUInt::assert_lt(
             &mut circuit_builder,
-            &mut rom_handler,
+            &mut chip_handler,
             &old_stack_ts,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt()],
         )?;
         let stack_values = &phase0[Self::phase0_stack_values()];
-        ram_handler.stack_pop(
+        StackChip::pop(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
             old_stack_ts.values(),
@@ -119,15 +124,21 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         );
 
         // Check the range of stack_top within [0, 1 << STACK_TOP_BIT_WIDTH).
-        rom_handler.range_check_stack_top(&mut circuit_builder, stack_top.into())?;
+        RangeChip::range_check_stack_top(
+            &mut chip_handler,
+            &mut circuit_builder,
+            stack_top.into(),
+        )?;
         // Push stack_values twice to stack
-        ram_handler.stack_push(
+        StackChip::push(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
             stack_ts.values(),
             stack_values,
         );
-        ram_handler.stack_push(
+        StackChip::push(
+            &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr,
             stack_ts.values(),
@@ -135,14 +146,14 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
         );
 
         // Bytecode check for (pc, DUP{N})
-        rom_handler.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
         );
 
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
@@ -248,7 +259,6 @@ mod test {
                 Goldilocks::from(range_values[0]),
                 Goldilocks::from(range_values[1]),
                 Goldilocks::from(range_values[2]),
-                // Goldilocks::from(range_values[3]),
                 Goldilocks::from(1u64),
             ],
         );
@@ -268,6 +278,7 @@ mod test {
         );
     }
 
+    #[cfg(not(debug_assertions))]
     fn bench_dup_instruction_helper<E: ExtensionField, const N: usize>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
@@ -328,11 +339,13 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_dup1_instruction() {
         bench_dup_instruction_helper::<GoldilocksExt2, 1>(10);
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_dup2_instruction() {
         bench_dup_instruction_helper::<GoldilocksExt2, 2>(10);
     }

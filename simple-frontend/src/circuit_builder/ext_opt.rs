@@ -270,7 +270,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     // ======================================
 
     /// Compute the random linear combination of `in_array` by challenge.
-    /// out = \sum_{i = 0}^{in_array.len()} challenge^i * in_array[i] + challenge^{in_array.len()}.
+    /// out = (\sum_{i = 0}^{in_array.len()} challenge^i * in_array[i]) + challenge^{in_array.len()}.
     pub fn rlc(&mut self, out: &ExtCellId<Ext>, in_array: &[CellId], challenge: ChallengeId) {
         assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
         for (i, item) in in_array.iter().enumerate() {
@@ -304,7 +304,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     }
 
     /// Compute the random linear combination of `in_array` with mixed types by challenge.
-    /// out = \sum_{i = 0}^{in_array.len()} challenge^i * (\sum_j in_array[i][j]) + challenge^{in_array.len()}.
+    /// out = (\sum_{i = 0}^{in_array.len()} challenge^i * (\sum_j in_array[i][j])) + challenge^{in_array.len()}.
     pub fn rlc_mixed(
         &mut self,
         out: &ExtCellId<Ext>,
