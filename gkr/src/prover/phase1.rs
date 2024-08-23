@@ -1,11 +1,9 @@
 use ark_std::{end_timer, start_timer};
-use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
-    virtual_poly::build_eq_x_r_vec_sequential,
-    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+    virtual_poly::{build_eq_x_r_vec_sequential, ArcMultilinearExtension, VirtualPolynomial},
 };
 use simple_frontend::structs::LayerId;
 use std::sync::Arc;
@@ -35,7 +33,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         circuit: &Circuit<E>,
         circuit_witness: &'a CircuitWitness<E>,
         multi_threads_meta: (usize, usize),
-    ) -> VirtualPolynomialV2<'a, E> {
+    ) -> VirtualPolynomial<'a, E> {
         let span = entered_span!("preparation");
         let timer = start_timer!(|| "Prover sumcheck phase 1 step 1");
 
@@ -150,9 +148,8 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         // sumcheck: sigma = \sum_{s || y}(f1({s || y}) * (\sum_j g1^{(j)}({s || y})))
         let span = entered_span!("virtual_poly");
-        let mut virtual_poly_1: VirtualPolynomialV2<E> =
-            VirtualPolynomialV2::new_from_mle(f1, E::ONE);
-        virtual_poly_1.mul_by_mle(g1, E::BaseField::ONE);
+        let mut virtual_poly_1: VirtualPolynomial<E> = VirtualPolynomial::new_from_mle(f1, E::ONE);
+        virtual_poly_1.mul_by_mle(g1, E::ONE);
         exit_span!(span);
         end_timer!(timer);
 
@@ -162,7 +159,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     pub(super) fn combine_phase1_step1_evals(
         &mut self,
         sumcheck_proof_1: SumcheckProof<E>,
-        prover_state: sumcheck::structs::IOPProverStateV2<E>,
+        prover_state: sumcheck::structs::IOPProverState<E>,
     ) -> IOPProverStepMessage<E> {
         let (mut f1, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()

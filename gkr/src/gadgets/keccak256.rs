@@ -14,7 +14,7 @@ use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, IntoMLE},
-    virtual_poly_v2::ArcMultilinearExtension,
+    virtual_poly::ArcMultilinearExtension,
 };
 use simple_frontend::structs::CircuitBuilder;
 use std::iter;

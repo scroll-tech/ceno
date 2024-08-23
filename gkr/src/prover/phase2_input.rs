@@ -1,11 +1,9 @@
 use ark_std::{end_timer, start_timer};
-use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
-    virtual_poly::build_eq_x_r_vec,
-    virtual_poly_v2::VirtualPolynomialV2,
+    virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
 #[cfg(feature = "parallel")]
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -120,10 +118,10 @@ impl<E: ExtensionField> IOPProverState<E> {
         f_vec.extend(f_vec_counter_in);
         g_vec.extend(g_vec_counter_in);
 
-        let mut virtual_poly = VirtualPolynomialV2::new(max_lo_in_num_vars);
+        let mut virtual_poly = VirtualPolynomial::new(max_lo_in_num_vars);
         for (f, g) in f_vec.into_iter().zip(g_vec.into_iter()) {
-            let mut tmp = VirtualPolynomialV2::new_from_mle(f, E::ONE);
-            tmp.mul_by_mle(g, E::BaseField::ONE);
+            let mut tmp = VirtualPolynomial::new_from_mle(f, E::ONE);
+            tmp.mul_by_mle(g, E::ONE);
             virtual_poly.merge(&tmp);
         }
 

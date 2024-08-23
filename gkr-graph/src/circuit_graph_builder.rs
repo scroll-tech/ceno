@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, CircuitWitness};
 use itertools::{chain, izip, Itertools};
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+    mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
 };
 use simple_frontend::structs::WitnessId;
 

@@ -1,15 +1,12 @@
 use ark_std::{end_timer, iterable::Iterable, start_timer};
-use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
-    commutative_op_mle_pair,
     mle::{
         DenseMultilinearExtension, InstanceIntoIteratorMut, IntoInstanceIter, IntoInstanceIterMut,
     },
     util::ceil_log2,
-    virtual_poly::build_eq_x_r_vec_sequential,
-    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+    virtual_poly::{build_eq_x_r_vec_sequential, ArcMultilinearExtension, VirtualPolynomial},
 };
 use std::{iter, sync::Arc};
 
@@ -40,7 +37,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         circuit: &Circuit<E>,
         circuit_witness: &'a CircuitWitness<E>,
         multi_threads_meta: (usize, usize),
-    ) -> VirtualPolynomialV2<'a, E> {
+    ) -> VirtualPolynomial<'a, E> {
         let timer = start_timer!(|| "Prover sumcheck output phase 1 step 1");
         let total_length = self.to_next_phase_point_and_evals.len()
             + self.subset_point_and_evals[self.layer_id as usize].len()
@@ -171,9 +168,8 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         // sumcheck: sigma = \sum_y( \sum_j f1^{(j)}(y) * g1^{(j)}(y))
         let span = entered_span!("virtual_poly");
-        let mut virtual_poly_1: VirtualPolynomialV2<E> =
-            VirtualPolynomialV2::new_from_mle(f1, E::ONE);
-        virtual_poly_1.mul_by_mle(g1, E::BaseField::ONE);
+        let mut virtual_poly_1: VirtualPolynomial<E> = VirtualPolynomial::new_from_mle(f1, E::ONE);
+        virtual_poly_1.mul_by_mle(g1, E::ONE);
         exit_span!(span);
         end_timer!(timer);
         virtual_poly_1
@@ -182,7 +178,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     pub(super) fn combine_output_phase1_step1_evals(
         &mut self,
         sumcheck_proof_1: SumcheckProof<E>,
-        prover_state: sumcheck::structs::IOPProverStateV2<E>,
+        prover_state: sumcheck::structs::IOPProverState<E>,
     ) -> IOPProverStepMessage<E> {
         let (mut f1, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()

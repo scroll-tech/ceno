@@ -5,12 +5,12 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::build_eq_x_r_vec,
-    virtual_poly_v2::ArcMultilinearExtension,
+    virtual_poly::ArcMultilinearExtension,
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     entered_span, exit_span,
-    structs::{IOPProverMessage, IOPProverStateV2},
+    structs::{IOPProverMessage, IOPProverState},
 };
 use transcript::Transcript;
 
@@ -351,7 +351,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             }
         }
 
-        let (main_sel_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
+        let (main_sel_sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
             num_threads,
             virtual_polys.get_batched_polys(),
             transcript,
@@ -547,7 +547,7 @@ impl TowerProver {
                     }
                 }
 
-                let (sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
+                let (sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
                     num_threads,
                     virtual_polys.get_batched_polys(),
                     transcript,

@@ -250,11 +250,11 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// Returns
     /// - the list of polynomials,
     /// - its sum of polynomial evaluations over the boolean hypercube.
-    pub fn random_mle_list(
+    pub fn random_mle_list<T: From<DenseMultilinearExtension<E>>>(
         nv: usize,
         degree: usize,
         mut rng: &mut impl RngCore,
-    ) -> (Vec<ArcDenseMultilinearExtension<E>>, E) {
+    ) -> (Vec<T>, E) {
         let start = start_timer!(|| "sample random mle list");
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
@@ -283,11 +283,11 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     }
 
     // Build a randomize list of mle-s whose sum is zero.
-    pub fn random_zero_mle_list(
+    pub fn random_zero_mle_list<T: From<DenseMultilinearExtension<E>>>(
         nv: usize,
         degree: usize,
         mut rng: impl RngCore,
-    ) -> Vec<ArcDenseMultilinearExtension<E>> {
+    ) -> Vec<T> {
         let start = start_timer!(|| "sample random zero mle list");
 
         let mut multiplicands = Vec::with_capacity(degree);

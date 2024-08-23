@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 use sumcheck::structs::IOPProverMessage;
 
 use crate::uint::UInt;

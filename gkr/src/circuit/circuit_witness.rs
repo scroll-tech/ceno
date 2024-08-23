@@ -9,7 +9,7 @@ use multilinear_extensions::{
         DenseMultilinearExtension, InstanceIntoIterator, InstanceIntoIteratorMut, IntoInstanceIter,
         IntoInstanceIterMut, IntoMLE, MultilinearExtension,
     },
-    virtual_poly_v2::ArcMultilinearExtension,
+    virtual_poly::ArcMultilinearExtension,
 };
 use simple_frontend::structs::{ChallengeConst, LayerId};
 use std::fmt::Debug;
@@ -62,7 +62,7 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
             for (wit_id, (l, r)) in circuit.paste_from_wits_in.iter().enumerate() {
                 let layer_wit_iter: InstanceIntoIteratorMut<E::BaseField> =
                     layer_wit.into_instance_iter_mut(n_instances);
-                let wit_in = wits_in[wit_id as usize].get_base_field_vec();
+                let wit_in = wits_in[wit_id].get_base_field_vec();
                 let wit_in_iter: InstanceIntoIterator<E::BaseField> =
                     wit_in.into_instance_iter(n_instances);
                 for (layer_wit, wit_in) in layer_wit_iter.zip_eq(wit_in_iter) {
@@ -253,18 +253,24 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
             .iter_mut()
             .zip(inferred_wits_out.into_iter())
         {
-            Arc::get_mut(wit_out).unwrap().merge(inferred_wits_out);
+            Arc::<(dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a)>::get_mut(wit_out)
+                .unwrap()
+                .merge(inferred_wits_out);
         }
 
         for (wit_in, new_wit_in) in self.witness_in.iter_mut().zip(new_wits_in.into_iter()) {
-            Arc::get_mut(wit_in).unwrap().merge(new_wit_in);
+            Arc::<(dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a)>::get_mut(wit_in)
+                .unwrap()
+                .merge(new_wit_in);
         }
 
         // Merge self and circuit_witness.
         for (layer_wit, inferred_layer_wit) in
             self.layers.iter_mut().zip(inferred_layer_wits.into_iter())
         {
-            Arc::get_mut(layer_wit).unwrap().merge(inferred_layer_wit);
+            Arc::<(dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a)>::get_mut(layer_wit)
+                .unwrap()
+                .merge(inferred_layer_wit);
         }
 
         self.n_instances += n_instances;

@@ -1,10 +1,9 @@
 use ark_std::{end_timer, iterable::Iterable, start_timer};
-use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
-    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+    virtual_poly::{ArcMultilinearExtension, VirtualPolynomial},
 };
 use simple_frontend::structs::LayerId;
 use std::sync::Arc;
@@ -76,7 +75,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         circuit: &Circuit<E>,
         circuit_witness: &'a CircuitWitness<E>,
         multi_threads_meta: (usize, usize),
-    ) -> VirtualPolynomialV2<'a, E> {
+    ) -> VirtualPolynomial<'a, E> {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 1");
         let layer = &circuit.layers[layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
@@ -204,10 +203,10 @@ impl<E: ExtensionField> IOPProverState<E> {
         ) = ([vec![f1], f1_j].concat(), [vec![g1], g1_j].concat());
 
         // sumcheck: sigma = \sum_{s1 || x1} f1(s1 || x1) * g1(s1 || x1) + \sum_j f1'_j(s1 || x1) * g1'_j(s1 || x1)
-        let mut virtual_poly_1 = VirtualPolynomialV2::new(f[0].num_vars());
+        let mut virtual_poly_1 = VirtualPolynomial::new(f[0].num_vars());
         for (f, g) in f.into_iter().zip(g.into_iter()) {
-            let mut tmp = VirtualPolynomialV2::new_from_mle(f, E::ONE);
-            tmp.mul_by_mle(g, E::BaseField::ONE);
+            let mut tmp = VirtualPolynomial::new_from_mle(f, E::ONE);
+            tmp.mul_by_mle(g, E::ONE);
             virtual_poly_1.merge(&tmp);
         }
         exit_span!(span);
@@ -220,7 +219,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         &mut self,
         circuit: &Circuit<E>,
         sumcheck_proof_1: SumcheckProof<E>,
-        prover_state: sumcheck::structs::IOPProverStateV2<E>,
+        prover_state: sumcheck::structs::IOPProverState<E>,
     ) -> IOPProverStepMessage<E> {
         let layer = &circuit.layers[self.layer_id as usize];
         let eval_point_1 = sumcheck_proof_1.point.clone();
@@ -269,7 +268,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         circuit: &Circuit<E>,
         circuit_witness: &'a CircuitWitness<E>,
         multi_threads_meta: (usize, usize),
-    ) -> VirtualPolynomialV2<'a, E> {
+    ) -> VirtualPolynomial<'a, E> {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 2");
         let layer = &circuit.layers[layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
@@ -326,8 +325,8 @@ impl<E: ExtensionField> IOPProverState<E> {
         end_timer!(timer);
 
         // sumcheck: sigma = \sum_{s2 || x2} f2(s2 || x2) * g2(s2 || x2)
-        let mut virtual_poly_2 = VirtualPolynomialV2::new_from_mle(f2, E::ONE);
-        virtual_poly_2.mul_by_mle(g2, E::BaseField::ONE);
+        let mut virtual_poly_2 = VirtualPolynomial::new_from_mle(f2, E::ONE);
+        virtual_poly_2.mul_by_mle(g2, E::ONE);
 
         virtual_poly_2
     }
@@ -336,7 +335,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         &mut self,
         _circuit: &Circuit<E>,
         sumcheck_proof_2: SumcheckProof<E>,
-        prover_state: sumcheck::structs::IOPProverStateV2<E>,
+        prover_state: sumcheck::structs::IOPProverState<E>,
         no_step3: bool,
     ) -> IOPProverStepMessage<E> {
         let eval_point_2 = sumcheck_proof_2.point.clone();
@@ -374,7 +373,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         circuit: &Circuit<E>,
         circuit_witness: &'a CircuitWitness<E>,
         multi_threads_meta: (usize, usize),
-    ) -> VirtualPolynomialV2<'a, E> {
+    ) -> VirtualPolynomial<'a, E> {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 3");
         let layer = &circuit.layers[layer_id as usize];
         let lo_out_num_vars = layer.num_vars;
@@ -416,8 +415,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             DenseMultilinearExtension::from_evaluations_ext_vec(f3.num_vars(), g3).into()
         };
 
-        let mut virtual_poly_3 = VirtualPolynomialV2::new_from_mle(f3, E::ONE);
-        virtual_poly_3.mul_by_mle(g3, E::BaseField::ONE);
+        let mut virtual_poly_3 = VirtualPolynomial::new_from_mle(f3, E::ONE);
+        virtual_poly_3.mul_by_mle(g3, E::ONE);
 
         exit_span!(span);
         end_timer!(timer);
@@ -428,7 +427,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         &mut self,
         _circuit: &Circuit<E>,
         sumcheck_proof_3: SumcheckProof<E>,
-        prover_state: sumcheck::structs::IOPProverStateV2<E>,
+        prover_state: sumcheck::structs::IOPProverState<E>,
     ) -> IOPProverStepMessage<E> {
         let eval_point_3 = sumcheck_proof_3.point.clone();
         let (f3, _): (Vec<_>, Vec<_>) = prover_state

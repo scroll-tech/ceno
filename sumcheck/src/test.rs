@@ -4,7 +4,7 @@ use ark_std::{rand::RngCore, test_rng};
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
-use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::VirtualPolynomial};
+use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::Transcript;
 
@@ -77,7 +77,9 @@ fn test_sumcheck_internal<E: ExtensionField>(
             .flattened_ml_extensions
             .par_iter_mut()
             .for_each(|mle| {
-                Arc::make_mut(mle).fix_variables_in_place(&[p.elements]);
+                Arc::get_mut(mle)
+                    .unwrap()
+                    .fix_variables_in_place(&[p.elements]);
             });
     };
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);

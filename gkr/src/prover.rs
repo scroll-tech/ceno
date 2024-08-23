@@ -2,7 +2,7 @@ use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    virtual_poly::build_eq_x_r_vec, virtual_poly_v2::VirtualPolynomialV2,
+    virtual_poly::build_eq_x_r_vec, virtual_poly::VirtualPolynomial,
 };
 
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -27,7 +27,7 @@ mod phase2_linear;
 #[cfg(test)]
 mod test;
 
-type SumcheckStateV2<'a, F> = sumcheck::structs::IOPProverStateV2<'a, F>;
+type SumcheckStateV2<'a, F> = sumcheck::structs::IOPProverState<'a, F>;
 
 impl<E: ExtensionField> IOPProverState<E> {
     /// Prove process for data parallel circuits.
@@ -95,7 +95,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 })
                                 .collect::<Vec<Vec<_>>>();
 
-                            let virtual_polys: Vec<VirtualPolynomialV2<E>> = (0..max_thread_id)
+                            let virtual_polys: Vec<VirtualPolynomial<E>> = (0..max_thread_id)
                                 .into_par_iter()
                                 .map(|thread_id| {
                                     let span = entered_span!("build_poly");
@@ -114,7 +114,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 .collect();
 
                             let (sumcheck_proof, sumcheck_prover_state) =
-                                sumcheck::structs::IOPProverStateV2::<E>::prove_batch_polys(
+                                sumcheck::structs::IOPProverState::<E>::prove_batch_polys(
                                     max_thread_id,
                                     virtual_polys.try_into().unwrap(),
                                     transcript,
@@ -147,7 +147,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 })
                                 .collect::<Vec<Vec<_>>>();
 
-                            let virtual_polys: Vec<VirtualPolynomialV2<E>> = (0..max_thread_id)
+                            let virtual_polys: Vec<VirtualPolynomial<E>> = (0..max_thread_id)
                                 .into_par_iter()
                                 .map(|thread_id| {
                                     let span = entered_span!("build_poly");
@@ -166,7 +166,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 .collect();
 
                             let (sumcheck_proof, sumcheck_prover_state) =
-                                sumcheck::structs::IOPProverStateV2::<E>::prove_batch_polys(
+                                sumcheck::structs::IOPProverState::<E>::prove_batch_polys(
                                     max_thread_id,
                                     virtual_polys.try_into().unwrap(),
                                     transcript,
@@ -191,7 +191,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 let bounded_eval_point = prover_state.to_next_step_point.clone();
                                 eqs.push(build_eq_x_r_vec(&bounded_eval_point));
                                 // build step round poly
-                                let virtual_polys: Vec<VirtualPolynomialV2<E>> = (0..max_thread_id)
+                                let virtual_polys: Vec<VirtualPolynomial<E>> = (0..max_thread_id)
                                     .into_par_iter()
                                     .map(|thread_id| {
                                         let span = entered_span!("build_poly");
@@ -237,7 +237,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                     .collect();
 
                                 let (sumcheck_proof, sumcheck_prover_state) =
-                                    sumcheck::structs::IOPProverStateV2::<E>::prove_batch_polys(
+                                    sumcheck::structs::IOPProverState::<E>::prove_batch_polys(
                                         max_thread_id,
                                         virtual_polys.try_into().unwrap(),
                                         transcript,

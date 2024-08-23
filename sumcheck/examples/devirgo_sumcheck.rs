@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ark_std::test_rng;
 use const_env::from_env;
-use ff_ext::{ff::Field, ExtensionField};
+use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -18,9 +18,9 @@ use transcript::Transcript;
 
 type E = GoldilocksExt2;
 
-fn prepare_input<E: ExtensionField>(
+fn prepare_input<'a, E: ExtensionField>(
     max_thread_id: usize,
-) -> (E, VirtualPolynomial<E>, Vec<VirtualPolynomial<E>>) {
+) -> (E, VirtualPolynomial<'a, E>, Vec<VirtualPolynomial<'a, E>>) {
     let nv = 10;
     let mut rng = test_rng();
     let size_log2 = ceil_log2(max_thread_id);
@@ -29,8 +29,8 @@ fn prepare_input<E: ExtensionField>(
     let g1: Arc<DenseMultilinearExtension<E>> =
         DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
 
-    let mut virtual_poly_1 = VirtualPolynomial::new_from_mle(f1.clone(), E::BaseField::ONE);
-    virtual_poly_1.mul_by_mle(g1.clone(), <E as ff_ext::ExtensionField>::BaseField::ONE);
+    let mut virtual_poly_1 = VirtualPolynomial::new_from_mle(f1.clone(), E::ONE);
+    virtual_poly_1.mul_by_mle(g1.clone(), E::ONE);
 
     let mut virtual_poly_f1: Vec<VirtualPolynomial<E>> = match &f1.evaluations {
         multilinear_extensions::mle::FieldType::Base(evaluations) => evaluations
@@ -39,7 +39,7 @@ fn prepare_input<E: ExtensionField>(
                 DenseMultilinearExtension::<E>::from_evaluations_vec(nv - size_log2, chunk.to_vec())
                     .into()
             })
-            .map(|mle| VirtualPolynomial::new_from_mle(mle, E::BaseField::ONE))
+            .map(|mle| VirtualPolynomial::new_from_mle(mle, E::ONE))
             .collect_vec(),
         _ => unreachable!(),
     };
@@ -64,7 +64,7 @@ fn prepare_input<E: ExtensionField>(
     virtual_poly_f1
         .iter_mut()
         .zip(poly_g1.iter())
-        .for_each(|(f1, g1)| f1.mul_by_mle(g1.clone(), E::BaseField::ONE));
+        .for_each(|(f1, g1)| f1.mul_by_mle(g1.clone(), E::ONE));
     (
         asserted_sum,
         virtual_poly_1,
