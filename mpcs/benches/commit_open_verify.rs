@@ -116,7 +116,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     ));
     group.sample_size(NUM_SAMPLES);
     // Challenge is over extension field, poly over the base field
-    for num_vars in 10..=20 {
+    for num_vars in 15..=20 {
         for batch_size_log in 1..=6 {
             let batch_size = 1 << batch_size_log;
             let num_points = batch_size >> 1;
