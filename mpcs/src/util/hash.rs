@@ -102,9 +102,11 @@ pub fn hash_two_digests<F: SmallField>(
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
     use ark_std::{end_timer, start_timer, test_rng};
     use ff::Field;
     use goldilocks::Goldilocks;
+    use itertools::Itertools;
 
     use super::*;
 
@@ -135,5 +137,53 @@ mod tests {
             hasher.squeeze_vec();
         }
         end_timer!(timer);
+    }
+
+    #[test]
+    fn bench_n_to_1() {
+        let mut rng = test_rng();
+        let n_evaluations = 60;
+        let n_iterations = 200;
+
+        let values = (0..n_evaluations).map(|_| Goldilocks::random(&mut rng)).collect_vec();
+
+        let mut duration_sum = Duration::ZERO;
+        for i in 0..n_iterations {
+            let mut hasher = new_hasher::<Goldilocks>();
+            let now = Instant::now();
+            hasher.update(&values);
+            let hash = &hasher.squeeze_vec()[0..DIGEST_WIDTH];
+            duration_sum += now.elapsed();
+        }
+        let mean_duration = duration_sum / n_iterations;
+
+        println!("time to hash {:?}-to-1: {:?}", n_evaluations, mean_duration);
+    }
+
+    #[test]
+    fn bench_2_to_1() {
+        let mut rng = test_rng();
+        let n_evaluations = 60;
+        let n_iterations = 20000;
+
+        let values = (0..n_evaluations).map(|_| Goldilocks::random(&mut rng)).collect_vec();
+
+        let mut hasher = new_hasher::<Goldilocks>();
+        hasher.update(&values);
+        let hash = &hasher.squeeze_vec()[0..DIGEST_WIDTH];
+
+        let left = Digest(hash.try_into().unwrap());
+        let right = left.clone();
+
+        let mut duration_sum = Duration::ZERO;
+        for i in 0..n_iterations {
+            let mut hasher = new_hasher::<Goldilocks>();
+            let now = Instant::now();
+            hash_two_digests(&left, &right, &mut hasher);
+            duration_sum += now.elapsed();
+        }
+        let mean_duration = duration_sum / n_iterations;
+
+        println!("time to hash 2-to-1: {:?}", mean_duration);
     }
 }
