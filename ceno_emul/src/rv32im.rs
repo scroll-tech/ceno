@@ -15,9 +15,8 @@
 // limitations under the License.
 
 use anyhow::Result;
-use risc0_zkvm_platform::WORD_SIZE;
 
-use super::addr::{ByteAddr, WordAddr};
+use super::addr::{ByteAddr, WordAddr, WORD_SIZE};
 
 pub trait EmuContext {
     // Handle environment call

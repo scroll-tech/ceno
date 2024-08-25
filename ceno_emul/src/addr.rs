@@ -16,9 +16,10 @@
 
 use std::{fmt, ops};
 
-use risc0_zkvm_platform::WORD_SIZE;
+pub const WORD_SIZE: usize = 32;
 
-use super::pager::PAGE_WORDS;
+// No paging.
+const PAGE_WORDS: u32 = u32::MAX / WORD_SIZE as u32;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ByteAddr(pub u32);
