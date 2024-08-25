@@ -16,7 +16,7 @@
 
 use std::{fmt, ops};
 
-pub const WORD_SIZE: usize = 32;
+pub const WORD_SIZE: usize = 4;
 
 // No paging.
 const PAGE_WORDS: u32 = u32::MAX / WORD_SIZE as u32;

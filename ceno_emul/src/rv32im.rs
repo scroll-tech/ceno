@@ -358,7 +358,7 @@ impl Emulator {
         }
     }
 
-    pub fn step<C: EmuContext>(&mut self, ctx: &mut C) -> Result<()> {
+    pub fn step<C: EmuContext>(&self, ctx: &mut C) -> Result<()> {
         let pc = ctx.get_pc();
 
         if !ctx.check_insn_load(pc) {
@@ -390,7 +390,7 @@ impl Emulator {
     }
 
     fn step_compute<M: EmuContext>(
-        &mut self,
+        &self,
         ctx: &mut M,
         kind: InsnKind,
         decoded: &DecodedInstruction,
@@ -513,7 +513,7 @@ impl Emulator {
     }
 
     fn step_load<M: EmuContext>(
-        &mut self,
+        &self,
         ctx: &mut M,
         kind: InsnKind,
         decoded: &DecodedInstruction,
@@ -565,7 +565,7 @@ impl Emulator {
     }
 
     fn step_store<M: EmuContext>(
-        &mut self,
+        &self,
         ctx: &mut M,
         kind: InsnKind,
         decoded: &DecodedInstruction,
@@ -606,7 +606,7 @@ impl Emulator {
     }
 
     fn step_system<M: EmuContext>(
-        &mut self,
+        &self,
         ctx: &mut M,
         kind: InsnKind,
         decoded: &DecodedInstruction,
