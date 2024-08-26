@@ -221,7 +221,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn namespace<NR: Into<String>, N: FnOnce() -> NR, T>(
         &mut self,
         name_fn: N,
-        cb: impl Fn(&mut ConstraintSystem<E>) -> Result<T, ZKVMError>,
+        cb: impl FnOnce(&mut ConstraintSystem<E>) -> Result<T, ZKVMError>,
     ) -> Result<T, ZKVMError> {
         self.ns.push_namespace(name_fn().into());
         let t = cb(self);
