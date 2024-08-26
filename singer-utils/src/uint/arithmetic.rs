@@ -1,7 +1,11 @@
-use crate::{chip_handler::RangeChipOperations, error::UtilError, uint::uint::UInt};
+use crate::{
+    chip_handler::{range::RangeChip, ChipHandler},
+    error::UtilError,
+    uint::uint::UInt,
+};
 use ff::Field;
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{Cell, CellId, CircuitBuilder};
+use simple_frontend::structs::{CellId, CircuitBuilder};
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Little-endian addition.
@@ -49,9 +53,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Little-endian addition.
-    pub fn add<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        chip_handler: &mut ChipHandler<E>,
         addend_0: &UInt<M, C>,
         addend_1: &UInt<M, C>,
         witness: &[CellId],
@@ -59,7 +63,12 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        RangeChip::range_check_uint(
+            chip_handler,
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+        )
     }
 
     /// Add a constant value to a `UInt<M, C>` instance
@@ -89,9 +98,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Add a constant value to a `UInt<M, C>` instance
-    pub fn add_const<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_const<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        chip_handler: &mut ChipHandler<E>,
         addend_0: &UInt<M, C>,
         constant: E::BaseField,
         witness: &[CellId],
@@ -99,14 +108,19 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        RangeChip::range_check_uint(
+            chip_handler,
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+        )
     }
 
     /// Add a constant value to a `UInt<M, C>` instance
     /// Assumes that addition leads to no overflow.
-    pub fn add_const_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_const_no_overflow<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        chip_handler: &mut ChipHandler<E>,
         addend_0: &UInt<M, C>,
         constant: E::BaseField,
         witness: &[CellId],
@@ -114,7 +128,12 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry_no_overflow_add(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        RangeChip::range_check_uint(
+            chip_handler,
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+        )
     }
 
     /// Adds a single cell value to a `UInt<M, C>` instance
@@ -144,9 +163,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Adds a single cell value to a `UInt<M, C>` instance
-    pub fn add_cell<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_cell<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        chip_handler: &mut ChipHandler<E>,
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         witness: &[CellId],
@@ -154,14 +173,19 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        RangeChip::range_check_uint(
+            chip_handler,
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+        )
     }
 
     /// Adds a single cell value to a `UInt<M, C>` instance
     /// Assumes that addition lead to no overflow.
-    pub fn add_cell_no_overflow<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn add_cell_no_overflow<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        chip_handler: &mut ChipHandler<E>,
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         witness: &[CellId],
@@ -169,7 +193,12 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let carry = Self::extract_carry_no_overflow_add(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
         let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        RangeChip::range_check_uint(
+            chip_handler,
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+        )
     }
 
     /// Little endian subtraction
@@ -198,9 +227,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     }
 
     /// Little endian subtraction
-    pub fn sub<E: ExtensionField, H: RangeChipOperations<E>>(
+    pub fn sub<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
-        range_chip_handler: &mut H,
+        chip_handler: &mut ChipHandler<E>,
         minuend: &UInt<M, C>,
         subtrahend: &UInt<M, C>,
         witness: &[CellId],
@@ -208,7 +237,12 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         let borrow = Self::extract_borrow_sub(witness);
         let range_values = Self::extract_range_values(witness);
         let computed_result = Self::sub_unsafe(circuit_builder, minuend, subtrahend, borrow)?;
-        range_chip_handler.range_check_uint(circuit_builder, &computed_result, Some(range_values))
+        RangeChip::range_check_uint(
+            chip_handler,
+            circuit_builder,
+            &computed_result,
+            Some(range_values),
+        )
     }
 
     /// Modify addition result based on carry instructions

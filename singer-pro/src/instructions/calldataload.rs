@@ -3,13 +3,13 @@ use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
-    chip_handler::{CalldataChipOperations, ROMOperations},
+    chip_handler::{calldata::CalldataChip, ChipHandler},
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,
-    structs::{ChipChallenges, InstOutChipType, ROMHandler, StackUInt, TSUInt, UInt64},
+    structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt, UInt64},
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use crate::{
     component::{FromPredInst, FromWitness, InstCircuit, InstLayout, ToSuccInst},
@@ -44,11 +44,11 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
         let (offset_id, offset) = circuit_builder.create_witness_in(UInt64::N_OPERAND_CELLS);
 
-        let mut rom_handler = ROMHandler::new(&challenges);
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // CallDataLoad check (offset, data)
         let data = &phase0[Self::phase0_data()];
-        rom_handler.calldataload(&mut circuit_builder, &offset, data);
+        CalldataChip::load(&mut chip_handler, &mut circuit_builder, &offset, data);
 
         // To successor instruction
         let (data_copy_id, data_copy) = circuit_builder.create_witness_out(data.len());
@@ -58,7 +58,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         add_assign_each_cell(&mut circuit_builder, &next_memory_ts, &memory_ts);
 
         // To chips
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let (_, _, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let mut to_chip_ids = vec![None; InstOutChipType::iter().count()];

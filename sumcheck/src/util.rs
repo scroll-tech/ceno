@@ -28,7 +28,8 @@ pub fn barycentric_weights<F: PrimeField>(points: &[F]) -> Vec<F> {
             points
                 .iter()
                 .enumerate()
-                .filter_map(|(i, point_i)| (i != j).then(|| *point_j - point_i))
+                .filter(|&(i, _)| (i != j))
+                .map(|(_, point_i)| *point_j - point_i)
                 .reduce(|acc, value| acc * value)
                 .unwrap_or(F::ONE)
         })
@@ -51,8 +52,8 @@ pub fn batch_inversion_and_mul<F: PrimeField>(v: &mut [F], coeff: &F) {
     let num_elem_per_thread = max(num_elems / num_cpus_available, min_elements_per_thread);
 
     // Batch invert in parallel, without copying the vector
-    v.par_chunks_mut(num_elem_per_thread).for_each(|mut chunk| {
-        serial_batch_inversion_and_mul(&mut chunk, coeff);
+    v.par_chunks_mut(num_elem_per_thread).for_each(|chunk| {
+        serial_batch_inversion_and_mul(chunk, coeff);
     });
 }
 
@@ -91,7 +92,7 @@ fn serial_batch_inversion_and_mul<F: PrimeField>(v: &mut [F], coeff: &F) {
     {
         // tmp := tmp * f; f := tmp * s = 1/f
         let new_tmp = tmp * *f;
-        *f = tmp * &s;
+        *f = tmp * s;
         tmp = new_tmp;
     }
 }
@@ -198,7 +199,7 @@ pub fn is_power_of_2(x: usize) -> bool {
 }
 
 pub(crate) fn merge_sumcheck_polys<E: ExtensionField>(
-    prover_states: &Vec<IOPProverState<E>>,
+    prover_states: &[IOPProverState<E>],
     max_thread_id: usize,
 ) -> VirtualPolynomial<E> {
     let log2_max_thread_id = ceil_log2(max_thread_id);
@@ -209,8 +210,7 @@ pub(crate) fn merge_sumcheck_polys<E: ExtensionField>(
         let _ = mem::replace(&mut ml_ext.evaluations, {
             let evaluations = prover_states
                 .iter()
-                .enumerate()
-                .map(|(_, prover_state)| {
+                .map(|prover_state| {
                     if let FieldType::Ext(evaluations) =
                         &prover_state.poly.flattened_ml_extensions[i].evaluations
                     {
@@ -230,7 +230,7 @@ pub(crate) fn merge_sumcheck_polys<E: ExtensionField>(
 }
 
 pub(crate) fn merge_sumcheck_polys_v2<'a, E: ExtensionField>(
-    prover_states: &Vec<IOPProverStateV2<'a, E>>,
+    prover_states: &[IOPProverStateV2<'a, E>],
     max_thread_id: usize,
 ) -> VirtualPolynomialV2<'a, E> {
     let log2_max_thread_id = ceil_log2(max_thread_id);
@@ -241,8 +241,7 @@ pub(crate) fn merge_sumcheck_polys_v2<'a, E: ExtensionField>(
             log2_max_thread_id,
             prover_states
                 .iter()
-                .enumerate()
-                .map(|(_, prover_state)| {
+                .map(|prover_state| {
                     let mle = &prover_state.poly.flattened_ml_extensions[i];
                     op_mle!(
                         mle,
@@ -274,7 +273,7 @@ impl<F: AddAssign, const N: usize> AddAssign for AdditiveArray<F, N> {
     fn add_assign(&mut self, rhs: Self) {
         self.0
             .iter_mut()
-            .zip(rhs.0.into_iter())
+            .zip(rhs.0)
             .for_each(|(acc, item)| *acc += item);
     }
 }
@@ -335,7 +334,7 @@ impl<F: AddAssign> AddAssign for AdditiveVec<F> {
     fn add_assign(&mut self, rhs: Self) {
         self.0
             .iter_mut()
-            .zip(rhs.0.into_iter())
+            .zip(rhs.0)
             .for_each(|(acc, item)| *acc += item);
     }
 }

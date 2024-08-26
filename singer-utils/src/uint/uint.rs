@@ -5,7 +5,6 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 use sumcheck::util::ceil_log2;
 

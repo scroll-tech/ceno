@@ -172,38 +172,11 @@ mod test {
         let circuit = circuit_builder.finalize_circuit();
 
         // generate mock witness
-        let pc = vec![1u64, 0, 0, 0];
-        let ts = vec![3u64, 0, 0];
-        let next_pc = vec![2u64, 0, 0];
-        let prev_rd_v = vec![0, 0, 0, 0];
-        let a = vec![1u64, 1, 0, 0];
-        let b = vec![2u64, 1, 0, 0];
-        let carries = vec![0; 4];
-        let rs_id = vec![1, 2, 3];
-        let prev_rs1_ts = vec![1u64, 0, 0];
-        let prev_rs2_ts = vec![1u64, 0, 0];
-        let prev_rd_ts = vec![1u64, 0, 0];
-        let wits_in = [
-            pc,
-            ts,
-            next_pc,
-            prev_rd_v,
-            a,
-            b,
-            carries,
-            rs_id,
-            prev_rs1_ts,
-            prev_rs2_ts,
-            prev_rd_ts,
-        ]
-        .concat();
-
-        println!("wit num: {:?} vs {:?}", circuit.num_witin, wits_in.len());
         let num_instances = 1 << 2;
         let wits_in = (0..circuit.num_witin as usize)
             .map(|_| {
                 (0..num_instances)
-                    .map(|_| 1.into())
+                    .map(|_| Goldilocks::random(&mut rng))
                     .collect::<Vec<Goldilocks>>()
                     .into_mle()
                     .into()

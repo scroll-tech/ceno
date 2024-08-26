@@ -1,14 +1,18 @@
+use crate::{
+    chip_handler::{ram_handler::RAMHandler, util::cell_to_mixed, ChipHandler},
+    structs::RAMType,
+};
+use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
+use std::{cell::RefCell, rc::Rc};
 
-use crate::structs::{RAMHandler, RAMType};
+pub struct MemoryChip {}
 
-use super::{MemoryChipOperations, RAMOperations};
-
-impl<Ext: ExtensionField> MemoryChipOperations<Ext> for RAMHandler<Ext> {
-    fn mem_load(
-        &mut self,
+impl MemoryChip {
+    pub fn read<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],
         old_ts: &[CellId],
@@ -19,16 +23,22 @@ impl<Ext: ExtensionField> MemoryChipOperations<Ext> for RAMHandler<Ext> {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 RAMType::Memory as u64,
             ))],
-            offset.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(offset),
         ]
         .concat();
-        let old_ts = old_ts.iter().map(|&x| x.into()).collect_vec();
-        let cur_ts = cur_ts.iter().map(|&x| x.into()).collect_vec();
-        self.ram_load_mixed(circuit_builder, &old_ts, &cur_ts, &key, &[byte.into()]);
+        let old_ts = cell_to_mixed(old_ts);
+        let cur_ts = cell_to_mixed(cur_ts);
+        chip_handler.ram_handler.read_mixed(
+            circuit_builder,
+            &old_ts,
+            &cur_ts,
+            &key,
+            &[byte.into()],
+        );
     }
 
-    fn mem_store(
-        &mut self,
+    pub fn write<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         offset: &[CellId],
         old_ts: &[CellId],
@@ -40,12 +50,12 @@ impl<Ext: ExtensionField> MemoryChipOperations<Ext> for RAMHandler<Ext> {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 RAMType::Memory as u64,
             ))],
-            offset.iter().map(|&x| x.into()).collect_vec(),
+            cell_to_mixed(offset),
         ]
         .concat();
-        let old_ts = old_ts.iter().map(|&x| x.into()).collect_vec();
-        let cur_ts = cur_ts.iter().map(|&x| x.into()).collect_vec();
-        self.ram_store_mixed(
+        let old_ts = cell_to_mixed(old_ts);
+        let cur_ts = cell_to_mixed(cur_ts);
+        chip_handler.ram_handler.write_mixed(
             circuit_builder,
             &old_ts,
             &cur_ts,

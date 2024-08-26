@@ -3,16 +3,17 @@ use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
-use singer_utils::uint::constants::AddSubConstants;
 use singer_utils::{
     chip_handler::{
-        BytecodeChipOperations, GlobalStateChipOperations, OAMOperations, ROMOperations,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
-    structs::{PCUInt, RAMHandler, ROMHandler, TSUInt},
+    structs::{PCUInt, TSUInt},
+    uint::constants::AddSubConstants,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -43,8 +44,8 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
-        let mut ram_handler = RAMHandler::new(&challenges);
-        let mut rom_handler = ROMHandler::new(&challenges);
+
+        let mut chip_handler = ChipHandler::new(challenges.clone());
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -53,7 +54,8 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         let stack_top = phase0[Self::phase0_stack_top().start];
         let clk = phase0[Self::phase0_clk().start];
         let clk_expr = MixedCell::Cell(clk);
-        ram_handler.state_in(
+        GlobalStateChip::state_in(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
@@ -63,8 +65,9 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         );
 
         let next_pc =
-            ROMHandler::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
-        ram_handler.state_out(
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+        GlobalStateChip::state_out(
+            &mut chip_handler,
             &mut circuit_builder,
             next_pc.values(),
             stack_ts.values(), // Because there is no stack push.
@@ -74,14 +77,14 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         );
 
         // Bytecode check for (pc, jump)
-        rom_handler.bytecode_with_pc_opcode(
+        BytecodeChip::bytecode_with_pc_opcode(
+            &mut chip_handler,
             &mut circuit_builder,
             pc.values(),
             <Self as Instruction<E>>::OPCODE,
         );
 
-        let (ram_load_id, ram_store_id) = ram_handler.finalize(&mut circuit_builder);
-        let rom_id = rom_handler.finalize(&mut circuit_builder);
+        let (ram_load_id, ram_store_id, rom_id) = chip_handler.finalize(&mut circuit_builder);
         circuit_builder.configure();
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
@@ -165,6 +168,7 @@ mod test {
         );
     }
 
+    #[cfg(not(debug_assertions))]
     fn bench_jumpdest_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
@@ -224,6 +228,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn bench_jumpdest_instruction() {
         bench_jumpdest_instruction_helper::<GoldilocksExt2>(10);
     }

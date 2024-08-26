@@ -23,11 +23,11 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     fn evaluations_range(&self) -> Option<(usize, usize)>; // start offset
     fn evaluations_to_owned(self) -> FieldType<E>;
     fn merge(&mut self, rhs: Self::Output);
-    fn get_ranged_mle<'a>(
-        &'a self,
+    fn get_ranged_mle(
+        &self,
         num_range: usize,
         range_index: usize,
-    ) -> RangedMultilinearExtension<'a, E>;
+    ) -> RangedMultilinearExtension<'_, E>;
     #[deprecated = "TODO try to redesign this api for it's costly and create a new DenseMultilinearExtension "]
     fn resize_ranged(
         &self,
@@ -70,14 +70,14 @@ impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMult
     }
 }
 
-impl<E: ExtensionField> Into<DenseMultilinearExtension<E>> for Vec<Vec<E::BaseField>> {
-    fn into(self) -> DenseMultilinearExtension<E> {
-        let per_instance_size = self[0].len();
+impl<E: ExtensionField> From<Vec<Vec<E::BaseField>>> for DenseMultilinearExtension<E> {
+    fn from(val: Vec<Vec<E::BaseField>>) -> Self {
+        let per_instance_size = val[0].len();
         let next_pow2_per_instance_size = ceil_log2(per_instance_size);
-        let evaluations = self
+        let evaluations = val
             .into_iter()
             .enumerate()
-            .map(|(i, mut instance)| {
+            .flat_map(|(i, mut instance)| {
                 assert_eq!(
                     instance.len(),
                     per_instance_size,
@@ -89,7 +89,6 @@ impl<E: ExtensionField> Into<DenseMultilinearExtension<E>> for Vec<Vec<E::BaseFi
                 instance.resize(1 << next_pow2_per_instance_size, E::BaseField::ZERO);
                 instance
             })
-            .flatten()
             .collect::<Vec<E::BaseField>>();
         assert!(evaluations.len().is_power_of_two());
         let num_vars = ceil_log2(evaluations.len());
@@ -129,6 +128,14 @@ impl<E: ExtensionField> FieldType<E> {
             FieldType::Unreachable => 0,
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            FieldType::Base(content) => content.is_empty(),
+            FieldType::Ext(content) => content.is_empty(),
+            FieldType::Unreachable => true,
+        }
+    }
 }
 
 /// Stores a multilinear polynomial in dense evaluation form.
@@ -140,11 +147,13 @@ pub struct DenseMultilinearExtension<E: ExtensionField> {
     pub num_vars: usize,
 }
 
-impl<E: ExtensionField> Into<Arc<dyn MultilinearExtension<E, Output = Self>>>
-    for DenseMultilinearExtension<E>
+impl<E: ExtensionField> From<DenseMultilinearExtension<E>>
+    for Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>>
 {
-    fn into(self) -> Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>> {
-        Arc::new(self)
+    fn from(
+        mle: DenseMultilinearExtension<E>,
+    ) -> Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>> {
+        Arc::new(mle)
     }
 }
 
@@ -166,10 +175,6 @@ fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
 
 impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// This function can tell T being Field or ExtensionField and invoke respective function
-    #[tracing::instrument(
-        skip_all,
-        name = "DenseMultilinearExtension::from_evaluation_vec_smart"
-    )]
     pub fn from_evaluation_vec_smart<T: Clone + 'static>(
         num_vars: usize,
         evaluations: Vec<T>,
@@ -263,7 +268,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             for e in multiplicands.iter_mut() {
                 let val = E::BaseField::random(&mut rng);
                 e.push(val);
-                product = product * &val;
+                product *= val
             }
             sum += product;
         }
@@ -309,18 +314,20 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         op_mle!(self, |evaluations| {
             DenseMultilinearExtension::from_evaluations_ext_vec(
                 self.num_vars(),
-                evaluations.iter().map(|f| E::from(*f)).collect(),
+                evaluations.iter().cloned().map(E::from).collect(),
             )
         })
     }
 }
 
+#[allow(clippy::wrong_self_convention)]
 pub trait IntoInstanceIter<'a, T> {
     type Item;
     type IntoIter: Iterator<Item = Self::Item>;
     fn into_instance_iter(&self, n_instances: usize) -> Self::IntoIter;
 }
 
+#[allow(clippy::wrong_self_convention)]
 pub trait IntoInstanceIterMut<'a, T> {
     type ItemMut;
     type IntoIterMut: Iterator<Item = Self::ItemMut>;
@@ -397,7 +404,7 @@ impl<'a, T: 'a> IntoInstanceIterMut<'a, T> for Vec<T> {
             evaluations: self,
             start: 0,
             offset,
-            origin_len: origin_len,
+            origin_len,
         }
     }
 }
@@ -720,15 +727,15 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
     }
 
     /// get ranged multiliear extention
-    fn get_ranged_mle<'a>(
-        &'a self,
+    fn get_ranged_mle(
+        &self,
         num_range: usize,
         range_index: usize,
-    ) -> RangedMultilinearExtension<'a, E> {
+    ) -> RangedMultilinearExtension<'_, E> {
         assert!(num_range > 0);
         let offset = self.evaluations.len() / num_range;
         let start = offset * range_index;
-        RangedMultilinearExtension::new(&self, start, offset)
+        RangedMultilinearExtension::new(self, start, offset)
     }
 
     /// resize to new size (num_instances * new_size_per_instance / num_range)

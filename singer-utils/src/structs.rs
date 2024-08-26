@@ -38,19 +38,6 @@ pub struct ChipChallenges {
     pub(super) record_item_rlc: ChallengeId,
 }
 
-#[derive(Clone, Debug)]
-pub struct RAMHandler<Ext: ExtensionField> {
-    pub(crate) rd_records: Vec<ExtCellId<Ext>>,
-    pub(crate) wt_records: Vec<ExtCellId<Ext>>,
-    pub(crate) challenge: ChipChallenges,
-}
-
-#[derive(Clone, Debug)]
-pub struct ROMHandler<Ext: ExtensionField> {
-    pub(crate) records: Vec<ExtCellId<Ext>>,
-    pub(crate) challenge: ChipChallenges,
-}
-
 pub type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
 pub type PCUInt = UInt64;
 pub type TSUInt = UInt<48, 48>;

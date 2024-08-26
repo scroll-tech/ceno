@@ -1,13 +1,17 @@
+use crate::{
+    chip_handler::{ram_handler::RAMHandler, util::cell_to_mixed, ChipHandler},
+    structs::RAMType,
+};
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
+use itertools::Itertools;
+use simple_frontend::structs::{Cell, CellId, CircuitBuilder, MixedCell};
+use std::{cell::RefCell, rc::Rc};
 
-use crate::structs::{RAMHandler, RAMType};
+pub struct GlobalStateChip {}
 
-use super::{GlobalStateChipOperations, OAMOperations};
-
-impl<Ext: ExtensionField> GlobalStateChipOperations<Ext> for RAMHandler<Ext> {
-    fn state_in(
-        &mut self,
+impl GlobalStateChip {
+    pub fn state_in<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         stack_ts: &[CellId],
@@ -19,17 +23,20 @@ impl<Ext: ExtensionField> GlobalStateChipOperations<Ext> for RAMHandler<Ext> {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 RAMType::GlobalState as u64,
             ))],
-            pc.iter().map(|&x| x.into()).collect::<Vec<_>>(),
-            stack_ts.iter().map(|&x| x.into()).collect::<Vec<_>>(),
-            memory_ts.iter().map(|&x| x.into()).collect::<Vec<_>>(),
+            cell_to_mixed(pc),
+            cell_to_mixed(stack_ts),
+            cell_to_mixed(memory_ts),
             vec![stack_top.into(), clk.into()],
         ]
         .concat();
-        self.oam_load_mixed(circuit_builder, &[], &key, &[]);
+
+        chip_handler
+            .ram_handler
+            .read_oam_mixed(circuit_builder, &[], &key, &[]);
     }
 
-    fn state_out(
-        &mut self,
+    pub fn state_out<Ext: ExtensionField>(
+        chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,
         pc: &[CellId],
         stack_ts: &[CellId],
@@ -41,12 +48,15 @@ impl<Ext: ExtensionField> GlobalStateChipOperations<Ext> for RAMHandler<Ext> {
             vec![MixedCell::Constant(Ext::BaseField::from(
                 RAMType::GlobalState as u64,
             ))],
-            pc.iter().map(|&x| x.into()).collect::<Vec<_>>(),
-            stack_ts.iter().map(|&x| x.into()).collect::<Vec<_>>(),
-            memory_ts.iter().map(|&x| x.into()).collect::<Vec<_>>(),
+            cell_to_mixed(pc),
+            cell_to_mixed(stack_ts),
+            cell_to_mixed(memory_ts),
             vec![stack_top.into(), clk.into()],
         ]
         .concat();
-        self.oam_store_mixed(circuit_builder, &[], &key, &[]);
+
+        chip_handler
+            .ram_handler
+            .write_oam_mixed(circuit_builder, &[], &key, &[]);
     }
 }

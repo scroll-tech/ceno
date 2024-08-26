@@ -62,7 +62,6 @@ fn prepare_input<E: ExtensionField>(
 
     let asserted_sum = commutative_op_mle_pair!(|f1, g1| {
         (0..f1.len())
-            .into_iter()
             .map(|i| f1[i] * g1[i])
             .fold(E::ZERO, |acc, item| acc + item)
     });

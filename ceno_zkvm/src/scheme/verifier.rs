@@ -250,6 +250,8 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 
 pub struct TowerVerify;
 
+pub type TowerVerifyResult<E> = Result<(Point<E>, Vec<E>, Vec<E>, Vec<E>), ZKVMError>;
+
 impl TowerVerify {
     // TODO review hyper parameter usage and trust less from prover
     pub fn verify<E: ExtensionField>(
@@ -259,7 +261,7 @@ impl TowerVerify {
         expected_max_round: usize,
         num_fanin: usize,
         transcript: &mut Transcript<E>,
-    ) -> Result<(Point<E>, Vec<E>, Vec<E>, Vec<E>), ZKVMError> {
+    ) -> TowerVerifyResult<E> {
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
         // TODO mayber give a better naming?
         assert_eq!(num_fanin, 2);
