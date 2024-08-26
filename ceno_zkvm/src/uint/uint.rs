@@ -5,6 +5,7 @@ use crate::{
     expression::{Expression, ToExpr, WitIn},
     utils::add_one_to_big_num,
 };
+use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -34,7 +35,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                 (0..Self::NUM_CELLS)
                     .map(|_| {
                         let w = circuit_builder.create_witin();
-                        circuit_builder.assert_u16(w.expr()).unwrap();
+                        circuit_builder.assert_ux::<C>(w.expr()).unwrap();
                         w
                     })
                     .collect_vec(),
@@ -57,7 +58,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                 (0..Self::NUM_CELLS)
                     .map(|_| {
                         let w = circuit_builder.create_witin();
-                        circuit_builder.assert_u16(w.expr()).unwrap();
+                        circuit_builder.assert_ux::<C>(w.expr()).unwrap();
                         w
                     })
                     .collect_vec(),
@@ -71,7 +72,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             self.carries = (0..Self::NUM_CELLS)
                 .map(|_| {
                     let w = circuit_builder.create_witin();
-                    circuit_builder.assert_u16(w.expr()).unwrap();
+                    circuit_builder.assert_ux::<C>(w.expr()).unwrap();
                     Some(w)
                 })
                 .collect();

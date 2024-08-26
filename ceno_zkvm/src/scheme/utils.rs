@@ -329,7 +329,7 @@ pub(crate) fn eval_by_expr<E: ExtensionField>(
         &|witness_id| witnesses[witness_id as usize],
         &|scalar| scalar.into(),
         &|challenge_id, pow, scalar, offset| {
-            // TODO cache challenge power to be aquire once for each power
+            // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
             challenge.pow([pow as u64]) * scalar + offset
         },

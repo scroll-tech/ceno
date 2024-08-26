@@ -125,7 +125,18 @@ impl<E: ExtensionField> CircuitBuilder<E> {
         self.require_zero(Expression::from(1) - expr)
     }
 
-    pub(crate) fn assert_u5(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
+    pub(crate) fn assert_ux<const C: usize>(
+        &mut self,
+        expr: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        match C {
+            16 => self.assert_u16(expr),
+            5 => self.assert_u5(expr),
+            _ => panic!("Unsupported bit range"),
+        }
+    }
+
+    fn assert_u5(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
         let items: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
             expr,
@@ -135,7 +146,7 @@ impl<E: ExtensionField> CircuitBuilder<E> {
         Ok(())
     }
 
-    pub(crate) fn assert_u16(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
+    fn assert_u16(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
         let items: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
             expr,

@@ -81,19 +81,18 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let rs1_id = circuit_builder.create_witin();
     let rs2_id = circuit_builder.create_witin();
     let rd_id = circuit_builder.create_witin();
-    circuit_builder.assert_u5(rs1_id.expr())?;
-    circuit_builder.assert_u5(rs2_id.expr())?;
-    circuit_builder.assert_u5(rd_id.expr())?;
+    circuit_builder.assert_ux::<5>(rs1_id.expr())?;
+    circuit_builder.assert_ux::<5>(rs2_id.expr())?;
+    circuit_builder.assert_ux::<5>(rd_id.expr())?;
 
     // TODO remove me, this is just for testing degree > 1 sumcheck in main constraints
-    circuit_builder.require_zero(rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr())?;
+    // circuit_builder.require_zero(rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr())?;
 
     let mut prev_rs1_ts = TSUInt::new(circuit_builder);
     let mut prev_rs2_ts = TSUInt::new(circuit_builder);
     let mut prev_rd_ts = TSUInt::new(circuit_builder);
 
     let mut ts = circuit_builder.register_read(&rs1_id, &mut prev_rs1_ts, &mut ts, &addend_0)?;
-
     let mut ts = circuit_builder.register_read(&rs2_id, &mut prev_rs2_ts, &mut ts, &addend_1)?;
 
     let ts = circuit_builder.register_write(
@@ -173,11 +172,38 @@ mod test {
         let circuit = circuit_builder.finalize_circuit();
 
         // generate mock witness
+        let pc = vec![1u64, 0, 0, 0];
+        let ts = vec![3u64, 0, 0];
+        let next_pc = vec![2u64, 0, 0];
+        let prev_rd_v = vec![0, 0, 0, 0];
+        let a = vec![1u64, 1, 0, 0];
+        let b = vec![2u64, 1, 0, 0];
+        let carries = vec![0; 4];
+        let rs_id = vec![1, 2, 3];
+        let prev_rs1_ts = vec![1u64, 0, 0];
+        let prev_rs2_ts = vec![1u64, 0, 0];
+        let prev_rd_ts = vec![1u64, 0, 0];
+        let wits_in = [
+            pc,
+            ts,
+            next_pc,
+            prev_rd_v,
+            a,
+            b,
+            carries,
+            rs_id,
+            prev_rs1_ts,
+            prev_rs2_ts,
+            prev_rd_ts,
+        ]
+        .concat();
+
+        println!("wit num: {:?} vs {:?}", circuit.num_witin, wits_in.len());
         let num_instances = 1 << 2;
         let wits_in = (0..circuit.num_witin as usize)
             .map(|_| {
                 (0..num_instances)
-                    .map(|_| Goldilocks::random(&mut rng))
+                    .map(|_| 1.into())
                     .collect::<Vec<Goldilocks>>()
                     .into_mle()
                     .into()
