@@ -128,8 +128,8 @@ impl<'a, E: ExtensionField> MockProver<E> {
             }
         }
 
-        let mut t = vec![];
-        load_u5_table(&mut t, cb, challenge);
+        let mut table_vec = vec![];
+        load_u5_table(&mut table_vec, cb, challenge);
 
         // Lookup expressions
         for (expr, name) in cb
@@ -143,7 +143,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
 
             // Check each lookup expr exists in t vec
             for element in expr_evaluated {
-                if !t.contains(element) {
+                if !table_vec.contains(element) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
                         evaluated: *element,
