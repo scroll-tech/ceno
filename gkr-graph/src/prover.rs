@@ -1,9 +1,3 @@
-use ff_ext::ExtensionField;
-use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
-use itertools::{izip, Itertools};
-use std::mem;
-use transcript::Transcript;
-
 use crate::{
     error::GKRGraphError,
     structs::{
@@ -11,11 +5,16 @@ use crate::{
         NodeOutputType, PredType, TargetEvaluations,
     },
 };
+use ff_ext::ExtensionField;
+use gkr::structs::PointAndEval;
+use itertools::{izip, Itertools};
+use std::mem;
+use transcript::Transcript;
 
 impl<E: ExtensionField> IOPProverState<E> {
     pub fn prove(
         circuit: &CircuitGraph<E>,
-        circuit_witness: &CircuitGraphWitness<E::BaseField>,
+        circuit_witness: &CircuitGraphWitness<E>,
         target_evals: &TargetEvaluations<E>,
         transcript: &mut Transcript<E>,
         expected_max_thread_id: usize,
@@ -31,7 +30,9 @@ impl<E: ExtensionField> IOPProverState<E> {
             .collect_vec();
         izip!(&circuit.targets, &target_evals.0).for_each(|(target, eval)| match target {
             NodeOutputType::OutputLayer(id) => output_evals[*id].push(eval.clone()),
-            NodeOutputType::WireOut(id, _) => wit_out_evals[*id].push(eval.clone()),
+            NodeOutputType::WireOut(id, wire_out_id) => {
+                wit_out_evals[*id][*wire_out_id as usize] = eval.clone()
+            }
         });
 
         let gkr_proofs = izip!(&circuit.nodes, &circuit_witness.node_witnesses)
@@ -61,10 +62,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     // }
 
                     for (witness_id, point_and_eval) in wit_out_evals[node.id].iter().enumerate() {
-                        let mle = witness.witness_out_ref()[witness_id]
-                            .instances
-                            .as_slice()
-                            .original_mle();
+                        let mle = &witness.witness_out_ref()[witness_id];
                         debug_assert_eq!(
                             mle.evaluate(&point_and_eval.point),
                             point_and_eval.eval,
@@ -96,10 +94,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                         PredType::Source => {
                             // sanity check for input poly evaluation
                             if cfg!(debug_assertions) {
-                                let input_layer_poly =  witness.witness_in_ref()[wire_id]
-                                    .instances
-                                    .as_slice()
-                                    .original_mle();
+                                let input_layer_poly = &witness.witness_in_ref()[wire_id];
                                 debug_assert_eq!(
                                     input_layer_poly.evaluate(&point_and_eval.point),
                                     point_and_eval.eval,

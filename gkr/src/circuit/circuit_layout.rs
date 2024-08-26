@@ -282,10 +282,7 @@ impl<E: ExtensionField> Circuit<E> {
                     || circuit_builder.n_witness_out() == 1 && output_copy_to[0] != seg
                     || !output_assert_const.is_empty()
                 {
-                    curr_sc_steps.extend([
-                        SumcheckStepType::OutputPhase1Step1,
-                        SumcheckStepType::OutputPhase1Step2,
-                    ]);
+                    curr_sc_steps.extend([SumcheckStepType::OutputPhase1Step1]);
                 }
             } else {
                 let last_layer = &layers[(layer_id - 1) as usize];

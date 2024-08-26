@@ -24,6 +24,7 @@ use crate::{
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
+use multilinear_extensions::mle::MultilinearExtension;
 use query_phase::{
     batch_prover_query_phase, batch_verifier_query_phase, prover_query_phase,
     simple_batch_prover_query_phase, simple_batch_verifier_query_phase, verifier_query_phase,

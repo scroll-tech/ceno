@@ -3,7 +3,9 @@ use std::{array, mem, sync::Arc};
 use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
-use multilinear_extensions::{commutative_op_mle_pair, op_mle, virtual_poly::VirtualPolynomial};
+use multilinear_extensions::{
+    commutative_op_mle_pair, mle::MultilinearExtension, op_mle, virtual_poly::VirtualPolynomial,
+};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
@@ -122,7 +124,11 @@ impl<E: ExtensionField> IOPProverState<E> {
             } else {
                 #[cfg(not(feature = "non_pow2_rayon_thread"))]
                 {
-                    panic!("rayon global thread pool size {} mismatch with desired poly size {}, add --features non_pow2_rayon_thread", rayon::current_num_threads(), polys.len());
+                    panic!(
+                        "rayon global thread pool size {} mismatch with desired poly size {}, add --features non_pow2_rayon_thread",
+                        rayon::current_num_threads(),
+                        polys.len()
+                    );
                 }
 
                 #[cfg(feature = "non_pow2_rayon_thread")]
@@ -224,9 +230,8 @@ impl<E: ExtensionField> IOPProverState<E> {
                         .map(|challenge| challenge.elements)
                         .collect(),
                     proofs: prover_msgs,
-                    ..Default::default()
                 },
-                prover_state.into(),
+                prover_state,
             );
         }
 
@@ -277,9 +282,8 @@ impl<E: ExtensionField> IOPProverState<E> {
                 .map(|challenge| challenge.elements)
                 .collect(),
                 proofs: prover_msgs,
-                ..Default::default()
             },
-            prover_state.into(),
+            prover_state,
         )
     }
 
@@ -353,7 +357,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                 self.poly
                     .flattened_ml_extensions
                     .iter_mut()
-                    .for_each(|f| *f = f.fix_variables(&[r.elements]).into());
+                    .for_each(|f| *f = Arc::new(f.fix_variables(&[r.elements])));
             } else {
                 self.poly
                     .flattened_ml_extensions
@@ -386,7 +390,6 @@ impl<E: ExtensionField> IOPProverState<E> {
                         op_mle! {
                             |f| {
                                 (0..f.len())
-                                    .into_iter()
                                     .step_by(2)
                                     .fold(AdditiveArray::<E, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
                                             acc.0[0] += f[b];
@@ -404,7 +407,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             &self.poly.flattened_ml_extensions[products[1]],
                         );
                         commutative_op_mle_pair!(
-                            |f, g| (0..f.len()).into_iter().step_by(2).fold(
+                            |f, g| (0..f.len()).step_by(2).fold(
                                 AdditiveArray::<E, 3>(array::from_fn(|_| 0.into())),
                                 |mut acc, b| {
                                     acc.0[0] += f[b] * g[b];
@@ -446,7 +449,6 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         IOPProverMessage {
             evaluations: products_sum,
-            ..Default::default()
         }
     }
 
@@ -486,7 +488,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             return (
                 IOPProof::default(),
                 IOPProverState {
-                    poly: poly,
+                    poly,
                     ..Default::default()
                 },
             );
@@ -543,9 +545,8 @@ impl<E: ExtensionField> IOPProverState<E> {
                     .map(|challenge| challenge.elements)
                     .collect(),
                 proofs: prover_msgs,
-                ..Default::default()
             },
-            prover_state.into(),
+            prover_state,
         )
     }
 
@@ -722,7 +723,6 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         IOPProverMessage {
             evaluations: products_sum,
-            ..Default::default()
         }
     }
 }

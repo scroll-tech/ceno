@@ -2,6 +2,7 @@
 pub mod local_thread_pool;
 mod macros;
 mod prover;
+mod prover_v2;
 pub mod structs;
 pub mod util;
 mod verifier;

@@ -1,8 +1,8 @@
 use ff::Field;
 use ff_ext::ExtensionField;
 use gkr::{
-    structs::{Circuit, LayerWitness, PointAndEval},
-    utils::MultilinearExtensionFromVectors,
+    structs::{Circuit, PointAndEval},
+    util::ceil_log2,
 };
 use gkr_graph::{
     error::GKRGraphError,
@@ -12,6 +12,7 @@ use gkr_graph::{
     },
 };
 use goldilocks::{Goldilocks, GoldilocksExt2};
+use multilinear_extensions::mle::DenseMultilinearExtension;
 use simple_frontend::structs::{ChallengeId, CircuitBuilder, MixedCell};
 use std::sync::Arc;
 use transcript::Transcript;
@@ -153,7 +154,7 @@ fn main() -> Result<(), GKRGraphError> {
                                     circuit: &Arc<Circuit<_>>,
                                     preds: Vec<PredType>,
                                     challenges: Vec<_>,
-                                    sources: Vec<LayerWitness<_>>,
+                                    sources: Vec<DenseMultilinearExtension<_>>,
                                     num_instances: usize|
      -> Result<usize, GKRGraphError> {
         let prover_node_id = prover_graph_builder.add_node_with_witness(
@@ -174,10 +175,10 @@ fn main() -> Result<(), GKRGraphError> {
         &input_circuit,
         vec![PredType::Source],
         challenge,
-        // input_circuit_wires_in.clone()
-        vec![LayerWitness {
-            instances: vec![input_circuit_wires_in.clone()],
-        }],
+        vec![DenseMultilinearExtension::from_evaluations_vec(
+            ceil_log2(input_circuit_wires_in.len()),
+            input_circuit_wires_in.clone(),
+        )],
         1,
     )?;
     let selector = add_node_and_witness("selector", &prefix_selector, vec![], vec![], vec![], 1)?;
@@ -191,7 +192,7 @@ fn main() -> Result<(), GKRGraphError> {
             PredType::PredWire(NodeOutputType::OutputLayer(selector)),
         ],
         vec![],
-        vec![LayerWitness::default(); 2],
+        vec![DenseMultilinearExtension::default(); 2],
         round_input_size >> 1,
     )?;
     round_input_size >>= 1;
@@ -203,7 +204,7 @@ fn main() -> Result<(), GKRGraphError> {
                 &frac_sum_circuit,
                 vec![PredType::PredWire(frac_sum_input)],
                 vec![],
-                vec![LayerWitness::default(); 1],
+                vec![DenseMultilinearExtension::default(); 1],
                 round_input_size >> 1,
             )?,
             0,
@@ -237,9 +238,6 @@ fn main() -> Result<(), GKRGraphError> {
         .last()
         .unwrap()
         .output_layer_witness_ref()
-        .instances
-        .as_slice()
-        .original_mle()
         .evaluate(&output_point);
     let proof = IOPProverState::prove(
         &prover_graph,

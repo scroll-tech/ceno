@@ -6,7 +6,7 @@ use goldilocks::GoldilocksExt2;
 type E = GoldilocksExt2;
 
 use crate::{
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
     util::bit_decompose,
     virtual_poly::{build_eq_x_r, VirtualPolynomial},
 };

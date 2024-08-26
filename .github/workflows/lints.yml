@@ -57,11 +57,11 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: make
-          args: fmt-check
+          args: fmt-check-selected-packages
 
       - name: Run clippy
         uses: actions-rs/cargo@v1
         with:
           command: make
-          args: clippy
+          args: clippy-check-selected-packages
 

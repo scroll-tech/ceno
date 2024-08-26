@@ -52,7 +52,7 @@ impl<E: ExtensionField> InstructionGraph<E> for ReturnInstruction {
         graph_builder: &mut CircuitGraphBuilder<E>,
         chip_builder: &mut SingerChipBuilder<E>,
         inst_circuits: &[InstCircuit<E>],
-        mut sources: Vec<CircuitWiresIn<E::BaseField>>,
+        mut sources: Vec<CircuitWiresIn<E>>,
         real_challenges: &[E],
         _: usize,
         params: &SingerParams,

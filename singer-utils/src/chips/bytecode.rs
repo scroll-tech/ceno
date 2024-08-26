@@ -1,10 +1,12 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
+use ff::Field;
 use ff_ext::ExtensionField;
-use gkr::structs::{Circuit, LayerWitness};
+use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
-use simple_frontend::structs::{CircuitBuilder, MixedCell};
+use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
+use simple_frontend::structs::CircuitBuilder;
 use sumcheck::util::ceil_log2;
 
 use crate::{
@@ -36,8 +38,8 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
 
 /// Add bytecode table circuit and witness to the circuit graph. Return node id
 /// and lookup instance log size.
-pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
-    builder: &mut CircuitGraphBuilder<E>,
+pub(crate) fn construct_bytecode_table_and_witness<'a, E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<'a, E>,
     bytecode: &[u8],
     challenges: &ChipChallenges,
     real_challenges: &[E],
@@ -55,10 +57,19 @@ pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
     )?;
 
     let wits_in = vec![
-        LayerWitness {
-            instances: PCUInt::counter_vector::<E::BaseField>(bytecode.len().next_power_of_two())
-        };
-        2
+        PCUInt::counter_vector::<E::BaseField>(bytecode.len().next_power_of_two())
+            .into_iter()
+            .flatten()
+            .collect_vec()
+            .into_mle(),
+        {
+            let len = bytecode.len().next_power_of_two();
+            let bytecode = bytecode
+                .iter()
+                .map(|x| E::BaseField::from(*x as u64))
+                .collect_vec();
+            bytecode.into_mle()
+        },
     ];
 
     let table_node_id = builder.add_node_with_witness(

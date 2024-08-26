@@ -11,6 +11,7 @@ use gkr::{
 };
 use goldilocks::GoldilocksExt2;
 use itertools::{izip, Itertools};
+use multilinear_extensions::mle::IntoMLE;
 use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
@@ -48,17 +49,25 @@ fn main() {
         let all_zero = vec![
             vec![<GoldilocksExt2 as ExtensionField>::BaseField::ZERO; 25 * 64],
             vec![<GoldilocksExt2 as ExtensionField>::BaseField::ZERO; 17 * 64],
-        ];
+        ]
+        .into_iter()
+        .map(|wit_in| wit_in.into_mle())
+        .collect();
         let all_one = vec![
             vec![<GoldilocksExt2 as ExtensionField>::BaseField::ONE; 25 * 64],
             vec![<GoldilocksExt2 as ExtensionField>::BaseField::ZERO; 17 * 64],
-        ];
+        ]
+        .into_iter()
+        .map(|wit_in| wit_in.into_mle())
+        .collect();
         let mut witness = CircuitWitness::new(&circuit, Vec::new());
         witness.add_instance(&circuit, all_zero);
         witness.add_instance(&circuit, all_one);
 
         izip!(
-            &witness.witness_out_ref()[0].instances,
+            witness.witness_out_ref()[0]
+                .get_base_field_vec()
+                .chunks(256),
             [[0; 25], [u64::MAX; 25]]
         )
         .for_each(|(wire_out, state)| {
@@ -93,11 +102,11 @@ fn main() {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     for log2_n in 0..12 {
-        let Some((proof, output_mle)) =
+        let Some((proof, witness)) =
             prove_keccak256::<GoldilocksExt2>(log2_n, &circuit, (1 << log2_n).min(max_thread_id))
         else {
             return;
         };
-        assert!(verify_keccak256(log2_n, output_mle, proof, &circuit).is_ok());
+        assert!(verify_keccak256(log2_n, &witness.witness_out_ref()[0], proof, &circuit).is_ok());
     }
 }

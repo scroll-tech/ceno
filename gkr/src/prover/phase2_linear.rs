@@ -5,18 +5,17 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension,
-    virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
+    virtual_poly::build_eq_x_r_vec,
+    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
 };
 use transcript::Transcript;
 
 use crate::{
     circuit::EvaluateConstant,
+    prover::SumcheckStateV2,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
-    utils::MultilinearExtensionFromVectors,
 };
-
-use super::SumcheckState;
 
 // Prove the computation in the current layer for data parallel circuits.
 // The number of terms depends on the gate.
@@ -35,7 +34,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     pub(super) fn prove_and_update_state_linear_phase2_step1(
         &mut self,
         circuit: &Circuit<E>,
-        circuit_witness: &CircuitWitness<E::BaseField>,
+        circuit_witness: &CircuitWitness<E>,
         transcript: &mut Transcript<E>,
     ) -> IOPProverStepMessage<E> {
         let timer = start_timer!(|| "Prover sumcheck phase 2 step 1");
@@ -50,12 +49,20 @@ impl<E: ExtensionField> IOPProverState<E> {
         let challenges = &circuit_witness.challenges;
 
         let f1_g1 = || {
+            assert_eq!(
+                circuit_witness.layers_ref()[self.layer_id as usize + 1].num_vars() - hi_num_vars,
+                lo_in_num_vars,
+                "next layer num var {} - hi_num_vars {} != lo_in_num_vars {}",
+                circuit_witness.layers_ref()[self.layer_id as usize + 1].num_vars(),
+                hi_num_vars,
+                lo_in_num_vars
+            );
+
             // f1(x1) = layers[i + 1](rt || x1)
-            let layer_in_vec = circuit_witness.layers[self.layer_id as usize + 1]
-                .instances
-                .as_slice();
-            let mut f1 = layer_in_vec.mle(lo_in_num_vars, hi_num_vars);
-            Arc::make_mut(&mut f1).fix_high_variables_in_place(&hi_point);
+            let f1: ArcMultilinearExtension<E> = Arc::new(
+                circuit_witness.layers_ref()[self.layer_id as usize + 1]
+                    .fix_high_variables(&hi_point),
+            );
 
             // g1(x1) = add(ry, x1)
             let g1 = {
@@ -63,20 +70,28 @@ impl<E: ExtensionField> IOPProverState<E> {
                 layer.adds.iter().for_each(|gate| {
                     g1[gate.idx_in[0]] += eq_y_ry[gate.idx_out] * &gate.scalar.eval(&challenges);
                 });
+
                 DenseMultilinearExtension::from_evaluations_ext_vec(lo_in_num_vars, g1)
             };
             (vec![f1], vec![g1.into()])
         };
 
-        let (mut f1_vec, mut g1_vec) = f1_g1();
+        let (mut f1_vec, mut g1_vec): (
+            Vec<ArcMultilinearExtension<E>>,
+            Vec<ArcDenseMultilinearExtension<E>>,
+        ) = f1_g1();
 
         // f1'^{(j)}(x1) = subset[j][i](rt || x1)
         // g1'^{(j)}(x1) = paste_from[j](ry, x1)
-        let paste_from_sources = circuit_witness.layers_ref();
         let old_wire_id = |old_layer_id: usize, subset_wire_id: usize| -> usize {
             circuit.layers[old_layer_id].copy_to[&self.layer_id][subset_wire_id]
         };
         layer.paste_from.iter().for_each(|(&j, paste_from)| {
+            let paste_from_sources = circuit_witness.layers_ref()[j as usize].get_base_field_vec();
+            let layer_per_instance_size =
+                circuit_witness.layers_ref()[j as usize].evaluations().len()
+                    / circuit_witness.n_instances();
+
             let mut f1_j = vec![0.into(); 1 << (lo_in_num_vars + hi_num_vars)];
             let mut g1_j = vec![E::ZERO; 1 << lo_in_num_vars];
 
@@ -84,12 +99,12 @@ impl<E: ExtensionField> IOPProverState<E> {
                 .iter()
                 .enumerate()
                 .for_each(|(subset_wire_id, &new_wire_id)| {
+                    // TODO seems cache unfriendly if iterating from s
                     for s in 0..(1 << hi_num_vars) {
+                        let instance_start_index = layer_per_instance_size * s;
                         f1_j[(s << lo_in_num_vars) ^ subset_wire_id] = paste_from_sources
-                            [j as usize]
-                            .instances[s][old_wire_id(j as usize, subset_wire_id)];
+                            [instance_start_index + old_wire_id(j as usize, subset_wire_id)];
                     }
-
                     g1_j[subset_wire_id] += eq_y_ry[new_wire_id];
                 });
             f1_vec.push({
@@ -98,7 +113,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     f1_j,
                 );
                 f1_j.fix_high_variables_in_place(&hi_point);
-                f1_j.into()
+                Arc::new(f1_j)
             });
             g1_vec.push(
                 DenseMultilinearExtension::from_evaluations_ext_vec(lo_in_num_vars, g1_j).into(),
@@ -106,15 +121,15 @@ impl<E: ExtensionField> IOPProverState<E> {
         });
 
         // sumcheck: sigma = \sum_{x1} f1(x1) * g1(x1) + \sum_j f1'_j(x1) * g1'_j(x1)
-        let mut virtual_poly_1 = VirtualPolynomial::new(lo_in_num_vars);
+        let mut virtual_poly_1 = VirtualPolynomialV2::new(lo_in_num_vars);
         for (f1_j, g1_j) in izip!(f1_vec.into_iter(), g1_vec.into_iter()) {
-            let mut tmp = VirtualPolynomial::new_from_mle(f1_j, E::BaseField::ONE);
+            let mut tmp = VirtualPolynomialV2::new_from_mle(f1_j, E::ONE);
             tmp.mul_by_mle(g1_j, E::BaseField::ONE);
             virtual_poly_1.merge(&tmp);
         }
 
         let (sumcheck_proof_1, prover_state) =
-            SumcheckState::prove_parallel(virtual_poly_1, transcript);
+            SumcheckStateV2::prove_parallel(virtual_poly_1, transcript);
         let eval_point_1 = sumcheck_proof_1.point.clone();
         let (f1_vec, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()

@@ -13,7 +13,7 @@ use sumcheck::{structs::IOPProverState, util::ceil_log2};
 use goldilocks::GoldilocksExt2;
 use multilinear_extensions::{
     commutative_op_mle_pair,
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::VirtualPolynomial,
 };
 use transcript::Transcript;
@@ -62,7 +62,6 @@ fn prepare_input<E: ExtensionField>(
 
     let asserted_sum = commutative_op_mle_pair!(|f1, g1| {
         (0..f1.len())
-            .into_iter()
             .map(|i| f1[i] * g1[i])
             .fold(E::ZERO, |acc, item| acc + item)
     });
@@ -84,7 +83,7 @@ const RAYON_NUM_THREADS: usize = 8;
 fn sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    for nv in 24..25 {
+    for nv in [13, 14, 15, 16].into_iter() {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("sumcheck_nv_{}", nv));
         group.sample_size(NUM_SAMPLES);
@@ -122,7 +121,7 @@ fn sumcheck_fn(c: &mut Criterion) {
 fn devirgo_sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    for nv in 24..25 {
+    for nv in [13, 14, 15, 16].into_iter() {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("devirgo_nv_{}", nv));
         group.sample_size(NUM_SAMPLES);

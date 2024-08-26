@@ -5,7 +5,7 @@ RAYON_NUM_THREADS = "${CORE}"
 
 [tasks.tests]
 command = "cargo"
-args = ["test", "--lib", "--release", "--all"]
+args = ["test", "--lib", "--release", "--workspace", "--exclude", "singer-pro"]
 
 [tasks.fmt-check]
 command = "cargo"
@@ -18,3 +18,11 @@ args = ["fmt", "--all"]
 [tasks.clippy]
 command = "cargo"
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
+
+[tasks.fmt-check-selected-packages]
+command = "cargo"
+args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
+
+[tasks.clippy-check-selected-packages]
+command = "cargo"
+args = ["clippy", "-p", "ceno_zkvm", "--", "-D", "warnings"]

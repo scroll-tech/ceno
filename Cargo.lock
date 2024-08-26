@@ -251,6 +251,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8cd6604a82acf3039f1144f54b8eb34e91ffba622051189e71b781822d5ee1f5"
 
 [[package]]
+name = "ceno_zkvm"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "cfg-if",
+ "const_env",
+ "criterion",
+ "ff",
+ "ff_ext",
+ "goldilocks",
+ "itertools 0.12.1",
+ "multilinear_extensions",
+ "paste",
+ "pprof",
+ "rayon",
+ "serde",
+ "strum 0.25.0",
+ "strum_macros 0.25.3",
+ "sumcheck",
+ "tracing",
+ "tracing-flame",
+ "tracing-subscriber",
+ "transcript",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1638,6 +1664,7 @@ dependencies = [
  "gkr-graph",
  "goldilocks",
  "itertools 0.12.1",
+ "multilinear_extensions",
  "simple-frontend",
  "strum 0.26.1",
  "strum_macros 0.26.1",

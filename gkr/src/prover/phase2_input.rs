@@ -3,8 +3,9 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
-    virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
+    virtual_poly::build_eq_x_r_vec,
+    virtual_poly_v2::VirtualPolynomialV2,
 };
 #[cfg(feature = "parallel")]
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -14,7 +15,7 @@ use transcript::Transcript;
 
 use crate::{
     izip_parallizable,
-    prover::SumcheckState,
+    prover::SumcheckStateV2,
     structs::{Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval},
 };
 
@@ -33,7 +34,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     pub(super) fn prove_and_update_state_input_phase2_step1(
         &mut self,
         circuit: &Circuit<E>,
-        circuit_witness: &CircuitWitness<E::BaseField>,
+        circuit_witness: &CircuitWitness<E>,
         transcript: &mut Transcript<E>,
     ) -> IOPProverStepMessage<E> {
         let timer = start_timer!(|| "Prover sumcheck input phase 2 step 1");
@@ -54,17 +55,21 @@ impl<E: ExtensionField> IOPProverState<E> {
         ) = izip_parallizable!(paste_from_wit_in)
             .enumerate()
             .map(|(j, (l, r))| {
+                let wit_in = circuit_witness.witness_in_ref()[j].get_base_field_vec();
+                let per_instance_size = wit_in.len() / circuit_witness.n_instances();
                 let mut f = vec![0.into(); 1 << (max_lo_in_num_vars + hi_num_vars)];
                 let mut g = vec![E::ZERO; 1 << max_lo_in_num_vars];
 
                 for new_wire_id in *l..*r {
                     let subset_wire_id = new_wire_id - l;
                     for s in 0..(1 << hi_num_vars) {
+                        let instance_start_index = s * per_instance_size;
                         f[(s << max_lo_in_num_vars) ^ subset_wire_id] =
-                            wits_in[j as usize].instances[s][subset_wire_id];
+                            wit_in[instance_start_index + subset_wire_id];
                     }
                     g[subset_wire_id] = eq_y_ry[new_wire_id];
                 }
+
                 (
                     {
                         let mut f = DenseMultilinearExtension::from_evaluations_vec(
@@ -115,15 +120,15 @@ impl<E: ExtensionField> IOPProverState<E> {
         f_vec.extend(f_vec_counter_in);
         g_vec.extend(g_vec_counter_in);
 
-        let mut virtual_poly = VirtualPolynomial::new(max_lo_in_num_vars);
+        let mut virtual_poly = VirtualPolynomialV2::new(max_lo_in_num_vars);
         for (f, g) in f_vec.into_iter().zip(g_vec.into_iter()) {
-            let mut tmp = VirtualPolynomial::new_from_mle(f, E::BaseField::ONE);
+            let mut tmp = VirtualPolynomialV2::new_from_mle(f, E::ONE);
             tmp.mul_by_mle(g, E::BaseField::ONE);
             virtual_poly.merge(&tmp);
         }
 
         let (sumcheck_proofs, prover_state) =
-            SumcheckState::prove_parallel(virtual_poly, transcript);
+            SumcheckStateV2::prove_parallel(virtual_poly, transcript);
         let eval_point = sumcheck_proofs.point.clone();
         let (f_vec, _): (Vec<_>, Vec<_>) = prover_state
             .get_mle_final_evaluations()

@@ -2,6 +2,7 @@ use core::ops::Range;
 use ff::Field;
 use ff_ext::ExtensionField;
 use gkr::structs::CircuitWitness;
+use multilinear_extensions::mle::IntoMLE;
 use simple_frontend::structs::CellId;
 use singer_utils::uint::UInt;
 use std::collections::BTreeMap;
@@ -22,13 +23,13 @@ pub(crate) fn get_uint_params<T: UIntParams>() -> (usize, usize) {
     (T::BITS, T::CELL_BIT_WIDTH)
 }
 
-pub(crate) fn test_opcode_circuit_v2<Ext: ExtensionField>(
+pub(crate) fn test_opcode_circuit_v2<'a, Ext: ExtensionField>(
     inst_circuit: &InstCircuit<Ext>,
     phase0_idx_map: &BTreeMap<&'static str, Range<CellId>>,
     phase0_witness_size: usize,
     phase0_values_map: &BTreeMap<&'static str, Vec<Ext::BaseField>>,
     circuit_witness_challenges: Vec<Ext>,
-) -> CircuitWitness<<Ext as ExtensionField>::BaseField> {
+) -> CircuitWitness<'a, Ext> {
     // configure circuit
     let circuit = inst_circuit.circuit.as_ref();
 
@@ -63,6 +64,8 @@ pub(crate) fn test_opcode_circuit_v2<Ext: ExtensionField>(
 
     #[cfg(feature = "test-dbg")]
     println!("{:?}", witness_in);
+
+    let witness_in = witness_in.into_iter().map(|w_in| w_in.into_mle()).collect();
 
     let circuit_witness = {
         let mut circuit_witness = CircuitWitness::new(&circuit, circuit_witness_challenges);
@@ -142,13 +145,13 @@ pub(crate) fn test_opcode_circuit_v2<Ext: ExtensionField>(
 }
 
 #[deprecated(note = "deprecated and use test_opcode_circuit_v2 instead")]
-pub(crate) fn test_opcode_circuit<Ext: ExtensionField>(
+pub(crate) fn test_opcode_circuit<'a, Ext: ExtensionField>(
     inst_circuit: &InstCircuit<Ext>,
     phase0_idx_map: &BTreeMap<&'static str, Range<CellId>>,
     phase0_witness_size: usize,
     phase0_values_map: &BTreeMap<String, Vec<Ext::BaseField>>,
     circuit_witness_challenges: Vec<Ext>,
-) -> CircuitWitness<<Ext as ExtensionField>::BaseField> {
+) -> CircuitWitness<'a, Ext> {
     let phase0_values_map = phase0_values_map
         .iter()
         .map(|(key, value)| (key.clone().leak() as &'static str, value.clone()))

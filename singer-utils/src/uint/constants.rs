@@ -3,8 +3,9 @@ use crate::{constants::RANGE_CHIP_BIT_WIDTH, uint::util::const_min};
 use std::marker::PhantomData;
 
 impl<const M: usize, const C: usize> UInt<M, C> {
-    pub const C: usize = C;
     pub const M: usize = M;
+    pub const C: usize = C;
+
     /// Determines the maximum number of bits that should be represented in each cell
     /// independent of the cell capacity `C`.
     /// If M < C i.e. total bit < cell capacity, the maximum_usable_cell_capacity

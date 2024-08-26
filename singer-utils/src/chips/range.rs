@@ -28,8 +28,8 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
 
 /// Add range table circuit and witness to the circuit graph. Return node id and
 /// lookup instance log size.
-pub(crate) fn construct_range_table_and_witness<E: ExtensionField>(
-    builder: &mut CircuitGraphBuilder<E>,
+pub(crate) fn construct_range_table_and_witness<'a, E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<'a, E>,
     bit_with: usize,
     challenges: &ChipChallenges,
     real_challenges: &[E],

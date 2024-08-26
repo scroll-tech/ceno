@@ -13,6 +13,7 @@ pub enum RAMType {
     Stack,
     Memory,
     GlobalState,
+    Register,
 }
 
 #[derive(Clone, Debug, Copy, EnumIter)]

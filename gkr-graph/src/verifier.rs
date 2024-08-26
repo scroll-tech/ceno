@@ -31,7 +31,9 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             .collect_vec();
         izip!(&circuit.targets, &target_evals.0).for_each(|(target, eval)| match target {
             NodeOutputType::OutputLayer(id) => output_evals[*id].push(eval.clone()),
-            NodeOutputType::WireOut(id, _) => wit_out_evals[*id].push(eval.clone()),
+            NodeOutputType::WireOut(id, wire_out_id) => {
+                wit_out_evals[*id][*wire_out_id as usize] = eval.clone()
+            }
         });
 
         for ((node, instance_num_vars), proof) in izip!(

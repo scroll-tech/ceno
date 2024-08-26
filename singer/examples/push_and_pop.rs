@@ -23,7 +23,7 @@ fn main() {
     let real_challenges = vec![];
     let singer_params = SingerParams::default();
 
-    let (proof, singer_aux_info) = {
+    let (proof, singer_aux_info, singer_wire_out_values) = {
         let real_n_instances = singer_wires_in
             .instructions
             .iter()
@@ -40,7 +40,7 @@ fn main() {
             )
             .expect("construct failed");
 
-        let (proof, graph_aux_info) =
+        let (proof, graph_aux_info, singer_wire_out_values) =
             prove(&circuit, &witness, &wires_out_id, &mut prover_transcript).expect("prove failed");
         let aux_info = SingerAuxInfo {
             graph_aux_info,
@@ -49,7 +49,7 @@ fn main() {
             bytecode_len: bytecode.len(),
             ..Default::default()
         };
-        (proof, aux_info)
+        (proof, aux_info, singer_wire_out_values)
     };
 
     // 4. Verify.
@@ -61,6 +61,7 @@ fn main() {
     verify(
         &circuit,
         proof,
+        singer_wire_out_values,
         &singer_aux_info,
         &real_challenges,
         &mut verifier_transcript,

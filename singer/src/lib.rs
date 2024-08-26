@@ -2,13 +2,14 @@
 
 use error::ZKVMError;
 use ff_ext::ExtensionField;
-use gkr::structs::LayerWitness;
 use gkr_graph::structs::{
     CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
 };
-use goldilocks::SmallField;
 use instructions::{
     construct_inst_graph, construct_inst_graph_and_witness, InstOutputType, SingerCircuitBuilder,
+};
+use multilinear_extensions::{
+    mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
 };
 use singer_utils::chips::SingerChipBuilder;
 use std::mem;
@@ -35,13 +36,13 @@ mod utils;
 /// InstOutputType, corresponding to the product of summation of the chip check
 /// records. `public_output_size` is the wire id stores the size of public
 /// output.
-pub struct SingerGraphBuilder<E: ExtensionField> {
-    pub graph_builder: CircuitGraphBuilder<E>,
+pub struct SingerGraphBuilder<'a, E: ExtensionField> {
+    pub graph_builder: CircuitGraphBuilder<'a, E>,
     pub chip_builder: SingerChipBuilder<E>,
     pub public_output_size: Option<NodeOutputType>,
 }
 
-impl<E: ExtensionField> SingerGraphBuilder<E> {
+impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
     pub fn new() -> Self {
         Self {
             graph_builder: CircuitGraphBuilder::new(),
@@ -53,19 +54,12 @@ impl<E: ExtensionField> SingerGraphBuilder<E> {
     pub fn construct_graph_and_witness(
         mut self,
         circuit_builder: &SingerCircuitBuilder<E>,
-        singer_wires_in: SingerWiresIn<E::BaseField>,
+        singer_wires_in: SingerWiresIn<E>,
         bytecode: &[u8],
         program_input: &[u8],
         real_challenges: &[E],
         params: &SingerParams,
-    ) -> Result<
-        (
-            SingerCircuit<E>,
-            SingerWitness<E::BaseField>,
-            SingerWiresOutID,
-        ),
-        ZKVMError,
-    > {
+    ) -> Result<(SingerCircuit<E>, SingerWitness<'a, E>, SingerWiresOutID), ZKVMError> {
         // Add instruction and its extension (if any) circuits to the graph.
         for inst_wires_in in singer_wires_in.instructions.into_iter() {
             let InstWiresIn {
@@ -180,12 +174,12 @@ impl<E: ExtensionField> SingerGraphBuilder<E> {
 
 pub struct SingerCircuit<E: ExtensionField>(CircuitGraph<E>);
 
-pub struct SingerWitness<F: SmallField>(pub CircuitGraphWitness<F>);
+pub struct SingerWitness<'a, E: ExtensionField>(pub CircuitGraphWitness<'a, E>);
 
 #[derive(Clone, Debug, Default)]
-pub struct SingerWiresIn<F: SmallField> {
-    pub instructions: Vec<InstWiresIn<F>>,
-    pub table_count: Vec<LayerWitness<F>>,
+pub struct SingerWiresIn<E: ExtensionField> {
+    pub instructions: Vec<InstWiresIn<E>>,
+    pub table_count: Vec<DenseMultilinearExtension<E>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -205,14 +199,14 @@ pub struct SingerWiresOutID {
     public_output_size: Option<NodeOutputType>,
 }
 
-#[derive(Clone, Debug)]
-pub struct SingerWiresOutValues<F: SmallField> {
-    ram_load: Vec<Vec<F>>,
-    ram_store: Vec<Vec<F>>,
-    rom_input: Vec<Vec<F>>,
-    rom_table: Vec<Vec<F>>,
+#[derive(Clone)]
+pub struct SingerWiresOutValues<'a, E: ExtensionField> {
+    ram_load: Vec<ArcMultilinearExtension<'a, E>>,
+    ram_store: Vec<ArcMultilinearExtension<'a, E>>,
+    rom_input: Vec<ArcMultilinearExtension<'a, E>>,
+    rom_table: Vec<ArcMultilinearExtension<'a, E>>,
 
-    public_output_size: Option<Vec<F>>,
+    public_output_size: Option<ArcMultilinearExtension<'a, E>>,
 }
 
 impl SingerWiresOutID {
@@ -240,12 +234,12 @@ pub struct SingerAuxInfo {
     pub program_output_len: usize,
 }
 
-// Indexed by 1. wires_in id (or phase); 2. instance id; 3. wire id.
-pub type CircuitWiresIn<F> = Vec<LayerWitness<F>>;
+// Indexed by 1. wires_in id (or phase); 2. instance id || wire id.
+pub type CircuitWiresIn<E> = Vec<DenseMultilinearExtension<E>>;
 
 #[derive(Clone, Debug, Default)]
-pub struct InstWiresIn<F: SmallField> {
+pub struct InstWiresIn<E: ExtensionField> {
     pub opcode: u8,
     pub real_n_instances: usize,
-    pub wires_in: Vec<CircuitWiresIn<F>>,
+    pub wires_in: Vec<CircuitWiresIn<E>>,
 }
