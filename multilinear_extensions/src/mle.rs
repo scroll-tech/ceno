@@ -28,6 +28,26 @@ impl<E: ExtensionField> FieldType<E> {
             FieldType::Unreachable => unreachable!(),
         }
     }
+
+    pub fn get_as_base_vec(values: &[Self]) -> Vec<&[E::BaseField]> {
+        values.iter().map(|value| {
+            match value {
+                FieldType::Base(inner) => inner.as_slice(),
+                // TODO: return an error here instead
+                _ => unreachable!()
+            }
+        }).collect()
+    }
+
+    pub fn get_as_ext_vec(values: &[Self]) -> Vec<&[E]> {
+        values.iter().map(|value| {
+            match value {
+                FieldType::Ext(inner) => inner.as_slice(),
+                // TODO: return an error here instead
+                _ => unreachable!()
+            }
+        }).collect()
+    }
 }
 
 /// Stores a multilinear polynomial in dense evaluation form.

@@ -357,3 +357,73 @@ fn authenticate_merkle_path_root_batch<E: ExtensionField>(
     }
     assert_eq!(&hash, root);
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+    use ark_std::test_rng;
+    use ff::Field;
+    use goldilocks::{Goldilocks, GoldilocksExt2};
+    use itertools::Itertools;
+    use multilinear_extensions::mle::FieldType;
+    use crate::util::hash::new_hasher;
+    use crate::util::merkle_tree::MerkleTree;
+
+    #[test]
+    fn bench_old_merkle_commit_base() {
+        let mut rng = test_rng();
+        let n_iterations = 10;
+        let n_vars = 20;
+        let blowup_factor = 8;
+
+        let n_leaves = (1 << n_vars) * blowup_factor;
+        let mut duration_sum = Duration::ZERO;
+        for i in 0..n_iterations {
+            let hasher = new_hasher::<Goldilocks>();
+            let values: FieldType<GoldilocksExt2> = FieldType::Base(
+                (0..n_leaves)
+                    .map(|_| Goldilocks::random(&mut rng))
+                    .collect_vec(),
+            );
+            let now = Instant::now();
+            MerkleTree::from_leaves(values, &hasher);
+            duration_sum += now.elapsed();
+        }
+        let mean_duration = duration_sum / n_iterations;
+        println!(
+            "time to commit to 2^{:?} leaves: {:?}",
+            n_vars, mean_duration
+        );
+    }
+
+    #[test]
+    fn bench_old_batch_merkle_commit_base() {
+        let mut rng = test_rng();
+        let n_iterations = 3;
+        let n_evaluations = 60;
+        let n_vars = 20;
+        let blowup_factor = 8;
+
+        let n_leaves = (1 << n_vars) * blowup_factor;
+        let mut duration_sum = Duration::ZERO;
+        for i in 0..n_iterations {
+            let values: Vec<FieldType<GoldilocksExt2>> = vec![
+                FieldType::Base(
+                    (0..n_leaves)
+                        .map(|_| Goldilocks::random(&mut rng))
+                        .collect_vec()
+                );
+                n_evaluations
+            ];
+            let hasher = new_hasher::<Goldilocks>();
+            let now = Instant::now();
+            MerkleTree::from_batch_leaves(values, &hasher);
+            duration_sum += now.elapsed();
+        }
+        let mean_duration = duration_sum / n_iterations;
+        println!(
+            "time to batch commit to 2^{:?} leaves with {:?} evaluations each: {:?}",
+            n_vars, n_evaluations, mean_duration
+        );
+    }
+}

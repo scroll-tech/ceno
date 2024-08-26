@@ -372,6 +372,7 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
 
 #[cfg(any(test, feature = "benchmark"))]
 pub mod test_util {
+    use std::time::Instant;
     use crate::{
         util::transcript::{InMemoryTranscript, TranscriptRead, TranscriptWrite},
         Evaluation, PolynomialCommitmentScheme,
@@ -548,7 +549,7 @@ pub mod test_util {
             + InMemoryTranscript<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
-            let batch_size = 2;
+            let batch_size = 60;
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
             // Setup
             let (pp, vp) = {
@@ -562,7 +563,7 @@ pub mod test_util {
                 let polys = (0..batch_size)
                     .map(|i| {
                         if base {
-                            DenseMultilinearExtension::random(num_vars - (i >> 1), &mut rng.clone())
+                            DenseMultilinearExtension::random(num_vars, &mut rng.clone())
                         } else {
                             DenseMultilinearExtension::from_evaluations_ext_vec(
                                 num_vars,
@@ -571,7 +572,9 @@ pub mod test_util {
                         }
                     })
                     .collect_vec();
+                let now = Instant::now();
                 let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                println!("time to commit: {:?}", now.elapsed());
 
                 let point = transcript.squeeze_challenges(num_vars);
 

@@ -285,6 +285,8 @@ where
 
         // build merkle tree from leaves
         let hasher = new_hasher::<E::BaseField>();
+        dbg!(code_words.len());
+        dbg!(code_words[0].len());
         let codeword_tree = MerkleTree::<E>::from_batch_leaves(code_words, &hasher);
 
         let is_base = match polys[0].evaluations {
@@ -1060,14 +1062,14 @@ mod test {
             GoldilocksExt2,
             PcsGoldilocks,
             PoseidonTranscript<GoldilocksExt2>,
-        >(true, 10, 11);
+        >(true, 20, 21);
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_2() {
         // Both challenge and poly are over extension field
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
-            false, 10, 11,
+            false, 20, 21,
         );
     }
 
