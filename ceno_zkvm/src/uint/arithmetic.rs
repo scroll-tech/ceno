@@ -47,16 +47,23 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(self.expr().remove(0) + 1.into())
     }
 
-    /// borrow*(1<<shift) + a - b = diff
-    /// return borrow
-    pub fn sub_with_borrow<E: ExtensionField>(
+    // when flag is true, return lhs
+    // otherwise return rhs
+    pub fn select_if<E: ExtensionField>(
+        _circuit_builder: &mut CircuitBuilder<E>,
+        _flag: Expression<E>,
+        _lhs: UInt<M, C>,
+        _rhs: UInt<M, C>,
+    ) -> Result<UInt<M, C>, ZKVMError> {
+        // we need represent UInt limb as expression
+        todo!()
+    }
+
+    /// return the most significant bit
+    pub fn msb<E: ExtensionField>(
         &self,
-        circuit_builder: &mut CircuitBuilder<E>,
-        _rhs: &UInt<M, C>,
-    ) -> Result<WitIn, ZKVMError> {
-        // TODO
-        let borrow = circuit_builder.create_witin();
-        circuit_builder.assert_bit(borrow.expr())?;
-        Ok(borrow)
+        _circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<Expression<E>, ZKVMError> {
+        todo!()
     }
 }

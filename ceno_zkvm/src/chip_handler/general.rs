@@ -135,9 +135,9 @@ impl<E: ExtensionField> CircuitBuilder<E> {
         Ok(())
     }
 
-    pub(crate) fn assert_u12(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
+    pub(crate) fn assert_u16(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
         let items: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from(ROMType::U12 as u64)),
+            Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
             expr,
         ];
         let rlc_record = self.rlc_chip_record(items);
@@ -146,8 +146,7 @@ impl<E: ExtensionField> CircuitBuilder<E> {
     }
 
     pub(crate) fn assert_bit(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
-        self.require_zero((Expression::from(1) - expr.clone()) * expr)?;
-        Ok(())
+        self.assert_u16(expr * Expression::from(1 << 15))
     }
 
     pub fn finalize_circuit(&self) -> Circuit<E> {
