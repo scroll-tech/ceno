@@ -316,7 +316,7 @@ mod tests {
                     )),
                 ),
                 evaluated: 123002.into(), // 123 * 1000 + 2
-                name: "test_lookup_error/assert u5".to_string(),
+                name: "test_lookup_error/assert_u5/assert u5".to_string(),
             }]
         );
     }
