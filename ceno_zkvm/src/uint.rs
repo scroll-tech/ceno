@@ -83,17 +83,6 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
-    /// Return limbs in Expression form
-    pub fn expr(&self) -> Vec<Expression<E>> {
-        match &self.limbs {
-            UintLimb::WitIn(limbs) => limbs
-                .iter()
-                .map(ToExpr::expr)
-                .collect::<Vec<Expression<E>>>(),
-            UintLimb::Expression(e) => e.clone(),
-        }
-    }
-
     /// Return if the limbs are in Expression form or not.
     pub fn is_expr(&self) -> bool {
         matches!(&self.limbs, UintLimb::Expression(_))
@@ -216,6 +205,19 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UI
 
     fn try_from(values: &[WitIn]) -> Result<Self, Self::Error> {
         values.to_vec().try_into()
+    }
+}
+
+impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UInt<M, C, E> {
+    type Output = Vec<Expression<E>>;
+    fn expr(&self) -> Vec<Expression<E>> {
+        match &self.limbs {
+            UintLimb::WitIn(limbs) => limbs
+                .iter()
+                .map(ToExpr::expr)
+                .collect::<Vec<Expression<E>>>(),
+            UintLimb::Expression(e) => e.clone(),
+        }
     }
 }
 

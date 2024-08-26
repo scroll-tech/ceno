@@ -33,6 +33,9 @@ cfg-if = "1.0.0"
 const_env = "0.1.2"
 
 [features]
+default = ["riv32"]
+riv32 = []
+riv64 = []
 
 [profile.bench]
 opt-level = 0

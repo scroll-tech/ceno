@@ -8,11 +8,10 @@ use crate::{
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::Instruction,
-    structs::{PCUInt, TSUInt, UInt64},
 };
 
 use super::{
-    constants::{OPType, OpcodeType, PC_STEP_SIZE},
+    constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
     RIVInstruction,
 };
 
@@ -20,18 +19,18 @@ pub struct AddInstruction;
 pub struct SubInstruction;
 
 pub struct InstructionConfig<E: ExtensionField> {
-    pub pc: PCUInt<E>,
-    pub ts: TSUInt<E>,
-    pub prev_rd_value: UInt64<E>,
-    pub addend_0: UInt64<E>,
-    pub addend_1: UInt64<E>,
-    pub outcome: UInt64<E>,
+    pub pc: WitIn,
+    pub ts: WitIn,
+    pub prev_rd_value: RegUInt<E>,
+    pub addend_0: RegUInt<E>,
+    pub addend_1: RegUInt<E>,
+    pub outcome: RegUInt<E>,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
-    pub prev_rs1_ts: TSUInt<E>,
-    pub prev_rs2_ts: TSUInt<E>,
-    pub prev_rd_ts: TSUInt<E>,
+    pub prev_rs1_ts: WitIn,
+    pub prev_rs2_ts: WitIn,
+    pub prev_rd_ts: WitIn,
     phantom: PhantomData<E>,
 }
 
@@ -46,21 +45,21 @@ impl<E: ExtensionField> RIVInstruction<E> for SubInstruction {
 fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     circuit_builder: &mut CircuitBuilder<E>,
 ) -> Result<InstructionConfig<E>, ZKVMError> {
-    let pc = PCUInt::new(circuit_builder);
-    let mut ts = TSUInt::new(circuit_builder);
+    let pc = circuit_builder.create_witin();
+    let cur_ts = circuit_builder.create_witin();
 
     // state in
-    circuit_builder.state_in(&pc, &ts)?;
+    circuit_builder.state_in(pc.expr(), cur_ts.expr())?;
 
-    let next_pc = pc.add_const(circuit_builder, PC_STEP_SIZE.into())?;
+    let next_pc = pc.expr() + PC_STEP_SIZE.into();
 
     // Execution result = addend0 + addend1, with carry.
-    let prev_rd_value = UInt64::new(circuit_builder);
+    let prev_rd_value = RegUInt::new(circuit_builder);
 
     let (addend_0, addend_1, outcome) = if IS_ADD {
         // outcome = addend_0 + addend_1
-        let addend_0 = UInt64::new(circuit_builder);
-        let addend_1 = UInt64::new(circuit_builder);
+        let addend_0 = RegUInt::new(circuit_builder);
+        let addend_1 = RegUInt::new(circuit_builder);
         (
             addend_0.clone(),
             addend_1.clone(),
@@ -68,8 +67,8 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         )
     } else {
         // outcome + addend_1 = addend_0
-        let outcome = UInt64::new(circuit_builder);
-        let addend_1 = UInt64::new(circuit_builder);
+        let outcome = RegUInt::new(circuit_builder);
+        let addend_1 = RegUInt::new(circuit_builder);
         (
             addend_1.clone().add(circuit_builder, &outcome.clone())?,
             addend_1,
@@ -84,27 +83,23 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     // TODO remove me, this is just for testing degree > 1 sumcheck in main constraints
     circuit_builder.require_zero(rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr())?;
 
-    let mut prev_rs1_ts = TSUInt::new(circuit_builder);
-    let mut prev_rs2_ts = TSUInt::new(circuit_builder);
-    let mut prev_rd_ts = TSUInt::new(circuit_builder);
+    let prev_rs1_ts = circuit_builder.create_witin();
+    let prev_rs2_ts = circuit_builder.create_witin();
+    let prev_rd_ts = circuit_builder.create_witin();
 
-    let mut ts = circuit_builder.register_read(&rs1_id, &mut prev_rs1_ts, &mut ts, &addend_0)?;
-    let mut ts = circuit_builder.register_read(&rs2_id, &mut prev_rs2_ts, &mut ts, &addend_1)?;
+    let ts =
+        circuit_builder.register_read(&rs1_id, prev_rs1_ts.expr(), cur_ts.expr(), &addend_0)?;
+    let ts = circuit_builder.register_read(&rs2_id, prev_rs2_ts.expr(), ts, &addend_1)?;
 
-    let ts = circuit_builder.register_write(
-        &rd_id,
-        &mut prev_rd_ts,
-        &mut ts,
-        &prev_rd_value,
-        &outcome,
-    )?;
+    let ts =
+        circuit_builder.register_write(&rd_id, prev_rd_ts.expr(), ts, &prev_rd_value, &outcome)?;
 
-    let next_ts = ts.add_const(circuit_builder, 1.into())?;
-    circuit_builder.state_out(&next_pc, &next_ts)?;
+    let next_ts = ts + 1.into();
+    circuit_builder.state_out(next_pc, next_ts)?;
 
     Ok(InstructionConfig {
         pc,
-        ts,
+        ts: cur_ts,
         prev_rd_value,
         addend_0,
         addend_1,

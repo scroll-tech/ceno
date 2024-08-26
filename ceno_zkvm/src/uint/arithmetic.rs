@@ -203,7 +203,9 @@ mod tests {
 
     mod add {
         use crate::{
-            circuit_builder::CircuitBuilder, expression::Expression, scheme::utils::eval_by_expr,
+            circuit_builder::CircuitBuilder,
+            expression::{Expression, ToExpr},
+            scheme::utils::eval_by_expr,
             uint::UInt,
         };
         use ff::Field;
@@ -452,7 +454,10 @@ mod tests {
     }
 
     mod mul {
-        use crate::{circuit_builder::CircuitBuilder, scheme::utils::eval_by_expr, uint::UInt};
+        use crate::{
+            circuit_builder::CircuitBuilder, expression::ToExpr, scheme::utils::eval_by_expr,
+            uint::UInt,
+        };
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
@@ -533,7 +538,10 @@ mod tests {
     }
 
     mod mul_add {
-        use crate::{circuit_builder::CircuitBuilder, scheme::utils::eval_by_expr, uint::UInt};
+        use crate::{
+            circuit_builder::CircuitBuilder, expression::ToExpr, scheme::utils::eval_by_expr,
+            uint::UInt,
+        };
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
 
@@ -578,8 +586,8 @@ mod tests {
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
             let uint_a = UInt::<64, 16, E>::new(&mut circuit_builder);
-            let mut uint_b = UInt::<64, 16, E>::new(&mut circuit_builder);
-            let mut uint_c = uint_a.add(&mut circuit_builder, &mut uint_b).unwrap();
+            let uint_b = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let mut uint_c = uint_a.add(&mut circuit_builder, &uint_b).unwrap();
             let mut uint_d = UInt::<64, 16, E>::new(&mut circuit_builder);
             let uint_e = uint_c.mul(&mut circuit_builder, &mut uint_d).unwrap();
 
@@ -640,11 +648,11 @@ mod tests {
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
             let uint_a = UInt::<64, 16, E>::new(&mut circuit_builder);
-            let mut uint_b = UInt::<64, 16, E>::new(&mut circuit_builder);
-            let mut uint_c = uint_a.add(&mut circuit_builder, &mut uint_b).unwrap();
+            let uint_b = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let mut uint_c = uint_a.add(&mut circuit_builder, &uint_b).unwrap();
             let uint_d = UInt::<64, 16, E>::new(&mut circuit_builder);
-            let mut uint_e = UInt::<64, 16, E>::new(&mut circuit_builder);
-            let mut uint_f = uint_d.add(&mut circuit_builder, &mut uint_e).unwrap();
+            let uint_e = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let mut uint_f = uint_d.add(&mut circuit_builder, &uint_e).unwrap();
             let uint_g = uint_c.mul(&mut circuit_builder, &mut uint_f).unwrap();
 
             uint_g.expr().iter().enumerate().for_each(|(i, ret)| {
@@ -687,8 +695,8 @@ mod tests {
             let mut uint_a = UInt::<64, 16, E>::new(&mut circuit_builder);
             let mut uint_b = UInt::<64, 16, E>::new(&mut circuit_builder);
             let uint_c = uint_a.mul(&mut circuit_builder, &mut uint_b).unwrap();
-            let mut uint_d = UInt::<64, 16, E>::new(&mut circuit_builder);
-            let uint_e = uint_c.add(&mut circuit_builder, &mut uint_d).unwrap();
+            let uint_d = UInt::<64, 16, E>::new(&mut circuit_builder);
+            let uint_e = uint_c.add(&mut circuit_builder, &uint_d).unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
                 // limbs check

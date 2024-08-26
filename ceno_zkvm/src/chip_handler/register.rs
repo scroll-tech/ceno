@@ -4,19 +4,19 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    structs::{RAMType, TSUInt, UInt64},
+    structs::RAMType,
 };
 
 use super::RegisterChipOperations;
 
 impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
-    fn register_read(
+    fn register_read<V: ToExpr<E, Output = Vec<Expression<E>>>>(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &mut TSUInt<E>,
-        ts: &mut TSUInt<E>,
-        values: &UInt64<E>,
-    ) -> Result<TSUInt<E>, ZKVMError> {
+        prev_ts: Expression<E>,
+        ts: Expression<E>,
+        values: &V,
+    ) -> Result<Expression<E>, ZKVMError> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
@@ -25,7 +25,7 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
                 ))],
                 vec![register_id.expr()],
                 values.expr(),
-                prev_ts.expr(),
+                vec![prev_ts],
             ]
             .concat(),
         );
@@ -37,7 +37,7 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
                 ))],
                 vec![register_id.expr()],
                 values.expr(),
-                ts.expr(),
+                vec![ts.clone()],
             ]
             .concat(),
         );
@@ -45,21 +45,22 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
         self.write_record(write_record)?;
 
         // assert prev_ts < current_ts
-        let is_lt = prev_ts.lt(self, ts)?;
-        self.require_one(is_lt)?;
-        let next_ts = ts.add_const(self, 1.into())?;
+        // TODO implement lt gadget
+        // let is_lt = prev_ts.lt(self, ts)?;
+        // self.require_one(is_lt)?;
+        let next_ts = ts + 1.into();
 
         Ok(next_ts)
     }
 
-    fn register_write(
+    fn register_write<V: ToExpr<E, Output = Vec<Expression<E>>>>(
         &mut self,
         register_id: &WitIn,
-        prev_ts: &mut TSUInt<E>,
-        ts: &mut TSUInt<E>,
-        prev_values: &UInt64<E>,
-        values: &UInt64<E>,
-    ) -> Result<TSUInt<E>, ZKVMError> {
+        prev_ts: Expression<E>,
+        ts: Expression<E>,
+        prev_values: &V,
+        values: &V,
+    ) -> Result<Expression<E>, ZKVMError> {
         // READ (a, v, t)
         let read_record = self.rlc_chip_record(
             [
@@ -68,7 +69,7 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
                 ))],
                 vec![register_id.expr()],
                 prev_values.expr(),
-                prev_ts.expr(),
+                vec![prev_ts],
             ]
             .concat(),
         );
@@ -80,7 +81,7 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
                 ))],
                 vec![register_id.expr()],
                 values.expr(),
-                ts.expr(),
+                vec![ts.clone()],
             ]
             .concat(),
         );
@@ -88,9 +89,10 @@ impl<E: ExtensionField> RegisterChipOperations<E> for CircuitBuilder<E> {
         self.write_record(write_record)?;
 
         // assert prev_ts < current_ts
-        let is_lt = prev_ts.lt(self, ts)?;
-        self.require_one(is_lt)?;
-        let next_ts = ts.add_const(self, 1.into())?;
+        // TODO implement lt gadget
+        // let is_lt = prev_ts.lt(self, ts)?;
+        // self.require_one(is_lt)?;
+        let next_ts = ts + 1.into();
 
         Ok(next_ts)
     }

@@ -2,8 +2,6 @@ use ff_ext::ExtensionField;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use sumcheck::structs::IOPProverMessage;
 
-use crate::uint::UInt;
-
 pub struct TowerProver;
 
 #[derive(Clone)]
@@ -19,12 +17,8 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
     pub witness: Vec<Vec<ArcMultilinearExtension<'a, E>>>,
 }
 
-const VALUE_BIT_WIDTH: usize = 16;
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
-pub type UInt64<E> = UInt<64, VALUE_BIT_WIDTH, E>;
-pub type PCUInt<E> = UInt64<E>;
-pub type TSUInt<E> = UInt<48, 16, E>;
 
 pub enum ROMType {
     U5,  // 2^5 = 32
