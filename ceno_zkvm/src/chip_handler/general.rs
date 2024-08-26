@@ -145,8 +145,23 @@ impl<E: ExtensionField> CircuitBuilder<E> {
         Ok(())
     }
 
+    pub(crate) fn assert_byte(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
+        self.assert_u16(expr * Expression::from(1 << 8))
+    }
+
     pub(crate) fn assert_bit(&mut self, expr: Expression<E>) -> Result<(), ZKVMError> {
         self.assert_u16(expr * Expression::from(1 << 15))
+    }
+
+    /// lookup lhs ^ rhs = res
+    /// where lhs and rhs are bytes
+    pub(crate) fn lookup_and(
+        &mut self,
+        _res: Expression<E>,
+        _lhs: Expression<E>,
+        _rhs: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        todo!()
     }
 
     pub fn finalize_circuit(&self) -> Circuit<E> {

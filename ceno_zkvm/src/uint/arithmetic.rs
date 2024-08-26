@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 use itertools::izip;
 
 use crate::{
@@ -59,11 +60,26 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         todo!()
     }
 
-    /// return the most significant bit
-    pub fn msb<E: ExtensionField>(
+    /// decompose x = (x_s, x_{<s})
+    /// where x_s is highest bit, x_{<s} is the rest
+    pub fn msb_decompose<F: SmallField, E: ExtensionField<BaseField = F>>(
         &self,
-        _circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Expression<E>, ZKVMError> {
-        todo!()
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<(Expression<E>, Expression<E>), ZKVMError> {
+        let l = circuit_builder.create_witin();
+        let h = circuit_builder.create_witin();
+        let h_mask = circuit_builder.create_witin();
+        let high_limb = self.values[Self::N_OPERAND_CELLS - 1].expr();
+
+        circuit_builder.assert_byte(l.expr())?;
+        circuit_builder.assert_byte(h.expr())?;
+        circuit_builder
+            .require_zero(l.expr() + h.expr() * Expression::from(1 << 8) - high_limb.clone())?;
+        circuit_builder.lookup_and(h_mask.expr(), h.expr(), Expression::from(1 << 7))?;
+
+        let inv_128 = F::from(128).invert().unwrap();
+        let msb = (h.expr() - h_mask.expr()) * Expression::Constant(inv_128);
+        let high_limb_mask = l.expr() + h_mask.expr() * Expression::from(1 << 8);
+        Ok((msb, high_limb_mask))
     }
 }

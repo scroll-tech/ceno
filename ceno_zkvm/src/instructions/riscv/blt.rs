@@ -62,8 +62,8 @@ fn blt_gadget<E: ExtensionField>(
     circuit_builder.assert_bit(ltu.expr())?;
     circuit_builder.assert_bit(lt.expr())?;
 
-    let lhs_msb = lhs.msb(circuit_builder)?;
-    let rhs_msb = rhs.msb(circuit_builder)?;
+    let (lhs_msb, _) = lhs.msb_decompose(circuit_builder)?;
+    let (rhs_msb, _) = rhs.msb_decompose(circuit_builder)?;
 
     // (1) compute ltu(a_{<s},b_{<s})
 
