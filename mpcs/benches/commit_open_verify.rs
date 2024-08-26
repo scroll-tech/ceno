@@ -6,9 +6,12 @@ use goldilocks::GoldilocksExt2;
 
 use itertools::{chain, Itertools};
 use mpcs::{
-    util::transcript::{
-        FieldTranscript, FieldTranscriptRead, FieldTranscriptWrite, InMemoryTranscript,
-        PoseidonTranscript,
+    util::{
+        plonky2_util::log2_ceil,
+        transcript::{
+            FieldTranscript, FieldTranscriptRead, FieldTranscriptWrite, InMemoryTranscript,
+            PoseidonTranscript,
+        },
     },
     Basefold, BasefoldDefaultParams, Evaluation, PolynomialCommitmentScheme,
 };
@@ -144,11 +147,16 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                 let polys = (0..batch_size)
                     .map(|i| {
                         if is_base {
-                            DenseMultilinearExtension::random(num_vars - (i >> 1), &mut rng.clone())
+                            DenseMultilinearExtension::random(
+                                num_vars - log2_ceil((i >> 1) + 1),
+                                &mut rng.clone(),
+                            )
                         } else {
                             DenseMultilinearExtension::from_evaluations_ext_vec(
-                                num_vars,
-                                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                                num_vars - log2_ceil((i >> 1) + 1),
+                                (0..1 << (num_vars - log2_ceil((i >> 1) + 1)))
+                                    .map(|_| E::random(&mut OsRng))
+                                    .collect(),
                             )
                         }
                     })
@@ -159,7 +167,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                     .collect_vec();
 
                 let points = (0..num_points)
-                    .map(|i| transcript.squeeze_challenges(num_vars - i))
+                    .map(|i| transcript.squeeze_challenges(num_vars - log2_ceil(i + 1)))
                     .take(num_points)
                     .collect_vec();
 
@@ -203,7 +211,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             let comms = &Pcs::read_commitments(&vp, batch_size, &mut transcript).unwrap();
 
             let points = (0..num_points)
-                .map(|i| transcript.squeeze_challenges(num_vars - i))
+                .map(|i| transcript.squeeze_challenges(num_vars - log2_ceil(i + 1)))
                 .take(num_points)
                 .collect_vec();
 
