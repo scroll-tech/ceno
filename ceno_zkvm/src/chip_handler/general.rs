@@ -155,13 +155,42 @@ impl<E: ExtensionField> CircuitBuilder<E> {
 
     /// lookup lhs ^ rhs = res
     /// where lhs and rhs are bytes
-    pub(crate) fn lookup_and(
+    pub(crate) fn lookup_and_byte(
         &mut self,
-        _res: Expression<E>,
-        _lhs: Expression<E>,
-        _rhs: Expression<E>,
+        res: Expression<E>,
+        lhs: Expression<E>,
+        rhs: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        todo!()
+        self.assert_byte(lhs.clone())?;
+        self.assert_byte(rhs.clone())?;
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(ROMType::And as u64)),
+            res,
+            lhs,
+            rhs,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(rlc_record)?;
+        Ok(())
+    }
+
+    pub(crate) fn lookup_ltu_byte(
+        &mut self,
+        res: Expression<E>,
+        lhs: Expression<E>,
+        rhs: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        self.assert_byte(lhs.clone())?;
+        self.assert_byte(rhs.clone())?;
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
+            res,
+            lhs,
+            rhs,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(rlc_record)?;
+        Ok(())
     }
 
     pub fn finalize_circuit(&self) -> Circuit<E> {

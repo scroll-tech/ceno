@@ -75,7 +75,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         circuit_builder.assert_byte(h.expr())?;
         circuit_builder
             .require_zero(l.expr() + h.expr() * Expression::from(1 << 8) - high_limb.clone())?;
-        circuit_builder.lookup_and(h_mask.expr(), h.expr(), Expression::from(1 << 7))?;
+        circuit_builder.lookup_and_byte(h_mask.expr(), h.expr(), Expression::from(1 << 7))?;
 
         let inv_128 = F::from(128).invert().unwrap();
         let msb = (h.expr() - h_mask.expr()) * Expression::Constant(inv_128);
