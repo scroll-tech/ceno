@@ -24,6 +24,9 @@ enum MockProverError<E: ExtensionField> {
         evaluated: E,
         name: String,
     },
+    // TODO later
+    // r_expressions
+    // w_expressions
 }
 
 impl<E: ExtensionField> MockProverError<E> {
