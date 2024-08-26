@@ -468,13 +468,13 @@ impl TowerProver {
         assert!(!prod_specs.is_empty());
         let log_num_fanin = ceil_log2(num_fanin);
         // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
-        let max_round = prod_specs
+        let max_round_index = prod_specs
             .iter()
             .chain(logup_specs.iter())
             .map(|m| m.witness.len())
             .max()
             .unwrap()
-            - 1;
+            - 1; // index start from 0
 
         // generate alpha challenge
         let alpha_pows = get_challenge_pows(
@@ -488,7 +488,8 @@ impl TowerProver {
             .collect_vec();
 
         let (next_rt, _) =
-            (1..=max_round).fold((initial_rt, alpha_pows), |(out_rt, alpha_pows), round| {
+            (1..=max_round_index).fold((initial_rt, alpha_pows), |(out_rt, alpha_pows), round| {
+                println!("prover max round {max_round_index} round {round}");
                 // in first few round we just run on single thread
                 let num_threads = proper_num_threads(out_rt.len(), max_threads);
 

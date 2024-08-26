@@ -8,6 +8,9 @@ pub mod prover;
 pub mod utils;
 pub mod verifier;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone)]
 pub struct ZKVMProof<E: ExtensionField> {
     // TODO support >1 opcodes
