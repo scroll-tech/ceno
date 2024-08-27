@@ -206,6 +206,7 @@ mod tests {
         error::ZKVMError,
         expression::{ToExpr, WitIn},
     };
+    use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use multilinear_extensions::mle::IntoMLE;
 
@@ -310,14 +311,14 @@ mod tests {
                         1,
                         // TODO this still uses default challenge in ConstraintSystem, but challengeId
                         // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
-                        GoldilocksExt2([Goldilocks(1), Goldilocks(0)]),
-                        GoldilocksExt2([Goldilocks(0), Goldilocks(0)]),
+                        GoldilocksExt2::ONE,
+                        GoldilocksExt2::ZERO,
                     )),
                     Box::new(Expression::Challenge(
                         0,
                         1,
-                        GoldilocksExt2([Goldilocks(1), Goldilocks(0)]),
-                        GoldilocksExt2([Goldilocks(0), Goldilocks(0)]),
+                        GoldilocksExt2::ONE,
+                        GoldilocksExt2::ZERO,
                     )),
                 ),
                 evaluated: 123002.into(), // 123 * 1000 + 2
