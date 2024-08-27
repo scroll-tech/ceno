@@ -5,7 +5,7 @@ use ff::Field;
 use crate::{
     circuit_builder::{Circuit, CircuitBuilder},
     error::ZKVMError,
-    expression::{Expression, WitIn},
+    expression::{Expression, ToExpr, WitIn},
     structs::ROMType,
 };
 
@@ -191,6 +191,22 @@ impl<E: ExtensionField> CircuitBuilder<E> {
         let rlc_record = self.rlc_chip_record(items);
         self.lk_record(rlc_record)?;
         Ok(())
+    }
+
+    pub(crate) fn is_equal(
+        &mut self,
+        lhs: Expression<E>,
+        rhs: Expression<E>,
+    ) -> Result<Expression<E>, ZKVMError> {
+        let is_eq = self.create_witin();
+        let diff_inverse = self.create_witin();
+
+        self.require_zero(is_eq.expr().clone() * (lhs.clone() - rhs.clone()))?;
+        self.require_zero(
+            Expression::from(1) - is_eq.expr().clone() - diff_inverse.expr() * (lhs - rhs),
+        )?;
+
+        Ok(is_eq.expr())
     }
 
     pub fn finalize_circuit(&self) -> Circuit<E> {

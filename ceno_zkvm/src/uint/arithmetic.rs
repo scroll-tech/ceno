@@ -59,11 +59,32 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         // we need represent UInt limb as expression
         todo!()
     }
+
+    pub fn is_equal<E: ExtensionField>(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        rhs: UInt<M, C>,
+    ) -> Result<Expression<E>, ZKVMError> {
+        let n_limbs = Self::N_OPERAND_CELLS;
+        let flags = self
+            .values
+            .iter()
+            .zip_eq(rhs.values.iter())
+            .map(|(a, b)| circuit_builder.is_equal(a.expr(), b.expr()))
+            .collect::<Result<Vec<Expression<E>>, ZKVMError>>()?;
+
+        let sum_flags = flags
+            .iter()
+            .fold(Expression::from(0), |acc, flag| acc.clone() + flag.clone());
+
+        circuit_builder.is_equal(sum_flags, Expression::from(n_limbs))
+    }
 }
 
 impl<const M: usize> UInt<M, 8> {
     /// decompose x = (x_s, x_{<s})
     /// where x_s is highest bit, x_{<s} is the rest
+    /// TODO: return (Expression, UInt<M, 8>)
     pub fn msb_decompose<F: SmallField, E: ExtensionField<BaseField = F>>(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
