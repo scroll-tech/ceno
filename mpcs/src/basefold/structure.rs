@@ -30,7 +30,7 @@ where
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct BasefoldProverParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
-    pub(super) encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    pub encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
 }
 
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldProverParams<E, Spec> {

@@ -36,7 +36,7 @@ use query_phase::{
     SimpleBatchQueriesResultWithMerklePath,
 };
 use std::{borrow::BorrowMut, ops::Deref};
-use structure::BasefoldSpec;
+pub use structure::BasefoldSpec;
 
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Serialize};

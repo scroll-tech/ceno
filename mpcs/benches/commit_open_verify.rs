@@ -389,7 +389,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks_base(c: &mut Criterion) {
 criterion_group! {
   name = bench_basefold;
   config = Criterion::default().warm_up_time(Duration::from_millis(3000));
-  targets = bench_batch_commit_open_verify_goldilocks_base, bench_batch_commit_open_verify_goldilocks_2, bench_simple_batch_commit_open_verify_goldilocks_base, bench_simple_batch_commit_open_verify_goldilocks_2,bench_commit_open_verify_goldilocks_base, bench_commit_open_verify_goldilocks_2,
+  targets = bench_simple_batch_commit_open_verify_goldilocks_base, bench_simple_batch_commit_open_verify_goldilocks_2,bench_batch_commit_open_verify_goldilocks_base, bench_batch_commit_open_verify_goldilocks_2, bench_commit_open_verify_goldilocks_base, bench_commit_open_verify_goldilocks_2,
 }
 
 criterion_main!(bench_basefold);
