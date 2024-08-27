@@ -106,7 +106,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             if u.is_expr() {
                 let existing_expr = u.expr();
                 // this will overwrite existing expressions
-                u.create_witin(circuit_builder);
+                u.replace_limbs_with_witin(circuit_builder);
                 // check if the new witness equals the existing expression
                 izip!(u.expr(), existing_expr)
                     .try_for_each(|(lhs, rhs)| circuit_builder.require_equal(lhs, rhs))
@@ -122,18 +122,19 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         let c_expr = c.expr();
         let c_carries = c.carries.as_ref().unwrap();
 
-        // a_expr[0] * b_expr[0] - c_carry[0] ^ pow_c = c_expr[0]
+        // a_expr[0] * b_expr[0] - c_carry[0] * 2^C = c_expr[0]
         circuit_builder.require_equal(
             a_expr[0].clone() * b_expr[0].clone() - c_carries[0].expr() * Self::POW_OF_C.into(),
             c_expr[0].clone(),
         )?;
-        // a_expr[0] * b_expr[1] + a_expr[1] * b_expr[0] -  c_carry[1] * pow_c + c_carry[0] = c_expr[1]
+        // a_expr[0] * b_expr[1] + a_expr[1] * b_expr[0] -  c_carry[1] * 2^C + c_carry[0] = c_expr[1]
         circuit_builder.require_equal(
             a_expr[0].clone() * b_expr[0].clone() - c_carries[1].expr() * Self::POW_OF_C.into()
                 + c_carries[0].expr(),
             c_expr[1].clone(),
         )?;
-        // a_expr[0] * b_expr[2] + a_expr[1] * b_expr[1] + a_expr[2] * b_expr[0] - c_carry[2] ^ pow_c + c_carry[1]= c_expr[2]
+        // a_expr[0] * b_expr[2] + a_expr[1] * b_expr[1] + a_expr[2] * b_expr[0] -
+        // c_carry[2] * 2^C + c_carry[1] = c_expr[2]
         circuit_builder.require_equal(
             a_expr[0].clone() * b_expr[2].clone()
                 + a_expr[1].clone() * b_expr[1].clone()
@@ -142,7 +143,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                 + c_carries[1].expr(),
             c_expr[2].clone(),
         )?;
-        // a_expr[0] * b_expr[3] + a_expr[1] * b_expr[2] + a_expr[2] * b_expr[1] + a_expr[3] * b_expr[0]- c_carry[3] ^ pow_c + c_carry[2]= c_expr[3]
+        // a_expr[0] * b_expr[3] + a_expr[1] * b_expr[2] + a_expr[2] * b_expr[1] +
+        // a_expr[3] * b_expr[0] - c_carry[3] * 2^C + c_carry[2] = c_expr[3]
         circuit_builder.require_equal(
             a_expr[0].clone() * b_expr[3].clone()
                 + a_expr[1].clone() * b_expr[2].clone()

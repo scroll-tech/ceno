@@ -54,9 +54,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             carries: None,
         }
     }
-    // Create witIn for limbs
-    // WARNING: it will replace the existing limbs if the limbs are Expression
-    pub fn create_witin(&mut self, circuit_builder: &mut CircuitBuilder<E>) {
+
+    /// If current limbs are Expression, this function will create witIn and replace the limbs
+    pub fn replace_limbs_with_witin(&mut self, circuit_builder: &mut CircuitBuilder<E>) {
         if let UintLimb::Expression(_) = self.limbs {
             self.limbs = UintLimb::WitIn(
                 (0..Self::NUM_CELLS)
