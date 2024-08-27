@@ -204,8 +204,8 @@ pub trait BasefoldSpec<E: ExtensionField>: Debug + Clone {
         Self::EncodingScheme::get_rate_log()
     }
 
-    fn get_basecode_size_log() -> usize {
-        Self::EncodingScheme::get_basecode_size_log()
+    fn get_basecode_msg_size_log() -> usize {
+        Self::EncodingScheme::get_basecode_msg_size_log()
     }
 }
 

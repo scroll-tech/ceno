@@ -1,44 +1,35 @@
 use std::marker::PhantomData;
 
-use super::{concatenate_field_types, EncodingProverParameters, EncodingScheme};
+use super::{EncodingProverParameters, EncodingScheme};
 use crate::{
-    util::{
-        arithmetic::base_from_raw_bytes, log2_strict, num_of_bytes, plonky2_util::reverse_bits,
-    },
+    util::{field_type_index_mul_base, log2_strict},
     Error,
 };
-use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use ark_std::{end_timer, start_timer};
-use ctr;
-use ff::{BatchInverter, Field, PrimeField};
+use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
-use generic_array::GenericArray;
 use multilinear_extensions::mle::FieldType;
-use rand::SeedableRng;
-use rayon::prelude::{ParallelIterator, ParallelSlice, ParallelSliceMut};
 
-use itertools::Itertools;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rand_chacha::{rand_core::RngCore, ChaCha8Rng};
-use rayon::prelude::IntoParallelRefIterator;
 
-use crate::util::arithmetic::{horner, steps};
+use crate::util::arithmetic::horner;
 
 pub trait RSCodeSpec: std::fmt::Debug + Clone {
     fn get_number_queries() -> usize;
 
     fn get_rate_log() -> usize;
 
-    fn get_basecode_size_log() -> usize;
+    fn get_basecode_msg_size_log() -> usize;
 }
 
-pub type FftRootTable<F> = Vec<Vec<F>>;
+/// The FFT codes in this file are borrowed and adapted from Plonky2.
+type FftRootTable<F> = Vec<Vec<F>>;
 
-pub fn fft_root_table<F: PrimeField>(n: usize) -> FftRootTable<F> {
-    let lg_n = log2_strict(n);
+fn fft_root_table<F: PrimeField>(lg_n: usize) -> FftRootTable<F> {
     // bases[i] = g^2^i, for i = 0, ..., lg_n - 1
+    // Note that the end of bases is g^{n/2} = -1
     let mut bases = Vec::with_capacity(lg_n);
     let mut base = F::ROOT_OF_UNITY.pow(&[(1 << (F::S - lg_n as u32)) as u64]);
     bases.push(base);
@@ -47,6 +38,15 @@ pub fn fft_root_table<F: PrimeField>(n: usize) -> FftRootTable<F> {
         bases.push(base);
     }
 
+    // The result table looks like this:
+    // len=2: [1, g^{n/2}=-1]
+    // len=2: [1, g^{n/4}]
+    // len=4: [1, g^{n/8}, g^{n/4}, g^{3n/8}]
+    // len=8: [1, g^{n/16}, ..., g^{7n/16}]
+    // ...
+    // len=n/2: [1, g, ..., g^{n/2-1}]
+    // There is no need to compute the other halves of these powers, because
+    // those would be simply the negations of the previous halves.
     let mut root_table = Vec::with_capacity(lg_n);
     for lg_m in 1..=lg_n {
         let half_m = 1 << (lg_m - 1);
@@ -61,70 +61,53 @@ pub fn fft_root_table<F: PrimeField>(n: usize) -> FftRootTable<F> {
     root_table
 }
 
-#[inline]
-fn fft_dispatch<F: PrimeField>(
-    input: &mut [F],
-    zero_factor: Option<usize>,
-    root_table: Option<&FftRootTable<F>>,
+#[allow(unused)]
+fn ifft<E: ExtensionField>(
+    poly: &mut FieldType<E>,
+    zero_factor: usize,
+    root_table: &FftRootTable<E::BaseField>,
 ) {
-    let computed_root_table = root_table.is_none().then(|| fft_root_table(input.len()));
-    let used_root_table = root_table.or(computed_root_table.as_ref()).unwrap();
-
-    fft_classic(input, zero_factor.unwrap_or(0), used_root_table);
-}
-
-#[inline]
-pub fn fft<F: PrimeField>(coeffs: Vec<F>) -> Vec<F> {
-    fft_with_options(coeffs, None, None)
-}
-
-#[inline]
-pub fn fft_with_options<F: PrimeField>(
-    poly: Vec<F>,
-    zero_factor: Option<usize>,
-    root_table: Option<&FftRootTable<F>>,
-) -> Vec<F> {
-    let mut buffer = poly;
-    fft_dispatch(&mut buffer, zero_factor, root_table);
-    buffer
-}
-
-#[inline]
-pub fn ifft<F: PrimeField>(poly: Vec<F>) -> Vec<F> {
-    ifft_with_options(poly, None, None)
-}
-
-pub fn ifft_with_options<F: PrimeField>(
-    poly: Vec<F>,
-    zero_factor: Option<usize>,
-    root_table: Option<&FftRootTable<F>>,
-) -> Vec<F> {
     let n = poly.len();
     let lg_n = log2_strict(n);
-    let n_inv = (F::ONE + F::ONE).invert().unwrap().pow(&[lg_n as u64]);
+    let n_inv = (E::BaseField::ONE + E::BaseField::ONE)
+        .invert()
+        .unwrap()
+        .pow(&[lg_n as u64]);
 
-    let mut buffer = poly;
-    fft_dispatch(&mut buffer, zero_factor, root_table);
+    fft(poly, zero_factor, root_table);
 
     // We reverse all values except the first, and divide each by n.
-    buffer[0] *= n_inv;
-    buffer[n / 2] *= n_inv;
-    for i in 1..(n / 2) {
-        let j = n - i;
-        let coeffs_i = buffer[j] * n_inv;
-        let coeffs_j = buffer[i] * n_inv;
-        buffer[i] = coeffs_i;
-        buffer[j] = coeffs_j;
+    field_type_index_mul_base(poly, 0, &n_inv);
+    field_type_index_mul_base(poly, n / 2, &n_inv);
+    match poly {
+        FieldType::Base(poly) => {
+            for i in 1..(n / 2) {
+                let j = n - i;
+                let coeffs_i = poly[j] * n_inv;
+                let coeffs_j = poly[i] * n_inv;
+                poly[i] = coeffs_i;
+                poly[j] = coeffs_j;
+            }
+        }
+        FieldType::Ext(poly) => {
+            for i in 1..(n / 2) {
+                let j = n - i;
+                let coeffs_i = poly[j] * n_inv;
+                let coeffs_j = poly[i] * n_inv;
+                poly[i] = coeffs_i;
+                poly[j] = coeffs_j;
+            }
+        }
+        _ => panic!("Unsupported field type"),
     }
-    buffer
 }
 
-/// Generic FFT implementation.
-fn fft_classic_simd<F: Field>(
-    values: &mut [F],
+/// Core FFT implementation.
+fn fft_classic_inner<E: ExtensionField>(
+    values: &mut FieldType<E>,
     r: usize,
     lg_n: usize,
-    root_table: &FftRootTable<F>,
+    root_table: &[Vec<E::BaseField>],
 ) {
     // We've already done the first lg_packed_width (if they were required) iterations.
 
@@ -137,14 +120,30 @@ fn fft_classic_simd<F: Field>(
 
         // omega values for this iteration, as slice of vectors
         let omega_table = &root_table[lg_half_m][..];
-        for k in (0..n).step_by(m) {
-            for j in 0..half_m {
-                let omega = omega_table[j];
-                let t = omega * values[k + half_m + j];
-                let u = values[k + j];
-                values[k + j] = u + t;
-                values[k + half_m + j] = u - t;
+        match values {
+            FieldType::Base(values) => {
+                for k in (0..n).step_by(m) {
+                    for j in 0..half_m {
+                        let omega = omega_table[j];
+                        let t = omega * values[k + half_m + j];
+                        let u = values[k + j];
+                        values[k + j] = u + t;
+                        values[k + half_m + j] = u - t;
+                    }
+                }
             }
+            FieldType::Ext(values) => {
+                for k in (0..n).step_by(m) {
+                    for j in 0..half_m {
+                        let omega = omega_table[j];
+                        let t = values[k + half_m + j] * omega;
+                        let u = values[k + j];
+                        values[k + j] = u + t;
+                        values[k + half_m + j] = u - t;
+                    }
+                }
+            }
+            _ => panic!("Unsupported field type"),
         }
     }
 }
@@ -155,8 +154,20 @@ fn fft_classic_simd<F: Field>(
 /// The parameter r signifies that the first 1/2^r of the entries of
 /// input may be non-zero, but the last 1 - 1/2^r entries are
 /// definitely zero.
-pub(crate) fn fft_classic<F: Field>(values: &mut [F], r: usize, root_table: &FftRootTable<F>) {
-    reverse_index_bits_in_place(values);
+pub(crate) fn fft<E: ExtensionField>(
+    values: &mut FieldType<E>,
+    r: usize,
+    root_table: &[Vec<E::BaseField>],
+) {
+    match values {
+        FieldType::Base(values) => {
+            reverse_index_bits_in_place(values);
+        }
+        FieldType::Ext(values) => {
+            reverse_index_bits_in_place(values);
+        }
+        _ => panic!("Unsupported field type"),
+    }
 
     let n = values.len();
     let lg_n = log2_strict(n);
@@ -179,27 +190,47 @@ pub(crate) fn fft_classic<F: Field>(values: &mut [F], r: usize, root_table: &Fft
     if r > 0 {
         // if r == 0 then this loop is a noop.
         let mask = !((1 << r) - 1);
-        for i in 0..n {
-            values[i] = values[i & mask];
+        match values {
+            FieldType::Base(values) => {
+                for i in 0..n {
+                    values[i] = values[i & mask];
+                }
+            }
+            FieldType::Ext(values) => {
+                for i in 0..n {
+                    values[i] = values[i & mask];
+                }
+            }
+            _ => panic!("Unsupported field type"),
         }
     }
 
-    fft_classic_simd::<F>(values, r, lg_n, root_table);
+    fft_classic_inner::<E>(values, r, lg_n, root_table);
 }
 
-pub(crate) fn coset_fft_with_options<F: PrimeField>(
-    coeffs: &Vec<F>,
-    shift: F,
-    zero_factor: Option<usize>,
-    root_table: Option<&FftRootTable<F>>,
-) -> Vec<F> {
-    let mut modified_poly = coeffs.clone();
-    let mut shift_power = F::ONE;
-    for (i, coeff) in modified_poly.iter_mut().enumerate() {
-        *coeff *= shift_power;
-        shift_power *= shift;
+pub(crate) fn coset_fft<E: ExtensionField>(
+    coeffs: &mut FieldType<E>,
+    shift: E::BaseField,
+    zero_factor: usize,
+    root_table: &[Vec<E::BaseField>],
+) {
+    let mut shift_power = E::BaseField::ONE;
+    match coeffs {
+        FieldType::Base(coeffs) => {
+            for coeff in coeffs.iter_mut() {
+                *coeff *= shift_power;
+                shift_power *= shift;
+            }
+        }
+        FieldType::Ext(coeffs) => {
+            for coeff in coeffs.iter_mut() {
+                *coeff *= shift_power;
+                shift_power *= shift;
+            }
+        }
+        _ => panic!("Unsupported field type"),
     }
-    fft_with_options(modified_poly, zero_factor, root_table)
+    fft(coeffs, zero_factor, root_table);
 }
 
 #[derive(Debug, Clone)]
@@ -214,7 +245,7 @@ impl RSCodeSpec for RSCodeDefaultSpec {
         3
     }
 
-    fn get_basecode_size_log() -> usize {
+    fn get_basecode_msg_size_log() -> usize {
         7
     }
 }
@@ -225,9 +256,7 @@ impl RSCodeSpec for RSCodeDefaultSpec {
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct RSCodeParameters<E: ExtensionField> {
-    pub(crate) table: Vec<Vec<E::BaseField>>,
-    pub(crate) table_w_weights: Vec<Vec<(E::BaseField, E::BaseField)>>,
-    pub(crate) rng_seed: [u8; 32],
+    pub(crate) fft_root_table: FftRootTable<E::BaseField>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -235,27 +264,32 @@ pub struct RSCodeParameters<E: ExtensionField> {
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct RSCodeProverParameters<E: ExtensionField, Spec: RSCodeSpec> {
-    pub(crate) table: Vec<Vec<E::BaseField>>,
-    pub(crate) table_w_weights: Vec<Vec<(E::BaseField, E::BaseField)>>,
-    pub(crate) rng_seed: [u8; 32],
-    #[serde(skip)]
-    _phantom: PhantomData<fn() -> Spec>,
+pub struct RSCodeProverParameters<E: ExtensionField> {
+    pub(crate) fft_root_table: FftRootTable<E::BaseField>,
+    pub(crate) gamma_powers: Vec<E::BaseField>,
+    pub(crate) gamma_powers_inv_div_two: Vec<E::BaseField>,
 }
 
-impl<E: ExtensionField, Spec: RSCodeSpec> EncodingProverParameters
-    for RSCodeProverParameters<E, Spec>
-{
+impl<E: ExtensionField> EncodingProverParameters for RSCodeProverParameters<E> {
     fn get_max_message_size_log(&self) -> usize {
-        self.table.len() - Spec::get_rate_log()
+        self.fft_root_table.len()
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RSCodeVerifierParameters {
-    pub(crate) rng_seed: [u8; 32],
-    pub(crate) aes_key: [u8; 16],
-    pub(crate) aes_iv: [u8; 16],
+pub struct RSCodeVerifierParameters<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    /// The verifier also needs a FFT table (much smaller)
+    /// for small-size encoding. It contains the same roots as the
+    /// prover's version for the first few levels (i < basecode_msg_size_log)
+    /// For the other levels (i >= basecode_msg_size_log),
+    /// it contains only the g^(2^i).
+    pub(crate) fft_root_table: FftRootTable<E::BaseField>,
+    pub(crate) full_message_size_log: usize,
+    pub(crate) gamma_powers: Vec<E::BaseField>,
+    pub(crate) gamma_powers_inv_div_two: Vec<E::BaseField>,
 }
 
 #[derive(Debug, Clone)]
@@ -269,18 +303,13 @@ where
 {
     type PublicParameters = RSCodeParameters<E>;
 
-    type ProverParameters = RSCodeProverParameters<E, Spec>;
+    type ProverParameters = RSCodeProverParameters<E>;
 
-    type VerifierParameters = RSCodeVerifierParameters;
+    type VerifierParameters = RSCodeVerifierParameters<E>;
 
-    fn setup(max_msg_size_log: usize, rng_seed: [u8; 32]) -> Self::PublicParameters {
-        let rng = ChaCha8Rng::from_seed(rng_seed.clone());
-        let (table_w_weights, table) =
-            get_table_aes::<E, _>(max_msg_size_log, Spec::get_rate_log(), &mut rng.clone());
+    fn setup(max_msg_size_log: usize, _rng_seed: [u8; 32]) -> Self::PublicParameters {
         RSCodeParameters {
-            table,
-            table_w_weights,
-            rng_seed,
+            fft_root_table: fft_root_table(max_msg_size_log),
         }
     }
 
@@ -288,58 +317,56 @@ where
         pp: &Self::PublicParameters,
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
-        if pp.table.len() < Spec::get_rate_log() + max_msg_size_log {
+        if pp.fft_root_table.len() < max_msg_size_log {
             return Err(Error::InvalidPcsParam(format!(
                 "Public parameter is setup for a smaller message size (log={}) than the trimmed message size (log={})",
-                pp.table.len() - Spec::get_rate_log(),
+                pp.fft_root_table.len(),
                 max_msg_size_log,
             )));
         }
-        let mut key: [u8; 16] = [0u8; 16];
-        let mut iv: [u8; 16] = [0u8; 16];
-        let mut rng = ChaCha8Rng::from_seed(pp.rng_seed);
-        rng.set_word_pos(0);
-        rng.fill_bytes(&mut key);
-        rng.fill_bytes(&mut iv);
+        let mut gamma_powers = Vec::with_capacity(max_msg_size_log);
+        let mut gamma_powers_inv = Vec::with_capacity(max_msg_size_log);
+        gamma_powers[0] = E::BaseField::MULTIPLICATIVE_GENERATOR;
+        gamma_powers_inv[0] = E::BaseField::MULTIPLICATIVE_GENERATOR.invert().unwrap();
+        for i in 1..max_msg_size_log {
+            gamma_powers[i] = gamma_powers[i - 1].square();
+            gamma_powers_inv[i] = gamma_powers_inv[i - 1].square();
+        }
+        let inv_of_two = E::BaseField::from(2).invert().unwrap();
+        gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
         Ok((
             Self::ProverParameters {
-                table_w_weights: pp.table_w_weights.clone(),
-                table: pp.table.clone(),
-                rng_seed: pp.rng_seed.clone(),
-                _phantom: PhantomData,
+                fft_root_table: pp.fft_root_table[..max_msg_size_log].to_vec(),
+                gamma_powers: gamma_powers.clone(),
+                gamma_powers_inv_div_two: gamma_powers_inv.clone(),
             },
             Self::VerifierParameters {
-                rng_seed: pp.rng_seed.clone(),
-                aes_key: key,
-                aes_iv: iv,
+                fft_root_table: pp.fft_root_table[..Spec::get_basecode_msg_size_log()]
+                    .iter()
+                    .map(|v| v.clone())
+                    .chain(
+                        pp.fft_root_table[..Spec::get_basecode_msg_size_log()]
+                            .iter()
+                            .map(|v| vec![v[1]]),
+                    )
+                    .collect(),
+                full_message_size_log: max_msg_size_log,
+                gamma_powers,
+                gamma_powers_inv_div_two: gamma_powers_inv,
             },
         ))
     }
 
     fn encode(pp: &Self::ProverParameters, coeffs: &FieldType<E>) -> FieldType<E> {
-        // Split the input into chunks of message size, encode each message, and return the codewords
-        let basecode = encode_field_type_rs_basecode(
-            coeffs,
-            1 << Spec::get_rate_log(),
-            1 << Spec::get_basecode_size_log(),
-        );
-
-        // Apply the recursive definition of the BaseFold code to the list of base codewords,
-        // and produce the final codeword
-        evaluate_over_foldable_domain_generic_basecode::<E>(
-            1 << Spec::get_basecode_size_log(),
-            coeffs.len(),
-            Spec::get_rate_log(),
-            basecode,
-            &pp.table,
-        )
+        // Use the length of the FFT root table as the full message size to
+        // determine the shift factor.
+        Self::encode_internal(&pp.fft_root_table, coeffs)
     }
 
-    fn encode_small(coeffs: &FieldType<E>) -> FieldType<E> {
-        let mut basecode =
-            encode_field_type_rs_basecode(coeffs, 1 << Spec::get_rate_log(), coeffs.len());
-        assert_eq!(basecode.len(), 1);
-        basecode.remove(0)
+    fn encode_small(vp: &Self::VerifierParameters, coeffs: &FieldType<E>) -> FieldType<E> {
+        // Use the length of the FFT root table as the full message size to
+        // determine the shift factor.
+        Self::encode_internal(&vp.fft_root_table, coeffs)
     }
 
     fn get_number_queries() -> usize {
@@ -350,17 +377,26 @@ where
         return Spec::get_rate_log();
     }
 
-    fn get_basecode_size_log() -> usize {
-        return Spec::get_basecode_size_log();
+    fn get_basecode_msg_size_log() -> usize {
+        return Spec::get_basecode_msg_size_log();
     }
 
     fn prover_folding_coeffs(pp: &Self::ProverParameters, level: usize, index: usize) -> (E, E, E) {
-        let level = &pp.table_w_weights[level];
-        (
-            E::from(level[index].0),
-            E::from(-level[index].0),
-            E::from(level[index].1),
-        )
+        // level is the logarithmic of the codeword size after folded.
+        // Therefore, the domain after folded is gamma^2^(full_log_n - level) H
+        // where H is the multiplicative subgroup of size 2^level.
+        // The element at index i in this domain is
+        // gamma^2^(full_log_n - level) * ((2^level)-th root of unity)^i
+        // The x0 and x1 are exactly the two square roots, i.e.,
+        // x0 = gamma^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^i
+        let x0 = pp.gamma_powers[pp.fft_root_table.len() - level - 1]
+            * pp.fft_root_table[level + 1][index];
+        let x1 = -x0;
+        // The weight is 1/(x1-x0) = -1/(2x0)
+        // = -1/2 * (gamma^{-1})^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^{2^(level+1)-i}
+        let w = -pp.gamma_powers_inv_div_two[pp.fft_root_table.len() - level - 1]
+            * pp.fft_root_table[level + 1][(1 << (level + 1)) - index];
+        (E::from(x0), E::from(x1), E::from(w))
     }
 
     fn verifier_folding_coeffs(
@@ -368,224 +404,94 @@ where
         level: usize,
         index: usize,
     ) -> (E, E, E) {
-        type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
-        let mut cipher = Aes128Ctr64LE::new(
-            GenericArray::from_slice(&vp.aes_key[..]),
-            GenericArray::from_slice(&vp.aes_iv[..]),
-        );
-
-        let x0: E::BaseField = query_root_table_from_rng_aes::<E>(level, index, &mut cipher);
+        // The same as prover_folding_coeffs, exept that the powers of
+        // g is computed on the fly for levels exceeding the root table.
+        let x0 = if level + 1 < Spec::get_basecode_msg_size_log() {
+            vp.fft_root_table[level + 1][index]
+        } else {
+            // In this case, this level of fft root table of the verifier
+            // only stores the first 2^(level+1)-th root of unity.
+            vp.fft_root_table[level + 1][0].pow(&[index as u64])
+        };
         let x1 = -x0;
-
-        let w = (x1 - x0).invert().unwrap();
-
+        // The weight is 1/(x1-x0) = -1/(2x0)
+        // = -1/2 * (gamma^{-1})^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^{2^(level+1)-i}
+        let w = -vp.gamma_powers_inv_div_two[vp.fft_root_table.len() - level - 1]
+            * if level + 1 < Spec::get_basecode_msg_size_log() {
+                vp.fft_root_table[level + 1][(1 << (level + 1)) - index]
+            } else {
+                // In this case, this level of fft root table of the verifier
+                // only stores the first 2^(level+1)-th root of unity.
+                vp.fft_root_table[level + 1][0].pow(&[(1 << (level + 1)) - index as u64])
+            };
         (E::from(x0), E::from(x1), E::from(w))
     }
 }
 
-fn encode_field_type_rs_basecode<E: ExtensionField>(
-    poly: &FieldType<E>,
-    rate: usize,
-    message_size: usize,
-) -> Vec<FieldType<E>> {
-    match poly {
-        FieldType::Ext(poly) => get_basecode(poly, rate, message_size)
-            .iter()
-            .map(|x| FieldType::Ext(x.clone()))
-            .collect(),
-        FieldType::Base(poly) => get_basecode(poly, rate, message_size)
-            .iter()
-            .map(|x| FieldType::Base(x.clone()))
-            .collect(),
-        _ => panic!("Unsupported field type"),
+impl<Spec: RSCodeSpec> RSCode<Spec> {
+    fn encode_internal<E: ExtensionField>(
+        fft_root_table: &FftRootTable<E::BaseField>,
+        coeffs: &FieldType<E>,
+    ) -> FieldType<E>
+    where
+        E::BaseField: Serialize + DeserializeOwned,
+    {
+        let lg_m = log2_strict(coeffs.len());
+        let full_lg_n = fft_root_table.len();
+        let fft_root_table = &fft_root_table[..lg_m];
+        assert!(
+            lg_m <= full_lg_n,
+            "Encoded message exceeds the maximum supported message size of the table."
+        );
+        let rate = 1 << Spec::get_rate_log();
+        let mut ret = match coeffs {
+            FieldType::Base(coeffs) => {
+                let mut coeffs = coeffs.clone();
+                coeffs.extend(itertools::repeat_n(
+                    E::BaseField::ZERO,
+                    coeffs.len() * (rate - 1),
+                ));
+                FieldType::Base(coeffs)
+            }
+            FieldType::Ext(coeffs) => {
+                let mut coeffs = coeffs.clone();
+                coeffs.extend(itertools::repeat_n(E::ZERO, coeffs.len() * (rate - 1)));
+                FieldType::Ext(coeffs)
+            }
+            _ => panic!("Unsupported field type"),
+        };
+        // Let gamma be the multiplicative generator of the base field.
+        // The full domain is gamma H where H is the multiplicative subgroup
+        // of size n * rate.
+        // When the input message size is not n, but n/2^k, then the domain is
+        // gamma^2^k H.
+        let k = 1 << (fft_root_table.len() - lg_m);
+        coset_fft(
+            &mut ret,
+            E::BaseField::MULTIPLICATIVE_GENERATOR.pow(&[k]),
+            lg_m,
+            fft_root_table,
+        );
+        ret
     }
 }
 
-// Split the input into chunks of message size, encode each message, and return the codewords
-fn get_basecode<F: Field>(poly: &Vec<F>, rate: usize, message_size: usize) -> Vec<Vec<F>> {
+#[allow(unused)]
+fn naive_fft<E: ExtensionField>(poly: &Vec<E>, rate: usize, shift: E::BaseField) -> Vec<E> {
     let timer = start_timer!(|| "Encode RSCode");
-    // The domain is just counting 1, 2, 3, ... , domain_size
-    let domain: Vec<F> = steps(F::ONE).take(message_size * rate).collect();
-    let res = poly
-        .par_chunks_exact(message_size)
-        .map(|chunk| {
-            let mut target = vec![F::ZERO; message_size * rate];
-            // Just Reed-Solomon code, but with the naive domain
-            target
-                .iter_mut()
-                .enumerate()
-                .for_each(|(i, target)| *target = horner(&chunk[..], &domain[i]));
-            target
-        })
-        .collect::<Vec<Vec<F>>>();
+    let message_size = poly.len();
+    // The domain is shift * H where H is the multiplicative subgroup of size
+    // message_size * rate.
+    let mut domain = Vec::<E::BaseField>::with_capacity(message_size * rate);
+    domain[0] = shift;
+    for i in 1..message_size * rate {
+        domain[i] = domain[i - 1] * shift;
+    }
+    let mut res = vec![E::ZERO; message_size * rate];
+    res.iter_mut()
+        .enumerate()
+        .for_each(|(i, target)| *target = horner(&poly[..], &E::from(domain[i])));
     end_timer!(timer);
-
-    res
-}
-
-// this function assumes all codewords in base_codeword has equivalent length
-pub fn evaluate_over_foldable_domain_generic_basecode<E: ExtensionField>(
-    base_message_length: usize,
-    num_coeffs: usize,
-    log_rate: usize,
-    base_codewords: Vec<FieldType<E>>,
-    table: &Vec<Vec<E::BaseField>>,
-) -> FieldType<E> {
-    let timer = start_timer!(|| "evaluate over foldable domain");
-    let k = num_coeffs;
-    let logk = log2_strict(k);
-    let base_log_k = log2_strict(base_message_length);
-    // concatenate together all base codewords
-    //    let now = Instant::now();
-    let mut coeffs_with_bc = concatenate_field_types(&base_codewords);
-    //    println!("concatenate base codewords {:?}", now.elapsed());
-    // iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
-    let mut chunk_size = base_codewords[0].len(); // block length of the base code
-    for i in base_log_k..logk {
-        // In beginning of each iteration, the current codeword size is 1<<i, after this iteration,
-        // every two adjacent codewords are folded into one codeword of size 1<<(i+1).
-        // Fetch the table that has the same size of the *current* codeword size.
-        let level = &table[i + log_rate];
-        // chunk_size is equal to 1 << (i+1), i.e., the codeword size after the current iteration
-        // half_chunk is equal to 1 << i, i.e. the current codeword size
-        chunk_size = chunk_size << 1;
-        assert_eq!(level.len(), chunk_size >> 1);
-        match coeffs_with_bc {
-            FieldType::Ext(ref mut coeffs_with_bc) => {
-                coeffs_with_bc.par_chunks_mut(chunk_size).for_each(|chunk| {
-                    let half_chunk = chunk_size >> 1;
-                    for j in half_chunk..chunk_size {
-                        // Suppose the current codewords are (a, b)
-                        // The new codeword is computed by two halves:
-                        // left  = a + t * b
-                        // right = a - t * b
-                        let rhs = chunk[j] * E::from(level[j - half_chunk]);
-                        chunk[j] = chunk[j - half_chunk] - rhs;
-                        chunk[j - half_chunk] = chunk[j - half_chunk] + rhs;
-                    }
-                });
-            }
-            FieldType::Base(ref mut coeffs_with_bc) => {
-                coeffs_with_bc.par_chunks_mut(chunk_size).for_each(|chunk| {
-                    let half_chunk = chunk_size >> 1;
-                    for j in half_chunk..chunk_size {
-                        // Suppose the current codewords are (a, b)
-                        // The new codeword is computed by two halves:
-                        // left  = a + t * b
-                        // right = a - t * b
-                        let rhs = chunk[j] * level[j - half_chunk];
-                        chunk[j] = chunk[j - half_chunk] - rhs;
-                        chunk[j - half_chunk] = chunk[j - half_chunk] + rhs;
-                    }
-                });
-            }
-            _ => unreachable!(),
-        }
-    }
-    end_timer!(timer);
-    coeffs_with_bc
-}
-
-pub fn get_table_aes<E: ExtensionField, Rng: RngCore + Clone>(
-    poly_size_log: usize,
-    rate: usize,
-    rng: &mut Rng,
-) -> (
-    Vec<Vec<(E::BaseField, E::BaseField)>>,
-    Vec<Vec<E::BaseField>>,
-) {
-    // The size (logarithmic) of the codeword for the polynomial
-    let lg_n: usize = rate + poly_size_log;
-
-    let mut key: [u8; 16] = [0u8; 16];
-    let mut iv: [u8; 16] = [0u8; 16];
-    rng.fill_bytes(&mut key);
-    rng.fill_bytes(&mut iv);
-
-    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
-
-    let mut cipher = Aes128Ctr64LE::new(
-        GenericArray::from_slice(&key[..]),
-        GenericArray::from_slice(&iv[..]),
-    );
-
-    // Allocate the buffer for storing n field elements (the entire codeword)
-    let bytes = num_of_bytes::<E::BaseField>(1 << lg_n);
-    let mut dest: Vec<u8> = vec![0u8; bytes];
-    cipher.apply_keystream(&mut dest[..]);
-
-    // Now, dest is a vector filled with random data for a field vector of size n
-
-    // Collect the bytes into field elements
-    let flat_table: Vec<E::BaseField> = dest
-        .par_chunks_exact(num_of_bytes::<E::BaseField>(1))
-        .map(|chunk| base_from_raw_bytes::<E>(&chunk.to_vec()))
-        .collect::<Vec<_>>();
-
-    // Now, flat_table is a field vector of size n, filled with random field elements
-    assert_eq!(flat_table.len(), 1 << lg_n);
-
-    // Multiply -2 to every element to get the weights. Now weights = { -2x }
-    let mut weights: Vec<E::BaseField> = flat_table
-        .par_iter()
-        .map(|el| E::BaseField::ZERO - *el - *el)
-        .collect();
-
-    // Then invert all the elements. Now weights = { -1/2x }
-    let mut scratch_space = vec![E::BaseField::ZERO; weights.len()];
-    BatchInverter::invert_with_external_scratch(&mut weights, &mut scratch_space);
-
-    // Zip x and -1/2x together. The result is the list { (x, -1/2x) }
-    // What is this -1/2x? It is used in linear interpolation over the domain (x, -x), which
-    // involves computing 1/(b-a) where b=-x and a=x, and 1/(b-a) here is exactly -1/2x
-    let flat_table_w_weights = flat_table
-        .iter()
-        .zip(weights)
-        .map(|(el, w)| (*el, w))
-        .collect_vec();
-
-    // Split the positions from 0 to n-1 into slices of sizes:
-    // 2, 2, 4, 8, ..., n/2, exactly lg_n number of them
-    // The weights are (x, -1/2x), the table elements are just x
-
-    let mut unflattened_table_w_weights = vec![Vec::new(); lg_n];
-    let mut unflattened_table = vec![Vec::new(); lg_n];
-
-    unflattened_table_w_weights[0] = flat_table_w_weights[1..2].to_vec();
-    unflattened_table[0] = flat_table[1..2].to_vec();
-    for i in 1..lg_n {
-        unflattened_table[i] = flat_table[(1 << i)..(1 << (i + 1))].to_vec();
-        let mut level = flat_table_w_weights[(1 << i)..(1 << (i + 1))].to_vec();
-        reverse_index_bits_in_place(&mut level);
-        unflattened_table_w_weights[i] = level;
-    }
-
-    return (unflattened_table_w_weights, unflattened_table);
-}
-
-pub fn query_root_table_from_rng_aes<E: ExtensionField>(
-    level: usize,
-    index: usize,
-    cipher: &mut ctr::Ctr32LE<aes::Aes128>,
-) -> E::BaseField {
-    let mut level_offset: u128 = 1;
-    for lg_m in 1..=level {
-        let half_m = 1 << (lg_m - 1);
-        level_offset += half_m;
-    }
-
-    let pos = ((level_offset + (reverse_bits(index, level) as u128))
-        * ((E::BaseField::NUM_BITS as usize).next_power_of_two() as u128))
-        .checked_div(8)
-        .unwrap();
-
-    cipher.seek(pos);
-
-    let bytes = (E::BaseField::NUM_BITS as usize).next_power_of_two() / 8;
-    let mut dest: Vec<u8> = vec![0u8; bytes];
-    cipher.apply_keystream(&mut dest);
-
-    let res = base_from_raw_bytes::<E>(&dest);
 
     res
 }
@@ -593,16 +499,17 @@ pub fn query_root_table_from_rng_aes<E: ExtensionField>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use goldilocks::GoldilocksExt2;
-    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use goldilocks::{Goldilocks, GoldilocksExt2};
 
     #[test]
-    fn time_rs_code() {
+    fn time_naive_code() {
         use rand::rngs::OsRng;
 
-        let poly = DenseMultilinearExtension::random(20, &mut OsRng);
+        let poly: Vec<GoldilocksExt2> = (0..(1 << 20))
+            .map(|_| GoldilocksExt2::random(&mut OsRng))
+            .collect();
 
-        encode_field_type_rs_basecode::<GoldilocksExt2>(&poly.evaluations, 2, 64);
+        naive_fft::<GoldilocksExt2>(&poly, 2, Goldilocks::MULTIPLICATIVE_GENERATOR);
     }
 
     #[test]

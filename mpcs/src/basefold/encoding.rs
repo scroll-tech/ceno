@@ -36,13 +36,13 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
 
     /// Encodes a message of small length, such that the verifier is also able
     /// to execute the encoding.
-    fn encode_small(coeffs: &FieldType<E>) -> FieldType<E>;
+    fn encode_small(vp: &Self::VerifierParameters, coeffs: &FieldType<E>) -> FieldType<E>;
 
     fn get_number_queries() -> usize;
 
     fn get_rate_log() -> usize;
 
-    fn get_basecode_size_log() -> usize;
+    fn get_basecode_msg_size_log() -> usize;
 
     /// Returns three values: x0, x1 and 1/(x1-x0). Note that although
     /// 1/(x1-x0) can be computed from the other two values, we return it

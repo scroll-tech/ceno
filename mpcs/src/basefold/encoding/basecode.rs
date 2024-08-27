@@ -31,7 +31,7 @@ pub trait BasecodeSpec: std::fmt::Debug + Clone {
 
     fn get_rate_log() -> usize;
 
-    fn get_basecode_size_log() -> usize;
+    fn get_basecode_msg_size_log() -> usize;
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +46,7 @@ impl BasecodeSpec for BasecodeDefaultSpec {
         3
     }
 
-    fn get_basecode_size_log() -> usize {
+    fn get_basecode_msg_size_log() -> usize {
         7
     }
 }
@@ -153,13 +153,13 @@ where
         let basecode = encode_field_type_rs_basecode(
             coeffs,
             1 << Spec::get_rate_log(),
-            1 << Spec::get_basecode_size_log(),
+            1 << Spec::get_basecode_msg_size_log(),
         );
 
         // Apply the recursive definition of the BaseFold code to the list of base codewords,
         // and produce the final codeword
         evaluate_over_foldable_domain_generic_basecode::<E>(
-            1 << Spec::get_basecode_size_log(),
+            1 << Spec::get_basecode_msg_size_log(),
             coeffs.len(),
             Spec::get_rate_log(),
             basecode,
@@ -167,7 +167,7 @@ where
         )
     }
 
-    fn encode_small(coeffs: &FieldType<E>) -> FieldType<E> {
+    fn encode_small(_vp: &Self::VerifierParameters, coeffs: &FieldType<E>) -> FieldType<E> {
         let mut basecodes =
             encode_field_type_rs_basecode(coeffs, 1 << Spec::get_rate_log(), coeffs.len());
         assert_eq!(basecodes.len(), 1);
@@ -182,8 +182,8 @@ where
         return Spec::get_rate_log();
     }
 
-    fn get_basecode_size_log() -> usize {
-        return Spec::get_basecode_size_log();
+    fn get_basecode_msg_size_log() -> usize {
+        return Spec::get_basecode_msg_size_log();
     }
 
     fn prover_folding_coeffs(pp: &Self::ProverParameters, level: usize, index: usize) -> (E, E, E) {

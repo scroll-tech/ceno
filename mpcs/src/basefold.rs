@@ -91,10 +91,10 @@ where
             pp.encoding_params.get_max_message_size_log()
         );
         assert!(
-            num_vars >= Spec::get_basecode_size_log(),
-            "num_vars {} < Spec::get_basecode_size_log() {}",
+            num_vars >= Spec::get_basecode_msg_size_log(),
+            "num_vars {} < Spec::get_basecode_msg_size_log() {}",
             num_vars,
-            Spec::get_basecode_size_log()
+            Spec::get_basecode_msg_size_log()
         );
 
         // Switch to coefficient form
@@ -321,7 +321,7 @@ where
     ) -> Result<(), Error> {
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
-        assert!(comm.num_vars >= Spec::get_basecode_size_log());
+        assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
         assert!(comm.num_polys == 1);
         let (trees, oracles) = commit_phase::<E, Spec>(
             &pp.encoding_params,
@@ -329,7 +329,7 @@ where
             &comm,
             transcript,
             poly.num_vars,
-            poly.num_vars - Spec::get_basecode_size_log(),
+            poly.num_vars - Spec::get_basecode_msg_size_log(),
             &hasher,
         );
 
@@ -371,7 +371,7 @@ where
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
         let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
-        assert!(min_num_vars >= Spec::get_basecode_size_log());
+        assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
 
         comms.iter().for_each(|comm| {
             assert!(comm.num_polys == 1);
@@ -539,7 +539,7 @@ where
             comms.as_slice(),
             transcript,
             num_vars,
-            num_vars - Spec::get_basecode_size_log(),
+            num_vars - Spec::get_basecode_msg_size_log(),
             coeffs.as_slice(),
             &hasher,
         );
@@ -591,7 +591,7 @@ where
         polys
             .iter()
             .for_each(|poly| assert_eq!(poly.num_vars, num_vars));
-        assert!(num_vars >= Spec::get_basecode_size_log());
+        assert!(num_vars >= Spec::get_basecode_msg_size_log());
         assert_eq!(comm.num_polys, polys.len());
         assert_eq!(comm.num_polys, evals.len());
 
@@ -623,7 +623,7 @@ where
             &comm,
             transcript,
             num_vars,
-            num_vars - Spec::get_basecode_size_log(),
+            num_vars - Spec::get_basecode_msg_size_log(),
             &hasher,
         );
 
@@ -700,14 +700,14 @@ where
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::verify");
-        assert!(comm.num_vars().unwrap() >= Spec::get_basecode_size_log());
+        assert!(comm.num_vars().unwrap() >= Spec::get_basecode_msg_size_log());
         let hasher = new_hasher::<E::BaseField>();
 
         let num_vars = point.len();
         if let Some(comm_num_vars) = comm.num_vars() {
             assert_eq!(num_vars, comm_num_vars);
         }
-        let num_rounds = num_vars - Spec::get_basecode_size_log();
+        let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
         let mut roots = Vec::new();
@@ -724,7 +724,7 @@ where
 
         let read_timer = start_timer!(|| "Basefold::verify::read transcript");
         let final_message = transcript
-            .read_field_elements_ext(1 << Spec::get_basecode_size_log())
+            .read_field_elements_ext(1 << Spec::get_basecode_msg_size_log())
             .unwrap();
         let query_challenges = transcript
             .squeeze_challenges(Spec::get_number_queries())
@@ -795,7 +795,7 @@ where
         let hasher = new_hasher::<E::BaseField>();
         let comms = comms.into_iter().collect_vec();
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
-        let num_rounds = num_vars - Spec::get_basecode_size_log();
+        let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
         validate_input("batch verify", num_vars, &vec![], &points.to_vec())?;
         let poly_num_vars = comms.iter().map(|c| c.num_vars().unwrap()).collect_vec();
         evals.iter().for_each(|eval| {
@@ -804,7 +804,7 @@ where
                 comms[eval.poly()].num_vars().unwrap()
             );
         });
-        assert!(poly_num_vars.iter().min().unwrap() >= &Spec::get_basecode_size_log());
+        assert!(poly_num_vars.iter().min().unwrap() >= &Spec::get_basecode_msg_size_log());
 
         let sumcheck_timer = start_timer!(|| "Basefold::batch_verify::initial sumcheck");
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
@@ -850,7 +850,7 @@ where
             }
         }
         let final_message = transcript
-            .read_field_elements_ext(1 << Spec::get_basecode_size_log())
+            .read_field_elements_ext(1 << Spec::get_basecode_msg_size_log())
             .unwrap();
 
         let query_challenges = transcript
@@ -923,7 +923,7 @@ where
         transcript: &mut impl TranscriptRead<Self::CommitmentChunk, E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::simple batch verify");
-        assert!(comm.num_vars().unwrap() >= Spec::get_basecode_size_log());
+        assert!(comm.num_vars().unwrap() >= Spec::get_basecode_msg_size_log());
         let batch_size = evals.len();
         if let Some(num_polys) = comm.num_polys {
             assert_eq!(num_polys, batch_size);
@@ -934,7 +934,7 @@ where
         if let Some(comm_num_vars) = comm.num_vars {
             assert_eq!(num_vars, comm_num_vars);
         }
-        let num_rounds = num_vars - Spec::get_basecode_size_log();
+        let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
 
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
@@ -956,7 +956,7 @@ where
 
         let read_timer = start_timer!(|| "Basefold::verify::read transcript");
         let final_message = transcript
-            .read_field_elements_ext(1 << Spec::get_basecode_size_log())
+            .read_field_elements_ext(1 << Spec::get_basecode_msg_size_log())
             .unwrap();
         let query_challenges = transcript
             .squeeze_challenges(Spec::get_number_queries())

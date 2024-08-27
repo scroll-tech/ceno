@@ -139,7 +139,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let mut message = final_message.clone();
     interpolate_over_boolean_hypercube(&mut message);
     let final_codeword =
-        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(&FieldType::Ext(message));
+        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
     let mut final_codeword = match final_codeword {
         FieldType::Ext(final_codeword) => final_codeword,
         _ => panic!("Final codeword must be extension field"),
@@ -205,7 +205,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let mut message = final_message.clone();
     interpolate_over_boolean_hypercube(&mut message);
     let final_codeword =
-        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(&FieldType::Ext(message));
+        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
     let mut final_codeword = match final_codeword {
         FieldType::Ext(final_codeword) => final_codeword,
         _ => panic!("Final codeword must be extension field"),
@@ -276,7 +276,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     let mut message = final_message.clone();
     interpolate_over_boolean_hypercube(&mut message);
     let final_codeword =
-        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(&FieldType::Ext(message));
+        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
     let mut final_codeword = match final_codeword {
         FieldType::Ext(final_codeword) => final_codeword,
         _ => panic!("Final codeword must be extension field"),
