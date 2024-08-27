@@ -50,7 +50,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     // when flag is true, return lhs
     // otherwise return rhs
-    pub fn select_if<E: ExtensionField>(
+    pub fn conditional_select<E: ExtensionField>(
         _circuit_builder: &mut CircuitBuilder<E>,
         _flag: Expression<E>,
         _lhs: UInt<M, C>,

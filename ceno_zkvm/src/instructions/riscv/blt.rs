@@ -72,7 +72,7 @@ fn blt_gadget<E: ExtensionField>(
     // update pc
     let next_pc_1 = pc.add(circuit_builder, &imm)?;
     let next_pc_2 = pc.add_const(circuit_builder, PC_STEP_SIZE.into())?;
-    let next_pc = PCUInt::select_if(circuit_builder, lt.expr(), next_pc_1, next_pc_2)?;
+    let next_pc = PCUInt::conditional_select(circuit_builder, lt.expr(), next_pc_1, next_pc_2)?;
 
     // update ts
     let mut prev_rs1_ts = TSUInt::new(circuit_builder);
