@@ -8,7 +8,7 @@ use crate::{
     expression::{Expression, ToExpr},
 };
 
-use super::{uint::UintLimb, UInt};
+use super::{UInt, UintLimb};
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
@@ -202,7 +202,7 @@ mod tests {
     mod add {
         use crate::{
             circuit_builder::CircuitBuilder, expression::Expression, scheme::utils::eval_by_expr,
-            uint::uint::UInt,
+            uint::UInt,
         };
         use ff::Field;
         use goldilocks::GoldilocksExt2;
@@ -450,9 +450,7 @@ mod tests {
     }
 
     mod mul {
-        use crate::{
-            circuit_builder::CircuitBuilder, scheme::utils::eval_by_expr, uint::uint::UInt,
-        };
+        use crate::{circuit_builder::CircuitBuilder, scheme::utils::eval_by_expr, uint::UInt};
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
@@ -533,9 +531,7 @@ mod tests {
     }
 
     mod mul_add {
-        use crate::{
-            circuit_builder::CircuitBuilder, scheme::utils::eval_by_expr, uint::uint::UInt,
-        };
+        use crate::{circuit_builder::CircuitBuilder, scheme::utils::eval_by_expr, uint::UInt};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
 
