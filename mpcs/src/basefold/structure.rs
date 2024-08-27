@@ -10,7 +10,7 @@ use multilinear_extensions::mle::FieldType;
 use rand_chacha::ChaCha8Rng;
 use std::{marker::PhantomData, slice};
 
-use super::encoding::{Basecode, BasecodeDefaultSpec, EncodingProverParameters, EncodingScheme};
+pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -216,7 +216,7 @@ impl<E: ExtensionField> BasefoldSpec<E> for BasefoldDefaultParams
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    type EncodingScheme = Basecode<BasecodeDefaultSpec>;
+    type EncodingScheme = RSCode<RSCodeDefaultSpec>;
 }
 
 #[derive(Debug)]

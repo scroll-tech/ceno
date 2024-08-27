@@ -23,7 +23,10 @@ use crate::{
     validate_input, Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
 };
 use ark_std::{end_timer, start_timer};
-use encoding::{EncodingProverParameters, EncodingScheme};
+pub use encoding::{
+    Basecode, BasecodeDefaultSpec, EncodingProverParameters, EncodingScheme, RSCode,
+    RSCodeDefaultSpec,
+};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
 use query_phase::{

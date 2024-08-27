@@ -3,6 +3,10 @@ use multilinear_extensions::mle::FieldType;
 
 mod basecode;
 pub use basecode::{Basecode, BasecodeDefaultSpec};
+
+mod rs;
+pub use rs::{RSCode, RSCodeDefaultSpec};
+
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::Error;
