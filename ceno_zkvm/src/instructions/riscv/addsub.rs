@@ -77,13 +77,9 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         )
     };
 
-    // TODO rs1_id, rs2_id, rd_id should be bytecode lookup
     let rs1_id = circuit_builder.create_witin();
     let rs2_id = circuit_builder.create_witin();
     let rd_id = circuit_builder.create_witin();
-    circuit_builder.assert_ux::<5>(rs1_id.expr())?;
-    circuit_builder.assert_ux::<5>(rs2_id.expr())?;
-    circuit_builder.assert_ux::<5>(rd_id.expr())?;
 
     // TODO remove me, this is just for testing degree > 1 sumcheck in main constraints
     circuit_builder.require_zero(rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr())?;
