@@ -287,7 +287,17 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                             .collect(),
                     )),
                     (_, _) => {
-                        unimplemented!("r,w only support degree 1 expression")
+                        assert_eq!(a.len(), b.len());
+                        // we do the pointwise evaluation multiplication here without involving FFT
+                        // the evaluations outside of range will be checked via sumcheck + identity polynomial
+                        Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                            ceil_log2(a.len()),
+                            a.par_iter()
+                                .zip(b.par_iter())
+                                .with_min_len(MIN_PAR_SIZE)
+                                .map(|(a, b)| *a * b)
+                                .collect(),
+                        ))
                     }
                 }
             })
