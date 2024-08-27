@@ -12,7 +12,7 @@ use super::{uint::UintLimb, UInt};
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
-    const LIMB_BIT_MASK: u64 = 0xFFFFFFFFFFFFFFFF >> (M - C);
+    const LIMB_BIT_MASK: u64 = 1 << C;
 
     fn internal_add(
         &self,

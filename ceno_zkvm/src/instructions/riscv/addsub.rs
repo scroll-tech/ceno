@@ -86,7 +86,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     circuit_builder.assert_ux::<5>(rd_id.expr())?;
 
     // TODO remove me, this is just for testing degree > 1 sumcheck in main constraints
-    // circuit_builder.require_zero(rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr())?;
+    circuit_builder.require_zero(rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr())?;
 
     let mut prev_rs1_ts = TSUInt::new(circuit_builder);
     let mut prev_rs2_ts = TSUInt::new(circuit_builder);
