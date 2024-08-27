@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use super::rv32im::EmuContext;
 use crate::{
     addr::{ByteAddr, WordAddr},
-    platform::PC_START,
+    platform::Platform,
     rv32im::{DecodedInstruction, Instruction, TrapCause},
 };
 use anyhow::{anyhow, Result};
 
 pub struct SimpleContext {
+    platform: Platform,
     pc: u32,
     /// Map a word-address (addr/4) to a word.
     memory: HashMap<u32, u32>,
@@ -16,9 +17,11 @@ pub struct SimpleContext {
 }
 
 impl SimpleContext {
-    pub fn new() -> Self {
+    pub fn new(platform: Platform) -> Self {
+        let pc = platform.pc_start;
         Self {
-            pc: PC_START,
+            platform,
+            pc,
             memory: HashMap::new(),
             registers: [0; 32],
         }
@@ -68,5 +71,10 @@ impl EmuContext for SimpleContext {
     fn store_memory(&mut self, addr: WordAddr, data: u32) -> Result<()> {
         self.memory.insert(addr.0, data);
         Ok(())
+    }
+
+    fn check_insn_load(&self, addr: ByteAddr) -> bool {
+        (self.platform.rom_start..self.platform.rom_start + self.platform.rom_size)
+            .contains(&addr.0)
     }
 }

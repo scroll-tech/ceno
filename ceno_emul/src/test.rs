@@ -1,18 +1,14 @@
 use super::rv32im::Emulator;
 use crate::{
-    addr::{ByteAddr, WordAddr},
-    emu_context::SimpleContext,
-    inst,
-    platform::PC_START,
-    rv32im::EmuContext,
+    addr::ByteAddr, emu_context::SimpleContext, platform::CENO_PLATFORM, rv32im::EmuContext,
 };
 use anyhow::Result;
 
 #[test]
 fn test_emulator() -> Result<()> {
-    let mut ctx = SimpleContext::new();
+    let mut ctx = SimpleContext::new(CENO_PLATFORM);
 
-    let pc_start = ByteAddr(PC_START).waddr();
+    let pc_start = ByteAddr(CENO_PLATFORM.pc_start).waddr();
     for (i, &inst) in PROGRAM_FIBONACCI_20.iter().enumerate() {
         ctx.store_memory(pc_start + i as u32, inst)?;
     }

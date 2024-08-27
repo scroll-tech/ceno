@@ -52,6 +52,12 @@ pub trait EmuContext {
     // Store to memory
     fn store_memory(&mut self, addr: WordAddr, data: u32) -> Result<()>;
 
+    // Load from memory, in the context of instruction fetching.
+    // Only called after check_insn_load returns true.
+    fn fetch(&mut self, addr: WordAddr) -> Result<u32> {
+        self.load_memory(addr)
+    }
+
     // Check access for instruction load
     fn check_insn_load(&self, _addr: ByteAddr) -> bool {
         true
@@ -366,8 +372,9 @@ impl Emulator {
             return Ok(());
         }
 
-        let word = ctx.load_memory(pc.waddr())?;
+        let word = ctx.fetch(pc.waddr())?;
         if word & 0x03 != 0x03 {
+            // Opcode must end in 0b11 in RV32IM.
             ctx.trap(TrapCause::IllegalInstruction(word))?;
             return Ok(());
         }
