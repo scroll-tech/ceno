@@ -206,9 +206,7 @@ where
             GenericArray::from_slice(&vp.aes_iv[..]),
         );
 
-        let ri0 = reverse_bits(index << 1, level + 1);
-
-        let x0: E::BaseField = query_point::<E>(1 << (level + 1), ri0, level, &mut cipher);
+        let x0: E::BaseField = query_root_table_from_rng_aes::<E>(level, index, &mut cipher);
         let x1 = -x0;
 
         let w = (x1 - x0).invert().unwrap();
@@ -385,12 +383,8 @@ pub fn get_table_aes<E: ExtensionField, Rng: RngCore + Clone>(
     let mut unflattened_table_w_weights = vec![Vec::new(); lg_n];
     let mut unflattened_table = vec![Vec::new(); lg_n];
 
-    let mut level_weights = flat_table_w_weights[0..2].to_vec();
-    // Apply the reverse-bits permutation to a vector of size 2, equivalent to just swapping
-    reverse_index_bits_in_place(&mut level_weights);
-    unflattened_table_w_weights[0] = level_weights;
-
-    unflattened_table[0] = flat_table[0..2].to_vec();
+    unflattened_table_w_weights[0] = flat_table_w_weights[1..2].to_vec();
+    unflattened_table[0] = flat_table[1..2].to_vec();
     for i in 1..lg_n {
         unflattened_table[i] = flat_table[(1 << i)..(1 << (i + 1))].to_vec();
         let mut level = flat_table_w_weights[(1 << i)..(1 << (i + 1))].to_vec();
@@ -399,23 +393,6 @@ pub fn get_table_aes<E: ExtensionField, Rng: RngCore + Clone>(
     }
 
     return (unflattened_table_w_weights, unflattened_table);
-}
-
-pub fn query_point<E: ExtensionField>(
-    block_length: usize,
-    eval_index: usize,
-    level: usize,
-    mut cipher: &mut ctr::Ctr32LE<aes::Aes128>,
-) -> E::BaseField {
-    let level_index = eval_index % (block_length);
-    let mut el =
-        query_root_table_from_rng_aes::<E>(level, level_index % (block_length >> 1), &mut cipher);
-
-    if level_index >= (block_length >> 1) {
-        el = -E::BaseField::ONE * el;
-    }
-
-    return el;
 }
 
 pub fn query_root_table_from_rng_aes<E: ExtensionField>(
@@ -429,7 +406,7 @@ pub fn query_root_table_from_rng_aes<E: ExtensionField>(
         level_offset += half_m;
     }
 
-    let pos = ((level_offset + (index as u128))
+    let pos = ((level_offset + (reverse_bits(index, level) as u128))
         * ((E::BaseField::NUM_BITS as usize).next_power_of_two() as u128))
         .checked_div(8)
         .unwrap();
@@ -458,5 +435,23 @@ mod tests {
         let poly = DenseMultilinearExtension::random(20, &mut OsRng);
 
         encode_field_type_rs_basecode::<GoldilocksExt2>(&poly.evaluations, 2, 64);
+    }
+
+    #[test]
+    fn prover_verifier_consistency() {
+        type Code = Basecode<BasecodeDefaultSpec>;
+        let pp: BasecodeParameters<GoldilocksExt2> = Code::setup(10, [0; 32]);
+        let (pp, vp) = Code::trim(&pp, 10).unwrap();
+        for level in 0..(10 + <Code as EncodingScheme<GoldilocksExt2>>::get_rate_log()) {
+            for index in 0..(1 << level) {
+                assert_eq!(
+                    Code::prover_folding_coeffs(&pp, level, index),
+                    Code::verifier_folding_coeffs(&vp, level, index),
+                    "failed for level = {}, index = {}",
+                    level,
+                    index
+                );
+            }
+        }
     }
 }
