@@ -198,6 +198,7 @@ pub fn load_u5_table<E: ExtensionField>(
 }
 
 #[allow(unused_imports)]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
