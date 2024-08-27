@@ -18,9 +18,6 @@ use std::{fmt, ops};
 
 pub const WORD_SIZE: usize = 4;
 
-// No paging.
-const PAGE_WORDS: u32 = u32::MAX / WORD_SIZE as u32;
-
 #[derive(Clone, Copy, PartialEq)]
 pub struct ByteAddr(pub u32);
 
@@ -60,10 +57,6 @@ impl ByteAddr {
 impl WordAddr {
     pub const fn baddr(self) -> ByteAddr {
         ByteAddr(self.0 * WORD_SIZE as u32)
-    }
-
-    pub fn page_idx(&self) -> u32 {
-        self.0 / PAGE_WORDS as u32
     }
 }
 
