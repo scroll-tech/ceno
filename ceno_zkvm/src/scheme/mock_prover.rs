@@ -1,6 +1,7 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{circuit_builder::CircuitBuilder, expression::Expression, structs::ROMType};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{marker::PhantomData, ops::Neg};
 
@@ -90,7 +91,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
             .assert_zero_expressions
             .iter()
             .chain(&cb.cs.assert_zero_sumcheck_expressions)
-            .zip(
+            .zip_eq(
                 cb.cs
                     .assert_zero_expressions_namespace_map
                     .iter()
@@ -109,7 +110,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
                 let right_evaluated = wit_infer_by_expr(wits_in, &challenge, &right);
                 let right_evaluated = right_evaluated.get_ext_field_vec();
 
-                for (left_element, right_element) in left_evaluated.iter().zip(right_evaluated) {
+                for (left_element, right_element) in left_evaluated.iter().zip_eq(right_evaluated) {
                     if *left_element != *right_element {
                         errors.push(MockProverError::AssertEqualError {
                             left_expression: left.clone(),
@@ -146,7 +147,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
             .cs
             .lk_expressions
             .iter()
-            .zip(cb.cs.lk_expressions_namespace_map.iter())
+            .zip_eq(cb.cs.lk_expressions_namespace_map.iter())
         {
             let expr_evaluated = wit_infer_by_expr(wits_in, &challenge, expr);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
