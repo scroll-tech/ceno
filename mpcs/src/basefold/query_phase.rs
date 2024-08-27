@@ -1,7 +1,6 @@
-use super::basecode::{encode_rs_basecode, query_point};
 use crate::util::{
     arithmetic::{
-        degree_2_eval, degree_2_zero_plus_one, inner_product, interpolate2,
+        degree_2_eval, degree_2_zero_plus_one, inner_product, interpolate2_weights,
         interpolate_over_boolean_hypercube,
     },
     ext_to_usize, field_type_index_base, field_type_index_ext,
@@ -10,23 +9,22 @@ use crate::util::{
     merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree},
     transcript::{TranscriptRead, TranscriptWrite},
 };
-use aes::cipher::KeyIvInit;
 use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
-use ctr;
 use ff_ext::ExtensionField;
-use generic_array::GenericArray;
 
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use multilinear_extensions::mle::FieldType;
 
-use crate::util::plonky2_util::{reverse_bits, reverse_index_bits_in_place};
-use rand_chacha::{rand_core::RngCore, ChaCha8Rng};
+use crate::util::plonky2_util::reverse_index_bits_in_place;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
-use super::structure::{BasefoldCommitment, BasefoldCommitmentWithData};
+use super::{
+    encoding::EncodingScheme,
+    structure::{BasefoldCommitment, BasefoldCommitmentWithData, BasefoldSpec},
+};
 
 pub fn prover_query_phase<E: ExtensionField>(
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
@@ -119,18 +117,17 @@ where
     }
 }
 
-pub fn verifier_query_phase<E: ExtensionField>(
+pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     queries: &QueriesResultWithMerklePath<E>,
     sum_check_messages: &Vec<Vec<E>>,
     fold_challenges: &Vec<E>,
     num_rounds: usize,
     num_vars: usize,
-    log_rate: usize,
     final_message: &Vec<E>,
     roots: &Vec<Digest<E::BaseField>>,
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
-    rng: ChaCha8Rng,
     eval: &E,
     hasher: &Hasher<E::BaseField>,
 ) where
@@ -141,38 +138,23 @@ pub fn verifier_query_phase<E: ExtensionField>(
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.clone();
     interpolate_over_boolean_hypercube(&mut message);
-    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
-    assert_eq!(final_codeword.len(), 1);
-    let mut final_codeword = final_codeword.remove(0);
+    let final_codeword =
+        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(&FieldType::Ext(message));
+    let mut final_codeword = match final_codeword {
+        FieldType::Ext(final_codeword) => final_codeword,
+        _ => panic!("Final codeword must be extension field"),
+    };
     reverse_index_bits_in_place(&mut final_codeword);
     end_timer!(encode_timer);
 
-    // For computing the weights on the fly, because the verifier is incapable of storing
-    // the weights.
-    let aes_timer = start_timer!(|| "Initialize AES");
-    let mut key: [u8; 16] = [0u8; 16];
-    let mut iv: [u8; 16] = [0u8; 16];
-    let mut rng = rng.clone();
-    rng.set_word_pos(0);
-    rng.fill_bytes(&mut key);
-    rng.fill_bytes(&mut iv);
-
-    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
-    let cipher = Aes128Ctr64LE::new(
-        GenericArray::from_slice(&key[..]),
-        GenericArray::from_slice(&iv[..]),
-    );
-    end_timer!(aes_timer);
-
-    queries.check(
+    queries.check::<Spec>(
+        vp,
         fold_challenges,
         num_rounds,
         num_vars,
-        log_rate,
         &final_codeword,
         roots,
         comm,
-        cipher,
         hasher,
     );
 
@@ -201,19 +183,18 @@ pub fn verifier_query_phase<E: ExtensionField>(
     end_timer!(timer);
 }
 
-pub fn batch_verifier_query_phase<E: ExtensionField>(
+pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     queries: &BatchedQueriesResultWithMerklePath<E>,
     sum_check_messages: &Vec<Vec<E>>,
     fold_challenges: &Vec<E>,
     num_rounds: usize,
     num_vars: usize,
-    log_rate: usize,
     final_message: &Vec<E>,
     roots: &Vec<Digest<E::BaseField>>,
     comms: &Vec<&BasefoldCommitment<E>>,
     coeffs: &[E],
     partial_eq: &[E],
-    rng: ChaCha8Rng,
     eval: &E,
     hasher: &Hasher<E::BaseField>,
 ) where
@@ -223,39 +204,27 @@ pub fn batch_verifier_query_phase<E: ExtensionField>(
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.clone();
     interpolate_over_boolean_hypercube(&mut message);
-    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
-    assert_eq!(final_codeword.len(), 1);
-    let mut final_codeword = final_codeword.remove(0);
+    let final_codeword =
+        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(&FieldType::Ext(message));
+    let mut final_codeword = match final_codeword {
+        FieldType::Ext(final_codeword) => final_codeword,
+        _ => panic!("Final codeword must be extension field"),
+    };
     reverse_index_bits_in_place(&mut final_codeword);
     end_timer!(encode_timer);
 
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
-    let aes_timer = start_timer!(|| "Initialize AES");
-    let mut key: [u8; 16] = [0u8; 16];
-    let mut iv: [u8; 16] = [0u8; 16];
-    let mut rng = rng.clone();
-    rng.set_word_pos(0);
-    rng.fill_bytes(&mut key);
-    rng.fill_bytes(&mut iv);
 
-    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
-    let cipher = Aes128Ctr64LE::new(
-        GenericArray::from_slice(&key[..]),
-        GenericArray::from_slice(&iv[..]),
-    );
-    end_timer!(aes_timer);
-
-    queries.check(
+    queries.check::<Spec>(
+        vp,
         fold_challenges,
         num_rounds,
         num_vars,
-        log_rate,
         &final_codeword,
         roots,
         comms,
         coeffs,
-        cipher,
         hasher,
     );
 
@@ -284,19 +253,18 @@ pub fn batch_verifier_query_phase<E: ExtensionField>(
     end_timer!(timer);
 }
 
-pub fn simple_batch_verifier_query_phase<E: ExtensionField>(
+pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     queries: &SimpleBatchQueriesResultWithMerklePath<E>,
     sum_check_messages: &Vec<Vec<E>>,
     fold_challenges: &Vec<E>,
     batch_coeffs: &Vec<E>,
     num_rounds: usize,
     num_vars: usize,
-    log_rate: usize,
     final_message: &Vec<E>,
     roots: &Vec<Digest<E::BaseField>>,
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
-    rng: ChaCha8Rng,
     evals: &[E],
     hasher: &Hasher<E::BaseField>,
 ) where
@@ -307,39 +275,26 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField>(
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.clone();
     interpolate_over_boolean_hypercube(&mut message);
-    let mut final_codeword = encode_rs_basecode(&message, 1 << log_rate, message.len());
-    assert_eq!(final_codeword.len(), 1);
-    let mut final_codeword = final_codeword.remove(0);
+    let final_codeword =
+        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(&FieldType::Ext(message));
+    let mut final_codeword = match final_codeword {
+        FieldType::Ext(final_codeword) => final_codeword,
+        _ => panic!("Final codeword must be extension field"),
+    };
     reverse_index_bits_in_place(&mut final_codeword);
     end_timer!(encode_timer);
 
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
-    let aes_timer = start_timer!(|| "Initialize AES");
-    let mut key: [u8; 16] = [0u8; 16];
-    let mut iv: [u8; 16] = [0u8; 16];
-    let mut rng = rng.clone();
-    rng.set_word_pos(0);
-    rng.fill_bytes(&mut key);
-    rng.fill_bytes(&mut iv);
-
-    type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
-    let cipher = Aes128Ctr64LE::new(
-        GenericArray::from_slice(&key[..]),
-        GenericArray::from_slice(&iv[..]),
-    );
-    end_timer!(aes_timer);
-
-    queries.check(
+    queries.check::<Spec>(
+        vp,
         fold_challenges,
         batch_coeffs,
         num_rounds,
         num_vars,
-        log_rate,
         &final_codeword,
         roots,
         comm,
-        cipher,
         hasher,
     );
 
@@ -1079,16 +1034,15 @@ where
         }
     }
 
-    pub fn check(
+    pub fn check<Spec: BasefoldSpec<E>>(
         &self,
+        vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &Vec<E>,
         num_rounds: usize,
         num_vars: usize,
-        log_rate: usize,
         final_codeword: &Vec<E>,
         roots: &Vec<Digest<E::BaseField>>,
         comm: &BasefoldCommitment<E>,
-        mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
         hasher: &Hasher<E::BaseField>,
     ) {
@@ -1103,18 +1057,14 @@ where
         let mut left_index = right_index - 1;
 
         for i in 0..num_rounds {
-            // let round_timer = start_timer!(|| format!("SingleQueryResult::round {}", i));
-            let ri0 = reverse_bits(left_index, num_vars + log_rate - i);
+            let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
+                vp,
+                num_vars + Spec::get_rate_log() - i - 1,
+                left_index >> 1,
+            );
 
-            let x0 = E::from(query_point::<E>(
-                1 << (num_vars + log_rate - i),
-                ri0,
-                num_vars + log_rate - i - 1,
-                &mut cipher,
-            ));
-            let x1 = -x0;
-
-            let res = interpolate2([(x0, curr_left), (x1, curr_right)], fold_challenges[i]);
+            let res =
+                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
 
             let next_index = right_index >> 1;
             let next_oracle_value = if i < num_rounds - 1 {
@@ -1238,29 +1188,27 @@ where
         }
     }
 
-    pub fn check(
+    pub fn check<Spec: BasefoldSpec<E>>(
         &self,
+        vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &Vec<E>,
         num_rounds: usize,
         num_vars: usize,
-        log_rate: usize,
         final_codeword: &Vec<E>,
         roots: &Vec<Digest<E::BaseField>>,
         comm: &BasefoldCommitment<E>,
-        cipher: ctr::Ctr32LE<aes::Aes128>,
         hasher: &Hasher<E::BaseField>,
     ) {
         let timer = start_timer!(|| "QueriesResult::check");
         self.inner.par_iter().for_each(|(index, query)| {
-            query.check(
+            query.check::<Spec>(
+                vp,
                 fold_challenges,
                 num_rounds,
                 num_vars,
-                log_rate,
                 final_codeword,
                 roots,
                 comm,
-                cipher.clone(),
                 *index,
                 hasher,
             );
@@ -1367,17 +1315,16 @@ where
         }
     }
 
-    pub fn check(
+    pub fn check<Spec: BasefoldSpec<E>>(
         &self,
+        vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &Vec<E>,
         num_rounds: usize,
         num_vars: usize,
-        log_rate: usize,
         final_codeword: &Vec<E>,
         roots: &Vec<Digest<E::BaseField>>,
         comms: &Vec<&BasefoldCommitment<E>>,
         coeffs: &[E],
-        mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
         hasher: &Hasher<E::BaseField>,
     ) {
@@ -1394,7 +1341,6 @@ where
 
         for i in 0..num_rounds {
             // let round_timer = start_timer!(|| format!("BatchedSingleQueryResult::round {}", i));
-            let ri0 = reverse_bits(left_index, num_vars + log_rate - i);
             let matching_comms = comms
                 .iter()
                 .enumerate()
@@ -1409,15 +1355,14 @@ where
                 curr_right += query.right_ext() * coeffs[*index];
             });
 
-            let x0: E = E::from(query_point::<E>(
-                1 << (num_vars + log_rate - i),
-                ri0,
-                num_vars + log_rate - i - 1,
-                &mut cipher,
-            ));
-            let x1 = -x0;
+            let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
+                vp,
+                num_vars + Spec::get_rate_log() - i - 1,
+                left_index >> 1,
+            );
 
-            let mut res = interpolate2([(x0, curr_left), (x1, curr_right)], fold_challenges[i]);
+            let mut res =
+                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
 
             let next_index = right_index >> 1;
 
@@ -1569,31 +1514,29 @@ where
         }
     }
 
-    pub fn check(
+    pub fn check<Spec: BasefoldSpec<E>>(
         &self,
+        vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &Vec<E>,
         num_rounds: usize,
         num_vars: usize,
-        log_rate: usize,
         final_codeword: &Vec<E>,
         roots: &Vec<Digest<E::BaseField>>,
         comms: &Vec<&BasefoldCommitment<E>>,
         coeffs: &[E],
-        cipher: ctr::Ctr32LE<aes::Aes128>,
         hasher: &Hasher<E::BaseField>,
     ) {
         let timer = start_timer!(|| "BatchedQueriesResult::check");
         self.inner.par_iter().for_each(|(index, query)| {
-            query.check(
+            query.check::<Spec>(
+                vp,
                 fold_challenges,
                 num_rounds,
                 num_vars,
-                log_rate,
                 final_codeword,
                 roots,
                 comms,
                 coeffs,
-                cipher.clone(),
                 *index,
                 hasher,
             );
@@ -1891,17 +1834,16 @@ where
         }
     }
 
-    pub fn check(
+    pub fn check<Spec: BasefoldSpec<E>>(
         &self,
+        vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &Vec<E>,
         batch_coeffs: &Vec<E>,
         num_rounds: usize,
         num_vars: usize,
-        log_rate: usize,
         final_codeword: &Vec<E>,
         roots: &Vec<Digest<E::BaseField>>,
         comm: &BasefoldCommitment<E>,
-        mut cipher: ctr::Ctr32LE<aes::Aes128>,
         index: usize,
         hasher: &Hasher<E::BaseField>,
     ) {
@@ -1918,17 +1860,15 @@ where
 
         for i in 0..num_rounds {
             // let round_timer = start_timer!(|| format!("SingleQueryResult::round {}", i));
-            let ri0 = reverse_bits(left_index, num_vars + log_rate - i);
 
-            let x0 = E::from(query_point::<E>(
-                1 << (num_vars + log_rate - i),
-                ri0,
-                num_vars + log_rate - i - 1,
-                &mut cipher,
-            ));
-            let x1 = -x0;
+            let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
+                vp,
+                num_vars + Spec::get_rate_log() - i - 1,
+                left_index >> 1,
+            );
 
-            let res = interpolate2([(x0, curr_left), (x1, curr_right)], fold_challenges[i]);
+            let res =
+                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
 
             let next_index = right_index >> 1;
             let next_oracle_value = if i < num_rounds - 1 {
@@ -2056,31 +1996,29 @@ where
         }
     }
 
-    pub fn check(
+    pub fn check<Spec: BasefoldSpec<E>>(
         &self,
+        vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &Vec<E>,
         batch_coeffs: &Vec<E>,
         num_rounds: usize,
         num_vars: usize,
-        log_rate: usize,
         final_codeword: &Vec<E>,
         roots: &Vec<Digest<E::BaseField>>,
         comm: &BasefoldCommitment<E>,
-        cipher: ctr::Ctr32LE<aes::Aes128>,
         hasher: &Hasher<E::BaseField>,
     ) {
         let timer = start_timer!(|| "QueriesResult::check");
         self.inner.par_iter().for_each(|(index, query)| {
-            query.check(
+            query.check::<Spec>(
+                vp,
                 fold_challenges,
                 batch_coeffs,
                 num_rounds,
                 num_vars,
-                log_rate,
                 final_codeword,
                 roots,
                 comm,
-                cipher.clone(),
                 *index,
                 hasher,
             );

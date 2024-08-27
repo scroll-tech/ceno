@@ -1,4 +1,12 @@
-use crate::util::{arithmetic::base_from_raw_bytes, log2_strict, num_of_bytes};
+use std::marker::PhantomData;
+
+use super::{concatenate_field_types, EncodingProverParameters, EncodingScheme};
+use crate::{
+    util::{
+        arithmetic::base_from_raw_bytes, log2_strict, num_of_bytes, plonky2_util::reverse_bits,
+    },
+    Error,
+};
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use ark_std::{end_timer, start_timer};
 use ctr;
@@ -6,27 +14,220 @@ use ff::{BatchInverter, Field, PrimeField};
 use ff_ext::ExtensionField;
 use generic_array::GenericArray;
 use multilinear_extensions::mle::FieldType;
+use rand::SeedableRng;
 use rayon::prelude::{ParallelIterator, ParallelSlice, ParallelSliceMut};
 
 use itertools::Itertools;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rand_chacha::rand_core::RngCore;
+use rand_chacha::{rand_core::RngCore, ChaCha8Rng};
 use rayon::prelude::IntoParallelRefIterator;
 
 use crate::util::arithmetic::{horner, steps};
 
-pub fn encode_field_type_rs_basecode<E: ExtensionField>(
+pub trait BasecodeSpec: std::fmt::Debug + Clone {
+    fn get_number_queries() -> usize;
+
+    fn get_rate_log() -> usize;
+
+    fn get_basecode_size_log() -> usize;
+}
+
+#[derive(Debug, Clone)]
+pub struct BasecodeDefaultSpec {}
+
+impl BasecodeSpec for BasecodeDefaultSpec {
+    fn get_number_queries() -> usize {
+        260
+    }
+
+    fn get_rate_log() -> usize {
+        3
+    }
+
+    fn get_basecode_size_log() -> usize {
+        7
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct BasecodeParameters<E: ExtensionField> {
+    pub(crate) table: Vec<Vec<E::BaseField>>,
+    pub(crate) table_w_weights: Vec<Vec<(E::BaseField, E::BaseField)>>,
+    pub(crate) rng_seed: [u8; 32],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct BasecodeProverParameters<E: ExtensionField, Spec: BasecodeSpec> {
+    pub(crate) table: Vec<Vec<E::BaseField>>,
+    pub(crate) table_w_weights: Vec<Vec<(E::BaseField, E::BaseField)>>,
+    pub(crate) rng_seed: [u8; 32],
+    #[serde(skip)]
+    _phantom: PhantomData<fn() -> Spec>,
+}
+
+impl<E: ExtensionField, Spec: BasecodeSpec> EncodingProverParameters
+    for BasecodeProverParameters<E, Spec>
+{
+    fn get_max_message_size_log(&self) -> usize {
+        self.table.len() - Spec::get_rate_log()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BasecodeVerifierParameters {
+    pub(crate) rng_seed: [u8; 32],
+    pub(crate) aes_key: [u8; 16],
+    pub(crate) aes_iv: [u8; 16],
+}
+
+#[derive(Debug, Clone)]
+pub struct Basecode<Spec: BasecodeSpec> {
+    _phantom_data: PhantomData<Spec>,
+}
+
+impl<E: ExtensionField, Spec: BasecodeSpec> EncodingScheme<E> for Basecode<Spec>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    type PublicParameters = BasecodeParameters<E>;
+
+    type ProverParameters = BasecodeProverParameters<E, Spec>;
+
+    type VerifierParameters = BasecodeVerifierParameters;
+
+    fn setup(max_msg_size_log: usize, rng_seed: [u8; 32]) -> Self::PublicParameters {
+        let rng = ChaCha8Rng::from_seed(rng_seed.clone());
+        let (table_w_weights, table) =
+            get_table_aes::<E, _>(max_msg_size_log, Spec::get_rate_log(), &mut rng.clone());
+        BasecodeParameters {
+            table,
+            table_w_weights,
+            rng_seed,
+        }
+    }
+
+    fn trim(
+        pp: &Self::PublicParameters,
+        max_msg_size_log: usize,
+    ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
+        if pp.table.len() < Spec::get_rate_log() + max_msg_size_log {
+            return Err(Error::InvalidPcsParam(format!(
+                "Public parameter is setup for a smaller message size (log={}) than the trimmed message size (log={})",
+                pp.table.len() - Spec::get_rate_log(),
+                max_msg_size_log,
+            )));
+        }
+        let mut key: [u8; 16] = [0u8; 16];
+        let mut iv: [u8; 16] = [0u8; 16];
+        let mut rng = ChaCha8Rng::from_seed(pp.rng_seed);
+        rng.set_word_pos(0);
+        rng.fill_bytes(&mut key);
+        rng.fill_bytes(&mut iv);
+        Ok((
+            Self::ProverParameters {
+                table_w_weights: pp.table_w_weights.clone(),
+                table: pp.table.clone(),
+                rng_seed: pp.rng_seed.clone(),
+                _phantom: PhantomData,
+            },
+            Self::VerifierParameters {
+                rng_seed: pp.rng_seed.clone(),
+                aes_key: key,
+                aes_iv: iv,
+            },
+        ))
+    }
+
+    fn encode(pp: &Self::ProverParameters, coeffs: &FieldType<E>) -> FieldType<E> {
+        // Split the input into chunks of message size, encode each message, and return the codewords
+        let basecode = encode_field_type_rs_basecode(
+            coeffs,
+            1 << Spec::get_rate_log(),
+            1 << Spec::get_basecode_size_log(),
+        );
+
+        // Apply the recursive definition of the BaseFold code to the list of base codewords,
+        // and produce the final codeword
+        evaluate_over_foldable_domain_generic_basecode::<E>(
+            1 << Spec::get_basecode_size_log(),
+            coeffs.len(),
+            Spec::get_rate_log(),
+            basecode,
+            &pp.table,
+        )
+    }
+
+    fn encode_small(coeffs: &FieldType<E>) -> FieldType<E> {
+        let mut basecodes =
+            encode_field_type_rs_basecode(coeffs, 1 << Spec::get_rate_log(), coeffs.len());
+        assert_eq!(basecodes.len(), 1);
+        basecodes.remove(0)
+    }
+
+    fn get_number_queries() -> usize {
+        return Spec::get_number_queries();
+    }
+
+    fn get_rate_log() -> usize {
+        return Spec::get_rate_log();
+    }
+
+    fn get_basecode_size_log() -> usize {
+        return Spec::get_basecode_size_log();
+    }
+
+    fn prover_folding_coeffs(pp: &Self::ProverParameters, level: usize, index: usize) -> (E, E, E) {
+        let level = &pp.table_w_weights[level];
+        (
+            E::from(level[index].0),
+            E::from(-level[index].0),
+            E::from(level[index].1),
+        )
+    }
+
+    fn verifier_folding_coeffs(
+        vp: &Self::VerifierParameters,
+        level: usize,
+        index: usize,
+    ) -> (E, E, E) {
+        type Aes128Ctr64LE = ctr::Ctr32LE<aes::Aes128>;
+        let mut cipher = Aes128Ctr64LE::new(
+            GenericArray::from_slice(&vp.aes_key[..]),
+            GenericArray::from_slice(&vp.aes_iv[..]),
+        );
+
+        let ri0 = reverse_bits(index << 1, level + 1);
+
+        let x0: E::BaseField = query_point::<E>(1 << (level + 1), ri0, level, &mut cipher);
+        let x1 = -x0;
+
+        let w = (x1 - x0).invert().unwrap();
+
+        (E::from(x0), E::from(x1), E::from(w))
+    }
+}
+
+fn encode_field_type_rs_basecode<E: ExtensionField>(
     poly: &FieldType<E>,
     rate: usize,
     message_size: usize,
 ) -> Vec<FieldType<E>> {
     match poly {
-        FieldType::Ext(poly) => encode_rs_basecode(poly, rate, message_size)
+        FieldType::Ext(poly) => get_basecode(poly, rate, message_size)
             .iter()
             .map(|x| FieldType::Ext(x.clone()))
             .collect(),
-        FieldType::Base(poly) => encode_rs_basecode(poly, rate, message_size)
+        FieldType::Base(poly) => get_basecode(poly, rate, message_size)
             .iter()
             .map(|x| FieldType::Base(x.clone()))
             .collect(),
@@ -35,11 +236,7 @@ pub fn encode_field_type_rs_basecode<E: ExtensionField>(
 }
 
 // Split the input into chunks of message size, encode each message, and return the codewords
-pub fn encode_rs_basecode<F: Field>(
-    poly: &Vec<F>,
-    rate: usize,
-    message_size: usize,
-) -> Vec<Vec<F>> {
+fn get_basecode<F: Field>(poly: &Vec<F>, rate: usize, message_size: usize) -> Vec<Vec<F>> {
     let timer = start_timer!(|| "Encode basecode");
     // The domain is just counting 1, 2, 3, ... , domain_size
     let domain: Vec<F> = steps(F::ONE).take(message_size * rate).collect();
@@ -58,34 +255,6 @@ pub fn encode_rs_basecode<F: Field>(
     end_timer!(timer);
 
     res
-}
-
-fn concatenate_field_types<E: ExtensionField>(coeffs: &Vec<FieldType<E>>) -> FieldType<E> {
-    match coeffs[0] {
-        FieldType::Ext(_) => {
-            let res = coeffs
-                .iter()
-                .map(|x| match x {
-                    FieldType::Ext(x) => x.iter().map(|x| *x),
-                    _ => unreachable!(),
-                })
-                .flatten()
-                .collect::<Vec<_>>();
-            FieldType::Ext(res)
-        }
-        FieldType::Base(_) => {
-            let res = coeffs
-                .iter()
-                .map(|x| match x {
-                    FieldType::Base(x) => x.iter().map(|x| *x),
-                    _ => unreachable!(),
-                })
-                .flatten()
-                .collect::<Vec<_>>();
-            FieldType::Base(res)
-        }
-        _ => unreachable!(),
-    }
 }
 
 // this function assumes all codewords in base_codeword has equivalent length
@@ -152,7 +321,7 @@ pub fn evaluate_over_foldable_domain_generic_basecode<E: ExtensionField>(
 }
 
 pub fn get_table_aes<E: ExtensionField, Rng: RngCore + Clone>(
-    poly_size: usize,
+    poly_size_log: usize,
     rate: usize,
     rng: &mut Rng,
 ) -> (
@@ -160,7 +329,7 @@ pub fn get_table_aes<E: ExtensionField, Rng: RngCore + Clone>(
     Vec<Vec<E::BaseField>>,
 ) {
     // The size (logarithmic) of the codeword for the polynomial
-    let lg_n: usize = rate + log2_strict(poly_size);
+    let lg_n: usize = rate + poly_size_log;
 
     let mut key: [u8; 16] = [0u8; 16];
     let mut iv: [u8; 16] = [0u8; 16];

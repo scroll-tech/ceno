@@ -29,8 +29,9 @@ pub fn pcs_setup<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_trim<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     param: &Pcs::Param,
+    poly_size: usize,
 ) -> Result<(Pcs::ProverParam, Pcs::VerifierParam), Error> {
-    Pcs::trim(param)
+    Pcs::trim(param, poly_size)
 }
 
 pub fn pcs_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -136,7 +137,10 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn setup(poly_size: usize, rng: &Self::Rng) -> Result<Self::Param, Error>;
 
-    fn trim(param: &Self::Param) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
+    fn trim(
+        param: &Self::Param,
+        poly_size: usize,
+    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
     fn commit(
         pp: &Self::ProverParam,
@@ -330,7 +334,7 @@ pub enum Error {
 mod basefold;
 pub use basefold::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldDefault,
-    BasefoldDefaultParams, BasefoldExtParams, BasefoldParams,
+    BasefoldDefaultParams, BasefoldParams,
 };
 
 fn validate_input<E: ExtensionField>(
@@ -398,7 +402,7 @@ pub mod test_util {
                 let rng = ChaCha8Rng::from_seed([0u8; 32]);
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, &rng).unwrap();
-                Pcs::trim(&param).unwrap()
+                Pcs::trim(&param, poly_size).unwrap()
             };
             // Commit and open
             let proof = {
@@ -456,7 +460,7 @@ pub mod test_util {
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, &rng).unwrap();
-                Pcs::trim(&param).unwrap()
+                Pcs::trim(&param, poly_size).unwrap()
             };
             // Batch commit and open
             let evals = chain![
@@ -555,7 +559,7 @@ pub mod test_util {
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, &rng).unwrap();
-                Pcs::trim(&param).unwrap()
+                Pcs::trim(&param, poly_size).unwrap()
             };
 
             let proof = {
@@ -605,9 +609,9 @@ pub mod test_util {
 #[cfg(test)]
 mod test {
     use crate::{
-        basefold::{Basefold, BasefoldExtParams},
+        basefold::Basefold,
         util::transcript::{FieldTranscript, InMemoryTranscript, PoseidonTranscript},
-        PolynomialCommitmentScheme,
+        BasefoldDefaultParams, PolynomialCommitmentScheme,
     };
     use goldilocks::GoldilocksExt2;
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
@@ -615,22 +619,7 @@ mod test {
     use rand_chacha::ChaCha8Rng;
     #[test]
     fn test_transcript() {
-        #[derive(Debug)]
-        pub struct Five {}
-
-        impl BasefoldExtParams for Five {
-            fn get_reps() -> usize {
-                return 5;
-            }
-            fn get_rate() -> usize {
-                return 3;
-            }
-            fn get_basecode() -> usize {
-                return 2;
-            }
-        }
-
-        type Pcs = Basefold<GoldilocksExt2, Five>;
+        type Pcs = Basefold<GoldilocksExt2, BasefoldDefaultParams, ChaCha8Rng>;
         let num_vars = 10;
         let rng = ChaCha8Rng::from_seed([0u8; 32]);
         let poly_size = 1 << num_vars;
@@ -639,7 +628,9 @@ mod test {
         let param =
             <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::setup(poly_size, &rng).unwrap();
 
-        let (pp, vp) = <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::trim(&param).unwrap();
+        let (pp, vp) =
+            <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::trim(&param, 1 << num_vars)
+                .unwrap();
         println!("before commit");
         let comm = <Pcs as PolynomialCommitmentScheme<GoldilocksExt2>>::commit_and_write(
             &pp,

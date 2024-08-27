@@ -1,5 +1,6 @@
 use super::{
-    basecode::encode_rs_basecode,
+    encoding::EncodingScheme,
+    structure::BasefoldSpec,
     sumcheck::{
         sum_check_challenge_round, sum_check_first_round, sum_check_first_round_field_type,
         sum_check_last_round,
@@ -29,14 +30,13 @@ use rayon::prelude::{
 use super::structure::BasefoldCommitmentWithData;
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-pub fn commit_phase<E: ExtensionField>(
+pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
     comm: &BasefoldCommitmentWithData<E>,
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
     num_vars: usize,
     num_rounds: usize,
-    table_w_weights: &Vec<Vec<(E::BaseField, E::BaseField)>>,
-    log_rate: usize,
     hasher: &Hasher<E::BaseField>,
 ) -> (Vec<MerkleTree<E>>, Vec<Vec<E>>)
 where
@@ -86,8 +86,8 @@ where
         let challenge = transcript.squeeze_challenge();
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<E>(
-            &table_w_weights,
+        running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
+            pp,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
             challenge,
@@ -120,9 +120,14 @@ where
 
                 let mut coeffs = running_evals.clone();
                 interpolate_over_boolean_hypercube(&mut coeffs);
-                let basecode = encode_rs_basecode(&coeffs, 1 << log_rate, coeffs.len());
-                assert_eq!(basecode.len(), 1);
-                let basecode = basecode[0].clone();
+                let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
+                    pp,
+                    &FieldType::Ext(coeffs),
+                );
+                let basecode = match basecode {
+                    FieldType::Ext(b) => b,
+                    _ => panic!("Should be ext field"),
+                };
 
                 reverse_index_bits_in_place(&mut running_oracle);
                 assert_eq!(basecode, running_oracle);
@@ -135,14 +140,13 @@ where
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-pub fn batch_commit_phase<E: ExtensionField>(
+pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
     comms: &[BasefoldCommitmentWithData<E>],
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
     num_vars: usize,
     num_rounds: usize,
-    table_w_weights: &Vec<Vec<(E::BaseField, E::BaseField)>>,
-    log_rate: usize,
     coeffs: &[E],
     hasher: &Hasher<E::BaseField>,
 ) -> (Vec<MerkleTree<E>>, Vec<Vec<E>>)
@@ -153,7 +157,7 @@ where
     assert_eq!(point.len(), num_vars);
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
-    let mut running_oracle = vec![E::ZERO; 1 << (num_vars + log_rate)];
+    let mut running_oracle = vec![E::ZERO; 1 << (num_vars + Spec::get_rate_log())];
 
     let build_oracle_timer = start_timer!(|| "Basefold build initial oracle");
     // Before the interaction, collect all the polynomials whose num variables match the
@@ -217,8 +221,8 @@ where
         let challenge = transcript.squeeze_challenge();
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<E>(
-            &table_w_weights,
+        running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
+            pp,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
             challenge,
@@ -267,9 +271,14 @@ where
 
                 let mut coeffs = sum_of_all_evals_for_sumcheck.clone();
                 interpolate_over_boolean_hypercube(&mut coeffs);
-                let basecode = encode_rs_basecode(&coeffs, 1 << log_rate, coeffs.len());
-                assert_eq!(basecode.len(), 1);
-                let basecode = basecode[0].clone();
+                let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
+                    pp,
+                    &FieldType::Ext(coeffs),
+                );
+                let basecode = match basecode {
+                    FieldType::Ext(x) => x,
+                    _ => panic!("Expected ext field"),
+                };
 
                 reverse_index_bits_in_place(&mut running_oracle);
                 assert_eq!(basecode, running_oracle);
@@ -282,15 +291,14 @@ where
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-pub fn simple_batch_commit_phase<E: ExtensionField>(
+pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
     batch_coeffs: &[E],
     comm: &BasefoldCommitmentWithData<E>,
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
     num_vars: usize,
     num_rounds: usize,
-    table_w_weights: &Vec<Vec<(E::BaseField, E::BaseField)>>,
-    log_rate: usize,
     hasher: &Hasher<E::BaseField>,
 ) -> (Vec<MerkleTree<E>>, Vec<Vec<E>>)
 where
@@ -334,8 +342,8 @@ where
         let challenge = transcript.squeeze_challenge();
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<E>(
-            &table_w_weights,
+        running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
+            pp,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
             challenge,
@@ -368,9 +376,14 @@ where
 
                 let mut coeffs = running_evals.clone();
                 interpolate_over_boolean_hypercube(&mut coeffs);
-                let basecode = encode_rs_basecode(&coeffs, 1 << log_rate, coeffs.len());
-                assert_eq!(basecode.len(), 1);
-                let basecode = basecode[0].clone();
+                let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
+                    pp,
+                    &FieldType::Ext(coeffs),
+                );
+                let basecode = match basecode {
+                    FieldType::Ext(basecode) => basecode,
+                    _ => panic!("Should be ext field"),
+                };
 
                 reverse_index_bits_in_place(&mut running_oracle);
                 assert_eq!(basecode, running_oracle);
@@ -382,25 +395,19 @@ where
     return (trees, oracles);
 }
 
-fn basefold_one_round_by_interpolation_weights<E: ExtensionField>(
-    table: &Vec<Vec<(E::BaseField, E::BaseField)>>,
-    level_index: usize,
+fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    level: usize,
     values: &Vec<E>,
     challenge: E,
 ) -> Vec<E> {
-    let level = &table[level_index];
     values
         .par_chunks_exact(2)
         .enumerate()
         .map(|(i, ys)| {
-            interpolate2_weights(
-                [
-                    (E::from(level[i].0), ys[0]),
-                    (E::from(-(level[i].0)), ys[1]),
-                ],
-                E::from(level[i].1),
-                challenge,
-            )
+            let (x0, x1, w) =
+                <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs(pp, level, i);
+            interpolate2_weights([(x0, ys[0]), (x1, ys[1])], w, challenge)
         })
         .collect::<Vec<_>>()
 }

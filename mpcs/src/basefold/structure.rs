@@ -2,44 +2,50 @@ use crate::util::{hash::Digest, merkle_tree::MerkleTree};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 
+use rand::RngCore;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use multilinear_extensions::mle::FieldType;
 
-use rand_chacha::rand_core::RngCore;
+use rand_chacha::ChaCha8Rng;
 use std::{marker::PhantomData, slice};
 
+use super::encoding::{Basecode, BasecodeDefaultSpec, EncodingProverParameters, EncodingScheme};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BasefoldParams<E: ExtensionField, Rng: RngCore>
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct BasefoldParams<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(super) log_rate: usize,
-    pub(super) num_verifier_queries: usize,
-    pub(super) max_num_vars: usize,
-    pub(super) table_w_weights: Vec<Vec<(E::BaseField, E::BaseField)>>,
-    pub(super) table: Vec<Vec<E::BaseField>>,
-    pub(super) rng: Rng,
+    pub(super) params: <Spec::EncodingScheme as EncodingScheme<E>>::PublicParameters,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BasefoldProverParams<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    pub(super) log_rate: usize,
-    pub(super) table_w_weights: Vec<Vec<(E::BaseField, E::BaseField)>>,
-    pub(super) table: Vec<Vec<E::BaseField>>,
-    pub(super) num_verifier_queries: usize,
-    pub(super) max_num_vars: usize,
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct BasefoldProverParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
+    pub(super) encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+}
+
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldProverParams<E, Spec> {
+    pub fn get_max_message_size_log(&self) -> usize {
+        self.encoding_params.get_max_message_size_log()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BasefoldVerifierParams<Rng: RngCore> {
-    pub(super) rng: Rng,
-    pub(super) max_num_vars: usize,
-    pub(super) log_rate: usize,
-    pub(super) num_verifier_queries: usize,
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
+    pub(super) encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
 }
 
 /// A polynomial commitment together with all the data (e.g., the codeword, and Merkle tree)
@@ -187,37 +193,40 @@ impl<E: ExtensionField> Eq for BasefoldCommitmentWithData<E> where
 {
 }
 
-pub trait BasefoldExtParams: Debug {
-    fn get_reps() -> usize;
+pub trait BasefoldSpec<E: ExtensionField>: Debug + Clone {
+    type EncodingScheme: EncodingScheme<E>;
 
-    fn get_rate() -> usize;
+    fn get_number_queries() -> usize {
+        Self::EncodingScheme::get_number_queries()
+    }
 
-    fn get_basecode() -> usize;
+    fn get_rate_log() -> usize {
+        Self::EncodingScheme::get_rate_log()
+    }
+
+    fn get_basecode_size_log() -> usize {
+        Self::EncodingScheme::get_basecode_size_log()
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BasefoldDefaultParams;
 
-impl BasefoldExtParams for BasefoldDefaultParams {
-    fn get_reps() -> usize {
-        return 260;
-    }
-
-    fn get_rate() -> usize {
-        return 3;
-    }
-
-    fn get_basecode() -> usize {
-        return 7;
-    }
+impl<E: ExtensionField> BasefoldSpec<E> for BasefoldDefaultParams
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    type EncodingScheme = Basecode<BasecodeDefaultSpec>;
 }
 
 #[derive(Debug)]
-pub struct Basefold<E: ExtensionField, V: BasefoldExtParams>(PhantomData<(E, V)>);
+pub struct Basefold<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore>(
+    PhantomData<(E, Spec, Rng)>,
+);
 
-pub type BasefoldDefault<F> = Basefold<F, BasefoldDefaultParams>;
+pub type BasefoldDefault<F> = Basefold<F, BasefoldDefaultParams, ChaCha8Rng>;
 
-impl<E: ExtensionField, V: BasefoldExtParams> Clone for Basefold<E, V> {
+impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore> Clone for Basefold<E, Spec, Rng> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
