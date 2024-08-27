@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::rv32im::EmuContext;
 use crate::{
     addr::{ByteAddr, WordAddr},
-    platform::Platform,
+    platform::{Platform, ECALL_HALT, HALT_SUCCESS, REG_A0, REG_ECALL},
     rv32im::{DecodedInstruction, Instruction, TrapCause},
 };
 use anyhow::{anyhow, Result};
@@ -14,6 +14,8 @@ pub struct SimpleContext {
     /// Map a word-address (addr/4) to a word.
     memory: HashMap<u32, u32>,
     registers: [u32; 32],
+    // Termination.
+    succeeded: bool,
 }
 
 impl SimpleContext {
@@ -24,17 +26,33 @@ impl SimpleContext {
             pc,
             memory: HashMap::new(),
             registers: [0; 32],
+            succeeded: false,
         }
+    }
+
+    pub fn succeeded(&self) -> bool {
+        self.succeeded
     }
 }
 
 impl EmuContext for SimpleContext {
+    // Expect an ecall to indicate a successful exit:
+    // function HALT with argument SUCCESS.
     fn ecall(&mut self) -> Result<bool> {
-        Ok(true)
+        let function = self.load_register(REG_ECALL)?;
+        let argument = self.load_register(REG_A0)?;
+        if function == ECALL_HALT && argument == HALT_SUCCESS {
+            self.succeeded = true;
+            Ok(true)
+        } else {
+            self.trap(TrapCause::EnvironmentCallFromUserMode)
+        }
     }
 
+    // No traps are implemented so MRET is not legal.
     fn mret(&self) -> Result<bool> {
-        Ok(true)
+        let mret = 0b001100000010_00000_000_00000_1110011;
+        self.trap(TrapCause::IllegalInstruction(mret))
     }
 
     fn trap(&self, cause: TrapCause) -> Result<bool> {

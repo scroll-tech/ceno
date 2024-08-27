@@ -13,8 +13,7 @@ fn test_emulator() -> Result<()> {
         ctx.store_memory(pc_start + i as u32, inst)?;
     }
 
-    let res = run(&mut ctx);
-    assert!(matches!(res, Err(e) if e.to_string().contains("IllegalInstruction(0)")));
+    run(&mut ctx)?;
 
     let (x1, x2, x3) = expected_fibonacci_20();
     assert_eq!(ctx.load_register(1)?, x1);
@@ -23,14 +22,23 @@ fn test_emulator() -> Result<()> {
     Ok(())
 }
 
-fn run(ctx: &mut SimpleContext) -> Result<()> {
-    let emu = Emulator::new();
-    loop {
-        emu.step(ctx)?;
-    }
+#[test]
+fn test_empty_program() -> Result<()> {
+    let mut ctx = SimpleContext::new(CENO_PLATFORM);
+    let res = run(&mut ctx);
+    assert!(matches!(res, Err(e) if e.to_string().contains("IllegalInstruction(0)")));
+    Ok(())
 }
 
-const PROGRAM_FIBONACCI_20: [u32; 6] = [
+fn run(ctx: &mut SimpleContext) -> Result<()> {
+    let emu = Emulator::new();
+    while !ctx.succeeded() {
+        emu.step(ctx)?;
+    }
+    Ok(())
+}
+
+const PROGRAM_FIBONACCI_20: [u32; 7] = [
     // x1 = 10;
     // x3 = 1;
     // immediate    rs1  f3   rd   opcode
@@ -48,6 +56,8 @@ const PROGRAM_FIBONACCI_20: [u32; 6] = [
     //     if x1 == 0 { break }
     // imm      rs2   rs1   f3  imm    opcode
     0b_1_111111_00000_00001_001_1010_1_1100011, // bne x1, x0, -12
+    // ecall HALT, SUCCESS
+    0b_000000000000_00000_000_00000_1110011,
 ];
 
 fn expected_fibonacci_20() -> (u32, u32, u32) {
