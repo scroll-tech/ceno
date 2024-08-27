@@ -8,7 +8,7 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::Instruction,
-    structs::{PCUInt, TSUInt, UInt64},
+    structs::{PCUInt, TSUInt, UInt64, UInt64B},
 };
 
 use super::{
@@ -21,8 +21,8 @@ pub struct BltInstruction;
 pub struct InstructionConfig<E: ExtensionField> {
     pub pc: PCUInt,
     pub ts: TSUInt,
-    pub lhs: UInt64,
-    pub rhs: UInt64,
+    pub lhs: UInt64B,
+    pub rhs: UInt64B,
     pub imm: UInt64,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
@@ -49,9 +49,8 @@ fn blt_gadget<E: ExtensionField>(
     let rs2_id = circuit_builder.create_witin();
     circuit_builder.assert_u5(rs1_id.expr())?;
     circuit_builder.assert_u5(rs2_id.expr())?;
-
-    let lhs = UInt64::new(circuit_builder);
-    let rhs = UInt64::new(circuit_builder);
+    let lhs = UInt64B::new(circuit_builder);
+    let rhs = UInt64B::new(circuit_builder);
     // imm is already sext(imm) from instruction
     let imm = UInt64::new(circuit_builder);
 
@@ -78,8 +77,10 @@ fn blt_gadget<E: ExtensionField>(
     // update ts
     let mut prev_rs1_ts = TSUInt::new(circuit_builder);
     let mut prev_rs2_ts = TSUInt::new(circuit_builder);
-    let mut ts = circuit_builder.register_read(&rs1_id, &mut prev_rs1_ts, &mut ts, &lhs)?;
-    let _ = circuit_builder.register_read(&rs2_id, &mut prev_rs2_ts, &mut ts, &rhs)?;
+    let mut ts =
+        circuit_builder.register_read(&rs1_id, &mut prev_rs1_ts, &mut ts, &lhs.clone().into())?;
+    let _ =
+        circuit_builder.register_read(&rs2_id, &mut prev_rs2_ts, &mut ts, &rhs.clone().into())?;
 
     let next_ts = ts.add_const(circuit_builder, 1.into())?;
     circuit_builder.state_out(&next_pc, &next_ts)?;

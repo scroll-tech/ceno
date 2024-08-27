@@ -20,11 +20,19 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 }
 
 const VALUE_BIT_WIDTH: usize = 16;
+const BYTE_BIT_WIDTH: usize = 8;
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 pub type UInt64 = UInt<64, VALUE_BIT_WIDTH>;
+pub type UInt64B = UInt<64, BYTE_BIT_WIDTH>;
 pub type PCUInt = UInt64;
 pub type TSUInt = UInt<48, 48>;
+
+impl From<UInt64B> for UInt64 {
+    fn from(_x: UInt64B) -> UInt64 {
+        todo!()
+    }
+}
 
 pub enum ROMType {
     U5,  // 2^5=32
