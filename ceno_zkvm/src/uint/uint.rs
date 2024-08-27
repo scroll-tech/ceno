@@ -44,7 +44,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
-    pub fn new_limb_as_expr(circuit_builder: &mut CircuitBuilder<E>) -> Self {
+    pub fn new_limb_as_expr() -> Self {
         Self {
             limbs: UintLimb::Expression(Vec::new()),
             carries: None,
@@ -92,16 +92,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
     /// Return if the limbs are in Expression form or not.
     pub fn is_expr(&self) -> bool {
-        match &self.limbs {
-            UintLimb::Expression(_) => true,
-            _ => false,
-        }
+        matches!(&self.limbs, UintLimb::Expression(_))
     }
 
     /// Return the `UInt` underlying cell id's
     pub fn wits_in(&self) -> Option<&[WitIn]> {
         match &self.limbs {
-            UintLimb::WitIn(c) => Some(&c),
+            UintLimb::WitIn(c) => Some(c),
             _ => None,
         }
     }
@@ -109,8 +106,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     /// Builds a `UInt` instance from a set of cells that represent `RANGE_VALUES`
     /// assumes range_values are represented in little endian form
     pub fn from_range_wits_in(
-        circuit_builder: &mut CircuitBuilder<E>,
-        range_values: &[WitIn],
+        _circuit_builder: &mut CircuitBuilder<E>,
+        _range_values: &[WitIn],
     ) -> Result<Self, UtilError> {
         // Self::from_different_sized_cell_values(
         //     circuit_builder,
@@ -153,10 +150,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
     /// Builds a `UInt` instance from a set of cell values of a certain `CELL_WIDTH`
     fn from_different_sized_cell_values(
-        circuit_builder: &mut CircuitBuilder<E>,
-        wits_in: &[WitIn],
-        cell_width: usize,
-        is_little_endian: bool,
+        _circuit_builder: &mut CircuitBuilder<E>,
+        _wits_in: &[WitIn],
+        _cell_width: usize,
+        _is_little_endian: bool,
     ) -> Result<Self, UtilError> {
         todo!()
         // let mut values = convert_decomp(

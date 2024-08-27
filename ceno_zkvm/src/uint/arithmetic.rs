@@ -12,7 +12,7 @@ use super::{uint::UintLimb, UInt};
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
-    const LIMB_BIT_MASK: u64 = 1 << C;
+    const LIMB_BIT_MASK: u64 = (1 << C) - 1;
 
     fn internal_add(
         &self,
@@ -21,7 +21,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         addend2: &Vec<Expression<E>>,
         check_overflow: bool,
     ) -> Result<UInt<M, C, E>, ZKVMError> {
-        let mut c = UInt::<M, C, E>::new_limb_as_expr(circuit_builder);
+        let mut c = UInt::<M, C, E>::new_limb_as_expr();
 
         // allocate witness cells and do range checks for carries
         c.create_carry_witin(circuit_builder);
@@ -65,7 +65,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
         // convert Expression::Constant to limbs
         let b_limbs = (0..Self::NUM_CELLS)
-            .map(|i| Expression::Constant(E::BaseField::from((b >> C * i) & Self::LIMB_BIT_MASK)))
+            .map(|i| Expression::Constant(E::BaseField::from((b >> (C * i)) & Self::LIMB_BIT_MASK)))
             .collect_vec();
 
         self.internal_add(circuit_builder, &self.expr(), &b_limbs, true)
@@ -109,7 +109,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                 u.create_witin(circuit_builder);
                 // check if the new witness equals the existing expression
                 izip!(u.expr(), existing_expr)
-                    .try_for_each(|(lhs, rhs)| circuit_builder.require_equal(lhs, rhs));
+                    .try_for_each(|(lhs, rhs)| circuit_builder.require_equal(lhs, rhs))
+                    .unwrap();
             }
             u.expr()
         };
@@ -188,8 +189,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
     pub fn lt(
         &self,
-        circuit_builder: &mut CircuitBuilder<E>,
-        rhs: &UInt<M, C, E>,
+        _circuit_builder: &mut CircuitBuilder<E>,
+        _rhs: &UInt<M, C, E>,
     ) -> Result<Expression<E>, ZKVMError> {
         Ok(self.expr().remove(0) + 1.into())
     }

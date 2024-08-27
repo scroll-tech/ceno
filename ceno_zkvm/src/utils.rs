@@ -31,6 +31,7 @@ pub(crate) fn add_one_to_big_num<F: Field>(limb_modulo: F, limbs: &[F]) -> Vec<F
     result
 }
 
+#[allow(dead_code)]
 pub(crate) fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
     if x >= 0 {
         E::BaseField::from(x as u64)

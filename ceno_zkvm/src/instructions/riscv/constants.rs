@@ -2,6 +2,7 @@ use std::fmt;
 
 pub(crate) const PC_STEP_SIZE: usize = 4;
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, Copy)]
 pub enum OPType {
     OP,
