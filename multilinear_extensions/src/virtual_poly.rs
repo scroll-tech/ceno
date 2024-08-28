@@ -419,6 +419,24 @@ fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut Vec<E>) 
     }
 }
 
+fn build_eq_x_r_helper_sequential_v2<E: ExtensionField>(r: &[E], buf: &mut [E]) {
+    buf[0] = E::ONE;
+    for (i, r) in r.iter().rev().enumerate() {
+        let next_size = 1 << (i + 1);
+        // suppose at the previous step we processed buf [0..size]
+        // for the current step we are populating new buf[0..2*size]
+        // for j travese 0..size
+        // buf[2*j + 1] = r * buf[j]
+        // buf[2*j] = (1 - r) * buf[j]
+        (0..next_size).step_by(2).rev().for_each(|index| {
+            let prev_val = buf[index >> 1];
+            let tmp = *r * prev_val;
+            buf[index + 1] = tmp;
+            buf[index] = prev_val - tmp;
+        });
+    }
+}
+
 /// This function build the eq(x, r) polynomial for any given r.
 ///
 /// Evaluate
@@ -455,16 +473,23 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
     //  ....
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
+    let n_threads = env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
+    let nbits = n_threads.trailing_zeros() as usize;
+    assert_eq!(1 << nbits, n_threads);
+    assert!(r.len() > nbits);
 
-    let mut evals: [Vec<E>; 2] = (0..2) // allocate 2 vector as rolling buffer
-        .into_par_iter()
-        .map(|_| vec![E::ZERO; 1 << r.len()])
-        .collect::<Vec<Vec<E>>>()
-        .try_into()
-        .unwrap();
-    build_eq_x_r_helper(r, &mut evals);
+    let eq_ts = build_eq_x_r_vec_sequential(&r[(r.len() - nbits)..]);
+    let mut ret = vec![E::ZERO; (1 << r.len())];
+    ret.par_chunks_mut(1 << (r.len() - nbits))
+        .zip((0..n_threads).into_par_iter())
+        .for_each(|(chunks, tid)| {
+            let eq_t = eq_ts[tid];
 
-    mem::take(&mut evals[0])
+            build_eq_x_r_helper_sequential_v2(&r[..(r.len() - nbits)], chunks);
+            chunks.iter_mut().for_each(|c| *c *= eq_t);
+        });
+
+    ret
 }
 
 /// A helper function to build eq(x, r) via dynamic programing tricks.
@@ -494,5 +519,42 @@ fn build_eq_x_r_helper<E: ExtensionField>(r: &[E], buf: &mut [Vec<E>; 2]) {
                 next_vals[0] = *prev_val - tmp;
             });
         buf.swap(0, 1); // swap rolling buffer
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::virtual_poly::{build_eq_x_r_vec, build_eq_x_r_vec_sequential};
+    use ark_std::rand::thread_rng;
+    use ff::Field;
+    use goldilocks::GoldilocksExt2;
+
+    #[test]
+    fn test_build_eq() {
+        env_logger::init();
+        let mut rng = thread_rng();
+
+        for num_vars in 18..24 {
+            let r = (0..num_vars)
+                .map(|_| GoldilocksExt2::random(&mut rng))
+                .collect::<Vec<GoldilocksExt2>>();
+
+            let seq_start = std::time::Instant::now();
+            let eq_r_seq = build_eq_x_r_vec_sequential(&r);
+            let seq_time = seq_start.elapsed();
+
+            let par_start = std::time::Instant::now();
+            let eq_r_par = build_eq_x_r_vec(&r);
+            let par_time = par_start.elapsed();
+
+            assert_eq!(eq_r_par, eq_r_seq);
+            println!(
+                "nv = {}, par_time: {:?}, seq_time: {:?}, speedup: {}",
+                num_vars,
+                par_time,
+                seq_time,
+                (seq_time.as_micros() as f64) / (par_time.as_micros() as f64)
+            );
+        }
     }
 }
