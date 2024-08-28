@@ -99,17 +99,17 @@ impl Tracer {
 
     pub fn load_memory(&mut self, addr: WordAddr, value: u32) {
         if self.memory_loaded || self.memory_stored {
-            unimplemented!("Only one memory access is supported");
+            unimplemented!("Only one memory load is supported");
         }
         self.memory_loaded = true;
         self.record.memory_op = (addr, Change::new(value, value));
     }
 
     pub fn store_memory(&mut self, addr: WordAddr, value: Change<u32>) {
-        if self.memory_loaded || self.memory_stored {
-            unimplemented!("Only one memory access is supported");
+        if self.memory_stored {
+            unimplemented!("Only one memory store is supported");
         }
-        // self.memory_stored = true; // TODO.
+        self.memory_stored = true;
         self.record.memory_op = (addr, value);
     }
 }

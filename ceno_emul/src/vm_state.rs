@@ -152,7 +152,15 @@ impl EmuContext for VMState {
         Ok(value)
     }
 
+    fn check_data_load(&self, addr: ByteAddr) -> bool {
+        self.platform.can_read(addr.0)
+    }
+
+    fn check_data_store(&self, addr: ByteAddr) -> bool {
+        self.platform.can_write(addr.0)
+    }
+
     fn check_insn_load(&self, addr: ByteAddr) -> bool {
-        self.platform.rom_range().contains(&addr.0)
+        self.platform.can_execute(addr.0)
     }
 }
