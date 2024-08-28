@@ -54,23 +54,25 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let next_pc = pc.expr() + PC_STEP_SIZE.into();
 
     // Execution result = addend0 + addend1, with carry.
-    let prev_rd_value = RegUInt::new(circuit_builder);
+    let prev_rd_value = RegUInt::new(|| "prev_rd_value", circuit_builder)?;
 
     let (addend_0, addend_1, outcome) = if IS_ADD {
         // outcome = addend_0 + addend_1
-        let addend_0 = RegUInt::new(circuit_builder);
-        let addend_1 = RegUInt::new(circuit_builder);
+        let addend_0 = RegUInt::new(|| "addend_0", circuit_builder)?;
+        let addend_1 = RegUInt::new(|| "addend_1", circuit_builder)?;
         (
             addend_0.clone(),
             addend_1.clone(),
-            addend_0.add(circuit_builder, &addend_1)?,
+            addend_0.add(|| "outcome", circuit_builder, &addend_1)?,
         )
     } else {
         // outcome + addend_1 = addend_0
-        let outcome = RegUInt::new(circuit_builder);
-        let addend_1 = RegUInt::new(circuit_builder);
+        let outcome = RegUInt::new(|| "outcome", circuit_builder)?;
+        let addend_1 = RegUInt::new(|| "addend_1", circuit_builder)?;
         (
-            addend_1.clone().add(circuit_builder, &outcome.clone())?,
+            addend_1
+                .clone()
+                .add(|| "addend_0", circuit_builder, &outcome.clone())?,
             addend_1,
             outcome,
         )

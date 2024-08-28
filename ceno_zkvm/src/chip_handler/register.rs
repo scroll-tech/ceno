@@ -22,7 +22,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
     ) -> Result<Expression<E>, ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
-            let read_record = self.rlc_chip_record(
+            let read_record = cb.rlc_chip_record(
                 [
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
@@ -34,7 +34,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                 .concat(),
             );
             // Write (a, v, t)
-            let write_record = self.rlc_chip_record(
+            let write_record = cb.rlc_chip_record(
                 [
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
@@ -45,8 +45,8 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                 ]
                 .concat(),
             );
-            self.read_record(|| "read_record", read_record)?;
-            self.write_record(|| "write_record", write_record)?;
+            cb.read_record(|| "read_record", read_record)?;
+            cb.write_record(|| "write_record", write_record)?;
 
             // assert prev_ts < current_ts
             // TODO implement lt gadget
@@ -69,7 +69,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
     ) -> Result<Expression<E>, ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
-            let read_record = self.rlc_chip_record(
+            let read_record = cb.rlc_chip_record(
                 [
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
@@ -81,7 +81,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                 .concat(),
             );
             // Write (a, v, t)
-            let write_record = self.rlc_chip_record(
+            let write_record = cb.rlc_chip_record(
                 [
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
@@ -92,8 +92,8 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                 ]
                 .concat(),
             );
-            self.read_record(|| "read_record", read_record)?;
-            self.write_record(|| "write_record", write_record)?;
+            cb.read_record(|| "read_record", read_record)?;
+            cb.write_record(|| "write_record", write_record)?;
 
             // assert prev_ts < current_ts
             // TODO implement lt gadget
