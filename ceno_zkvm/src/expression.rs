@@ -373,22 +373,25 @@ impl<E: ExtensionField> Mul for Expression<E> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct WitIn {
     pub id: WitnessId,
 }
 
 pub trait ToExpr<E: ExtensionField> {
-    fn expr(&self) -> Expression<E>;
+    type Output;
+    fn expr(&self) -> Self::Output;
 }
 
 impl<E: ExtensionField> ToExpr<E> for WitIn {
+    type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
         Expression::WitIn(self.id)
     }
 }
 
 impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
+    type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
         Expression::Constant(*self)
     }

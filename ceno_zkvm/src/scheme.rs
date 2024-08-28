@@ -5,8 +5,11 @@ use crate::structs::TowerProofs;
 
 pub mod constants;
 pub mod prover;
-mod utils;
+pub mod utils;
 pub mod verifier;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone)]
 pub struct ZKVMProof<E: ExtensionField> {
