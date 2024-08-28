@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 
 use crate::{
     chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
@@ -156,7 +155,6 @@ mod test {
     use super::AddInstruction;
 
     #[test]
-    #[ignore = "hit tower verification bug, PR#165"]
     fn test_add_construct_circuit() {
         let mut rng = test_rng();
 

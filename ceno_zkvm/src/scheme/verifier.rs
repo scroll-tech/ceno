@@ -261,8 +261,8 @@ pub type TowerVerifyResult<E> = Result<
 
 impl TowerVerify {
     pub fn verify<E: ExtensionField>(
-        init_prod_evals: Vec<Vec<E>>,
-        init_logup_evals: Vec<Vec<E>>,
+        prod_out_evals: Vec<Vec<E>>,
+        logup_out_evals: Vec<Vec<E>>,
         tower_proofs: &TowerProofs<E>,
         expected_rounds: Vec<usize>,
         num_fanin: usize,
@@ -271,15 +271,15 @@ impl TowerVerify {
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
         // TODO mayber give a better naming?
         assert_eq!(num_fanin, 2);
-        let num_prod_spec = init_prod_evals.len();
-        let num_logup_spec = init_logup_evals.len();
+        let num_prod_spec = prod_out_evals.len();
+        let num_logup_spec = logup_out_evals.len();
 
         let log2_num_fanin = ceil_log2(num_fanin);
         // sanity check
         assert!(num_prod_spec == tower_proofs.prod_spec_size());
-        assert!(init_prod_evals.iter().all(|evals| evals.len() == num_fanin));
+        assert!(prod_out_evals.iter().all(|evals| evals.len() == num_fanin));
         assert!(num_logup_spec == tower_proofs.logup_spec_size());
-        assert!(init_logup_evals.iter().all(|evals| {
+        assert!(logup_out_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
         }));
         assert_eq!(expected_rounds.len(), num_prod_spec + num_logup_spec);
@@ -295,10 +295,10 @@ impl TowerVerify {
         // out_j[rt] := (record_{j}[rt])
         // out_j[rt] := (logup_p{j}[rt])
         // out_j[rt] := (logup_q{j}[rt])
-        let initial_claim = izip!(init_prod_evals, alpha_pows.iter())
+        let initial_claim = izip!(prod_out_evals, alpha_pows.iter())
             .map(|(evals, alpha)| evals.into_mle().evaluate(&initial_rt) * alpha)
             .sum::<E>()
-            + izip!(init_logup_evals, alpha_pows[num_prod_spec..].chunks(2))
+            + izip!(logup_out_evals, alpha_pows[num_prod_spec..].chunks(2))
                 .map(|(evals, alpha)| {
                     let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
                     let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
