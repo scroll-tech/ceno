@@ -21,8 +21,8 @@ args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
 
 [tasks.fmt-check-selected-packages]
 command = "cargo"
-args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
+args = ["fmt", "-p", "ceno_zkvm", "-p", "sumcheck", "-p", "multilinear_extensions", "-p", "transcript", "-p", "ff_ext", "-p" ,"simple-frontend", "--", "--check"]
 
 [tasks.clippy-check-selected-packages]
 command = "cargo"
-args = ["clippy", "-p", "ceno_zkvm", "--", "-D", "warnings"]
+args = ["clippy", "-p", "ceno_zkvm", "-p", "sumcheck", "-p", "multilinear_extensions", "-p", "transcript", "-p", "ff_ext", "-p" ,"simple-frontend", "--", "-D", "warnings"]

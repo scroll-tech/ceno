@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use gkr_graph::structs::{CircuitGraphAuxInfo, NodeOutputType};
 use itertools::Itertools;
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 use transcript::Transcript;
 
 use crate::{

@@ -451,7 +451,7 @@ mod test {
         }
 
         {
-            let max_idx = 1 << (n - 1) - 1;
+            let max_idx = 1 << ((n - 1) - 1);
             let mut partial_eq_vec: Vec<_> = eq_vec[0..=max_idx].to_vec();
             partial_eq_vec.extend(vec![GoldilocksExt2::ZERO; pow_n - max_idx - 1]);
             let expected_ans =
@@ -471,7 +471,7 @@ mod test {
 
     #[test]
     fn test_counter_eval() {
-        let vec = (0..(1 << 4)).map(|x| GoldilocksExt2::from(x)).collect_vec();
+        let vec = (0..(1 << 4)).map(GoldilocksExt2::from).collect_vec();
         let point = vec![
             GoldilocksExt2::from(97),
             GoldilocksExt2::from(101),

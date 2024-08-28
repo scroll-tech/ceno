@@ -8,14 +8,14 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     util::ceil_log2,
-    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+    virtual_poly::{ArcMultilinearExtension, VirtualPolynomial},
 };
 
 use crate::{expression::Expression, utils::transpose};
 
 pub struct VirtualPolynomials<'a, E: ExtensionField> {
     num_threads: usize,
-    polys: Vec<VirtualPolynomialV2<'a, E>>,
+    polys: Vec<VirtualPolynomial<'a, E>>,
     /// a storage to keep thread based mles, specific to multi-thread logic
     thread_based_mles_storage: HashMap<usize, Vec<ArcMultilinearExtension<'a, E>>>,
 }
@@ -25,7 +25,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         VirtualPolynomials {
             num_threads,
             polys: (0..num_threads)
-                .map(|_| VirtualPolynomialV2::new(num_variables - ceil_log2(num_threads)))
+                .map(|_| VirtualPolynomial::new(num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
             thread_based_mles_storage: HashMap::new(),
         }
@@ -76,7 +76,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             });
     }
 
-    pub fn get_batched_polys(self) -> Vec<VirtualPolynomialV2<'a, E>> {
+    pub fn get_batched_polys(self) -> Vec<VirtualPolynomial<'a, E>> {
         self.polys
     }
 
@@ -168,7 +168,7 @@ mod tests {
 
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
-    use multilinear_extensions::{mle::IntoMLE, virtual_poly_v2::ArcMultilinearExtension};
+    use multilinear_extensions::{mle::IntoMLE, virtual_poly::ArcMultilinearExtension};
 
     use crate::{
         circuit_builder::CircuitBuilder,

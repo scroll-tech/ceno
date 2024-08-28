@@ -24,7 +24,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             chip_handler,
             circuit_builder,
             &computed_diff,
-            Some(&range_values),
+            Some(range_values),
         )?;
 
         // if operand_0 < operand_1, the last borrow should equal 1
@@ -107,6 +107,6 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         operand_1: &[CellId],
     ) -> Result<(), UtilError> {
         let range_as_uint = UInt::from_range_values(circuit_builder, operand_1)?;
-        Self::assert_eq(circuit_builder, &operand_0, &range_as_uint)
+        Self::assert_eq(circuit_builder, operand_0, &range_as_uint)
     }
 }
