@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 
 use crate::{
     chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
@@ -162,12 +163,6 @@ mod test {
         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
         let _ = AddInstruction::construct_circuit(&mut circuit_builder);
         let circuit = circuit_builder.finalize_circuit();
-        println!(
-            "circuit.r_expressions.len() {:?}, circuit.w_expressions.len() {:?}, circuit.lk_expressions.len() {:?}",
-            circuit.r_expressions.len(),
-            circuit.w_expressions.len(),
-            circuit.lk_expressions.len()
-        );
 
         // generate mock witness
         let num_instances = 1 << 2;

@@ -1,16 +1,23 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use serde::Serialize;
 use sumcheck::structs::IOPProverMessage;
 
 pub struct TowerProver;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct TowerProofs<E: ExtensionField> {
     pub proofs: Vec<Vec<IOPProverMessage<E>>>,
     // specs -> layers -> evals
     pub prod_specs_eval: Vec<Vec<Vec<E>>>,
+    // specs -> layers -> point
+    #[serde(skip)] // verifier can derive points itself
+    pub prod_specs_points: Vec<Vec<Point<E>>>,
     // specs -> layers -> evals
     pub logup_specs_eval: Vec<Vec<Vec<E>>>,
+    // specs -> layers -> point
+    #[serde(skip)] // verifier can derive points itself
+    pub logup_specs_points: Vec<Vec<Point<E>>>,
 }
 
 pub struct TowerProverSpec<'a, E: ExtensionField> {

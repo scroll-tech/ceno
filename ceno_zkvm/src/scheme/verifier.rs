@@ -87,7 +87,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 
         // verify LogUp witness nominator p(x) ?= constant vector 1
         // index 0 is LogUp witness for Fixed Lookup table
-        if logup_p_evals[0] != E::ONE {
+        if logup_p_evals[0].eval != E::ONE {
             return Err(ZKVMError::VerifyError(
                 "Lookup table witness p(x) != constant 1",
             ));
@@ -95,9 +95,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 
         // verify zero statement (degree > 1) + sel sumcheck
         let (rt_r, rt_w, rt_lk): (Vec<E>, Vec<E>, Vec<E>) = (
-            rt_tower[..log2_num_instances + log2_r_count].to_vec(),
-            rt_tower[..log2_num_instances + log2_w_count].to_vec(),
-            rt_tower[..log2_num_instances + log2_lk_count].to_vec(),
+            record_evals[0].point.clone(),
+            record_evals[1].point.clone(),
+            logup_q_evals[0].point.clone(),
         );
 
         let alpha_pow = get_challenge_pows(
@@ -112,9 +112,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         );
         // alpha_read * (out_r[rt] - 1) + alpha_write * (out_w[rt] - 1) + alpha_lk * (out_lk_q - chip_record_alpha)
         // + 0 // 0 come from zero check
-        let claim_sum = *alpha_read * (record_evals[0] - E::ONE)
-            + *alpha_write * (record_evals[1] - E::ONE)
-            + *alpha_lk * (logup_q_evals[0] - chip_record_alpha);
+        let claim_sum = *alpha_read * (record_evals[0].eval - E::ONE)
+            + *alpha_write * (record_evals[1].eval - E::ONE)
+            + *alpha_lk * (logup_q_evals[0].eval - chip_record_alpha);
         let main_sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {
@@ -249,7 +249,15 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 
 pub struct TowerVerify;
 
-pub type TowerVerifyResult<E> = Result<(Point<E>, Vec<E>, Vec<E>, Vec<E>), ZKVMError>;
+pub type TowerVerifyResult<E> = Result<
+    (
+        Point<E>,
+        Vec<PointAndEval<E>>,
+        Vec<PointAndEval<E>>,
+        Vec<PointAndEval<E>>,
+    ),
+    ZKVMError,
+>;
 
 impl TowerVerify {
     pub fn verify<E: ExtensionField>(
@@ -277,7 +285,7 @@ impl TowerVerify {
         assert_eq!(expected_rounds.len(), num_prod_spec + num_logup_spec);
 
         let alpha_pows = get_challenge_pows(
-            init_prod_evals.len() + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
+            num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
         let initial_rt: Point<E> = (0..log2_num_fanin)
@@ -300,9 +308,9 @@ impl TowerVerify {
                 .sum::<E>();
 
         // evaluation in the tower input layer
-        let mut prod_spec_input_layer_eval = vec![E::ZERO; num_prod_spec];
-        let mut logup_spec_p_input_layer_eval = vec![E::ZERO; num_logup_spec];
-        let mut logup_spec_q_input_layer_eval = vec![E::ZERO; num_logup_spec];
+        let mut prod_spec_input_layer_eval = vec![PointAndEval::default(); num_prod_spec];
+        let mut logup_spec_p_input_layer_eval = vec![PointAndEval::default(); num_logup_spec];
+        let mut logup_spec_q_input_layer_eval = vec![PointAndEval::default(); num_logup_spec];
 
         let expected_max_round = expected_rounds.iter().max().unwrap();
 
@@ -315,7 +323,6 @@ impl TowerVerify {
                 alpha_pows,
             ),
             |(point_and_eval, alpha_pows), round| {
-                println!("verifier max round {:?} round {round}", expected_max_round-1);
                 let (out_rt, out_claim) = (&point_and_eval.point, &point_and_eval.eval);
                 let sumcheck_claim = IOPVerifierState::verify(
                     *out_claim,
@@ -384,7 +391,6 @@ impl TowerVerify {
                     .zip(next_alpha_pows.iter())
                     .zip(expected_rounds.iter())
                     .map(|((spec_index, alpha), max_round)| {
-                        println!("verifier product round {round} tower_proofs.prod_specs_eval[spec_index].len() {:?}", tower_proofs.prod_specs_eval[spec_index].len());
                         if round < max_round -1 {
                             // merged evaluation
                             let evals = izip!(
@@ -394,24 +400,21 @@ impl TowerVerify {
                             .map(|(a, b)| *a * b)
                             .sum::<E>();
                             // this will keep update until round > evaluation
-                            prod_spec_input_layer_eval[spec_index] = evals;
+                            prod_spec_input_layer_eval[spec_index] = PointAndEval::new(rt_prime.clone(), evals);
                             if next_round < max_round -1 {
                                 *alpha * evals
                             } else {
                                 E::ZERO
                             }
                         } else {
-                            println!("product round {round} skipped");
                             E::ZERO
                         }
                     })
                     .sum::<E>();
-                println!("round {round} prod_spec_evals {:?}", next_prod_spec_evals == E::ZERO);
                 let next_logup_spec_evals = (0..num_logup_spec)
                     .zip_eq(next_alpha_pows[num_prod_spec..].chunks(2))
                     .zip_eq(expected_rounds[num_prod_spec..].iter())
                     .map(|((spec_index, alpha), max_round)| {
-                        println!("verifier logup round {round} tower_proofs.prod_specs_eval[spec_index].len() {:?}", tower_proofs.logup_specs_eval[spec_index].len());
                         if round < max_round -1 {
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
                             // merged evaluation
@@ -430,8 +433,8 @@ impl TowerVerify {
                             .sum::<E>();
 
                             // this will keep update until round > evaluation
-                            logup_spec_p_input_layer_eval[spec_index] = p_evals;
-                            logup_spec_q_input_layer_eval[spec_index] = q_evals;
+                            logup_spec_p_input_layer_eval[spec_index] = PointAndEval::new(rt_prime.clone(), p_evals);
+                            logup_spec_q_input_layer_eval[spec_index] = PointAndEval::new(rt_prime.clone(), q_evals);
 
                             if next_round < max_round -1 {
                                 *alpha_numerator * p_evals + *alpha_denominator * q_evals
@@ -439,7 +442,6 @@ impl TowerVerify {
                                 E::ZERO
                             }
                         } else {
-                            println!("logup round {round} skipped");
                             E::ZERO
                         }
                     })
