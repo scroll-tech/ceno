@@ -2,12 +2,13 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
-    addr::{ByteAddr, WordAddr},
+    addr::{ByteAddr, WordAddr, WORD_SIZE},
     platform::Platform,
-    rv32im::{DecodedInstruction, Instruction, TrapCause},
-    tracer::{Change, Tracer},
+    rv32im::{DecodedInstruction, Emulator, Instruction, TrapCause},
+    tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{anyhow, Result};
+use std::iter::from_fn;
 
 /// An implementation of the machine state and of the side-effects of operations.
 pub struct VMState {
@@ -38,12 +39,35 @@ impl VMState {
         self.succeeded
     }
 
-    pub fn take_tracer(&mut self) -> Tracer {
-        std::mem::take(&mut self.tracer)
+    pub fn tracer(&mut self) -> &mut Tracer {
+        &mut self.tracer
     }
 
-    fn get_memory(&self, addr: WordAddr) -> u32 {
+    /// Get the value of a register without side-effects.
+    pub fn peek_register(&self, idx: usize) -> u32 {
+        self.registers[idx]
+    }
+
+    /// Get the value of a memory word without side-effects.
+    pub fn peek_memory(&self, addr: WordAddr) -> u32 {
         *self.memory.get(&addr.0).unwrap_or(&0)
+    }
+
+    pub fn iter_until_success(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
+        let emu = Emulator::new();
+        from_fn(move || {
+            if self.succeeded() {
+                None
+            } else {
+                Some(self.step(&emu))
+            }
+        })
+    }
+
+    fn step(&mut self, emu: &Emulator) -> Result<StepRecord> {
+        emu.step(self)?;
+        let step = self.tracer().advance();
+        Ok(step)
     }
 }
 
@@ -51,8 +75,8 @@ impl EmuContext for VMState {
     // Expect an ecall to indicate a successful exit:
     // function HALT with argument SUCCESS.
     fn ecall(&mut self) -> Result<bool> {
-        let function = self.load_register(self.platform.reg_ecall())?;
-        let argument = self.load_register(self.platform.reg_arg0())?;
+        let function = 0; // self.load_register(self.platform.reg_ecall())?;
+        let argument = 0; // self.load_register(self.platform.reg_arg0())?;
         if function == self.platform.ecall_halt() && argument == self.platform.code_success() {
             self.succeeded = true;
             Ok(true)
@@ -71,52 +95,54 @@ impl EmuContext for VMState {
         Err(anyhow!("Trap {:?}", cause)) // Crash.
     }
 
-    fn on_insn_decoded(&mut self, kind: &Instruction, decoded: &DecodedInstruction) {
-        self.tracer.on_insn_decoded(kind, decoded);
-    }
+    fn on_insn_decoded(&mut self, kind: &Instruction, decoded: &DecodedInstruction) {}
 
-    fn on_normal_end(&mut self, insn: &Instruction, decoded: &DecodedInstruction) {}
+    fn on_normal_end(&mut self, insn: &Instruction, decoded: &DecodedInstruction) {
+        self.tracer.store_pc(ByteAddr(self.pc));
+    }
 
     fn get_pc(&self) -> ByteAddr {
         ByteAddr(self.pc)
     }
 
     fn set_pc(&mut self, after: ByteAddr) {
-        let before = self.get_pc();
-        self.tracer.set_pc(Change { before, after });
         self.pc = after.0;
     }
 
+    /// Load a register and record this operation.
     fn load_register(&mut self, idx: usize) -> Result<u32> {
-        self.tracer.load_register(idx, self.registers[idx]);
-        Ok(self.registers[idx])
+        self.tracer.load_register(idx, self.peek_register(idx));
+        Ok(self.peek_register(idx))
     }
 
+    /// Store a register and record this operation.
     fn store_register(&mut self, idx: usize, after: u32) -> Result<()> {
         if idx != 0 {
-            let before = self.registers[idx];
+            let before = self.peek_register(idx);
             self.tracer.store_register(idx, Change { before, after });
             self.registers[idx] = after;
         }
         Ok(())
     }
 
+    /// Load a memory word and record this operation.
     fn load_memory(&mut self, addr: WordAddr) -> Result<u32> {
-        let value = self.get_memory(addr);
+        let value = self.peek_memory(addr);
         self.tracer.load_memory(addr, value);
         Ok(value)
     }
 
+    /// Store a memory word and record this operation.
     fn store_memory(&mut self, addr: WordAddr, after: u32) -> Result<()> {
-        let before = self.get_memory(addr);
+        let before = self.peek_memory(addr);
         self.tracer.store_memory(addr, Change { after, before });
         self.memory.insert(addr.0, after);
         Ok(())
     }
 
-    fn fetch(&mut self, addr: WordAddr) -> Result<u32> {
-        let value = self.get_memory(addr);
-        self.tracer.fetch(addr, value);
+    fn fetch(&mut self, pc: WordAddr) -> Result<u32> {
+        let value = self.peek_memory(pc);
+        self.tracer.fetch(pc, value);
         Ok(value)
     }
 

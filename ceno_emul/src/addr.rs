@@ -18,10 +18,12 @@ use std::{fmt, ops};
 
 pub const WORD_SIZE: usize = 4;
 
-#[derive(Clone, Copy, PartialEq)]
+pub type RegIdx = usize;
+
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct ByteAddr(pub u32);
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct WordAddr(pub u32);
 
 impl From<ByteAddr> for WordAddr {

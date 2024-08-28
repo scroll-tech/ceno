@@ -1,6 +1,10 @@
 use super::rv32im::Emulator;
 use crate::{
-    addr::ByteAddr, platform::CENO_PLATFORM, rv32im::EmuContext, tracer::Tracer, vm_state::VMState,
+    addr::ByteAddr,
+    platform::CENO_PLATFORM,
+    rv32im::EmuContext,
+    tracer::{StepRecord, Tracer},
+    vm_state::VMState,
 };
 use anyhow::Result;
 
@@ -13,12 +17,13 @@ fn test_emulator() -> Result<()> {
         ctx.store_memory(pc_start + i as u32, inst)?;
     }
 
-    run(&mut ctx)?;
+    let _steps = run(&mut ctx)?;
+    let ctx = ctx;
 
     let (x1, x2, x3) = expected_fibonacci_20();
-    assert_eq!(ctx.load_register(1)?, x1);
-    assert_eq!(ctx.load_register(2)?, x2);
-    assert_eq!(ctx.load_register(3)?, x3);
+    assert_eq!(ctx.peek_register(1), x1);
+    assert_eq!(ctx.peek_register(2), x2);
+    assert_eq!(ctx.peek_register(3), x3);
     Ok(())
 }
 
@@ -30,14 +35,8 @@ fn test_empty_program() -> Result<()> {
     Ok(())
 }
 
-fn run(ctx: &mut VMState) -> Result<()> {
-    let emu = Emulator::new();
-    while !ctx.succeeded() {
-        emu.step(ctx)?;
-        let step_record = ctx.take_tracer();
-        println!("STEP: {:?}", step_record);
-    }
-    Ok(())
+fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
+    state.iter_until_success().collect()
 }
 
 const PROGRAM_FIBONACCI_20: [u32; 7] = [

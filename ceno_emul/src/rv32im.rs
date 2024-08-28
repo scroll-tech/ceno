@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::addr::{ByteAddr, WordAddr, WORD_SIZE};
 
@@ -367,14 +367,18 @@ impl Emulator {
 
         if !ctx.check_insn_load(pc) {
             ctx.trap(TrapCause::InstructionAccessFault)?;
-            return Ok(());
+            return Err(anyhow!("Fatal: could not fetch instruction at pc={:?}", pc));
         }
 
         let word = ctx.fetch(pc.waddr())?;
         if word & 0x03 != 0x03 {
             // Opcode must end in 0b11 in RV32IM.
             ctx.trap(TrapCause::IllegalInstruction(word))?;
-            return Ok(());
+            return Err(anyhow!(
+                "Fatal: illegal instruction at pc={:?}: 0x{:08x}",
+                pc,
+                word
+            ));
         }
 
         let decoded = DecodedInstruction::new(word);
