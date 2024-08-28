@@ -5,7 +5,7 @@ use crate::{
     addr::{ByteAddr, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Instruction, TrapCause},
-    tracer::Tracer,
+    tracer::{Change, Tracer},
 };
 use anyhow::{anyhow, Result};
 
@@ -81,9 +81,10 @@ impl EmuContext for VMState {
         ByteAddr(self.pc)
     }
 
-    fn set_pc(&mut self, pc_after: ByteAddr) {
-        self.tracer.set_pc(pc_after, self.get_pc());
-        self.pc = pc_after.0;
+    fn set_pc(&mut self, after: ByteAddr) {
+        let before = self.get_pc();
+        self.tracer.set_pc(Change { before, after });
+        self.pc = after.0;
     }
 
     fn load_register(&mut self, idx: usize) -> Result<u32> {
@@ -91,11 +92,11 @@ impl EmuContext for VMState {
         Ok(self.registers[idx])
     }
 
-    fn store_register(&mut self, idx: usize, value_after: u32) -> Result<()> {
+    fn store_register(&mut self, idx: usize, after: u32) -> Result<()> {
         if idx != 0 {
-            self.tracer
-                .store_register(idx, value_after, self.registers[idx]);
-            self.registers[idx] = value_after;
+            let before = self.registers[idx];
+            self.tracer.store_register(idx, Change { before, after });
+            self.registers[idx] = after;
         }
         Ok(())
     }
@@ -106,10 +107,10 @@ impl EmuContext for VMState {
         Ok(value)
     }
 
-    fn store_memory(&mut self, addr: WordAddr, value_after: u32) -> Result<()> {
-        let value_before = self.get_memory(addr);
-        self.tracer.store_memory(addr, value_after, value_before);
-        self.memory.insert(addr.0, value_after);
+    fn store_memory(&mut self, addr: WordAddr, after: u32) -> Result<()> {
+        let before = self.get_memory(addr);
+        self.tracer.store_memory(addr, Change { after, before });
+        self.memory.insert(addr.0, after);
         Ok(())
     }
 

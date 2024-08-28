@@ -35,6 +35,7 @@ fn run(ctx: &mut VMState) -> Result<()> {
     while !ctx.succeeded() {
         emu.step(ctx)?;
         let step_record = ctx.take_tracer();
+        println!("STEP: {:?}", step_record);
     }
     Ok(())
 }
