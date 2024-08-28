@@ -18,7 +18,8 @@ pub fn ceil_log2(x: usize) -> usize {
     usize_bits - (x - 1).leading_zeros() as usize
 }
 
-pub unsafe fn create_vec_unsafe<T: Sized>(len: usize) -> Vec<T> {
+#[allow(clippy::uninit_vec)]
+pub(crate) unsafe fn create_vec_unsafe<T: Sized>(len: usize) -> Vec<T> {
     let mut v = Vec::with_capacity(len);
     unsafe {
         v.set_len(len);
