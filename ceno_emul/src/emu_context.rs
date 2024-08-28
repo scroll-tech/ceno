@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::rv32im::EmuContext;
 use crate::{
     addr::{ByteAddr, WordAddr},
-    platform::{Platform, ECALL_HALT, HALT_SUCCESS, REG_A0, REG_ECALL},
+    platform::Platform,
     rv32im::{DecodedInstruction, Instruction, TrapCause},
 };
 use anyhow::{anyhow, Result};
@@ -20,7 +20,7 @@ pub struct SimpleContext {
 
 impl SimpleContext {
     pub fn new(platform: Platform) -> Self {
-        let pc = platform.pc_start;
+        let pc = platform.pc_start();
         Self {
             platform,
             pc,
@@ -39,9 +39,9 @@ impl EmuContext for SimpleContext {
     // Expect an ecall to indicate a successful exit:
     // function HALT with argument SUCCESS.
     fn ecall(&mut self) -> Result<bool> {
-        let function = self.load_register(REG_ECALL)?;
-        let argument = self.load_register(REG_A0)?;
-        if function == ECALL_HALT && argument == HALT_SUCCESS {
+        let function = self.load_register(self.platform.reg_ecall())?;
+        let argument = self.load_register(self.platform.reg_arg0())?;
+        if function == self.platform.ecall_halt() && argument == self.platform.code_success() {
             self.succeeded = true;
             Ok(true)
         } else {
@@ -92,7 +92,6 @@ impl EmuContext for SimpleContext {
     }
 
     fn check_insn_load(&self, addr: ByteAddr) -> bool {
-        (self.platform.rom_start..self.platform.rom_start + self.platform.rom_size)
-            .contains(&addr.0)
+        self.platform.rom_range().contains(&addr.0)
     }
 }
