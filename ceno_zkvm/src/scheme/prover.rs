@@ -213,9 +213,18 @@ impl<E: ExtensionField> ZKVMProver<E> {
         // batch sumcheck: selector + main degree > 1 constraints
         let span = entered_span!("sumcheck::main_sel");
         let (rt_r, rt_w, rt_lk, rt_non_lc_sumcheck): (Vec<E>, Vec<E>, Vec<E>, Vec<E>) = (
-            rt_tower[..log2_num_instances + log2_r_count].to_vec(),
-            rt_tower[..log2_num_instances + log2_w_count].to_vec(),
-            rt_tower[..log2_num_instances + log2_lk_count].to_vec(),
+            tower_proof.prod_specs_points[0]
+                .last()
+                .expect("error getting rt_r")
+                .to_vec(),
+            tower_proof.prod_specs_points[1]
+                .last()
+                .expect("error getting rt_w")
+                .to_vec(),
+            tower_proof.logup_specs_points[0]
+                .last()
+                .expect("error getting rt_lk")
+                .to_vec(),
             rt_tower[..log2_num_instances].to_vec(),
         );
 
@@ -428,18 +437,22 @@ impl<E: ExtensionField> TowerProofs<E> {
             proofs: vec![],
             prod_specs_eval: vec![vec![]; prod_spec_size],
             logup_specs_eval: vec![vec![]; logup_spec_size],
+            prod_specs_points: vec![vec![]; prod_spec_size],
+            logup_specs_points: vec![vec![]; logup_spec_size],
         }
     }
     pub fn push_sumcheck_proofs(&mut self, proofs: Vec<IOPProverMessage<E>>) {
         self.proofs.push(proofs);
     }
 
-    pub fn push_prod_evals(&mut self, spec_index: usize, evals: Vec<E>) {
+    pub fn push_prod_evals_and_point(&mut self, spec_index: usize, evals: Vec<E>, point: Vec<E>) {
         self.prod_specs_eval[spec_index].push(evals);
+        self.prod_specs_points[spec_index].push(point);
     }
 
-    pub fn push_logup_evals(&mut self, spec_index: usize, evals: Vec<E>) {
+    pub fn push_logup_evals_and_point(&mut self, spec_index: usize, evals: Vec<E>, point: Vec<E>) {
         self.logup_specs_eval[spec_index].push(evals);
+        self.logup_specs_points[spec_index].push(point);
     }
 
     pub fn prod_spec_size(&self) -> usize {
@@ -468,13 +481,13 @@ impl TowerProver {
         assert!(!prod_specs.is_empty());
         let log_num_fanin = ceil_log2(num_fanin);
         // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
-        let max_round = prod_specs
+        let max_round_index = prod_specs
             .iter()
             .chain(logup_specs.iter())
             .map(|m| m.witness.len())
             .max()
             .unwrap()
-            - 1;
+            - 1; // index start from 0
 
         // generate alpha challenge
         let alpha_pows = get_challenge_pows(
@@ -488,7 +501,7 @@ impl TowerProver {
             .collect_vec();
 
         let (next_rt, _) =
-            (1..=max_round).fold((initial_rt, alpha_pows), |(out_rt, alpha_pows), round| {
+            (1..=max_round_index).fold((initial_rt, alpha_pows), |(out_rt, alpha_pows), round| {
                 // in first few round we just run on single thread
                 let num_threads = proper_num_threads(out_rt.len(), max_threads);
 
@@ -571,11 +584,12 @@ impl TowerProver {
                 for (i, s) in prod_specs.iter().enumerate() {
                     if round < s.witness.len() {
                         // collect evals belong to current spec
-                        proofs.push_prod_evals(
+                        proofs.push_prod_evals_and_point(
                             i,
                             (0..num_fanin)
                                 .map(|_| *evals_iter.next().expect("insufficient evals length"))
                                 .collect::<Vec<E>>(),
+                                rt_prime.clone(),
                         );
                     }
                 }
@@ -587,7 +601,7 @@ impl TowerProver {
                         let q2 = *evals_iter.next().expect("insufficient evals length");
                         let p2 = *evals_iter.next().expect("insufficient evals length");
                         let q1 = *evals_iter.next().expect("insufficient evals length");
-                        proofs.push_logup_evals(i, vec![p1, p2, q1, q2]);
+                        proofs.push_logup_evals_and_point(i, vec![p1, p2, q1, q2], rt_prime.clone());
                     }
                 }
                 assert_eq!(evals_iter.next(), None);
