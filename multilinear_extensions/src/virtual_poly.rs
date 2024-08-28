@@ -1,10 +1,10 @@
-use std::{cmp::max, collections::HashMap, marker::PhantomData, mem, sync::Arc};
+use std::{cmp::max, collections::HashMap, marker::PhantomData, sync::Arc};
 
 use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
-    util::bit_decompose,
+    util::{bit_decompose, create_vec_unsafe},
 };
-use ark_std::{end_timer, rand::Rng, start_timer};
+use ark_std::{end_timer, iterable::Iterable, rand::Rng, start_timer};
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use rayon::{
@@ -389,38 +389,17 @@ pub fn build_eq_x_r_vec_sequential<E: ExtensionField>(r: &[E]) -> Vec<E> {
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
 
-    let mut evals = vec![E::ZERO; 1 << r.len()];
-    build_eq_x_r_helper_sequential(r, &mut evals);
+    let mut evals = unsafe { create_vec_unsafe(1 << r.len()) };
+    build_eq_x_r_helper_sequential(r, &mut evals, E::ONE);
 
     evals
 }
 
-/// A helper function to build eq(x, r) via dynamic programing tricks.
+/// A helper function to build eq(x, r)*init via dynamic programing tricks.
 /// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
-fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut Vec<E>) {
-    buf[0] = E::ONE;
-    if r.is_empty() {
-        buf.resize(1, E::ZERO);
-        return;
-    }
-    for (i, r) in r.iter().rev().enumerate() {
-        let next_size = 1 << (i + 1);
-        // suppose at the previous step we processed buf [0..size]
-        // for the current step we are populating new buf[0..2*size]
-        // for j travese 0..size
-        // buf[2*j + 1] = r * buf[j]
-        // buf[2*j] = (1 - r) * buf[j]
-        (0..next_size).step_by(2).rev().for_each(|index| {
-            let prev_val = buf[index >> 1];
-            let tmp = *r * prev_val;
-            buf[index + 1] = tmp;
-            buf[index] = prev_val - tmp;
-        });
-    }
-}
+fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut [E], init: E) {
+    buf[0] = init;
 
-fn build_eq_x_r_helper_sequential_v2<E: ExtensionField>(r: &[E], buf: &mut [E]) {
-    buf[0] = E::ONE;
     for (i, r) in r.iter().rev().enumerate() {
         let next_size = 1 << (i + 1);
         // suppose at the previous step we processed buf [0..size]
@@ -473,27 +452,31 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
     //  ....
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
-    let n_threads = env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
-    let nbits = n_threads.trailing_zeros() as usize;
-    assert_eq!(1 << nbits, n_threads);
-    assert!(r.len() > nbits);
+    let nthreads =
+        std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
+    let nbits = nthreads.trailing_zeros() as usize;
+    assert_eq!(1 << nbits, nthreads);
 
-    let eq_ts = build_eq_x_r_vec_sequential(&r[(r.len() - nbits)..]);
-    let mut ret = vec![E::ZERO; (1 << r.len())];
-    ret.par_chunks_mut(1 << (r.len() - nbits))
-        .zip((0..n_threads).into_par_iter())
-        .for_each(|(chunks, tid)| {
-            let eq_t = eq_ts[tid];
+    if r.len() < nbits {
+        build_eq_x_r_vec_sequential(r)
+    } else {
+        let eq_ts = build_eq_x_r_vec_sequential(&r[(r.len() - nbits)..]);
+        let mut ret = unsafe { create_vec_unsafe(1 << r.len()) };
 
-            build_eq_x_r_helper_sequential_v2(&r[..(r.len() - nbits)], chunks);
-            chunks.iter_mut().for_each(|c| *c *= eq_t);
-        });
+        ret.par_chunks_mut(1 << (r.len() - nbits))
+            .zip((0..nthreads).into_par_iter())
+            .for_each(|(chunks, tid)| {
+                let eq_t = eq_ts[tid];
 
-    ret
+                build_eq_x_r_helper_sequential(&r[..(r.len() - nbits)], chunks, eq_t);
+            });
+        ret
+    }
 }
 
 /// A helper function to build eq(x, r) via dynamic programing tricks.
 /// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
+#[allow(dead_code)]
 fn build_eq_x_r_helper<E: ExtensionField>(r: &[E], buf: &mut [Vec<E>; 2]) {
     buf[0][0] = E::ONE;
     if r.is_empty() {
@@ -548,7 +531,7 @@ mod tests {
             let par_time = par_start.elapsed();
 
             assert_eq!(eq_r_par, eq_r_seq);
-            println!(
+            log::info!(
                 "nv = {}, par_time: {:?}, seq_time: {:?}, speedup: {}",
                 num_vars,
                 par_time,

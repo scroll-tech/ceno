@@ -17,3 +17,11 @@ pub fn ceil_log2(x: usize) -> usize {
     let usize_bits = std::mem::size_of::<usize>() * 8;
     usize_bits - (x - 1).leading_zeros() as usize
 }
+
+pub unsafe fn create_vec_unsafe<T: Sized>(len: usize) -> Vec<T> {
+    let mut v = Vec::with_capacity(len);
+    unsafe {
+        v.set_len(len);
+    }
+    v
+}
