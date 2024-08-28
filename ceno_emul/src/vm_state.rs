@@ -8,7 +8,8 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 
-pub struct SimpleContext {
+/// An implementation of the machine state and of the side-effects of operations.
+pub struct VMState {
     platform: Platform,
     pc: u32,
     /// Map a word-address (addr/4) to a word.
@@ -18,7 +19,7 @@ pub struct SimpleContext {
     succeeded: bool,
 }
 
-impl SimpleContext {
+impl VMState {
     pub fn new(platform: Platform) -> Self {
         let pc = platform.pc_start();
         Self {
@@ -35,7 +36,7 @@ impl SimpleContext {
     }
 }
 
-impl EmuContext for SimpleContext {
+impl EmuContext for VMState {
     // Expect an ecall to indicate a successful exit:
     // function HALT with argument SUCCESS.
     fn ecall(&mut self) -> Result<bool> {

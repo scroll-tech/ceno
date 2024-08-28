@@ -74,6 +74,7 @@ pub trait EmuContext {
     }
 }
 
+/// An implementation of the basic ISA (RV32IM), that is instruction decoding and functional units.
 #[derive(Default)]
 pub struct Emulator {
     table: FastDecodeTable,

@@ -1,12 +1,10 @@
 use super::rv32im::Emulator;
-use crate::{
-    addr::ByteAddr, emu_context::SimpleContext, platform::CENO_PLATFORM, rv32im::EmuContext,
-};
+use crate::{addr::ByteAddr, platform::CENO_PLATFORM, rv32im::EmuContext, vm_state::VMState};
 use anyhow::Result;
 
 #[test]
 fn test_emulator() -> Result<()> {
-    let mut ctx = SimpleContext::new(CENO_PLATFORM);
+    let mut ctx = VMState::new(CENO_PLATFORM);
 
     let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
     for (i, &inst) in PROGRAM_FIBONACCI_20.iter().enumerate() {
@@ -24,13 +22,13 @@ fn test_emulator() -> Result<()> {
 
 #[test]
 fn test_empty_program() -> Result<()> {
-    let mut ctx = SimpleContext::new(CENO_PLATFORM);
+    let mut ctx = VMState::new(CENO_PLATFORM);
     let res = run(&mut ctx);
     assert!(matches!(res, Err(e) if e.to_string().contains("IllegalInstruction(0)")));
     Ok(())
 }
 
-fn run(ctx: &mut SimpleContext) -> Result<()> {
+fn run(ctx: &mut VMState) -> Result<()> {
     let emu = Emulator::new();
     while !ctx.succeeded() {
         emu.step(ctx)?;
