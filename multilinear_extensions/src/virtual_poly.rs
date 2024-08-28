@@ -517,7 +517,7 @@ mod tests {
         env_logger::init();
         let mut rng = thread_rng();
 
-        for num_vars in 18..24 {
+        for num_vars in 10..24 {
             let r = (0..num_vars)
                 .map(|_| GoldilocksExt2::random(&mut rng))
                 .collect::<Vec<GoldilocksExt2>>();
