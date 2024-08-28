@@ -29,7 +29,7 @@ pub trait EmuContext {
     fn trap(&self, cause: TrapCause) -> Result<bool>;
 
     // Callback when instructions are decoded
-    fn on_insn_decoded(&self, kind: &Instruction, decoded: &DecodedInstruction);
+    fn on_insn_decoded(&mut self, kind: &Instruction, decoded: &DecodedInstruction);
 
     // Callback when instructions end normally
     fn on_normal_end(&mut self, insn: &Instruction, decoded: &DecodedInstruction);
@@ -54,8 +54,8 @@ pub trait EmuContext {
 
     // Load from memory, in the context of instruction fetching.
     // Only called after check_insn_load returns true.
-    fn fetch(&mut self, addr: WordAddr) -> Result<u32> {
-        self.load_memory(addr)
+    fn fetch(&mut self, pc: WordAddr) -> Result<u32> {
+        self.load_memory(pc)
     }
 
     // Check access for instruction load

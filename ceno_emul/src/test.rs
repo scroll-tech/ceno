@@ -1,5 +1,7 @@
 use super::rv32im::Emulator;
-use crate::{addr::ByteAddr, platform::CENO_PLATFORM, rv32im::EmuContext, vm_state::VMState};
+use crate::{
+    addr::ByteAddr, platform::CENO_PLATFORM, rv32im::EmuContext, tracer::Tracer, vm_state::VMState,
+};
 use anyhow::Result;
 
 #[test]
@@ -32,6 +34,7 @@ fn run(ctx: &mut VMState) -> Result<()> {
     let emu = Emulator::new();
     while !ctx.succeeded() {
         emu.step(ctx)?;
+        let step_record = ctx.take_tracer();
     }
     Ok(())
 }

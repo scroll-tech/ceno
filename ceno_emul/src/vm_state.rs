@@ -5,6 +5,7 @@ use crate::{
     addr::{ByteAddr, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Instruction, TrapCause},
+    tracer::Tracer,
 };
 use anyhow::{anyhow, Result};
 
@@ -17,6 +18,7 @@ pub struct VMState {
     registers: [u32; 32],
     // Termination.
     succeeded: bool,
+    tracer: Tracer,
 }
 
 impl VMState {
@@ -28,11 +30,20 @@ impl VMState {
             memory: HashMap::new(),
             registers: [0; 32],
             succeeded: false,
+            tracer: Default::default(),
         }
     }
 
     pub fn succeeded(&self) -> bool {
         self.succeeded
+    }
+
+    pub fn take_tracer(&mut self) -> Tracer {
+        std::mem::take(&mut self.tracer)
+    }
+
+    fn get_memory(&self, addr: WordAddr) -> u32 {
+        *self.memory.get(&addr.0).unwrap_or(&0)
     }
 }
 
@@ -60,7 +71,9 @@ impl EmuContext for VMState {
         Err(anyhow!("Trap {:?}", cause)) // Crash.
     }
 
-    fn on_insn_decoded(&self, kind: &Instruction, decoded: &DecodedInstruction) {}
+    fn on_insn_decoded(&mut self, kind: &Instruction, decoded: &DecodedInstruction) {
+        self.tracer.on_insn_decoded(kind, decoded);
+    }
 
     fn on_normal_end(&mut self, insn: &Instruction, decoded: &DecodedInstruction) {}
 
@@ -68,28 +81,42 @@ impl EmuContext for VMState {
         ByteAddr(self.pc)
     }
 
-    fn set_pc(&mut self, addr: ByteAddr) {
-        self.pc = addr.0;
+    fn set_pc(&mut self, pc_after: ByteAddr) {
+        self.tracer.set_pc(pc_after, self.get_pc());
+        self.pc = pc_after.0;
     }
 
     fn load_register(&mut self, idx: usize) -> Result<u32> {
+        self.tracer.load_register(idx, self.registers[idx]);
         Ok(self.registers[idx])
     }
 
-    fn store_register(&mut self, idx: usize, data: u32) -> Result<()> {
+    fn store_register(&mut self, idx: usize, value_after: u32) -> Result<()> {
         if idx != 0 {
-            self.registers[idx] = data;
+            self.tracer
+                .store_register(idx, value_after, self.registers[idx]);
+            self.registers[idx] = value_after;
         }
         Ok(())
     }
 
     fn load_memory(&mut self, addr: WordAddr) -> Result<u32> {
-        Ok(*self.memory.get(&addr.0).unwrap_or(&0))
+        let value = self.get_memory(addr);
+        self.tracer.load_memory(addr, value);
+        Ok(value)
     }
 
-    fn store_memory(&mut self, addr: WordAddr, data: u32) -> Result<()> {
-        self.memory.insert(addr.0, data);
+    fn store_memory(&mut self, addr: WordAddr, value_after: u32) -> Result<()> {
+        let value_before = self.get_memory(addr);
+        self.tracer.store_memory(addr, value_after, value_before);
+        self.memory.insert(addr.0, value_after);
         Ok(())
+    }
+
+    fn fetch(&mut self, addr: WordAddr) -> Result<u32> {
+        let value = self.get_memory(addr);
+        self.tracer.fetch(addr, value);
+        Ok(value)
     }
 
     fn check_insn_load(&self, addr: ByteAddr) -> bool {
