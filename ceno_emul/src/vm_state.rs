@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
-    addr::{ByteAddr, WordAddr, WORD_SIZE},
+    addr::{ByteAddr, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, Instruction, TrapCause},
     tracer::{Change, StepRecord, Tracer},
@@ -92,6 +92,7 @@ impl EmuContext for VMState {
 
     // No traps are implemented so MRET is not legal.
     fn mret(&self) -> Result<bool> {
+        #[allow(clippy::unusual_byte_groupings)]
         let mret = 0b001100000010_00000_000_00000_1110011;
         self.trap(TrapCause::IllegalInstruction(mret))
     }
@@ -100,9 +101,9 @@ impl EmuContext for VMState {
         Err(anyhow!("Trap {:?}", cause)) // Crash.
     }
 
-    fn on_insn_decoded(&mut self, kind: &Instruction, decoded: &DecodedInstruction) {}
+    fn on_insn_decoded(&mut self, _kind: &Instruction, _decoded: &DecodedInstruction) {}
 
-    fn on_normal_end(&mut self, insn: &Instruction, decoded: &DecodedInstruction) {
+    fn on_normal_end(&mut self, _kind: &Instruction, _decoded: &DecodedInstruction) {
         self.tracer.store_pc(ByteAddr(self.pc));
     }
 

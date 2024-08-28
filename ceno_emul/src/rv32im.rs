@@ -81,6 +81,7 @@ pub struct Emulator {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum TrapCause {
     InstructionAddressMisaligned,
     InstructionAccessFault,
@@ -115,6 +116,7 @@ enum InsnCategory {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum InsnKind {
     INVALID,
     ADD,
