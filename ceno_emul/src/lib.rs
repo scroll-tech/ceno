@@ -1,8 +1,13 @@
 mod addr;
-mod platform;
-mod rv32im;
-mod tracer;
-mod vm_state;
+pub use addr::{ByteAddr, RegIdx, WordAddr};
 
-#[cfg(test)]
-mod test;
+mod platform;
+pub use platform::{Platform, CENO_PLATFORM};
+
+mod tracer;
+pub use tracer::{Change, StepRecord};
+
+mod vm_state;
+pub use vm_state::VMState;
+
+mod rv32im;

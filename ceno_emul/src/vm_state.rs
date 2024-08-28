@@ -53,6 +53,11 @@ impl VMState {
         *self.memory.get(&addr.0).unwrap_or(&0)
     }
 
+    /// Set a word in memory without side-effects.
+    pub fn init_memory(&mut self, addr: WordAddr, value: u32) {
+        self.memory.insert(addr.0, value);
+    }
+
     pub fn iter_until_success(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
         let emu = Emulator::new();
         from_fn(move || {

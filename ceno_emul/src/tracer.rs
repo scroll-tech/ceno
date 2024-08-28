@@ -1,9 +1,6 @@
 use std::fmt;
 
-use crate::{
-    addr::{ByteAddr, RegIdx, WordAddr},
-    rv32im::{DecodedInstruction, Instruction},
-};
+use crate::addr::{ByteAddr, RegIdx, WordAddr};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 #[derive(Clone, Debug, Default)]
