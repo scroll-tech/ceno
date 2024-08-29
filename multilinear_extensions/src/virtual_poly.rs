@@ -463,6 +463,11 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
         let eq_ts = build_eq_x_r_vec_sequential(&r[(r.len() - nbits)..]);
         let mut ret = create_uninit_vec(1 << r.len());
 
+        // eq(x, r) = eq(x_lo, r_lo) * eq(x_hi, r_hi)
+        // where rlen = r.len(), x_lo = x[0..rlen-nbits], x_hi = x[rlen-nbits..]
+        //  r_lo = r[0..rlen-nbits] and r_hi = r[rlen-nbits..]
+        // each thread is associated with x_hi, and it will computes the subset
+        // { eq(x_lo, r_lo) * eq(x_hi, r_hi) } whose cardinality equals to 2^{rlen-nbits}
         ret.par_chunks_mut(1 << (r.len() - nbits))
             .zip((0..nthreads).into_par_iter())
             .for_each(|(chunks, tid)| {
