@@ -69,7 +69,7 @@ fn test_rw_lk_expression_combination() {
             .collect_vec();
 
         // get proof
-        let prover = ZKVMProver::new(pk); // circuit clone due to verifier alos need circuit reference
+        let prover = ZKVMProver::new(pk);
         let mut transcript = Transcript::new(b"test");
         let challenges = [1.into(), 2.into()];
 

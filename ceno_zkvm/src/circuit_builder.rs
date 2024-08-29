@@ -251,7 +251,7 @@ impl<E: ExtensionField> ProvingKey<E> {
 
 #[derive(Clone, Debug)]
 pub struct VerifyingKey<E: ExtensionField> {
-    pub cs: ConstraintSystem<E>,
+    cs: ConstraintSystem<E>,
 }
 
 impl<E: ExtensionField> VerifyingKey<E> {
