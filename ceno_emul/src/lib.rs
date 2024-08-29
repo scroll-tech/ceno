@@ -11,3 +11,5 @@ mod vm_state;
 pub use vm_state::VMState;
 
 mod rv32im;
+
+mod elf;
