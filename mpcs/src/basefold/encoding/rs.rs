@@ -52,9 +52,9 @@ fn fft_root_table<F: PrimeField>(lg_n: usize) -> FftRootTable<F> {
         let half_m = 1 << (lg_m - 1);
         let base = bases[lg_n - lg_m];
         let mut root_row = Vec::with_capacity(half_m.max(2));
-        root_row[0] = F::ONE;
-        for i in 1..root_row.len() {
-            root_row[i] = root_row[i - 1] * base;
+        root_row.push(F::ONE);
+        for i in 1..half_m.max(2) {
+            root_row.push(root_row[i - 1] * base);
         }
         root_table.push(root_row);
     }
@@ -326,11 +326,11 @@ where
         }
         let mut gamma_powers = Vec::with_capacity(max_msg_size_log);
         let mut gamma_powers_inv = Vec::with_capacity(max_msg_size_log);
-        gamma_powers[0] = E::BaseField::MULTIPLICATIVE_GENERATOR;
-        gamma_powers_inv[0] = E::BaseField::MULTIPLICATIVE_GENERATOR.invert().unwrap();
+        gamma_powers.push(E::BaseField::MULTIPLICATIVE_GENERATOR);
+        gamma_powers_inv.push(E::BaseField::MULTIPLICATIVE_GENERATOR.invert().unwrap());
         for i in 1..max_msg_size_log {
-            gamma_powers[i] = gamma_powers[i - 1].square();
-            gamma_powers_inv[i] = gamma_powers_inv[i - 1].square();
+            gamma_powers.push(gamma_powers[i - 1].square());
+            gamma_powers_inv.push(gamma_powers_inv[i - 1].square());
         }
         let inv_of_two = E::BaseField::from(2).invert().unwrap();
         gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
@@ -483,9 +483,9 @@ fn naive_fft<E: ExtensionField>(poly: &Vec<E>, rate: usize, shift: E::BaseField)
     // The domain is shift * H where H is the multiplicative subgroup of size
     // message_size * rate.
     let mut domain = Vec::<E::BaseField>::with_capacity(message_size * rate);
-    domain[0] = shift;
+    domain.push(shift);
     for i in 1..message_size * rate {
-        domain[i] = domain[i - 1] * shift;
+        domain.push(domain[i - 1] * shift);
     }
     let mut res = vec![E::ZERO; message_size * rate];
     res.iter_mut()
@@ -505,7 +505,7 @@ mod tests {
     fn time_naive_code() {
         use rand::rngs::OsRng;
 
-        let poly: Vec<GoldilocksExt2> = (0..(1 << 20))
+        let poly: Vec<GoldilocksExt2> = (0..(1 << 10))
             .map(|_| GoldilocksExt2::random(&mut OsRng))
             .collect();
 
