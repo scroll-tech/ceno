@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 /// Decompose an integer into a binary vector in little endian.
 pub fn bit_decompose(input: u64, num_var: usize) -> Vec<bool> {
     let mut res = Vec::with_capacity(num_var);
@@ -16,4 +18,10 @@ pub fn ceil_log2(x: usize) -> usize {
     // Calculate the number of bits in usize
     let usize_bits = std::mem::size_of::<usize>() * 8;
     usize_bits - (x - 1).leading_zeros() as usize
+}
+
+pub(crate) fn create_uninit_vec<T: Sized>(len: usize) -> Vec<MaybeUninit<T>> {
+    let mut vec: Vec<MaybeUninit<T>> = Vec::with_capacity(len);
+    unsafe { vec.set_len(len) };
+    vec
 }
