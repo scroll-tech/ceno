@@ -116,6 +116,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let claim_sum = *alpha_read * (record_evals[0].eval - E::ONE)
             + *alpha_write * (record_evals[1].eval - E::ONE)
             + *alpha_lk * (logup_q_evals[0].eval - chip_record_alpha);
+
         let main_sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {
@@ -123,7 +124,8 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 proofs: proof.main_sel_sumcheck_proofs.clone(),
             },
             &VPAuxInfo {
-                max_degree: SEL_DEGREE.max(cs.max_non_lc_degree),
+                // + 1 from sel_non_lc_zero_sumcheck
+                max_degree: SEL_DEGREE.max(cs.max_non_lc_degree + 1),
                 num_variables: log2_num_instances,
                 phantom: PhantomData,
             },

@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -93,20 +94,11 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     ) -> BTreeSet<u16> {
         assert!(expr.is_monomial_form());
         let monomial_terms = expr.evaluate(
-            &|witness_id| {
-                vec![(E::ONE, {
-                    let mut monomial_terms = BTreeSet::new();
-                    monomial_terms.insert(witness_id);
-                    monomial_terms
-                })]
-            },
-            &|scalar| vec![(E::from(scalar), { BTreeSet::new() })],
+            &|witness_id| vec![(E::ONE, { vec![witness_id] })],
+            &|scalar| vec![(E::from(scalar), { vec![] })],
             &|challenge_id, pow, scalar, offset| {
                 let challenge = challenges[challenge_id as usize];
-                vec![(
-                    challenge.pow([pow as u64]) * scalar + offset,
-                    BTreeSet::new(),
-                )]
+                vec![(challenge.pow([pow as u64]) * scalar + offset, vec![])]
             },
             &|mut a, b| {
                 a.extend(b);
@@ -139,12 +131,12 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                     vec![(a[0].0, mem::take(&mut x[0].1))]
                 } else {
                     // return [ax, b]
-                    vec![(a[0].0, mem::take(&mut x[0].1)), (b[0].0, BTreeSet::new())]
+                    vec![(a[0].0, mem::take(&mut x[0].1)), (b[0].0, vec![])]
                 }
             },
         );
         for (constant, monomial_term) in monomial_terms.iter() {
-            if *constant != E::ZERO && monomial_term.is_empty() {
+            if *constant != E::ZERO && monomial_term.is_empty() && selector.is_none() {
                 todo!("make virtual poly support pure constant")
             }
             let sel = selector.map(|sel| vec![sel]).unwrap_or_default();
@@ -160,6 +152,15 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .into_iter()
             .flat_map(|(_, monomial_term)| monomial_term.into_iter().collect_vec())
             .collect::<BTreeSet<u16>>()
+    }
+
+    #[cfg(test)]
+    pub fn degree(&self) -> usize {
+        assert!(self.polys.iter().map(|p| p.aux_info.max_degree).all_equal());
+        self.polys
+            .first()
+            .map(|p| p.aux_info.max_degree)
+            .unwrap_or_default()
     }
 }
 
@@ -202,5 +203,18 @@ mod tests {
             1.into(),
         );
         assert!(distrinct_zerocheck_terms_set.len() == 2);
+        assert!(virtual_polys.degree() == 2);
+
+        // 3x^3
+        let expr: Expression<E> = Expression::from(3) * x.expr() * x.expr() * x.expr();
+        let distrinct_zerocheck_terms_set = virtual_polys.add_mle_list_by_expr(
+            None,
+            wits_in.iter().collect_vec(),
+            &expr,
+            &[],
+            1.into(),
+        );
+        assert!(distrinct_zerocheck_terms_set.len() == 1);
+        assert!(virtual_polys.degree() == 3);
     }
 }

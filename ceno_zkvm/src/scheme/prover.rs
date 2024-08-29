@@ -374,7 +374,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 + if cs.assert_zero_sumcheck_expressions.is_empty() {
                     0
                 } else {
-                    distrinct_zerocheck_terms_set.len() + 1 // 1 from sel_non_lc_zero_sumcheck
+                    distrinct_zerocheck_terms_set.len() + 1 // +1 from sel_non_lc_zero_sumcheck
                 }
         ); // 3 from [sel_r, sel_w, sel_lk]
         let mut main_sel_evals_iter = main_sel_evals.into_iter();
