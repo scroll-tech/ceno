@@ -308,28 +308,28 @@ where
 
     type VerifierParameters = RSCodeVerifierParameters<E>;
 
-    fn setup(max_msg_size_log: usize, _rng_seed: [u8; 32]) -> Self::PublicParameters {
+    fn setup(max_message_size_log: usize, _rng_seed: [u8; 32]) -> Self::PublicParameters {
         RSCodeParameters {
-            fft_root_table: fft_root_table(max_msg_size_log + Spec::get_rate_log()),
+            fft_root_table: fft_root_table(max_message_size_log + Spec::get_rate_log()),
         }
     }
 
     fn trim(
         pp: &Self::PublicParameters,
-        max_msg_size_log: usize,
+        max_message_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
-        if pp.fft_root_table.len() < max_msg_size_log + Spec::get_rate_log() {
+        if pp.fft_root_table.len() < max_message_size_log + Spec::get_rate_log() {
             return Err(Error::InvalidPcsParam(format!(
                 "Public parameter is setup for a smaller message size (log={}) than the trimmed message size (log={})",
                 pp.fft_root_table.len() - Spec::get_rate_log(),
-                max_msg_size_log,
+                max_message_size_log,
             )));
         }
-        let mut gamma_powers = Vec::with_capacity(max_msg_size_log);
-        let mut gamma_powers_inv = Vec::with_capacity(max_msg_size_log);
+        let mut gamma_powers = Vec::with_capacity(max_message_size_log);
+        let mut gamma_powers_inv = Vec::with_capacity(max_message_size_log);
         gamma_powers.push(E::BaseField::MULTIPLICATIVE_GENERATOR);
         gamma_powers_inv.push(E::BaseField::MULTIPLICATIVE_GENERATOR.invert().unwrap());
-        for i in 1..max_msg_size_log {
+        for i in 1..max_message_size_log + Spec::get_rate_log() {
             gamma_powers.push(gamma_powers[i - 1].square());
             gamma_powers_inv.push(gamma_powers_inv[i - 1].square());
         }
@@ -337,11 +337,11 @@ where
         gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
         Ok((
             Self::ProverParameters {
-                fft_root_table: pp.fft_root_table[..max_msg_size_log + Spec::get_rate_log()]
+                fft_root_table: pp.fft_root_table[..max_message_size_log + Spec::get_rate_log()]
                     .to_vec(),
                 gamma_powers: gamma_powers.clone(),
                 gamma_powers_inv_div_two: gamma_powers_inv.clone(),
-                full_message_size_log: max_msg_size_log,
+                full_message_size_log: max_message_size_log,
             },
             Self::VerifierParameters {
                 fft_root_table: pp.fft_root_table
@@ -355,7 +355,7 @@ where
                             .map(|v| vec![v[1]]),
                     )
                     .collect(),
-                full_message_size_log: max_msg_size_log,
+                full_message_size_log: max_message_size_log,
                 gamma_powers,
                 gamma_powers_inv_div_two: gamma_powers_inv,
             },
@@ -392,13 +392,27 @@ where
         // gamma^2^(full_log_n - level) * ((2^level)-th root of unity)^i
         // The x0 and x1 are exactly the two square roots, i.e.,
         // x0 = gamma^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^i
-        let x0 = pp.gamma_powers[pp.full_message_size_log - level - 1]
-            * pp.fft_root_table[level + 1][index];
+        // Since root_table[i] stores the first half of the powers of
+        // the 2^(i+1)-th roots of unity, we can avoid recomputing them.
+        let x0 = if index < (1 << level) {
+            pp.fft_root_table[level][index]
+        } else {
+            -pp.fft_root_table[level][index - (1 << level)]
+        } * pp.gamma_powers[pp.full_message_size_log + Spec::get_rate_log() - level - 1];
         let x1 = -x0;
         // The weight is 1/(x1-x0) = -1/(2x0)
-        // = -1/2 * (gamma^{-1})^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^{2^(level+1)-i}
-        let w = -pp.gamma_powers_inv_div_two[pp.full_message_size_log - level - 1]
-            * pp.fft_root_table[level + 1][(1 << (level + 1)) - index];
+        // = -1/2 * (gamma^{-1})^2^(full_codeword_log_n - level - 1) * ((2^(level+1))-th root of unity)^{2^(level+1)-i}
+        let w = -pp.gamma_powers_inv_div_two
+            [pp.full_message_size_log + Spec::get_rate_log() - level - 1]
+            * if index == 0 {
+                E::BaseField::ONE
+            } else if index < (1 << level) {
+                -pp.fft_root_table[level][(1 << level) - index]
+            } else if index == 1 << level {
+                -E::BaseField::ONE
+            } else {
+                pp.fft_root_table[level][(1 << (level + 1)) - index]
+            };
         (E::from(x0), E::from(x1), E::from(w))
     }
 
@@ -409,23 +423,36 @@ where
     ) -> (E, E, E) {
         // The same as prover_folding_coeffs, exept that the powers of
         // g is computed on the fly for levels exceeding the root table.
-        let x0 = if level + 1 < Spec::get_basecode_msg_size_log() {
-            vp.fft_root_table[level + 1][index]
+        let x0 = if level < Spec::get_basecode_msg_size_log() + Spec::get_rate_log() {
+            if index < (1 << level) {
+                vp.fft_root_table[level][index]
+            } else {
+                -vp.fft_root_table[level][index - (1 << level)]
+            }
         } else {
-            // In this case, this level of fft root table of the verifier
-            // only stores the first 2^(level+1)-th root of unity.
-            vp.fft_root_table[level + 1][0].pow(&[index as u64])
-        };
+            // In this case, the level-th row of fft root table of the verifier
+            // only stores the first 2^(level+1)-th roots of unity.
+            vp.fft_root_table[level][0].pow(&[index as u64])
+        } * vp.gamma_powers[vp.full_message_size_log + Spec::get_rate_log() - level - 1];
         let x1 = -x0;
         // The weight is 1/(x1-x0) = -1/(2x0)
         // = -1/2 * (gamma^{-1})^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^{2^(level+1)-i}
-        let w = -vp.gamma_powers_inv_div_two[vp.fft_root_table.len() - level - 1]
-            * if level + 1 < Spec::get_basecode_msg_size_log() {
-                vp.fft_root_table[level + 1][(1 << (level + 1)) - index]
+        let w = -vp.gamma_powers_inv_div_two
+            [vp.full_message_size_log + Spec::get_rate_log() - level - 1]
+            * if level < Spec::get_basecode_msg_size_log() + Spec::get_rate_log() {
+                if index == 0 {
+                    E::BaseField::ONE
+                } else if index < (1 << level) {
+                    -vp.fft_root_table[level][(1 << level) - index]
+                } else if index == 1 << level {
+                    -E::BaseField::ONE
+                } else {
+                    vp.fft_root_table[level][(1 << (level + 1)) - index]
+                }
             } else {
                 // In this case, this level of fft root table of the verifier
                 // only stores the first 2^(level+1)-th root of unity.
-                vp.fft_root_table[level + 1][0].pow(&[(1 << (level + 1)) - index as u64])
+                vp.fft_root_table[level][0].pow(&[(1 << (level + 1)) - index as u64])
             };
         (E::from(x0), E::from(x1), E::from(w))
     }
@@ -435,7 +462,7 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
     fn encode_internal<E: ExtensionField>(
         fft_root_table: &FftRootTable<E::BaseField>,
         coeffs: &FieldType<E>,
-        full_msg_size_log: usize,
+        full_message_size_log: usize,
     ) -> FieldType<E>
     where
         E::BaseField: Serialize + DeserializeOwned,
@@ -443,7 +470,7 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
         let lg_m = log2_strict(coeffs.len());
         let fft_root_table = &fft_root_table[..lg_m + Spec::get_rate_log()];
         assert!(
-            lg_m <= full_msg_size_log,
+            lg_m <= full_message_size_log,
             "Encoded message exceeds the maximum supported message size of the table."
         );
         let rate = 1 << Spec::get_rate_log();
@@ -468,7 +495,7 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
         // of size n * rate.
         // When the input message size is not n, but n/2^k, then the domain is
         // gamma^2^k H.
-        let k = 1 << (full_msg_size_log - lg_m);
+        let k = 1 << (full_message_size_log - lg_m);
         coset_fft(
             &mut ret,
             E::BaseField::MULTIPLICATIVE_GENERATOR.pow(&[k]),
@@ -476,6 +503,24 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
             fft_root_table,
         );
         ret
+    }
+
+    #[allow(unused)]
+    fn folding_coeffs_naive<E: ExtensionField>(
+        level: usize,
+        index: usize,
+        full_message_size_log: usize,
+    ) -> (E, E, E) {
+        // x0 is the index-th 2^(level+1)-th root of unity, multiplied by
+        // the shift factor at level+1, which is gamma^2^(full_codeword_log_n - level - 1).
+        let x0 = E::BaseField::ROOT_OF_UNITY
+            .pow(&[1 << (E::BaseField::S - (level as u32 + 1))])
+            .pow(&[index as u64])
+            * E::BaseField::MULTIPLICATIVE_GENERATOR
+                .pow(&[1 << (full_message_size_log + Spec::get_rate_log() - level - 1)]);
+        let x1 = -x0;
+        let w = (x1 - x0).invert().unwrap();
+        (E::from(x0), E::from(x1), E::from(w))
     }
 }
 
@@ -595,9 +640,15 @@ mod tests {
         let (pp, vp) = Code::trim(&pp, 10).unwrap();
         for level in 0..(10 + <Code as EncodingScheme<GoldilocksExt2>>::get_rate_log()) {
             for index in 0..(1 << level) {
+                let (naive_x0, naive_x1, naive_w) =
+                    Code::folding_coeffs_naive(level, index, pp.full_message_size_log);
+                let (p_x0, p_x1, p_w) = Code::prover_folding_coeffs(&pp, level, index);
+                let (v_x0, v_x1, v_w) = Code::verifier_folding_coeffs(&vp, level, index);
+                // assert_eq!(v_w * (v_x1 - v_x0), GoldilocksExt2::ONE);
+                // assert_eq!(p_w * (p_x1 - p_x0), GoldilocksExt2::ONE);
                 assert_eq!(
-                    Code::prover_folding_coeffs(&pp, level, index),
-                    Code::verifier_folding_coeffs(&vp, level, index),
+                    (v_x0, v_x1, v_w, p_x0, p_x1, p_w),
+                    (naive_x0, naive_x1, naive_w, naive_x0, naive_x1, naive_w),
                     "failed for level = {}, index = {}",
                     level,
                     index
