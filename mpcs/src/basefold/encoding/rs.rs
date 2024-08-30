@@ -27,7 +27,7 @@ pub trait RSCodeSpec: std::fmt::Debug + Clone {
 /// The FFT codes in this file are borrowed and adapted from Plonky2.
 type FftRootTable<F> = Vec<Vec<F>>;
 
-fn fft_root_table<F: PrimeField>(lg_n: usize) -> FftRootTable<F> {
+pub fn fft_root_table<F: PrimeField>(lg_n: usize) -> FftRootTable<F> {
     // bases[i] = g^2^i, for i = 0, ..., lg_n - 1
     // Note that the end of bases is g^{n/2} = -1
     let mut bases = Vec::with_capacity(lg_n);
@@ -154,7 +154,7 @@ fn fft_classic_inner<E: ExtensionField>(
 /// The parameter r signifies that the first 1/2^r of the entries of
 /// input may be non-zero, but the last 1 - 1/2^r entries are
 /// definitely zero.
-pub(crate) fn fft<E: ExtensionField>(
+pub fn fft<E: ExtensionField>(
     values: &mut FieldType<E>,
     r: usize,
     root_table: &[Vec<E::BaseField>],
@@ -208,7 +208,7 @@ pub(crate) fn fft<E: ExtensionField>(
     fft_classic_inner::<E>(values, r, lg_n, root_table);
 }
 
-pub(crate) fn coset_fft<E: ExtensionField>(
+pub fn coset_fft<E: ExtensionField>(
     coeffs: &mut FieldType<E>,
     shift: E::BaseField,
     zero_factor: usize,
@@ -469,7 +469,7 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
         coset_fft(
             &mut ret,
             E::BaseField::MULTIPLICATIVE_GENERATOR.pow(&[k]),
-            lg_m,
+            Spec::get_rate_log(),
             fft_root_table,
         );
         ret
@@ -480,12 +480,14 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
 fn naive_fft<E: ExtensionField>(poly: &Vec<E>, rate: usize, shift: E::BaseField) -> Vec<E> {
     let timer = start_timer!(|| "Encode RSCode");
     let message_size = poly.len();
+    let domain_size_bit = log2_strict(message_size * rate);
+    let root = E::BaseField::ROOT_OF_UNITY.pow(&[1 << (E::BaseField::S - domain_size_bit as u32)]);
     // The domain is shift * H where H is the multiplicative subgroup of size
     // message_size * rate.
     let mut domain = Vec::<E::BaseField>::with_capacity(message_size * rate);
     domain.push(shift);
     for i in 1..message_size * rate {
-        domain.push(domain[i - 1] * shift);
+        domain.push(domain[i - 1] * root);
     }
     let mut res = vec![E::ZERO; message_size * rate];
     res.iter_mut()
@@ -502,14 +504,85 @@ mod tests {
     use goldilocks::{Goldilocks, GoldilocksExt2};
 
     #[test]
-    fn time_naive_code() {
-        use rand::rngs::OsRng;
+    fn test_naive_fft() {
+        let num_vars = 2;
 
-        let poly: Vec<GoldilocksExt2> = (0..(1 << 10))
+        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
+            .map(|i| GoldilocksExt2::from(i))
+            .collect();
+        let mut poly2 = FieldType::Ext(poly.clone());
+
+        let naive = naive_fft::<GoldilocksExt2>(&poly, 1, Goldilocks::ONE);
+
+        let root_table = fft_root_table(num_vars);
+        fft::<GoldilocksExt2>(&mut poly2, 0, &root_table);
+
+        let poly2 = match poly2 {
+            FieldType::Ext(coeffs) => coeffs,
+            _ => panic!("Wrong field type"),
+        };
+        assert_eq!(naive, poly2);
+    }
+
+    #[test]
+    fn test_naive_fft_with_shift() {
+        use rand::rngs::OsRng;
+        let num_vars = 2;
+
+        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
             .map(|_| GoldilocksExt2::random(&mut OsRng))
             .collect();
+        let mut poly2 = FieldType::Ext(poly.clone());
 
-        naive_fft::<GoldilocksExt2>(&poly, 2, Goldilocks::MULTIPLICATIVE_GENERATOR);
+        let naive = naive_fft::<GoldilocksExt2>(&poly, 1, Goldilocks::MULTIPLICATIVE_GENERATOR);
+
+        let root_table = fft_root_table(num_vars);
+        coset_fft::<GoldilocksExt2>(
+            &mut poly2,
+            Goldilocks::MULTIPLICATIVE_GENERATOR,
+            0,
+            &root_table,
+        );
+
+        let poly2 = match poly2 {
+            FieldType::Ext(coeffs) => coeffs,
+            _ => panic!("Wrong field type"),
+        };
+        assert_eq!(naive, poly2);
+    }
+
+    #[test]
+    fn test_naive_fft_with_rate() {
+        use rand::rngs::OsRng;
+        let num_vars = 2;
+        let rate_bits = 1;
+
+        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
+            .map(|_| GoldilocksExt2::random(&mut OsRng))
+            .collect();
+        let mut poly2 = vec![GoldilocksExt2::ZERO; poly.len() * (1 << rate_bits)];
+        poly2.as_mut_slice()[..poly.len()].copy_from_slice(poly.as_slice());
+        let mut poly2 = FieldType::Ext(poly2.clone());
+
+        let naive = naive_fft::<GoldilocksExt2>(
+            &poly,
+            1 << rate_bits,
+            Goldilocks::MULTIPLICATIVE_GENERATOR,
+        );
+
+        let root_table = fft_root_table(num_vars + rate_bits);
+        coset_fft::<GoldilocksExt2>(
+            &mut poly2,
+            Goldilocks::MULTIPLICATIVE_GENERATOR,
+            rate_bits,
+            &root_table,
+        );
+
+        let poly2 = match poly2 {
+            FieldType::Ext(coeffs) => coeffs,
+            _ => panic!("Wrong field type"),
+        };
+        assert_eq!(naive, poly2);
     }
 
     #[test]

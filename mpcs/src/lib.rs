@@ -333,9 +333,9 @@ pub enum Error {
 
 mod basefold;
 pub use basefold::{
-    Basecode, BasecodeDefaultSpec, Basefold, BasefoldCommitment, BasefoldCommitmentWithData,
-    BasefoldDefault, BasefoldDefaultParams, BasefoldParams, BasefoldSpec, EncodingScheme, RSCode,
-    RSCodeDefaultSpec,
+    coset_fft, fft, fft_root_table, Basecode, BasecodeDefaultSpec, Basefold, BasefoldCommitment,
+    BasefoldCommitmentWithData, BasefoldDefault, BasefoldDefaultParams, BasefoldParams,
+    BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,
 };
 
 fn validate_input<E: ExtensionField>(

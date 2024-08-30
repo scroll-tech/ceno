@@ -63,6 +63,7 @@ pub use structure::{
 mod commit_phase;
 use commit_phase::{batch_commit_phase, commit_phase, simple_batch_commit_phase};
 mod encoding;
+pub use encoding::{coset_fft, fft, fft_root_table};
 mod query_phase;
 // This sumcheck module is different from the mpcs::sumcheck module, in that
 // it deals only with the special case of the form \sum eq(r_i)f_i().

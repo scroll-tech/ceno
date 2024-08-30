@@ -5,7 +5,7 @@ mod basecode;
 pub use basecode::{Basecode, BasecodeDefaultSpec};
 
 mod rs;
-pub use rs::{RSCode, RSCodeDefaultSpec};
+pub use rs::{coset_fft, fft, fft_root_table, RSCode, RSCodeDefaultSpec};
 
 use serde::{de::DeserializeOwned, Serialize};
 
