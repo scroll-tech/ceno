@@ -153,36 +153,26 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
     use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLE;
-    use transcript::Transcript;
 
     use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::{
-            constants::NUM_FANIN, mock_prover::MockProver, prover::ZKVMProver,
-            verifier::ZKVMVerifier,
-        },
-        structs::PointAndEval,
+        scheme::mock_prover::MockProver,
     };
 
-    use super::{AddInstruction, InstructionConfig};
+    use super::AddInstruction;
 
     #[test]
     fn test_add_construct_circuit() {
-        let mut rng = test_rng();
-
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let _ = cb.namespace(
             || "add",
-            |mut cb| {
-                let config = AddInstruction::construct_circuit(&mut cb);
+            |cb| {
+                let config = AddInstruction::construct_circuit(cb);
                 Ok(config)
             },
         );
