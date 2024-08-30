@@ -153,7 +153,6 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
 
 #[cfg(test)]
 mod test {
-
     use ark_std::test_rng;
     use ff::Field;
     use ff_ext::ExtensionField;
@@ -165,61 +164,44 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
         instructions::Instruction,
-        scheme::{constants::NUM_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier},
+        scheme::{
+            constants::NUM_FANIN, mock_prover::MockProver, prover::ZKVMProver,
+            verifier::ZKVMVerifier,
+        },
         structs::PointAndEval,
     };
 
-    use super::AddInstruction;
+    use super::{AddInstruction, InstructionConfig};
 
     #[test]
     fn test_add_construct_circuit() {
         let mut rng = test_rng();
 
-        let mut cs = ConstraintSystem::new(|| "riscv");
-        let _ = cs.namespace(
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let _ = cb.namespace(
             || "add",
-            |cs| {
-                let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(cs);
-                let config = AddInstruction::construct_circuit(&mut circuit_builder);
+            |mut cb| {
+                let config = AddInstruction::construct_circuit(&mut cb);
                 Ok(config)
             },
         );
-        let vk = cs.key_gen();
-        let pk = ProvingKey::create_pk(vk);
 
-        // generate mock witness
-        let num_instances = 1 << 2;
-        let wits_in = (0..pk.get_cs().num_witin as usize)
-            .map(|_| {
-                (0..num_instances)
-                    .map(|_| Goldilocks::random(&mut rng))
-                    .collect::<Vec<Goldilocks>>()
-                    .into_mle()
-                    .into()
-            })
-            .collect_vec();
+        let wits_in = vec![
+            vec![Goldilocks::from(1)].into_mle().into(),
+            vec![Goldilocks::from(2)].into_mle().into(),
+            vec![Goldilocks::from(3)].into_mle().into(),
+            vec![Goldilocks::from(4)].into_mle().into(),
+            vec![Goldilocks::from(5)].into_mle().into(),
+            vec![Goldilocks::from(6)].into_mle().into(),
+            vec![Goldilocks::from(7)].into_mle().into(),
+            vec![Goldilocks::from(8)].into_mle().into(),
+            vec![Goldilocks::from(9)].into_mle().into(),
+            vec![Goldilocks::from(0)].into_mle().into(),
+            vec![Goldilocks::from(11)].into_mle().into(),
+        ];
 
-        // get proof
-        let prover = ZKVMProver::new(pk.clone());
-        let mut transcript = Transcript::new(b"riscv");
-        let challenges = [1.into(), 2.into()];
-
-        let proof = prover
-            .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
-            .expect("create_proof failed");
-
-        let verifier = ZKVMVerifier::new(pk.vk);
-        let mut v_transcript = Transcript::new(b"riscv");
-        let _rt_input = verifier
-            .verify(
-                &proof,
-                &mut v_transcript,
-                NUM_FANIN,
-                &PointAndEval::default(),
-                &challenges,
-            )
-            .expect("verifier failed");
-        // TODO verify opening via PCS
+        MockProver::assert_satisfied(&mut cb, &wits_in, None);
     }
 
     fn bench_add_instruction_helper<E: ExtensionField>(_instance_num_vars: usize) {}
