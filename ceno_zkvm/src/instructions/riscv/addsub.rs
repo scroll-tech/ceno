@@ -18,6 +18,7 @@ use super::{
 pub struct AddInstruction;
 pub struct SubInstruction;
 
+#[derive(Debug)]
 pub struct InstructionConfig<E: ExtensionField> {
     pub pc: WitIn,
     pub ts: WitIn,
@@ -166,30 +167,48 @@ mod test {
     use super::AddInstruction;
 
     #[test]
+    #[allow(clippy::option_map_unit_fn)]
     fn test_add_construct_circuit() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let _ = cb.namespace(
-            || "add",
-            |cb| {
-                let config = AddInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        );
+        let config = cb
+            .namespace(
+                || "add",
+                |cb| {
+                    let config = AddInstruction::construct_circuit(cb);
+                    Ok(config)
+                },
+            )
+            .unwrap()
+            .unwrap();
 
-        let wits_in = vec![
-            vec![Goldilocks::from(1)].into_mle().into(),
-            vec![Goldilocks::from(2)].into_mle().into(),
-            vec![Goldilocks::from(3)].into_mle().into(),
-            vec![Goldilocks::from(4)].into_mle().into(),
-            vec![Goldilocks::from(5)].into_mle().into(),
-            vec![Goldilocks::from(6)].into_mle().into(),
-            vec![Goldilocks::from(7)].into_mle().into(),
-            vec![Goldilocks::from(8)].into_mle().into(),
-            vec![Goldilocks::from(9)].into_mle().into(),
-            vec![Goldilocks::from(0)].into_mle().into(),
-            vec![Goldilocks::from(11)].into_mle().into(),
-        ];
+        let empty = vec![Goldilocks::from(0)].into_mle().into();
+        let mut wits_in = vec![empty; cb.cs.num_witin as usize];
+
+        wits_in[config.pc.id as usize] = vec![Goldilocks::from(1)].into_mle().into();
+        wits_in[config.ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        config.prev_rd_value.wits_in().map(|w| {
+            wits_in[w[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[w[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+        });
+        config.addend_0.wits_in().map(|w| {
+            wits_in[w[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[w[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+        });
+        config.addend_1.wits_in().map(|w| {
+            wits_in[w[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[w[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+        });
+        config.outcome.carries.map(|w| {
+            wits_in[w[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[w[1].id as usize] = vec![Goldilocks::from(0)].into_mle().into();
+        });
+        wits_in[config.rs1_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.rs2_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.rd_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.prev_rs1_ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.prev_rs2_ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.prev_rd_ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
 
         MockProver::assert_satisfied(&mut cb, &wits_in, None);
     }
