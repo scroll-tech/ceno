@@ -4,8 +4,9 @@ use itertools::{izip, Itertools};
 
 use crate::{
     circuit_builder::CircuitBuilder,
+    create_witin_from_expr,
     error::ZKVMError,
-    expression::{Expression, ToExpr},
+    expression::{Expression, ToExpr, WitIn},
 };
 
 use super::{UInt, UintLimb};
@@ -221,6 +222,167 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         _rhs: &UInt<M, C, E>,
     ) -> Result<Expression<E>, ZKVMError> {
         Ok(self.expr().remove(0) + 1.into())
+    }
+
+    pub fn is_equal(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        rhs: &UInt<M, C, E>,
+    ) -> Result<Expression<E>, ZKVMError> {
+        let n_limbs = Self::NUM_CELLS;
+        let flags = self
+            .limbs
+            .iter()
+            .zip_eq(rhs.limbs.iter())
+            .map(|(a, b)| circuit_builder.is_equal(a.expr(), b.expr()))
+            .collect::<Result<Vec<Expression<E>>, ZKVMError>>()?;
+
+        let sum_expr = flags
+            .iter()
+            .fold(Expression::from(0), |acc, flag| acc.clone() + flag.clone());
+
+        let sum_flag = create_witin_from_expr!(circuit_builder, sum_expr)?;
+        circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))
+    }
+}
+
+impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
+    /// decompose x = (x_s, x_{<s})
+    /// where x_s is highest bit, x_{<s} is the rest
+    pub fn msb_decompose<F: SmallField>(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<(Expression<E>, UInt<M, 8, E>), ZKVMError>
+    where
+        E: ExtensionField<BaseField = F>,
+    {
+        let high_limb = self.limbs[Self::NUM_CELLS - 1].expr();
+        let high_limb_mask = circuit_builder.create_witin(|| "high_limb_mask")?.expr();
+
+        circuit_builder.lookup_and_byte(
+            high_limb_mask.clone(),
+            high_limb.clone(),
+            Expression::from(1 << 7),
+        )?;
+
+        let inv_128 = F::from(128).invert().unwrap();
+        let msb = (high_limb - high_limb_mask.clone()) * Expression::Constant(inv_128);
+        let mut limbs = self.limbs.iter().map(|limb| limb.expr()).collect_vec();
+        limbs[Self::NUM_CELLS - 1] = high_limb_mask;
+        let limbs = UInt::<M, 8, E>::create_witin_from_exprs(circuit_builder, limbs);
+        Ok((msb, limbs))
+    }
+
+    /// compare unsigned intergers a < b
+    pub fn ltu_limb8(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        rhs: &UInt<M, 8, E>,
+    ) -> Result<Expression<E>, ZKVMError> {
+        let n_bytes = Self::NUM_CELLS;
+        let indexes: Vec<WitIn> = (0..n_bytes)
+            .map(|_| circuit_builder.create_witin(|| ""))
+            .collect::<Result<_, ZKVMError>>()?;
+
+        // indicate the first non-zero byte index i_0 of a[i] - b[i]
+        indexes
+            .iter()
+            .try_for_each(|idx| circuit_builder.assert_bit(|| "bit assert", idx.expr()))?;
+        let index_sum = indexes
+            .iter()
+            .fold(Expression::from(0), |acc, idx| acc + idx.expr());
+        circuit_builder.assert_bit(|| "bit assert", index_sum)?;
+
+        // equal zero if a==b, otherwise equal (a[i_0]-b[i_0])^{-1}
+        let byte_diff_inverse = circuit_builder.create_witin(|| "byte_diff_inverse")?;
+
+        // define accumulated index sum
+        let si_expr: Vec<Expression<E>> = indexes
+            .iter()
+            .scan(Expression::from(0), |acc, idx| {
+                *acc = acc.clone() + idx.expr();
+                Some(acc.clone())
+            })
+            .collect();
+        let si = si_expr
+            .into_iter()
+            .map(|expr| create_witin_from_expr!(circuit_builder, expr))
+            .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
+
+        // check byte diff that before the first non-zero i_0 equals zero
+        si.iter()
+            .zip(self.limbs.iter())
+            .zip(rhs.limbs.iter())
+            .try_for_each(|((flag, a), b)| {
+                circuit_builder.require_zero(
+                    || "zero check",
+                    Expression::from(1) - flag.expr() * a.expr() + flag.expr() * b.expr(),
+                )
+            })?;
+
+        // define accumulated byte sum
+        // when a!= b, the last item in sa should equal the first non-zero byte a[i_0]
+        let sa: Vec<Expression<E>> = self
+            .limbs
+            .iter()
+            .zip_eq(indexes.iter())
+            .scan(Expression::from(0), |acc, (ai, idx)| {
+                *acc = acc.clone() + ai.expr() * idx.expr();
+                Some(acc.clone())
+            })
+            .collect();
+        let sb: Vec<Expression<E>> = rhs
+            .limbs
+            .iter()
+            .zip_eq(indexes.iter())
+            .scan(Expression::from(0), |acc, (ai, idx)| {
+                *acc = acc.clone() + ai.expr() * idx.expr();
+                Some(acc.clone())
+            })
+            .collect();
+
+        // check the first byte difference has a inverse
+        // unwrap is safe because vector len > 0
+        let lhs_ne_byte = create_witin_from_expr!(circuit_builder, sa.last().unwrap().clone())?;
+        let rhs_ne_byte = create_witin_from_expr!(circuit_builder, sb.last().unwrap().clone())?;
+        let index_ne = si.last().unwrap();
+        circuit_builder.require_zero(
+            || "zero check",
+            lhs_ne_byte.expr() * byte_diff_inverse.expr()
+                - rhs_ne_byte.expr() * byte_diff_inverse.expr()
+                - index_ne.expr(),
+        )?;
+
+        let is_ltu = circuit_builder.create_witin(|| "is_ltu")?;
+        // circuit_builder.assert_bit(is_ltu.expr())?; // lookup ensure it is bit
+        // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
+        circuit_builder.lookup_ltu_limb8(is_ltu.expr(), lhs_ne_byte.expr(), rhs_ne_byte.expr())?;
+        Ok(is_ltu.expr())
+    }
+
+    pub fn lt_limb8(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        rhs: &UInt<M, 8, E>,
+    ) -> Result<Expression<E>, ZKVMError> {
+        let is_lt = circuit_builder.create_witin(|| "is_lt")?;
+        circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
+
+        let is_equal = self.is_equal(circuit_builder, rhs)?;
+        let (lhs_msb, lhs_no_msb) = self.msb_decompose(circuit_builder)?;
+        let (rhs_msb, rhs_no_msb) = rhs.msb_decompose(circuit_builder)?;
+        // (1) compute ltu(a_{<s},b_{<s})
+        let is_ltu = lhs_no_msb.ltu_limb8(circuit_builder, &rhs_no_msb)?;
+        // (2) compute $lt(a,b)=a_s\cdot (1-b_s)+eq(a_s,b_s)\cdot ltu(a_{<s},b_{<s})$
+        // Refer Jolt 5.3: Set Less Than (https://people.cs.georgetown.edu/jthaler/Jolt-paper.pdf)
+        let lhs_msb = create_witin_from_expr!(circuit_builder, lhs_msb)?;
+        let rhs_msb = create_witin_from_expr!(circuit_builder, rhs_msb)?;
+        circuit_builder.require_zero(
+            || "zero check",
+            lhs_msb.expr() - lhs_msb.expr() * rhs_msb.expr() + is_equal.clone() * is_ltu.clone()
+                - is_lt.expr(),
+        )?;
+        Ok(is_lt.expr())
     }
 }
 

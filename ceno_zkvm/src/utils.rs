@@ -1,3 +1,8 @@
+use crate::{
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{Expression, ToExpr, WitIn},
+};
 use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -153,6 +158,33 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
                 .collect::<Vec<T>>()
         })
         .collect()
+}
+
+impl WitIn {
+    pub fn from_expr<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        input: Expression<E>,
+    ) -> Result<Self, ZKVMError> {
+        let wit = circuit_builder.create_witin(|| "wit_from_expr")?;
+        circuit_builder.require_zero(|| "create_wit_from_expr", wit.expr() - input)?;
+        Ok(wit)
+    }
+}
+
+#[macro_export]
+/// this is to avoid non-monomial expression
+macro_rules! create_witin_from_expr {
+    // Handle the case for a single expression
+    ($builder:expr, $e:expr) => {
+        WitIn::from_expr($builder, $e)
+    };
+    // Recursively handle multiple expressions and create a flat tuple with error handling
+    ($builder:expr, $e:expr, $($rest:expr),+) => {
+        {
+            // Return a Result tuple, handling errors
+            Ok::<_, ZKVMError>((WitIn::from_expr($builder, $e)?, $(WitIn::from_expr($builder, $rest)?),*))
+        }
+    };
 }
 
 #[cfg(test)]

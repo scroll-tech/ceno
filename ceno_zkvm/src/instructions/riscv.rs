@@ -4,6 +4,7 @@ use ff_ext::ExtensionField;
 use super::Instruction;
 
 pub mod addsub;
+pub mod blt;
 mod constants;
 
 #[cfg(test)]

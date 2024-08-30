@@ -10,8 +10,11 @@ use crate::{
 };
 use ark_std::iterable::Iterable;
 use constants::BYTE_BIT_WIDTH;
+use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
+use itertools::Itertools;
+use std::ops::Index;
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
@@ -23,6 +26,28 @@ pub enum UintLimb<E: ExtensionField> {
 }
 
 #[derive(Clone, Debug)]
+impl<E: ExtensionField> UintLimb<E> {
+    pub fn iter(&self) -> impl Iterator<Item = &WitIn> {
+        match self {
+            UintLimb::WitIn(vec) => vec.iter(),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl<E: ExtensionField> Index<usize> for UintLimb<E> {
+    type Output = WitIn;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        match self {
+            UintLimb::WitIn(vec) => &vec[index],
+            _ => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Clone)]
+>>>>>>> 29d196c (implement opcode blt)
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
 pub struct UInt<const M: usize, const C: usize, E: ExtensionField> {
@@ -57,6 +82,103 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             limbs: UintLimb::Expression(Vec::new()),
             carries: None,
         }
+    }
+
+    /// expr_limbs is little endian order
+    pub fn create_witin_from_exprs(
+        circuit_builder: &mut CircuitBuilder<E>,
+        expr_limbs: Vec<Expression<E>>,
+    ) -> Self {
+        assert_eq!(expr_limbs.len(), Self::NUM_CELLS);
+        let limbs = (0..Self::NUM_CELLS)
+            .map(|i| {
+                let w = circuit_builder.create_witin(|| "wit for limb").unwrap();
+                circuit_builder
+                    .assert_ux::<_, _, C>(|| "range check", w.expr())
+                    .unwrap();
+                circuit_builder
+                    .require_zero(|| "zero check", w.expr() - expr_limbs[i].clone())
+                    .unwrap();
+                w
+            })
+            .collect_vec();
+        Self {
+            limbs: UintLimb::WitIn(limbs),
+            carries: None,
+        }
+    }
+
+    /// conversion is needed for lt/ltu
+    /// TODO: add general conversion between any two limb sizes C1 <-> C2
+    pub fn from_u8_limbs(
+        circuit_builder: &mut CircuitBuilder<E>,
+        x: &UInt<M, 8, E>,
+    ) -> UInt<M, C, E> {
+        assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
+        assert!(x.carries.is_none());
+        let k = C / 8;
+        let shift_pows = {
+            let mut shift_pows = Vec::with_capacity(k);
+            shift_pows.push(Expression::Constant(E::BaseField::ONE));
+            (0..k - 1).for_each(|_| {
+                shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8).into())
+            });
+            shift_pows
+        };
+        let combined_limbs = x
+            .limbs
+            .iter()
+            .collect_vec()
+            .chunks(k)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .zip(shift_pows.iter())
+                    .map(|(limb, shift)| shift.clone() * limb.expr())
+                    .reduce(|a, b| a + b)
+                    .unwrap()
+            })
+            .collect_vec();
+        UInt::<M, C, E>::create_witin_from_exprs(circuit_builder, combined_limbs)
+    }
+
+    pub fn to_u8_limbs(circuit_builder: &mut CircuitBuilder<E>, x: UInt<M, C, E>) -> UInt<M, 8, E> {
+        assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
+        assert!(x.carries.is_none());
+        let k = C / 8;
+        let shift_pows = {
+            let mut shift_pows = Vec::with_capacity(k);
+            shift_pows.push(Expression::Constant(E::BaseField::ONE));
+            (0..k - 1).for_each(|_| {
+                shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8).into())
+            });
+            shift_pows
+        };
+        let split_limbs = x
+            .limbs
+            .iter()
+            .flat_map(|large_limb| {
+                let limbs = (0..k)
+                    .map(|_| {
+                        let w = circuit_builder.create_witin(|| "").unwrap();
+                        circuit_builder.assert_byte(|| "", w.expr()).unwrap();
+                        w.expr()
+                    })
+                    .collect_vec();
+                let combined_limb = limbs
+                    .iter()
+                    .zip(shift_pows.iter())
+                    .map(|(limb, shift)| shift.clone() * limb.clone())
+                    .reduce(|a, b| a + b)
+                    .unwrap();
+
+                circuit_builder
+                    .require_zero(|| "zero check", large_limb.expr() - combined_limb)
+                    .unwrap();
+                limbs
+            })
+            .collect_vec();
+        UInt::<M, 8, E>::create_witin_from_exprs(circuit_builder, split_limbs)
     }
 
     /// If current limbs are Expression, this function will create witIn and replace the limbs
