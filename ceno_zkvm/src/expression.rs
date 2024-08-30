@@ -82,6 +82,13 @@ impl<E: ExtensionField> Expression<E> {
         Self::is_monomial_form_inner(MonomialState::SumTerm, self)
     }
 
+    pub fn unpack_sum(&self) -> Option<(Expression<E>, Expression<E>)> {
+        match self {
+            Expression::Sum(a, b) => Some((a.deref().clone(), b.deref().clone())),
+            _ => None,
+        }
+    }
+
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
             Expression::WitIn(_) => false,
@@ -92,6 +99,7 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Challenge(_, _, _, _) => false,
         }
     }
+
     fn is_monomial_form_inner(s: MonomialState, expr: &Expression<E>) -> bool {
         match (expr, s) {
             (Expression::WitIn(_), MonomialState::SumTerm) => true,
