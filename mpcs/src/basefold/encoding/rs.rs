@@ -268,11 +268,12 @@ pub struct RSCodeProverParameters<E: ExtensionField> {
     pub(crate) fft_root_table: FftRootTable<E::BaseField>,
     pub(crate) gamma_powers: Vec<E::BaseField>,
     pub(crate) gamma_powers_inv_div_two: Vec<E::BaseField>,
+    pub(crate) full_message_size_log: usize,
 }
 
 impl<E: ExtensionField> EncodingProverParameters for RSCodeProverParameters<E> {
     fn get_max_message_size_log(&self) -> usize {
-        self.fft_root_table.len()
+        self.full_message_size_log
     }
 }
 
@@ -309,7 +310,7 @@ where
 
     fn setup(max_msg_size_log: usize, _rng_seed: [u8; 32]) -> Self::PublicParameters {
         RSCodeParameters {
-            fft_root_table: fft_root_table(max_msg_size_log),
+            fft_root_table: fft_root_table(max_msg_size_log + Spec::get_rate_log()),
         }
     }
 
@@ -317,10 +318,10 @@ where
         pp: &Self::PublicParameters,
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
-        if pp.fft_root_table.len() < max_msg_size_log {
+        if pp.fft_root_table.len() < max_msg_size_log + Spec::get_rate_log() {
             return Err(Error::InvalidPcsParam(format!(
                 "Public parameter is setup for a smaller message size (log={}) than the trimmed message size (log={})",
-                pp.fft_root_table.len(),
+                pp.fft_root_table.len() - Spec::get_rate_log(),
                 max_msg_size_log,
             )));
         }
@@ -336,16 +337,20 @@ where
         gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
         Ok((
             Self::ProverParameters {
-                fft_root_table: pp.fft_root_table[..max_msg_size_log].to_vec(),
+                fft_root_table: pp.fft_root_table[..max_msg_size_log + Spec::get_rate_log()]
+                    .to_vec(),
                 gamma_powers: gamma_powers.clone(),
                 gamma_powers_inv_div_two: gamma_powers_inv.clone(),
+                full_message_size_log: max_msg_size_log,
             },
             Self::VerifierParameters {
-                fft_root_table: pp.fft_root_table[..Spec::get_basecode_msg_size_log()]
+                fft_root_table: pp.fft_root_table
+                    [..Spec::get_basecode_msg_size_log() + Spec::get_rate_log()]
                     .iter()
                     .map(|v| v.clone())
                     .chain(
-                        pp.fft_root_table[..Spec::get_basecode_msg_size_log()]
+                        pp.fft_root_table
+                            [Spec::get_basecode_msg_size_log() + Spec::get_rate_log()..]
                             .iter()
                             .map(|v| vec![v[1]]),
                     )
@@ -358,15 +363,13 @@ where
     }
 
     fn encode(pp: &Self::ProverParameters, coeffs: &FieldType<E>) -> FieldType<E> {
-        // Use the length of the FFT root table as the full message size to
-        // determine the shift factor.
-        Self::encode_internal(&pp.fft_root_table, coeffs)
+        // Use the full message size to determine the shift factor.
+        Self::encode_internal(&pp.fft_root_table, coeffs, pp.full_message_size_log)
     }
 
     fn encode_small(vp: &Self::VerifierParameters, coeffs: &FieldType<E>) -> FieldType<E> {
-        // Use the length of the FFT root table as the full message size to
-        // determine the shift factor.
-        Self::encode_internal(&vp.fft_root_table, coeffs)
+        // Use the full message size to determine the shift factor.
+        Self::encode_internal(&vp.fft_root_table, coeffs, vp.full_message_size_log)
     }
 
     fn get_number_queries() -> usize {
@@ -389,12 +392,12 @@ where
         // gamma^2^(full_log_n - level) * ((2^level)-th root of unity)^i
         // The x0 and x1 are exactly the two square roots, i.e.,
         // x0 = gamma^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^i
-        let x0 = pp.gamma_powers[pp.fft_root_table.len() - level - 1]
+        let x0 = pp.gamma_powers[pp.full_message_size_log - level - 1]
             * pp.fft_root_table[level + 1][index];
         let x1 = -x0;
         // The weight is 1/(x1-x0) = -1/(2x0)
         // = -1/2 * (gamma^{-1})^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^{2^(level+1)-i}
-        let w = -pp.gamma_powers_inv_div_two[pp.fft_root_table.len() - level - 1]
+        let w = -pp.gamma_powers_inv_div_two[pp.full_message_size_log - level - 1]
             * pp.fft_root_table[level + 1][(1 << (level + 1)) - index];
         (E::from(x0), E::from(x1), E::from(w))
     }
@@ -432,15 +435,15 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
     fn encode_internal<E: ExtensionField>(
         fft_root_table: &FftRootTable<E::BaseField>,
         coeffs: &FieldType<E>,
+        full_msg_size_log: usize,
     ) -> FieldType<E>
     where
         E::BaseField: Serialize + DeserializeOwned,
     {
         let lg_m = log2_strict(coeffs.len());
-        let full_lg_n = fft_root_table.len();
-        let fft_root_table = &fft_root_table[..lg_m];
+        let fft_root_table = &fft_root_table[..lg_m + Spec::get_rate_log()];
         assert!(
-            lg_m <= full_lg_n,
+            lg_m <= full_msg_size_log,
             "Encoded message exceeds the maximum supported message size of the table."
         );
         let rate = 1 << Spec::get_rate_log();
@@ -465,7 +468,7 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
         // of size n * rate.
         // When the input message size is not n, but n/2^k, then the domain is
         // gamma^2^k H.
-        let k = 1 << (fft_root_table.len() - lg_m);
+        let k = 1 << (full_msg_size_log - lg_m);
         coset_fft(
             &mut ret,
             E::BaseField::MULTIPLICATIVE_GENERATOR.pow(&[k]),
