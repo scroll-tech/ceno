@@ -284,7 +284,7 @@ mod tests {
             cb: &mut CircuitBuilder<GoldilocksExt2>,
         ) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
-            cb.assert_u5(|| "assert u5", a.expr())?;
+            cb.assert_ux::<_, _, 5>(|| "assert u5", a.expr())?;
             Ok(Self { a })
         }
     }
