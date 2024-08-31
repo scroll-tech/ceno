@@ -6,4 +6,4 @@ license.workspace = true
 
 [dependencies]
 riscv = "0.11.1"
-#riscv-rt = "0.12.2"
+riscv-rt = "0.12.2"
