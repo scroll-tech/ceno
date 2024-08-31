@@ -80,8 +80,8 @@ impl EmuContext for VMState {
     // Expect an ecall to indicate a successful exit:
     // function HALT with argument SUCCESS.
     fn ecall(&mut self) -> Result<bool> {
-        let function = 0; // self.load_register(self.platform.reg_ecall())?;
-        let argument = 0; // self.load_register(self.platform.reg_arg0())?;
+        let function = self.load_register(self.platform.reg_ecall())?;
+        let argument = self.load_register(self.platform.reg_arg0())?;
         if function == self.platform.ecall_halt() && argument == self.platform.code_success() {
             self.succeeded = true;
             Ok(true)
