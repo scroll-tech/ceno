@@ -4,7 +4,7 @@ pub mod util;
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::UtilError,
+    error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
     utils::add_one_to_big_num,
 };
@@ -12,7 +12,6 @@ use ark_std::iterable::Iterable;
 use constants::BYTE_BIT_WIDTH;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::Itertools;
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
@@ -33,19 +32,24 @@ pub struct UInt<const M: usize, const C: usize, E: ExtensionField> {
 }
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
-    pub fn new(circuit_builder: &mut CircuitBuilder<E>) -> Self {
-        Self {
-            limbs: UintLimb::WitIn(
-                (0..Self::NUM_CELLS)
-                    .map(|_| {
-                        let w = circuit_builder.create_witin();
-                        circuit_builder.assert_ux::<C>(w.expr()).unwrap();
-                        w
-                    })
-                    .collect_vec(),
-            ),
-            carries: None,
-        }
+    pub fn new<NR: Into<String>, N: FnOnce() -> NR>(
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<Self, ZKVMError> {
+        circuit_builder.namespace(name_fn, |cb| {
+            Ok(UInt {
+                limbs: UintLimb::WitIn(
+                    (0..Self::NUM_CELLS)
+                        .map(|i| {
+                            let w = cb.create_witin(|| format!("limb_{i}"))?;
+                            cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
+                            Ok(w)
+                        })
+                        .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
+                ),
+                carries: None,
+            })
+        })
     }
 
     pub fn new_limb_as_expr() -> Self {
@@ -56,31 +60,49 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     }
 
     /// If current limbs are Expression, this function will create witIn and replace the limbs
-    pub fn replace_limbs_with_witin(&mut self, circuit_builder: &mut CircuitBuilder<E>) {
+    pub fn replace_limbs_with_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<(), ZKVMError> {
         if let UintLimb::Expression(_) = self.limbs {
-            self.limbs = UintLimb::WitIn(
-                (0..Self::NUM_CELLS)
-                    .map(|_| {
-                        let w = circuit_builder.create_witin();
-                        circuit_builder.assert_ux::<C>(w.expr()).unwrap();
-                        w
-                    })
-                    .collect_vec(),
-            )
+            circuit_builder.namespace(name_fn, |cb| {
+                self.limbs = UintLimb::WitIn(
+                    (0..Self::NUM_CELLS)
+                        .map(|i| {
+                            let w = cb.create_witin(|| format!("limb_{i}"))?;
+                            cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
+                            Ok(w)
+                        })
+                        .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
+                );
+                Ok(())
+            })?;
         }
+        Ok(())
     }
 
     // Create witIn for carries
-    pub fn create_carry_witin(&mut self, circuit_builder: &mut CircuitBuilder<E>) {
+    pub fn create_carry_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<(), ZKVMError> {
         if self.carries.is_none() {
-            self.carries = (0..Self::NUM_CELLS)
-                .map(|_| {
-                    let w = circuit_builder.create_witin();
-                    circuit_builder.assert_ux::<C>(w.expr()).unwrap();
-                    Some(w)
-                })
-                .collect();
+            circuit_builder.namespace(name_fn, |cb| {
+                self.carries = Some(
+                    (0..Self::NUM_CELLS)
+                        .map(|i| {
+                            let c = cb.create_witin(|| format!("carry_{i}"))?;
+                            cb.assert_ux::<_, _, C>(|| format!("carry_{i}_in_{C}"), c.expr())?;
+                            Ok(c)
+                        })
+                        .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
+                );
+                Ok(())
+            })?;
         }
+        Ok(())
     }
 
     /// Return if the limbs are in Expression form or not.

@@ -15,7 +15,7 @@ use sumcheck::{
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::Circuit,
+    circuit_builder::ProvingKey,
     error::ZKVMError,
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN},
@@ -32,12 +32,12 @@ use crate::{
 use super::ZKVMProof;
 
 pub struct ZKVMProver<E: ExtensionField> {
-    circuit: Circuit<E>,
+    pk: ProvingKey<E>,
 }
 
 impl<E: ExtensionField> ZKVMProver<E> {
-    pub fn new(circuit: Circuit<E>) -> Self {
-        ZKVMProver { circuit }
+    pub fn new(pk: ProvingKey<E>) -> Self {
+        ZKVMProver { pk }
     }
 
     /// create proof giving witness and num_instances
@@ -52,39 +52,38 @@ impl<E: ExtensionField> ZKVMProver<E> {
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ZKVMProof<E>, ZKVMError> {
-        let circuit = &self.circuit;
+        let cs = self.pk.get_cs();
         let log2_num_instances = ceil_log2(num_instances);
         let next_pow2_instances = 1 << log2_num_instances;
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         // sanity check
-        assert_eq!(witnesses.len(), circuit.num_witin as usize);
+        assert_eq!(witnesses.len(), cs.num_witin as usize);
         assert!(witnesses.iter().all(|v| {
             v.num_vars() == log2_num_instances && v.evaluations().len() == next_pow2_instances
         }));
 
         // main constraint: read/write record witness inference
         let span = entered_span!("wit_inference::record");
-        let records_wit: Vec<ArcMultilinearExtension<'_, E>> = circuit
+        let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_expressions
             .par_iter()
-            .chain(circuit.w_expressions.par_iter())
-            .chain(circuit.lk_expressions.par_iter())
+            .chain(cs.w_expressions.par_iter())
+            .chain(cs.lk_expressions.par_iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
                 wit_infer_by_expr(&witnesses, challenges, expr)
             })
             .collect();
-        let (r_records_wit, w_lk_records_wit) = records_wit.split_at(circuit.r_expressions.len());
-        let (w_records_wit, lk_records_wit) =
-            w_lk_records_wit.split_at(circuit.w_expressions.len());
+        let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
+        let (w_records_wit, lk_records_wit) = w_lk_records_wit.split_at(cs.w_expressions.len());
         exit_span!(span);
 
         // product constraint: tower witness inference
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
-            circuit.r_expressions.len(),
-            circuit.w_expressions.len(),
-            circuit.lk_expressions.len(),
+            cs.r_expressions.len(),
+            cs.w_expressions.len(),
+            cs.lk_expressions.len(),
         );
         let (log2_r_count, log2_w_count, log2_lk_count) = (
             ceil_log2(r_counts_per_instance),
@@ -230,7 +229,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         let num_threads = proper_num_threads(log2_num_instances, max_threads);
         let alpha_pow = get_challenge_pows(
-            MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + circuit.assert_zero_sumcheck_expressions.len(),
+            MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
             transcript,
         );
         let mut alpha_pow_iter = alpha_pow.iter();
@@ -279,7 +278,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         // only initialize when circuit got assert_zero_sumcheck_expressions
         let sel_non_lc_zero_sumcheck = {
-            if !circuit.assert_zero_sumcheck_expressions.is_empty() {
+            if !cs.assert_zero_sumcheck_expressions.is_empty() {
                 let mut sel_non_lc_zero_sumcheck = build_eq_x_r_vec(&rt_non_lc_sumcheck);
                 if num_instances < sel_non_lc_zero_sumcheck.len() {
                     sel_non_lc_zero_sumcheck.splice(
@@ -341,11 +340,11 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         let mut distrinct_zerocheck_terms_set = BTreeSet::new();
         // degree > 1 zero expression sumcheck
-        if !circuit.assert_zero_sumcheck_expressions.is_empty() {
+        if !cs.assert_zero_sumcheck_expressions.is_empty() {
             assert!(sel_non_lc_zero_sumcheck.is_some());
 
             // \sum_t (sel(rt, t) * (\sum_j alpha_{j} * all_monomial_terms(t) ))
-            for (expr, alpha) in circuit
+            for (expr, alpha) in cs
                 .assert_zero_sumcheck_expressions
                 .iter()
                 .zip_eq(alpha_pow_iter)
@@ -372,7 +371,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 + w_counts_per_instance
                 + lk_counts_per_instance
                 + 3
-                + if circuit.assert_zero_sumcheck_expressions.is_empty() {
+                + if cs.assert_zero_sumcheck_expressions.is_empty() {
                     0
                 } else {
                     distrinct_zerocheck_terms_set.len() + 1 // 1 from sel_non_lc_zero_sumcheck
@@ -395,7 +394,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             // we can skip all the rest of degree > 1 monomial terms because all the witness evaluation will be evaluated at last step
             // and pass to verifier
             main_sel_evals_iter.count()
-                == if circuit.assert_zero_sumcheck_expressions.is_empty() {
+                == if cs.assert_zero_sumcheck_expressions.is_empty() {
                     0
                 } else {
                     distrinct_zerocheck_terms_set.len() + 1

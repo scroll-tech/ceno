@@ -8,7 +8,7 @@ use multilinear_extensions::mle::IntoMLE;
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::CircuitBuilder,
+    circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
     error::ZKVMError,
     expression::{Expression, ToExpr},
     structs::PointAndEval,
@@ -24,23 +24,23 @@ impl<E: ExtensionField> TestCircuit<E> {
     pub fn construct_circuit<const L: usize, const RW: usize>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        let regid = cb.create_witin();
+        let regid = cb.create_witin(|| "reg_id")?;
         (0..RW).try_for_each(|_| {
             let record = cb.rlc_chip_record(vec![
                 Expression::<E>::Constant(E::BaseField::ONE),
                 regid.expr(),
             ]);
-            cb.read_record(record.clone())?;
-            cb.write_record(record)?;
+            cb.read_record(|| "read", record.clone())?;
+            cb.write_record(|| "write", record)?;
             Result::<(), ZKVMError>::Ok(())
         })?;
         (0..L).try_for_each(|_| {
-            cb.assert_ux::<16>(regid.expr())?;
+            cb.assert_ux::<_, _, 16>(|| "regid_in_range", regid.expr())?;
             Result::<(), ZKVMError>::Ok(())
         })?;
-        assert_eq!(cb.lk_expressions.len(), L);
-        assert_eq!(cb.r_expressions.len(), RW);
-        assert_eq!(cb.w_expressions.len(), RW);
+        assert_eq!(cb.cs.lk_expressions.len(), L);
+        assert_eq!(cb.cs.r_expressions.len(), RW);
+        assert_eq!(cb.cs.w_expressions.len(), RW);
         Ok(Self {
             phantom: PhantomData,
         })
@@ -50,13 +50,15 @@ impl<E: ExtensionField> TestCircuit<E> {
 #[test]
 fn test_rw_lk_expression_combination() {
     fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut cs = ConstraintSystem::new(|| "test");
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
         let _ = TestCircuit::construct_circuit::<L, RW>(&mut circuit_builder);
-        let circuit = circuit_builder.finalize_circuit();
+        let vk = cs.key_gen();
+        let pk = ProvingKey::create_pk(vk.clone());
 
         // generate mock witness
         let num_instances = 1 << 2;
-        let wits_in = (0..circuit.num_witin as usize)
+        let wits_in = (0..pk.get_cs().num_witin as usize)
             .map(|_| {
                 (0..num_instances)
                     .map(|_| Goldilocks::ONE)
@@ -67,7 +69,7 @@ fn test_rw_lk_expression_combination() {
             .collect_vec();
 
         // get proof
-        let prover = ZKVMProver::new(circuit.clone()); // circuit clone due to verifier alos need circuit reference
+        let prover = ZKVMProver::new(pk);
         let mut transcript = Transcript::new(b"test");
         let challenges = [1.into(), 2.into()];
 
@@ -75,7 +77,7 @@ fn test_rw_lk_expression_combination() {
             .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
             .expect("create_proof failed");
 
-        let verifier = ZKVMVerifier::new(circuit);
+        let verifier = ZKVMVerifier::new(vk);
         let mut v_transcript = Transcript::new(b"test");
         let _rt_input = verifier
             .verify(

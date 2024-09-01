@@ -15,9 +15,10 @@ pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
 }
 
-pub trait RegisterChipOperations<E: ExtensionField> {
+pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
     fn register_read<V: ToExpr<E, Output = Vec<Expression<E>>>>(
         &mut self,
+        name_fn: N,
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
@@ -26,6 +27,7 @@ pub trait RegisterChipOperations<E: ExtensionField> {
 
     fn register_write<V: ToExpr<E, Output = Vec<Expression<E>>>>(
         &mut self,
+        name_fn: N,
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
