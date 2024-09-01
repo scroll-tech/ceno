@@ -20,6 +20,7 @@ fn halt(exit_code: u32) -> ! {
     unreachable!()
 }
 
+#[link_section = ".init"]
 #[no_mangle]
 pub fn _start() -> ! {
     halt(0)

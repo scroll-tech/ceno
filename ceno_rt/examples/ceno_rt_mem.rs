@@ -20,19 +20,24 @@ fn halt(exit_code: u32) -> ! {
     unreachable!()
 }
 
+#[link_section = ".init"]
+#[no_mangle]
+pub fn _start() -> ! {
+    main();
+    halt(0)
+}
+
+fn main() {
+    let y = my_recurse(3, 0);
+    output(y);
+}
+
 static mut OUTPUT: u32 = 0;
 
 #[inline(never)]
 fn output(out: u32) {
     // Volatile write to prevent the compiler from optimizing this away.
     unsafe { core::ptr::write_volatile(addr_of_mut!(OUTPUT), out) };
-}
-
-#[no_mangle]
-pub fn _start() -> ! {
-    let y = my_recurse(3, 0);
-    output(y);
-    halt(0)
 }
 
 #[inline(never)]

@@ -2,7 +2,8 @@ SECTIONS
 {
   .text :
   {
-    *(.text._start);
+    *(.init);
+    . = ALIGN(4);
     *(.text .text.*);
   } > ROM
 
