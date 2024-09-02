@@ -4,7 +4,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, WitIn},
+    expression::{Expression, Fixed, WitIn},
     structs::WitnessId,
 };
 
@@ -61,11 +61,20 @@ impl NameSpace {
 }
 
 #[derive(Clone, Debug)]
+pub struct LookupTableExpression<E: ExtensionField> {
+    pub multiplicity: Expression<E>,
+    pub values: Expression<E>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ConstraintSystem<E: ExtensionField> {
     ns: NameSpace,
 
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
+
+    pub num_fixed: usize,
+    pub fixed_namespace_map: Vec<String>,
 
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
@@ -76,6 +85,8 @@ pub struct ConstraintSystem<E: ExtensionField> {
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
     pub lk_expressions_namespace_map: Vec<String>,
+    pub lk_table_expressions: Vec<LookupTableExpression<E>>,
+    pub lk_table_expressions_namespace_map: Vec<String>,
 
     /// main constraints zero expression
     pub assert_zero_expressions: Vec<Expression<E>>,
@@ -100,6 +111,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Self {
             num_witin: 0,
             witin_namespace_map: vec![],
+            num_fixed: 0,
+            fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
@@ -107,6 +120,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             w_expressions_namespace_map: vec![],
             lk_expressions: vec![],
             lk_expressions_namespace_map: vec![],
+            lk_table_expressions: vec![],
+            lk_table_expressions_namespace_map: vec![],
             assert_zero_expressions: vec![],
             assert_zero_expressions_namespace_map: vec![],
             assert_zero_sumcheck_expressions: vec![],
@@ -118,8 +133,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             phantom: std::marker::PhantomData,
         }
     }
-    pub fn key_gen(self) -> VerifyingKey<E> {
-        VerifyingKey { cs: self }
+    pub fn key_gen(self) -> ProvingKey<E> {
+        ProvingKey {
+            vk: VerifyingKey { cs: self },
+        }
     }
 
     pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(
@@ -140,6 +157,19 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(wit_in)
     }
 
+    pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+    ) -> Result<Fixed, ZKVMError> {
+        let f = Fixed(self.num_fixed);
+        self.num_fixed += 1;
+
+        let path = self.ns.compute_path(n().into());
+        self.fixed_namespace_map.push(path);
+
+        Ok(f)
+    }
+
     pub fn lk_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
@@ -154,6 +184,32 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
+        Ok(())
+    }
+
+    pub fn lk_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        rlc_record: Expression<E>,
+        multiplicity: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc record degree {} != 1",
+            rlc_record.degree()
+        );
+        self.lk_table_expressions.push(LookupTableExpression {
+            values: rlc_record,
+            multiplicity,
+        });
+        let path = self.ns.compute_path(name_fn().into());
+        self.lk_table_expressions_namespace_map.push(path);
+
         Ok(())
     }
 

@@ -163,7 +163,7 @@ mod test {
     use transcript::Transcript;
 
     use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
         scheme::{constants::NUM_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier},
         structs::PointAndEval,
@@ -184,8 +184,8 @@ mod test {
                 Ok(config)
             },
         );
-        let vk = cs.key_gen();
-        let pk = ProvingKey::create_pk(vk);
+        let pk = cs.key_gen();
+        let vk = pk.vk.clone();
 
         // generate mock witness
         let num_instances = 1 << 2;
@@ -200,7 +200,7 @@ mod test {
             .collect_vec();
 
         // get proof
-        let prover = ZKVMProver::new(pk.clone());
+        let prover = ZKVMProver::new(pk);
         let mut transcript = Transcript::new(b"riscv");
         let challenges = [1.into(), 2.into()];
 
@@ -208,7 +208,7 @@ mod test {
             .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
             .expect("create_proof failed");
 
-        let verifier = ZKVMVerifier::new(pk.vk);
+        let verifier = ZKVMVerifier::new(vk);
         let mut v_transcript = Transcript::new(b"riscv");
         let _rt_input = verifier
             .verify(

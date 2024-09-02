@@ -93,6 +93,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     ) -> BTreeSet<u16> {
         assert!(expr.is_monomial_form());
         let monomial_terms = expr.evaluate(
+            &|_| vec![(E::ONE, BTreeSet::new())],
             &|witness_id| {
                 vec![(E::ONE, {
                     let mut monomial_terms = BTreeSet::new();

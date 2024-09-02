@@ -5,7 +5,7 @@ use ff::Field;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    expression::{Expression, WitIn},
+    expression::{Expression, Fixed, WitIn},
     structs::ROMType,
 };
 
@@ -22,6 +22,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_witin(name_fn)
     }
 
+    pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Result<Fixed, ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.create_fixed(name_fn)
+    }
+
     pub fn lk_record<NR, N>(
         &mut self,
         name_fn: N,
@@ -32,6 +40,19 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.lk_record(name_fn, rlc_record)
+    }
+
+    pub fn lk_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        rlc_record: Expression<E>,
+        multiplicity: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.lk_table_record(name_fn, rlc_record, multiplicity)
     }
 
     pub fn read_record<NR, N>(

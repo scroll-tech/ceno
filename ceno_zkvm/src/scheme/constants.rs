@@ -3,3 +3,4 @@ pub(crate) const MAINCONSTRAIN_SUMCHECK_BATCH_SIZE: usize = 3; // read/write/loo
 pub(crate) const SEL_DEGREE: usize = 2;
 
 pub const NUM_FANIN: usize = 2;
+pub const NUM_FANIN_LOGUP: usize = 2;
