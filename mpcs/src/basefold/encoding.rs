@@ -160,17 +160,20 @@ pub(crate) mod test_util {
         let num_vars = 10;
 
         let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from(i)).collect();
-        let poly = FieldType::Ext(poly);
+        let mut poly = FieldType::Ext(poly);
 
         let rng_seed = [0; 32];
         let pp: Code::PublicParameters = Code::setup(num_vars, rng_seed);
         let (pp, _) = Code::trim(&pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         reverse_index_bits_in_place_field_type(&mut codeword);
+        reverse_index_bits_in_place_field_type(&mut poly);
         let challenge = E::from(2);
         let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
-        let folded_message = Code::fold_message(&poly, challenge);
-        let mut encoded_folded_message = Code::encode(&pp, &FieldType::Ext(folded_message));
+        let mut folded_message = FieldType::Ext(Code::fold_message(&poly, challenge));
+        // Reverse the message back before encoding
+        reverse_index_bits_in_place_field_type(&mut folded_message);
+        let mut encoded_folded_message = Code::encode(&pp, &folded_message);
         reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
         let encoded_folded_message = match encoded_folded_message {
             FieldType::Ext(coeffs) => coeffs,
