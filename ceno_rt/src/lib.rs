@@ -1,14 +1,16 @@
 #![no_main]
 #![no_std]
-use core::{
-    arch::{asm, global_asm},
-    panic::PanicInfo,
-};
+use core::arch::{asm, global_asm};
 
-#[panic_handler]
-#[inline(never)]
-pub fn panic_handler(_panic: &PanicInfo<'_>) -> ! {
-    halt(1)
+#[cfg(not(test))]
+mod panic_handler {
+    use core::panic::PanicInfo;
+
+    #[panic_handler]
+    #[inline(never)]
+    fn panic_handler(_panic: &PanicInfo<'_>) -> ! {
+        super::halt(1)
+    }
 }
 
 pub fn halt(exit_code: u32) -> ! {
