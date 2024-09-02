@@ -36,7 +36,7 @@ fn test_ceno_rt_mem() -> Result<()> {
     for step in state.iter_until_success() {
         match step {
             Ok(step) => {
-                println!("{:?}", step);
+                // println!("{:?}", step);
                 prev_step = step;
             }
             Err(e) => {
@@ -44,6 +44,12 @@ fn test_ceno_rt_mem() -> Result<()> {
                 return Err(e);
             }
         }
+    }
+
+    for i in 0..4 {
+        let addr = ByteAddr(CENO_PLATFORM.ram_start()).waddr() + i as u32;
+        let value = state.peek_memory(addr);
+        println!("{:?} = 0x{:08x}", addr, value);
     }
 
     Ok(())

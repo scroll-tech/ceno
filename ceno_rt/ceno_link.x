@@ -1,8 +1,11 @@
+
+_stack_start = ORIGIN(REGION_STACK) + LENGTH(REGION_STACK);
+
 SECTIONS
 {
   .text :
   {
-    *(.init);
+    KEEP(*(.init));
     . = ALIGN(4);
     *(.text .text.*);
   } > ROM
@@ -15,9 +18,16 @@ SECTIONS
 
   .data : ALIGN(4)
   {
+    /* Must be called __global_pointer$ for linker relaxations to work. */
+    PROVIDE(__global_pointer$ = . + 0x800);
+
     *(.sdata .sdata.*);
     *(.sdata2 .sdata2.*);
     *(.data .data.*);
+    . = ALIGN(4);
+
+    _sheap = .;
+
   } > RAM
 
   .bss (NOLOAD) : ALIGN(4)
