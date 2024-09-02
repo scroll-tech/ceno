@@ -1,13 +1,16 @@
-use std::marker::PhantomData;
-
 use ff_ext::ExtensionField;
 
 use crate::{
     chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
+    create_witin_from_expr,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    instructions::Instruction,
+    instructions::{
+        riscv::config::{LtConfig, LtInput},
+        Instruction,
+    },
+    utils::{i64_to_ext, limb_u8_to_u16},
 };
 
 use super::{
@@ -19,6 +22,7 @@ pub struct BltInstruction;
 
 pub struct InstructionConfig<E: ExtensionField> {
     pub pc: WitIn,
+    pub next_pc: WitIn,
     pub ts: WitIn,
     pub imm: WitIn,
     pub lhs: RegUInt<E>,
@@ -29,7 +33,80 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub rs2_id: WitIn,
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
-    phantom: PhantomData<E>,
+    pub is_lt: LtConfig,
+}
+
+pub struct BltInput {
+    pub pc: u16,
+    pub ts: u16,
+    pub imm: i16, // rust don't have i12
+    pub lhs_limb8: Vec<u8>,
+    pub rhs_limb8: Vec<u8>,
+    pub rs1_id: u8,
+    pub rs2_id: u8,
+    pub prev_rs1_ts: u16,
+    pub prev_rs2_ts: u16,
+}
+
+impl BltInput {
+    /// TODO: refactor after formalize the interface of opcode inputs
+    pub fn generate_witness<E: ExtensionField>(
+        &self,
+        witin: &mut [E],
+        config: InstructionConfig<E>,
+    ) {
+        assert!(!self.lhs_limb8.is_empty() && (self.lhs_limb8.len() == self.rhs_limb8.len()));
+        // TODO: add boundary check for witin
+        let lt_input = LtInput {
+            lhs_limbs: &self.lhs_limb8,
+            rhs_limbs: &self.rhs_limb8,
+        };
+        let is_lt = lt_input.generate_witness(witin, &config.is_lt);
+
+        config.pc.assign(witin, || i64_to_ext(self.pc as i64));
+        config.next_pc.assign(witin, || {
+            if is_lt {
+                i64_to_ext(self.pc as i64 + self.imm as i64)
+            } else {
+                i64_to_ext(self.pc as i64 + PC_STEP_SIZE as i64)
+            }
+        });
+        config.ts.assign(witin, || i64_to_ext(self.ts as i64));
+        config.imm.assign(witin, || i64_to_ext(self.imm as i64));
+        config
+            .rs1_id
+            .assign(witin, || i64_to_ext(self.rs1_id as i64));
+        config
+            .rs2_id
+            .assign(witin, || i64_to_ext(self.rs2_id as i64));
+        config
+            .prev_rs1_ts
+            .assign(witin, || i64_to_ext(self.prev_rs1_ts as i64));
+        config
+            .prev_rs2_ts
+            .assign(witin, || i64_to_ext(self.prev_rs2_ts as i64));
+
+        config.lhs_limb8.assign(witin, || {
+            self.lhs_limb8
+                .iter()
+                .map(|&limb| i64_to_ext(limb as i64))
+                .collect()
+        });
+        config.rhs_limb8.assign(witin, || {
+            self.lhs_limb8
+                .iter()
+                .map(|&limb| i64_to_ext(limb as i64))
+                .collect()
+        });
+        let lhs = limb_u8_to_u16(&self.lhs_limb8);
+        let rhs = limb_u8_to_u16(&self.rhs_limb8);
+        config.lhs.assign(witin, || {
+            lhs.iter().map(|&limb| i64_to_ext(limb as i64)).collect()
+        });
+        config.rhs.assign(witin, || {
+            rhs.iter().map(|&limb| i64_to_ext(limb as i64)).collect()
+        });
+    }
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for BltInstruction {
@@ -57,9 +134,9 @@ fn blt_gadget<E: ExtensionField>(
 
     // update pc
     let next_pc = pc.expr()
-        + is_lt.clone() * imm.expr()
+        + is_lt.is_lt.expr() * imm.expr()
         + PC_STEP_SIZE.into()
-        + is_lt.clone() * PC_STEP_SIZE.into();
+        + is_lt.is_lt.expr() * PC_STEP_SIZE.into();
 
     // update ts
     let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
@@ -82,11 +159,13 @@ fn blt_gadget<E: ExtensionField>(
         &rhs,
     )?;
 
+    let next_pc = create_witin_from_expr!(circuit_builder, next_pc)?;
     let next_ts = ts + 1.into();
-    circuit_builder.state_out(next_pc, next_ts)?;
+    circuit_builder.state_out(next_pc.expr(), next_ts)?;
 
     Ok(InstructionConfig {
         pc,
+        next_pc,
         ts: cur_ts,
         lhs,
         rhs,
@@ -97,7 +176,7 @@ fn blt_gadget<E: ExtensionField>(
         rs2_id,
         prev_rs1_ts,
         prev_rs2_ts,
-        phantom: PhantomData,
+        is_lt,
     })
 }
 

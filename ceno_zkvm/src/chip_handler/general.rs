@@ -4,7 +4,6 @@ use ff::Field;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     structs::ROMType,
@@ -228,18 +227,15 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.assert_u16(name_fn, expr * Expression::from(1 << 15))
     }
 
-    /// lookup lhs ^ rhs = res
-    /// where lhs and rhs are bytes
+    /// lookup a ^ b = res
+    /// a and b are bytes
     pub(crate) fn lookup_and_byte(
         &mut self,
         res: Expression<E>,
-        lhs: Expression<E>,
-        rhs: Expression<E>,
+        a: Expression<E>,
+        b: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        let (a, b) = create_witin_from_expr!(self, lhs, rhs)?;
-        self.assert_byte(|| "byte lookup lhs", a.expr())?;
-        self.assert_byte(|| "byte lookup rhs", b.expr())?;
-        let key = a.expr() * 256.into() + b.expr();
+        let key = a * 256.into() + b;
         let items: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(ROMType::And as u64)),
             key,
@@ -250,16 +246,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
+    /// lookup a < b as usigned byte
     pub(crate) fn lookup_ltu_limb8(
         &mut self,
         res: Expression<E>,
-        lhs: Expression<E>,
-        rhs: Expression<E>,
+        a: Expression<E>,
+        b: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        let (a, b) = create_witin_from_expr!(self, lhs, rhs)?;
-        self.assert_byte(|| "ltu lookup lhs", a.expr())?;
-        self.assert_byte(|| "ltu lookup rhs", b.expr())?;
-        let key = a.expr() * 256.into() + b.expr();
+        let key = a * 256.into() + b;
         let items: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
             key,
@@ -274,7 +268,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         &mut self,
         lhs: Expression<E>,
         rhs: Expression<E>,
-    ) -> Result<Expression<E>, ZKVMError> {
+    ) -> Result<(WitIn, WitIn), ZKVMError> {
         let is_eq = self.create_witin(|| "is_eq")?;
         let diff_inverse = self.create_witin(|| "diff_inverse")?;
 
@@ -288,6 +282,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                 + diff_inverse.expr() * rhs,
         )?;
 
-        Ok(is_eq.expr())
+        Ok((is_eq, diff_inverse))
     }
 }

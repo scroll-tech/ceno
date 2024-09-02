@@ -5,7 +5,8 @@ use super::Instruction;
 
 pub mod addsub;
 pub mod blt;
-mod constants;
+pub mod config;
+pub mod constants;
 
 #[cfg(test)]
 mod test;

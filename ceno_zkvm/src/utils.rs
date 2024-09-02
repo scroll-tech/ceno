@@ -1,12 +1,37 @@
-use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
-};
 use ff::Field;
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 use itertools::Itertools;
 use transcript::Transcript;
+
+/// convert ext field element to u64, assume it is inside the range
+#[allow(dead_code)]
+pub fn ext_to_u64<E: ExtensionField>(x: &E) -> u64 {
+    let bases = x.as_bases();
+    bases[0].to_canonical_u64()
+}
+
+pub fn i64_to_ext<E: ExtensionField>(x: i64) -> E {
+    let x0 = if x >= 0 {
+        E::BaseField::from(x as u64)
+    } else {
+        -E::BaseField::from((-x) as u64)
+    };
+    E::from_bases(&[x0, E::BaseField::ZERO])
+}
+
+/// This is helper function to convert witness of u8 limb into u16 limb
+/// TODO: need a better way to keep consistency of VALUE_BIT_WIDTH
+pub fn limb_u8_to_u16(input: &[u8]) -> Vec<u16> {
+    input
+        .chunks(2)
+        .map(|chunk| {
+            let low = chunk[0] as u16;
+            let high = if chunk.len() > 1 { chunk[1] as u16 } else { 0 };
+            high * 256 + low
+        })
+        .collect()
+}
 
 /// Compile time evaluated minimum function
 /// returns min(a, b)
@@ -158,33 +183,6 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
                 .collect::<Vec<T>>()
         })
         .collect()
-}
-
-impl WitIn {
-    pub fn from_expr<E: ExtensionField>(
-        circuit_builder: &mut CircuitBuilder<E>,
-        input: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
-        let wit = circuit_builder.create_witin(|| "wit_from_expr")?;
-        circuit_builder.require_zero(|| "create_wit_from_expr", wit.expr() - input)?;
-        Ok(wit)
-    }
-}
-
-#[macro_export]
-/// this is to avoid non-monomial expression
-macro_rules! create_witin_from_expr {
-    // Handle the case for a single expression
-    ($builder:expr, $e:expr) => {
-        WitIn::from_expr($builder, $e)
-    };
-    // Recursively handle multiple expressions and create a flat tuple with error handling
-    ($builder:expr, $e:expr, $($rest:expr),+) => {
-        {
-            // Return a Result tuple, handling errors
-            Ok::<_, ZKVMError>((WitIn::from_expr($builder, $e)?, $(WitIn::from_expr($builder, $rest)?),*))
-        }
-    };
 }
 
 #[cfg(test)]

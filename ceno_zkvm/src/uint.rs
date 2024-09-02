@@ -77,6 +77,19 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         })
     }
 
+    /// this fn does not create new witness
+    pub fn new_from_limbs(limbs: &[WitIn]) -> Self {
+        assert!(limbs.len() == Self::NUM_CELLS);
+        UInt {
+            limbs: UintLimb::WitIn(
+                (0..Self::NUM_CELLS)
+                    .map(|i| limbs[i])
+                    .collect::<Vec<WitIn>>(),
+            ),
+            carries: None,
+        }
+    }
+
     pub fn new_limb_as_expr() -> Self {
         Self {
             limbs: UintLimb::Expression(Vec::new()),
@@ -106,6 +119,20 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             limbs: UintLimb::WitIn(limbs),
             carries: None,
         }
+    }
+
+    pub fn assign<V>(&self, witin: &mut [E], to: V)
+    where
+        V: FnOnce() -> Vec<E>,
+    {
+        let values = to();
+        assert!(values.len() == Self::NUM_CELLS);
+        if let UintLimb::WitIn(c) = &self.limbs {
+            for (idx, wire) in c.iter().enumerate() {
+                witin[wire.id as usize] = values[idx];
+            }
+        }
+        // TODO: handle carries
     }
 
     /// conversion is needed for lt/ltu
