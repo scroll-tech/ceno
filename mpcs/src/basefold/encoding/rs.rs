@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use super::{EncodingProverParameters, EncodingScheme};
 use crate::{
-    util::{field_type_index_mul_base, log2_strict},
+    util::{field_type_index_mul_base, log2_strict, plonky2_util::reverse_bits},
     Error,
 };
 use ark_std::{end_timer, start_timer};
@@ -389,6 +389,9 @@ where
     }
 
     fn prover_folding_coeffs(pp: &Self::ProverParameters, level: usize, index: usize) -> (E, E, E) {
+        // The coefficients are for the bit-reversed codeword, so reverse the
+        // bits before providing the coefficients.
+        let index = reverse_bits(index, level);
         // level is the logarithmic of the codeword size after folded.
         // Therefore, the domain after folded is gamma^2^(full_log_n - level) H
         // where H is the multiplicative subgroup of size 2^level.
@@ -425,6 +428,9 @@ where
         level: usize,
         index: usize,
     ) -> (E, E, E) {
+        // The coefficients are for the bit-reversed codeword, so reverse the
+        // bits before providing the coefficients.
+        let index = reverse_bits(index, level);
         // The same as prover_folding_coeffs, exept that the powers of
         // g is computed on the fly for levels exceeding the root table.
         let x0 = if level < Spec::get_basecode_msg_size_log() + Spec::get_rate_log() {
@@ -515,6 +521,9 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
         index: usize,
         full_message_size_log: usize,
     ) -> (E, E, E) {
+        // The coefficients are for the bit-reversed codeword, so reverse the
+        // bits before providing the coefficients.
+        let index = reverse_bits(index, level);
         // x0 is the index-th 2^(level+1)-th root of unity, multiplied by
         // the shift factor at level+1, which is gamma^2^(full_codeword_log_n - level - 1).
         let x0 = E::BaseField::ROOT_OF_UNITY
@@ -743,8 +752,23 @@ mod tests {
         let (pp, _) = Code::trim(&pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         check_low_degree(&codeword, "low degree check for original codeword");
+        let c0 = field_type_index_ext(&codeword, 0);
+        let c_mid = field_type_index_ext(&codeword, codeword.len() >> 1);
+        let c1 = field_type_index_ext(&codeword, 1);
+        let c_mid1 = field_type_index_ext(&codeword, (codeword.len() >> 1) + 1);
 
         reverse_index_bits_in_place_field_type(&mut codeword);
+        // After the bit inversion, the first element is still the first,
+        // but the middle one is switched to the second.
+        assert_eq!(c0, field_type_index_ext(&codeword, 0));
+        assert_eq!(c_mid, field_type_index_ext(&codeword, 1));
+        // The second element is placed at the middle, and the next to middle
+        // element is still at the place.
+        assert_eq!(c1, field_type_index_ext(&codeword, codeword.len() >> 1));
+        assert_eq!(
+            c_mid1,
+            field_type_index_ext(&codeword, (codeword.len() >> 1) + 1)
+        );
 
         // For RS codeword, the addition of the left and right halves is also
         // a valid codeword
@@ -756,9 +780,11 @@ mod tests {
             .chunks(2)
             .map(|chunk| chunk[0] + chunk[1])
             .collect();
+        assert_eq!(left_right_sum[0], c0 + c_mid);
         reverse_index_bits_in_place(&mut left_right_sum);
+        assert_eq!(left_right_sum[1], c1 + c_mid1);
         check_low_degree(
-            &FieldType::Ext(left_right_sum),
+            &FieldType::Ext(left_right_sum.clone()),
             "check low degree of left+right",
         );
 
@@ -769,21 +795,98 @@ mod tests {
             .chunks(2)
             .map(|chunk| chunk[0] - chunk[1])
             .collect();
+        assert_eq!(left_right_diff[0], c0 - c_mid);
         reverse_index_bits_in_place(&mut left_right_diff);
+        assert_eq!(left_right_diff[1], c1 - c_mid1);
         let root_of_unity_inv = F::ROOT_OF_UNITY_INV
             .pow(&[1 << (F::S as usize - log2_strict(left_right_diff.len()) - 1)]);
         for (i, coeff) in left_right_diff.iter_mut().enumerate() {
             *coeff *= root_of_unity_inv.pow(&[i as u64]);
         }
+        assert_eq!(left_right_diff[0], c0 - c_mid);
+        assert_eq!(left_right_diff[1], (c1 - c_mid1) * root_of_unity_inv);
         check_low_degree(
-            &FieldType::Ext(left_right_diff),
+            &FieldType::Ext(left_right_diff.clone()),
             "check low degree of (left-right)*omega^(-i)",
         );
 
         let challenge = E::from(2);
         let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
+        let c_fold = folded_codeword[0];
+        let c_fold1 = folded_codeword[folded_codeword.len() >> 1];
         let mut folded_codeword = FieldType::Ext(folded_codeword);
         reverse_index_bits_in_place_field_type(&mut folded_codeword);
+        assert_eq!(c_fold, field_type_index_ext(&folded_codeword, 0));
+        assert_eq!(c_fold1, field_type_index_ext(&folded_codeword, 1));
+
+        // The top level folding coefficient should have shift factor gamma
+        let folding_coeffs = Code::prover_folding_coeffs(&pp, log2_strict(codeword.len()) - 1, 0);
+        assert_eq!(folding_coeffs.0, E::from(F::MULTIPLICATIVE_GENERATOR));
+        assert_eq!(folding_coeffs.0 + folding_coeffs.1, E::ZERO);
+        assert_eq!(
+            (folding_coeffs.1 - folding_coeffs.0) * folding_coeffs.2,
+            E::ONE
+        );
+        // The three points (x0, c0), (x1, c_mid), (challenge, c_fold) should
+        // be colinear
+        assert_eq!(
+            (c_mid - c_fold) * (folding_coeffs.0 - challenge),
+            (c0 - c_fold) * (folding_coeffs.1 - challenge),
+        );
+        // So the folded value should be equal to
+        // (gamma^{-1} * alpha * (c0 - c_mid) + (c0 + c_mid)) / 2
+        assert_eq!(
+            c_fold * F::MULTIPLICATIVE_GENERATOR * F::from(2),
+            challenge * (c0 - c_mid) + (c0 + c_mid) * F::MULTIPLICATIVE_GENERATOR
+        );
+        assert_eq!(
+            c_fold * F::MULTIPLICATIVE_GENERATOR * F::from(2),
+            challenge * left_right_diff[0] + left_right_sum[0] * F::MULTIPLICATIVE_GENERATOR
+        );
+        assert_eq!(
+            c_fold * F::from(2),
+            challenge * left_right_diff[0] * F::MULTIPLICATIVE_GENERATOR.invert().unwrap()
+                + left_right_sum[0]
+        );
+
+        let folding_coeffs = Code::prover_folding_coeffs(&pp, log2_strict(codeword.len()) - 1, 1);
+        let root_of_unity =
+            F::ROOT_OF_UNITY.pow(&[1 << (F::S as usize - log2_strict(codeword.len()))]);
+        assert_eq!(root_of_unity.pow(&[codeword.len() as u64]), F::ONE);
+        assert_eq!(root_of_unity.pow(&[(codeword.len() >> 1) as u64]), -F::ONE);
+        assert_eq!(
+            folding_coeffs.0,
+            E::from(F::MULTIPLICATIVE_GENERATOR)
+                * E::from(root_of_unity).pow(&[(codeword.len() >> 2) as u64])
+        );
+        assert_eq!(folding_coeffs.0 + folding_coeffs.1, E::ZERO);
+        assert_eq!(
+            (folding_coeffs.1 - folding_coeffs.0) * folding_coeffs.2,
+            E::ONE
+        );
+
+        // The folded codeword is the linear combination of the left+right and the
+        // twisted left-right vectors.
+        // The coefficients are respectively 1/2 and gamma^{-1}/2 * alpha.
+        // In another word, the folded codeword multipled by 2 is the linear
+        // combination by coeffs: 1 and gamma^{-1} * alpha
+        let gamma_inv = F::MULTIPLICATIVE_GENERATOR.invert().unwrap();
+        let b = challenge * gamma_inv;
+        let folded_codeword_vec = match &folded_codeword {
+            FieldType::Ext(coeffs) => coeffs.clone(),
+            _ => panic!("Wrong field type"),
+        };
+        assert_eq!(
+            c_fold * F::from(2),
+            left_right_diff[0] * b + left_right_sum[0]
+        );
+        for (i, (c, (diff, sum))) in folded_codeword_vec
+            .iter()
+            .zip(left_right_diff.iter().zip(left_right_sum.iter()))
+            .enumerate()
+        {
+            assert_eq!(*c + c, *sum + b * diff, "failed for i = {}", i);
+        }
 
         check_low_degree(&folded_codeword, "low degree check for folded");
     }
