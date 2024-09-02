@@ -187,22 +187,24 @@ mod test {
 
         wits_in[config.pc.id as usize] = vec![Goldilocks::from(1)].into_mle().into();
         wits_in[config.ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
-        config.prev_rd_value.wits_in().map(|w| {
-            wits_in[w[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-            wits_in[w[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+        config.prev_rd_value.wits_in().map(|prev_rd_value| {
+            wits_in[prev_rd_value[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[prev_rd_value[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
         });
-        config.addend_0.wits_in().map(|w| {
-            wits_in[w[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-            wits_in[w[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+        config.addend_0.wits_in().map(|addend_0| {
+            wits_in[addend_0[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[addend_0[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
         });
-        config.addend_1.wits_in().map(|w| {
-            wits_in[w[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-            wits_in[w[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+        config.addend_1.wits_in().map(|addend_1| {
+            wits_in[addend_1[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[addend_1[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
         });
-        config.outcome.carries.map(|w| {
-            wits_in[w[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-            wits_in[w[1].id as usize] = vec![Goldilocks::from(0)].into_mle().into();
+        // TODO #174
+        config.outcome.carries.map(|carry| {
+            wits_in[carry[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[carry[1].id as usize] = vec![Goldilocks::from(0)].into_mle().into();
         });
+        // TODO #167
         wits_in[config.rs1_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
         wits_in[config.rs2_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
         wits_in[config.rd_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
