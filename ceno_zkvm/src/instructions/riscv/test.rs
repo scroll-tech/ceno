@@ -26,5 +26,5 @@ fn test_multiple_opcode() {
             Ok(config)
         },
     );
-    cs.key_gen();
+    cs.key_gen(None);
 }

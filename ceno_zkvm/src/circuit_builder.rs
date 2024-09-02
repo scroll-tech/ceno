@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 
 use crate::{
     error::ZKVMError,
@@ -133,8 +134,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             phantom: std::marker::PhantomData,
         }
     }
-    pub fn key_gen(self) -> ProvingKey<E> {
+
+    pub fn key_gen(self, fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>) -> ProvingKey<E> {
         ProvingKey {
+            fixed_traces,
             vk: VerifyingKey { cs: self },
         }
     }
@@ -293,13 +296,14 @@ pub struct CircuitBuilder<'a, E: ExtensionField> {
 
 #[derive(Clone, Debug)]
 pub struct ProvingKey<E: ExtensionField> {
+    pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
     pub vk: VerifyingKey<E>,
 }
 
 impl<E: ExtensionField> ProvingKey<E> {
-    pub fn create_pk(vk: VerifyingKey<E>) -> Self {
-        Self { vk }
-    }
+    // pub fn create_pk(vk: VerifyingKey<E>) -> Self {
+    //     Self { vk }
+    // }
     pub fn get_cs(&self) -> &ConstraintSystem<E> {
         self.vk.get_cs()
     }

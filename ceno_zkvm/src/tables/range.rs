@@ -91,10 +91,11 @@ mod tests {
                 },
             )
             .expect("construct range table circuit");
-        let pk = cs.key_gen();
-        let vk = pk.vk.clone();
 
         let traces = config.generate_traces((0..1 << 8).collect_vec().as_slice());
+
+        let pk = cs.key_gen(Some(traces.fixed.clone().into_values().collect_vec()));
+        let vk = pk.vk.clone();
         let prover = ZKVMProver::new(pk);
 
         let mut transcript = Transcript::new(b"range");
@@ -103,17 +104,12 @@ mod tests {
         let proof = prover
             .create_table_proof(
                 traces
-                    .fixed
-                    .into_values()
-                    .map(|mle| mle.into())
-                    .collect_vec(),
-                traces
                     .wits
                     .into_values()
                     .map(|mle| mle.into())
                     .collect_vec(),
                 1 << 16,
-                8,
+                1,
                 &mut transcript,
                 &challenges,
             )

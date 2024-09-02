@@ -53,7 +53,7 @@ fn test_rw_lk_expression_combination() {
         let mut cs = ConstraintSystem::new(|| "test");
         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
         let _ = TestCircuit::construct_circuit::<L, RW>(&mut circuit_builder);
-        let pk = cs.key_gen();
+        let pk = cs.key_gen(None);
         let vk = pk.vk.clone();
 
         // generate mock witness

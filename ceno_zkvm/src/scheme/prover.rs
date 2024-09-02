@@ -430,7 +430,6 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
     pub fn create_table_proof(
         &self,
-        fixed: Vec<ArcMultilinearExtension<'_, E>>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         num_instances: usize,
         max_threads: usize,
@@ -438,6 +437,14 @@ impl<E: ExtensionField> ZKVMProver<E> {
         challenges: &[E; 2],
     ) -> Result<ZKVMTableProof<E>, ZKVMError> {
         let cs = self.pk.get_cs();
+        let fixed = self
+            .pk
+            .fixed_traces
+            .clone()
+            .unwrap()
+            .into_iter()
+            .map(|f| f.into())
+            .collect_vec();
         let log2_num_instances = ceil_log2(num_instances);
         let next_pow2_instances = 1 << log2_num_instances;
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);

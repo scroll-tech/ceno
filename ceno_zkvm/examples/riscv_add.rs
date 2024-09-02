@@ -44,7 +44,7 @@ fn main() {
     let mut cs = ConstraintSystem::new(|| "risv_add");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
     let _ = AddInstruction::construct_circuit(&mut circuit_builder);
-    let pk = cs.key_gen();
+    let pk = cs.key_gen(None);
     let num_witin = pk.get_cs().num_witin;
 
     let prover = ZKVMProver::new(pk);
