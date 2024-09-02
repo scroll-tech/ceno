@@ -552,14 +552,17 @@ fn naive_fft<E: ExtensionField>(poly: &Vec<E>, rate: usize, shift: E::BaseField)
 
 #[cfg(test)]
 mod tests {
-    use crate::basefold::encoding::test_util::test_codeword_folding;
+    use crate::{
+        basefold::encoding::test_util::test_codeword_folding,
+        util::plonky2_util::reverse_index_bits_in_place_field_type,
+    };
 
     use super::*;
     use goldilocks::{Goldilocks, GoldilocksExt2};
 
     #[test]
     fn test_naive_fft() {
-        let num_vars = 2;
+        let num_vars = 5;
 
         let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
             .map(|i| GoldilocksExt2::from(i))
@@ -581,7 +584,7 @@ mod tests {
     #[test]
     fn test_naive_fft_with_shift() {
         use rand::rngs::OsRng;
-        let num_vars = 2;
+        let num_vars = 5;
 
         let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
             .map(|_| GoldilocksExt2::random(&mut OsRng))
@@ -608,7 +611,7 @@ mod tests {
     #[test]
     fn test_naive_fft_with_rate() {
         use rand::rngs::OsRng;
-        let num_vars = 2;
+        let num_vars = 5;
         let rate_bits = 1;
 
         let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
@@ -639,6 +642,22 @@ mod tests {
         assert_eq!(naive, poly2);
     }
 
+    fn test_ifft() {
+        let num_vars = 5;
+
+        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
+            .map(|i| GoldilocksExt2::from(i))
+            .collect();
+        let mut poly = FieldType::Ext(poly);
+        let original = poly.clone();
+
+        let root_table = fft_root_table(num_vars);
+        fft::<GoldilocksExt2>(&mut poly, 0, &root_table);
+        ifft::<GoldilocksExt2>(&mut poly, 0, &root_table);
+
+        assert_eq!(original, poly);
+    }
+
     #[test]
     fn prover_verifier_consistency() {
         type Code = RSCode<RSCodeDefaultSpec>;
@@ -666,5 +685,47 @@ mod tests {
     #[test]
     fn test_rs_codeword_folding() {
         test_codeword_folding::<GoldilocksExt2, RSCode<RSCodeDefaultSpec>>();
+    }
+
+    type E = GoldilocksExt2;
+    type Code = RSCode<RSCodeDefaultSpec>;
+
+    #[test]
+    pub fn test_colinearity() {
+        let num_vars = 10;
+
+        let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from(i)).collect();
+        let poly = FieldType::Ext(poly);
+
+        let rng_seed = [0; 32];
+        let pp = <Code as EncodingScheme<E>>::setup(num_vars, rng_seed);
+        let (pp, _) = Code::trim(&pp, num_vars).unwrap();
+        let mut codeword = Code::encode(&pp, &poly);
+        reverse_index_bits_in_place_field_type(&mut codeword);
+        let challenge = E::from(2);
+        let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
+        let codeword = match codeword {
+            FieldType::Ext(coeffs) => coeffs,
+            _ => panic!("Wrong field type"),
+        };
+
+        for (i, (a, b)) in folded_codeword.iter().zip(codeword.chunks(2)).enumerate() {
+            let (x0, x1, _) = Code::prover_folding_coeffs(
+                &pp,
+                num_vars + <Code as EncodingScheme<E>>::get_rate_log() - 1,
+                i,
+            );
+            // Check that (x0, b[0]), (x1, b[1]) and (challenge, a) are
+            // on the same line, i.e.,
+            // (b[0]-a)/(x0-challenge) = (b[1]-a)/(x1-challenge)
+            // which is equivalent to
+            // (x0-challenge)*(b[1]-a) = (x1-challenge)*(b[0]-a)
+            assert_eq!(
+                (x0 - challenge) * (b[1] - a),
+                (x1 - challenge) * (b[0] - a),
+                "failed for i = {}",
+                i
+            );
+        }
     }
 }
