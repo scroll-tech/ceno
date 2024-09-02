@@ -20,6 +20,25 @@ fn test_ceno_rt_mini() -> Result<()> {
 }
 
 #[test]
+fn test_ceno_rt_panic() -> Result<()> {
+    let mut state = VMState::new(CENO_PLATFORM);
+
+    // Load an ELF program in memory.
+    let program_elf = include_bytes!("./data/ceno_rt_panic");
+    let program = Program::load_elf(program_elf, u32::MAX)?;
+    for (addr, word) in program.image.iter() {
+        let addr = ByteAddr(*addr).waddr();
+        state.init_memory(addr, *word);
+    }
+    assert_eq!(program.entry, CENO_PLATFORM.pc_start());
+
+    let res = run(&mut state);
+    assert!(matches!(res, Err(e) if e.to_string().contains("EcallError")));
+
+    Ok(())
+}
+
+#[test]
 fn test_ceno_rt_mem() -> Result<()> {
     let mut state = VMState::new(CENO_PLATFORM);
 

@@ -90,7 +90,7 @@ impl EmuContext for VMState {
             self.succeeded = true;
             Ok(true)
         } else {
-            self.trap(TrapCause::EnvironmentCallFromUserMode)
+            self.trap(TrapCause::EcallError)
         }
     }
 

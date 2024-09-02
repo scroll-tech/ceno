@@ -91,7 +91,7 @@ pub enum TrapCause {
     LoadAccessFault(ByteAddr),
     StoreAddressMisaligned(ByteAddr),
     StoreAccessFault,
-    EnvironmentCallFromUserMode,
+    EcallError,
 }
 
 #[derive(Clone, Debug, Default)]
