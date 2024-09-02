@@ -1,13 +1,16 @@
 use std::fmt;
 
-use crate::addr::{ByteAddr, RegIdx, WordAddr};
+use crate::{
+    addr::{ByteAddr, RegIdx, WordAddr},
+    rv32im::DecodedInstruction,
+};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 #[derive(Clone, Debug, Default)]
 pub struct StepRecord {
     cycle: u32,
     pc: Change<ByteAddr>,
-    inst: u32,
+    insn_code: u32,
 
     rs1: (RegIdx, u32),
     rs2: (RegIdx, u32),
@@ -26,8 +29,12 @@ impl StepRecord {
         self.pc
     }
 
-    pub fn inst(&self) -> u32 {
-        self.inst
+    pub fn insn_code(&self) -> u32 {
+        self.insn_code
+    }
+
+    pub fn insn_decoded(&self) -> DecodedInstruction {
+        DecodedInstruction::new(self.insn_code)
     }
 
     pub fn rs1(&self) -> (RegIdx, u32) {
@@ -71,7 +78,7 @@ impl Tracer {
 
     pub fn fetch(&mut self, pc: WordAddr, value: u32) {
         self.record.pc.before = pc.baddr();
-        self.record.inst = value;
+        self.record.insn_code = value;
     }
 
     pub fn load_register(&mut self, idx: usize, value: u32) {

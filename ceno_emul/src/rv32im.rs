@@ -15,6 +15,7 @@
 // limitations under the License.
 
 use anyhow::{anyhow, Result};
+use std::sync::OnceLock;
 
 use super::addr::{ByteAddr, WordAddr, WORD_SIZE};
 
@@ -75,9 +76,8 @@ pub trait EmuContext {
 }
 
 /// An implementation of the basic ISA (RV32IM), that is instruction decoding and functional units.
-#[derive(Default)]
 pub struct Emulator {
-    table: FastDecodeTable,
+    table: &'static FastDecodeTable,
 }
 
 #[derive(Debug)]
@@ -96,7 +96,7 @@ pub enum TrapCause {
 
 #[derive(Clone, Debug, Default)]
 pub struct DecodedInstruction {
-    pub insn: u32,
+    insn: u32,
     top_bit: u32,
     func7: u32,
     rs2: u32,
@@ -107,7 +107,7 @@ pub struct DecodedInstruction {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum InsnCategory {
+pub enum InsnCategory {
     Compute,
     Load,
     Store,
@@ -178,7 +178,7 @@ pub struct Instruction {
 }
 
 impl DecodedInstruction {
-    fn new(insn: u32) -> Self {
+    pub fn new(insn: u32) -> Self {
         Self {
             insn,
             top_bit: (insn & 0x80000000) >> 31,
@@ -191,22 +191,59 @@ impl DecodedInstruction {
         }
     }
 
-    fn imm_b(&self) -> u32 {
+    pub fn encoded(&self) -> u32 {
+        self.insn
+    }
+
+    pub fn opcode(&self) -> u32 {
+        self.opcode
+    }
+
+    pub fn rd(&self) -> u32 {
+        self.rd
+    }
+
+    pub fn func3(&self) -> u32 {
+        self.func3
+    }
+
+    pub fn rs1(&self) -> u32 {
+        self.rs1
+    }
+
+    pub fn rs2(&self) -> u32 {
+        self.rs2
+    }
+
+    pub fn func7(&self) -> u32 {
+        self.func7
+    }
+
+    pub fn sign_bit(&self) -> u32 {
+        self.top_bit
+    }
+
+    pub fn kind(&self) -> (InsnCategory, InsnKind) {
+        let i = FastDecodeTable::get().lookup(self);
+        (i.category, i.kind)
+    }
+
+    pub fn imm_b(&self) -> u32 {
         (self.top_bit * 0xfffff000)
             | ((self.rd & 1) << 11)
             | ((self.func7 & 0x3f) << 5)
             | (self.rd & 0x1e)
     }
 
-    fn imm_i(&self) -> u32 {
+    pub fn imm_i(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rs2
     }
 
-    fn imm_s(&self) -> u32 {
+    pub fn imm_s(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
     }
 
-    fn imm_j(&self) -> u32 {
+    pub fn imm_j(&self) -> u32 {
         (self.top_bit * 0xfff00000)
             | (self.rs1 << 15)
             | (self.func3 << 12)
@@ -215,7 +252,7 @@ impl DecodedInstruction {
             | (self.rs2 & 0x1e)
     }
 
-    fn imm_u(&self) -> u32 {
+    pub fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
     }
 }
@@ -303,12 +340,6 @@ struct FastDecodeTable {
     table: FastInstructionTable,
 }
 
-impl Default for FastDecodeTable {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl FastDecodeTable {
     fn new() -> Self {
         let mut table: FastInstructionTable = [0; 1 << 10];
@@ -316,6 +347,10 @@ impl FastDecodeTable {
             Self::add_insn(&mut table, insn, isa_idx);
         }
         Self { table }
+    }
+
+    fn get() -> &'static Self {
+        FAST_DECODE_TABLE.get_or_init(Self::new)
     }
 
     // Map to 10 bit format
@@ -357,10 +392,12 @@ impl FastDecodeTable {
     }
 }
 
+static FAST_DECODE_TABLE: OnceLock<FastDecodeTable> = OnceLock::new();
+
 impl Emulator {
     pub fn new() -> Self {
         Self {
-            table: FastDecodeTable::new(),
+            table: FastDecodeTable::get(),
         }
     }
 

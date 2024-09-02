@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ceno_emul::{ByteAddr, StepRecord, VMState, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, InsnKind, StepRecord, VMState, CENO_PLATFORM};
 
 #[test]
 fn test_vm_trace() -> Result<()> {
@@ -10,13 +10,20 @@ fn test_vm_trace() -> Result<()> {
         ctx.init_memory(pc_start + i as u32, inst);
     }
 
-    let _steps = run(&mut ctx)?;
+    let steps = run(&mut ctx)?;
     let ctx = ctx;
 
     let (x1, x2, x3) = expected_fibonacci_20();
     assert_eq!(ctx.peek_register(1), x1);
     assert_eq!(ctx.peek_register(2), x2);
     assert_eq!(ctx.peek_register(3), x3);
+
+    let ops: Vec<InsnKind> = steps
+        .iter()
+        .map(|step| step.insn_decoded().kind().1)
+        .collect();
+    assert_eq!(ops, expected_ops_fibonacci_20());
+
     Ok(())
 }
 
@@ -71,4 +78,14 @@ fn expected_fibonacci_20() -> (u32, u32, u32) {
     assert_eq!(x2, 6765); // Fibonacci 20.
     assert_eq!(x3, 10946); // Fibonacci 21.
     (x1, x2, x3)
+}
+
+fn expected_ops_fibonacci_20() -> Vec<InsnKind> {
+    use InsnKind::*;
+    let mut ops = vec![ADDI, ADDI];
+    for _ in 0..10 {
+        ops.extend(&[ADDI, ADD, ADD, BNE]);
+    }
+    ops.push(EANY);
+    ops
 }

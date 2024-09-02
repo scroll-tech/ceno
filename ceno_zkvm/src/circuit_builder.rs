@@ -68,7 +68,7 @@ pub struct LookupTableExpression<E: ExtensionField> {
 
 #[derive(Clone, Debug)]
 pub struct ConstraintSystem<E: ExtensionField> {
-    ns: NameSpace,
+    pub(crate) ns: NameSpace,
 
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
