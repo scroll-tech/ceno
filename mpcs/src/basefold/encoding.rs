@@ -167,7 +167,7 @@ pub(crate) mod test_util {
     use super::EncodingScheme;
 
     pub fn test_codeword_folding<E: ExtensionField, Code: EncodingScheme<E>>() {
-        let num_vars = 10;
+        let num_vars = 12;
 
         let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from(i)).collect();
         let mut poly = FieldType::Ext(poly);
@@ -200,6 +200,34 @@ pub(crate) mod test_util {
             .enumerate()
         {
             assert_eq!(a, b, "Failed at index {}", i);
+        }
+
+        let mut folded_codeword = FieldType::Ext(folded_codeword);
+        for round in 0..4 {
+            let folded_codeword_vec =
+                Code::fold_bitreversed_codeword(&pp, &folded_codeword, challenge);
+
+            if Code::message_need_bit_reversion() {
+                reverse_index_bits_in_place_field_type(&mut folded_message);
+            }
+            folded_message = FieldType::Ext(Code::fold_message(&folded_message, challenge));
+            if Code::message_need_bit_reversion() {
+                reverse_index_bits_in_place_field_type(&mut folded_message);
+            }
+            let mut encoded_folded_message = Code::encode(&pp, &folded_message);
+            reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
+            let encoded_folded_message = match encoded_folded_message {
+                FieldType::Ext(coeffs) => coeffs,
+                _ => panic!("Wrong field type"),
+            };
+            for (i, (a, b)) in folded_codeword_vec
+                .iter()
+                .zip(encoded_folded_message.iter())
+                .enumerate()
+            {
+                assert_eq!(a, b, "Failed at index {} in round {}", i, round);
+            }
+            folded_codeword = FieldType::Ext(folded_codeword_vec);
         }
     }
 }
