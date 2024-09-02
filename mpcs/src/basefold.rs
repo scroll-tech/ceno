@@ -108,15 +108,10 @@ where
         //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
 
         // The sum-check protocol starts from the first variable, but the FRI part
-        // will eventually produce the evaluation at (alpha_k, ..., alpha_1), so
-        // the folding of the messages should be even-odd.
-        // If the foldable encoding scheme originally requires left-right folding
-        // then we should bit-reverse the message.
-        if <Spec::EncodingScheme as EncodingScheme<E>>::message_need_bit_reversion() {
-            reverse_index_bits_in_place_field_type(&mut bh_evals);
-        }
-        // We should always bit-reverse the codeword such that when building
-        // the Merkle tree, the folding elements are sibling nodes.
+        // will eventually produce the evaluation at (alpha_k, ..., alpha_1), so apply
+        // the bit-reversion to reverse the variable indices of the polynomial.
+        // In short: store the poly and codeword in big endian
+        reverse_index_bits_in_place_field_type(&mut bh_evals);
         reverse_index_bits_in_place_field_type(&mut codeword);
 
         (bh_evals, codeword)
