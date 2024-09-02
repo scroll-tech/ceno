@@ -689,6 +689,7 @@ mod tests {
     }
 
     type E = GoldilocksExt2;
+    type F = Goldilocks;
     type Code = RSCode<RSCodeDefaultSpec>;
 
     #[test]
@@ -741,18 +742,68 @@ mod tests {
         let pp = <Code as EncodingScheme<E>>::setup(num_vars, rng_seed);
         let (pp, _) = Code::trim(&pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
+        check_low_degree(&codeword, "low degree check for original codeword");
 
-        let root_table = fft_root_table(num_vars + <Code as EncodingScheme<E>>::get_rate_log());
+        reverse_index_bits_in_place_field_type(&mut codeword);
+
+        // For RS codeword, the addition of the left and right halves is also
+        // a valid codeword
+        let codeword_vec = match &codeword {
+            FieldType::Ext(coeffs) => coeffs.clone(),
+            _ => panic!("Wrong field type"),
+        };
+        let mut left_right_sum: Vec<E> = codeword_vec
+            .chunks(2)
+            .map(|chunk| chunk[0] + chunk[1])
+            .collect();
+        reverse_index_bits_in_place(&mut left_right_sum);
+        check_low_degree(
+            &FieldType::Ext(left_right_sum),
+            "check low degree of left+right",
+        );
+
+        // The the difference of the left and right halves is also
+        // a valid codeword after twisted by omega^(-i), regardless of the
+        // shift of the coset.
+        let mut left_right_diff: Vec<E> = codeword_vec
+            .chunks(2)
+            .map(|chunk| chunk[0] - chunk[1])
+            .collect();
+        reverse_index_bits_in_place(&mut left_right_diff);
+        let root_of_unity_inv = F::ROOT_OF_UNITY_INV
+            .pow(&[1 << (F::S as usize - log2_strict(left_right_diff.len()) - 1)]);
+        for (i, coeff) in left_right_diff.iter_mut().enumerate() {
+            *coeff *= root_of_unity_inv.pow(&[i as u64]);
+        }
+        check_low_degree(
+            &FieldType::Ext(left_right_diff),
+            "check low degree of (left-right)*omega^(-i)",
+        );
+
+        let challenge = E::from(2);
+        let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
+        let mut folded_codeword = FieldType::Ext(folded_codeword);
+        reverse_index_bits_in_place_field_type(&mut folded_codeword);
+
+        check_low_degree(&folded_codeword, "low degree check for folded");
+    }
+
+    fn check_low_degree(codeword: &FieldType<E>, message: &str) {
+        let mut codeword = codeword.clone();
+        let codeword_bits = log2_strict(codeword.len());
+        let root_table = fft_root_table(codeword_bits);
         let original = codeword.clone();
         ifft(&mut codeword, 0, &root_table);
         for i in (codeword.len() >> <Code as EncodingScheme<E>>::get_rate_log())..codeword.len() {
-            assert_eq!(field_type_index_ext(&codeword, i), E::ZERO)
+            assert_eq!(
+                field_type_index_ext(&codeword, i),
+                E::ZERO,
+                "{}: zero check failed for i = {}",
+                message,
+                i
+            )
         }
-        fft(
-            &mut codeword,
-            <Code as EncodingScheme<E>>::get_rate_log(),
-            &root_table,
-        );
+        fft(&mut codeword, 0, &root_table);
         let original = match original {
             FieldType::Ext(coeffs) => coeffs,
             _ => panic!("Wrong field type"),
@@ -766,40 +817,7 @@ mod tests {
             .zip(codeword.iter())
             .enumerate()
             .for_each(|(i, (a, b))| {
-                assert_eq!(a, b, "failed for i = {}", i);
-            });
-
-        let mut codeword = FieldType::Ext(codeword);
-        reverse_index_bits_in_place_field_type(&mut codeword);
-
-        let challenge = E::from(2);
-        let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
-        let mut folded_codeword = FieldType::Ext(folded_codeword);
-        reverse_index_bits_in_place_field_type(&mut folded_codeword);
-
-        let root_table = fft_root_table(num_vars + <Code as EncodingScheme<E>>::get_rate_log() - 1);
-        let original = folded_codeword.clone();
-        ifft(&mut folded_codeword, 0, &root_table);
-        for i in (folded_codeword.len() >> <Code as EncodingScheme<E>>::get_rate_log())
-            ..folded_codeword.len()
-        {
-            assert_eq!(field_type_index_ext(&folded_codeword, i), E::ZERO)
-        }
-        fft(&mut folded_codeword, 0, &root_table);
-        let original = match original {
-            FieldType::Ext(coeffs) => coeffs,
-            _ => panic!("Wrong field type"),
-        };
-        let folded_codeword = match folded_codeword {
-            FieldType::Ext(coeffs) => coeffs,
-            _ => panic!("Wrong field type"),
-        };
-        original
-            .iter()
-            .zip(folded_codeword.iter())
-            .enumerate()
-            .for_each(|(i, (a, b))| {
-                assert_eq!(a, b, "failed for i = {}", i);
+                assert_eq!(a, b, "{}: failed for i = {}", message, i);
             });
     }
 }
