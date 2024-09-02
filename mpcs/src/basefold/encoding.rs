@@ -7,7 +7,7 @@ pub use basecode::{Basecode, BasecodeDefaultSpec};
 mod rs;
 use plonky2::util::log2_strict;
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
 pub use rs::{coset_fft, fft, fft_root_table, RSCode, RSCodeDefaultSpec};
@@ -110,37 +110,20 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
 
     /// Fold the given message into a smaller message of half size using challenge
     /// as the random linear combination coefficient.
-    /// Note that this is either even-odd fold or left-right fold,
-    /// assuming the message has been bit-reversed (since this is the case
-    /// in basefold).
-    /// So if the message folding does not need bit reversion at all,
-    /// (specified by the `message_need_bit_reversion` function)
-    /// then the folding should be left-and-right.
-    fn fold_bitreversed_message(msg: &FieldType<E>, challenge: E) -> Vec<E> {
-        if Self::message_need_bit_reversion() {
-            match msg {
-                FieldType::Ext(msg) => msg
-                    .par_chunks_exact(2)
-                    .map(|ys| ys[0] + ys[1] * challenge)
-                    .collect::<Vec<_>>(),
-                FieldType::Base(msg) => msg
-                    .par_chunks_exact(2)
-                    .map(|ys| E::from(ys[0]) + E::from(ys[1]) * challenge)
-                    .collect::<Vec<_>>(),
-                _ => panic!("Unsupported field type"),
-            }
-        } else {
-            match msg {
-                FieldType::Ext(msg) => (0..(msg.len() >> 1))
-                    .into_par_iter()
-                    .map(|i| challenge * msg[(msg.len() >> 1) + i] + msg[i])
-                    .collect::<Vec<_>>(),
-                FieldType::Base(msg) => (0..(msg.len() >> 1))
-                    .into_par_iter()
-                    .map(|i| challenge * msg[(msg.len() >> 1) + i] + msg[i])
-                    .collect::<Vec<_>>(),
-                _ => panic!("Unsupported field type"),
-            }
+    /// Note that this is always even-odd fold, assuming the message has
+    /// been bit-reversed (or not) according to the setting
+    /// of the `message_need_bit_reversion` function.
+    fn fold_message(msg: &FieldType<E>, challenge: E) -> Vec<E> {
+        match msg {
+            FieldType::Ext(msg) => msg
+                .par_chunks_exact(2)
+                .map(|ys| ys[0] + ys[1] * challenge)
+                .collect::<Vec<_>>(),
+            FieldType::Base(msg) => msg
+                .par_chunks_exact(2)
+                .map(|ys| E::from(ys[0]) + E::from(ys[1]) * challenge)
+                .collect::<Vec<_>>(),
+            _ => panic!("Unsupported field type"),
         }
     }
 }
@@ -194,12 +177,17 @@ pub(crate) mod test_util {
         let (pp, _) = Code::trim(&pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         reverse_index_bits_in_place_field_type(&mut codeword);
-        reverse_index_bits_in_place_field_type(&mut poly);
+        if Code::message_need_bit_reversion() {
+            reverse_index_bits_in_place_field_type(&mut poly);
+        }
         let challenge = E::random(&mut OsRng);
         let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
-        let mut folded_message = FieldType::Ext(Code::fold_bitreversed_message(&poly, challenge));
-        reverse_index_bits_in_place_field_type(&mut folded_message);
-
+        let mut folded_message = FieldType::Ext(Code::fold_message(&poly, challenge));
+        if Code::message_need_bit_reversion() {
+            // Reverse the message back before encoding if it has been
+            // bit-reversed
+            reverse_index_bits_in_place_field_type(&mut folded_message);
+        }
         let mut encoded_folded_message = Code::encode(&pp, &folded_message);
         reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
         let encoded_folded_message = match encoded_folded_message {
@@ -219,11 +207,13 @@ pub(crate) mod test_util {
             let folded_codeword_vec =
                 Code::fold_bitreversed_codeword(&pp, &folded_codeword, challenge);
 
-            reverse_index_bits_in_place_field_type(&mut folded_message);
-            folded_message =
-                FieldType::Ext(Code::fold_bitreversed_message(&folded_message, challenge));
-            reverse_index_bits_in_place_field_type(&mut folded_message);
-
+            if Code::message_need_bit_reversion() {
+                reverse_index_bits_in_place_field_type(&mut folded_message);
+            }
+            folded_message = FieldType::Ext(Code::fold_message(&folded_message, challenge));
+            if Code::message_need_bit_reversion() {
+                reverse_index_bits_in_place_field_type(&mut folded_message);
+            }
             let mut encoded_folded_message = Code::encode(&pp, &folded_message);
             reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
             let encoded_folded_message = match encoded_folded_message {
