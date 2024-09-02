@@ -6,9 +6,8 @@ use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{marker::PhantomData, ops::Neg};
 
 #[allow(clippy::enum_variant_names)]
-#[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone)]
-enum MockProverError<E: ExtensionField> {
+pub(crate) enum MockProverError<E: ExtensionField> {
     AssertZeroError {
         expression: Expression<E>,
         evaluated: E,
@@ -32,7 +31,6 @@ enum MockProverError<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> MockProverError<E> {
-    #[allow(dead_code)]
     pub fn print(&self) {
         match self {
             Self::AssertZeroError {
@@ -73,8 +71,7 @@ impl<E: ExtensionField> MockProverError<E> {
     }
 }
 
-#[allow(dead_code)] // TODO remove
-struct MockProver<E: ExtensionField> {
+pub(crate) struct MockProver<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 

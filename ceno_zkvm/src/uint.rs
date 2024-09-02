@@ -22,7 +22,7 @@ pub enum UintLimb<E: ExtensionField> {
     Expression(Vec<Expression<E>>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
 pub struct UInt<const M: usize, const C: usize, E: ExtensionField> {

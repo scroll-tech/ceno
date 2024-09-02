@@ -18,6 +18,7 @@ use super::{
 pub struct AddInstruction;
 pub struct SubInstruction;
 
+#[derive(Debug)]
 pub struct InstructionConfig<E: ExtensionField> {
     pub pc: WitIn,
     pub ts: WitIn,
@@ -153,73 +154,65 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
 
 #[cfg(test)]
 mod test {
-
-    use ark_std::test_rng;
-    use ff::Field;
     use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLE;
-    use transcript::Transcript;
 
     use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::{constants::NUM_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier},
-        structs::PointAndEval,
+        scheme::mock_prover::MockProver,
     };
 
     use super::AddInstruction;
 
     #[test]
+    #[allow(clippy::option_map_unit_fn)]
     fn test_add_construct_circuit() {
-        let mut rng = test_rng();
-
-        let mut cs = ConstraintSystem::new(|| "riscv");
-        let _ = cs.namespace(
-            || "add",
-            |cs| {
-                let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(cs);
-                let config = AddInstruction::construct_circuit(&mut circuit_builder);
-                Ok(config)
-            },
-        );
-        let vk = cs.key_gen();
-        let pk = ProvingKey::create_pk(vk);
-
-        // generate mock witness
-        let num_instances = 1 << 2;
-        let wits_in = (0..pk.get_cs().num_witin as usize)
-            .map(|_| {
-                (0..num_instances)
-                    .map(|_| Goldilocks::random(&mut rng))
-                    .collect::<Vec<Goldilocks>>()
-                    .into_mle()
-                    .into()
-            })
-            .collect_vec();
-
-        // get proof
-        let prover = ZKVMProver::new(pk.clone());
-        let mut transcript = Transcript::new(b"riscv");
-        let challenges = [1.into(), 2.into()];
-
-        let proof = prover
-            .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
-            .expect("create_proof failed");
-
-        let verifier = ZKVMVerifier::new(pk.vk);
-        let mut v_transcript = Transcript::new(b"riscv");
-        let _rt_input = verifier
-            .verify(
-                &proof,
-                &mut v_transcript,
-                NUM_FANIN,
-                &PointAndEval::default(),
-                &challenges,
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = cb
+            .namespace(
+                || "add",
+                |cb| {
+                    let config = AddInstruction::construct_circuit(cb);
+                    Ok(config)
+                },
             )
-            .expect("verifier failed");
-        // TODO verify opening via PCS
+            .unwrap()
+            .unwrap();
+
+        let empty = vec![Goldilocks::from(0)].into_mle().into();
+        let mut wits_in = vec![empty; cb.cs.num_witin as usize];
+
+        wits_in[config.pc.id as usize] = vec![Goldilocks::from(1)].into_mle().into();
+        wits_in[config.ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        config.prev_rd_value.wits_in().map(|prev_rd_value| {
+            wits_in[prev_rd_value[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[prev_rd_value[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+        });
+        config.addend_0.wits_in().map(|addend_0| {
+            wits_in[addend_0[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[addend_0[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+        });
+        config.addend_1.wits_in().map(|addend_1| {
+            wits_in[addend_1[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[addend_1[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+        });
+        // TODO #174
+        config.outcome.carries.map(|carry| {
+            wits_in[carry[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
+            wits_in[carry[1].id as usize] = vec![Goldilocks::from(0)].into_mle().into();
+        });
+        // TODO #167
+        wits_in[config.rs1_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.rs2_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.rd_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.prev_rs1_ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.prev_rs2_ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+        wits_in[config.prev_rd_ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
+
+        MockProver::assert_satisfied(&mut cb, &wits_in, None);
     }
 
     fn bench_add_instruction_helper<E: ExtensionField>(_instance_num_vars: usize) {}
