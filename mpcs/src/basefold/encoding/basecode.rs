@@ -186,7 +186,7 @@ where
         return Spec::get_basecode_msg_size_log();
     }
 
-    fn message_need_bit_reversion() -> bool {
+    fn message_is_left_and_right_folding() -> bool {
         true
     }
 

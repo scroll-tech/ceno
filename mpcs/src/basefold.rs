@@ -102,7 +102,7 @@ where
         let mut coeffs = bh_evals.clone();
         interpolate_field_type_over_boolean_hypercube(&mut coeffs);
 
-        if !<Spec::EncodingScheme as EncodingScheme<E>>::message_need_bit_reversion() {
+        if !<Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
             reverse_index_bits_in_place_field_type(&mut coeffs);
         }
         let mut codeword = Spec::EncodingScheme::encode(&pp.encoding_params, &coeffs);

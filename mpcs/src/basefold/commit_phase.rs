@@ -123,7 +123,7 @@ where
 
                 let mut coeffs = running_evals.clone();
                 interpolate_over_boolean_hypercube(&mut coeffs);
-                if !<Spec::EncodingScheme as EncodingScheme<E>>::message_need_bit_reversion() {
+                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
                 let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
@@ -276,7 +276,7 @@ where
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
                 let mut coeffs = sum_of_all_evals_for_sumcheck.clone();
-                if !<Spec::EncodingScheme as EncodingScheme<E>>::message_need_bit_reversion() {
+                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
                 interpolate_over_boolean_hypercube(&mut coeffs);
@@ -384,7 +384,7 @@ where
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
                 let mut coeffs = running_evals.clone();
-                if !<Spec::EncodingScheme as EncodingScheme<E>>::message_need_bit_reversion() {
+                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
                 interpolate_over_boolean_hypercube(&mut coeffs);

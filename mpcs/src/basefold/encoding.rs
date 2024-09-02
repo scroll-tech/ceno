@@ -53,7 +53,11 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
     /// folding. If the folding is already even-odd style (like RS code),
     /// then set this function to return false. If the folding is originally
     /// left-right, like basefold, then return true.
-    fn message_need_bit_reversion() -> bool;
+    fn message_is_left_and_right_folding() -> bool;
+
+    fn message_is_even_and_odd_folding() -> bool {
+        !Self::message_is_left_and_right_folding()
+    }
 
     /// Returns three values: x0, x1 and 1/(x1-x0). Note that although
     /// 1/(x1-x0) can be computed from the other two values, we return it
@@ -177,13 +181,13 @@ pub(crate) mod test_util {
         let (pp, _) = Code::trim(&pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         reverse_index_bits_in_place_field_type(&mut codeword);
-        if Code::message_need_bit_reversion() {
+        if Code::message_is_left_and_right_folding() {
             reverse_index_bits_in_place_field_type(&mut poly);
         }
         let challenge = E::random(&mut OsRng);
         let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
         let mut folded_message = FieldType::Ext(Code::fold_message(&poly, challenge));
-        if Code::message_need_bit_reversion() {
+        if Code::message_is_left_and_right_folding() {
             // Reverse the message back before encoding if it has been
             // bit-reversed
             reverse_index_bits_in_place_field_type(&mut folded_message);
@@ -207,11 +211,11 @@ pub(crate) mod test_util {
             let folded_codeword_vec =
                 Code::fold_bitreversed_codeword(&pp, &folded_codeword, challenge);
 
-            if Code::message_need_bit_reversion() {
+            if Code::message_is_left_and_right_folding() {
                 reverse_index_bits_in_place_field_type(&mut folded_message);
             }
             folded_message = FieldType::Ext(Code::fold_message(&folded_message, challenge));
-            if Code::message_need_bit_reversion() {
+            if Code::message_is_left_and_right_folding() {
                 reverse_index_bits_in_place_field_type(&mut folded_message);
             }
             let mut encoded_folded_message = Code::encode(&pp, &folded_message);
