@@ -160,6 +160,7 @@ fn concatenate_field_types<E: ExtensionField>(coeffs: &Vec<FieldType<E>>) -> Fie
 pub(crate) mod test_util {
     use ff_ext::ExtensionField;
     use multilinear_extensions::mle::FieldType;
+    use rand::rngs::OsRng;
 
     use crate::util::plonky2_util::reverse_index_bits_in_place_field_type;
 
@@ -179,7 +180,7 @@ pub(crate) mod test_util {
         if Code::message_need_bit_reversion() {
             reverse_index_bits_in_place_field_type(&mut poly);
         }
-        let challenge = E::from(2);
+        let challenge = E::random(&mut OsRng);
         let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
         let mut folded_message = FieldType::Ext(Code::fold_message(&poly, challenge));
         if Code::message_need_bit_reversion() {
