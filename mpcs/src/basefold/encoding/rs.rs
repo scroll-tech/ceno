@@ -554,7 +554,7 @@ fn naive_fft<E: ExtensionField>(poly: &Vec<E>, rate: usize, shift: E::BaseField)
 mod tests {
     use crate::{
         basefold::encoding::test_util::test_codeword_folding,
-        util::plonky2_util::reverse_index_bits_in_place_field_type,
+        util::{field_type_index_ext, plonky2_util::reverse_index_bits_in_place_field_type},
     };
 
     use super::*;
@@ -642,6 +642,7 @@ mod tests {
         assert_eq!(naive, poly2);
     }
 
+    #[test]
     fn test_ifft() {
         let num_vars = 5;
 
@@ -727,5 +728,78 @@ mod tests {
                 i
             );
         }
+    }
+
+    #[test]
+    pub fn test_low_degree() {
+        let num_vars = 10;
+
+        let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from(i)).collect();
+        let poly = FieldType::Ext(poly);
+
+        let rng_seed = [0; 32];
+        let pp = <Code as EncodingScheme<E>>::setup(num_vars, rng_seed);
+        let (pp, _) = Code::trim(&pp, num_vars).unwrap();
+        let mut codeword = Code::encode(&pp, &poly);
+
+        let root_table = fft_root_table(num_vars + <Code as EncodingScheme<E>>::get_rate_log());
+        let original = codeword.clone();
+        ifft(&mut codeword, 0, &root_table);
+        for i in (codeword.len() >> <Code as EncodingScheme<E>>::get_rate_log())..codeword.len() {
+            assert_eq!(field_type_index_ext(&codeword, i), E::ZERO)
+        }
+        fft(
+            &mut codeword,
+            <Code as EncodingScheme<E>>::get_rate_log(),
+            &root_table,
+        );
+        let original = match original {
+            FieldType::Ext(coeffs) => coeffs,
+            _ => panic!("Wrong field type"),
+        };
+        let codeword = match codeword {
+            FieldType::Ext(coeffs) => coeffs,
+            _ => panic!("Wrong field type"),
+        };
+        original
+            .iter()
+            .zip(codeword.iter())
+            .enumerate()
+            .for_each(|(i, (a, b))| {
+                assert_eq!(a, b, "failed for i = {}", i);
+            });
+
+        let mut codeword = FieldType::Ext(codeword);
+        reverse_index_bits_in_place_field_type(&mut codeword);
+
+        let challenge = E::from(2);
+        let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
+        let mut folded_codeword = FieldType::Ext(folded_codeword);
+        reverse_index_bits_in_place_field_type(&mut folded_codeword);
+
+        let root_table = fft_root_table(num_vars + <Code as EncodingScheme<E>>::get_rate_log() - 1);
+        let original = folded_codeword.clone();
+        ifft(&mut folded_codeword, 0, &root_table);
+        for i in (folded_codeword.len() >> <Code as EncodingScheme<E>>::get_rate_log())
+            ..folded_codeword.len()
+        {
+            assert_eq!(field_type_index_ext(&folded_codeword, i), E::ZERO)
+        }
+        fft(&mut folded_codeword, 0, &root_table);
+        let original = match original {
+            FieldType::Ext(coeffs) => coeffs,
+            _ => panic!("Wrong field type"),
+        };
+        let folded_codeword = match folded_codeword {
+            FieldType::Ext(coeffs) => coeffs,
+            _ => panic!("Wrong field type"),
+        };
+        original
+            .iter()
+            .zip(folded_codeword.iter())
+            .enumerate()
+            .for_each(|(i, (a, b))| {
+                assert_eq!(a, b, "failed for i = {}", i);
+            });
     }
 }
