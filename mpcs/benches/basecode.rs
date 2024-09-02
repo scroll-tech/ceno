@@ -9,9 +9,7 @@ use mpcs::{
     util::{
         arithmetic::interpolate_field_type_over_boolean_hypercube,
         plonky2_util::reverse_index_bits_in_place_field_type,
-    },
-    Basefold, BasefoldRSParams, BasefoldSpec, EncodingScheme,
-    PolynomialCommitmentScheme,
+    }, Basefold, BasefoldBasecodeParams, BasefoldSpec, EncodingScheme, PolynomialCommitmentScheme
 };
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
@@ -19,7 +17,7 @@ use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+type Pcs = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;
 type E = GoldilocksExt2;
 
 const NUM_SAMPLES: usize = 10;
@@ -70,7 +68,7 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
                                 interpolate_field_type_over_boolean_hypercube(&mut coeffs);
             
                                 let mut codeword =
-                                    <<BasefoldRSParams as BasefoldSpec<E>>::EncodingScheme as EncodingScheme<E>>::encode(
+                                    <<BasefoldBasecodeParams as BasefoldSpec<E>>::EncodingScheme as EncodingScheme<E>>::encode(
                                         &pp.encoding_params,
                                         &coeffs,
                                     );

@@ -57,8 +57,9 @@ type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 
 mod structure;
 pub use structure::{
-    Basefold, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams,
-    BasefoldProverParams, BasefoldRSParams, BasefoldVerifierParams,
+    Basefold, BasefoldBasecodeParams, BasefoldCommitment, BasefoldCommitmentWithData,
+    BasefoldDefault, BasefoldParams, BasefoldProverParams, BasefoldRSParams,
+    BasefoldVerifierParams,
 };
 mod commit_phase;
 use commit_phase::{batch_commit_phase, commit_phase, simple_batch_commit_phase};
@@ -102,7 +103,7 @@ where
         let mut coeffs = bh_evals.clone();
         interpolate_field_type_over_boolean_hypercube(&mut coeffs);
 
-        if !<Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
+        if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
             reverse_index_bits_in_place_field_type(&mut coeffs);
         }
         let mut codeword = Spec::EncodingScheme::encode(&pp.encoding_params, &coeffs);

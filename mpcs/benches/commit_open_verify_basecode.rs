@@ -13,14 +13,14 @@ use mpcs::{
             PoseidonTranscript,
         },
     },
-    Basefold, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
+    Basefold, BasefoldBasecodeParams, Evaluation, PolynomialCommitmentScheme,
 };
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+type Pcs = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;
 type T = PoseidonTranscript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
@@ -32,7 +32,7 @@ const BATCH_SIZE_LOG_END: usize = 5;
 
 fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     let mut group = c.benchmark_group(format!(
-        "commit_open_verify_goldilocks_{}",
+        "commit_open_verify_goldilocks_rs_{}",
         if is_base { "base" } else { "ext2" }
     ));
     group.sample_size(NUM_SAMPLES);
@@ -118,7 +118,7 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
 
 fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     let mut group = c.benchmark_group(format!(
-        "batch_commit_open_verify_goldilocks_{}",
+        "batch_commit_open_verify_goldilocks_rs_{}",
         if is_base { "base" } else { "ext2" }
     ));
     group.sample_size(NUM_SAMPLES);
@@ -263,7 +263,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
 
 fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     let mut group = c.benchmark_group(format!(
-        "simple_batch_commit_open_verify_goldilocks_{}",
+        "simple_batch_commit_open_verify_goldilocks_rs_{}",
         if is_base { "base" } else { "extension" }
     ));
     group.sample_size(NUM_SAMPLES);
