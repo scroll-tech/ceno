@@ -1,48 +1,70 @@
-use core::{ptr::write_volatile, slice};
+use crate::{INFO_OUT_ADDR, WORD_SIZE};
+use core::{cell::Cell, fmt, mem::size_of, ptr::write_volatile, slice};
 
-const WORD_SIZE: usize = 4;
+static INFO_OUT: IOWriter = IOWriter::new(INFO_OUT_ADDR);
 
-const INFO_OUT_ADDR: u32 = 0xC000_0000;
-
-static mut INFO_OUT_CURSOR: *mut u32 = INFO_OUT_ADDR as *mut u32;
-
-pub fn write_info_u32(msg: &[u32]) {
-    let byte_len = msg.len() * WORD_SIZE;
-    write_info_u32_and_odd(msg, None, byte_len);
+pub fn info_out() -> &'static IOWriter {
+    &INFO_OUT
 }
 
-pub fn write_info(msg: &[u8]) {
-    let byte_len = msg.len();
-    let word_len_up = byte_len.div_ceil(WORD_SIZE);
-    let bytes_to_erase = word_len_up * WORD_SIZE - byte_len;
-
-    let msg_words = unsafe {
-        // SAFETY: We only support aligned u32 reads. We do read beyond the slice, but reading the last odd bytes means reading the full word and masking the high bytes.
-        slice::from_raw_parts(msg.as_ptr() as *const u32, word_len_up)
-    };
-
-    if bytes_to_erase == 0 {
-        write_info_u32_and_odd(msg_words, None, byte_len);
-    } else {
-        // Truncate the last word to meet the actual length of the message.
-        let odd_word = msg_words[word_len_up - 1];
-        let odd_word = (odd_word << (bytes_to_erase * 8)) >> (bytes_to_erase * 8);
-        write_info_u32_and_odd(&msg_words[..word_len_up - 1], Some(odd_word), byte_len);
-    };
+pub struct IOWriter {
+    cursor: Cell<*mut u32>,
 }
 
-fn write_info_u32_and_odd(msg: &[u32], odd_word: Option<u32>, byte_len: usize) {
-    unsafe {
-        let mut cursor = INFO_OUT_CURSOR.add(1);
-        for word in msg {
-            write_volatile(cursor, *word);
-            cursor = cursor.add(1);
+// Safety: Only single-threaded programs are supported.
+// TODO: There may be a better way to handle this.
+unsafe impl Sync for IOWriter {}
+
+impl IOWriter {
+    const fn new(addr: u32) -> Self {
+        assert!(addr % WORD_SIZE as u32 == 0);
+        IOWriter {
+            cursor: Cell::new(addr as *mut u32),
         }
-        if let Some(word) = odd_word {
-            write_volatile(cursor, word);
-            cursor = cursor.add(1);
+    }
+
+    pub fn alloc<T>(&self, count: usize) -> &mut [T] {
+        let byte_len = count * size_of::<T>();
+        let cursor = self.cursor.get();
+
+        // Write the length of the message at the current cursor.
+        unsafe {
+            write_volatile(cursor, byte_len as u32);
         }
-        write_volatile(INFO_OUT_CURSOR, byte_len as u32);
-        INFO_OUT_CURSOR = cursor;
+
+        // Bump the cursor to the next word-aligned address.
+        self.cursor
+            .set(unsafe { cursor.add(1 + byte_len.div_ceil(WORD_SIZE)) });
+
+        // Return a slice of the allocated memory after the length word.
+        unsafe { slice::from_raw_parts_mut(cursor.add(1) as *mut T, count) }
+    }
+
+    pub fn write(&self, msg: &[u8]) {
+        let buf = self.alloc(msg.len());
+        buf.copy_from_slice(msg);
+    }
+}
+
+impl fmt::Write for &IOWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.write(s.as_bytes());
+        Ok(())
+    }
+}
+
+mod macros {
+    #[macro_export]
+    macro_rules! print {
+        ($($arg:tt)*) => {
+            let _ = core::write!($crate::info_out(), $($arg)*);
+        };
+    }
+
+    #[macro_export]
+    macro_rules! println {
+        ($($arg:tt)*) => {
+            let _ = core::writeln!($crate::info_out(), $($arg)*);
+        };
     }
 }

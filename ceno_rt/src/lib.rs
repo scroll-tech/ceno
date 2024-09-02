@@ -1,9 +1,12 @@
 #![no_std]
 
 mod io;
-pub use io::{write_info, write_info_u32};
+pub use io::info_out;
 
 use core::arch::{asm, global_asm};
+
+mod params;
+pub use params::*;
 
 #[cfg(not(test))]
 mod panic_handler {

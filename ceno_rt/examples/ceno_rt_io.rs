@@ -3,11 +3,11 @@
 
 #[allow(unused_imports)]
 use ceno_rt;
-use ceno_rt::write_info;
+use ceno_rt::println;
+use core::fmt::Write;
 
 #[no_mangle]
-#[inline(never)]
 fn main() {
-    write_info("📜📜📜 Hello, World!\n".as_bytes());
-    write_info("🌏🌍🌎\n".as_bytes());
+    println!("📜📜📜 Hello, World!");
+    println!("🌏🌍🌎");
 }
