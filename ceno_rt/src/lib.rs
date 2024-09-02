@@ -1,5 +1,8 @@
-#![no_main]
 #![no_std]
+
+mod io;
+pub use io::{write_info, write_info_u32};
+
 use core::arch::{asm, global_asm};
 
 #[cfg(not(test))]
