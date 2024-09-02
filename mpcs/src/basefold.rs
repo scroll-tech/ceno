@@ -102,6 +102,9 @@ where
         let mut coeffs = bh_evals.clone();
         interpolate_field_type_over_boolean_hypercube(&mut coeffs);
 
+        if !<Spec::EncodingScheme as EncodingScheme<E>>::message_need_bit_reversion() {
+            reverse_index_bits_in_place_field_type(&mut coeffs);
+        }
         let mut codeword = Spec::EncodingScheme::encode(&pp.encoding_params, &coeffs);
 
         // If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above

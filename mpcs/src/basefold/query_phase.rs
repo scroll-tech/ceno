@@ -138,6 +138,9 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.clone();
     interpolate_over_boolean_hypercube(&mut message);
+    if !<Spec::EncodingScheme as EncodingScheme<E>>::message_need_bit_reversion() {
+        reverse_index_bits_in_place(&mut message);
+    }
     let final_codeword =
         <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
     let mut final_codeword = match final_codeword {
@@ -203,6 +206,9 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let timer = start_timer!(|| "Verifier batch query phase");
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.clone();
+    if !<Spec::EncodingScheme as EncodingScheme<E>>::message_need_bit_reversion() {
+        reverse_index_bits_in_place(&mut message);
+    }
     interpolate_over_boolean_hypercube(&mut message);
     let final_codeword =
         <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
@@ -274,6 +280,9 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.clone();
+    if !<Spec::EncodingScheme as EncodingScheme<E>>::message_need_bit_reversion() {
+        reverse_index_bits_in_place(&mut message);
+    }
     interpolate_over_boolean_hypercube(&mut message);
     let final_codeword =
         <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
