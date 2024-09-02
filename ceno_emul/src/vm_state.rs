@@ -72,7 +72,11 @@ impl VMState {
     fn step(&mut self, emu: &Emulator) -> Result<StepRecord> {
         emu.step(self)?;
         let step = self.tracer().advance();
-        Ok(step)
+        if step.is_busy_loop() && !self.succeeded() {
+            Err(anyhow!("Stuck in loop {}", "{}"))
+        } else {
+            Ok(step)
+        }
     }
 }
 

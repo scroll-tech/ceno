@@ -22,7 +22,7 @@ pub fn halt(exit_code: u32) -> ! {
         );
         riscv::asm::ecall();
     }
-    unreachable!()
+    loop {}
 }
 
 global_asm!(

@@ -24,15 +24,14 @@ SECTIONS
     *(.sdata .sdata.*);
     *(.sdata2 .sdata2.*);
     *(.data .data.*);
-    . = ALIGN(4);
-
-    _sheap = .;
-
   } > RAM
 
   .bss (NOLOAD) : ALIGN(4)
   {
     *(.sbss .sbss.*);
     *(.bss .bss.*);
+
+    . = ALIGN(4);
+    _sheap = .;
   } > RAM
 }
