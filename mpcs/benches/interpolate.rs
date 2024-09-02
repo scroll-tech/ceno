@@ -5,21 +5,13 @@ use ff::Field;
 use goldilocks::GoldilocksExt2;
 
 use itertools::Itertools;
-use mpcs::{
-    util::{
-        arithmetic::interpolate_field_type_over_boolean_hypercube,
-        plonky2_util::reverse_index_bits_in_place_field_type,
-    },
-    Basefold, BasefoldRSParams, BasefoldSpec, EncodingScheme,
-    PolynomialCommitmentScheme,
-};
+use mpcs::util::arithmetic::interpolate_field_type_over_boolean_hypercube;
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 type E = GoldilocksExt2;
 
 const NUM_SAMPLES: usize = 10;
@@ -30,7 +22,7 @@ const BATCH_SIZE_LOG_END: usize = 5;
 
 fn bench_encoding(c: &mut Criterion, is_base: bool) {
     let mut group = c.benchmark_group(format!(
-        "encoding_basecode_{}",
+        "interpolate_{}",
         if is_base { "base" } else { "extension" }
     ));
     group.sample_size(NUM_SAMPLES);
@@ -39,11 +31,6 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
         for batch_size_log in BATCH_SIZE_LOG_START..=BATCH_SIZE_LOG_END {
             let batch_size = 1 << batch_size_log;
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
-            let (pp, _) = {
-                let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, &rng).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
-            };
             let polys = (0..batch_size)
                 .map(|_| {
                     if is_base {
@@ -57,7 +44,6 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
                 })
                 .collect_vec();
 
-
             group.bench_function(
                 BenchmarkId::new("batch_encode", format!("{}-{}", num_vars, batch_size)),
                 |b| {
@@ -68,26 +54,9 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
                                 // Switch to coefficient form
                                 let mut coeffs = poly.evaluations.clone();
                                 interpolate_field_type_over_boolean_hypercube(&mut coeffs);
-            
-                                let mut codeword =
-                                    <<BasefoldRSParams as BasefoldSpec<E>>::EncodingScheme as EncodingScheme<E>>::encode(
-                                        &pp.encoding_params,
-                                        &coeffs,
-                                    );
-            
-                                // If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
-                                //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
-            
-                                // The sum-check protocol starts from the first variable, but the FRI part
-                                // will eventually produce the evaluation at (alpha_k, ..., alpha_1), so apply
-                                // the bit-reversion to reverse the variable indices of the polynomial.
-                                // In short: store the poly and codeword in big endian
-                                reverse_index_bits_in_place_field_type(&mut coeffs);
-                                reverse_index_bits_in_place_field_type(&mut codeword);
-            
-                                (coeffs, codeword)
+                                coeffs
                             })
-                            .collect::<(Vec<FieldType<E>>, Vec<FieldType<E>>)>();
+                            .collect::<Vec<FieldType<E>>>();
                     })
                 },
             );

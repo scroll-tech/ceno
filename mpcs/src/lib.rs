@@ -334,8 +334,8 @@ pub enum Error {
 mod basefold;
 pub use basefold::{
     coset_fft, fft, fft_root_table, Basecode, BasecodeDefaultSpec, Basefold, BasefoldCommitment,
-    BasefoldCommitmentWithData, BasefoldDefault, BasefoldDefaultParams, BasefoldParams,
-    BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,
+    BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams, BasefoldRSParams, BasefoldSpec,
+    EncodingScheme, RSCode, RSCodeDefaultSpec,
 };
 
 fn validate_input<E: ExtensionField>(
@@ -612,7 +612,7 @@ mod test {
     use crate::{
         basefold::Basefold,
         util::transcript::{FieldTranscript, InMemoryTranscript, PoseidonTranscript},
-        BasefoldDefaultParams, PolynomialCommitmentScheme,
+        BasefoldRSParams, PolynomialCommitmentScheme,
     };
     use goldilocks::GoldilocksExt2;
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
@@ -620,7 +620,7 @@ mod test {
     use rand_chacha::ChaCha8Rng;
     #[test]
     fn test_transcript() {
-        type Pcs = Basefold<GoldilocksExt2, BasefoldDefaultParams, ChaCha8Rng>;
+        type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
         let num_vars = 10;
         let rng = ChaCha8Rng::from_seed([0u8; 32]);
         let poly_size = 1 << num_vars;

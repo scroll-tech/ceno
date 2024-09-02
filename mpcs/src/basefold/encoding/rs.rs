@@ -548,6 +548,8 @@ fn naive_fft<E: ExtensionField>(poly: &Vec<E>, rate: usize, shift: E::BaseField)
 
 #[cfg(test)]
 mod tests {
+    use crate::basefold::encoding::test_util::test_codeword_folding;
+
     use super::*;
     use goldilocks::{Goldilocks, GoldilocksExt2};
 
@@ -655,5 +657,10 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_rs_codeword_folding() {
+        test_codeword_folding::<GoldilocksExt2, RSCode<RSCodeDefaultSpec>>();
     }
 }

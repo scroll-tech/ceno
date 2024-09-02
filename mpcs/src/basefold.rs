@@ -57,8 +57,8 @@ type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 
 mod structure;
 pub use structure::{
-    Basefold, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldDefault,
-    BasefoldDefaultParams, BasefoldParams, BasefoldProverParams, BasefoldVerifierParams,
+    Basefold, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams,
+    BasefoldProverParams, BasefoldRSParams, BasefoldVerifierParams,
 };
 mod commit_phase;
 use commit_phase::{batch_commit_phase, commit_phase, simple_batch_commit_phase};
@@ -1040,9 +1040,9 @@ mod test {
     use goldilocks::GoldilocksExt2;
     use rand_chacha::ChaCha8Rng;
 
-    use super::BasefoldDefaultParams;
+    use super::BasefoldRSParams;
 
-    type PcsGoldilocks = Basefold<GoldilocksExt2, BasefoldDefaultParams, ChaCha8Rng>;
+    type PcsGoldilocks = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 
     #[test]
     fn commit_open_verify_goldilocks_base() {

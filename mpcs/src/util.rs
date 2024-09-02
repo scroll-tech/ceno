@@ -144,7 +144,7 @@ pub fn field_type_index_set_ext<E: ExtensionField>(
 ) {
     match poly {
         FieldType::Ext(coeffs) => coeffs[index] = *scalar,
-        FieldType::Base(coeffs) => panic!("Cannot set base field from extension field"),
+        FieldType::Base(_) => panic!("Cannot set base field from extension field"),
         _ => unreachable!(),
     }
 }

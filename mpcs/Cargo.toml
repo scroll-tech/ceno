@@ -54,5 +54,13 @@ name = "basecode"
 harness = false
 
 [[bench]]
+name = "rscode"
+harness = false
+
+[[bench]]
+name = "interpolate"
+harness = false
+
+[[bench]]
 name = "fft"
 harness = false

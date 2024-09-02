@@ -11,6 +11,7 @@ use rand_chacha::ChaCha8Rng;
 use std::{marker::PhantomData, slice};
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
+use super::{Basecode, BasecodeDefaultSpec};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -210,9 +211,19 @@ pub trait BasefoldSpec<E: ExtensionField>: Debug + Clone {
 }
 
 #[derive(Debug, Clone)]
-pub struct BasefoldDefaultParams;
+pub struct BasefoldBasecodeParams;
 
-impl<E: ExtensionField> BasefoldSpec<E> for BasefoldDefaultParams
+impl<E: ExtensionField> BasefoldSpec<E> for BasefoldBasecodeParams
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    type EncodingScheme = Basecode<BasecodeDefaultSpec>;
+}
+
+#[derive(Debug, Clone)]
+pub struct BasefoldRSParams;
+
+impl<E: ExtensionField> BasefoldSpec<E> for BasefoldRSParams
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -224,7 +235,7 @@ pub struct Basefold<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore>(
     PhantomData<(E, Spec, Rng)>,
 );
 
-pub type BasefoldDefault<F> = Basefold<F, BasefoldDefaultParams, ChaCha8Rng>;
+pub type BasefoldDefault<F> = Basefold<F, BasefoldRSParams, ChaCha8Rng>;
 
 impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore> Clone for Basefold<E, Spec, Rng> {
     fn clone(&self) -> Self {

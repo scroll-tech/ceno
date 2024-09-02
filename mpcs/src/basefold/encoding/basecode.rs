@@ -424,6 +424,8 @@ pub fn query_root_table_from_rng_aes<E: ExtensionField>(
 
 #[cfg(test)]
 mod tests {
+    use crate::basefold::encoding::test_util::test_codeword_folding;
+
     use super::*;
     use goldilocks::GoldilocksExt2;
     use multilinear_extensions::mle::DenseMultilinearExtension;
@@ -453,5 +455,10 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_basecode_codeword_folding() {
+        test_codeword_folding::<GoldilocksExt2, Basecode<BasecodeDefaultSpec>>();
     }
 }

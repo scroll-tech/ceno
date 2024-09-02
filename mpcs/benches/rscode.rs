@@ -30,7 +30,7 @@ const BATCH_SIZE_LOG_END: usize = 5;
 
 fn bench_encoding(c: &mut Criterion, is_base: bool) {
     let mut group = c.benchmark_group(format!(
-        "encoding_basecode_{}",
+        "encoding_rscode_{}",
         if is_base { "base" } else { "extension" }
     ));
     group.sample_size(NUM_SAMPLES);

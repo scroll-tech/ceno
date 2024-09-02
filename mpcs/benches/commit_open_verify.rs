@@ -13,14 +13,14 @@ use mpcs::{
             PoseidonTranscript,
         },
     },
-    Basefold, BasefoldDefaultParams, Evaluation, PolynomialCommitmentScheme,
+    Basefold, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
 };
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-type Pcs = Basefold<GoldilocksExt2, BasefoldDefaultParams, ChaCha8Rng>;
+type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 type T = PoseidonTranscript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
