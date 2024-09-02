@@ -24,6 +24,7 @@ pub fn halt(exit_code: u32) -> ! {
         );
         riscv::asm::ecall();
     }
+    #[allow(clippy::empty_loop)]
     loop {}
 }
 
@@ -49,8 +50,9 @@ _start:
     ",
 );
 
+/// _start_rust is called by the assembly entry point and it calls the Rust main().
 #[no_mangle]
-pub unsafe extern "C" fn _start_rust() -> ! {
+unsafe extern "C" fn _start_rust() -> ! {
     main();
     halt(0)
 }
