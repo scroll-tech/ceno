@@ -1040,58 +1040,119 @@ mod test {
     use goldilocks::GoldilocksExt2;
     use rand_chacha::ChaCha8Rng;
 
-    use super::BasefoldRSParams;
+    use super::{structure::BasefoldBasecodeParams, BasefoldRSParams};
 
-    type PcsGoldilocks = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;
 
     #[test]
-    fn commit_open_verify_goldilocks_base() {
+    fn commit_open_verify_goldilocks_basecode_base() {
         // Challenge is over extension field, poly over the base field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<GoldilocksExt2>>(
-            true, 10, 11,
-        );
-    }
-
-    #[test]
-    fn commit_open_verify_goldilocks_2() {
-        // Both challenge and poly are over extension field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
-            false, 10, 11,
-        );
-    }
-
-    #[test]
-    fn simple_batch_commit_open_verify_goldilocks_base() {
-        // Both challenge and poly are over base field
-        run_simple_batch_commit_open_verify::<
+        run_commit_open_verify::<
             GoldilocksExt2,
-            PcsGoldilocks,
-            PoseidonTranscript<GoldilocksExt2>,
-        >(true, 10, 11, 4);
-    }
-
-    #[test]
-    fn simple_batch_commit_open_verify_goldilocks_2() {
-        // Both challenge and poly are over extension field
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
-            false, 10, 11, 4,
-        );
-    }
-
-    #[test]
-    fn batch_commit_open_verify_goldilocks_base() {
-        // Both challenge and poly are over base field
-        run_batch_commit_open_verify::<
-            GoldilocksExt2,
-            PcsGoldilocks,
+            PcsGoldilocksBaseCode,
             PoseidonTranscript<GoldilocksExt2>,
         >(true, 10, 11);
     }
 
     #[test]
-    fn batch_commit_open_verify_goldilocks_2() {
+    fn commit_open_verify_goldilocks_rscode_base() {
+        // Challenge is over extension field, poly over the base field
+        run_commit_open_verify::<
+            GoldilocksExt2,
+            PcsGoldilocksRSCode,
+            PoseidonTranscript<GoldilocksExt2>,
+        >(true, 10, 11);
+    }
+
+    #[test]
+    fn commit_open_verify_goldilocks_basecode_2() {
         // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks, PoseidonTranscript<_>>(
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode, PoseidonTranscript<_>>(
+            false, 10, 11,
+        );
+    }
+
+    #[test]
+    fn commit_open_verify_goldilocks_rscode_2() {
+        // Both challenge and poly are over extension field
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode, PoseidonTranscript<_>>(
+            false, 10, 11,
+        );
+    }
+
+    #[test]
+    fn simple_batch_commit_open_verify_goldilocks_basecode_base() {
+        // Both challenge and poly are over base field
+        run_simple_batch_commit_open_verify::<
+            GoldilocksExt2,
+            PcsGoldilocksBaseCode,
+            PoseidonTranscript<GoldilocksExt2>,
+        >(true, 10, 11, 4);
+    }
+
+    #[test]
+    fn simple_batch_commit_open_verify_goldilocks_rscode_base() {
+        // Both challenge and poly are over base field
+        run_simple_batch_commit_open_verify::<
+            GoldilocksExt2,
+            PcsGoldilocksRSCode,
+            PoseidonTranscript<GoldilocksExt2>,
+        >(true, 10, 11, 4);
+    }
+
+    #[test]
+    fn simple_batch_commit_open_verify_goldilocks_basecode_2() {
+        // Both challenge and poly are over extension field
+        run_simple_batch_commit_open_verify::<
+            GoldilocksExt2,
+            PcsGoldilocksBaseCode,
+            PoseidonTranscript<_>,
+        >(false, 10, 11, 4);
+    }
+
+    #[test]
+    fn simple_batch_commit_open_verify_goldilocks_rscode_2() {
+        // Both challenge and poly are over extension field
+        run_simple_batch_commit_open_verify::<
+            GoldilocksExt2,
+            PcsGoldilocksRSCode,
+            PoseidonTranscript<_>,
+        >(false, 10, 11, 4);
+    }
+
+    #[test]
+    fn batch_commit_open_verify_goldilocks_basecode_base() {
+        // Both challenge and poly are over base field
+        run_batch_commit_open_verify::<
+            GoldilocksExt2,
+            PcsGoldilocksBaseCode,
+            PoseidonTranscript<GoldilocksExt2>,
+        >(true, 10, 11);
+    }
+
+    #[test]
+    fn batch_commit_open_verify_goldilocks_rscode_base() {
+        // Both challenge and poly are over base field
+        run_batch_commit_open_verify::<
+            GoldilocksExt2,
+            PcsGoldilocksRSCode,
+            PoseidonTranscript<GoldilocksExt2>,
+        >(true, 10, 11);
+    }
+
+    #[test]
+    fn batch_commit_open_verify_goldilocks_basecode_2() {
+        // Both challenge and poly are over extension field
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode, PoseidonTranscript<_>>(
+            false, 10, 11,
+        );
+    }
+
+    #[test]
+    fn batch_commit_open_verify_goldilocks_rscode_2() {
+        // Both challenge and poly are over extension field
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode, PoseidonTranscript<_>>(
             false, 10, 11,
         );
     }

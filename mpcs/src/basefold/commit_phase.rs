@@ -51,7 +51,10 @@ where
     let mut running_evals = comm.polynomials_bh_evals[0].clone();
 
     #[cfg(feature = "sanity-check")]
-    assert_eq!(running_oracle.len(), running_evals.len() << log_rate);
+    assert_eq!(
+        running_oracle.len(),
+        running_evals.len() << Spec::get_rate_log()
+    );
     #[cfg(feature = "sanity-check")]
     assert_eq!(running_evals.len(), 1 << num_vars);
 
