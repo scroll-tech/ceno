@@ -384,6 +384,10 @@ where
         return Spec::get_basecode_msg_size_log();
     }
 
+    fn message_need_bit_reversion() -> bool {
+        false
+    }
+
     fn prover_folding_coeffs(pp: &Self::ProverParameters, level: usize, index: usize) -> (E, E, E) {
         // level is the logarithmic of the codeword size after folded.
         // Therefore, the domain after folded is gamma^2^(full_log_n - level) H

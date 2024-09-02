@@ -49,6 +49,12 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
 
     fn get_basecode_msg_size_log() -> usize;
 
+    /// Whether the message needs to be bit-reversed to allow even-odd
+    /// folding. If the folding is already even-odd style (like RS code),
+    /// then set this function to return false. If the folding is originally
+    /// left-right, like basefold, then return true.
+    fn message_need_bit_reversion() -> bool;
+
     /// Returns three values: x0, x1 and 1/(x1-x0). Note that although
     /// 1/(x1-x0) can be computed from the other two values, we return it
     /// separately because inversion is expensive.
@@ -104,6 +110,9 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
 
     /// Fold the given message into a smaller message of half size using challenge
     /// as the random linear combination coefficient.
+    /// Note that this is always even-odd fold, assuming the message has
+    /// been bit-reversed (or not) according to the setting
+    /// of the `message_need_bit_reversion` function.
     fn fold_message(msg: &FieldType<E>, challenge: E) -> Vec<E> {
         match msg {
             FieldType::Ext(msg) => msg
@@ -167,12 +176,17 @@ pub(crate) mod test_util {
         let (pp, _) = Code::trim(&pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         reverse_index_bits_in_place_field_type(&mut codeword);
-        reverse_index_bits_in_place_field_type(&mut poly);
+        if Code::message_need_bit_reversion() {
+            reverse_index_bits_in_place_field_type(&mut poly);
+        }
         let challenge = E::from(2);
         let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
         let mut folded_message = FieldType::Ext(Code::fold_message(&poly, challenge));
-        // Reverse the message back before encoding
-        reverse_index_bits_in_place_field_type(&mut folded_message);
+        if Code::message_need_bit_reversion() {
+            // Reverse the message back before encoding if it has been
+            // bit-reversed
+            reverse_index_bits_in_place_field_type(&mut folded_message);
+        }
         let mut encoded_folded_message = Code::encode(&pp, &folded_message);
         reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
         let encoded_folded_message = match encoded_folded_message {

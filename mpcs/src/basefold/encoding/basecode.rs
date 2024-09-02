@@ -186,6 +186,10 @@ where
         return Spec::get_basecode_msg_size_log();
     }
 
+    fn message_need_bit_reversion() -> bool {
+        true
+    }
+
     fn prover_folding_coeffs(pp: &Self::ProverParameters, level: usize, index: usize) -> (E, E, E) {
         let level = &pp.table_w_weights[level];
         (
