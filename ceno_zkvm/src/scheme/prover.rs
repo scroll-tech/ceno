@@ -1,15 +1,15 @@
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use ff_ext::ExtensionField;
 
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly::build_eq_x_r_vec,
+    mle::{IntoMLE, MultilinearExtension},
+    util::ceil_log2,
+    virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use multilinear_extensions::mle::MultilinearExtension;
 use sumcheck::{
     entered_span, exit_span,
     structs::{IOPProverMessage, IOPProverStateV2},
