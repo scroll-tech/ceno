@@ -1,19 +1,21 @@
 use std::marker::PhantomData;
 
+use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
+use super::{
+    constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
+    RIVInstruction,
+};
 use crate::{
     chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::Instruction,
+    set_val,
 };
-
-use super::{
-    constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
-    RIVInstruction,
-};
+use core::mem::MaybeUninit;
 
 pub struct AddInstruction;
 pub struct SubInstruction;
@@ -140,6 +142,42 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
     ) -> Result<InstructionConfig<E>, ZKVMError> {
         add_sub_gadget::<E, true>(circuit_builder)
     }
+
+    #[allow(clippy::option_map_unit_fn)]
+    fn assign_instance(
+        config: &Self::InstructionConfig,
+        instance: &mut [MaybeUninit<E>],
+        _step: StepRecord,
+    ) -> Result<(), ZKVMError> {
+        // TODO use field from step
+        set_val!(instance, config.pc, 1);
+        set_val!(instance, config.ts, 2);
+        config.prev_rd_value.wits_in().map(|prev_rd_value| {
+            set_val!(instance, prev_rd_value[0], 4);
+            set_val!(instance, prev_rd_value[1], 4);
+        });
+        config.addend_0.wits_in().map(|addend_0| {
+            set_val!(instance, addend_0[0], 4);
+            set_val!(instance, addend_0[1], 4);
+        });
+        config.addend_1.wits_in().map(|addend_1| {
+            set_val!(instance, addend_1[0], 4);
+            set_val!(instance, addend_1[1], 4);
+        });
+        // TODO #174
+        config.outcome.carries.as_ref().map(|carry| {
+            set_val!(instance, carry[0], 4);
+            set_val!(instance, carry[1], 0);
+        });
+        // TODO #167
+        set_val!(instance, config.rs1_id, 2);
+        set_val!(instance, config.rs2_id, 2);
+        set_val!(instance, config.rd_id, 2);
+        set_val!(instance, config.prev_rs1_ts, 2);
+        set_val!(instance, config.prev_rs2_ts, 2);
+        set_val!(instance, config.prev_rd_ts, 2);
+        Ok(())
+    }
 }
 
 impl<E: ExtensionField> Instruction<E> for SubInstruction {
@@ -150,13 +188,51 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
     ) -> Result<InstructionConfig<E>, ZKVMError> {
         add_sub_gadget::<E, false>(circuit_builder)
     }
+
+    #[allow(clippy::option_map_unit_fn)]
+    fn assign_instance(
+        config: &Self::InstructionConfig,
+        instance: &mut [MaybeUninit<E>],
+        _step: StepRecord,
+    ) -> Result<(), ZKVMError> {
+        // TODO use field from step
+        set_val!(instance, config.pc, _step.pc().before.0 as u64);
+        set_val!(instance, config.ts, 2);
+        config.prev_rd_value.wits_in().map(|prev_rd_value| {
+            set_val!(instance, prev_rd_value[0], 4);
+            set_val!(instance, prev_rd_value[1], 4);
+        });
+        config.addend_0.wits_in().map(|addend_0| {
+            set_val!(instance, addend_0[0], 4);
+            set_val!(instance, addend_0[1], 4);
+        });
+        config.addend_1.wits_in().map(|addend_1| {
+            set_val!(instance, addend_1[0], 4);
+            set_val!(instance, addend_1[1], 4);
+        });
+        // TODO #174
+        config.outcome.carries.as_ref().map(|carry| {
+            set_val!(instance, carry[0], 4);
+            set_val!(instance, carry[1], 0);
+        });
+        // TODO #167
+        set_val!(instance, config.rs1_id, 2);
+        set_val!(instance, config.rs2_id, 2);
+        set_val!(instance, config.rd_id, 2);
+        set_val!(instance, config.prev_rs1_ts, 2);
+        set_val!(instance, config.prev_rs2_ts, 2);
+        set_val!(instance, config.prev_rd_ts, 2);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use ff_ext::ExtensionField;
-    use goldilocks::{Goldilocks, GoldilocksExt2};
-    use multilinear_extensions::mle::IntoMLE;
+
+    use ceno_emul::StepRecord;
+    use goldilocks::GoldilocksExt2;
+    use itertools::Itertools;
+    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -167,7 +243,6 @@ mod test {
     use super::AddInstruction;
 
     #[test]
-    #[allow(clippy::option_map_unit_fn)]
     fn test_add_construct_circuit() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -182,43 +257,22 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let empty = vec![Goldilocks::from(0)].into_mle().into();
-        let mut wits_in = vec![empty; cb.cs.num_witin as usize];
+        let raw_witin = AddInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::default()],
+        )
+        .unwrap();
 
-        wits_in[config.pc.id as usize] = vec![Goldilocks::from(1)].into_mle().into();
-        wits_in[config.ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
-        config.prev_rd_value.wits_in().map(|prev_rd_value| {
-            wits_in[prev_rd_value[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-            wits_in[prev_rd_value[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-        });
-        config.addend_0.wits_in().map(|addend_0| {
-            wits_in[addend_0[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-            wits_in[addend_0[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-        });
-        config.addend_1.wits_in().map(|addend_1| {
-            wits_in[addend_1[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-            wits_in[addend_1[1].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-        });
-        // TODO #174
-        config.outcome.carries.map(|carry| {
-            wits_in[carry[0].id as usize] = vec![Goldilocks::from(4)].into_mle().into();
-            wits_in[carry[1].id as usize] = vec![Goldilocks::from(0)].into_mle().into();
-        });
-        // TODO #167
-        wits_in[config.rs1_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
-        wits_in[config.rs2_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
-        wits_in[config.rd_id.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
-        wits_in[config.prev_rs1_ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
-        wits_in[config.prev_rs2_ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
-        wits_in[config.prev_rd_ts.id as usize] = vec![Goldilocks::from(2)].into_mle().into();
-
-        MockProver::assert_satisfied(&mut cb, &wits_in, None);
-    }
-
-    fn bench_add_instruction_helper<E: ExtensionField>(_instance_num_vars: usize) {}
-
-    #[test]
-    fn bench_add_instruction() {
-        bench_add_instruction_helper::<GoldilocksExt2>(10);
+        MockProver::assert_satisfied(
+            &mut cb,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            None,
+        );
     }
 }

@@ -274,6 +274,7 @@ name = "ceno_zkvm"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "ceno_emul",
  "cfg-if",
  "const_env",
  "criterion",
