@@ -55,8 +55,8 @@ impl<E: ExtensionField> MockProverError<E> {
                 println!(
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
                     Expression: {expression_fmt}\n\
-                    Wtns@{inst_id}: {wtns_fmt}\n\
-                    Evaluation: {eval_fmt} != 0\n",
+                    Evaluation: {eval_fmt} != 0\n\
+                    Inst[{inst_id}]: {wtns_fmt}\n",
                 );
             }
             Self::AssertEqualError {
@@ -74,11 +74,10 @@ impl<E: ExtensionField> MockProverError<E> {
                 let right_eval_fmt = fmt_field::<E>(right);
                 println!(
                     "\nAssertEqualError {name:?}\n\
+                    Left: {left_eval_fmt} != Right: {right_eval_fmt}\n\
                     Left Expression: {left_expression_fmt}\n\
                     Right Expression: {right_expression_fmt}\n\
-                    Wtns@{inst_id}: {wtns_fmt}\n\
-                    Left: {left_eval_fmt} != Right: {right_eval_fmt}\n\
-                    ",
+                    Inst[{inst_id}]: {wtns_fmt}\n",
                 );
             }
             Self::LookupError {
@@ -93,8 +92,8 @@ impl<E: ExtensionField> MockProverError<E> {
                 println!(
                     "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\n\
                     Expression: {expression_fmt}\n\
-                    Wtns@{inst_id}: {wtns_fmt}\n\
-                    Evaluation: {eval_fmt}\n",
+                    Evaluation: {eval_fmt}\n\
+                    Inst[{inst_id}]: {wtns_fmt}\n",
                 );
             }
         }
@@ -151,14 +150,14 @@ impl<E: ExtensionField> MockProverError<E> {
         }
 
         fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField) -> String {
-            let name = format!("{:?}", base_field);
-            let name = name.split('(').next().unwrap_or("Field");
+            // let name = format!("{:?}", base_field);
+            // let name = name.split('(').next().unwrap_or("Field");
             let value = base_field.to_canonical_u64();
 
             if value < E::BaseField::MODULUS_U64 - 100000 {
-                format!("{name}({value})")
+                format!("{value}")
             } else {
-                format!("{name}(-{})", E::BaseField::MODULUS_U64 - value)
+                format!("(-{})", E::BaseField::MODULUS_U64 - value)
             }
         }
 
