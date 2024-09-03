@@ -28,6 +28,7 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub addend_0: RegUInt<E>,
     pub addend_1: RegUInt<E>,
     pub outcome: RegUInt<E>,
+    pub is_wrapping_add_sub: WitIn,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
@@ -59,25 +60,38 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     // Execution result = addend0 + addend1, with carry.
     let prev_rd_value = RegUInt::new(|| "prev_rd_value", circuit_builder)?;
 
-    let (addend_0, addend_1, outcome) = if IS_ADD {
+    let (addend_0, addend_1, outcome, is_wrapping_add_sub) = if IS_ADD {
+        let overflow = circuit_builder.create_witin(|| "overflow")?;
         // outcome = addend_0 + addend_1
-        let addend_0 = RegUInt::new(|| "addend_0", circuit_builder)?;
-        let addend_1 = RegUInt::new(|| "addend_1", circuit_builder)?;
+        let addend_0 = RegUInt::new_unchecked(|| "addend_0", circuit_builder)?;
+        let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
         (
             addend_0.clone(),
             addend_1.clone(),
-            addend_0.add(|| "outcome", circuit_builder, &addend_1)?,
+            addend_0.add(
+                || "outcome",
+                circuit_builder,
+                &addend_1,
+                Some(overflow.expr()),
+            )?,
+            overflow,
         )
     } else {
+        let underflow = circuit_builder.create_witin(|| "underflow")?;
         // outcome + addend_1 = addend_0
+        // outcome is the new value to be updated in register so we need to constrain its range
         let outcome = RegUInt::new(|| "outcome", circuit_builder)?;
-        let addend_1 = RegUInt::new(|| "addend_1", circuit_builder)?;
+        let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
         (
-            addend_1
-                .clone()
-                .add(|| "addend_0", circuit_builder, &outcome.clone())?,
+            addend_1.clone().add(
+                || "addend_0",
+                circuit_builder,
+                &outcome.clone(),
+                Some(underflow.expr()),
+            )?,
             addend_1,
             outcome,
+            underflow,
         )
     };
 
@@ -124,6 +138,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         addend_0,
         addend_1,
         outcome,
+        is_wrapping_add_sub,
         rs1_id,
         rs2_id,
         rd_id,
@@ -164,9 +179,8 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             set_val!(instance, addend_1[0], 4);
             set_val!(instance, addend_1[1], 4);
         });
-        // TODO #174
         config.outcome.carries.as_ref().map(|carry| {
-            set_val!(instance, carry[0], 4);
+            set_val!(instance, carry[0], 0);
             set_val!(instance, carry[1], 0);
         });
         // TODO #167

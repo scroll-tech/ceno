@@ -60,13 +60,31 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
+        Self::new_maybe_unchecked(name_fn, circuit_builder, true)
+    }
+
+    pub fn new_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<Self, ZKVMError> {
+        Self::new_maybe_unchecked(name_fn, circuit_builder, false)
+    }
+
+    fn new_maybe_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+        is_check: bool,
+    ) -> Result<Self, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             Ok(UInt {
                 limbs: UintLimb::WitIn(
                     (0..Self::NUM_CELLS)
                         .map(|i| {
                             let w = cb.create_witin(|| format!("limb_{i}"))?;
-                            cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
+                            if is_check {
+                                cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
+                            }
+                            // skip range check
                             Ok(w)
                         })
                         .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
@@ -89,9 +107,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
-    pub fn new_limb_as_expr() -> Self {
+    /// expr_limbs is little endian order
+    pub fn new_as_empty() -> Self {
         Self {
-            limbs: UintLimb::Expression(Vec::new()),
+            limbs: UintLimb::Expression(vec![]),
             carries: None,
         }
     }
@@ -209,6 +228,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             })
             .collect_vec();
         UInt::<M, 8, E>::create_witin_from_exprs(circuit_builder, split_limbs)
+    }
+
+    pub fn new_from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Result<Self, ZKVMError> {
+        let n = Self {
+            limbs: UintLimb::Expression(expr_limbs),
+            carries: None,
+        };
+        Ok(n)
     }
 
     /// If current limbs are Expression, this function will create witIn and replace the limbs
