@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use ff_ext::ExtensionField;
 
@@ -8,6 +9,7 @@ use multilinear_extensions::{
     virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use multilinear_extensions::mle::MultilinearExtension;
 use sumcheck::{
     entered_span, exit_span,
     structs::{IOPProverMessage, IOPProverStateV2},
@@ -440,11 +442,11 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let fixed = self
             .pk
             .fixed_traces
-            .clone()
-            .unwrap()
-            .into_iter()
-            .map(|f| f.into())
-            .collect_vec();
+            .as_ref()
+            .expect("pk.fixed_traces must not be none for table circuit")
+            .iter()
+            .map(|f| -> ArcMultilinearExtension<E> { Arc::new(f.get_ranged_mle(1, 0)) })
+            .collect::<Vec<ArcMultilinearExtension<E>>>();
         let log2_num_instances = ceil_log2(num_instances);
         let next_pow2_instances = 1 << log2_num_instances;
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
@@ -476,7 +478,6 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let (lk_d_wit, lk_n_wit) = records_wit.split_at(cs.lk_table_expressions.len());
         exit_span!(span);
 
-        // product constraint: tower witness inference
         let lk_counts_per_instance = cs.lk_table_expressions.len();
         let log2_lk_count = ceil_log2(lk_counts_per_instance);
 
@@ -543,6 +544,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         );
 
         let num_threads = proper_num_threads(log2_num_instances, max_threads);
+        // 2 for denominator and numerator
         let alpha_pow =
             get_challenge_pows(2 + cs.assert_zero_sumcheck_expressions.len(), transcript);
         let mut alpha_pow_iter = alpha_pow.iter();

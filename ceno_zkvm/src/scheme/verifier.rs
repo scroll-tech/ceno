@@ -289,6 +289,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         // verify zero statement (degree > 1) + sel sumcheck
         let rt_lk: Vec<E> = logup_p_evals[0].point.to_vec();
 
+        // 2 for denominator and numerator
         let alpha_pow =
             get_challenge_pows(2 + cs.assert_zero_sumcheck_expressions.len(), transcript);
         let mut alpha_pow_iter = alpha_pow.iter();

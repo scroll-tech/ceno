@@ -343,19 +343,7 @@ pub(crate) fn eval_by_expr<E: ExtensionField>(
     challenges: &[E],
     expr: &Expression<E>,
 ) -> E {
-    expr.evaluate::<E>(
-        &|_| unreachable!(),
-        &|witness_id| witnesses[witness_id as usize],
-        &|scalar| scalar.into(),
-        &|challenge_id, pow, scalar, offset| {
-            // TODO cache challenge power to be acquired once for each power
-            let challenge = challenges[challenge_id as usize];
-            challenge.pow([pow as u64]) * scalar + offset
-        },
-        &|a, b| a + b,
-        &|a, b| a * b,
-        &|x, a, b| a * x + b,
-    )
+    eval_by_expr_with_fixed(&[], witnesses, challenges, expr)
 }
 
 pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(

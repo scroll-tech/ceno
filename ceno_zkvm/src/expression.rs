@@ -108,12 +108,13 @@ impl<E: ExtensionField> Expression<E> {
 
     fn is_monomial_form_inner(s: MonomialState, expr: &Expression<E>) -> bool {
         match (expr, s) {
-            (Expression::Fixed(_), MonomialState::SumTerm) => true,
-            (Expression::Fixed(_), MonomialState::ProductTerm) => true,
-            (Expression::WitIn(_), MonomialState::SumTerm) => true,
-            (Expression::WitIn(_), MonomialState::ProductTerm) => true,
-            (Expression::Constant(_), MonomialState::SumTerm) => true,
-            (Expression::Constant(_), MonomialState::ProductTerm) => true,
+            (
+                Expression::Fixed(_)
+                | Expression::WitIn(_)
+                | Expression::Challenge(..)
+                | Expression::Constant(_),
+                _,
+            ) => true,
             (Expression::Sum(a, b), MonomialState::SumTerm) => {
                 Self::is_monomial_form_inner(MonomialState::SumTerm, a)
                     && Self::is_monomial_form_inner(MonomialState::SumTerm, b)
@@ -129,8 +130,6 @@ impl<E: ExtensionField> Expression<E> {
             }
             (Expression::ScaledSum(_, _, _), MonomialState::SumTerm) => true,
             (Expression::ScaledSum(_, _, b), MonomialState::ProductTerm) => Self::is_zero_expr(b),
-            (Expression::Challenge(_, _, _, _), MonomialState::SumTerm) => true,
-            (Expression::Challenge(_, _, _, _), MonomialState::ProductTerm) => true,
         }
     }
 }
@@ -139,12 +138,7 @@ impl<E: ExtensionField> Neg for Expression<E> {
     type Output = Expression<E>;
     fn neg(self) -> Self::Output {
         match self {
-            Expression::Fixed(_) => Expression::ScaledSum(
-                Box::new(self),
-                Box::new(Expression::Constant(E::BaseField::ONE.neg())),
-                Box::new(Expression::Constant(E::BaseField::ZERO)),
-            ),
-            Expression::WitIn(_) => Expression::ScaledSum(
+            Expression::Fixed(_) | Expression::WitIn(_) => Expression::ScaledSum(
                 Box::new(self),
                 Box::new(Expression::Constant(E::BaseField::ONE.neg())),
                 Box::new(Expression::Constant(E::BaseField::ZERO)),

@@ -62,7 +62,7 @@ impl NameSpace {
 }
 
 #[derive(Clone, Debug)]
-pub struct LookupTableExpression<E: ExtensionField> {
+pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
 }
@@ -86,7 +86,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
     pub lk_expressions_namespace_map: Vec<String>,
-    pub lk_table_expressions: Vec<LookupTableExpression<E>>,
+    pub lk_table_expressions: Vec<LogupTableExpression<E>>,
     pub lk_table_expressions_namespace_map: Vec<String>,
 
     /// main constraints zero expression
@@ -206,7 +206,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             "rlc record degree {} != 1",
             rlc_record.degree()
         );
-        self.lk_table_expressions.push(LookupTableExpression {
+        self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
             multiplicity,
         });
