@@ -298,9 +298,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             alpha_pow_iter.next().unwrap(),
             alpha_pow_iter.next().unwrap(),
         );
-        // alpha_lk * (out_lk_q - chip_record_alpha) + alpha_lk_n * out_lk_p
-        let claim_sum = *alpha_lk_d * (logup_q_evals[0].eval - chip_record_alpha)
-            + *alpha_lk_n * logup_p_evals[0].eval;
+        // alpha_lk * (out_lk_q - one) + alpha_lk_n * out_lk_p
+        let claim_sum =
+            *alpha_lk_d * (logup_q_evals[0].eval - E::ONE) + *alpha_lk_n * logup_p_evals[0].eval;
         let sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {

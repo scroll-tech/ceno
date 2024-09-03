@@ -285,7 +285,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 if num_instances < sel_non_lc_zero_sumcheck.len() {
                     sel_non_lc_zero_sumcheck.splice(
                         num_instances..sel_non_lc_zero_sumcheck.len(),
-                        std::iter::repeat(E::ZERO),
+                        std::iter::repeat(E::ZERO)
+                            .take(sel_non_lc_zero_sumcheck.len() - num_instances),
                     );
                 }
                 let sel_non_lc_zero_sumcheck: ArcMultilinearExtension<E> =
@@ -449,7 +450,6 @@ impl<E: ExtensionField> ZKVMProver<E> {
             .collect::<Vec<ArcMultilinearExtension<E>>>();
         let log2_num_instances = ceil_log2(num_instances);
         let next_pow2_instances = 1 << log2_num_instances;
-        let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);
@@ -484,12 +484,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
         // infer all tower witness after last layer
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
-        let lk_denominator_last_layer = interleaving_mles_to_mles(
-            lk_d_wit,
-            log2_num_instances,
-            NUM_FANIN_LOGUP,
-            chip_record_alpha,
-        );
+        let lk_denominator_last_layer =
+            interleaving_mles_to_mles(lk_d_wit, log2_num_instances, NUM_FANIN_LOGUP, E::ONE);
         let lk_numerator_last_layer =
             interleaving_mles_to_mles(lk_n_wit, log2_num_instances, NUM_FANIN_LOGUP, E::ZERO);
         assert_eq!(lk_denominator_last_layer.len(), NUM_FANIN_LOGUP);
@@ -551,7 +547,6 @@ impl<E: ExtensionField> ZKVMProver<E> {
         );
         // create selector: all ONE, but padding ZERO to ceil_log2
         let sel_lk: ArcMultilinearExtension<E> = {
-            // TODO sel can be shared if expression count match
             let mut sel_lk = build_eq_x_r_vec(&rt_lk[log2_lk_count..]);
             if num_instances < sel_lk.len() {
                 sel_lk.splice(
@@ -571,12 +566,10 @@ impl<E: ExtensionField> ZKVMProver<E> {
             // \sum_t (sel(rt, t) * (\sum_i alpha_lk_d * eq(rs, i) * lk_d_record[i]))
             virtual_polys.add_mle_list(vec![&sel_lk, &lk_d_wit[i]], eq_lk[i] * alpha_lk_d);
         }
-        // \sum_t alpha_lk * sel(rt, t) * chip_record_alpha * (\sum_i (eq(rs, i)) - 1)
+        // \sum_t alpha_lk_d * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_lk],
-            *alpha_lk_d
-                * chip_record_alpha
-                * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE),
+            *alpha_lk_d * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE),
         );
 
         // lk numerator
