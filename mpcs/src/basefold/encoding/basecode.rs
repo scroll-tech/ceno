@@ -39,7 +39,7 @@ pub struct BasecodeDefaultSpec {}
 
 impl BasecodeSpec for BasecodeDefaultSpec {
     fn get_number_queries() -> usize {
-        260
+        766
     }
 
     fn get_rate_log() -> usize {

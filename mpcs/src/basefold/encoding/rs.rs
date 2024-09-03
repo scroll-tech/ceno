@@ -238,7 +238,7 @@ pub struct RSCodeDefaultSpec {}
 
 impl RSCodeSpec for RSCodeDefaultSpec {
     fn get_number_queries() -> usize {
-        260
+        336
     }
 
     fn get_rate_log() -> usize {
