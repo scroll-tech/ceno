@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt, mem};
 use crate::{
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     rv32im::DecodedInstruction,
-    Addr, CENO_PLATFORM,
+    CENO_PLATFORM,
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -19,10 +19,10 @@ pub struct StepRecord {
     pc: Change<ByteAddr>,
     insn_code: Word,
 
-    rs1: Option<(RegIdx, Word, Cycle)>,
-    rs2: Option<(RegIdx, Word, Cycle)>,
+    rs1: Option<(WordAddr, Word, Cycle)>,
+    rs2: Option<(WordAddr, Word, Cycle)>,
 
-    rd: Option<(RegIdx, Change<Word>, Cycle)>,
+    rd: Option<(WordAddr, Change<Word>, Cycle)>,
 
     memory_op: Option<(WordAddr, Change<Word>, Cycle)>,
 }
@@ -44,15 +44,15 @@ impl StepRecord {
         DecodedInstruction::new(self.insn_code)
     }
 
-    pub fn rs1(&self) -> Option<(RegIdx, Word, Cycle)> {
+    pub fn rs1(&self) -> Option<(WordAddr, Word, Cycle)> {
         self.rs1
     }
 
-    pub fn rs2(&self) -> Option<(RegIdx, Word, Cycle)> {
+    pub fn rs2(&self) -> Option<(WordAddr, Word, Cycle)> {
         self.rs2
     }
 
-    pub fn rd(&self) -> Option<(RegIdx, Change<Word>, Cycle)> {
+    pub fn rd(&self) -> Option<(WordAddr, Change<Word>, Cycle)> {
         self.rd
     }
 
@@ -65,7 +65,7 @@ impl StepRecord {
 pub struct Tracer {
     record: StepRecord,
 
-    latest_accesses: HashMap<Addr, Cycle>,
+    latest_accesses: HashMap<WordAddr, Cycle>,
 }
 
 impl Tracer {
@@ -81,19 +81,19 @@ impl Tracer {
         self.record.cycle = record.cycle + 1;
 
         // Track this step as the origin of its memory accesses.
-        let mut track_mem = |vma| self.latest_accesses.insert(vma, record.cycle);
+        let mut track_mem = |addr| self.latest_accesses.insert(addr, record.cycle);
 
-        if let Some((idx, _, _)) = record.rs1 {
-            track_mem(CENO_PLATFORM.register_vma(idx));
+        if let Some((addr, _, _)) = record.rs1 {
+            track_mem(addr);
         }
-        if let Some((idx, _, _)) = record.rs2 {
-            track_mem(CENO_PLATFORM.register_vma(idx));
+        if let Some((addr, _, _)) = record.rs2 {
+            track_mem(addr);
         }
-        if let Some((idx, _, _)) = record.rd {
-            track_mem(CENO_PLATFORM.register_vma(idx));
+        if let Some((addr, _, _)) = record.rd {
+            track_mem(addr);
         }
         if let Some((addr, _, _)) = record.memory_op {
-            track_mem(addr.into());
+            track_mem(addr);
         }
 
         record
@@ -109,15 +109,15 @@ impl Tracer {
     }
 
     pub fn load_register(&mut self, idx: RegIdx, value: Word) {
-        let vma = CENO_PLATFORM.register_vma(idx);
-        let prev_cycle = self.latest_accesses(vma);
+        let addr = CENO_PLATFORM.register_vma(idx).into();
+        let prev_cycle = self.latest_accesses(addr);
 
         match (self.record.rs1, self.record.rs2) {
             (None, None) => {
-                self.record.rs1 = Some((idx, value, prev_cycle));
+                self.record.rs1 = Some((addr, value, prev_cycle));
             }
             (Some(_), None) => {
-                self.record.rs2 = Some((idx, value, prev_cycle));
+                self.record.rs2 = Some((addr, value, prev_cycle));
             }
             _ => unimplemented!("Only two register reads are supported"),
         }
@@ -125,9 +125,9 @@ impl Tracer {
 
     pub fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
         if self.record.rd.is_none() {
-            let vma = CENO_PLATFORM.register_vma(idx);
-            let prev_cycle = self.latest_accesses(vma);
-            self.record.rd = Some((idx, value, prev_cycle));
+            let addr = CENO_PLATFORM.register_vma(idx).into();
+            let prev_cycle = self.latest_accesses(addr);
+            self.record.rd = Some((addr, value, prev_cycle));
         } else {
             unimplemented!("Only one register write is supported");
         }
@@ -138,7 +138,7 @@ impl Tracer {
             unimplemented!("Only one memory access is supported");
         }
 
-        let prev_cycle = self.latest_accesses(addr.into());
+        let prev_cycle = self.latest_accesses(addr);
         self.record.memory_op = Some((addr, Change::new(value, value), prev_cycle));
     }
 
@@ -147,11 +147,11 @@ impl Tracer {
             unimplemented!("Only one memory access is supported");
         }
 
-        let prev_cycle = self.latest_accesses(addr.into());
+        let prev_cycle = self.latest_accesses(addr);
         self.record.memory_op = Some((addr, value, prev_cycle));
     }
 
-    fn latest_accesses(&self, addr: Addr) -> Cycle {
+    fn latest_accesses(&self, addr: WordAddr) -> Cycle {
         *self.latest_accesses.get(&addr).unwrap_or(&0)
     }
 }

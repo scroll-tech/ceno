@@ -15,7 +15,7 @@ pub struct VMState {
     platform: Platform,
     pc: u32,
     /// Map a word-address (addr/4) to a word.
-    memory: HashMap<u32, u32>,
+    memory: HashMap<WordAddr, u32>,
     registers: [u32; 32],
     // Termination.
     succeeded: bool,
@@ -50,7 +50,7 @@ impl VMState {
 
     /// Set a word in memory without side-effects.
     pub fn init_memory(&mut self, addr: WordAddr, value: u32) {
-        self.memory.insert(addr.0, value);
+        self.memory.insert(addr, value);
     }
 
     pub fn iter_until_success(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
@@ -137,13 +137,13 @@ impl EmuContext for VMState {
     fn store_memory(&mut self, addr: WordAddr, after: u32) -> Result<()> {
         let before = self.peek_memory(addr);
         self.tracer.store_memory(addr, Change { after, before });
-        self.memory.insert(addr.0, after);
+        self.memory.insert(addr, after);
         Ok(())
     }
 
     /// Get the value of a memory word without side-effects.
     fn peek_memory(&self, addr: WordAddr) -> u32 {
-        *self.memory.get(&addr.0).unwrap_or(&0)
+        *self.memory.get(&addr).unwrap_or(&0)
     }
 
     fn fetch(&mut self, pc: WordAddr) -> Result<u32> {

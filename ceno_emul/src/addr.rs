@@ -28,7 +28,7 @@ pub type RegIdx = usize;
 pub struct ByteAddr(pub u32);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct WordAddr(pub u32);
+pub struct WordAddr(u32);
 
 impl From<ByteAddr> for WordAddr {
     fn from(addr: ByteAddr) -> Self {
