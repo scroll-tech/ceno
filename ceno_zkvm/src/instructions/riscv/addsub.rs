@@ -28,7 +28,6 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub addend_0: RegUInt<E>,
     pub addend_1: RegUInt<E>,
     pub outcome: RegUInt<E>,
-    pub is_wrapping_add_sub: WitIn,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
@@ -60,38 +59,26 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     // Execution result = addend0 + addend1, with carry.
     let prev_rd_value = RegUInt::new(|| "prev_rd_value", circuit_builder)?;
 
-    let (addend_0, addend_1, outcome, is_wrapping_add_sub) = if IS_ADD {
-        let overflow = circuit_builder.create_witin(|| "overflow")?;
+    let (addend_0, addend_1, outcome) = if IS_ADD {
         // outcome = addend_0 + addend_1
         let addend_0 = RegUInt::new_unchecked(|| "addend_0", circuit_builder)?;
         let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
         (
             addend_0.clone(),
             addend_1.clone(),
-            addend_0.add(
-                || "outcome",
-                circuit_builder,
-                &addend_1,
-                Some(overflow.expr()),
-            )?,
-            overflow,
+            addend_0.add(|| "outcome", circuit_builder, &addend_1, true)?,
         )
     } else {
-        let underflow = circuit_builder.create_witin(|| "underflow")?;
         // outcome + addend_1 = addend_0
         // outcome is the new value to be updated in register so we need to constrain its range
         let outcome = RegUInt::new(|| "outcome", circuit_builder)?;
         let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
         (
-            addend_1.clone().add(
-                || "addend_0",
-                circuit_builder,
-                &outcome.clone(),
-                Some(underflow.expr()),
-            )?,
+            addend_1
+                .clone()
+                .add(|| "addend_0", circuit_builder, &outcome.clone(), true)?,
             addend_1,
             outcome,
-            underflow,
         )
     };
 
@@ -138,7 +125,6 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         addend_0,
         addend_1,
         outcome,
-        is_wrapping_add_sub,
         rs1_id,
         rs2_id,
         rd_id,
@@ -250,14 +236,50 @@ mod test {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
+        instructions::{riscv::constants::RegUInt, Instruction},
         scheme::mock_prover::MockProver,
     };
 
     use super::AddInstruction;
 
     #[test]
-    fn test_add_construct_circuit() {
+    #[allow(clippy::option_map_unit_fn)]
+    fn test_opcode_add() {
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = cb
+            .namespace(
+                || "add",
+                |cb| {
+                    let config = AddInstruction::construct_circuit(cb);
+                    Ok(config)
+                },
+            )
+            .unwrap()
+            .unwrap();
+
+        let raw_witin = AddInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::default()],
+        )
+        .unwrap();
+
+        MockProver::assert_satisfied(
+            &mut cb,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            None,
+        );
+    }
+
+    #[test]
+    #[allow(clippy::option_map_unit_fn)]
+    fn test_opcode_add_overflow() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb

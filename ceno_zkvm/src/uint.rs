@@ -266,11 +266,17 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         &mut self,
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
+        with_overflow: bool,
     ) -> Result<(), ZKVMError> {
         if self.carries.is_none() {
             circuit_builder.namespace(name_fn, |cb| {
+                let carries_len = if with_overflow {
+                    Self::NUM_CELLS
+                } else {
+                    Self::NUM_CELLS - 1
+                };
                 self.carries = Some(
-                    (0..Self::NUM_CELLS)
+                    (0..carries_len)
                         .map(|i| {
                             let c = cb.create_witin(|| format!("carry_{i}"))?;
                             cb.assert_ux::<_, _, C>(|| format!("carry_{i}_in_{C}"), c.expr())?;
