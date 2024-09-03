@@ -108,7 +108,7 @@ mod tests {
                     .into_values()
                     .map(|mle| mle.into())
                     .collect_vec(),
-                1 << 16,
+                (1 << 16) - 5, // to test non-power-of-2 case
                 1,
                 &mut transcript,
                 &challenges,
