@@ -1,4 +1,5 @@
 #![feature(box_patterns)]
+#![feature(stmt_expr_attributes)]
 
 pub mod error;
 pub mod instructions;

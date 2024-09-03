@@ -284,6 +284,7 @@ dependencies = [
  "multilinear_extensions",
  "paste",
  "pprof",
+ "rand",
  "rayon",
  "serde",
  "strum 0.25.0",

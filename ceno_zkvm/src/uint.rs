@@ -25,7 +25,6 @@ pub enum UintLimb<E: ExtensionField> {
     Expression(Vec<Expression<E>>),
 }
 
-#[derive(Clone, Debug)]
 impl<E: ExtensionField> UintLimb<E> {
     pub fn iter(&self) -> impl Iterator<Item = &WitIn> {
         match self {
@@ -46,8 +45,7 @@ impl<E: ExtensionField> Index<usize> for UintLimb<E> {
     }
 }
 
-#[derive(Clone)]
->>>>>>> 29d196c (implement opcode blt)
+#[derive(Clone, Debug)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
 pub struct UInt<const M: usize, const C: usize, E: ExtensionField> {
@@ -110,7 +108,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                     .assert_ux::<_, _, C>(|| "range check", w.expr())
                     .unwrap();
                 circuit_builder
-                    .require_zero(|| "zero check", w.expr() - expr_limbs[i].clone())
+                    .require_zero(
+                        || "create_witin_from_expr",
+                        w.expr() - expr_limbs[i].clone(),
+                    )
                     .unwrap();
                 w
             })
@@ -126,9 +127,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         V: FnOnce() -> Vec<E>,
     {
         let values = to();
-        assert!(values.len() == Self::NUM_CELLS);
+        assert!(
+            values.len() == Self::NUM_CELLS,
+            "assign input length mismatch. input_len={}, NUM_CELLS={}",
+            values.len(),
+            Self::NUM_CELLS
+        );
         if let UintLimb::WitIn(c) = &self.limbs {
-            for (idx, wire) in c.iter().enumerate() {
+            for (idx, wire) in c.into_iter().enumerate() {
                 witin[wire.id as usize] = values[idx];
             }
         }

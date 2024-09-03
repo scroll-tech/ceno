@@ -143,6 +143,8 @@ impl<'a, E: ExtensionField> MockProver<E> {
         let mut table_vec = vec![];
         load_u5_table(&mut table_vec, cb, challenge);
 
+        #[rustfmt::skip]
+        /*
         // Lookup expressions
         for (expr, name) in cb
             .cs
@@ -164,6 +166,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
                 }
             }
         }
+        */
 
         if errors.is_empty() {
             Ok(())

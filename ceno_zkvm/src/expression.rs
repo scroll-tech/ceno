@@ -434,7 +434,6 @@ macro_rules! create_witin_from_expr {
         }
     };
 }
->>>>>>> c1165a5 (add instruction config in return;)
 
 pub trait ToExpr<E: ExtensionField> {
     type Output;

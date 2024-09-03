@@ -53,7 +53,7 @@ impl BltInput {
     pub fn generate_witness<E: ExtensionField>(
         &self,
         witin: &mut [E],
-        config: InstructionConfig<E>,
+        config: &InstructionConfig<E>,
     ) {
         assert!(!self.lhs_limb8.is_empty() && (self.lhs_limb8.len() == self.rhs_limb8.len()));
         // TODO: add boundary check for witin
@@ -106,6 +106,28 @@ impl BltInput {
         config.rhs.assign(witin, || {
             rhs.iter().map(|&limb| i64_to_ext(limb as i64)).collect()
         });
+    }
+
+    pub fn random() -> Self {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+
+        // hack to generate valid inputs
+        let ts_bound: u16 = rng.gen_range(100..1000);
+        let pc_bound: u16 = rng.gen_range(100..1000);
+
+        Self {
+            pc: rng.gen_range(pc_bound..(1 << 15)),
+            ts: rng.gen_range(ts_bound..(1 << 15)),
+            imm: rng.gen_range(-(pc_bound as i16)..2047),
+            // this is for riscv32 inputs
+            lhs_limb8: (0..4).map(|_| rng.gen()).collect(),
+            rhs_limb8: (0..4).map(|_| rng.gen()).collect(),
+            rs1_id: rng.gen(),
+            rs2_id: rng.gen(),
+            prev_rs1_ts: rng.gen_range(0..ts_bound),
+            prev_rs2_ts: rng.gen_range(0..ts_bound),
+        }
     }
 }
 
@@ -192,72 +214,53 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
+    use super::*;
     use ff::Field;
     use ff_ext::ExtensionField;
-    use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
+    use goldilocks::GoldilocksExt2;
     use multilinear_extensions::mle::IntoMLE;
-    use transcript::Transcript;
 
     use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::{constants::NUM_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier},
-        structs::PointAndEval,
+        scheme::mock_prover::MockProver,
     };
 
-    use super::BltInstruction;
+    use super::{BltInput, BltInstruction};
+
+    fn interleave<T: Clone>(vectors: Vec<Vec<T>>) -> Vec<Vec<T>> {
+        let len = vectors.first().map_or(0, Vec::len); // Get the length of the first vector, or 0 if empty
+
+        (0..len)
+            .map(|i| vectors.iter().map(|vec| vec[i].clone()).collect())
+            .collect()
+    }
 
     #[test]
-    fn test_blt_circuit() {
-        let mut rng = test_rng();
-
+    fn test_blt_circuit() -> Result<(), ZKVMError> {
         let mut cs = ConstraintSystem::new(|| "riscv");
-        let _ = cs.namespace(
-            || "blt",
-            |cs| {
-                let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(cs);
-                let config = BltInstruction::construct_circuit(&mut circuit_builder);
-                Ok(config)
-            },
-        );
-        let vk = cs.key_gen();
-        let pk = ProvingKey::create_pk(vk);
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+        let config = BltInstruction::construct_circuit(&mut circuit_builder)?;
 
+        let num_wits = circuit_builder.cs.num_witin as usize;
         // generate mock witness
         let num_instances = 1 << 2;
-        let wits_in = (0..pk.get_cs().num_witin as usize)
+        let wits_in = (0..num_instances)
             .map(|_| {
-                (0..num_instances)
-                    .map(|_| Goldilocks::random(&mut rng))
-                    .collect::<Vec<Goldilocks>>()
-                    .into_mle()
-                    .into()
+                let input = BltInput::random();
+                let mut witin: Vec<GoldilocksExt2> = Vec::with_capacity(num_wits);
+                witin.resize(num_wits, GoldilocksExt2::ZERO);
+                input.generate_witness(&mut witin, &config);
+                witin
             })
-            .collect_vec();
+            .collect();
+        let wits_in = interleave(wits_in)
+            .iter()
+            .map(|witin| witin.clone().into_mle().into())
+            .collect::<Vec<_>>();
 
-        // get proof
-        let prover = ZKVMProver::new(pk.clone());
-        let mut transcript = Transcript::new(b"riscv");
-        let challenges = [1.into(), 2.into()];
-
-        let proof = prover
-            .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
-            .expect("create_proof failed");
-
-        let verifier = ZKVMVerifier::new(pk.vk);
-        let mut v_transcript = Transcript::new(b"riscv");
-        let _rt_input = verifier
-            .verify(
-                &proof,
-                &mut v_transcript,
-                NUM_FANIN,
-                &PointAndEval::default(),
-                &challenges,
-            )
-            .expect("verifier failed");
-        // TODO verify opening via PCS
+        MockProver::assert_satisfied(&mut circuit_builder, &wits_in, None);
+        Ok(())
     }
 
     fn bench_blt_instruction_helper<E: ExtensionField>(_instance_num_vars: usize) {}

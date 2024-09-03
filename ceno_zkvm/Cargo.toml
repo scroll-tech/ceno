@@ -26,6 +26,8 @@ tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-flame = "0.2.0"
 tracing = "0.1.40"
 
+rand = "0.8"
+
 [dev-dependencies]
 pprof = { version = "0.13", features = ["flamegraph"]}
 criterion = { version = "0.5", features = ["html_reports"] }
