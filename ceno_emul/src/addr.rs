@@ -20,7 +20,7 @@ pub const WORD_SIZE: usize = 4;
 
 // Type aliases to clarify the code without wrapper types.
 pub type Word = u32;
-pub type VMA = u32;
+pub type Addr = u32;
 pub type Cycle = u32;
 pub type RegIdx = usize;
 

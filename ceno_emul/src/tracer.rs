@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
-    addr::{ByteAddr, Cycle, RegIdx, WordAddr},
+    addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     rv32im::DecodedInstruction,
     CENO_PLATFORM,
 };
@@ -9,20 +9,20 @@ use crate::{
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 #[derive(Clone, Debug, Default)]
 pub struct StepRecord {
-    cycle: Cycle,
+    cycle: Cycle, // TODO: start from 1.
     pc: Change<ByteAddr>,
-    insn_code: u32,
+    insn_code: Word,
 
-    rs1: (RegIdx, u32),
-    rs2: (RegIdx, u32),
+    rs1: (RegIdx, Word),
+    rs2: (RegIdx, Word),
 
-    rd: (RegIdx, Change<u32>),
+    rd: (RegIdx, Change<Word>),
 
-    memory_op: (WordAddr, Change<u32>),
+    memory_op: (WordAddr, Change<Word>),
 }
 
 impl StepRecord {
-    pub fn cycle(&self) -> u32 {
+    pub fn cycle(&self) -> Cycle {
         self.cycle
     }
 
@@ -30,7 +30,7 @@ impl StepRecord {
         self.pc
     }
 
-    pub fn insn_code(&self) -> u32 {
+    pub fn insn_code(&self) -> Word {
         self.insn_code
     }
 
@@ -38,19 +38,19 @@ impl StepRecord {
         DecodedInstruction::new(self.insn_code)
     }
 
-    pub fn rs1(&self) -> (RegIdx, u32) {
+    pub fn rs1(&self) -> (RegIdx, Word) {
         self.rs1
     }
 
-    pub fn rs2(&self) -> (RegIdx, u32) {
+    pub fn rs2(&self) -> (RegIdx, Word) {
         self.rs2
     }
 
-    pub fn rd(&self) -> (RegIdx, Change<u32>) {
+    pub fn rd(&self) -> (RegIdx, Change<Word>) {
         self.rd
     }
 
-    pub fn memory_op(&self) -> (WordAddr, Change<u32>) {
+    pub fn memory_op(&self) -> (WordAddr, Change<Word>) {
         self.memory_op
     }
 }
@@ -102,12 +102,12 @@ impl Tracer {
         self.record.pc.after = pc;
     }
 
-    pub fn fetch(&mut self, pc: WordAddr, value: u32) {
+    pub fn fetch(&mut self, pc: WordAddr, value: Word) {
         self.record.pc.before = pc.baddr();
         self.record.insn_code = value;
     }
 
-    pub fn load_register(&mut self, idx: usize, value: u32) {
+    pub fn load_register(&mut self, idx: RegIdx, value: Word) {
         match (self.actions.rs1_loaded, self.actions.rs2_loaded) {
             (false, false) => {
                 self.record.rs1 = (idx, value);
@@ -121,7 +121,7 @@ impl Tracer {
         }
     }
 
-    pub fn store_register(&mut self, idx: usize, value: Change<u32>) {
+    pub fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
         if !self.actions.rd_stored {
             self.record.rd = (idx, value);
             self.actions.rd_stored = true;
@@ -130,7 +130,7 @@ impl Tracer {
         }
     }
 
-    pub fn load_memory(&mut self, addr: WordAddr, value: u32) {
+    pub fn load_memory(&mut self, addr: WordAddr, value: Word) {
         if self.actions.memory_loaded || self.actions.memory_stored {
             unimplemented!("Only one memory load is supported");
         }
@@ -138,7 +138,7 @@ impl Tracer {
         self.record.memory_op = (addr, Change::new(value, value));
     }
 
-    pub fn store_memory(&mut self, addr: WordAddr, value: Change<u32>) {
+    pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
         if self.actions.memory_stored {
             unimplemented!("Only one memory store is supported");
         }
