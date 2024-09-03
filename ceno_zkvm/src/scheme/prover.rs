@@ -538,8 +538,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
         let num_threads = proper_num_threads(log2_num_instances, max_threads);
         // 2 for denominator and numerator
-        let alpha_pow =
-            get_challenge_pows(2 + cs.assert_zero_sumcheck_expressions.len(), transcript);
+        let alpha_pow = get_challenge_pows(2, transcript);
         let mut alpha_pow_iter = alpha_pow.iter();
         let (alpha_lk_d, alpha_lk_n) = (
             alpha_pow_iter.next().unwrap(),
@@ -675,7 +674,6 @@ impl TowerProver {
         assert_eq!(num_fanin, 2);
 
         let mut proofs = TowerProofs::new(prod_specs.len(), logup_specs.len());
-        // assert!(!prod_specs.is_empty());
         let log_num_fanin = ceil_log2(num_fanin);
         // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
         let max_round_index = prod_specs

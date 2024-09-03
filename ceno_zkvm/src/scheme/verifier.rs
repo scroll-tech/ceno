@@ -291,8 +291,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let rt_lk: Vec<E> = logup_p_evals[0].point.to_vec();
 
         // 2 for denominator and numerator
-        let alpha_pow =
-            get_challenge_pows(2 + cs.assert_zero_sumcheck_expressions.len(), transcript);
+        let alpha_pow = get_challenge_pows(2, transcript);
         let mut alpha_pow_iter = alpha_pow.iter();
         let (alpha_lk_d, alpha_lk_n) = (
             alpha_pow_iter.next().unwrap(),
@@ -341,9 +340,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         .iter()
         .sum::<E>();
         if computed_evals != expected_evaluation {
-            return Err(ZKVMError::VerifyError(
-                "main + sel evaluation verify failed",
-            ));
+            return Err(ZKVMError::VerifyError("sel evaluation verify failed"));
         }
         // verify records (degree = 1) statement, thus no sumcheck
         if cs
