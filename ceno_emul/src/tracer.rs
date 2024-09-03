@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, mem};
 
 use crate::{
     addr::{ByteAddr, RegIdx, WordAddr},
@@ -55,9 +55,7 @@ impl StepRecord {
 }
 
 #[derive(Debug, Default)]
-pub struct Tracer {
-    record: StepRecord,
-
+struct StepActions {
     rs1_loaded: bool,
     rs2_loaded: bool,
     rd_stored: bool,
@@ -65,9 +63,16 @@ pub struct Tracer {
     memory_stored: bool,
 }
 
+#[derive(Debug, Default)]
+pub struct Tracer {
+    record: StepRecord,
+    actions: StepActions,
+}
+
 impl Tracer {
     pub fn advance(&mut self) -> StepRecord {
-        let record = std::mem::take(self).record;
+        let record = mem::take(&mut self.record);
+        let actions = mem::take(&mut self.actions);
         self.record.cycle = record.cycle + 1;
         record
     }
@@ -82,41 +87,41 @@ impl Tracer {
     }
 
     pub fn load_register(&mut self, idx: usize, value: u32) {
-        match (self.rs1_loaded, self.rs2_loaded) {
+        match (self.actions.rs1_loaded, self.actions.rs2_loaded) {
             (false, false) => {
                 self.record.rs1 = (idx, value);
-                self.rs1_loaded = true;
+                self.actions.rs1_loaded = true;
             }
             (true, false) => {
                 self.record.rs2 = (idx, value);
-                self.rs2_loaded = true;
+                self.actions.rs2_loaded = true;
             }
             _ => unimplemented!("Only two register reads are supported"),
         }
     }
 
     pub fn store_register(&mut self, idx: usize, value: Change<u32>) {
-        if !self.rd_stored {
+        if !self.actions.rd_stored {
             self.record.rd = (idx, value);
-            self.rd_stored = true;
+            self.actions.rd_stored = true;
         } else {
             unimplemented!("Only one register write is supported");
         }
     }
 
     pub fn load_memory(&mut self, addr: WordAddr, value: u32) {
-        if self.memory_loaded || self.memory_stored {
+        if self.actions.memory_loaded || self.actions.memory_stored {
             unimplemented!("Only one memory load is supported");
         }
-        self.memory_loaded = true;
+        self.actions.memory_loaded = true;
         self.record.memory_op = (addr, Change::new(value, value));
     }
 
     pub fn store_memory(&mut self, addr: WordAddr, value: Change<u32>) {
-        if self.memory_stored {
+        if self.actions.memory_stored {
             unimplemented!("Only one memory store is supported");
         }
-        self.memory_stored = true;
+        self.actions.memory_stored = true;
         self.record.memory_op = (addr, value);
     }
 }
