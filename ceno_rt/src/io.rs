@@ -25,30 +25,34 @@ impl IOWriter {
 
     pub fn alloc<T>(&self, count: usize) -> &mut [T] {
         let byte_len = count * size_of::<T>();
+        let word_len = byte_len.div_ceil(WORD_SIZE);
         let cursor = self.cursor.get();
 
-        // Write the length of the message at the current cursor.
-        unsafe {
-            write_volatile(cursor, byte_len as u32);
-        }
-
         // Bump the cursor to the next word-aligned address.
-        self.cursor
-            .set(unsafe { cursor.add(1 + byte_len.div_ceil(WORD_SIZE)) });
+        self.cursor.set(unsafe { cursor.add(word_len) });
 
-        // Return a slice of the allocated memory after the length word.
-        unsafe { slice::from_raw_parts_mut(cursor.add(1) as *mut T, count) }
+        // Return a slice of the allocated memory.
+        unsafe { slice::from_raw_parts_mut(cursor as *mut T, count) }
     }
 
     pub fn write(&self, msg: &[u8]) {
         let buf = self.alloc(msg.len());
         buf.copy_from_slice(msg);
     }
+
+    pub fn write_frame(&self, msg: &[u8]) {
+        let word_len = msg.len().div_ceil(WORD_SIZE);
+        let words: &mut [u32] = self.alloc(1 + word_len);
+        words[0] = msg.len() as u32;
+        let bytes =
+            unsafe { slice::from_raw_parts_mut(words[1..].as_mut_ptr() as *mut u8, msg.len()) };
+        bytes.copy_from_slice(msg);
+    }
 }
 
 impl fmt::Write for &IOWriter {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.write(s.as_bytes());
+        self.write_frame(s.as_bytes());
         Ok(())
     }
 }
