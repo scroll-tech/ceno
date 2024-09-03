@@ -1,5 +1,5 @@
 mod addr;
-pub use addr::{ByteAddr, RegIdx, WordAddr};
+pub use addr::*;
 
 mod platform;
 pub use platform::{Platform, CENO_PLATFORM};

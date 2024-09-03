@@ -1,14 +1,15 @@
-use std::{fmt, mem};
+use std::{collections::HashMap, fmt, mem};
 
 use crate::{
-    addr::{ByteAddr, RegIdx, WordAddr},
+    addr::{ByteAddr, Cycle, RegIdx, WordAddr},
     rv32im::DecodedInstruction,
+    CENO_PLATFORM,
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 #[derive(Clone, Debug, Default)]
 pub struct StepRecord {
-    cycle: u32,
+    cycle: Cycle,
     pc: Change<ByteAddr>,
     insn_code: u32,
 
@@ -67,13 +68,33 @@ struct StepActions {
 pub struct Tracer {
     record: StepRecord,
     actions: StepActions,
+
+    previous_mem_op: HashMap<WordAddr, Cycle>,
 }
 
 impl Tracer {
     pub fn advance(&mut self) -> StepRecord {
-        let record = mem::take(&mut self.record);
+        // Reset and advance to the next cycle.
         let actions = mem::take(&mut self.actions);
+        let record = mem::take(&mut self.record);
         self.record.cycle = record.cycle + 1;
+
+        // Track this step as the origin of its memory accesses.
+        let mut track_mem = |vma| self.previous_mem_op.insert(vma, record.cycle);
+
+        if actions.rs1_loaded {
+            track_mem(CENO_PLATFORM.register_vma(record.rs1.0).into());
+        }
+        if actions.rs2_loaded {
+            track_mem(CENO_PLATFORM.register_vma(record.rs2.0).into());
+        }
+        if actions.rd_stored {
+            track_mem(CENO_PLATFORM.register_vma(record.rd.0).into());
+        }
+        if actions.memory_loaded || actions.memory_stored {
+            track_mem(record.memory_op.0);
+        }
+
         record
     }
 
