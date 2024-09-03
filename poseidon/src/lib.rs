@@ -1,5 +1,6 @@
-use goldilocks::SmallField;
+use goldilocks::{ExtensionField, SmallField};
 use serde::Serialize;
+use unroll::unroll_for_loops;
 
 // TODO: split up into multiple files
 
@@ -174,6 +175,24 @@ pub const N_PARTIAL_ROUNDS: usize = 22;
 pub const N_ROUNDS: usize = N_FULL_ROUNDS_TOTAL + N_PARTIAL_ROUNDS;
 const MAX_WIDTH: usize = 12; // we only have width 8 and 12, and 12 is bigger. :)
 trait Poseidon: SmallField {
+    // Total number of round constants required: width of the input
+    // times number of rounds.
+    const N_ROUND_CONSTANTS: usize = SPONGE_WIDTH * N_ROUNDS;
+
+    // The MDS matrix we use is C + D, where C is the circulant matrix whose first
+    // row is given by `MDS_MATRIX_CIRC`, and D is the diagonal matrix whose
+    // diagonal is given by `MDS_MATRIX_DIAG`.
+    const MDS_MATRIX_CIRC: [u64; SPONGE_WIDTH];
+    const MDS_MATRIX_DIAG: [u64; SPONGE_WIDTH];
+
+    // Precomputed constants for the fast Poseidon calculation. See
+    // the paper.
+    const FAST_PARTIAL_FIRST_ROUND_CONSTANT: [u64; SPONGE_WIDTH];
+    const FAST_PARTIAL_ROUND_CONSTANTS: [u64; N_PARTIAL_ROUNDS];
+    const FAST_PARTIAL_ROUND_VS: [[u64; SPONGE_WIDTH - 1]; N_PARTIAL_ROUNDS];
+    const FAST_PARTIAL_ROUND_W_HATS: [[u64; SPONGE_WIDTH - 1]; N_PARTIAL_ROUNDS];
+    const FAST_PARTIAL_ROUND_INITIAL_MATRIX: [[u64; SPONGE_WIDTH - 1]; SPONGE_WIDTH - 1];
+
     // done
     #[inline]
     fn poseidon(input: [Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
@@ -188,6 +207,7 @@ trait Poseidon: SmallField {
         state
     }
 
+    // done
     #[inline]
     fn full_rounds(state: &mut [Self; SPONGE_WIDTH], round_ctr: &mut usize) {
         for _ in 0..HALF_N_FULL_ROUNDS {
@@ -198,6 +218,7 @@ trait Poseidon: SmallField {
         }
     }
 
+    // done
     #[inline]
     fn partial_rounds(state: &mut [Self; SPONGE_WIDTH], round_ctr: &mut usize) {
         Self::partial_first_constant_layer(state);
@@ -211,6 +232,171 @@ trait Poseidon: SmallField {
             *state = Self::mds_partial_layer_fast(state, i);
         }
         *round_ctr += N_PARTIAL_ROUNDS;
+    }
+
+    #[inline(always)]
+    #[unroll_for_loops]
+    fn constant_layer(state: &mut [Self; SPONGE_WIDTH], round_ctr: usize) {
+        for i in 0..12 {
+            if i < SPONGE_WIDTH {
+                let round_constant = ALL_ROUND_CONSTANTS[i + SPONGE_WIDTH * round_ctr];
+                unsafe {
+                    state[i] = state[i].add_canonical_u64(round_constant);
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    #[unroll_for_loops]
+    fn sbox_layer(state: &mut [Self; SPONGE_WIDTH]) {
+        for i in 0..12 {
+            if i < SPONGE_WIDTH {
+                state[i] = Self::sbox_monomial(state[i]);
+            }
+        }
+    }
+
+    // done
+    #[inline(always)]
+    #[unroll_for_loops]
+    fn mds_layer(state_: &[Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
+        let mut result = [Self::ZERO; SPONGE_WIDTH];
+
+        let mut state = [0u64; SPONGE_WIDTH];
+        for r in 0..SPONGE_WIDTH {
+            state[r] = state_[r].to_noncanonical_u64();
+        }
+
+        // This is a hacky way of fully unrolling the loop.
+        for r in 0..12 {
+            if r < SPONGE_WIDTH {
+                let sum = Self::mds_row_shf(r, &state);
+                let sum_lo = sum as u64;
+                let sum_hi = (sum >> 64) as u32;
+                result[r] = Self::from_noncanonical_u96((sum_lo, sum_hi));
+            }
+        }
+
+        result
+    }
+
+    // done
+    #[inline(always)]
+    #[unroll_for_loops]
+    fn partial_first_constant_layer<F: ExtensionField<BaseField = Self>>(
+        state: &mut [F; SPONGE_WIDTH],
+    ) {
+        for i in 0..12 {
+            if i < SPONGE_WIDTH {
+                state[i] += F::from_canonical_u64(Self::FAST_PARTIAL_FIRST_ROUND_CONSTANT[i]);
+            }
+        }
+    }
+
+    // done
+    #[inline(always)]
+    #[unroll_for_loops]
+    fn mds_partial_layer_init<F: ExtensionField<BaseField = Self>>(
+        state: &[F; SPONGE_WIDTH],
+    ) -> [F; SPONGE_WIDTH] {
+        let mut result = [F::ZERO; SPONGE_WIDTH];
+
+        // Initial matrix has first row/column = [1, 0, ..., 0];
+
+        // c = 0
+        result[0] = state[0];
+
+        for r in 1..12 {
+            if r < SPONGE_WIDTH {
+                for c in 1..12 {
+                    if c < SPONGE_WIDTH {
+                        // NB: FAST_PARTIAL_ROUND_INITIAL_MATRIX is stored in
+                        // row-major order so that this dot product is cache
+                        // friendly.
+                        let t = F::from_canonical_u64(
+                            Self::FAST_PARTIAL_ROUND_INITIAL_MATRIX[r - 1][c - 1],
+                        );
+                        result[c] += state[r] * t;
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    // done
+    #[inline(always)]
+    fn sbox_monomial<F: ExtensionField<BaseField = Self>>(x: F) -> F {
+        // x |--> x^7
+        let x2 = x.square();
+        let x4 = x2.square();
+        let x3 = x * x2;
+        x3 * x4
+    }
+
+    // done
+    /// Computes s*A where s is the state row vector and A is the matrix
+    ///
+    ///    [ M_00  | v  ]
+    ///    [ ------+--- ]
+    ///    [ w_hat | Id ]
+    ///
+    /// M_00 is a scalar, v is 1x(t-1), w_hat is (t-1)x1 and Id is the
+    /// (t-1)x(t-1) identity matrix.
+    #[inline(always)]
+    #[unroll_for_loops]
+    fn mds_partial_layer_fast(state: &[Self; SPONGE_WIDTH], r: usize) -> [Self; SPONGE_WIDTH] {
+        // Set d = [M_00 | w^] dot [state]
+
+        let mut d_sum = (0u128, 0u32); // u160 accumulator
+        for i in 1..12 {
+            if i < SPONGE_WIDTH {
+                let t = Self::FAST_PARTIAL_ROUND_W_HATS[r][i - 1] as u128;
+                let si = state[i].to_noncanonical_u64() as u128;
+                d_sum = add_u160_u128(d_sum, si * t);
+            }
+        }
+        let s0 = state[0].to_noncanonical_u64() as u128;
+        let mds0to0 = (Self::MDS_MATRIX_CIRC[0] + Self::MDS_MATRIX_DIAG[0]) as u128;
+        d_sum = add_u160_u128(d_sum, s0 * mds0to0);
+        let d = reduce_u160::<Self>(d_sum);
+
+        // result = [d] concat [state[0] * v + state[shift up by 1]]
+        let mut result = [Self::ZERO; SPONGE_WIDTH];
+        result[0] = d;
+        for i in 1..12 {
+            if i < SPONGE_WIDTH {
+                let t = Self::from_canonical_u64(Self::FAST_PARTIAL_ROUND_VS[r][i - 1]);
+                result[i] = state[i].multiply_accumulate(state[0], t);
+            }
+        }
+        result
+    }
+
+    // done
+    #[inline(always)]
+    #[unroll_for_loops]
+    fn mds_row_shf(r: usize, v: &[u64; SPONGE_WIDTH]) -> u128 {
+        debug_assert!(r < SPONGE_WIDTH);
+        // The values of `MDS_MATRIX_CIRC` and `MDS_MATRIX_DIAG` are
+        // known to be small, so we can accumulate all the products for
+        // each row and reduce just once at the end (done by the
+        // caller).
+
+        // NB: Unrolling this, calculating each term independently, and
+        // summing at the end, didn't improve performance for me.
+        let mut res = 0u128;
+
+        // This is a hacky way of fully unrolling the loop.
+        for i in 0..12 {
+            if i < SPONGE_WIDTH {
+                res += (v[(i + r) % SPONGE_WIDTH] as u128) * (Self::MDS_MATRIX_CIRC[i] as u128);
+            }
+        }
+        res += (v[r] as u128) * (Self::MDS_MATRIX_DIAG[r] as u128);
+
+        res
     }
 }
 
@@ -318,3 +504,20 @@ pub const ALL_ROUND_CONSTANTS: [u64; MAX_WIDTH * N_ROUNDS]  = [
     0xaaed34074b164346, 0x8ffd96bbf9c9c81d, 0x70fc91eb5937085c, 0x7f795e2a5f915440,
     0x4543d9df5476d3cb, 0xf172d73e004fc90d, 0xdfd1c4febcc81238, 0xbc8dfb627fe558fc,
 ];
+
+// helpers
+#[inline(always)]
+const fn add_u160_u128((x_lo, x_hi): (u128, u32), y: u128) -> (u128, u32) {
+    let (res_lo, over) = x_lo.overflowing_add(y);
+    let res_hi = x_hi + (over as u32);
+    (res_lo, res_hi)
+}
+
+#[inline(always)]
+fn reduce_u160<F: SmallField>((n_lo, n_hi): (u128, u32)) -> F {
+    let n_lo_hi = (n_lo >> 64) as u64;
+    let n_lo_lo = n_lo as u64;
+    let reduced_hi: u64 = F::from_noncanonical_u96((n_lo_hi, n_hi)).to_noncanonical_u64();
+    let reduced128: u128 = ((reduced_hi as u128) << 64) + (n_lo_lo as u128);
+    F::from_noncanonical_u128(reduced128)
+}
