@@ -48,11 +48,6 @@ impl VMState {
         self.registers[idx]
     }
 
-    /// Get the value of a memory word without side-effects.
-    pub fn peek_memory(&self, addr: WordAddr) -> u32 {
-        *self.memory.get(&addr.0).unwrap_or(&0)
-    }
-
     /// Set a word in memory without side-effects.
     pub fn init_memory(&mut self, addr: WordAddr, value: u32) {
         self.memory.insert(addr.0, value);
@@ -144,6 +139,11 @@ impl EmuContext for VMState {
         self.tracer.store_memory(addr, Change { after, before });
         self.memory.insert(addr.0, after);
         Ok(())
+    }
+
+    /// Get the value of a memory word without side-effects.
+    fn peek_memory(&self, addr: WordAddr) -> u32 {
+        *self.memory.get(&addr.0).unwrap_or(&0)
     }
 
     fn fetch(&mut self, pc: WordAddr) -> Result<u32> {

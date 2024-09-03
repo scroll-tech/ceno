@@ -19,12 +19,12 @@ pub struct StepRecord {
     pc: Change<ByteAddr>,
     insn_code: Word,
 
-    rs1: (RegIdx, Word, Cycle),
-    rs2: (RegIdx, Word, Cycle),
+    rs1: Option<(RegIdx, Word, Cycle)>,
+    rs2: Option<(RegIdx, Word, Cycle)>,
 
-    rd: (RegIdx, Change<Word>, Cycle),
+    rd: Option<(RegIdx, Change<Word>, Cycle)>,
 
-    memory_op: (WordAddr, Change<Word>, Cycle),
+    memory_op: Option<(WordAddr, Change<Word>, Cycle)>,
 }
 
 impl StepRecord {
@@ -44,36 +44,26 @@ impl StepRecord {
         DecodedInstruction::new(self.insn_code)
     }
 
-    pub fn rs1(&self) -> (RegIdx, Word, Cycle) {
+    pub fn rs1(&self) -> Option<(RegIdx, Word, Cycle)> {
         self.rs1
     }
 
-    pub fn rs2(&self) -> (RegIdx, Word, Cycle) {
+    pub fn rs2(&self) -> Option<(RegIdx, Word, Cycle)> {
         self.rs2
     }
 
-    pub fn rd(&self) -> (RegIdx, Change<Word>, Cycle) {
+    pub fn rd(&self) -> Option<(RegIdx, Change<Word>, Cycle)> {
         self.rd
     }
 
-    pub fn memory_op(&self) -> (WordAddr, Change<Word>, Cycle) {
+    pub fn memory_op(&self) -> Option<(WordAddr, Change<Word>, Cycle)> {
         self.memory_op
     }
 }
 
 #[derive(Debug, Default)]
-struct StepActions {
-    rs1_loaded: bool,
-    rs2_loaded: bool,
-    rd_stored: bool,
-    memory_loaded: bool,
-    memory_stored: bool,
-}
-
-#[derive(Debug, Default)]
 pub struct Tracer {
     record: StepRecord,
-    actions: StepActions,
 
     latest_accesses: HashMap<Addr, Cycle>,
 }
@@ -87,24 +77,23 @@ impl Tracer {
 
     pub fn advance(&mut self) -> StepRecord {
         // Reset and advance to the next cycle.
-        let actions = mem::take(&mut self.actions);
         let record = mem::take(&mut self.record);
         self.record.cycle = record.cycle + 1;
 
         // Track this step as the origin of its memory accesses.
         let mut track_mem = |vma| self.latest_accesses.insert(vma, record.cycle);
 
-        if actions.rs1_loaded {
-            track_mem(CENO_PLATFORM.register_vma(record.rs1.0));
+        if let Some((idx, _, _)) = record.rs1 {
+            track_mem(CENO_PLATFORM.register_vma(idx));
         }
-        if actions.rs2_loaded {
-            track_mem(CENO_PLATFORM.register_vma(record.rs2.0));
+        if let Some((idx, _, _)) = record.rs2 {
+            track_mem(CENO_PLATFORM.register_vma(idx));
         }
-        if actions.rd_stored {
-            track_mem(CENO_PLATFORM.register_vma(record.rd.0));
+        if let Some((idx, _, _)) = record.rd {
+            track_mem(CENO_PLATFORM.register_vma(idx));
         }
-        if actions.memory_loaded || actions.memory_stored {
-            track_mem(record.memory_op.0.into());
+        if let Some((addr, _, _)) = record.memory_op {
+            track_mem(addr.into());
         }
 
         record
@@ -123,50 +112,43 @@ impl Tracer {
         let vma = CENO_PLATFORM.register_vma(idx);
         let prev_cycle = self.latest_accesses(vma);
 
-        match (self.actions.rs1_loaded, self.actions.rs2_loaded) {
-            (false, false) => {
-                self.record.rs1 = (idx, value, prev_cycle);
-                self.actions.rs1_loaded = true;
+        match (self.record.rs1, self.record.rs2) {
+            (None, None) => {
+                self.record.rs1 = Some((idx, value, prev_cycle));
             }
-            (true, false) => {
-                self.record.rs2 = (idx, value, prev_cycle);
-                self.actions.rs2_loaded = true;
+            (Some(_), None) => {
+                self.record.rs2 = Some((idx, value, prev_cycle));
             }
             _ => unimplemented!("Only two register reads are supported"),
         }
     }
 
     pub fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
-        if !self.actions.rd_stored {
-            self.actions.rd_stored = true;
-
+        if self.record.rd.is_none() {
             let vma = CENO_PLATFORM.register_vma(idx);
             let prev_cycle = self.latest_accesses(vma);
-
-            self.record.rd = (idx, value, prev_cycle);
+            self.record.rd = Some((idx, value, prev_cycle));
         } else {
             unimplemented!("Only one register write is supported");
         }
     }
 
     pub fn load_memory(&mut self, addr: WordAddr, value: Word) {
-        if self.actions.memory_loaded || self.actions.memory_stored {
-            unimplemented!("Only one memory load is supported");
+        if self.record.memory_op.is_some() {
+            unimplemented!("Only one memory access is supported");
         }
-        self.actions.memory_loaded = true;
 
         let prev_cycle = self.latest_accesses(addr.into());
-        self.record.memory_op = (addr, Change::new(value, value), prev_cycle);
+        self.record.memory_op = Some((addr, Change::new(value, value), prev_cycle));
     }
 
     pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
-        if self.actions.memory_stored {
-            unimplemented!("Only one memory store is supported");
+        if self.record.memory_op.is_some() {
+            unimplemented!("Only one memory access is supported");
         }
-        self.actions.memory_stored = true;
 
         let prev_cycle = self.latest_accesses(addr.into());
-        self.record.memory_op = (addr, value, prev_cycle);
+        self.record.memory_op = Some((addr, value, prev_cycle));
     }
 
     fn latest_accesses(&self, addr: Addr) -> Cycle {

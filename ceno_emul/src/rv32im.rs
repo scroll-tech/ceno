@@ -53,6 +53,9 @@ pub trait EmuContext {
     // Store to memory
     fn store_memory(&mut self, addr: WordAddr, data: u32) -> Result<()>;
 
+    // Get the value of a memory word without side-effects.
+    fn peek_memory(&self, addr: WordAddr) -> u32;
+
     // Load from memory, in the context of instruction fetching.
     // Only called after check_insn_load returns true.
     fn fetch(&mut self, pc: WordAddr) -> Result<u32> {
@@ -625,7 +628,7 @@ impl Emulator {
         if !ctx.check_data_store(addr) {
             return ctx.trap(TrapCause::StoreAccessFault);
         }
-        let mut data = ctx.load_memory(addr.waddr())?;
+        let mut data = ctx.peek_memory(addr.waddr());
         match kind {
             InsnKind::SB => {
                 data ^= data & (0xff << shift);
