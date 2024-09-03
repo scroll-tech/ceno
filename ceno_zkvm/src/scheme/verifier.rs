@@ -365,19 +365,6 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             return Err(ZKVMError::VerifyError("record evaluate != expected_evals"));
         }
 
-        // verify zero expression (degree = 1) statement, thus no sumcheck
-        if cs.assert_zero_expressions.iter().any(|expr| {
-            eval_by_expr_with_fixed(
-                &proof.fixed_in_evals,
-                &proof.wits_in_evals,
-                challenges,
-                expr,
-            ) != E::ZERO
-        }) {
-            // TODO add me back
-            // return Err(ZKVMError::VerifyError("zero expression != 0"));
-        }
-
         Ok(input_opening_point)
     }
 }
