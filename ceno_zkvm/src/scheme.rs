@@ -49,8 +49,8 @@ pub struct ZKVMTableProof<E: ExtensionField> {
 
     pub tower_proof: TowerProofs<E>,
 
-    // main constraint and select layer sumcheck proof
-    pub main_sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
+    // select layer sumcheck proof
+    pub sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
     pub lk_d_in_evals: Vec<E>,
     pub lk_n_in_evals: Vec<E>,
 

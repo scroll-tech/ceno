@@ -270,7 +270,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let tower_proofs = &proof.tower_proof;
 
         let expected_max_round = log2_num_instances + log2_lk_count;
-        let (rt_tower, _, logup_p_evals, logup_q_evals) = TowerVerify::verify(
+        let (_, _, logup_p_evals, logup_q_evals) = TowerVerify::verify(
             vec![],
             vec![vec![
                 proof.lk_p1_out_eval,
@@ -285,8 +285,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         )?;
         assert!(logup_q_evals.len() == 1, "[lk_q_record]");
         assert!(logup_p_evals.len() == 1, "[lk_p_record]");
+        assert_eq!(logup_p_evals[0].point, logup_q_evals[0].point);
 
-        // verify zero statement (degree > 1) + sel sumcheck
+        // verify selector layer sumcheck
         let rt_lk: Vec<E> = logup_p_evals[0].point.to_vec();
 
         // 2 for denominator and numerator
@@ -298,14 +299,13 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             alpha_pow_iter.next().unwrap(),
         );
         // alpha_lk * (out_lk_q - chip_record_alpha) + alpha_lk_n * out_lk_p
-        // + 0 // 0 come from zero check
         let claim_sum = *alpha_lk_d * (logup_q_evals[0].eval - chip_record_alpha)
             + *alpha_lk_n * logup_p_evals[0].eval;
-        let main_sel_subclaim = IOPVerifierState::verify(
+        let sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {
                 point: vec![], // final claimed point will be derived from sumcheck protocol
-                proofs: proof.main_sel_sumcheck_proofs.clone(),
+                proofs: proof.sel_sumcheck_proofs.clone(),
             },
             &VPAuxInfo {
                 max_degree: SEL_DEGREE.max(cs.max_non_lc_degree),
@@ -315,33 +315,13 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             transcript,
         );
         let (input_opening_point, expected_evaluation) = (
-            main_sel_subclaim
-                .point
-                .iter()
-                .map(|c| c.elements)
-                .collect_vec(),
-            main_sel_subclaim.expected_evaluation,
+            sel_subclaim.point.iter().map(|c| c.elements).collect_vec(),
+            sel_subclaim.expected_evaluation,
         );
         let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
-        let (sel_lk, sel_non_lc_zero_sumcheck) = {
-            (
-                eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
-                    * sel_eval(num_instances, &rt_lk[log2_lk_count..]),
-                // only initialize when circuit got non empty assert_zero_sumcheck_expressions
-                {
-                    let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
-                    if !cs.assert_zero_sumcheck_expressions.is_empty() {
-                        Some(
-                            eq_eval(&rt_non_lc_sumcheck, &input_opening_point)
-                                * sel_eval(num_instances, &rt_non_lc_sumcheck),
-                        )
-                    } else {
-                        None
-                    }
-                },
-            )
-        };
+        let sel_lk = eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
+            * sel_eval(num_instances, &rt_lk[log2_lk_count..]);
 
         let computed_evals = [
             // lookup denominator
@@ -357,25 +337,6 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 * ((0..lk_counts_per_instance)
                     .map(|i| proof.lk_n_in_evals[i] * eq_lk[i])
                     .sum::<E>()),
-            // degree > 1 zero exp sumcheck
-            {
-                // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))
-                sel_non_lc_zero_sumcheck.unwrap_or(E::ZERO)
-                    * cs.assert_zero_sumcheck_expressions
-                        .iter()
-                        .zip_eq(alpha_pow_iter)
-                        .map(|(expr, alpha)| {
-                            // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
-                            *alpha
-                                * eval_by_expr_with_fixed(
-                                    &proof.fixed_in_evals,
-                                    &proof.wits_in_evals,
-                                    challenges,
-                                    expr,
-                                )
-                        })
-                        .sum::<E>()
-            },
         ]
         .iter()
         .sum::<E>();
