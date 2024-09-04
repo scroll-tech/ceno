@@ -116,10 +116,8 @@ impl<'a, E: ExtensionField> ProverState<'a, E> {
                 .expression
                 .used_rotation()
                 .into_iter()
-                .filter_map(|rotation| {
-                    (rotation != Rotation::cur())
-                        .then(|| (rotation, self.bh.rotation_map(rotation)))
-                })
+                .filter(|&rotation| (rotation != Rotation::cur()))
+                .map(|rotation| (rotation, self.bh.rotation_map(rotation)))
                 .collect::<HashMap<_, _>>();
             for query in self.expression.used_query() {
                 if query.rotation() != Rotation::cur() {
@@ -312,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_sum_check_protocol() {
-        let polys = vec![
+        let polys = [
             DenseMultilinearExtension::<E>::from_evaluations_vec(
                 2,
                 vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)],

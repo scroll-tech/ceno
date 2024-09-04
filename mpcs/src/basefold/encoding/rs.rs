@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use super::{EncodingProverParameters, EncodingScheme};
 use crate::{
     util::{field_type_index_mul_base, log2_strict, plonky2_util::reverse_bits},
-    Error,
+    vec_mut, Error,
 };
 use ark_std::{end_timer, start_timer};
 use ff::{Field, PrimeField};
@@ -31,7 +31,7 @@ pub fn fft_root_table<F: PrimeField>(lg_n: usize) -> FftRootTable<F> {
     // bases[i] = g^2^i, for i = 0, ..., lg_n - 1
     // Note that the end of bases is g^{n/2} = -1
     let mut bases = Vec::with_capacity(lg_n);
-    let mut base = F::ROOT_OF_UNITY.pow(&[(1 << (F::S - lg_n as u32)) as u64]);
+    let mut base = F::ROOT_OF_UNITY.pow([(1 << (F::S - lg_n as u32)) as u64]);
     bases.push(base);
     for _ in 1..lg_n {
         base = base.square(); // base = g^2^_
@@ -72,34 +72,20 @@ fn ifft<E: ExtensionField>(
     let n_inv = (E::BaseField::ONE + E::BaseField::ONE)
         .invert()
         .unwrap()
-        .pow(&[lg_n as u64]);
+        .pow([lg_n as u64]);
 
     fft(poly, zero_factor, root_table);
 
     // We reverse all values except the first, and divide each by n.
     field_type_index_mul_base(poly, 0, &n_inv);
     field_type_index_mul_base(poly, n / 2, &n_inv);
-    match poly {
-        FieldType::Base(poly) => {
-            for i in 1..(n / 2) {
-                let j = n - i;
-                let coeffs_i = poly[j] * n_inv;
-                let coeffs_j = poly[i] * n_inv;
-                poly[i] = coeffs_i;
-                poly[j] = coeffs_j;
-            }
-        }
-        FieldType::Ext(poly) => {
-            for i in 1..(n / 2) {
-                let j = n - i;
-                let coeffs_i = poly[j] * n_inv;
-                let coeffs_j = poly[i] * n_inv;
-                poly[i] = coeffs_i;
-                poly[j] = coeffs_j;
-            }
-        }
-        _ => panic!("Unsupported field type"),
-    }
+    vec_mut!(|poly| for i in 1..(n / 2) {
+        let j = n - i;
+        let coeffs_i = poly[j] * n_inv;
+        let coeffs_j = poly[i] * n_inv;
+        poly[i] = coeffs_i;
+        poly[j] = coeffs_j;
+    })
 }
 
 /// Core FFT implementation.
@@ -111,7 +97,7 @@ fn fft_classic_inner<E: ExtensionField>(
 ) {
     // We've already done the first lg_packed_width (if they were required) iterations.
 
-    for lg_half_m in r..lg_n {
+    for (lg_half_m, cur_root_table) in root_table.iter().enumerate().take(lg_n).skip(r) {
         let n = 1 << lg_n;
         let lg_m = lg_half_m + 1;
         let m = 1 << lg_m; // Subarray size (in field elements).
@@ -119,32 +105,18 @@ fn fft_classic_inner<E: ExtensionField>(
         debug_assert!(half_m != 0);
 
         // omega values for this iteration, as slice of vectors
-        let omega_table = &root_table[lg_half_m][..];
-        match values {
-            FieldType::Base(values) => {
-                for k in (0..n).step_by(m) {
-                    for j in 0..half_m {
-                        let omega = omega_table[j];
-                        let t = omega * values[k + half_m + j];
-                        let u = values[k + j];
-                        values[k + j] = u + t;
-                        values[k + half_m + j] = u - t;
-                    }
+        let omega_table = &cur_root_table[..];
+        vec_mut!(|values| {
+            for k in (0..n).step_by(m) {
+                for j in 0..half_m {
+                    let omega = omega_table[j];
+                    let t = values[k + half_m + j] * omega;
+                    let u = values[k + j];
+                    values[k + j] = u + t;
+                    values[k + half_m + j] = u - t;
                 }
             }
-            FieldType::Ext(values) => {
-                for k in (0..n).step_by(m) {
-                    for j in 0..half_m {
-                        let omega = omega_table[j];
-                        let t = values[k + half_m + j] * omega;
-                        let u = values[k + j];
-                        values[k + j] = u + t;
-                        values[k + half_m + j] = u - t;
-                    }
-                }
-            }
-            _ => panic!("Unsupported field type"),
-        }
+        })
     }
 }
 
@@ -159,15 +131,7 @@ pub fn fft<E: ExtensionField>(
     r: usize,
     root_table: &[Vec<E::BaseField>],
 ) {
-    match values {
-        FieldType::Base(values) => {
-            reverse_index_bits_in_place(values);
-        }
-        FieldType::Ext(values) => {
-            reverse_index_bits_in_place(values);
-        }
-        _ => panic!("Unsupported field type"),
-    }
+    vec_mut!(|values| reverse_index_bits_in_place(values));
 
     let n = values.len();
     let lg_n = log2_strict(n);
@@ -215,21 +179,12 @@ pub fn coset_fft<E: ExtensionField>(
     root_table: &[Vec<E::BaseField>],
 ) {
     let mut shift_power = E::BaseField::ONE;
-    match coeffs {
-        FieldType::Base(coeffs) => {
-            for coeff in coeffs.iter_mut() {
-                *coeff *= shift_power;
-                shift_power *= shift;
-            }
+    vec_mut!(|coeffs| {
+        for coeff in coeffs.iter_mut() {
+            *coeff *= shift_power;
+            shift_power *= shift;
         }
-        FieldType::Ext(coeffs) => {
-            for coeff in coeffs.iter_mut() {
-                *coeff *= shift_power;
-                shift_power *= shift;
-            }
-        }
-        _ => panic!("Unsupported field type"),
-    }
+    });
     fft(coeffs, zero_factor, root_table);
 }
 
@@ -347,7 +302,7 @@ where
                 fft_root_table: pp.fft_root_table
                     [..Spec::get_basecode_msg_size_log() + Spec::get_rate_log()]
                     .iter()
-                    .map(|v| v.clone())
+                    .cloned()
                     .chain(
                         pp.fft_root_table
                             [Spec::get_basecode_msg_size_log() + Spec::get_rate_log()..]
@@ -373,15 +328,15 @@ where
     }
 
     fn get_number_queries() -> usize {
-        return Spec::get_number_queries();
+        Spec::get_number_queries()
     }
 
     fn get_rate_log() -> usize {
-        return Spec::get_rate_log();
+        Spec::get_rate_log()
     }
 
     fn get_basecode_msg_size_log() -> usize {
-        return Spec::get_basecode_msg_size_log();
+        Spec::get_basecode_msg_size_log()
     }
 
     fn message_is_left_and_right_folding() -> bool {
@@ -442,7 +397,7 @@ where
         } else {
             // In this case, the level-th row of fft root table of the verifier
             // only stores the first 2^(level+1)-th roots of unity.
-            vp.fft_root_table[level][0].pow(&[index as u64])
+            vp.fft_root_table[level][0].pow([index as u64])
         } * vp.gamma_powers[vp.full_message_size_log + Spec::get_rate_log() - level - 1];
         let x1 = -x0;
         // The weight is 1/(x1-x0) = -1/(2x0)
@@ -462,7 +417,7 @@ where
             } else {
                 // In this case, this level of fft root table of the verifier
                 // only stores the first 2^(level+1)-th root of unity.
-                vp.fft_root_table[level][0].pow(&[(1 << (level + 1)) - index as u64])
+                vp.fft_root_table[level][0].pow([(1 << (level + 1)) - index as u64])
             };
         (E::from(x0), E::from(x1), E::from(w))
     }
@@ -508,7 +463,7 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
         let k = 1 << (full_message_size_log - lg_m);
         coset_fft(
             &mut ret,
-            E::BaseField::MULTIPLICATIVE_GENERATOR.pow(&[k]),
+            E::BaseField::MULTIPLICATIVE_GENERATOR.pow([k]),
             Spec::get_rate_log(),
             fft_root_table,
         );
@@ -527,10 +482,10 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
         // x0 is the index-th 2^(level+1)-th root of unity, multiplied by
         // the shift factor at level+1, which is gamma^2^(full_codeword_log_n - level - 1).
         let x0 = E::BaseField::ROOT_OF_UNITY
-            .pow(&[1 << (E::BaseField::S - (level as u32 + 1))])
-            .pow(&[index as u64])
+            .pow([1 << (E::BaseField::S - (level as u32 + 1))])
+            .pow([index as u64])
             * E::BaseField::MULTIPLICATIVE_GENERATOR
-                .pow(&[1 << (full_message_size_log + Spec::get_rate_log() - level - 1)]);
+                .pow([1 << (full_message_size_log + Spec::get_rate_log() - level - 1)]);
         let x1 = -x0;
         let w = (x1 - x0).invert().unwrap();
         (E::from(x0), E::from(x1), E::from(w))
@@ -538,11 +493,11 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
 }
 
 #[allow(unused)]
-fn naive_fft<E: ExtensionField>(poly: &Vec<E>, rate: usize, shift: E::BaseField) -> Vec<E> {
+fn naive_fft<E: ExtensionField>(poly: &[E], rate: usize, shift: E::BaseField) -> Vec<E> {
     let timer = start_timer!(|| "Encode RSCode");
     let message_size = poly.len();
     let domain_size_bit = log2_strict(message_size * rate);
-    let root = E::BaseField::ROOT_OF_UNITY.pow(&[1 << (E::BaseField::S - domain_size_bit as u32)]);
+    let root = E::BaseField::ROOT_OF_UNITY.pow([1 << (E::BaseField::S - domain_size_bit as u32)]);
     // The domain is shift * H where H is the multiplicative subgroup of size
     // message_size * rate.
     let mut domain = Vec::<E::BaseField>::with_capacity(message_size * rate);
@@ -553,7 +508,7 @@ fn naive_fft<E: ExtensionField>(poly: &Vec<E>, rate: usize, shift: E::BaseField)
     let mut res = vec![E::ZERO; message_size * rate];
     res.iter_mut()
         .enumerate()
-        .for_each(|(i, target)| *target = horner(&poly[..], &E::from(domain[i])));
+        .for_each(|(i, target)| *target = horner(poly, &E::from(domain[i])));
     end_timer!(timer);
 
     res
@@ -573,9 +528,7 @@ mod tests {
     fn test_naive_fft() {
         let num_vars = 5;
 
-        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
-            .map(|i| GoldilocksExt2::from(i))
-            .collect();
+        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars)).map(GoldilocksExt2::from).collect();
         let mut poly2 = FieldType::Ext(poly.clone());
 
         let naive = naive_fft::<GoldilocksExt2>(&poly, 1, Goldilocks::ONE);
@@ -655,9 +608,7 @@ mod tests {
     fn test_ifft() {
         let num_vars = 5;
 
-        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
-            .map(|i| GoldilocksExt2::from(i))
-            .collect();
+        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars)).map(GoldilocksExt2::from).collect();
         let mut poly = FieldType::Ext(poly);
         let original = poly.clone();
 
@@ -705,7 +656,7 @@ mod tests {
     pub fn test_colinearity() {
         let num_vars = 10;
 
-        let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from(i)).collect();
+        let poly: Vec<E> = (0..(1 << num_vars)).map(E::from).collect();
         let poly = FieldType::Ext(poly);
 
         let rng_seed = [0; 32];
@@ -744,7 +695,7 @@ mod tests {
     pub fn test_low_degree() {
         let num_vars = 10;
 
-        let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from(i)).collect();
+        let poly: Vec<E> = (0..(1 << num_vars)).map(E::from).collect();
         let poly = FieldType::Ext(poly);
 
         let rng_seed = [0; 32];
@@ -799,9 +750,9 @@ mod tests {
         reverse_index_bits_in_place(&mut left_right_diff);
         assert_eq!(left_right_diff[1], c1 - c_mid1);
         let root_of_unity_inv = F::ROOT_OF_UNITY_INV
-            .pow(&[1 << (F::S as usize - log2_strict(left_right_diff.len()) - 1)]);
+            .pow([1 << (F::S as usize - log2_strict(left_right_diff.len()) - 1)]);
         for (i, coeff) in left_right_diff.iter_mut().enumerate() {
-            *coeff *= root_of_unity_inv.pow(&[i as u64]);
+            *coeff *= root_of_unity_inv.pow([i as u64]);
         }
         assert_eq!(left_right_diff[0], c0 - c_mid);
         assert_eq!(left_right_diff[1], (c1 - c_mid1) * root_of_unity_inv);
@@ -851,13 +802,13 @@ mod tests {
 
         let folding_coeffs = Code::prover_folding_coeffs(&pp, log2_strict(codeword.len()) - 1, 1);
         let root_of_unity =
-            F::ROOT_OF_UNITY.pow(&[1 << (F::S as usize - log2_strict(codeword.len()))]);
-        assert_eq!(root_of_unity.pow(&[codeword.len() as u64]), F::ONE);
-        assert_eq!(root_of_unity.pow(&[(codeword.len() >> 1) as u64]), -F::ONE);
+            F::ROOT_OF_UNITY.pow([1 << (F::S as usize - log2_strict(codeword.len()))]);
+        assert_eq!(root_of_unity.pow([codeword.len() as u64]), F::ONE);
+        assert_eq!(root_of_unity.pow([(codeword.len() >> 1) as u64]), -F::ONE);
         assert_eq!(
             folding_coeffs.0,
             E::from(F::MULTIPLICATIVE_GENERATOR)
-                * E::from(root_of_unity).pow(&[(codeword.len() >> 2) as u64])
+                * E::from(root_of_unity).pow([(codeword.len() >> 2) as u64])
         );
         assert_eq!(folding_coeffs.0 + folding_coeffs.1, E::ZERO);
         assert_eq!(

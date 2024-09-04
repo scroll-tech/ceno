@@ -5,11 +5,10 @@ use crate::{
     util::{
         arithmetic::base_from_raw_bytes, log2_strict, num_of_bytes, plonky2_util::reverse_bits,
     },
-    Error,
+    vec_mut, Error,
 };
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use ark_std::{end_timer, start_timer};
-use ctr;
 use ff::{BatchInverter, Field, PrimeField};
 use ff_ext::ExtensionField;
 use generic_array::GenericArray;
@@ -106,7 +105,7 @@ where
     type VerifierParameters = BasecodeVerifierParameters;
 
     fn setup(max_msg_size_log: usize, rng_seed: [u8; 32]) -> Self::PublicParameters {
-        let rng = ChaCha8Rng::from_seed(rng_seed.clone());
+        let rng = ChaCha8Rng::from_seed(rng_seed);
         let (table_w_weights, table) =
             get_table_aes::<E, _>(max_msg_size_log, Spec::get_rate_log(), &mut rng.clone());
         BasecodeParameters {
@@ -137,11 +136,11 @@ where
             Self::ProverParameters {
                 table_w_weights: pp.table_w_weights.clone(),
                 table: pp.table.clone(),
-                rng_seed: pp.rng_seed.clone(),
+                rng_seed: pp.rng_seed,
                 _phantom: PhantomData,
             },
             Self::VerifierParameters {
-                rng_seed: pp.rng_seed.clone(),
+                rng_seed: pp.rng_seed,
                 aes_key: key,
                 aes_iv: iv,
             },
@@ -175,15 +174,15 @@ where
     }
 
     fn get_number_queries() -> usize {
-        return Spec::get_number_queries();
+        Spec::get_number_queries()
     }
 
     fn get_rate_log() -> usize {
-        return Spec::get_rate_log();
+        Spec::get_rate_log()
     }
 
     fn get_basecode_msg_size_log() -> usize {
-        return Spec::get_basecode_msg_size_log();
+        Spec::get_basecode_msg_size_log()
     }
 
     fn message_is_left_and_right_folding() -> bool {
@@ -250,7 +249,7 @@ fn get_basecode<F: Field>(poly: &Vec<F>, rate: usize, message_size: usize) -> Ve
             target
                 .iter_mut()
                 .enumerate()
-                .for_each(|(i, target)| *target = horner(&chunk[..], &domain[i]));
+                .for_each(|(i, target)| *target = horner(chunk, &domain[i]));
             target
         })
         .collect::<Vec<Vec<F>>>();
@@ -265,7 +264,7 @@ pub fn evaluate_over_foldable_domain_generic_basecode<E: ExtensionField>(
     num_coeffs: usize,
     log_rate: usize,
     base_codewords: Vec<FieldType<E>>,
-    table: &Vec<Vec<E::BaseField>>,
+    table: &[Vec<E::BaseField>],
 ) -> FieldType<E> {
     let timer = start_timer!(|| "evaluate over foldable domain");
     let k = num_coeffs;
@@ -284,44 +283,28 @@ pub fn evaluate_over_foldable_domain_generic_basecode<E: ExtensionField>(
         let level = &table[i + log_rate];
         // chunk_size is equal to 1 << (i+1), i.e., the codeword size after the current iteration
         // half_chunk is equal to 1 << i, i.e. the current codeword size
-        chunk_size = chunk_size << 1;
+        chunk_size <<= 1;
         assert_eq!(level.len(), chunk_size >> 1);
-        match coeffs_with_bc {
-            FieldType::Ext(ref mut coeffs_with_bc) => {
-                coeffs_with_bc.par_chunks_mut(chunk_size).for_each(|chunk| {
-                    let half_chunk = chunk_size >> 1;
-                    for j in half_chunk..chunk_size {
-                        // Suppose the current codewords are (a, b)
-                        // The new codeword is computed by two halves:
-                        // left  = a + t * b
-                        // right = a - t * b
-                        let rhs = chunk[j] * E::from(level[j - half_chunk]);
-                        chunk[j] = chunk[j - half_chunk] - rhs;
-                        chunk[j - half_chunk] = chunk[j - half_chunk] + rhs;
-                    }
-                });
-            }
-            FieldType::Base(ref mut coeffs_with_bc) => {
-                coeffs_with_bc.par_chunks_mut(chunk_size).for_each(|chunk| {
-                    let half_chunk = chunk_size >> 1;
-                    for j in half_chunk..chunk_size {
-                        // Suppose the current codewords are (a, b)
-                        // The new codeword is computed by two halves:
-                        // left  = a + t * b
-                        // right = a - t * b
-                        let rhs = chunk[j] * level[j - half_chunk];
-                        chunk[j] = chunk[j - half_chunk] - rhs;
-                        chunk[j - half_chunk] = chunk[j - half_chunk] + rhs;
-                    }
-                });
-            }
-            _ => unreachable!(),
-        }
+        vec_mut!(coeffs_with_bc, |c| {
+            c.par_chunks_mut(chunk_size).for_each(|chunk| {
+                let half_chunk = chunk_size >> 1;
+                for j in half_chunk..chunk_size {
+                    // Suppose the current codewords are (a, b)
+                    // The new codeword is computed by two halves:
+                    // left  = a + t * b
+                    // right = a - t * b
+                    let rhs = chunk[j] * level[j - half_chunk];
+                    chunk[j] = chunk[j - half_chunk] - rhs;
+                    chunk[j - half_chunk] += rhs;
+                }
+            });
+        });
     }
     end_timer!(timer);
     coeffs_with_bc
 }
 
+#[allow(clippy::type_complexity)]
 pub fn get_table_aes<E: ExtensionField, Rng: RngCore + Clone>(
     poly_size_log: usize,
     rate: usize,
@@ -355,7 +338,7 @@ pub fn get_table_aes<E: ExtensionField, Rng: RngCore + Clone>(
     // Collect the bytes into field elements
     let flat_table: Vec<E::BaseField> = dest
         .par_chunks_exact(num_of_bytes::<E::BaseField>(1))
-        .map(|chunk| base_from_raw_bytes::<E>(&chunk.to_vec()))
+        .map(|chunk| base_from_raw_bytes::<E>(chunk))
         .collect::<Vec<_>>();
 
     // Now, flat_table is a field vector of size n, filled with random field elements
@@ -396,7 +379,7 @@ pub fn get_table_aes<E: ExtensionField, Rng: RngCore + Clone>(
         unflattened_table_w_weights[i] = level;
     }
 
-    return (unflattened_table_w_weights, unflattened_table);
+    (unflattened_table_w_weights, unflattened_table)
 }
 
 pub fn query_root_table_from_rng_aes<E: ExtensionField>(
@@ -421,9 +404,7 @@ pub fn query_root_table_from_rng_aes<E: ExtensionField>(
     let mut dest: Vec<u8> = vec![0u8; bytes];
     cipher.apply_keystream(&mut dest);
 
-    let res = base_from_raw_bytes::<E>(&dest);
-
-    res
+    base_from_raw_bytes::<E>(&dest)
 }
 
 #[cfg(test)]

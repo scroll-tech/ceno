@@ -29,7 +29,7 @@ use super::{
 pub fn prover_query_phase<E: ExtensionField>(
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
     comm: &BasefoldCommitmentWithData<E>,
-    oracles: &Vec<Vec<E>>,
+    oracles: &[Vec<E>],
     num_verifier_queries: usize,
 ) -> QueriesResult<E>
 where
@@ -49,7 +49,7 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    basefold_get_query::<E>(&comm.get_codewords()[0], &oracles, *x_index),
+                    basefold_get_query::<E>(&comm.get_codewords()[0], oracles, *x_index),
                 )
             })
             .collect(),
@@ -60,7 +60,7 @@ pub fn batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
     codeword_size: usize,
     comms: &[BasefoldCommitmentWithData<E>],
-    oracles: &Vec<Vec<E>>,
+    oracles: &[Vec<E>],
     num_verifier_queries: usize,
 ) -> BatchedQueriesResult<E>
 where
@@ -80,7 +80,7 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    batch_basefold_get_query::<E>(comms, &oracles, codeword_size, *x_index),
+                    batch_basefold_get_query::<E>(comms, oracles, codeword_size, *x_index),
                 )
             })
             .collect(),
@@ -90,7 +90,7 @@ where
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
     comm: &BasefoldCommitmentWithData<E>,
-    oracles: &Vec<Vec<E>>,
+    oracles: &[Vec<E>],
     num_verifier_queries: usize,
 ) -> SimpleBatchQueriesResult<E>
 where
@@ -110,21 +110,22 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    simple_batch_basefold_get_query::<E>(comm.get_codewords(), &oracles, *x_index),
+                    simple_batch_basefold_get_query::<E>(comm.get_codewords(), oracles, *x_index),
                 )
             })
             .collect(),
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     queries: &QueriesResultWithMerklePath<E>,
-    sum_check_messages: &Vec<Vec<E>>,
-    fold_challenges: &Vec<E>,
+    sum_check_messages: &[Vec<E>],
+    fold_challenges: &[E],
     num_rounds: usize,
     num_vars: usize,
-    final_message: &Vec<E>,
+    final_message: &[E],
     roots: &Vec<Digest<E::BaseField>>,
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
@@ -136,7 +137,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let timer = start_timer!(|| "Verifier query phase");
 
     let encode_timer = start_timer!(|| "Encode final codeword");
-    let mut message = final_message.clone();
+    let mut message = final_message.to_vec();
     interpolate_over_boolean_hypercube(&mut message);
     if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
         reverse_index_bits_in_place(&mut message);
@@ -186,16 +187,17 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     end_timer!(timer);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     queries: &BatchedQueriesResultWithMerklePath<E>,
-    sum_check_messages: &Vec<Vec<E>>,
-    fold_challenges: &Vec<E>,
+    sum_check_messages: &[Vec<E>],
+    fold_challenges: &[E],
     num_rounds: usize,
     num_vars: usize,
-    final_message: &Vec<E>,
-    roots: &Vec<Digest<E::BaseField>>,
-    comms: &Vec<&BasefoldCommitment<E>>,
+    final_message: &[E],
+    roots: &[Digest<E::BaseField>],
+    comms: &[&BasefoldCommitment<E>],
     coeffs: &[E],
     partial_eq: &[E],
     eval: &E,
@@ -205,7 +207,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 {
     let timer = start_timer!(|| "Verifier batch query phase");
     let encode_timer = start_timer!(|| "Encode final codeword");
-    let mut message = final_message.clone();
+    let mut message = final_message.to_vec();
     if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
         reverse_index_bits_in_place(&mut message);
     }
@@ -259,16 +261,17 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     end_timer!(timer);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     queries: &SimpleBatchQueriesResultWithMerklePath<E>,
-    sum_check_messages: &Vec<Vec<E>>,
-    fold_challenges: &Vec<E>,
-    batch_coeffs: &Vec<E>,
+    sum_check_messages: &[Vec<E>],
+    fold_challenges: &[E],
+    batch_coeffs: &[E],
     num_rounds: usize,
     num_vars: usize,
-    final_message: &Vec<E>,
-    roots: &Vec<Digest<E::BaseField>>,
+    final_message: &[E],
+    roots: &[Digest<E::BaseField>],
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
     evals: &[E],
@@ -279,7 +282,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     let timer = start_timer!(|| "Verifier query phase");
 
     let encode_timer = start_timer!(|| "Encode final codeword");
-    let mut message = final_message.clone();
+    let mut message = final_message.to_vec();
     if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
         reverse_index_bits_in_place(&mut message);
     }
@@ -337,7 +340,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
 fn basefold_get_query<E: ExtensionField>(
     poly_codeword: &FieldType<E>,
-    oracles: &Vec<Vec<E>>,
+    oracles: &[Vec<E>],
     x_index: usize,
 ) -> SingleQueryResult<E>
 where
@@ -373,15 +376,15 @@ where
         inner: oracle_queries,
     };
 
-    return SingleQueryResult {
+    SingleQueryResult {
         oracle_query,
         commitment_query,
-    };
+    }
 }
 
 fn batch_basefold_get_query<E: ExtensionField>(
     comms: &[BasefoldCommitmentWithData<E>],
-    oracles: &Vec<Vec<E>>,
+    oracles: &[Vec<E>],
     codeword_size: usize,
     x_index: usize,
 ) -> BatchedSingleQueryResult<E>
@@ -433,8 +436,8 @@ where
 }
 
 fn simple_batch_basefold_get_query<E: ExtensionField>(
-    poly_codewords: &Vec<FieldType<E>>,
-    oracles: &Vec<Vec<E>>,
+    poly_codewords: &[FieldType<E>],
+    oracles: &[Vec<E>],
     x_index: usize,
 ) -> SimpleBatchSingleQueryResult<E>
 where
@@ -486,10 +489,10 @@ where
         inner: oracle_queries,
     };
 
-    return SimpleBatchSingleQueryResult {
+    SimpleBatchSingleQueryResult {
         oracle_query,
         commitment_query,
-    };
+    }
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -530,7 +533,7 @@ where
         }
     }
 
-    pub fn batch(&self, coeffs: &Vec<E>) -> (E, E) {
+    pub fn batch(&self, coeffs: &[E]) -> (E, E) {
         match self {
             SimpleBatchLeavesPair::Ext(x) => {
                 let mut result = (E::ZERO, E::ZERO);
@@ -892,12 +895,9 @@ where
     ) -> Vec<MerklePathWithoutLeafOrRoot<E>> {
         let ret = self
             .get_inner()
-            .into_iter()
+            .iter()
             .enumerate()
-            .map(|(i, query_result)| {
-                let path = path(i, query_result.index);
-                path
-            })
+            .map(|(i, query_result)| path(i, query_result.index))
             .collect_vec();
         ret
     }
@@ -919,7 +919,7 @@ where
             query_result
                 .merkle_path(path)
                 .into_iter()
-                .zip(query_result.get_inner_into().into_iter())
+                .zip(query_result.get_inner_into())
                 .map(
                     |(path, codeword_result)| CodewordSingleQueryResultWithMerklePath {
                         query: codeword_result,
@@ -936,7 +936,7 @@ where
             .for_each(|q| q.write_transcript(transcript));
     }
 
-    fn check_merkle_paths(&self, roots: &Vec<Digest<E::BaseField>>, hasher: &Hasher<E::BaseField>) {
+    fn check_merkle_paths(&self, roots: &[Digest<E::BaseField>], hasher: &Hasher<E::BaseField>) {
         // let timer = start_timer!(|| "ListQuery::Check Merkle Path");
         self.get_inner()
             .iter()
@@ -972,7 +972,7 @@ where
 {
     pub fn from_single_query_result(
         single_query_result: SingleQueryResult<E>,
-        oracle_trees: &Vec<MerkleTree<E>>,
+        oracle_trees: &[MerkleTree<E>],
         commitment: &BasefoldCommitmentWithData<E>,
     ) -> Self {
         assert!(commitment.codeword_tree.height() > 0);
@@ -982,7 +982,7 @@ where
                 |i, j| oracle_trees[i].merkle_path_without_leaf_sibling_or_root(j),
             ),
             commitment_query: CodewordSingleQueryResultWithMerklePath {
-                query: single_query_result.commitment_query.clone(),
+                query: single_query_result.commitment_query,
                 merkle_path: commitment
                     .codeword_tree
                     .merkle_path_without_leaf_sibling_or_root(
@@ -1043,14 +1043,15 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-        fold_challenges: &Vec<E>,
+        fold_challenges: &[E],
         num_rounds: usize,
         num_vars: usize,
-        final_codeword: &Vec<E>,
-        roots: &Vec<Digest<E::BaseField>>,
+        final_codeword: &[E],
+        roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
         index: usize,
         hasher: &Hasher<E::BaseField>,
@@ -1058,7 +1059,7 @@ where
         // let timer = start_timer!(|| "Checking codeword single query");
         self.oracle_query.check_merkle_paths(roots, hasher);
         self.commitment_query
-            .check_merkle_path(&Digest(comm.root().0.try_into().unwrap()), hasher);
+            .check_merkle_path(&Digest(comm.root().0), hasher);
 
         let (mut curr_left, mut curr_right) = self.commitment_query.query.codepoints.as_ext();
 
@@ -1118,7 +1119,7 @@ where
 {
     pub fn from_query_result(
         query_result: QueriesResult<E>,
-        oracle_trees: &Vec<MerkleTree<E>>,
+        oracle_trees: &[MerkleTree<E>],
         commitment: &BasefoldCommitmentWithData<E>,
     ) -> Self {
         Self {
@@ -1197,14 +1198,15 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-        fold_challenges: &Vec<E>,
+        fold_challenges: &[E],
         num_rounds: usize,
         num_vars: usize,
-        final_codeword: &Vec<E>,
-        roots: &Vec<Digest<E::BaseField>>,
+        final_codeword: &[E],
+        roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
         hasher: &Hasher<E::BaseField>,
     ) {
@@ -1250,8 +1252,8 @@ where
 {
     pub fn from_batched_single_query_result(
         batched_single_query_result: BatchedSingleQueryResult<E>,
-        oracle_trees: &Vec<MerkleTree<E>>,
-        commitments: &Vec<BasefoldCommitmentWithData<E>>,
+        oracle_trees: &[MerkleTree<E>],
+        commitments: &[BasefoldCommitmentWithData<E>],
     ) -> Self {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
@@ -1324,22 +1326,29 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-        fold_challenges: &Vec<E>,
+        fold_challenges: &[E],
         num_rounds: usize,
         num_vars: usize,
-        final_codeword: &Vec<E>,
-        roots: &Vec<Digest<E::BaseField>>,
-        comms: &Vec<&BasefoldCommitment<E>>,
+        final_codeword: &[E],
+        roots: &[Digest<E::BaseField>],
+        comms: &[&BasefoldCommitment<E>],
         coeffs: &[E],
         index: usize,
         hasher: &Hasher<E::BaseField>,
     ) {
         self.oracle_query.check_merkle_paths(roots, hasher);
-        self.commitments_query
-            .check_merkle_paths(&comms.iter().map(|comm| comm.root()).collect(), hasher);
+        self.commitments_query.check_merkle_paths(
+            comms
+                .iter()
+                .map(|comm| comm.root())
+                .collect_vec()
+                .as_slice(),
+            hasher,
+        );
         // end_timer!(commit_timer);
 
         let mut curr_left = E::ZERO;
@@ -1358,7 +1367,7 @@ where
                 .collect_vec();
 
             matching_comms.iter().for_each(|index| {
-                let query = self.commitments_query.get_inner()[*index].query.clone();
+                let query = self.commitments_query.get_inner()[*index].query;
                 assert_eq!(query.index >> 1, left_index >> 1);
                 curr_left += query.left_ext() * coeffs[*index];
                 curr_right += query.right_ext() * coeffs[*index];
@@ -1404,7 +1413,7 @@ where
 
                 matching_comms.iter().for_each(|index| {
                     let query: CodewordSingleQueryResult<E> =
-                        self.commitments_query.get_inner()[*index].query.clone();
+                        self.commitments_query.get_inner()[*index].query;
                     assert_eq!(query.index >> 1, next_index >> 1);
                     if next_index & 1 == 0 {
                         res += query.left_ext() * coeffs[*index];
@@ -1444,8 +1453,8 @@ where
 {
     pub fn from_batched_query_result(
         batched_query_result: BatchedQueriesResult<E>,
-        oracle_trees: &Vec<MerkleTree<E>>,
-        commitments: &Vec<BasefoldCommitmentWithData<E>>,
+        oracle_trees: &[MerkleTree<E>],
+        commitments: &[BasefoldCommitmentWithData<E>],
     ) -> Self {
         Self {
             inner: batched_query_result
@@ -1523,15 +1532,16 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-        fold_challenges: &Vec<E>,
+        fold_challenges: &[E],
         num_rounds: usize,
         num_vars: usize,
-        final_codeword: &Vec<E>,
-        roots: &Vec<Digest<E::BaseField>>,
-        comms: &Vec<&BasefoldCommitment<E>>,
+        final_codeword: &[E],
+        roots: &[Digest<E::BaseField>],
+        comms: &[&BasefoldCommitment<E>],
         coeffs: &[E],
         hasher: &Hasher<E::BaseField>,
     ) {
@@ -1767,7 +1777,7 @@ where
 {
     pub fn from_single_query_result(
         single_query_result: SimpleBatchSingleQueryResult<E>,
-        oracle_trees: &Vec<MerkleTree<E>>,
+        oracle_trees: &[MerkleTree<E>],
         commitment: &BasefoldCommitmentWithData<E>,
     ) -> Self {
         Self {
@@ -1843,15 +1853,16 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-        fold_challenges: &Vec<E>,
-        batch_coeffs: &Vec<E>,
+        fold_challenges: &[E],
+        batch_coeffs: &[E],
         num_rounds: usize,
         num_vars: usize,
-        final_codeword: &Vec<E>,
-        roots: &Vec<Digest<E::BaseField>>,
+        final_codeword: &[E],
+        roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
         index: usize,
         hasher: &Hasher<E::BaseField>,
@@ -1859,7 +1870,7 @@ where
         let timer = start_timer!(|| "Checking codeword single query");
         self.oracle_query.check_merkle_paths(roots, hasher);
         self.commitment_query
-            .check_merkle_path(&Digest(comm.root().0.try_into().unwrap()), hasher);
+            .check_merkle_path(&Digest(comm.root().0), hasher);
 
         let (mut curr_left, mut curr_right) =
             self.commitment_query.query.leaves.batch(batch_coeffs);
@@ -1922,7 +1933,7 @@ where
 {
     pub fn from_query_result(
         query_result: SimpleBatchQueriesResult<E>,
-        oracle_trees: &Vec<MerkleTree<E>>,
+        oracle_trees: &[MerkleTree<E>],
         commitment: &BasefoldCommitmentWithData<E>,
     ) -> Self {
         Self {
@@ -2005,15 +2016,16 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-        fold_challenges: &Vec<E>,
-        batch_coeffs: &Vec<E>,
+        fold_challenges: &[E],
+        batch_coeffs: &[E],
         num_rounds: usize,
         num_vars: usize,
-        final_codeword: &Vec<E>,
-        roots: &Vec<Digest<E::BaseField>>,
+        final_codeword: &[E],
+        roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
         hasher: &Hasher<E::BaseField>,
     ) {

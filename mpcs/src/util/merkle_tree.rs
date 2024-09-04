@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
@@ -34,14 +35,14 @@ where
 {
     pub fn from_leaves(leaves: FieldType<E>, hasher: &Hasher<E::BaseField>) -> Self {
         Self {
-            inner: merkelize::<E>(&vec![&leaves], hasher),
+            inner: merkelize::<E>(&[&leaves], hasher),
             leaves: vec![leaves],
         }
     }
 
     pub fn from_batch_leaves(leaves: Vec<FieldType<E>>, hasher: &Hasher<E::BaseField>) -> Self {
         Self {
-            inner: merkelize::<E>(&leaves.iter().collect(), hasher),
+            inner: merkelize::<E>(&leaves.iter().collect_vec(), hasher),
             leaves,
         }
     }
@@ -80,8 +81,14 @@ where
 
     pub fn get_leaf_as_base(&self, index: usize) -> Vec<E::BaseField> {
         match &self.leaves[0] {
-            FieldType::Base(_) => self.leaves.iter().map(|leaves| field_type_index_base(leaves, index)).collect(),
-            FieldType::Ext(_) => panic!("Mismatching field type, calling get_leaf_as_base on a Merkle tree over extension fields"),
+            FieldType::Base(_) => self
+                .leaves
+                .iter()
+                .map(|leaves| field_type_index_base(leaves, index))
+                .collect(),
+            FieldType::Ext(_) => panic!(
+                "Mismatching field type, calling get_leaf_as_base on a Merkle tree over extension fields"
+            ),
             FieldType::Unreachable => unreachable!(),
         }
     }
@@ -134,6 +141,10 @@ where
 {
     pub fn new(inner: Vec<Digest<E::BaseField>>) -> Self {
         Self { inner }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
     pub fn len(&self) -> usize {
@@ -234,7 +245,7 @@ where
 }
 
 fn merkelize<E: ExtensionField>(
-    values: &Vec<&FieldType<E>>,
+    values: &[&FieldType<E>],
     hasher: &Hasher<E::BaseField>,
 ) -> Vec<Vec<Digest<E::BaseField>>> {
     #[cfg(feature = "sanity-check")]
@@ -273,14 +284,16 @@ fn merkelize<E: ExtensionField>(
                     hasher,
                 ),
                 FieldType::Ext(_) => hash_two_leaves_batch_ext::<E>(
-                    &values
+                    values
                         .iter()
                         .map(|values| field_type_index_ext(values, i << 1))
-                        .collect(),
-                    &values
+                        .collect_vec()
+                        .as_slice(),
+                    values
                         .iter()
                         .map(|values| field_type_index_ext(values, (i << 1) + 1))
-                        .collect(),
+                        .collect_vec()
+                        .as_slice(),
                     hasher,
                 ),
                 FieldType::Unreachable => unreachable!(),
@@ -303,7 +316,7 @@ fn merkelize<E: ExtensionField>(
 }
 
 fn authenticate_merkle_path_root<E: ExtensionField>(
-    path: &Vec<Digest<E::BaseField>>,
+    path: &[Digest<E::BaseField>],
     leaves: FieldType<E>,
     x_index: usize,
     root: &Digest<E::BaseField>,
@@ -319,11 +332,11 @@ fn authenticate_merkle_path_root<E: ExtensionField>(
 
     // The lowest bit in the index is ignored. It can point to either leaves
     x_index >>= 1;
-    for i in 0..path.len() {
+    for path_i in path.iter() {
         hash = if x_index & 1 == 0 {
-            hash_two_digests(&hash, &path[i], hasher)
+            hash_two_digests(&hash, path_i, hasher)
         } else {
-            hash_two_digests(&path[i], &hash, hasher)
+            hash_two_digests(path_i, &hash, hasher)
         };
         x_index >>= 1;
     }
@@ -331,7 +344,7 @@ fn authenticate_merkle_path_root<E: ExtensionField>(
 }
 
 fn authenticate_merkle_path_root_batch<E: ExtensionField>(
-    path: &Vec<Digest<E::BaseField>>,
+    path: &[Digest<E::BaseField>],
     left: FieldType<E>,
     right: FieldType<E>,
     x_index: usize,
@@ -351,11 +364,11 @@ fn authenticate_merkle_path_root_batch<E: ExtensionField>(
 
     // The lowest bit in the index is ignored. It can point to either leaves
     x_index >>= 1;
-    for i in 0..path.len() {
+    for path_i in path.iter() {
         hash = if x_index & 1 == 0 {
-            hash_two_digests(&hash, &path[i], hasher)
+            hash_two_digests(&hash, path_i, hasher)
         } else {
-            hash_two_digests(&path[i], &hash, hasher)
+            hash_two_digests(path_i, &hash, hasher)
         };
         x_index >>= 1;
     }

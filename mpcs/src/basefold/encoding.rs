@@ -1,6 +1,8 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 
+mod utils;
+
 mod basecode;
 pub use basecode::{Basecode, BasecodeDefaultSpec};
 
@@ -132,27 +134,25 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
     }
 }
 
-fn concatenate_field_types<E: ExtensionField>(coeffs: &Vec<FieldType<E>>) -> FieldType<E> {
+fn concatenate_field_types<E: ExtensionField>(coeffs: &[FieldType<E>]) -> FieldType<E> {
     match coeffs[0] {
         FieldType::Ext(_) => {
             let res = coeffs
                 .iter()
-                .map(|x| match x {
-                    FieldType::Ext(x) => x.iter().map(|x| *x),
+                .flat_map(|x| match x {
+                    FieldType::Ext(x) => x.iter().copied(),
                     _ => unreachable!(),
                 })
-                .flatten()
                 .collect::<Vec<_>>();
             FieldType::Ext(res)
         }
         FieldType::Base(_) => {
             let res = coeffs
                 .iter()
-                .map(|x| match x {
-                    FieldType::Base(x) => x.iter().map(|x| *x),
+                .flat_map(|x| match x {
+                    FieldType::Base(x) => x.iter().copied(),
                     _ => unreachable!(),
                 })
-                .flatten()
                 .collect::<Vec<_>>();
             FieldType::Base(res)
         }

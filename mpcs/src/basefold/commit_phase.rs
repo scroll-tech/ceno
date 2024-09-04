@@ -60,7 +60,7 @@ where
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_timer = start_timer!(|| "Basefold::open");
-    let mut eq = build_eq_x_r_vec(&point);
+    let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
     reverse_index_bits_in_place(&mut eq);
 
@@ -142,10 +142,11 @@ where
         end_timer!(sumcheck_timer);
     }
     end_timer!(timer);
-    return (trees, oracles);
+    (trees, oracles)
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
+#[allow(clippy::too_many_arguments)]
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
@@ -177,7 +178,7 @@ where
             running_oracle
                 .iter_mut()
                 .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
-                .for_each(|(r, a)| *r += E::from(a) * coeffs[index]);
+                .for_each(|(r, a)| *r += a * coeffs[index]);
         });
     end_timer!(build_oracle_timer);
 
@@ -196,16 +197,16 @@ where
                 // to align the polynomials to the variable with index 0 before adding them
                 // together. So each element is repeated by
                 // sum_of_all_evals_for_sumcheck.len() / bh_evals.len() times
-                *r += E::from(field_type_index_ext(
+                *r += field_type_index_ext(
                     &comm.polynomials_bh_evals[0],
                     pos >> (num_vars - log2_strict(comm.polynomials_bh_evals[0].len())),
-                )) * coeffs[index]
+                ) * coeffs[index]
             });
     });
     end_timer!(build_oracle_timer);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let mut eq = build_eq_x_r_vec(&point);
+    let mut eq = build_eq_x_r_vec(point);
     reverse_index_bits_in_place(&mut eq);
 
     let sumcheck_timer = start_timer!(|| "Basefold first round");
@@ -256,7 +257,7 @@ where
                     running_oracle
                         .iter_mut()
                         .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
-                        .for_each(|(r, a)| *r += E::from(a) * coeffs[index]);
+                        .for_each(|(r, a)| *r += a * coeffs[index]);
                 });
         } else {
             // The difference of the last round is that we don't need to compute the message,
@@ -296,10 +297,11 @@ where
         end_timer!(sumcheck_timer);
     }
     end_timer!(timer);
-    return (trees, oracles);
+    (trees, oracles)
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
+#[allow(clippy::too_many_arguments)]
 pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
@@ -331,7 +333,7 @@ where
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_timer = start_timer!(|| "Basefold::open");
-    let mut eq = build_eq_x_r_vec(&point);
+    let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
     reverse_index_bits_in_place(&mut eq);
 
@@ -404,7 +406,7 @@ where
         end_timer!(sumcheck_timer);
     }
     end_timer!(timer);
-    return (trees, oracles);
+    (trees, oracles)
 }
 
 fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: BasefoldSpec<E>>(

@@ -41,8 +41,8 @@ pub fn hash_two_leaves_base<E: ExtensionField>(
 }
 
 pub fn hash_two_leaves_batch_ext<E: ExtensionField>(
-    a: &Vec<E>,
-    b: &Vec<E>,
+    a: &[E],
+    b: &[E],
     hasher: &Hasher<E::BaseField>,
 ) -> Digest<E::BaseField> {
     let mut left_hasher = hasher.clone();

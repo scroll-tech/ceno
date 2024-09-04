@@ -118,21 +118,21 @@ where
     }
 }
 
-impl<E: ExtensionField> Into<Digest<E::BaseField>> for BasefoldCommitmentWithData<E>
+impl<E: ExtensionField> From<BasefoldCommitmentWithData<E>> for Digest<E::BaseField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn into(self) -> Digest<E::BaseField> {
-        self.get_root_as()
+    fn from(val: BasefoldCommitmentWithData<E>) -> Self {
+        val.get_root_as()
     }
 }
 
-impl<E: ExtensionField> Into<BasefoldCommitment<E>> for &BasefoldCommitmentWithData<E>
+impl<E: ExtensionField> From<&BasefoldCommitmentWithData<E>> for BasefoldCommitment<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn into(self) -> BasefoldCommitment<E> {
-        self.to_commitment()
+    fn from(val: &BasefoldCommitmentWithData<E>) -> Self {
+        val.to_commitment()
     }
 }
 
