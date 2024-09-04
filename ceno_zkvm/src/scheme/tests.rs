@@ -74,7 +74,7 @@ fn test_rw_lk_expression_combination() {
         let challenges = [1.into(), 2.into()];
 
         let proof = prover
-            .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
+            .create_opcode_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
             .expect("create_proof failed");
 
         let verifier = ZKVMVerifier::new(vk);

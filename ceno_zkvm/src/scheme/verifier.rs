@@ -24,7 +24,7 @@ use crate::{
 };
 
 use super::{
-    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMProof, ZKVMTableProof,
+    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZkvmOpcodeProof, ZkvmTableProof,
 };
 
 pub struct ZKVMVerifier<E: ExtensionField> {
@@ -39,7 +39,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
     /// verify proof and return input opening point
     pub fn verify(
         &self,
-        proof: &ZKVMProof<E>,
+        proof: &ZkvmOpcodeProof<E>,
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -252,7 +252,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 
     pub fn verify_table_proof(
         &self,
-        proof: &ZKVMTableProof<E>,
+        proof: &ZkvmTableProof<E>,
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,

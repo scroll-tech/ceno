@@ -13,7 +13,7 @@ pub mod verifier;
 mod tests;
 
 #[derive(Clone)]
-pub struct ZKVMProof<E: ExtensionField> {
+pub struct ZkvmOpcodeProof<E: ExtensionField> {
     // TODO support >1 opcodes
     pub num_instances: usize,
 
@@ -39,7 +39,7 @@ pub struct ZKVMProof<E: ExtensionField> {
 }
 
 #[derive(Clone)]
-pub struct ZKVMTableProof<E: ExtensionField> {
+pub struct ZkvmTableProof<E: ExtensionField> {
     pub num_instances: usize,
     // logup sum at layer 1
     pub lk_p1_out_eval: E,
@@ -56,4 +56,10 @@ pub struct ZKVMTableProof<E: ExtensionField> {
 
     pub fixed_in_evals: Vec<E>,
     pub wits_in_evals: Vec<E>,
+}
+
+#[derive(Clone)]
+pub struct ZkvmProof<E: ExtensionField> {
+    opcode_proofs: Vec<ZkvmOpcodeProof<E>>,
+    table_proofs: Vec<ZkvmTableProof<E>>,
 }

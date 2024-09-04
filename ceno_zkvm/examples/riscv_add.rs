@@ -78,7 +78,7 @@ fn main() {
             .collect_vec();
         let timer = Instant::now();
         let _ = prover
-            .create_proof(
+            .create_opcode_proof(
                 wits_in,
                 num_instances,
                 max_threads,

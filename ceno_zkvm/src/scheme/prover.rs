@@ -31,7 +31,7 @@ use crate::{
     virtual_polys::VirtualPolynomials,
 };
 
-use super::{ZKVMProof, ZKVMTableProof};
+use super::{ZkvmOpcodeProof, ZkvmProof, ZkvmTableProof};
 
 pub struct ZKVMProver<E: ExtensionField> {
     pk: ProvingKey<E>,
@@ -42,18 +42,24 @@ impl<E: ExtensionField> ZKVMProver<E> {
         ZKVMProver { pk }
     }
 
+    pub fn create_proof(
+
+    ) -> Result<ZkvmProof<E>>  {
+
+        Ok()
+    }
     /// create proof giving witness and num_instances
     /// major flow break down into
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
-    pub fn create_proof(
+    pub fn create_opcode_proof(
         &self,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<ZKVMProof<E>, ZKVMError> {
+    ) -> Result<ZkvmOpcodeProof<E>, ZKVMError> {
         let cs = self.pk.get_cs();
         let log2_num_instances = ceil_log2(num_instances);
         let next_pow2_instances = 1 << log2_num_instances;
@@ -414,7 +420,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             .collect();
         exit_span!(span);
 
-        Ok(ZKVMProof {
+        Ok(ZkvmOpcodeProof {
             num_instances,
             record_r_out_evals,
             record_w_out_evals,
@@ -438,7 +444,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<ZKVMTableProof<E>, ZKVMError> {
+    ) -> Result<ZkvmTableProof<E>, ZKVMError> {
         let cs = self.pk.get_cs();
         let fixed = self
             .pk
@@ -610,7 +616,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let wits_in_evals = evals;
         exit_span!(span);
 
-        Ok(ZKVMTableProof {
+        Ok(ZkvmTableProof {
             num_instances,
             lk_p1_out_eval,
             lk_p2_out_eval,
