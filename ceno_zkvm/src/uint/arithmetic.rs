@@ -243,7 +243,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             .iter()
             .fold(Expression::from(0), |acc, flag| acc.clone() + flag.expr());
 
-        let sum_flag = create_witin_from_expr!(circuit_builder, sum_expr)?;
+        let sum_flag = create_witin_from_expr!(circuit_builder, false, sum_expr)?;
         let (is_equal, diff_inv) =
             circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))?;
         Ok(IsEqualConfig {
@@ -276,7 +276,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
 
         let inv_128 = F::from(128).invert().unwrap();
         let msb = (high_limb - high_limb_no_msb.expr()) * Expression::Constant(inv_128);
-        let msb = create_witin_from_expr!(circuit_builder, msb)?;
+        let msb = create_witin_from_expr!(circuit_builder, false, msb)?;
         Ok(MsbConfig {
             msb,
             high_limb_no_msb,
@@ -291,10 +291,11 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
     ) -> Result<LtuConfig, ZKVMError> {
         let n_bytes = Self::NUM_CELLS;
         let indexes: Vec<WitIn> = (0..n_bytes)
-            .map(|_| circuit_builder.create_witin(|| ""))
+            .map(|_| circuit_builder.create_witin(|| "index"))
             .collect::<Result<_, ZKVMError>>()?;
 
         // indicate the first non-zero byte index i_0 of a[i] - b[i]
+        // from high to low
         indexes
             .iter()
             .try_for_each(|idx| circuit_builder.assert_bit(|| "bit assert", idx.expr()))?;
@@ -306,17 +307,19 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         // equal zero if a==b, otherwise equal (a[i_0]-b[i_0])^{-1}
         let byte_diff_inv = circuit_builder.create_witin(|| "byte_diff_inverse")?;
 
-        // define accumulated index sum
+        // define accumulated index sum from high to low
         let si_expr: Vec<Expression<E>> = indexes
             .iter()
-            .scan(Expression::from(0), |acc, idx| {
-                *acc = acc.clone() + idx.expr();
-                Some(acc.clone())
+            .rev()
+            .scan(Expression::from(0), |state, idx| {
+                *state = state.clone() + idx.expr();
+                Some(state.clone())
             })
             .collect();
         let si = si_expr
             .into_iter()
-            .map(|expr| create_witin_from_expr!(circuit_builder, expr))
+            .rev()
+            .map(|expr| create_witin_from_expr!(circuit_builder, false, expr))
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
 
         // check byte diff that before the first non-zero i_0 equals zero
@@ -325,39 +328,35 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
             .zip(rhs.limbs.iter())
             .try_for_each(|((flag, a), b)| {
                 circuit_builder.require_zero(
-                    || "zero check",
-                    Expression::from(1) - flag.expr() * a.expr() + flag.expr() * b.expr(),
+                    || "byte diff zero check",
+                    a.expr() - b.expr() - flag.expr() * a.expr() + flag.expr() * b.expr(),
                 )
             })?;
 
         // define accumulated byte sum
-        // when a!= b, the last item in sa should equal the first non-zero byte a[i_0]
-        let sa: Vec<Expression<E>> = self
+        // when a!= b, sa should equal the first non-zero byte a[i_0]
+        let sa = self
             .limbs
             .iter()
             .zip_eq(indexes.iter())
-            .scan(Expression::from(0), |acc, (ai, idx)| {
-                *acc = acc.clone() + ai.expr() * idx.expr();
-                Some(acc.clone())
-            })
-            .collect();
-        let sb: Vec<Expression<E>> = rhs
+            .fold(Expression::from(0), |acc, (ai, idx)| {
+                acc.clone() + ai.expr() * idx.expr()
+            });
+        let sb = rhs
             .limbs
             .iter()
             .zip_eq(indexes.iter())
-            .scan(Expression::from(0), |acc, (ai, idx)| {
-                *acc = acc.clone() + ai.expr() * idx.expr();
-                Some(acc.clone())
-            })
-            .collect();
+            .fold(Expression::from(0), |acc, (bi, idx)| {
+                acc.clone() + bi.expr() * idx.expr()
+            });
 
         // check the first byte difference has a inverse
         // unwrap is safe because vector len > 0
-        let lhs_ne_byte = create_witin_from_expr!(circuit_builder, sa.last().unwrap().clone())?;
-        let rhs_ne_byte = create_witin_from_expr!(circuit_builder, sb.last().unwrap().clone())?;
-        let index_ne = si.last().unwrap();
+        let lhs_ne_byte = create_witin_from_expr!(circuit_builder, false, sa.clone())?;
+        let rhs_ne_byte = create_witin_from_expr!(circuit_builder, false, sb.clone())?;
+        let index_ne = si.first().unwrap();
         circuit_builder.require_zero(
-            || "zero check",
+            || "byte inverse check",
             lhs_ne_byte.expr() * byte_diff_inv.expr()
                 - rhs_ne_byte.expr() * byte_diff_inv.expr()
                 - index_ne.expr(),
@@ -370,6 +369,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         Ok(LtuConfig {
             byte_diff_inv,
             indexes,
+            acc_indexes: si,
             lhs_ne_byte,
             rhs_ne_byte,
             is_ltu,
@@ -401,7 +401,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         let (msb_is_equal, msb_diff_inv) =
             circuit_builder.is_equal(lhs_msb.msb.expr(), rhs_msb.msb.expr())?;
         circuit_builder.require_zero(
-            || "zero check",
+            || "is lt zero check",
             lhs_msb.msb.expr() - lhs_msb.msb.expr() * rhs_msb.msb.expr()
                 + msb_is_equal.expr() * is_ltu.is_ltu.expr()
                 - is_lt.expr(),

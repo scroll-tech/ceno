@@ -143,8 +143,6 @@ impl<'a, E: ExtensionField> MockProver<E> {
         let mut table_vec = vec![];
         load_u5_table(&mut table_vec, cb, challenge);
 
-        #[rustfmt::skip]
-        /*
         // Lookup expressions
         for (expr, name) in cb
             .cs
@@ -166,7 +164,6 @@ impl<'a, E: ExtensionField> MockProver<E> {
                 }
             }
         }
-        */
 
         if errors.is_empty() {
             Ok(())
@@ -312,6 +309,7 @@ mod tests {
     }
 
     #[test]
+    // TODO: add it back after the support of missing lookup
     fn test_lookup_error() {
         let mut cs = ConstraintSystem::new(|| "test_lookup_error");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);

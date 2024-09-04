@@ -134,7 +134,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             Self::NUM_CELLS
         );
         if let UintLimb::WitIn(c) = &self.limbs {
-            for (idx, wire) in c.into_iter().enumerate() {
+            for (idx, wire) in c.iter().enumerate() {
                 witin[wire.id as usize] = values[idx];
             }
         }

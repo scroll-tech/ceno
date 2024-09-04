@@ -42,6 +42,7 @@ impl MsbInput<'_> {
 #[derive(Clone)]
 pub struct LtuConfig {
     pub indexes: Vec<WitIn>,
+    pub acc_indexes: Vec<WitIn>,
     pub byte_diff_inv: WitIn,
     pub lhs_ne_byte: WitIn,
     pub rhs_ne_byte: WitIn,
@@ -57,7 +58,13 @@ impl LtuInput<'_> {
     pub fn generate_witness<E: ExtensionField>(&self, witin: &mut [E], config: &LtuConfig) -> bool {
         let mut idx = 0;
         let mut flag: bool = false;
-        for (i, (&lhs, &rhs)) in self.lhs_limbs.iter().zip(self.rhs_limbs.iter()).enumerate() {
+        for (i, (&lhs, &rhs)) in self
+            .lhs_limbs
+            .iter()
+            .zip(self.rhs_limbs.iter())
+            .enumerate()
+            .rev()
+        {
             if lhs != rhs {
                 idx = i;
                 flag = true;
@@ -65,15 +72,22 @@ impl LtuInput<'_> {
             }
         }
         config.indexes[idx].assign(witin, || i64_to_ext(flag as i64));
+        config.acc_indexes.iter().enumerate().for_each(|(id, wit)| {
+            if id <= idx {
+                wit.assign(witin, || i64_to_ext(flag as i64));
+            } else {
+                wit.assign(witin, || E::ZERO);
+            }
+        });
         let lhs_ne_byte = i64_to_ext(self.lhs_limbs[idx] as i64);
         let rhs_ne_byte = i64_to_ext(self.rhs_limbs[idx] as i64);
         config.lhs_ne_byte.assign(witin, || lhs_ne_byte);
         config.rhs_ne_byte.assign(witin, || rhs_ne_byte);
         config.byte_diff_inv.assign(witin, || {
             if flag {
-                E::ONE
-            } else {
                 (lhs_ne_byte - rhs_ne_byte).invert().unwrap()
+            } else {
+                E::ONE
             }
         });
         let is_ltu = self.lhs_limbs[idx] < self.rhs_limbs[idx];

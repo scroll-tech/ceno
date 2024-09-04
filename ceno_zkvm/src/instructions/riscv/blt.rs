@@ -93,7 +93,7 @@ impl BltInput {
                 .collect()
         });
         config.rhs_limb8.assign(witin, || {
-            self.lhs_limb8
+            self.rhs_limb8
                 .iter()
                 .map(|&limb| i64_to_ext(limb as i64))
                 .collect()
@@ -155,14 +155,14 @@ fn blt_gadget<E: ExtensionField>(
     let is_lt = lhs_limb8.lt_limb8(circuit_builder, &rhs_limb8)?;
 
     // update pc
-    let next_pc = pc.expr()
-        + is_lt.is_lt.expr() * imm.expr()
-        + PC_STEP_SIZE.into()
-        + is_lt.is_lt.expr() * PC_STEP_SIZE.into();
+    let next_pc = pc.expr() + is_lt.is_lt.expr() * imm.expr() + PC_STEP_SIZE.into()
+        - is_lt.is_lt.expr() * PC_STEP_SIZE.into();
 
     // update ts
     let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
     let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
+    // TODO: replace it with `new_from_exprs_unchecked` after PR 181
+    // so we can remove lhs/rhs from config
     let lhs = RegUInt::from_u8_limbs(circuit_builder, &lhs_limb8);
     let rhs = RegUInt::from_u8_limbs(circuit_builder, &rhs_limb8);
 
@@ -181,7 +181,7 @@ fn blt_gadget<E: ExtensionField>(
         &rhs,
     )?;
 
-    let next_pc = create_witin_from_expr!(circuit_builder, next_pc)?;
+    let next_pc = create_witin_from_expr!(circuit_builder, false, next_pc)?;
     let next_ts = ts + 1.into();
     circuit_builder.state_out(next_pc.expr(), next_ts)?;
 
@@ -229,7 +229,7 @@ mod test {
     use super::{BltInput, BltInstruction};
 
     fn interleave<T: Clone>(vectors: Vec<Vec<T>>) -> Vec<Vec<T>> {
-        let len = vectors.first().map_or(0, Vec::len); // Get the length of the first vector, or 0 if empty
+        let len = vectors.first().map_or(0, Vec::len);
 
         (0..len)
             .map(|i| vectors.iter().map(|vec| vec[i].clone()).collect())
@@ -244,7 +244,7 @@ mod test {
 
         let num_wits = circuit_builder.cs.num_witin as usize;
         // generate mock witness
-        let num_instances = 1 << 2;
+        let num_instances = 1 << 4;
         let wits_in = (0..num_instances)
             .map(|_| {
                 let input = BltInput::random();
@@ -259,7 +259,7 @@ mod test {
             .map(|witin| witin.clone().into_mle().into())
             .collect::<Vec<_>>();
 
-        MockProver::assert_satisfied(&mut circuit_builder, &wits_in, None);
+        MockProver::run(&mut circuit_builder, &wits_in, None).expect_err("lookup will fail");
         Ok(())
     }
 
