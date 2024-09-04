@@ -17,7 +17,7 @@
 use anyhow::{anyhow, Result};
 use std::sync::OnceLock;
 
-use super::addr::{ByteAddr, WordAddr, WORD_SIZE};
+use super::addr::{ByteAddr, RegIdx, Word, WordAddr, WORD_SIZE};
 
 pub trait EmuContext {
     // Handle environment call
@@ -42,23 +42,26 @@ pub trait EmuContext {
     fn set_pc(&mut self, addr: ByteAddr);
 
     // Load from a register
-    fn load_register(&mut self, idx: usize) -> Result<u32>;
+    fn load_register(&mut self, idx: RegIdx) -> Result<Word>;
 
     // Store to a register
-    fn store_register(&mut self, idx: usize, data: u32) -> Result<()>;
+    fn store_register(&mut self, idx: RegIdx, data: Word) -> Result<()>;
 
     // Load from memory
-    fn load_memory(&mut self, addr: WordAddr) -> Result<u32>;
+    fn load_memory(&mut self, addr: WordAddr) -> Result<Word>;
 
     // Store to memory
-    fn store_memory(&mut self, addr: WordAddr, data: u32) -> Result<()>;
+    fn store_memory(&mut self, addr: WordAddr, data: Word) -> Result<()>;
+
+    // Get the value of a register without side-effects.
+    fn peek_register(&self, idx: RegIdx) -> Word;
 
     // Get the value of a memory word without side-effects.
-    fn peek_memory(&self, addr: WordAddr) -> u32;
+    fn peek_memory(&self, addr: WordAddr) -> Word;
 
     // Load from memory, in the context of instruction fetching.
     // Only called after check_insn_load returns true.
-    fn fetch(&mut self, pc: WordAddr) -> Result<u32> {
+    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
         self.load_memory(pc)
     }
 

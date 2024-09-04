@@ -11,4 +11,4 @@ mod vm_state;
 pub use vm_state::VMState;
 
 mod rv32im;
-pub use rv32im::{DecodedInstruction, InsnCategory, InsnKind};
+pub use rv32im::{DecodedInstruction, EmuContext, InsnCategory, InsnKind};

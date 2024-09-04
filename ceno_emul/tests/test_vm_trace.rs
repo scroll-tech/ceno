@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ceno_emul::{ByteAddr, InsnKind, StepRecord, VMState, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, EmuContext, InsnKind, StepRecord, VMState, CENO_PLATFORM};
 
 #[test]
 fn test_vm_trace() -> Result<()> {
