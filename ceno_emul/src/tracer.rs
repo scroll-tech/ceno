@@ -86,6 +86,12 @@ pub struct Tracer {
     latest_accesses: HashMap<WordAddr, Cycle>,
 }
 
+impl Default for Tracer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tracer {
     pub const SUBCYCLE_RS1: Cycle = 0;
     pub const SUBCYCLE_RS2: Cycle = 1;
@@ -103,17 +109,16 @@ impl Tracer {
         }
     }
 
+    /// Return the completed step and advance to the next cycle.
     pub fn advance(&mut self) -> StepRecord {
-        // Reset and advance to the next cycle.
         let next_cycle = self.record.cycle + Self::SUBCYCLES_PER_INSN;
-        let complete_step = mem::replace(
+        mem::replace(
             &mut self.record,
             StepRecord {
                 cycle: next_cycle,
                 ..StepRecord::default()
             },
-        );
-        complete_step
+        )
     }
 
     pub fn store_pc(&mut self, pc: ByteAddr) {
