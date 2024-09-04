@@ -8,11 +8,15 @@ use crate::{
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
-/// - Registers are assigned a VMA (virtual memory address, u32). This way they can be unified with the RAM check.
-/// - It is possible that the `rs1 / rs2 / rd` **be the same**. Then, they point to the **same previous cycle**. The circuits need to handle this case.
-/// - Any of `rs1 / rs2 / rd` may be `x0`. The trace handles this like any register, including the value that was _supposed_ to be stored. The circuits must handle this case, either by storing 0 or by skipping x0 operations.
-/// - `cycle = 0` means initialization; that is all the special startup logic we are going to have. The RISC-V program starts at `cycle = 1`.
-/// - We assume that the PC was written at `cycle - 1` so we don’t store this.
+/// - Each instruction is divided into 4 subcycles with the operations on: rs1, rs2, rd, memory. Each op is assigned a unique `cycle + subcycle`.
+///
+/// - `cycle = 0` means initialization; that is all the special startup logic we are going to have. The RISC-V program starts at `cycle = 4` and each instruction increments `cycle += 4`.
+///
+/// - Registers are assigned a VMA (virtual memory address, u32). This way they can be unified with other kinds of memory ops.
+///
+/// - Any of `rs1 / rs2 / rd` **may be `x0`**. The trace handles this like any register, including the value that was _supposed_ to be stored. The circuits must handle this case: either **store `0` or skip `x0` operations**.
+///
+/// - Any pair of `rs1 / rs2 / rd` **may be the same**. Then, one op will point to the other op in the same instruction but a different subcycle. The circuits may follow the operations **without special handling** of repeated registers.
 #[derive(Clone, Debug, Default)]
 pub struct StepRecord {
     cycle: Cycle,
@@ -75,7 +79,7 @@ impl StepRecord {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Tracer {
     record: StepRecord,
 
@@ -83,34 +87,33 @@ pub struct Tracer {
 }
 
 impl Tracer {
+    pub const SUBCYCLE_RS1: Cycle = 0;
+    pub const SUBCYCLE_RS2: Cycle = 1;
+    pub const SUBCYCLE_RD: Cycle = 2;
+    pub const SUBCYCLE_MEM: Cycle = 3;
+    pub const SUBCYCLES_PER_INSN: Cycle = 4;
+
     pub fn new() -> Tracer {
-        let mut t = Tracer::default();
-        t.record.cycle = 1;
-        t
+        Tracer {
+            record: StepRecord {
+                cycle: Self::SUBCYCLES_PER_INSN,
+                ..StepRecord::default()
+            },
+            latest_accesses: HashMap::new(),
+        }
     }
 
     pub fn advance(&mut self) -> StepRecord {
         // Reset and advance to the next cycle.
-        let record = mem::take(&mut self.record);
-        self.record.cycle = record.cycle + 1;
-
-        // Track this step as the origin of its memory accesses.
-        let mut track_mem = |addr| self.latest_accesses.insert(addr, record.cycle);
-
-        if let Some(ReadOp { addr, .. }) = record.rs1 {
-            track_mem(addr);
-        }
-        if let Some(ReadOp { addr, .. }) = record.rs2 {
-            track_mem(addr);
-        }
-        if let Some(WriteOp { addr, .. }) = record.rd {
-            track_mem(addr);
-        }
-        if let Some(WriteOp { addr, .. }) = record.memory_op {
-            track_mem(addr);
-        }
-
-        record
+        let next_cycle = self.record.cycle + Self::SUBCYCLES_PER_INSN;
+        let complete_step = mem::replace(
+            &mut self.record,
+            StepRecord {
+                cycle: next_cycle,
+                ..StepRecord::default()
+            },
+        );
+        complete_step
     }
 
     pub fn store_pc(&mut self, pc: ByteAddr) {
@@ -124,21 +127,20 @@ impl Tracer {
 
     pub fn load_register(&mut self, idx: RegIdx, value: Word) {
         let addr = CENO_PLATFORM.register_vma(idx).into();
-        let previous_cycle = self.latest_accesses(addr);
 
         match (&self.record.rs1, &self.record.rs2) {
             (None, None) => {
                 self.record.rs1 = Some(ReadOp {
                     addr,
                     value,
-                    previous_cycle,
+                    previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS1),
                 });
             }
             (Some(_), None) => {
                 self.record.rs2 = Some(ReadOp {
                     addr,
                     value,
-                    previous_cycle,
+                    previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS2),
                 });
             }
             _ => unimplemented!("Only two register reads are supported"),
@@ -154,20 +156,12 @@ impl Tracer {
         self.record.rd = Some(WriteOp {
             addr,
             value,
-            previous_cycle: self.latest_accesses(addr),
+            previous_cycle: self.track_access(addr, Self::SUBCYCLE_RD),
         });
     }
 
     pub fn load_memory(&mut self, addr: WordAddr, value: Word) {
-        if self.record.memory_op.is_some() {
-            unimplemented!("Only one memory access is supported");
-        }
-
-        self.record.memory_op = Some(WriteOp {
-            addr,
-            value: Change::new(value, value),
-            previous_cycle: self.latest_accesses(addr),
-        });
+        self.store_memory(addr, Change::new(value, value));
     }
 
     pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
@@ -178,12 +172,18 @@ impl Tracer {
         self.record.memory_op = Some(WriteOp {
             addr,
             value,
-            previous_cycle: self.latest_accesses(addr),
+            previous_cycle: self.track_access(addr, Self::SUBCYCLE_MEM),
         });
     }
 
-    fn latest_accesses(&self, addr: WordAddr) -> Cycle {
-        *self.latest_accesses.get(&addr).unwrap_or(&0)
+    /// - Return the cycle when an address was last accessed.
+    /// - Return 0 if this is the first access.
+    /// - Record the current instruction as the origin of the latest access.
+    /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
+    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
+        self.latest_accesses
+            .insert(addr, self.record.cycle + subcycle)
+            .unwrap_or(0)
     }
 }
 

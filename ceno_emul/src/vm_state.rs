@@ -31,7 +31,7 @@ impl VMState {
             memory: HashMap::new(),
             registers: [0; 32],
             succeeded: false,
-            tracer: Default::default(),
+            tracer: Tracer::new(),
         }
     }
 
