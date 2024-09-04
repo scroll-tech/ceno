@@ -185,6 +185,11 @@ impl Tracer {
             .insert(addr, self.record.cycle + subcycle)
             .unwrap_or(0)
     }
+
+    /// Return all the addresses that were accessed and the cycle when they were last accessed.
+    pub fn final_accesses(&self) -> &HashMap<WordAddr, Cycle> {
+        &self.latest_accesses
+    }
 }
 
 #[derive(Copy, Clone, Default)]
