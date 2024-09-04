@@ -141,12 +141,15 @@ impl<E: ExtensionField> MockProverError<E> {
         fn fmt_field<E: ExtensionField>(field: &E) -> String {
             let name = format!("{:?}", field);
             let name = name.split('(').next().unwrap_or("ExtensionField");
-
-            let mut list = vec![];
-            for v in field.as_bases().iter() {
-                list.push(fmt_base_field::<E>(v));
-            }
-            format!("{name}[{}]", list.join(","))
+            format!(
+                "{name}[{}]",
+                field
+                    .as_bases()
+                    .iter()
+                    .map(fmt_base_field::<E>)
+                    .collect::<Vec<String>>()
+                    .join(",")
+            )
         }
 
         fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField) -> String {
@@ -168,19 +171,19 @@ impl<E: ExtensionField> MockProverError<E> {
             wits_in: &[ArcMultilinearExtension<E>],
             inst_id: usize,
         ) -> String {
-            let mut list = vec![];
-            for wt_id in wtns {
-                let wit = &wits_in[*wt_id as usize];
-                let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
-                    fmt_field(&e[inst_id])
-                } else if let Some(bf) = wit.get_base_field_vec_optn() {
-                    fmt_base_field::<E>(&bf[inst_id])
-                } else {
-                    "Unknown".to_string()
-                };
-                list.push(format!("WitIn({wt_id})={value_fmt}"));
-            }
-            list.join(",")
+            wtns.iter()
+                .map(|wt_id| {
+                    let wit = &wits_in[*wt_id as usize];
+                    let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
+                        fmt_field(&e[inst_id])
+                    } else if let Some(bf) = wit.get_base_field_vec_optn() {
+                        fmt_base_field::<E>(&bf[inst_id])
+                    } else {
+                        "Unknown".to_string()
+                    };
+                    format!("WitIn({wt_id})={value_fmt}")
+                })
+                .join(",")
         }
     }
 }
