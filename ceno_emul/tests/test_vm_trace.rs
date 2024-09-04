@@ -1,5 +1,9 @@
 use anyhow::Result;
-use ceno_emul::{ByteAddr, InsnKind, StepRecord, VMState, CENO_PLATFORM};
+use std::collections::HashMap;
+
+use ceno_emul::{
+    ByteAddr, Cycle, EmuContext, InsnKind, StepRecord, Tracer, VMState, WordAddr, CENO_PLATFORM,
+};
 
 #[test]
 fn test_vm_trace() -> Result<()> {
@@ -11,7 +15,6 @@ fn test_vm_trace() -> Result<()> {
     }
 
     let steps = run(&mut ctx)?;
-    let ctx = ctx;
 
     let (x1, x2, x3) = expected_fibonacci_20();
     assert_eq!(ctx.peek_register(1), x1);
@@ -23,6 +26,11 @@ fn test_vm_trace() -> Result<()> {
         .map(|step| step.insn_decoded().kind().1)
         .collect();
     assert_eq!(ops, expected_ops_fibonacci_20());
+
+    assert_eq!(
+        ctx.tracer().final_accesses(),
+        &expected_final_accesses_fibonacci_20()
+    );
 
     Ok(())
 }
@@ -39,6 +47,7 @@ fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
     state.iter_until_success().collect()
 }
 
+/// Example in RISC-V bytecode and assembly.
 const PROGRAM_FIBONACCI_20: [u32; 7] = [
     // x1 = 10;
     // x3 = 1;
@@ -61,6 +70,7 @@ const PROGRAM_FIBONACCI_20: [u32; 7] = [
     0b_000000000000_00000_000_00000_1110011,
 ];
 
+/// Rust version of the example. Reconstruct the output.
 fn expected_fibonacci_20() -> (u32, u32, u32) {
     let mut x1 = 10;
     let mut x2 = 0; // Even.
@@ -80,6 +90,7 @@ fn expected_fibonacci_20() -> (u32, u32, u32) {
     (x1, x2, x3)
 }
 
+/// Reconstruct the sequence of opcodes.
 fn expected_ops_fibonacci_20() -> Vec<InsnKind> {
     use InsnKind::*;
     let mut ops = vec![ADDI, ADDI];
@@ -88,4 +99,35 @@ fn expected_ops_fibonacci_20() -> Vec<InsnKind> {
     }
     ops.push(EANY);
     ops
+}
+
+/// Reconstruct the last access of each register.
+fn expected_final_accesses_fibonacci_20() -> HashMap<WordAddr, Cycle> {
+    let mut accesses = HashMap::new();
+    let x = |i| WordAddr::from(CENO_PLATFORM.register_vma(i));
+    const C: Cycle = Tracer::SUBCYCLES_PER_INSN;
+
+    let mut cycle = C; // First cycle.
+    cycle += 2 * C; // Set x1 and x3.
+    for _ in 0..9 {
+        // Loop except the last iteration.
+        cycle += 4 * C; // ADDI, ADD, ADD, BNE.
+    }
+    cycle += 2 * C; // Last iteration ADDI and ADD.
+
+    // Last ADD.
+    accesses.insert(x(2), cycle + Tracer::SUBCYCLE_RS1);
+    accesses.insert(x(3), cycle + Tracer::SUBCYCLE_RD);
+    cycle += C;
+
+    // Last BNE.
+    accesses.insert(x(1), cycle + Tracer::SUBCYCLE_RS1);
+    accesses.insert(x(0), cycle + Tracer::SUBCYCLE_RS2);
+    cycle += C;
+
+    // Now at the final ECALL cycle.
+    accesses.insert(x(CENO_PLATFORM.reg_ecall()), cycle + Tracer::SUBCYCLE_RS1);
+    accesses.insert(x(CENO_PLATFORM.reg_arg0()), cycle + Tracer::SUBCYCLE_RS2);
+
+    accesses
 }

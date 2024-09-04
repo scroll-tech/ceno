@@ -5,7 +5,7 @@ use ff::Field;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    expression::{Expression, WitIn},
+    expression::{Expression, Fixed, ToExpr, WitIn},
     structs::ROMType,
 };
 
@@ -22,6 +22,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_witin(name_fn)
     }
 
+    pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Result<Fixed, ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.create_fixed(name_fn)
+    }
+
     pub fn lk_record<NR, N>(
         &mut self,
         name_fn: N,
@@ -32,6 +40,19 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.lk_record(name_fn, rlc_record)
+    }
+
+    pub fn lk_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        rlc_record: Expression<E>,
+        multiplicity: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.lk_table_record(name_fn, rlc_record, multiplicity)
     }
 
     pub fn read_record<NR, N>(
@@ -132,6 +153,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         match C {
             16 => self.assert_u16(name_fn, expr),
+            8 => self.assert_byte(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
             _ => panic!("Unsupported bit range"),
         }
@@ -179,5 +201,87 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             let mut inner_circuit_builder = CircuitBuilder::new(cs);
             cb(&mut inner_circuit_builder)
         })
+    }
+
+    pub(crate) fn assert_byte<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.assert_u16(name_fn, expr * Expression::from(1 << 8))
+    }
+
+    pub(crate) fn assert_bit<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.assert_u16(name_fn, expr * Expression::from(1 << 15))
+    }
+
+    /// lookup a ^ b = res
+    /// a and b are bytes
+    pub(crate) fn lookup_and_byte(
+        &mut self,
+        res: Expression<E>,
+        a: Expression<E>,
+        b: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        let key = a * 256.into() + b;
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(ROMType::And as u64)),
+            key,
+            res,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(|| "and lookup record", rlc_record)?;
+        Ok(())
+    }
+
+    /// lookup a < b as usigned byte
+    pub(crate) fn lookup_ltu_limb8(
+        &mut self,
+        res: Expression<E>,
+        a: Expression<E>,
+        b: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        let key = a * 256.into() + b;
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
+            key,
+            res,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(|| "ltu lookup record", rlc_record)?;
+        Ok(())
+    }
+
+    pub(crate) fn is_equal(
+        &mut self,
+        lhs: Expression<E>,
+        rhs: Expression<E>,
+    ) -> Result<(WitIn, WitIn), ZKVMError> {
+        let is_eq = self.create_witin(|| "is_eq")?;
+        let diff_inverse = self.create_witin(|| "diff_inverse")?;
+
+        self.require_zero(
+            || "is equal",
+            is_eq.expr().clone() * lhs.clone() - is_eq.expr() * rhs.clone(),
+        )?;
+        self.require_zero(
+            || "is equal",
+            Expression::from(1) - is_eq.expr().clone() - diff_inverse.expr() * lhs
+                + diff_inverse.expr() * rhs,
+        )?;
+
+        Ok((is_eq, diff_inverse))
     }
 }

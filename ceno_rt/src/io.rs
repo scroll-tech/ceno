@@ -1,5 +1,5 @@
 use crate::{INFO_OUT_ADDR, WORD_SIZE};
-use core::{cell::Cell, fmt, mem::size_of, ptr::write_volatile, slice};
+use core::{cell::Cell, fmt, mem::size_of, slice};
 
 static INFO_OUT: IOWriter = IOWriter::new(INFO_OUT_ADDR);
 

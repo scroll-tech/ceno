@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ceno_emul::{ByteAddr, StepRecord, VMState, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, EmuContext, StepRecord, VMState, CENO_PLATFORM};
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {

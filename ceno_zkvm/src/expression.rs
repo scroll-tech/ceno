@@ -7,12 +7,18 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 
-use crate::structs::{ChallengeId, WitnessId};
+use crate::{
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    structs::{ChallengeId, WitnessId},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
+    /// Fixed
+    Fixed(Fixed),
     /// Constant poly
     Constant(E::BaseField),
     /// This is the sum of two expression
@@ -25,7 +31,7 @@ pub enum Expression<E: ExtensionField> {
 }
 
 /// this is used as finite state machine state
-/// for differentiate a expression is in monomial form or not
+/// for differentiate an expression is in monomial form or not
 enum MonomialState {
     SumTerm,
     ProductTerm,
@@ -34,6 +40,7 @@ enum MonomialState {
 impl<E: ExtensionField> Expression<E> {
     pub fn degree(&self) -> usize {
         match self {
+            Expression::Fixed(_) => 1,
             Expression::WitIn(_) => 1,
             Expression::Constant(_) => 0,
             Expression::Sum(a_expr, b_expr) => max(a_expr.degree(), b_expr.degree()),
@@ -46,6 +53,7 @@ impl<E: ExtensionField> Expression<E> {
     #[allow(clippy::too_many_arguments)]
     pub fn evaluate<T>(
         &self,
+        fixed_in: &impl Fn(&Fixed) -> T,
         wit_in: &impl Fn(WitnessId) -> T, // witin id
         constant: &impl Fn(E::BaseField) -> T,
         challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
@@ -54,22 +62,23 @@ impl<E: ExtensionField> Expression<E> {
         scaled: &impl Fn(T, T, T) -> T,
     ) -> T {
         match self {
+            Expression::Fixed(f) => fixed_in(f),
             Expression::WitIn(witness_id) => wit_in(*witness_id),
             Expression::Constant(scalar) => constant(*scalar),
             Expression::Sum(a, b) => {
-                let a = a.evaluate(wit_in, constant, challenge, sum, product, scaled);
-                let b = b.evaluate(wit_in, constant, challenge, sum, product, scaled);
+                let a = a.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let b = b.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
                 sum(a, b)
             }
             Expression::Product(a, b) => {
-                let a = a.evaluate(wit_in, constant, challenge, sum, product, scaled);
-                let b = b.evaluate(wit_in, constant, challenge, sum, product, scaled);
+                let a = a.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let b = b.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
                 product(a, b)
             }
             Expression::ScaledSum(x, a, b) => {
-                let x = x.evaluate(wit_in, constant, challenge, sum, product, scaled);
-                let a = a.evaluate(wit_in, constant, challenge, sum, product, scaled);
-                let b = b.evaluate(wit_in, constant, challenge, sum, product, scaled);
+                let x = x.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let a = a.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let b = b.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
                 scaled(x, a, b)
             }
             Expression::Challenge(challenge_id, pow, scalar, offset) => {
@@ -91,6 +100,7 @@ impl<E: ExtensionField> Expression<E> {
 
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
+            Expression::Fixed(_) => false,
             Expression::WitIn(_) => false,
             Expression::Constant(c) => *c == E::BaseField::ZERO,
             Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
@@ -102,10 +112,13 @@ impl<E: ExtensionField> Expression<E> {
 
     fn is_monomial_form_inner(s: MonomialState, expr: &Expression<E>) -> bool {
         match (expr, s) {
-            (Expression::WitIn(_), MonomialState::SumTerm) => true,
-            (Expression::WitIn(_), MonomialState::ProductTerm) => true,
-            (Expression::Constant(_), MonomialState::SumTerm) => true,
-            (Expression::Constant(_), MonomialState::ProductTerm) => true,
+            (
+                Expression::Fixed(_)
+                | Expression::WitIn(_)
+                | Expression::Challenge(..)
+                | Expression::Constant(_),
+                _,
+            ) => true,
             (Expression::Sum(a, b), MonomialState::SumTerm) => {
                 Self::is_monomial_form_inner(MonomialState::SumTerm, a)
                     && Self::is_monomial_form_inner(MonomialState::SumTerm, b)
@@ -121,8 +134,6 @@ impl<E: ExtensionField> Expression<E> {
             }
             (Expression::ScaledSum(_, _, _), MonomialState::SumTerm) => true,
             (Expression::ScaledSum(_, _, b), MonomialState::ProductTerm) => Self::is_zero_expr(b),
-            (Expression::Challenge(_, _, _, _), MonomialState::SumTerm) => true,
-            (Expression::Challenge(_, _, _, _), MonomialState::ProductTerm) => true,
         }
     }
 }
@@ -131,7 +142,7 @@ impl<E: ExtensionField> Neg for Expression<E> {
     type Output = Expression<E>;
     fn neg(self) -> Self::Output {
         match self {
-            Expression::WitIn(_) => Expression::ScaledSum(
+            Expression::Fixed(_) | Expression::WitIn(_) => Expression::ScaledSum(
                 Box::new(self),
                 Box::new(Expression::Constant(E::BaseField::ONE.neg())),
                 Box::new(Expression::Constant(E::BaseField::ZERO)),
@@ -384,6 +395,39 @@ impl<E: ExtensionField> Mul for Expression<E> {
 #[derive(Clone, Debug, Copy)]
 pub struct WitIn {
     pub id: WitnessId,
+}
+
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub struct Fixed(pub usize);
+
+impl WitIn {
+    pub fn from_expr<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        input: Expression<E>,
+        debug: bool,
+    ) -> Result<Self, ZKVMError> {
+        let wit = circuit_builder.create_witin(|| "wit_from_expr")?;
+        if !debug {
+            circuit_builder.require_zero(|| "create_wit_from_expr", wit.expr() - input)?;
+        }
+        Ok(wit)
+    }
+}
+
+#[macro_export]
+/// this is to avoid non-monomial expression
+macro_rules! create_witin_from_expr {
+    // Handle the case for a single expression
+    ($builder:expr, $debug:expr, $e:expr) => {
+        WitIn::from_expr($builder, $e, $debug)
+    };
+    // Recursively handle multiple expressions and create a flat tuple with error handling
+    ($builder:expr, $debug:expr, $e:expr, $($rest:expr),+) => {
+        {
+            // Return a Result tuple, handling errors
+            Ok::<_, ZKVMError>((WitIn::from_expr($builder, $e, $debug)?, $(WitIn::from_expr($builder, $rest)?),*))
+        }
+    };
 }
 
 pub trait ToExpr<E: ExtensionField> {

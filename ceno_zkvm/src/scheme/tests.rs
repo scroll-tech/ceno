@@ -8,7 +8,7 @@ use multilinear_extensions::mle::IntoMLE;
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, ToExpr},
     structs::PointAndEval,
@@ -53,8 +53,8 @@ fn test_rw_lk_expression_combination() {
         let mut cs = ConstraintSystem::new(|| "test");
         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
         let _ = TestCircuit::construct_circuit::<L, RW>(&mut circuit_builder);
-        let vk = cs.key_gen();
-        let pk = ProvingKey::create_pk(vk.clone());
+        let pk = cs.key_gen(None);
+        let vk = pk.vk.clone();
 
         // generate mock witness
         let num_instances = 1 << 2;

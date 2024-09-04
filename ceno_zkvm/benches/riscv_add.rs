@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use ark_std::test_rng;
 use ceno_zkvm::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::{riscv::addsub::AddInstruction, Instruction},
     scheme::prover::ZKVMProver,
 };
@@ -65,8 +65,7 @@ fn bench_add(c: &mut Criterion) {
     let mut cs = ConstraintSystem::new(|| "risv_add");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
     let _ = AddInstruction::construct_circuit(&mut circuit_builder);
-    let vk = cs.key_gen();
-    let pk = ProvingKey::create_pk(vk);
+    let pk = cs.key_gen(None);
     let num_witin = pk.get_cs().num_witin;
 
     let prover = ZKVMProver::new(pk);

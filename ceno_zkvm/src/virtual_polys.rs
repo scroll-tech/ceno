@@ -94,6 +94,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     ) -> BTreeSet<u16> {
         assert!(expr.is_monomial_form());
         let monomial_terms = expr.evaluate(
+            &|_| unreachable!(),
             &|witness_id| vec![(E::ONE, { vec![witness_id] })],
             &|scalar| vec![(E::from(scalar), { vec![] })],
             &|challenge_id, pow, scalar, offset| {
