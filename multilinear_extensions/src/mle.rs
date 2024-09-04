@@ -44,22 +44,32 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     fn name(&self) -> &'static str;
 
     fn get_ext_field_vec(&self) -> &[E] {
-        match &self.evaluations() {
-            FieldType::Ext(evaluations) => {
-                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                &evaluations[start..][..offset]
-            }
-            _ => unreachable!(),
-        }
+        self.get_ext_field_vec_optn()
+            .unwrap_or_else(|| unreachable!())
     }
 
     fn get_base_field_vec(&self) -> &[E::BaseField] {
+        self.get_base_field_vec_optn()
+            .unwrap_or_else(|| unreachable!())
+    }
+
+    fn get_ext_field_vec_optn(&self) -> Option<&[E]> {
+        match &self.evaluations() {
+            FieldType::Ext(evaluations) => {
+                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
+                Some(&evaluations[start..][..offset])
+            }
+            _ => None,
+        }
+    }
+
+    fn get_base_field_vec_optn(&self) -> Option<&[E::BaseField]> {
         match &self.evaluations() {
             FieldType::Base(evaluations) => {
                 let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                &evaluations[start..][..offset]
+                Some(&evaluations[start..][..offset])
             }
-            _ => unreachable!(),
+            _ => None,
         }
     }
 }
@@ -107,6 +117,16 @@ impl<F: Field, E: ExtensionField> IntoMLE<DenseMultilinearExtension<E>> for Vec<
         let next_pow2 = self.len().next_power_of_two();
         self.resize(next_pow2, F::ZERO);
         DenseMultilinearExtension::from_evaluation_vec_smart::<F>(ceil_log2(next_pow2), self)
+    }
+}
+pub trait IntoMLEs<T>: Sized {
+    /// Converts this type into the (usually inferred) input type.
+    fn into_mles(self) -> Vec<T>;
+}
+
+impl<F: Field, E: ExtensionField> IntoMLEs<DenseMultilinearExtension<E>> for Vec<Vec<F>> {
+    fn into_mles(self) -> Vec<DenseMultilinearExtension<E>> {
+        self.into_iter().map(|v| v.into_mle()).collect()
     }
 }
 

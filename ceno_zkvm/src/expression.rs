@@ -7,7 +7,11 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 
-use crate::structs::{ChallengeId, WitnessId};
+use crate::{
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    structs::{ChallengeId, WitnessId},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expression<E: ExtensionField> {
@@ -395,6 +399,36 @@ pub struct WitIn {
 
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Fixed(pub usize);
+
+impl WitIn {
+    pub fn from_expr<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        input: Expression<E>,
+        debug: bool,
+    ) -> Result<Self, ZKVMError> {
+        let wit = circuit_builder.create_witin(|| "wit_from_expr")?;
+        if !debug {
+            circuit_builder.require_zero(|| "create_wit_from_expr", wit.expr() - input)?;
+        }
+        Ok(wit)
+    }
+}
+
+#[macro_export]
+/// this is to avoid non-monomial expression
+macro_rules! create_witin_from_expr {
+    // Handle the case for a single expression
+    ($builder:expr, $debug:expr, $e:expr) => {
+        WitIn::from_expr($builder, $e, $debug)
+    };
+    // Recursively handle multiple expressions and create a flat tuple with error handling
+    ($builder:expr, $debug:expr, $e:expr, $($rest:expr),+) => {
+        {
+            // Return a Result tuple, handling errors
+            Ok::<_, ZKVMError>((WitIn::from_expr($builder, $e, $debug)?, $(WitIn::from_expr($builder, $rest)?),*))
+        }
+    };
+}
 
 pub trait ToExpr<E: ExtensionField> {
     type Output;
