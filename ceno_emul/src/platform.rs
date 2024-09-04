@@ -1,4 +1,4 @@
-use crate::addr::{Addr, RegIdx, WORD_SIZE};
+use crate::addr::{Addr, RegIdx};
 
 /// The Platform struct holds the parameters of the VM.
 /// It defines:
@@ -38,7 +38,8 @@ impl Platform {
 
     /// Virtual address of a register.
     pub const fn register_vma(&self, index: RegIdx) -> Addr {
-        (index * WORD_SIZE) as Addr
+        // Register VMAs are aligned, cannot be confused with indices, and readable in hex.
+        (index << 8) as Addr
     }
 
     /// Virtual address of the program counter.
