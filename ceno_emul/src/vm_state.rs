@@ -53,8 +53,8 @@ impl VMState {
         self.succeeded
     }
 
-    pub fn tracer(&mut self) -> &mut Tracer {
-        &mut self.tracer
+    pub fn tracer(&self) -> &Tracer {
+        &self.tracer
     }
 
     /// Set a word in memory without side-effects.
@@ -75,7 +75,7 @@ impl VMState {
 
     fn step(&mut self, emu: &Emulator) -> Result<StepRecord> {
         emu.step(self)?;
-        let step = self.tracer().advance();
+        let step = self.tracer.advance();
         if step.is_busy_loop() && !self.succeeded() {
             Err(anyhow!("Stuck in loop {}", "{}"))
         } else {

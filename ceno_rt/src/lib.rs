@@ -1,6 +1,8 @@
-#![no_main]
 #![no_std]
+
 use core::arch::{asm, global_asm};
+
+mod allocator;
 
 #[cfg(not(test))]
 mod panic_handler {
