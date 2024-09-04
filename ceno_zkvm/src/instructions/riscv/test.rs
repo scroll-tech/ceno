@@ -1,7 +1,7 @@
 use goldilocks::GoldilocksExt2;
 
 use crate::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem, ProvingKey},
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
 };
 
@@ -26,6 +26,5 @@ fn test_multiple_opcode() {
             Ok(config)
         },
     );
-    let vk = cs.key_gen();
-    let _pk = ProvingKey::create_pk(vk);
+    cs.key_gen(None);
 }

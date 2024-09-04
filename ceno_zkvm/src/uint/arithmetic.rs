@@ -2,13 +2,14 @@ use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 
+use super::{UInt, UintLimb};
 use crate::{
     circuit_builder::CircuitBuilder,
+    create_witin_from_expr,
     error::ZKVMError,
-    expression::{Expression, ToExpr},
+    expression::{Expression, ToExpr, WitIn},
+    instructions::riscv::config::{IsEqualConfig, LtConfig, LtuConfig, MsbConfig},
 };
-
-use super::{UInt, UintLimb};
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
@@ -221,6 +222,198 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         _rhs: &UInt<M, C, E>,
     ) -> Result<Expression<E>, ZKVMError> {
         Ok(self.expr().remove(0) + 1.into())
+    }
+
+    pub fn is_equal(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        rhs: &UInt<M, C, E>,
+    ) -> Result<IsEqualConfig, ZKVMError> {
+        let n_limbs = Self::NUM_CELLS;
+        let (is_equal_per_limb, diff_inv_per_limb): (Vec<WitIn>, Vec<WitIn>) = self
+            .limbs
+            .iter()
+            .zip_eq(rhs.limbs.iter())
+            .map(|(a, b)| circuit_builder.is_equal(a.expr(), b.expr()))
+            .collect::<Result<Vec<(WitIn, WitIn)>, ZKVMError>>()?
+            .into_iter()
+            .unzip();
+
+        let sum_expr = is_equal_per_limb
+            .iter()
+            .fold(Expression::from(0), |acc, flag| acc.clone() + flag.expr());
+
+        let sum_flag = create_witin_from_expr!(circuit_builder, false, sum_expr)?;
+        let (is_equal, diff_inv) =
+            circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))?;
+        Ok(IsEqualConfig {
+            is_equal_per_limb,
+            diff_inv_per_limb,
+            is_equal,
+            diff_inv,
+        })
+    }
+}
+
+impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
+    /// decompose x = (x_s, x_{<s})
+    /// where x_s is highest bit, x_{<s} is the rest
+    pub fn msb_decompose<F: SmallField>(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<MsbConfig, ZKVMError>
+    where
+        E: ExtensionField<BaseField = F>,
+    {
+        let high_limb_no_msb = circuit_builder.create_witin(|| "high_limb_mask")?;
+        let high_limb = self.limbs[Self::NUM_CELLS - 1].expr();
+
+        circuit_builder.lookup_and_byte(
+            high_limb_no_msb.expr(),
+            high_limb.clone(),
+            Expression::from(1 << 7),
+        )?;
+
+        let inv_128 = F::from(128).invert().unwrap();
+        let msb = (high_limb - high_limb_no_msb.expr()) * Expression::Constant(inv_128);
+        let msb = create_witin_from_expr!(circuit_builder, false, msb)?;
+        Ok(MsbConfig {
+            msb,
+            high_limb_no_msb,
+        })
+    }
+
+    /// compare unsigned intergers a < b
+    pub fn ltu_limb8(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        rhs: &UInt<M, 8, E>,
+    ) -> Result<LtuConfig, ZKVMError> {
+        let n_bytes = Self::NUM_CELLS;
+        let indexes: Vec<WitIn> = (0..n_bytes)
+            .map(|_| circuit_builder.create_witin(|| "index"))
+            .collect::<Result<_, ZKVMError>>()?;
+
+        // indicate the first non-zero byte index i_0 of a[i] - b[i]
+        // from high to low
+        indexes
+            .iter()
+            .try_for_each(|idx| circuit_builder.assert_bit(|| "bit assert", idx.expr()))?;
+        let index_sum = indexes
+            .iter()
+            .fold(Expression::from(0), |acc, idx| acc + idx.expr());
+        circuit_builder.assert_bit(|| "bit assert", index_sum)?;
+
+        // equal zero if a==b, otherwise equal (a[i_0]-b[i_0])^{-1}
+        let byte_diff_inv = circuit_builder.create_witin(|| "byte_diff_inverse")?;
+
+        // define accumulated index sum from high to low
+        let si_expr: Vec<Expression<E>> = indexes
+            .iter()
+            .rev()
+            .scan(Expression::from(0), |state, idx| {
+                *state = state.clone() + idx.expr();
+                Some(state.clone())
+            })
+            .collect();
+        let si = si_expr
+            .into_iter()
+            .rev()
+            .map(|expr| create_witin_from_expr!(circuit_builder, false, expr))
+            .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
+
+        // check byte diff that before the first non-zero i_0 equals zero
+        si.iter()
+            .zip(self.limbs.iter())
+            .zip(rhs.limbs.iter())
+            .try_for_each(|((flag, a), b)| {
+                circuit_builder.require_zero(
+                    || "byte diff zero check",
+                    a.expr() - b.expr() - flag.expr() * a.expr() + flag.expr() * b.expr(),
+                )
+            })?;
+
+        // define accumulated byte sum
+        // when a!= b, sa should equal the first non-zero byte a[i_0]
+        let sa = self
+            .limbs
+            .iter()
+            .zip_eq(indexes.iter())
+            .fold(Expression::from(0), |acc, (ai, idx)| {
+                acc.clone() + ai.expr() * idx.expr()
+            });
+        let sb = rhs
+            .limbs
+            .iter()
+            .zip_eq(indexes.iter())
+            .fold(Expression::from(0), |acc, (bi, idx)| {
+                acc.clone() + bi.expr() * idx.expr()
+            });
+
+        // check the first byte difference has a inverse
+        // unwrap is safe because vector len > 0
+        let lhs_ne_byte = create_witin_from_expr!(circuit_builder, false, sa.clone())?;
+        let rhs_ne_byte = create_witin_from_expr!(circuit_builder, false, sb.clone())?;
+        let index_ne = si.first().unwrap();
+        circuit_builder.require_zero(
+            || "byte inverse check",
+            lhs_ne_byte.expr() * byte_diff_inv.expr()
+                - rhs_ne_byte.expr() * byte_diff_inv.expr()
+                - index_ne.expr(),
+        )?;
+
+        let is_ltu = circuit_builder.create_witin(|| "is_ltu")?;
+        // circuit_builder.assert_bit(is_ltu.expr())?; // lookup ensure it is bit
+        // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
+        circuit_builder.lookup_ltu_limb8(is_ltu.expr(), lhs_ne_byte.expr(), rhs_ne_byte.expr())?;
+        Ok(LtuConfig {
+            byte_diff_inv,
+            indexes,
+            acc_indexes: si,
+            lhs_ne_byte,
+            rhs_ne_byte,
+            is_ltu,
+        })
+    }
+
+    pub fn lt_limb8(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+        rhs: &UInt<M, 8, E>,
+    ) -> Result<LtConfig, ZKVMError> {
+        let is_lt = circuit_builder.create_witin(|| "is_lt")?;
+        circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
+
+        let lhs_msb = self.msb_decompose(circuit_builder)?;
+        let rhs_msb = rhs.msb_decompose(circuit_builder)?;
+
+        let mut lhs_limbs = self.limbs.iter().copied().collect_vec();
+        lhs_limbs[Self::NUM_CELLS - 1] = lhs_msb.high_limb_no_msb;
+        let lhs_no_msb = Self::new_from_limbs(&lhs_limbs);
+        let mut rhs_limbs = rhs.limbs.iter().copied().collect_vec();
+        rhs_limbs[Self::NUM_CELLS - 1] = rhs_msb.high_limb_no_msb;
+        let rhs_no_msb = Self::new_from_limbs(&rhs_limbs);
+
+        // (1) compute ltu(a_{<s},b_{<s})
+        let is_ltu = lhs_no_msb.ltu_limb8(circuit_builder, &rhs_no_msb)?;
+        // (2) compute $lt(a,b)=a_s\cdot (1-b_s)+eq(a_s,b_s)\cdot ltu(a_{<s},b_{<s})$
+        // Refer Jolt 5.3: Set Less Than (https://people.cs.georgetown.edu/jthaler/Jolt-paper.pdf)
+        let (msb_is_equal, msb_diff_inv) =
+            circuit_builder.is_equal(lhs_msb.msb.expr(), rhs_msb.msb.expr())?;
+        circuit_builder.require_zero(
+            || "is lt zero check",
+            lhs_msb.msb.expr() - lhs_msb.msb.expr() * rhs_msb.msb.expr()
+                + msb_is_equal.expr() * is_ltu.is_ltu.expr()
+                - is_lt.expr(),
+        )?;
+        Ok(LtConfig {
+            lhs_msb,
+            rhs_msb,
+            msb_is_equal,
+            msb_diff_inv,
+            is_ltu,
+            is_lt,
+        })
     }
 }
 

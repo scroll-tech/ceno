@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
-    addr::{ByteAddr, WordAddr},
+    addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, Instruction, TrapCause},
     tracer::{Change, StepRecord, Tracer},
@@ -14,10 +14,10 @@ use std::iter::from_fn;
 /// An implementation of the machine state and of the side-effects of operations.
 pub struct VMState {
     platform: Platform,
-    pc: u32,
+    pc: Word,
     /// Map a word-address (addr/4) to a word.
-    memory: HashMap<u32, u32>,
-    registers: [u32; 32],
+    memory: HashMap<WordAddr, Word>,
+    registers: [Word; 32],
     // Termination.
     succeeded: bool,
     tracer: Tracer,
@@ -32,7 +32,7 @@ impl VMState {
             memory: HashMap::new(),
             registers: [0; 32],
             succeeded: false,
-            tracer: Default::default(),
+            tracer: Tracer::new(),
         }
     }
 
@@ -57,19 +57,9 @@ impl VMState {
         &mut self.tracer
     }
 
-    /// Get the value of a register without side-effects.
-    pub fn peek_register(&self, idx: usize) -> u32 {
-        self.registers[idx]
-    }
-
-    /// Get the value of a memory word without side-effects.
-    pub fn peek_memory(&self, addr: WordAddr) -> u32 {
-        *self.memory.get(&addr.0).unwrap_or(&0)
-    }
-
     /// Set a word in memory without side-effects.
-    pub fn init_memory(&mut self, addr: WordAddr, value: u32) {
-        self.memory.insert(addr.0, value);
+    pub fn init_memory(&mut self, addr: WordAddr, value: Word) {
+        self.memory.insert(addr, value);
     }
 
     pub fn iter_until_success(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
@@ -134,13 +124,13 @@ impl EmuContext for VMState {
     }
 
     /// Load a register and record this operation.
-    fn load_register(&mut self, idx: usize) -> Result<u32> {
+    fn load_register(&mut self, idx: RegIdx) -> Result<Word> {
         self.tracer.load_register(idx, self.peek_register(idx));
         Ok(self.peek_register(idx))
     }
 
     /// Store a register and record this operation.
-    fn store_register(&mut self, idx: usize, after: u32) -> Result<()> {
+    fn store_register(&mut self, idx: RegIdx, after: Word) -> Result<()> {
         if idx != 0 {
             let before = self.peek_register(idx);
             self.tracer.store_register(idx, Change { before, after });
@@ -150,21 +140,31 @@ impl EmuContext for VMState {
     }
 
     /// Load a memory word and record this operation.
-    fn load_memory(&mut self, addr: WordAddr) -> Result<u32> {
+    fn load_memory(&mut self, addr: WordAddr) -> Result<Word> {
         let value = self.peek_memory(addr);
         self.tracer.load_memory(addr, value);
         Ok(value)
     }
 
     /// Store a memory word and record this operation.
-    fn store_memory(&mut self, addr: WordAddr, after: u32) -> Result<()> {
+    fn store_memory(&mut self, addr: WordAddr, after: Word) -> Result<()> {
         let before = self.peek_memory(addr);
         self.tracer.store_memory(addr, Change { after, before });
-        self.memory.insert(addr.0, after);
+        self.memory.insert(addr, after);
         Ok(())
     }
 
-    fn fetch(&mut self, pc: WordAddr) -> Result<u32> {
+    /// Get the value of a register without side-effects.
+    fn peek_register(&self, idx: RegIdx) -> Word {
+        self.registers[idx]
+    }
+
+    /// Get the value of a memory word without side-effects.
+    fn peek_memory(&self, addr: WordAddr) -> Word {
+        *self.memory.get(&addr).unwrap_or(&0)
+    }
+
+    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
         let value = self.peek_memory(pc);
         self.tracer.fetch(pc, value);
         Ok(value)

@@ -15,12 +15,17 @@ use transcript::Transcript;
 use crate::{
     circuit_builder::VerifyingKey,
     error::ZKVMError,
-    scheme::constants::{NUM_FANIN, SEL_DEGREE},
+    scheme::{
+        constants::{NUM_FANIN, SEL_DEGREE},
+        utils::eval_by_expr_with_fixed,
+    },
     structs::{Point, PointAndEval, TowerProofs},
     utils::{get_challenge_pows, sel_eval},
 };
 
-use super::{constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMProof};
+use super::{
+    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMProof, ZKVMTableProof,
+};
 
 pub struct ZKVMVerifier<E: ExtensionField> {
     vk: VerifyingKey<E>,
@@ -244,6 +249,124 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 
         Ok(input_opening_point)
     }
+
+    pub fn verify_table_proof(
+        &self,
+        proof: &ZKVMTableProof<E>,
+        transcript: &mut Transcript<E>,
+        num_logup_fanin: usize,
+        _out_evals: &PointAndEval<E>,
+        challenges: &[E; 2], // TODO: derive challenge from PCS
+    ) -> Result<Point<E>, ZKVMError> {
+        let cs = self.vk.get_cs();
+        let lk_counts_per_instance = cs.lk_table_expressions.len();
+        let log2_lk_count = ceil_log2(lk_counts_per_instance);
+        let (chip_record_alpha, _) = (challenges[0], challenges[1]);
+
+        let num_instances = proof.num_instances;
+        let log2_num_instances = ceil_log2(num_instances);
+
+        // verify and reduce product tower sumcheck
+        let tower_proofs = &proof.tower_proof;
+
+        let expected_max_round = log2_num_instances + log2_lk_count;
+        let (_, _, logup_p_evals, logup_q_evals) = TowerVerify::verify(
+            vec![],
+            vec![vec![
+                proof.lk_p1_out_eval,
+                proof.lk_p2_out_eval,
+                proof.lk_q1_out_eval,
+                proof.lk_q2_out_eval,
+            ]],
+            tower_proofs,
+            vec![expected_max_round],
+            num_logup_fanin,
+            transcript,
+        )?;
+        assert!(logup_q_evals.len() == 1, "[lk_q_record]");
+        assert!(logup_p_evals.len() == 1, "[lk_p_record]");
+        assert_eq!(logup_p_evals[0].point, logup_q_evals[0].point);
+
+        // verify selector layer sumcheck
+        let rt_lk: Vec<E> = logup_p_evals[0].point.to_vec();
+
+        // 2 for denominator and numerator
+        let alpha_pow = get_challenge_pows(2, transcript);
+        let mut alpha_pow_iter = alpha_pow.iter();
+        let (alpha_lk_d, alpha_lk_n) = (
+            alpha_pow_iter.next().unwrap(),
+            alpha_pow_iter.next().unwrap(),
+        );
+        // alpha_lk * (out_lk_q - one) + alpha_lk_n * out_lk_p
+        let claim_sum =
+            *alpha_lk_d * (logup_q_evals[0].eval - E::ONE) + *alpha_lk_n * logup_p_evals[0].eval;
+        let sel_subclaim = IOPVerifierState::verify(
+            claim_sum,
+            &IOPProof {
+                point: vec![], // final claimed point will be derived from sumcheck protocol
+                proofs: proof.sel_sumcheck_proofs.clone(),
+            },
+            &VPAuxInfo {
+                max_degree: SEL_DEGREE.max(cs.max_non_lc_degree),
+                num_variables: log2_num_instances,
+                phantom: PhantomData,
+            },
+            transcript,
+        );
+        let (input_opening_point, expected_evaluation) = (
+            sel_subclaim.point.iter().map(|c| c.elements).collect_vec(),
+            sel_subclaim.expected_evaluation,
+        );
+        let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
+
+        let sel_lk = eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
+            * sel_eval(num_instances, &rt_lk[log2_lk_count..]);
+
+        let computed_evals = [
+            // lookup denominator
+            *alpha_lk_d
+                * sel_lk
+                * ((0..lk_counts_per_instance)
+                    .map(|i| proof.lk_d_in_evals[i] * eq_lk[i])
+                    .sum::<E>()
+                    + chip_record_alpha
+                        * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE)),
+            *alpha_lk_n
+                * sel_lk
+                * ((0..lk_counts_per_instance)
+                    .map(|i| proof.lk_n_in_evals[i] * eq_lk[i])
+                    .sum::<E>()),
+        ]
+        .iter()
+        .sum::<E>();
+        if computed_evals != expected_evaluation {
+            return Err(ZKVMError::VerifyError("sel evaluation verify failed"));
+        }
+        // verify records (degree = 1) statement, thus no sumcheck
+        if cs
+            .lk_table_expressions
+            .iter()
+            .map(|lk| &lk.values)
+            .chain(cs.lk_table_expressions.iter().map(|lk| &lk.multiplicity))
+            .zip_eq(
+                proof.lk_d_in_evals[..lk_counts_per_instance]
+                    .iter()
+                    .chain(proof.lk_n_in_evals[..lk_counts_per_instance].iter()),
+            )
+            .any(|(expr, expected_evals)| {
+                eval_by_expr_with_fixed(
+                    &proof.fixed_in_evals,
+                    &proof.wits_in_evals,
+                    challenges,
+                    expr,
+                ) != *expected_evals
+            })
+        {
+            return Err(ZKVMError::VerifyError("record evaluate != expected_evals"));
+        }
+
+        Ok(input_opening_point)
+    }
 }
 
 pub struct TowerVerify;
@@ -326,7 +449,7 @@ impl TowerVerify {
                 let sumcheck_claim = IOPVerifierState::verify(
                     *out_claim,
                     &IOPProof {
-                        point: vec![], // final claimed point will be derive from sumcheck protocol
+                        point: vec![], // final claimed point will be derived from sumcheck protocol
                         proofs: tower_proofs.proofs[round].clone(),
                     },
                     &VPAuxInfo {

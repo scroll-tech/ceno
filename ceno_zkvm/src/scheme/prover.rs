@@ -1,10 +1,12 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use ff_ext::ExtensionField;
 
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly::build_eq_x_r_vec,
+    mle::{IntoMLE, MultilinearExtension},
+    util::ceil_log2,
+    virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -18,7 +20,7 @@ use crate::{
     circuit_builder::ProvingKey,
     error::ZKVMError,
     scheme::{
-        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN},
+        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
             wit_infer_by_expr,
@@ -29,7 +31,7 @@ use crate::{
     virtual_polys::VirtualPolynomials,
 };
 
-use super::ZKVMProof;
+use super::{ZKVMProof, ZKVMTableProof};
 
 pub struct ZKVMProver<E: ExtensionField> {
     pk: ProvingKey<E>,
@@ -72,7 +74,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             .chain(cs.lk_expressions.par_iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&witnesses, challenges, expr)
+                wit_infer_by_expr(&[], &witnesses, challenges, expr)
             })
             .collect();
         let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
@@ -135,7 +137,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         exit_span!(span);
 
         let span = entered_span!("wit_inference::tower_witness_lk_layers");
-        let lk_wit_layers = infer_tower_logup_witness(lk_records_last_layer);
+        let lk_wit_layers = infer_tower_logup_witness(None, lk_records_last_layer);
         exit_span!(span);
 
         if cfg!(test) {
@@ -283,7 +285,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 if num_instances < sel_non_lc_zero_sumcheck.len() {
                     sel_non_lc_zero_sumcheck.splice(
                         num_instances..sel_non_lc_zero_sumcheck.len(),
-                        std::iter::repeat(E::ZERO),
+                        std::iter::repeat(E::ZERO)
+                            .take(sel_non_lc_zero_sumcheck.len() - num_instances),
                     );
                 }
                 let sel_non_lc_zero_sumcheck: ArcMultilinearExtension<E> =
@@ -324,7 +327,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             *alpha_write * eq_w[w_counts_per_instance..].iter().sum::<E>() - *alpha_write,
         );
 
-        // lk
+        // lk denominator
         // rt := rt || rs
         for i in 0..lk_counts_per_instance {
             // \sum_t (sel(rt, t) * (\sum_i alpha_lk* eq(rs, i) * record_w[i]))
@@ -427,6 +430,200 @@ impl<E: ExtensionField> ZKVMProver<E> {
             wits_in_evals,
         })
     }
+
+    pub fn create_table_proof(
+        &self,
+        witnesses: Vec<ArcMultilinearExtension<'_, E>>,
+        num_instances: usize,
+        max_threads: usize,
+        transcript: &mut Transcript<E>,
+        challenges: &[E; 2],
+    ) -> Result<ZKVMTableProof<E>, ZKVMError> {
+        let cs = self.pk.get_cs();
+        let fixed = self
+            .pk
+            .fixed_traces
+            .as_ref()
+            .expect("pk.fixed_traces must not be none for table circuit")
+            .iter()
+            .map(|f| -> ArcMultilinearExtension<E> { Arc::new(f.get_ranged_mle(1, 0)) })
+            .collect::<Vec<ArcMultilinearExtension<E>>>();
+        let log2_num_instances = ceil_log2(num_instances);
+        let next_pow2_instances = 1 << log2_num_instances;
+
+        // sanity check
+        assert_eq!(witnesses.len(), cs.num_witin as usize);
+        assert_eq!(fixed.len(), cs.num_fixed);
+        assert!(witnesses.iter().all(|v| {
+            v.num_vars() == log2_num_instances && v.evaluations().len() == next_pow2_instances
+        }));
+        assert!(!cs.lk_table_expressions.is_empty());
+
+        // main constraint: lookup denominator and numerator record witness inference
+        let span = entered_span!("wit_inference::record");
+        let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
+            .lk_table_expressions
+            .par_iter()
+            .map(|lk| &lk.values)
+            .chain(
+                cs.lk_table_expressions
+                    .par_iter()
+                    .map(|lk| &lk.multiplicity),
+            )
+            .map(|expr| {
+                assert_eq!(expr.degree(), 1);
+                wit_infer_by_expr(&fixed, &witnesses, challenges, expr)
+            })
+            .collect();
+        let (lk_d_wit, lk_n_wit) = records_wit.split_at(cs.lk_table_expressions.len());
+        exit_span!(span);
+
+        let lk_counts_per_instance = cs.lk_table_expressions.len();
+        let log2_lk_count = ceil_log2(lk_counts_per_instance);
+
+        // infer all tower witness after last layer
+        let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
+        // TODO optimize last layer to avoid alloc new vector to save memory
+        let lk_denominator_last_layer =
+            interleaving_mles_to_mles(lk_d_wit, log2_num_instances, NUM_FANIN_LOGUP, E::ONE);
+        let lk_numerator_last_layer =
+            interleaving_mles_to_mles(lk_n_wit, log2_num_instances, NUM_FANIN_LOGUP, E::ZERO);
+        assert_eq!(lk_denominator_last_layer.len(), NUM_FANIN_LOGUP);
+        assert_eq!(lk_numerator_last_layer.len(), NUM_FANIN_LOGUP);
+        exit_span!(span);
+
+        let span = entered_span!("wit_inference::tower_witness_lk_layers");
+        let lk_wit_layers =
+            infer_tower_logup_witness(Some(lk_numerator_last_layer), lk_denominator_last_layer);
+        exit_span!(span);
+
+        if cfg!(test) {
+            // sanity check
+            assert_eq!(lk_wit_layers.len(), log2_num_instances + log2_lk_count);
+            assert!(lk_wit_layers.iter().enumerate().all(|(i, w)| {
+                let expected_size = 1 << i;
+                let (p1, p2, q1, q2) = (&w[0], &w[1], &w[2], &w[3]);
+                p1.evaluations().len() == expected_size
+                    && p2.evaluations().len() == expected_size
+                    && q1.evaluations().len() == expected_size
+                    && q2.evaluations().len() == expected_size
+            }));
+        }
+
+        // product constraint tower sumcheck
+        let span = entered_span!("sumcheck::tower");
+        // final evals for verifier
+        let lk_p1_out_eval = lk_wit_layers[0][0].get_ext_field_vec()[0];
+        let lk_p2_out_eval = lk_wit_layers[0][1].get_ext_field_vec()[0];
+        let lk_q1_out_eval = lk_wit_layers[0][2].get_ext_field_vec()[0];
+        let lk_q2_out_eval = lk_wit_layers[0][3].get_ext_field_vec()[0];
+        let (rt_tower, tower_proof) = TowerProver::create_proof(
+            max_threads,
+            vec![],
+            vec![TowerProverSpec {
+                witness: lk_wit_layers,
+            }],
+            NUM_FANIN_LOGUP,
+            transcript,
+        );
+        assert_eq!(rt_tower.len(), log2_num_instances + log2_lk_count);
+        exit_span!(span);
+
+        // selector layer sumcheck
+        let span = entered_span!("sumcheck::main_sel");
+        let rt_lk: Vec<E> = tower_proof.logup_specs_points[0]
+            .last()
+            .expect("error getting rt_lk")
+            .to_vec();
+
+        let num_threads = proper_num_threads(log2_num_instances, max_threads);
+        // 2 for denominator and numerator
+        let alpha_pow = get_challenge_pows(2, transcript);
+        let mut alpha_pow_iter = alpha_pow.iter();
+        let (alpha_lk_d, alpha_lk_n) = (
+            alpha_pow_iter.next().unwrap(),
+            alpha_pow_iter.next().unwrap(),
+        );
+        // create selector: all ONE, but padding ZERO to ceil_log2
+        let sel_lk: ArcMultilinearExtension<E> = {
+            let mut sel_lk = build_eq_x_r_vec(&rt_lk[log2_lk_count..]);
+            if num_instances < sel_lk.len() {
+                sel_lk.splice(
+                    num_instances..sel_lk.len(),
+                    std::iter::repeat(E::ZERO).take(sel_lk.len() - num_instances),
+                );
+            }
+            sel_lk.into_mle().into()
+        };
+
+        let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, log2_num_instances);
+
+        let eq_lk = build_eq_x_r_vec(&rt_lk[..log2_lk_count]);
+        // lk denominator
+        // rt := rt || rs
+        for i in 0..lk_counts_per_instance {
+            // \sum_t (sel(rt, t) * (\sum_i alpha_lk_d * eq(rs, i) * lk_d_record[i]))
+            virtual_polys.add_mle_list(vec![&sel_lk, &lk_d_wit[i]], eq_lk[i] * alpha_lk_d);
+        }
+        // \sum_t alpha_lk_d * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
+        virtual_polys.add_mle_list(
+            vec![&sel_lk],
+            *alpha_lk_d * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE),
+        );
+
+        // lk numerator
+        for i in 0..lk_counts_per_instance {
+            // \sum_t (sel(rt, t) * (\sum_i alpha_lk_n * eq(rs, i) * lk_n_record[i]))
+            virtual_polys.add_mle_list(vec![&sel_lk, &lk_n_wit[i]], eq_lk[i] * alpha_lk_n);
+        }
+
+        let (sel_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
+            num_threads,
+            virtual_polys.get_batched_polys(),
+            transcript,
+        );
+        let sel_evals = state.get_mle_final_evaluations();
+        assert_eq!(
+            sel_evals.len(),
+            lk_counts_per_instance * 2 + 1 // 1 for sel_lk
+        );
+        let mut sel_evals_iter = sel_evals.into_iter();
+        sel_evals_iter.next(); // skip sel_lk
+        let lk_d_in_evals = (0..lk_counts_per_instance)
+            .map(|_| sel_evals_iter.next().unwrap())
+            .collect_vec();
+        let lk_n_in_evals = (0..lk_counts_per_instance)
+            .map(|_| sel_evals_iter.next().unwrap())
+            .collect_vec();
+        assert!(sel_evals_iter.count() == 0);
+        let input_open_point = sel_sumcheck_proofs.point.clone();
+        assert!(input_open_point.len() == log2_num_instances);
+        exit_span!(span);
+
+        let span = entered_span!("fixed::evals + witin::evals");
+        let mut evals = witnesses
+            .par_iter()
+            .chain(fixed.par_iter())
+            .map(|poly| poly.evaluate(&input_open_point))
+            .collect::<Vec<_>>();
+        let fixed_in_evals = evals.split_off(witnesses.len());
+        let wits_in_evals = evals;
+        exit_span!(span);
+
+        Ok(ZKVMTableProof {
+            num_instances,
+            lk_p1_out_eval,
+            lk_p2_out_eval,
+            lk_q1_out_eval,
+            lk_q2_out_eval,
+            tower_proof,
+            sel_sumcheck_proofs: sel_sumcheck_proofs.proofs,
+            lk_d_in_evals,
+            lk_n_in_evals,
+            fixed_in_evals,
+            wits_in_evals,
+        })
+    }
 }
 
 /// TowerProofs
@@ -477,7 +674,6 @@ impl TowerProver {
         assert_eq!(num_fanin, 2);
 
         let mut proofs = TowerProofs::new(prod_specs.len(), logup_specs.len());
-        assert!(!prod_specs.is_empty());
         let log_num_fanin = ceil_log2(num_fanin);
         // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
         let max_round_index = prod_specs

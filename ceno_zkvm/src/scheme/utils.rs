@@ -64,9 +64,18 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
                             assert_eq!(instance.len(), per_instance_size);
                             instance[i] = *value;
                         }),
-                    _ => {
-                        unreachable!("must be extension field")
-                    }
+                    FieldType::Base(mle) => mle
+                        .get(start..(start + per_fanin_len))
+                        .unwrap_or(&[])
+                        .par_iter()
+                        .zip(evaluations.par_chunks_mut(per_instance_size))
+                        .with_min_len(MIN_PAR_SIZE)
+                        .for_each(|(value, instance)| {
+                            assert_eq!(instance.len(), per_instance_size);
+                            instance[i] =
+                                <<E as ff_ext::ExtensionField>::BaseField as Into<E>>::into(*value);
+                        }),
+                    _ => unreachable!(),
                 });
             evaluations.into_mle().into()
         })
@@ -75,83 +84,80 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
 
 /// infer logup witness from last layer
 /// return is the ([p1,p2], [q1,q2]) for each layer
-pub(crate) fn infer_tower_logup_witness<E: ExtensionField>(
-    q_mles: Vec<ArcMultilinearExtension<'_, E>>,
-) -> Vec<Vec<ArcMultilinearExtension<'_, E>>> {
+pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
+    p_mles: Option<Vec<ArcMultilinearExtension<'a, E>>>,
+    q_mles: Vec<ArcMultilinearExtension<'a, E>>,
+) -> Vec<Vec<ArcMultilinearExtension<'a, E>>> {
     if cfg!(test) {
         assert_eq!(q_mles.len(), 2);
         assert!(q_mles.iter().map(|q| q.evaluations().len()).all_equal());
     }
     let num_vars = ceil_log2(q_mles[0].evaluations().len());
-    let mut wit_layers = (0..num_vars).fold(
-        vec![(Option::<Vec<ArcMultilinearExtension<E>>>::None, q_mles)],
-        |mut acc, _| {
-            let (p, q): &(
-                Option<Vec<ArcMultilinearExtension<E>>>,
-                Vec<ArcMultilinearExtension<E>>,
-            ) = acc.last().unwrap();
-            let (q1, q2) = (&q[0], &q[1]);
-            let cur_len = q1.evaluations().len() / 2;
-            let (next_p, next_q): (
-                Vec<ArcMultilinearExtension<E>>,
-                Vec<ArcMultilinearExtension<E>>,
-            ) = (0..2)
-                .map(|index| {
-                    let mut p_evals = vec![E::ZERO; cur_len];
-                    let mut q_evals = vec![E::ZERO; cur_len];
-                    let start_index = cur_len * index;
-                    if let Some(p) = p {
-                        let (p1, p2) = (&p[0], &p[1]);
-                        match (
-                            p1.evaluations(),
-                            p2.evaluations(),
-                            q1.evaluations(),
-                            q2.evaluations(),
-                        ) {
-                            (
-                                FieldType::Ext(p1),
-                                FieldType::Ext(p2),
-                                FieldType::Ext(q1),
-                                FieldType::Ext(q2),
-                            ) => q1[start_index..][..cur_len]
-                                .par_iter()
-                                .zip(q2[start_index..][..cur_len].par_iter())
-                                .zip(p1[start_index..][..cur_len].par_iter())
-                                .zip(p2[start_index..][..cur_len].par_iter())
-                                .zip(p_evals.par_iter_mut())
-                                .zip(q_evals.par_iter_mut())
-                                .with_min_len(MIN_PAR_SIZE)
-                                .for_each(|(((((q1, q2), p1), p2), p_eval), q_eval)| {
-                                    *p_eval = *p2 * q1 + *p1 * q2;
-                                    *q_eval = *q1 * q2;
-                                }),
-                            _ => unreachable!(),
-                        };
-                    } else {
-                        match (q1.evaluations(), q2.evaluations()) {
-                            (FieldType::Ext(q1), FieldType::Ext(q2)) => q1[start_index..]
-                                [..cur_len]
-                                .par_iter()
-                                .zip(q2[start_index..][..cur_len].par_iter())
-                                .zip(p_evals.par_iter_mut())
-                                .zip(q_evals.par_iter_mut())
-                                .with_min_len(MIN_PAR_SIZE)
-                                .for_each(|(((q1, q2), p_res), q_res)| {
-                                    // 1 / q1 + 1 / q2 = (q1+q2) / q1*q2
-                                    // p is numerator and q is denominator
-                                    *p_res = *q1 + q2;
-                                    *q_res = *q1 * q2;
-                                }),
-                            _ => unreachable!(),
-                        };
-                    }
-                    (p_evals.into_mle().into(), q_evals.into_mle().into())
-                })
-                .unzip(); // vec[vec[p1, p2], vec[q1, q2]]
-            acc.push((Some(next_p), next_q));
-            acc
-        },
-    );
+    let mut wit_layers = (0..num_vars).fold(vec![(p_mles, q_mles)], |mut acc, _| {
+        let (p, q): &(
+            Option<Vec<ArcMultilinearExtension<E>>>,
+            Vec<ArcMultilinearExtension<E>>,
+        ) = acc.last().unwrap();
+        let (q1, q2) = (&q[0], &q[1]);
+        let cur_len = q1.evaluations().len() / 2;
+        let (next_p, next_q): (
+            Vec<ArcMultilinearExtension<E>>,
+            Vec<ArcMultilinearExtension<E>>,
+        ) = (0..2)
+            .map(|index| {
+                let mut p_evals = vec![E::ZERO; cur_len];
+                let mut q_evals = vec![E::ZERO; cur_len];
+                let start_index = cur_len * index;
+                if let Some(p) = p {
+                    let (p1, p2) = (&p[0], &p[1]);
+                    match (
+                        p1.evaluations(),
+                        p2.evaluations(),
+                        q1.evaluations(),
+                        q2.evaluations(),
+                    ) {
+                        (
+                            FieldType::Ext(p1),
+                            FieldType::Ext(p2),
+                            FieldType::Ext(q1),
+                            FieldType::Ext(q2),
+                        ) => q1[start_index..][..cur_len]
+                            .par_iter()
+                            .zip(q2[start_index..][..cur_len].par_iter())
+                            .zip(p1[start_index..][..cur_len].par_iter())
+                            .zip(p2[start_index..][..cur_len].par_iter())
+                            .zip(p_evals.par_iter_mut())
+                            .zip(q_evals.par_iter_mut())
+                            .with_min_len(MIN_PAR_SIZE)
+                            .for_each(|(((((q1, q2), p1), p2), p_eval), q_eval)| {
+                                *p_eval = *p2 * q1 + *p1 * q2;
+                                *q_eval = *q1 * q2;
+                            }),
+                        _ => unreachable!(),
+                    };
+                } else {
+                    match (q1.evaluations(), q2.evaluations()) {
+                        (FieldType::Ext(q1), FieldType::Ext(q2)) => q1[start_index..][..cur_len]
+                            .par_iter()
+                            .zip(q2[start_index..][..cur_len].par_iter())
+                            .zip(p_evals.par_iter_mut())
+                            .zip(q_evals.par_iter_mut())
+                            .with_min_len(MIN_PAR_SIZE)
+                            .for_each(|(((q1, q2), p_res), q_res)| {
+                                // 1 / q1 + 1 / q2 = (q1+q2) / q1*q2
+                                // p is numerator and q is denominator
+                                *p_res = *q1 + q2;
+                                *q_res = *q1 * q2;
+                            }),
+                        _ => unreachable!(),
+                    };
+                }
+                (p_evals.into_mle().into(), q_evals.into_mle().into())
+            })
+            .unzip(); // vec[vec[p1, p2], vec[q1, q2]]
+        acc.push((Some(next_p), next_q));
+        acc
+    });
     wit_layers.reverse();
     wit_layers
         .into_iter()
@@ -211,11 +217,13 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
 }
 
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
+    fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E; N],
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
     expr.evaluate::<ArcMultilinearExtension<'_, E>>(
+        &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
         &|scalar| {
             let scalar: ArcMultilinearExtension<E> = Arc::new(
@@ -335,7 +343,17 @@ pub(crate) fn eval_by_expr<E: ExtensionField>(
     challenges: &[E],
     expr: &Expression<E>,
 ) -> E {
+    eval_by_expr_with_fixed(&[], witnesses, challenges, expr)
+}
+
+pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
+    fixed: &[E],
+    witnesses: &[E],
+    challenges: &[E],
+    expr: &Expression<E>,
+) -> E {
     expr.evaluate::<E>(
+        &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
         &|scalar| scalar.into(),
         &|challenge_id, pow, scalar, offset| {
@@ -479,7 +497,7 @@ mod tests {
                 .into_mle()
                 .into(),
         ];
-        let mut res = infer_tower_logup_witness(q);
+        let mut res = infer_tower_logup_witness(None, q);
         assert_eq!(num_vars + 1, res.len());
         // input layer
         let layer = res.pop().unwrap();
