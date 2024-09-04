@@ -154,10 +154,14 @@ impl<E: ExtensionField> MockProverError<E> {
             // let name = name.split('(').next().unwrap_or("Field");
             let value = base_field.to_canonical_u64();
 
-            if value < E::BaseField::MODULUS_U64 - 100000 {
+            if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
+                // beautiful format for negative number > -65536
+                format!("(-{})", E::BaseField::MODULUS_U64 - value)
+            } else if value < u16::MAX as u64 {
                 format!("{value}")
             } else {
-                format!("(-{})", E::BaseField::MODULUS_U64 - value)
+                // hex
+                format!("{value:#x}")
             }
         }
 
