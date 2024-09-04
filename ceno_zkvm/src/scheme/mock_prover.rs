@@ -150,8 +150,6 @@ impl<E: ExtensionField> MockProverError<E> {
         }
 
         fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField) -> String {
-            // let name = format!("{:?}", base_field);
-            // let name = name.split('(').next().unwrap_or("Field");
             let value = base_field.to_canonical_u64();
 
             if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
@@ -171,7 +169,6 @@ impl<E: ExtensionField> MockProverError<E> {
             inst_id: usize,
         ) -> String {
             let mut list = vec![];
-            // println!("wtns");
             for wt_id in wtns {
                 let wit = &wits_in[*wt_id as usize];
                 let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
