@@ -6,6 +6,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
+    set_val,
     utils::add_one_to_big_num,
 };
 use ark_std::iterable::Iterable;
@@ -14,7 +15,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
-use std::ops::Index;
+use std::{mem::MaybeUninit, ops::Index};
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
@@ -122,11 +123,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
-    pub fn assign<V>(&self, witin: &mut [E], to: V)
-    where
-        V: FnOnce() -> Vec<E>,
-    {
-        let values = to();
+    pub fn assign(&self, instance: &mut [MaybeUninit<E>], values: Vec<E>) {
         assert!(
             values.len() == Self::NUM_CELLS,
             "assign input length mismatch. input_len={}, NUM_CELLS={}",
@@ -135,7 +132,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         );
         if let UintLimb::WitIn(c) = &self.limbs {
             for (idx, wire) in c.iter().enumerate() {
-                witin[wire.id as usize] = values[idx];
+                set_val!(instance, wire, values[idx]);
             }
         }
         // TODO: handle carries

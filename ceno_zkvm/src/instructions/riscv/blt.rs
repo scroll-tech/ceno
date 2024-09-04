@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -10,6 +12,7 @@ use crate::{
         riscv::config::{LtConfig, LtInput},
         Instruction,
     },
+    set_val,
     utils::{i64_to_ext, limb_u8_to_u16},
 };
 
@@ -50,10 +53,10 @@ pub struct BltInput {
 
 impl BltInput {
     /// TODO: refactor after formalize the interface of opcode inputs
-    pub fn generate_witness<E: ExtensionField>(
+    pub fn assign<E: ExtensionField>(
         &self,
-        witin: &mut [E],
         config: &InstructionConfig<E>,
+        instance: &mut [MaybeUninit<E>],
     ) {
         assert!(!self.lhs_limb8.is_empty() && (self.lhs_limb8.len() == self.rhs_limb8.len()));
         // TODO: add boundary check for witin
@@ -61,38 +64,38 @@ impl BltInput {
             lhs_limbs: &self.lhs_limb8,
             rhs_limbs: &self.rhs_limb8,
         };
-        let is_lt = lt_input.generate_witness(witin, &config.is_lt);
+        let is_lt = lt_input.assign(instance, &config.is_lt);
 
-        config.pc.assign(witin, || i64_to_ext(self.pc as i64));
-        config.next_pc.assign(witin, || {
+        set_val!(instance, config.pc, { i64_to_ext::<E>(self.pc as i64) });
+        set_val!(instance, config.next_pc, {
             if is_lt {
-                i64_to_ext(self.pc as i64 + self.imm as i64)
+                i64_to_ext::<E>(self.pc as i64 + self.imm as i64)
             } else {
-                i64_to_ext(self.pc as i64 + PC_STEP_SIZE as i64)
+                i64_to_ext::<E>(self.pc as i64 + PC_STEP_SIZE as i64)
             }
         });
-        config.ts.assign(witin, || i64_to_ext(self.ts as i64));
-        config.imm.assign(witin, || i64_to_ext(self.imm as i64));
-        config
-            .rs1_id
-            .assign(witin, || i64_to_ext(self.rs1_id as i64));
-        config
-            .rs2_id
-            .assign(witin, || i64_to_ext(self.rs2_id as i64));
-        config
-            .prev_rs1_ts
-            .assign(witin, || i64_to_ext(self.prev_rs1_ts as i64));
-        config
-            .prev_rs2_ts
-            .assign(witin, || i64_to_ext(self.prev_rs2_ts as i64));
+        set_val!(instance, config.ts, { i64_to_ext::<E>(self.ts as i64) });
+        set_val!(instance, config.imm, { i64_to_ext::<E>(self.imm as i64) });
+        set_val!(instance, config.rs1_id, {
+            i64_to_ext::<E>(self.rs1_id as i64)
+        });
+        set_val!(instance, config.rs2_id, {
+            i64_to_ext::<E>(self.rs2_id as i64)
+        });
+        set_val!(instance, config.prev_rs1_ts, {
+            i64_to_ext::<E>(self.prev_rs1_ts as i64)
+        });
+        set_val!(instance, config.prev_rs2_ts, {
+            i64_to_ext::<E>(self.prev_rs2_ts as i64)
+        });
 
-        config.lhs_limb8.assign(witin, || {
+        config.lhs_limb8.assign(instance, {
             self.lhs_limb8
                 .iter()
                 .map(|&limb| i64_to_ext(limb as i64))
                 .collect()
         });
-        config.rhs_limb8.assign(witin, || {
+        config.rhs_limb8.assign(instance, {
             self.rhs_limb8
                 .iter()
                 .map(|&limb| i64_to_ext(limb as i64))
@@ -100,10 +103,10 @@ impl BltInput {
         });
         let lhs = limb_u8_to_u16(&self.lhs_limb8);
         let rhs = limb_u8_to_u16(&self.rhs_limb8);
-        config.lhs.assign(witin, || {
+        config.lhs.assign(instance, {
             lhs.iter().map(|&limb| i64_to_ext(limb as i64)).collect()
         });
-        config.rhs.assign(witin, || {
+        config.rhs.assign(instance, {
             rhs.iter().map(|&limb| i64_to_ext(limb as i64)).collect()
         });
     }
@@ -210,15 +213,27 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
     ) -> Result<InstructionConfig<E>, ZKVMError> {
         blt_gadget::<E>(circuit_builder)
     }
+
+    fn assign_instance(
+        config: &Self::InstructionConfig,
+        instance: &mut [std::mem::MaybeUninit<E>],
+        _step: ceno_emul::StepRecord,
+    ) -> Result<(), ZKVMError> {
+        // take input from _step
+        let input = BltInput::random();
+        input.assign(config, instance);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use ff::Field;
+    use ceno_emul::StepRecord;
     use ff_ext::ExtensionField;
     use goldilocks::GoldilocksExt2;
-    use multilinear_extensions::mle::IntoMLE;
+    use itertools::Itertools;
+    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -226,15 +241,7 @@ mod test {
         scheme::mock_prover::MockProver,
     };
 
-    use super::{BltInput, BltInstruction};
-
-    fn interleave<T: Clone>(vectors: Vec<Vec<T>>) -> Vec<Vec<T>> {
-        let len = vectors.first().map_or(0, Vec::len);
-
-        (0..len)
-            .map(|i| vectors.iter().map(|vec| vec[i].clone()).collect())
-            .collect()
-    }
+    use super::BltInstruction;
 
     #[test]
     fn test_blt_circuit() -> Result<(), ZKVMError> {
@@ -245,21 +252,24 @@ mod test {
         let num_wits = circuit_builder.cs.num_witin as usize;
         // generate mock witness
         let num_instances = 1 << 4;
-        let wits_in = (0..num_instances)
-            .map(|_| {
-                let input = BltInput::random();
-                let mut witin: Vec<GoldilocksExt2> = Vec::with_capacity(num_wits);
-                witin.resize(num_wits, GoldilocksExt2::ZERO);
-                input.generate_witness(&mut witin, &config);
-                witin
-            })
-            .collect();
-        let wits_in = interleave(wits_in)
-            .iter()
-            .map(|witin| witin.clone().into_mle().into())
-            .collect::<Vec<_>>();
+        let raw_witin = BltInstruction::assign_instances(
+            &config,
+            num_wits,
+            vec![StepRecord::default(); num_instances],
+        )
+        .unwrap();
 
-        MockProver::run(&mut circuit_builder, &wits_in, None).expect_err("lookup will fail");
+        MockProver::run(
+            &mut circuit_builder,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            None,
+        )
+        .expect_err("lookup will fail");
         Ok(())
     }
 

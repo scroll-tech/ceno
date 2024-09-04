@@ -401,14 +401,6 @@ pub struct WitIn {
 pub struct Fixed(pub usize);
 
 impl WitIn {
-    pub fn assign<V, E>(&self, witin: &mut [E], to: V)
-    where
-        V: FnOnce() -> E,
-    {
-        // TODO: handle out of bound Error
-        witin[self.id as usize] = to();
-    }
-
     pub fn from_expr<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         input: Expression<E>,
