@@ -37,6 +37,9 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
     pub prev_rd_ts: WitIn,
+    pub lt_wtns_rs1: WitIn,
+    pub lt_wtns_rs2: WitIn,
+    pub lt_wtns_rd: WitIn,
     phantom: PhantomData<E>,
 }
 
@@ -121,6 +124,19 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let next_ts = ts + 1.into();
     circuit_builder.state_out(next_pc, next_ts)?;
 
+    let lt_wtns_rs1 = circuit_builder.assert_less_than(
+        || "prev_rs1_ts < ts",
+        prev_rs1_ts.expr(),
+        cur_ts.expr(),
+    )?;
+    let lt_wtns_rs2 = circuit_builder.assert_less_than(
+        || "prev_rs2_ts < ts",
+        prev_rs2_ts.expr(),
+        cur_ts.expr(),
+    )?;
+    let lt_wtns_rd =
+        circuit_builder.assert_less_than(|| "prev_rd_ts < ts", prev_rd_ts.expr(), cur_ts.expr())?;
+
     Ok(InstructionConfig {
         pc,
         ts: cur_ts,
@@ -134,6 +150,9 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         prev_rs1_ts,
         prev_rs2_ts,
         prev_rd_ts,
+        lt_wtns_rs1,
+        lt_wtns_rs2,
+        lt_wtns_rd,
         phantom: PhantomData,
     })
 }
@@ -159,7 +178,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     ) -> Result<(), ZKVMError> {
         // TODO use fields from step
         set_val!(instance, config.pc, 1);
-        set_val!(instance, config.ts, 2);
+        set_val!(instance, config.ts, 3);
         let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
         let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
         let rd_prev = UIntValue::new_unchecked(step.rd().unwrap().value.before);
@@ -187,6 +206,9 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         set_val!(instance, config.prev_rs1_ts, 2);
         set_val!(instance, config.prev_rs2_ts, 2);
         set_val!(instance, config.prev_rd_ts, 2);
+        set_val!(instance, config.lt_wtns_rs1, 1);
+        set_val!(instance, config.lt_wtns_rs2, 1);
+        set_val!(instance, config.lt_wtns_rd, 1);
         Ok(())
     }
 }
@@ -362,7 +384,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            None,
+            Some([100.into(), 100000.into()]),
         );
     }
 }

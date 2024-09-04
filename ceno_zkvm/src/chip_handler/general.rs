@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use ff_ext::ExtensionField;
 
 use ff::Field;
@@ -262,6 +264,49 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         let rlc_record = self.rlc_chip_record(items);
         self.lk_record(|| "ltu lookup record", rlc_record)?;
         Ok(())
+    }
+
+    pub(crate) fn less_than<N, NR>(
+        &mut self,
+        name_fn: N,
+        lhs: Expression<E>,
+        rhs: Expression<E>,
+    ) -> Result<WitIn, ZKVMError>
+    where
+        NR: Into<String> + Display,
+        N: FnOnce() -> NR,
+    {
+        self.namespace(
+            || "less_than",
+            |cb| {
+                let name = name_fn();
+                let is_lt = cb.create_witin(|| format!("{name} witin"))?;
+                // TODO add name_fn to lookup_ltu_limb8, not done yet to avoid merge conflicts
+                cb.lookup_ltu_limb8(is_lt.expr(), lhs, rhs)?;
+                Ok(is_lt)
+            },
+        )
+    }
+
+    pub(crate) fn assert_less_than<N, NR>(
+        &mut self,
+        name_fn: N,
+        lhs: Expression<E>,
+        rhs: Expression<E>,
+    ) -> Result<WitIn, ZKVMError>
+    where
+        NR: Into<String> + Clone + Display,
+        N: FnOnce() -> NR,
+    {
+        self.namespace(
+            || "assert_less_than",
+            |cb| {
+                let name = name_fn();
+                let is_lt = cb.less_than(|| name.clone(), lhs, rhs)?;
+                cb.require_one(|| name, is_lt.expr())?;
+                Ok(is_lt)
+            },
+        )
     }
 
     pub(crate) fn is_equal(
