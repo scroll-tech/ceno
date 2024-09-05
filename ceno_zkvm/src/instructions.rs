@@ -19,7 +19,7 @@ pub trait Instruction<E: ExtensionField> {
     // assign single instance giving step from trace
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         step: StepRecord,
     ) -> Result<(), ZKVMError>;
 
@@ -27,8 +27,8 @@ pub trait Instruction<E: ExtensionField> {
         config: &Self::InstructionConfig,
         num_witin: usize,
         steps: Vec<StepRecord>,
-    ) -> Result<RowMajorMatrix<E>, ZKVMError> {
-        let mut raw_witin = RowMajorMatrix::<E>::new(steps.len(), num_witin);
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+        let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin);
         let raw_witin_iter = raw_witin.par_iter_mut();
 
         raw_witin_iter

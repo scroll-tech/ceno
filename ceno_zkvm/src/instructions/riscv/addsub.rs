@@ -149,7 +149,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
     #[allow(clippy::option_map_unit_fn)]
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         _step: StepRecord,
     ) -> Result<(), ZKVMError> {
         // TODO use field from step
@@ -198,7 +198,7 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
     #[allow(clippy::option_map_unit_fn)]
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         _step: StepRecord,
     ) -> Result<(), ZKVMError> {
         // TODO use field from step
