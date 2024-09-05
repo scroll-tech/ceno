@@ -10,17 +10,14 @@ pub struct PoseidonHash;
 impl PoseidonHash {
     const HASH_SIZE: usize = DIGEST_WIDTH * 8;
 
-    // TODO: add documentation
     fn hash_no_pad<F: Poseidon + AdaptedField>(input: &[F]) -> Digest<F> {
         hash_n_to_hash_no_pad(input)
     }
 
-    // TODO: can I do without taking as full reference
     fn two_to_one<F: Poseidon + AdaptedField>(left: Digest<F>, right: Digest<F>) -> Digest<F> {
         compress(left, right)
     }
 
-    // TODO: add documentation
     fn hash_or_noop<F: Poseidon + AdaptedField>(inputs: Vec<F>) -> Digest<F> {
         if inputs.len() <= DIGEST_WIDTH {
             Digest::from_partial(inputs.as_slice())
@@ -58,7 +55,6 @@ pub fn hash_n_to_hash_no_pad<F: Poseidon>(inputs: &[F]) -> Digest<F> {
     hash_n_to_m_no_pad(inputs, DIGEST_WIDTH).try_into().unwrap()
 }
 
-// TODO: add documentation
 pub fn compress<F: Poseidon>(x: Digest<F>, y: Digest<F>) -> Digest<F> {
     debug_assert!(SPONGE_RATE >= DIGEST_WIDTH);
     debug_assert_eq!(x.elements().len(), DIGEST_WIDTH);

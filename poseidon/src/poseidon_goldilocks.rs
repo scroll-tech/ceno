@@ -2,7 +2,7 @@ use crate::{
     constants::N_PARTIAL_ROUNDS,
     poseidon::{AdaptedField, Poseidon},
 };
-use goldilocks::{EPSILON, Goldilocks, SmallField};
+use goldilocks::{Goldilocks, SmallField, EPSILON};
 
 #[rustfmt::skip]
 impl Poseidon for Goldilocks {

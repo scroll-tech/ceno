@@ -230,17 +230,13 @@ pub(crate) trait Poseidon: AdaptedField {
     }
 }
 
-// TODO: add documentation
 pub(crate) trait AdaptedField: SmallField {
     const ORDER: u64;
 
-    // TODO: add documentation
     fn from_noncanonical_u96(n_lo: u64, n_hi: u32) -> Self;
 
-    // TODO: add documentation
     fn from_noncanonical_u128(n: u128) -> Self;
 
-    // TODO: add documentation
     fn multiply_accumulate(&self, x: Self, y: Self) -> Self;
 
     /// Returns `n`. Assumes that `n` is already in canonical form, i.e. `n < Self::order()`.
@@ -261,4 +257,3 @@ pub(crate) trait AdaptedField: SmallField {
         *self + Self::from_canonical_u64(rhs)
     }
 }
-

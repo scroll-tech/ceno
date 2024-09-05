@@ -18,7 +18,6 @@ impl<F: SmallField> TryFrom<Vec<F>> for Digest<F> {
 }
 
 impl<F: SmallField> Digest<F> {
-    // TODO: add documentation
     pub(crate) fn from_partial(inputs: &[F]) -> Self {
         let mut elements = [F::ZERO; DIGEST_WIDTH];
         elements[0..inputs.len()].copy_from_slice(inputs);
