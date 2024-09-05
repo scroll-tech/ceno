@@ -8,8 +8,7 @@ use crate::{
 use goldilocks::{ExtensionField, SmallField};
 use unroll::unroll_for_loops;
 
-pub(crate) trait Poseidon: SmallField {
-    const ORDER: u64;
+pub(crate) trait Poseidon: AdaptedField {
 
     // Total number of round constants required: width of the input
     // times number of rounds.
@@ -29,14 +28,6 @@ pub(crate) trait Poseidon: SmallField {
     const FAST_PARTIAL_ROUND_W_HATS: [[u64; SPONGE_WIDTH - 1]; N_PARTIAL_ROUNDS];
     const FAST_PARTIAL_ROUND_INITIAL_MATRIX: [[u64; SPONGE_WIDTH - 1]; SPONGE_WIDTH - 1];
 
-    // TODO: add documentation
-    fn from_noncanonical_u96(n_lo: u64, n_hi: u32) -> Self;
-
-    // TODO: add documentation
-    fn from_noncanonical_u128(n: u128) -> Self;
-
-    // TODO: add documentation
-    fn multiply_accumulate(&self, x: Self, y: Self) -> Self;
 
     // done
     #[inline]
@@ -129,7 +120,7 @@ pub(crate) trait Poseidon: SmallField {
     // done
     #[inline(always)]
     #[unroll_for_loops]
-    fn partial_first_constant_layer<F: ExtensionField<BaseField = Self>>(
+    fn partial_first_constant_layer<F: ExtensionField<BaseField = Self> + AdaptedField>(
         state: &mut [F; SPONGE_WIDTH],
     ) {
         for i in 0..12 {
@@ -142,7 +133,7 @@ pub(crate) trait Poseidon: SmallField {
     // done
     #[inline(always)]
     #[unroll_for_loops]
-    fn mds_partial_layer_init<F: ExtensionField<BaseField = Self>>(
+    fn mds_partial_layer_init<F: ExtensionField<BaseField = Self> + AdaptedField>(
         state: &[F; SPONGE_WIDTH],
     ) -> [F; SPONGE_WIDTH] {
         let mut result = [F::ZERO; SPONGE_WIDTH];
@@ -172,7 +163,7 @@ pub(crate) trait Poseidon: SmallField {
 
     // done
     #[inline(always)]
-    fn sbox_monomial<F: ExtensionField<BaseField = Self>>(x: F) -> F {
+    fn sbox_monomial<F: ExtensionField<BaseField = Self> + AdaptedField>(x: F) -> F {
         // x |--> x^7
         let x2 = x.square();
         let x4 = x2.square();
@@ -243,6 +234,21 @@ pub(crate) trait Poseidon: SmallField {
 
         res
     }
+
+}
+
+// TODO: add documentation
+trait AdaptedField: SmallField {
+    const ORDER: u64;
+
+    // TODO: add documentation
+    fn from_noncanonical_u96(n_lo: u64, n_hi: u32) -> Self;
+
+    // TODO: add documentation
+    fn from_noncanonical_u128(n: u128) -> Self;
+
+    // TODO: add documentation
+    fn multiply_accumulate(&self, x: Self, y: Self) -> Self;
 
     /// Returns `n`. Assumes that `n` is already in canonical form, i.e. `n < Self::order()`.
     // TODO: Should probably be unsafe.
