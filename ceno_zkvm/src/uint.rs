@@ -123,7 +123,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
-    pub fn assign(&self, instance: &mut [MaybeUninit<E>], values: Vec<E>) {
+    pub fn assign(&self, instance: &mut [MaybeUninit<E::BaseField>], values: Vec<E::BaseField>) {
         assert!(
             values.len() == Self::NUM_CELLS,
             "assign input length mismatch. input_len={}, NUM_CELLS={}",
