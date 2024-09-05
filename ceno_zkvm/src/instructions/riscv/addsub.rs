@@ -156,17 +156,17 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         // TODO use fields from step
         set_val!(instance, config.pc, 1);
         set_val!(instance, config.ts, 2);
-        let addend_0 = UIntValue(step.rs1().unwrap().value);
-        let addend_1 = UIntValue(step.rs2().unwrap().value);
+        let addend_0 = UIntValue::new(step.rs1().unwrap().value);
+        let addend_1 = UIntValue::new(step.rs2().unwrap().value);
         config
             .prev_rd_value
             .assign_limbs(instance, [0, 0].iter().map(E::BaseField::from).collect());
         config
             .addend_0
-            .assign_limbs(instance, addend_0.as_u16_fields());
+            .assign_limbs(instance, addend_0.u16_fields());
         config
             .addend_1
-            .assign_limbs(instance, addend_1.as_u16_fields());
+            .assign_limbs(instance, addend_1.u16_fields());
         let carries = addend_0.add_u16_carries(&addend_1);
         config.outcome.assign_carries(
             instance,
@@ -234,9 +234,6 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
 
 #[cfg(test)]
 mod test {
-
-    use std::u32;
-
     use ceno_emul::{ReadOp, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;

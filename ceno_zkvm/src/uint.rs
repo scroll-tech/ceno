@@ -459,10 +459,22 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UInt<M, C,
     }
 }
 
-pub struct UIntValue<T: Into<u64> + Copy>(pub T);
+pub struct UIntValue<T: Into<u64> + Copy> {
+    #[allow(dead_code)]
+    val: T,
+    pub limbs: Vec<u16>,
+}
 
 // TODO generalize to support non 16 bit limbs
+// TODO optimize api with fixed size array
 impl<T: Into<u64> + Copy> UIntValue<T> {
+    pub fn new(val: T) -> Self {
+        UIntValue::<T> {
+            val,
+            limbs: Self::split_to_u16(val),
+        }
+    }
+
     fn split_to_u16(value: T) -> Vec<u16> {
         let mut limbs = Vec::new();
         let value: u64 = value.into(); // Convert to u64 for generality
@@ -477,23 +489,19 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
         limbs
     }
 
-    pub fn as_u16_limbs(&self) -> Vec<u16> {
-        Self::split_to_u16(self.0)
+    pub fn as_u16_limbs(&self) -> &[u16] {
+        &self.limbs
     }
 
-    pub fn as_u16_fields<F: SmallField>(&self) -> Vec<F> {
-        Self::split_to_u16(self.0)
-            .into_iter()
-            .map(|v| F::from(v as u64))
-            .collect_vec()
+    pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {
+        self.limbs.iter().map(|v| F::from(*v as u64)).collect_vec()
     }
 
     pub fn add_u16_carries(&self, rhs: &Self) -> Vec<bool> {
-        self.as_u16_limbs()
-            .into_iter()
-            .zip(rhs.as_u16_limbs())
-            .fold(vec![], |mut acc, (a_limb, b_limb)| {
-                let (a, b) = a_limb.overflowing_add(b_limb);
+        self.as_u16_limbs().iter().zip(rhs.as_u16_limbs()).fold(
+            vec![],
+            |mut acc, (a_limb, b_limb)| {
+                let (a, b) = a_limb.overflowing_add(*b_limb);
                 if let Some(prev_carry) = acc.last() {
                     let (_, d) = a.overflowing_add(*prev_carry as u16);
                     acc.push(b || d);
@@ -501,7 +509,8 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
                     acc.push(b);
                 }
                 acc
-            })
+            },
+        )
     }
 }
 
