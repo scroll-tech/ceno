@@ -68,3 +68,56 @@ pub fn compress<F: Poseidon>(x: Digest<F>, y: Digest<F>) -> Digest<F> {
 
     Digest(perm.squeeze()[..DIGEST_WIDTH].try_into().unwrap())
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{digest::Digest, poseidon_hash::PoseidonHash};
+    use goldilocks::Goldilocks;
+    use plonky2::{
+        field::{
+            goldilocks_field::GoldilocksField,
+            types::{PrimeField64, Sample},
+        },
+        hash::{hash_types::HashOut, poseidon::PoseidonHash as PlonkyPoseidonHash},
+        plonk::config::{GenericHashOut, Hasher},
+    };
+    use rand::{thread_rng, Rng};
+
+    type PlonkyFieldElements = Vec<GoldilocksField>;
+    type CenoFieldElements = Vec<Goldilocks>;
+
+    fn ceno_goldy_from_plonky_goldy(values: &[GoldilocksField]) -> Vec<Goldilocks> {
+        values
+            .iter()
+            .map(|value| Goldilocks(value.to_canonical_u64()))
+            .collect()
+    }
+
+    fn n_test_vectors(n: usize) -> (PlonkyFieldElements, CenoFieldElements) {
+        let plonky_elems = GoldilocksField::rand_vec(n);
+        let ceno_elems = ceno_goldy_from_plonky_goldy(plonky_elems.as_slice());
+        (plonky_elems, ceno_elems)
+    }
+
+    fn compare_hash_output(
+        plonky_hash: HashOut<GoldilocksField>,
+        ceno_hash: Digest<Goldilocks>,
+    ) -> bool {
+        let plonky_elems = plonky_hash.to_vec();
+        let plonky_in_ceno_field = ceno_goldy_from_plonky_goldy(plonky_elems.as_slice());
+        plonky_in_ceno_field == ceno_hash.elements()
+    }
+
+    #[test]
+    fn compare_hash_no_pad() {
+        let mut rng = thread_rng();
+
+        for i in 0..100 {
+            let n: usize = rng.gen_range(0..=100);
+            let (plonky_elems, ceno_elems) = n_test_vectors(n);
+            let plonky_out = PlonkyPoseidonHash::hash_no_pad(plonky_elems.as_slice());
+            let ceno_out = PoseidonHash::hash_no_pad(ceno_elems.as_slice());
+            assert!(compare_hash_output(plonky_out, ceno_out));
+        }
+    }
+}
