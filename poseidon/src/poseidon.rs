@@ -9,7 +9,6 @@ use goldilocks::{ExtensionField, SmallField};
 use unroll::unroll_for_loops;
 
 pub(crate) trait Poseidon: AdaptedField {
-
     // Total number of round constants required: width of the input
     // times number of rounds.
     const N_ROUND_CONSTANTS: usize = SPONGE_WIDTH * N_ROUNDS;
@@ -27,7 +26,6 @@ pub(crate) trait Poseidon: AdaptedField {
     const FAST_PARTIAL_ROUND_VS: [[u64; SPONGE_WIDTH - 1]; N_PARTIAL_ROUNDS];
     const FAST_PARTIAL_ROUND_W_HATS: [[u64; SPONGE_WIDTH - 1]; N_PARTIAL_ROUNDS];
     const FAST_PARTIAL_ROUND_INITIAL_MATRIX: [[u64; SPONGE_WIDTH - 1]; SPONGE_WIDTH - 1];
-
 
     // done
     #[inline]
@@ -120,12 +118,10 @@ pub(crate) trait Poseidon: AdaptedField {
     // done
     #[inline(always)]
     #[unroll_for_loops]
-    fn partial_first_constant_layer<F: ExtensionField<BaseField = Self> + AdaptedField>(
-        state: &mut [F; SPONGE_WIDTH],
-    ) {
+    fn partial_first_constant_layer(state: &mut [Self; SPONGE_WIDTH]) {
         for i in 0..12 {
             if i < SPONGE_WIDTH {
-                state[i] += F::from_canonical_u64(Self::FAST_PARTIAL_FIRST_ROUND_CONSTANT[i]);
+                state[i] += Self::from_canonical_u64(Self::FAST_PARTIAL_FIRST_ROUND_CONSTANT[i]);
             }
         }
     }
@@ -133,10 +129,8 @@ pub(crate) trait Poseidon: AdaptedField {
     // done
     #[inline(always)]
     #[unroll_for_loops]
-    fn mds_partial_layer_init<F: ExtensionField<BaseField = Self> + AdaptedField>(
-        state: &[F; SPONGE_WIDTH],
-    ) -> [F; SPONGE_WIDTH] {
-        let mut result = [F::ZERO; SPONGE_WIDTH];
+    fn mds_partial_layer_init(state: &[Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
+        let mut result = [Self::ZERO; SPONGE_WIDTH];
 
         // Initial matrix has first row/column = [1, 0, ..., 0];
 
@@ -150,7 +144,7 @@ pub(crate) trait Poseidon: AdaptedField {
                         // NB: FAST_PARTIAL_ROUND_INITIAL_MATRIX is stored in
                         // row-major order so that this dot product is cache
                         // friendly.
-                        let t = F::from_canonical_u64(
+                        let t = Self::from_canonical_u64(
                             Self::FAST_PARTIAL_ROUND_INITIAL_MATRIX[r - 1][c - 1],
                         );
                         result[c] += state[r] * t;
@@ -163,7 +157,7 @@ pub(crate) trait Poseidon: AdaptedField {
 
     // done
     #[inline(always)]
-    fn sbox_monomial<F: ExtensionField<BaseField = Self> + AdaptedField>(x: F) -> F {
+    fn sbox_monomial(x: Self) -> Self {
         // x |--> x^7
         let x2 = x.square();
         let x4 = x2.square();
@@ -234,11 +228,10 @@ pub(crate) trait Poseidon: AdaptedField {
 
         res
     }
-
 }
 
 // TODO: add documentation
-trait AdaptedField: SmallField {
+pub(crate) trait AdaptedField: SmallField {
     const ORDER: u64;
 
     // TODO: add documentation

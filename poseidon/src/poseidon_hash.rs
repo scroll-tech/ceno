@@ -1,27 +1,27 @@
 use crate::{
     constants::{DIGEST_WIDTH, SPONGE_RATE},
     digest::Digest,
-    poseidon::Poseidon,
+    poseidon::{AdaptedField, Poseidon},
     poseidon_permutation::PoseidonPermutation,
 };
 
 pub struct PoseidonHash;
 
-impl<F: Poseidon> PoseidonHash {
+impl PoseidonHash {
     const HASH_SIZE: usize = DIGEST_WIDTH * 8;
 
     // TODO: add documentation
-    fn hash_no_pad(input: &[F]) -> Digest<F> {
+    fn hash_no_pad<F: Poseidon + AdaptedField>(input: &[F]) -> Digest<F> {
         hash_n_to_hash_no_pad(input)
     }
 
     // TODO: can I do without taking as full reference
-    fn two_to_one(left: Digest<F>, right: Digest<F>) -> Digest<F> {
+    fn two_to_one<F: Poseidon + AdaptedField>(left: Digest<F>, right: Digest<F>) -> Digest<F> {
         compress(left, right)
     }
 
     // TODO: add documentation
-    fn hash_or_noop(inputs: Vec<F>) -> Digest<F> {
+    fn hash_or_noop<F: Poseidon + AdaptedField>(inputs: Vec<F>) -> Digest<F> {
         if inputs.len() <= DIGEST_WIDTH {
             Digest::from_partial(inputs.as_slice())
         } else {
