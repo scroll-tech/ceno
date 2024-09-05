@@ -1,12 +1,17 @@
-use std::marker::PhantomData;
+use itertools::Itertools;
+use std::{
+    collections::{BTreeMap, HashMap},
+    marker::PhantomData,
+};
 
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLEs};
 
 use crate::{
     error::ZKVMError,
     expression::{Expression, Fixed, WitIn},
     structs::WitnessId,
+    witness::RowMajorMatrix,
 };
 
 /// namespace used for annotation, preserve meta info during circuit construction
@@ -135,7 +140,18 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
-    pub fn key_gen(self, fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>) -> ProvingKey<E> {
+    pub fn key_gen(self, fixed_traces: Option<RowMajorMatrix<E>>) -> ProvingKey<E> {
+        // TODO: commit to fixed_traces
+
+        // transpose from row-major to column-major
+        let fixed_traces = fixed_traces.map(|t| {
+            t.de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec()
+        });
+
         ProvingKey {
             fixed_traces,
             vk: VerifyingKey { cs: self },
@@ -301,9 +317,6 @@ pub struct ProvingKey<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ProvingKey<E> {
-    // pub fn create_pk(vk: VerifyingKey<E>) -> Self {
-    //     Self { vk }
-    // }
     pub fn get_cs(&self) -> &ConstraintSystem<E> {
         self.vk.get_cs()
     }
@@ -318,4 +331,21 @@ impl<E: ExtensionField> VerifyingKey<E> {
     pub fn get_cs(&self) -> &ConstraintSystem<E> {
         &self.cs
     }
+}
+
+#[derive(Default)]
+pub struct ZKVMConstraintSystem<E: ExtensionField> {
+    pub circuit_css: BTreeMap<String, ConstraintSystem<E>>,
+}
+
+#[derive(Default)]
+pub struct ZKVMProvingKey<E: ExtensionField> {
+    // pk for opcode and table circuits
+    pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
+}
+
+#[derive(Default)]
+pub struct ZKVMVerifyingKey<E: ExtensionField> {
+    // pk for opcode and table circuits
+    pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
 }

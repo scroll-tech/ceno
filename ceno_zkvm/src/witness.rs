@@ -19,15 +19,23 @@ macro_rules! set_val {
 pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
     values: Vec<MaybeUninit<T>>,
+    num_padding_rows: usize,
     num_col: usize,
 }
 
 impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
-    pub fn new(num_row: usize, num_col: usize) -> Self {
+    pub fn new(num_rows: usize, num_col: usize) -> Self {
+        let num_total_rows = num_rows.next_power_of_two();
+        let num_padding_rows = num_total_rows - num_rows;
         RowMajorMatrix {
-            values: create_uninit_vec(num_row * num_col),
+            values: create_uninit_vec(num_total_rows * num_col),
+            num_padding_rows,
             num_col,
         }
+    }
+
+    pub fn num_instances(&self) -> usize {
+        self.values.len() / self.num_col - self.num_padding_rows
     }
 
     pub fn iter_mut(&mut self) -> ChunksMut<MaybeUninit<T>> {

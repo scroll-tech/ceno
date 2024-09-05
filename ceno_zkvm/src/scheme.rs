@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use std::collections::HashMap;
 use sumcheck::structs::IOPProverMessage;
 
 use crate::structs::TowerProofs;
@@ -13,7 +14,7 @@ pub mod verifier;
 mod tests;
 
 #[derive(Clone)]
-pub struct ZkvmOpcodeProof<E: ExtensionField> {
+pub struct ZKVMOpcodeProof<E: ExtensionField> {
     // TODO support >1 opcodes
     pub num_instances: usize,
 
@@ -39,7 +40,7 @@ pub struct ZkvmOpcodeProof<E: ExtensionField> {
 }
 
 #[derive(Clone)]
-pub struct ZkvmTableProof<E: ExtensionField> {
+pub struct ZKVMTableProof<E: ExtensionField> {
     pub num_instances: usize,
     // logup sum at layer 1
     pub lk_p1_out_eval: E,
@@ -58,8 +59,8 @@ pub struct ZkvmTableProof<E: ExtensionField> {
     pub wits_in_evals: Vec<E>,
 }
 
-#[derive(Clone)]
-pub struct ZkvmProof<E: ExtensionField> {
-    opcode_proofs: Vec<ZkvmOpcodeProof<E>>,
-    table_proofs: Vec<ZkvmTableProof<E>>,
+#[derive(Default, Clone)]
+pub struct ZKVMProof<E: ExtensionField> {
+    opcode_proofs: HashMap<String, ZKVMOpcodeProof<E>>,
+    table_proofs: HashMap<String, ZKVMTableProof<E>>,
 }

@@ -13,10 +13,10 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::VerifyingKey,
+    circuit_builder::{VerifyingKey, ZKVMVerifyingKey},
     error::ZKVMError,
     scheme::{
-        constants::{NUM_FANIN, SEL_DEGREE},
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_fixed,
     },
     structs::{Point, PointAndEval, TowerProofs},
@@ -24,28 +24,95 @@ use crate::{
 };
 
 use super::{
-    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZkvmOpcodeProof, ZkvmTableProof,
+    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMOpcodeProof, ZKVMProof,
+    ZKVMTableProof,
 };
 
 pub struct ZKVMVerifier<E: ExtensionField> {
-    vk: VerifyingKey<E>,
+    vk: ZKVMVerifyingKey<E>,
 }
 
 impl<E: ExtensionField> ZKVMVerifier<E> {
-    pub fn new(vk: VerifyingKey<E>) -> Self {
+    pub fn new(vk: ZKVMVerifyingKey<E>) -> Self {
         ZKVMVerifier { vk }
     }
 
-    /// verify proof and return input opening point
-    pub fn verify(
+    pub fn verify_proof(
         &self,
-        proof: &ZkvmOpcodeProof<E>,
+        vm_proof: ZKVMProof<E>,
+        transcript: &mut Transcript<E>,
+        challenges: &[E; 2],
+    ) -> Result<bool, ZKVMError> {
+        let mut prod_r = E::ONE;
+        let mut prod_w = E::ONE;
+        let mut logup_sum = E::ZERO;
+        let point_eval = PointAndEval::default();
+        for (name, opcode_proof) in vm_proof.opcode_proofs {
+            let circuit_vk = self
+                .vk
+                .circuit_vks
+                .get(&name)
+                .expect(format!("vk of opcode circuit {} is not present", name).as_str());
+            let _rand_point = self.verify_opcode_proof(
+                circuit_vk,
+                &opcode_proof,
+                transcript,
+                NUM_FANIN,
+                &point_eval,
+                challenges,
+            )?;
+
+            prod_r *= opcode_proof.record_r_out_evals.iter().product::<E>();
+            prod_w *= opcode_proof.record_w_out_evals.iter().product::<E>();
+
+            logup_sum +=
+                opcode_proof.lk_p1_out_eval * opcode_proof.lk_q1_out_eval.invert().unwrap();
+            logup_sum +=
+                opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.invert().unwrap();
+        }
+
+        for (name, table_proof) in vm_proof.table_proofs {
+            let circuit_vk = self
+                .vk
+                .circuit_vks
+                .get(&name)
+                .expect(format!("vk of table circuit {} is not present", name).as_str());
+            let _rand_point = self.verify_table_proof(
+                circuit_vk,
+                &table_proof,
+                transcript,
+                NUM_FANIN_LOGUP,
+                &point_eval,
+                challenges,
+            )?;
+
+            logup_sum -= table_proof.lk_p1_out_eval * table_proof.lk_q1_out_eval.invert().unwrap();
+            logup_sum -= table_proof.lk_p2_out_eval * table_proof.lk_q2_out_eval.invert().unwrap();
+        }
+        // check rw_set equality across all proofs
+        if prod_r != prod_w {
+            return Ok(false);
+        }
+
+        // check logup relation across all proofs
+        if logup_sum != E::ZERO {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    /// verify proof and return input opening point
+    pub fn verify_opcode_proof(
+        &self,
+        circuit_vk: &VerifyingKey<E>,
+        proof: &ZKVMOpcodeProof<E>,
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
-        let cs = self.vk.get_cs();
+        let cs = circuit_vk.get_cs();
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len(),
             cs.w_expressions.len(),
@@ -63,9 +130,6 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
-
-        // TODO check rw_set equality across all proofs
-        // TODO check logup relation across all proofs
 
         let (rt_tower, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
             vec![
@@ -252,13 +316,14 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 
     pub fn verify_table_proof(
         &self,
-        proof: &ZkvmTableProof<E>,
+        circuit_vk: &VerifyingKey<E>,
+        proof: &ZKVMTableProof<E>,
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // TODO: derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
-        let cs = self.vk.get_cs();
+        let cs = circuit_vk.get_cs();
         let lk_counts_per_instance = cs.lk_table_expressions.len();
         let log2_lk_count = ceil_log2(lk_counts_per_instance);
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);

@@ -9,6 +9,7 @@ pub use utils::u64vec;
 mod chip_handler;
 pub mod circuit_builder;
 pub mod expression;
+mod keygen;
 mod structs;
 mod uint;
 mod utils;

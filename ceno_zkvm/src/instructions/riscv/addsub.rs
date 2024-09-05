@@ -136,6 +136,9 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
 
 impl<E: ExtensionField> Instruction<E> for AddInstruction {
     // const NAME: &'static str = "ADD";
+    fn name() -> String {
+        "ADD".into()
+    }
     type InstructionConfig = InstructionConfig<E>;
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
@@ -182,6 +185,9 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
 
 impl<E: ExtensionField> Instruction<E> for SubInstruction {
     // const NAME: &'static str = "ADD";
+    fn name() -> String {
+        "SUB".into()
+    }
     type InstructionConfig = InstructionConfig<E>;
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
