@@ -5,7 +5,7 @@ use crate::{
     },
     reduce_u160,
 };
-use goldilocks::{ExtensionField, SmallField};
+use goldilocks::{ExtensionField, Goldilocks, SmallField, EPSILON};
 use unroll::unroll_for_loops;
 
 pub(crate) trait Poseidon: AdaptedField {
@@ -261,3 +261,4 @@ pub(crate) trait AdaptedField: SmallField {
         *self + Self::from_canonical_u64(rhs)
     }
 }
+

@@ -1,6 +1,7 @@
 pub(crate) mod constants;
 pub(crate) mod digest;
 pub(crate) mod poseidon;
+mod poseidon_goldilocks;
 pub(crate) mod poseidon_hash;
 pub(crate) mod poseidon_permutation;
 
