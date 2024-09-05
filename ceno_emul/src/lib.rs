@@ -1,14 +1,14 @@
 mod addr;
-pub use addr::{ByteAddr, RegIdx, WordAddr};
+pub use addr::*;
 
 mod platform;
 pub use platform::{Platform, CENO_PLATFORM};
 
 mod tracer;
-pub use tracer::{Change, StepRecord};
+pub use tracer::{Change, MemOp, ReadOp, StepRecord, Tracer, WriteOp};
 
 mod vm_state;
 pub use vm_state::VMState;
 
 mod rv32im;
-pub use rv32im::{DecodedInstruction, InsnCategory, InsnKind};
+pub use rv32im::{DecodedInstruction, EmuContext, InsnCategory, InsnKind};

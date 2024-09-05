@@ -1,6 +1,11 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
-use crate::{circuit_builder::CircuitBuilder, expression::Expression, structs::ROMType};
+use crate::{
+    circuit_builder::CircuitBuilder,
+    expression::Expression,
+    structs::{ROMType, WitnessId},
+};
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{marker::PhantomData, ops::Neg};
@@ -12,6 +17,7 @@ pub(crate) enum MockProverError<E: ExtensionField> {
         expression: Expression<E>,
         evaluated: E,
         name: String,
+        inst_id: usize,
     },
     AssertEqualError {
         left_expression: Expression<E>,
@@ -19,11 +25,13 @@ pub(crate) enum MockProverError<E: ExtensionField> {
         left: E,
         right: E,
         name: String,
+        inst_id: usize,
     },
     LookupError {
         expression: Expression<E>,
         evaluated: E,
         name: String,
+        inst_id: usize,
     },
     // TODO later
     // r_expressions
@@ -31,16 +39,24 @@ pub(crate) enum MockProverError<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> MockProverError<E> {
-    pub fn print(&self) {
+    pub fn print(&self, wits_in: &[ArcMultilinearExtension<E>]) {
+        let mut wtns = vec![];
+
         match self {
             Self::AssertZeroError {
                 expression,
                 evaluated,
                 name,
+                inst_id,
             } => {
+                let expression_fmt = fmt_expr(expression, &mut wtns, false);
+                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id);
+                let eval_fmt = fmt_field::<E>(evaluated);
                 println!(
-                    "\nAssertZeroError {name:#?}: Evaluated expression is not zero\nExpression: \
-                    {expression:?}\nEvaluation: {evaluated:?}\n",
+                    "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
+                    Expression: {expression_fmt}\n\
+                    Evaluation: {eval_fmt} != 0\n\
+                    Inst[{inst_id}]: {wtns_fmt}\n",
                 );
             }
             Self::AssertEqualError {
@@ -49,24 +65,125 @@ impl<E: ExtensionField> MockProverError<E> {
                 left,
                 right,
                 name,
+                inst_id,
             } => {
+                let left_expression_fmt = fmt_expr(left_expression, &mut wtns, false);
+                let right_expression_fmt = fmt_expr(right_expression, &mut wtns, false);
+                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id);
+                let left_eval_fmt = fmt_field::<E>(left);
+                let right_eval_fmt = fmt_field::<E>(right);
                 println!(
-                    "\nAssertEqualError {name:#?}: Left != Right\n\
-                    Left: {left:?}\nRight: {right:?}\n\
-                    Left Expression: {left_expression:?}\n\
-                    Right Expression: {right_expression:?}\n",
+                    "\nAssertEqualError {name:?}\n\
+                    Left: {left_eval_fmt} != Right: {right_eval_fmt}\n\
+                    Left Expression: {left_expression_fmt}\n\
+                    Right Expression: {right_expression_fmt}\n\
+                    Inst[{inst_id}]: {wtns_fmt}\n",
                 );
             }
             Self::LookupError {
                 expression,
                 evaluated,
                 name,
+                inst_id,
             } => {
+                let expression_fmt = fmt_expr(expression, &mut wtns, false);
+                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id);
+                let eval_fmt = fmt_field::<E>(evaluated);
                 println!(
-                    "\nLookupError {name:#?}: Evaluated expression does not exist in T \
-                    vector\nExpression: {expression:?}\nEvaluation: {evaluated:?}\n",
+                    "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\n\
+                    Expression: {expression_fmt}\n\
+                    Evaluation: {eval_fmt}\n\
+                    Inst[{inst_id}]: {wtns_fmt}\n",
                 );
             }
+        }
+
+        fn fmt_expr<E: ExtensionField>(
+            expression: &Expression<E>,
+            wtns: &mut Vec<WitnessId>,
+            add_prn_sum: bool,
+        ) -> String {
+            match expression {
+                Expression::WitIn(wit_in) => {
+                    wtns.push(*wit_in);
+                    format!("WitIn({})", wit_in)
+                }
+                Expression::Challenge(id, _, _, _) => format!("Challenge({})", id),
+                Expression::Constant(constant) => fmt_base_field::<E>(constant).to_string(),
+                Expression::Fixed(fixed) => format!("{:?}", fixed),
+                Expression::Sum(left, right) => {
+                    let s = format!(
+                        "{} + {}",
+                        fmt_expr(left, wtns, false),
+                        fmt_expr(right, wtns, false)
+                    );
+                    if add_prn_sum { format!("({})", s) } else { s }
+                }
+                Expression::Product(left, right) => {
+                    format!(
+                        "{} * {}",
+                        fmt_expr(left, wtns, true),
+                        fmt_expr(right, wtns, true)
+                    )
+                }
+                Expression::ScaledSum(x, a, b) => {
+                    let s = format!(
+                        "{} * {} + {}",
+                        fmt_expr(a, wtns, true),
+                        fmt_expr(x, wtns, true),
+                        fmt_expr(b, wtns, false)
+                    );
+                    if add_prn_sum { format!("({})", s) } else { s }
+                }
+            }
+        }
+
+        fn fmt_field<E: ExtensionField>(field: &E) -> String {
+            let name = format!("{:?}", field);
+            let name = name.split('(').next().unwrap_or("ExtensionField");
+            format!(
+                "{name}[{}]",
+                field
+                    .as_bases()
+                    .iter()
+                    .map(fmt_base_field::<E>)
+                    .collect::<Vec<String>>()
+                    .join(",")
+            )
+        }
+
+        fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField) -> String {
+            let value = base_field.to_canonical_u64();
+
+            if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
+                // beautiful format for negative number > -65536
+                format!("(-{})", E::BaseField::MODULUS_U64 - value)
+            } else if value < u16::MAX as u64 {
+                format!("{value}")
+            } else {
+                // hex
+                format!("{value:#x}")
+            }
+        }
+
+        fn fmt_wtns<E: ExtensionField>(
+            wtns: &[WitnessId],
+            wits_in: &[ArcMultilinearExtension<E>],
+            inst_id: usize,
+        ) -> String {
+            wtns.iter()
+                .map(|wt_id| {
+                    let wit = &wits_in[*wt_id as usize];
+                    let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
+                        fmt_field(&e[inst_id])
+                    } else if let Some(bf) = wit.get_base_field_vec_optn() {
+                        fmt_base_field::<E>(&bf[inst_id])
+                    } else {
+                        "Unknown".to_string()
+                    };
+                    format!("WitIn({wt_id})={value_fmt}")
+                })
+                .join(",")
         }
     }
 }
@@ -111,7 +228,9 @@ impl<'a, E: ExtensionField> MockProver<E> {
                 let right_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &right);
                 let right_evaluated = right_evaluated.get_ext_field_vec();
 
-                for (left_element, right_element) in left_evaluated.iter().zip_eq(right_evaluated) {
+                for (inst_id, (left_element, right_element)) in
+                    left_evaluated.iter().zip_eq(right_evaluated).enumerate()
+                {
                     if *left_element != *right_element {
                         errors.push(MockProverError::AssertEqualError {
                             left_expression: left.clone(),
@@ -119,20 +238,23 @@ impl<'a, E: ExtensionField> MockProver<E> {
                             left: *left_element,
                             right: *right_element,
                             name: name.clone(),
+                            inst_id,
                         });
                     }
                 }
             } else {
+                // contains require_zero
                 let expr = expr.clone().neg().neg(); // TODO get_ext_field_vec doesn't work without this
                 let expr_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &expr);
                 let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
-                for element in expr_evaluated {
+                for (inst_id, element) in expr_evaluated.iter().enumerate() {
                     if *element != E::ZERO {
                         errors.push(MockProverError::AssertZeroError {
                             expression: expr.clone(),
                             evaluated: *element,
                             name: name.clone(),
+                            inst_id,
                         });
                     }
                 }
@@ -154,12 +276,13 @@ impl<'a, E: ExtensionField> MockProver<E> {
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
             // Check each lookup expr exists in t vec
-            for element in expr_evaluated {
+            for (inst_id, element) in expr_evaluated.iter().enumerate() {
                 if !table_vec.contains(element) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
                         evaluated: *element,
                         name: name.clone(),
+                        inst_id,
                     });
                 }
             }
@@ -182,9 +305,13 @@ impl<'a, E: ExtensionField> MockProver<E> {
         match result {
             Ok(_) => {}
             Err(errors) => {
+                println!("======================================================");
+                println!("Error: {} constraints not satisfied", errors.len());
+
                 for error in errors {
-                    error.print();
+                    error.print(wits_in);
                 }
+                println!("======================================================");
                 panic!("Constraints not satisfied");
             }
         }
@@ -344,6 +471,7 @@ mod tests {
                 ),
                 evaluated: 123002.into(), // 123 * 1000 + 2
                 name: "test_lookup_error/assert_u5/assert u5".to_string(),
+                inst_id: 0,
             }]
         );
     }

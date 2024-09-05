@@ -18,13 +18,17 @@ use std::{fmt, ops};
 
 pub const WORD_SIZE: usize = 4;
 
+// Type aliases to clarify the code without wrapper types.
+pub type Word = u32;
+pub type Addr = u32;
+pub type Cycle = u64;
 pub type RegIdx = usize;
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct ByteAddr(pub u32);
 
-#[derive(Clone, Copy, Default, PartialEq)]
-pub struct WordAddr(pub u32);
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct WordAddr(u32);
 
 impl From<ByteAddr> for WordAddr {
     fn from(addr: ByteAddr) -> Self {
@@ -35,6 +39,30 @@ impl From<ByteAddr> for WordAddr {
 impl From<WordAddr> for ByteAddr {
     fn from(addr: WordAddr) -> Self {
         addr.baddr()
+    }
+}
+
+impl From<u32> for ByteAddr {
+    fn from(addr: u32) -> ByteAddr {
+        ByteAddr(addr)
+    }
+}
+
+impl From<u32> for WordAddr {
+    fn from(addr: u32) -> WordAddr {
+        ByteAddr(addr).waddr()
+    }
+}
+
+impl From<ByteAddr> for u32 {
+    fn from(addr: ByteAddr) -> Self {
+        addr.0
+    }
+}
+
+impl From<WordAddr> for u32 {
+    fn from(addr: WordAddr) -> Self {
+        addr.baddr().0
     }
 }
 

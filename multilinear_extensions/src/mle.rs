@@ -44,22 +44,32 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     fn name(&self) -> &'static str;
 
     fn get_ext_field_vec(&self) -> &[E] {
-        match &self.evaluations() {
-            FieldType::Ext(evaluations) => {
-                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                &evaluations[start..][..offset]
-            }
-            _ => unreachable!(),
-        }
+        self.get_ext_field_vec_optn()
+            .unwrap_or_else(|| unreachable!())
     }
 
     fn get_base_field_vec(&self) -> &[E::BaseField] {
+        self.get_base_field_vec_optn()
+            .unwrap_or_else(|| unreachable!())
+    }
+
+    fn get_ext_field_vec_optn(&self) -> Option<&[E]> {
+        match &self.evaluations() {
+            FieldType::Ext(evaluations) => {
+                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
+                Some(&evaluations[start..][..offset])
+            }
+            _ => None,
+        }
+    }
+
+    fn get_base_field_vec_optn(&self) -> Option<&[E::BaseField]> {
         match &self.evaluations() {
             FieldType::Base(evaluations) => {
                 let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                &evaluations[start..][..offset]
+                Some(&evaluations[start..][..offset])
             }
-            _ => unreachable!(),
+            _ => None,
         }
     }
 }

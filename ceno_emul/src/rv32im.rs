@@ -17,7 +17,7 @@
 use anyhow::{anyhow, Result};
 use std::sync::OnceLock;
 
-use super::addr::{ByteAddr, WordAddr, WORD_SIZE};
+use super::addr::{ByteAddr, RegIdx, Word, WordAddr, WORD_SIZE};
 
 pub trait EmuContext {
     // Handle environment call
@@ -42,20 +42,26 @@ pub trait EmuContext {
     fn set_pc(&mut self, addr: ByteAddr);
 
     // Load from a register
-    fn load_register(&mut self, idx: usize) -> Result<u32>;
+    fn load_register(&mut self, idx: RegIdx) -> Result<Word>;
 
     // Store to a register
-    fn store_register(&mut self, idx: usize, data: u32) -> Result<()>;
+    fn store_register(&mut self, idx: RegIdx, data: Word) -> Result<()>;
 
     // Load from memory
-    fn load_memory(&mut self, addr: WordAddr) -> Result<u32>;
+    fn load_memory(&mut self, addr: WordAddr) -> Result<Word>;
 
     // Store to memory
-    fn store_memory(&mut self, addr: WordAddr, data: u32) -> Result<()>;
+    fn store_memory(&mut self, addr: WordAddr, data: Word) -> Result<()>;
+
+    // Get the value of a register without side-effects.
+    fn peek_register(&self, idx: RegIdx) -> Word;
+
+    // Get the value of a memory word without side-effects.
+    fn peek_memory(&self, addr: WordAddr) -> Word;
 
     // Load from memory, in the context of instruction fetching.
     // Only called after check_insn_load returns true.
-    fn fetch(&mut self, pc: WordAddr) -> Result<u32> {
+    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
         self.load_memory(pc)
     }
 
@@ -443,11 +449,11 @@ impl Emulator {
         kind: InsnKind,
         decoded: &DecodedInstruction,
     ) -> Result<bool> {
+        use InsnKind::*;
+
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
         let mut rd = decoded.rd;
-        let rs1 = ctx.load_register(decoded.rs1 as usize)?;
-        let rs2 = ctx.load_register(decoded.rs2 as usize)?;
         let imm_i = decoded.imm_i();
         let mut br_cond = |cond| -> u32 {
             rd = 0;
@@ -457,100 +463,119 @@ impl Emulator {
             0
         };
         let out = match kind {
-            InsnKind::ADD => rs1.wrapping_add(rs2),
-            InsnKind::SUB => rs1.wrapping_sub(rs2),
-            InsnKind::XOR => rs1 ^ rs2,
-            InsnKind::OR => rs1 | rs2,
-            InsnKind::AND => rs1 & rs2,
-            InsnKind::SLL => rs1 << (rs2 & 0x1f),
-            InsnKind::SRL => rs1 >> (rs2 & 0x1f),
-            InsnKind::SRA => ((rs1 as i32) >> (rs2 & 0x1f)) as u32,
-            InsnKind::SLT => {
-                if (rs1 as i32) < (rs2 as i32) {
-                    1
-                } else {
-                    0
-                }
-            }
-            InsnKind::SLTU => {
-                if rs1 < rs2 {
-                    1
-                } else {
-                    0
-                }
-            }
-            InsnKind::ADDI => rs1.wrapping_add(imm_i),
-            InsnKind::XORI => rs1 ^ imm_i,
-            InsnKind::ORI => rs1 | imm_i,
-            InsnKind::ANDI => rs1 & imm_i,
-            InsnKind::SLLI => rs1 << (imm_i & 0x1f),
-            InsnKind::SRLI => rs1 >> (imm_i & 0x1f),
-            InsnKind::SRAI => ((rs1 as i32) >> (imm_i & 0x1f)) as u32,
-            InsnKind::SLTI => {
-                if (rs1 as i32) < (imm_i as i32) {
-                    1
-                } else {
-                    0
-                }
-            }
-            InsnKind::SLTIU => {
-                if rs1 < imm_i {
-                    1
-                } else {
-                    0
-                }
-            }
-            InsnKind::BEQ => br_cond(rs1 == rs2),
-            InsnKind::BNE => br_cond(rs1 != rs2),
-            InsnKind::BLT => br_cond((rs1 as i32) < (rs2 as i32)),
-            InsnKind::BGE => br_cond((rs1 as i32) >= (rs2 as i32)),
-            InsnKind::BLTU => br_cond(rs1 < rs2),
-            InsnKind::BGEU => br_cond(rs1 >= rs2),
-            InsnKind::JAL => {
+            // Instructions that do not read rs1 nor rs2.
+            JAL => {
                 new_pc = pc.wrapping_add(decoded.imm_j());
                 (pc + WORD_SIZE).0
             }
-            InsnKind::JALR => {
-                new_pc = ByteAddr(rs1.wrapping_add(imm_i) & 0xfffffffe);
-                (pc + WORD_SIZE).0
-            }
-            InsnKind::LUI => decoded.imm_u(),
-            InsnKind::AUIPC => (pc.wrapping_add(decoded.imm_u())).0,
-            InsnKind::MUL => rs1.wrapping_mul(rs2),
-            InsnKind::MULH => {
-                (sign_extend_u32(rs1).wrapping_mul(sign_extend_u32(rs2)) >> 32) as u32
-            }
-            InsnKind::MULHSU => (sign_extend_u32(rs1).wrapping_mul(rs2 as i64) >> 32) as u32,
-            InsnKind::MULHU => (((rs1 as u64).wrapping_mul(rs2 as u64)) >> 32) as u32,
-            InsnKind::DIV => {
-                if rs2 == 0 {
-                    u32::MAX
-                } else {
-                    ((rs1 as i32).wrapping_div(rs2 as i32)) as u32
+            LUI => decoded.imm_u(),
+            AUIPC => (pc.wrapping_add(decoded.imm_u())).0,
+
+            _ => {
+                // Instructions that read rs1 but not rs2.
+                let rs1 = ctx.load_register(decoded.rs1 as usize)?;
+
+                match kind {
+                    ADDI => rs1.wrapping_add(imm_i),
+                    XORI => rs1 ^ imm_i,
+                    ORI => rs1 | imm_i,
+                    ANDI => rs1 & imm_i,
+                    SLLI => rs1 << (imm_i & 0x1f),
+                    SRLI => rs1 >> (imm_i & 0x1f),
+                    SRAI => ((rs1 as i32) >> (imm_i & 0x1f)) as u32,
+                    SLTI => {
+                        if (rs1 as i32) < (imm_i as i32) {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    SLTIU => {
+                        if rs1 < imm_i {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    JALR => {
+                        new_pc = ByteAddr(rs1.wrapping_add(imm_i) & 0xfffffffe);
+                        (pc + WORD_SIZE).0
+                    }
+
+                    _ => {
+                        // Instructions that use rs1 and rs2.
+                        let rs2 = ctx.load_register(decoded.rs2 as usize)?;
+
+                        match kind {
+                            ADD => rs1.wrapping_add(rs2),
+                            SUB => rs1.wrapping_sub(rs2),
+                            XOR => rs1 ^ rs2,
+                            OR => rs1 | rs2,
+                            AND => rs1 & rs2,
+                            SLL => rs1 << (rs2 & 0x1f),
+                            SRL => rs1 >> (rs2 & 0x1f),
+                            SRA => ((rs1 as i32) >> (rs2 & 0x1f)) as u32,
+                            SLT => {
+                                if (rs1 as i32) < (rs2 as i32) {
+                                    1
+                                } else {
+                                    0
+                                }
+                            }
+                            SLTU => {
+                                if rs1 < rs2 {
+                                    1
+                                } else {
+                                    0
+                                }
+                            }
+                            BEQ => br_cond(rs1 == rs2),
+                            BNE => br_cond(rs1 != rs2),
+                            BLT => br_cond((rs1 as i32) < (rs2 as i32)),
+                            BGE => br_cond((rs1 as i32) >= (rs2 as i32)),
+                            BLTU => br_cond(rs1 < rs2),
+                            BGEU => br_cond(rs1 >= rs2),
+                            MUL => rs1.wrapping_mul(rs2),
+                            MULH => {
+                                (sign_extend_u32(rs1).wrapping_mul(sign_extend_u32(rs2)) >> 32)
+                                    as u32
+                            }
+                            MULHSU => (sign_extend_u32(rs1).wrapping_mul(rs2 as i64) >> 32) as u32,
+                            MULHU => (((rs1 as u64).wrapping_mul(rs2 as u64)) >> 32) as u32,
+                            DIV => {
+                                if rs2 == 0 {
+                                    u32::MAX
+                                } else {
+                                    ((rs1 as i32).wrapping_div(rs2 as i32)) as u32
+                                }
+                            }
+                            DIVU => {
+                                if rs2 == 0 {
+                                    u32::MAX
+                                } else {
+                                    rs1 / rs2
+                                }
+                            }
+                            REM => {
+                                if rs2 == 0 {
+                                    rs1
+                                } else {
+                                    ((rs1 as i32).wrapping_rem(rs2 as i32)) as u32
+                                }
+                            }
+                            REMU => {
+                                if rs2 == 0 {
+                                    rs1
+                                } else {
+                                    rs1 % rs2
+                                }
+                            }
+
+                            _ => unreachable!("Illegal compute instruction: {:?}", kind),
+                        }
+                    }
                 }
             }
-            InsnKind::DIVU => {
-                if rs2 == 0 {
-                    u32::MAX
-                } else {
-                    rs1 / rs2
-                }
-            }
-            InsnKind::REM => {
-                if rs2 == 0 {
-                    rs1
-                } else {
-                    ((rs1 as i32).wrapping_rem(rs2 as i32)) as u32
-                }
-            }
-            InsnKind::REMU => {
-                if rs2 == 0 {
-                    rs1
-                } else {
-                    rs1 % rs2
-                }
-            }
-            _ => unreachable!(),
         };
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
@@ -567,7 +592,7 @@ impl Emulator {
         decoded: &DecodedInstruction,
     ) -> Result<bool> {
         let rs1 = ctx.load_register(decoded.rs1 as usize)?;
-        let _rs2 = ctx.load_register(decoded.rs2 as usize)?;
+        // LOAD instructions do not read rs2.
         let addr = ByteAddr(rs1.wrapping_add(decoded.imm_i()));
         if !ctx.check_data_load(addr) {
             return ctx.trap(TrapCause::LoadAccessFault(addr));
@@ -625,7 +650,7 @@ impl Emulator {
         if !ctx.check_data_store(addr) {
             return ctx.trap(TrapCause::StoreAccessFault);
         }
-        let mut data = ctx.load_memory(addr.waddr())?;
+        let mut data = ctx.peek_memory(addr.waddr());
         match kind {
             InsnKind::SB => {
                 data ^= data & (0xff << shift);
