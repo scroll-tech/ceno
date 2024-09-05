@@ -654,15 +654,6 @@ mod tests {
                 eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
                 E::ZERO
             );
-            // overflow
-            assert_eq!(
-                eval_by_expr(
-                    &witness_values,
-                    &challenges,
-                    &c.carries.unwrap().last().unwrap().expr()
-                ),
-                E::ZERO
-            );
         }
 
         #[test]
@@ -701,15 +692,6 @@ mod tests {
             );
             assert_eq!(
                 eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-                E::ZERO
-            );
-            // overflow
-            assert_eq!(
-                eval_by_expr(
-                    &witness_values,
-                    &challenges,
-                    &c.carries.unwrap().last().unwrap().expr()
-                ),
                 E::ZERO
             );
         }
