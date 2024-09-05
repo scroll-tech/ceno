@@ -11,13 +11,12 @@ pub fn ext_to_u64<E: ExtensionField>(x: &E) -> u64 {
     bases[0].to_canonical_u64()
 }
 
-pub fn i64_to_ext<E: ExtensionField>(x: i64) -> E {
-    let x0 = if x >= 0 {
-        E::BaseField::from(x as u64)
+pub fn i64_to_base<F: SmallField>(x: i64) -> F {
+    if x >= 0 {
+        F::from(x as u64)
     } else {
-        -E::BaseField::from((-x) as u64)
-    };
-    E::from_bases(&[x0, E::BaseField::ZERO])
+        -F::from((-x) as u64)
+    }
 }
 
 /// This is helper function to convert witness of u8 limb into u16 limb
