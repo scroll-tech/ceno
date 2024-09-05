@@ -1,102 +1,125 @@
 use std::marker::PhantomData;
 
+use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
+use super::{
+    constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
+    RIVInstruction,
+};
 use crate::{
     chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::Instruction,
-    structs::{PCUInt, TSUInt, UInt64},
+    set_val,
 };
-
-use super::{
-    constants::{OPType, OpcodeType, PC_STEP_SIZE},
-    RIVInstruction,
-};
+use core::mem::MaybeUninit;
 
 pub struct AddInstruction;
 pub struct SubInstruction;
 
+#[derive(Debug)]
 pub struct InstructionConfig<E: ExtensionField> {
-    pub pc: PCUInt,
-    pub ts: TSUInt,
-    pub prev_rd_value: UInt64,
-    pub addend_0: UInt64,
-    pub addend_1: UInt64,
-    pub outcome: UInt64,
+    pub pc: WitIn,
+    pub ts: WitIn,
+    pub prev_rd_value: RegUInt<E>,
+    pub addend_0: RegUInt<E>,
+    pub addend_1: RegUInt<E>,
+    pub outcome: RegUInt<E>,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
-    pub prev_rs1_ts: TSUInt,
-    pub prev_rs2_ts: TSUInt,
-    pub prev_rd_ts: TSUInt,
+    pub prev_rs1_ts: WitIn,
+    pub prev_rs2_ts: WitIn,
+    pub prev_rd_ts: WitIn,
     phantom: PhantomData<E>,
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for AddInstruction {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::OP, 0x000, 0x0000000);
+    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0000000);
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for SubInstruction {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::OP, 0x000, 0x0100000);
+    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0100000);
 }
 
 fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     circuit_builder: &mut CircuitBuilder<E>,
 ) -> Result<InstructionConfig<E>, ZKVMError> {
-    let pc = PCUInt::new(circuit_builder);
-    let mut ts = TSUInt::new(circuit_builder);
+    let pc = circuit_builder.create_witin(|| "pc")?;
+    let cur_ts = circuit_builder.create_witin(|| "cur_ts")?;
 
     // state in
-    circuit_builder.state_in(&pc, &ts)?;
+    circuit_builder.state_in(pc.expr(), cur_ts.expr())?;
 
-    let next_pc = pc.add_const(circuit_builder, PC_STEP_SIZE.into())?;
+    let next_pc = pc.expr() + PC_STEP_SIZE.into();
 
     // Execution result = addend0 + addend1, with carry.
-    let prev_rd_value = UInt64::new(circuit_builder);
-    let addend_0 = UInt64::new(circuit_builder);
-    let addend_1 = UInt64::new(circuit_builder);
-    let outcome = UInt64::new(circuit_builder);
+    let prev_rd_value = RegUInt::new(|| "prev_rd_value", circuit_builder)?;
 
-    // TODO IS_ADD to deal with add/sub
-    let computed_outcome = addend_0.add(circuit_builder, &addend_1)?;
-    outcome.eq(circuit_builder, &computed_outcome)?;
+    let (addend_0, addend_1, outcome) = if IS_ADD {
+        // outcome = addend_0 + addend_1
+        let addend_0 = RegUInt::new(|| "addend_0", circuit_builder)?;
+        let addend_1 = RegUInt::new(|| "addend_1", circuit_builder)?;
+        (
+            addend_0.clone(),
+            addend_1.clone(),
+            addend_0.add(|| "outcome", circuit_builder, &addend_1)?,
+        )
+    } else {
+        // outcome + addend_1 = addend_0
+        let outcome = RegUInt::new(|| "outcome", circuit_builder)?;
+        let addend_1 = RegUInt::new(|| "addend_1", circuit_builder)?;
+        (
+            addend_1
+                .clone()
+                .add(|| "addend_0", circuit_builder, &outcome.clone())?,
+            addend_1,
+            outcome,
+        )
+    };
 
-    // TODO rs1_id, rs2_id, rd_id should be bytecode lookup
-    let rs1_id = circuit_builder.create_witin();
-    let rs2_id = circuit_builder.create_witin();
-    let rd_id = circuit_builder.create_witin();
-    circuit_builder.assert_u5(rs1_id.expr())?;
-    circuit_builder.assert_u5(rs2_id.expr())?;
-    circuit_builder.assert_u5(rd_id.expr())?;
+    let rs1_id = circuit_builder.create_witin(|| "rs1_id")?;
+    let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
+    let rd_id = circuit_builder.create_witin(|| "rd_id")?;
 
     // TODO remove me, this is just for testing degree > 1 sumcheck in main constraints
-    circuit_builder.require_zero(rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr())?;
-
-    let mut prev_rs1_ts = TSUInt::new(circuit_builder);
-    let mut prev_rs2_ts = TSUInt::new(circuit_builder);
-    let mut prev_rd_ts = TSUInt::new(circuit_builder);
-
-    let mut ts = circuit_builder.register_read(&rs1_id, &mut prev_rs1_ts, &mut ts, &addend_0)?;
-
-    let mut ts = circuit_builder.register_read(&rs2_id, &mut prev_rs2_ts, &mut ts, &addend_1)?;
-
-    let ts = circuit_builder.register_write(
-        &rd_id,
-        &mut prev_rd_ts,
-        &mut ts,
-        &prev_rd_value,
-        &computed_outcome,
+    circuit_builder.require_zero(
+        || "test_degree > 1",
+        rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr(),
     )?;
 
-    let next_ts = ts.add_const(circuit_builder, 1.into())?;
-    circuit_builder.state_out(&next_pc, &next_ts)?;
+    let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
+    let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
+    let prev_rd_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
+
+    let ts = circuit_builder.register_read(
+        || "read_rs1",
+        &rs1_id,
+        prev_rs1_ts.expr(),
+        cur_ts.expr(),
+        &addend_0,
+    )?;
+    let ts =
+        circuit_builder.register_read(|| "read_rs2", &rs2_id, prev_rs2_ts.expr(), ts, &addend_1)?;
+
+    let ts = circuit_builder.register_write(
+        || "write_rd",
+        &rd_id,
+        prev_rd_ts.expr(),
+        ts,
+        &prev_rd_value,
+        &outcome,
+    )?;
+
+    let next_ts = ts + 1.into();
+    circuit_builder.state_out(next_pc, next_ts)?;
 
     Ok(InstructionConfig {
         pc,
-        ts,
+        ts: cur_ts,
         prev_rd_value,
         addend_0,
         addend_1,
@@ -119,6 +142,42 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
     ) -> Result<InstructionConfig<E>, ZKVMError> {
         add_sub_gadget::<E, true>(circuit_builder)
     }
+
+    #[allow(clippy::option_map_unit_fn)]
+    fn assign_instance(
+        config: &Self::InstructionConfig,
+        instance: &mut [MaybeUninit<E>],
+        _step: StepRecord,
+    ) -> Result<(), ZKVMError> {
+        // TODO use field from step
+        set_val!(instance, config.pc, 1);
+        set_val!(instance, config.ts, 2);
+        config.prev_rd_value.wits_in().map(|prev_rd_value| {
+            set_val!(instance, prev_rd_value[0], 4);
+            set_val!(instance, prev_rd_value[1], 4);
+        });
+        config.addend_0.wits_in().map(|addend_0| {
+            set_val!(instance, addend_0[0], 4);
+            set_val!(instance, addend_0[1], 4);
+        });
+        config.addend_1.wits_in().map(|addend_1| {
+            set_val!(instance, addend_1[0], 4);
+            set_val!(instance, addend_1[1], 4);
+        });
+        // TODO #174
+        config.outcome.carries.as_ref().map(|carry| {
+            set_val!(instance, carry[0], 4);
+            set_val!(instance, carry[1], 0);
+        });
+        // TODO #167
+        set_val!(instance, config.rs1_id, 2);
+        set_val!(instance, config.rs2_id, 2);
+        set_val!(instance, config.rd_id, 2);
+        set_val!(instance, config.prev_rs1_ts, 2);
+        set_val!(instance, config.prev_rs2_ts, 2);
+        set_val!(instance, config.prev_rd_ts, 2);
+        Ok(())
+    }
 }
 
 impl<E: ExtensionField> Instruction<E> for SubInstruction {
@@ -129,75 +188,91 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
     ) -> Result<InstructionConfig<E>, ZKVMError> {
         add_sub_gadget::<E, false>(circuit_builder)
     }
+
+    #[allow(clippy::option_map_unit_fn)]
+    fn assign_instance(
+        config: &Self::InstructionConfig,
+        instance: &mut [MaybeUninit<E>],
+        _step: StepRecord,
+    ) -> Result<(), ZKVMError> {
+        // TODO use field from step
+        set_val!(instance, config.pc, _step.pc().before.0 as u64);
+        set_val!(instance, config.ts, 2);
+        config.prev_rd_value.wits_in().map(|prev_rd_value| {
+            set_val!(instance, prev_rd_value[0], 4);
+            set_val!(instance, prev_rd_value[1], 4);
+        });
+        config.addend_0.wits_in().map(|addend_0| {
+            set_val!(instance, addend_0[0], 4);
+            set_val!(instance, addend_0[1], 4);
+        });
+        config.addend_1.wits_in().map(|addend_1| {
+            set_val!(instance, addend_1[0], 4);
+            set_val!(instance, addend_1[1], 4);
+        });
+        // TODO #174
+        config.outcome.carries.as_ref().map(|carry| {
+            set_val!(instance, carry[0], 4);
+            set_val!(instance, carry[1], 0);
+        });
+        // TODO #167
+        set_val!(instance, config.rs1_id, 2);
+        set_val!(instance, config.rs2_id, 2);
+        set_val!(instance, config.rd_id, 2);
+        set_val!(instance, config.prev_rs1_ts, 2);
+        set_val!(instance, config.prev_rs2_ts, 2);
+        set_val!(instance, config.prev_rd_ts, 2);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod test {
 
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
-    use goldilocks::{Goldilocks, GoldilocksExt2};
+    use ceno_emul::StepRecord;
+    use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLE;
-    use transcript::Transcript;
+    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
-        circuit_builder::CircuitBuilder,
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::{constants::NUM_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier},
-        structs::PointAndEval,
+        scheme::mock_prover::MockProver,
     };
 
     use super::AddInstruction;
 
     #[test]
     fn test_add_construct_circuit() {
-        let mut rng = test_rng();
-
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
-        let _ = AddInstruction::construct_circuit(&mut circuit_builder);
-        let circuit = circuit_builder.finalize_circuit();
-
-        // generate mock witness
-        let num_instances = 1 << 2;
-        let wits_in = (0..circuit.num_witin as usize)
-            .map(|_| {
-                (0..num_instances)
-                    .map(|_| Goldilocks::random(&mut rng))
-                    .collect::<Vec<Goldilocks>>()
-                    .into_mle()
-                    .into()
-            })
-            .collect_vec();
-
-        // get proof
-        let prover = ZKVMProver::new(circuit.clone()); // circuit clone due to verifier alos need circuit reference
-        let mut transcript = Transcript::new(b"riscv");
-        let challenges = [1.into(), 2.into()];
-
-        let proof = prover
-            .create_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
-            .expect("create_proof failed");
-
-        let verifier = ZKVMVerifier::new(circuit);
-        let mut v_transcript = Transcript::new(b"riscv");
-        let _rt_input = verifier
-            .verify(
-                &proof,
-                &mut v_transcript,
-                NUM_FANIN,
-                &PointAndEval::default(),
-                &challenges,
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = cb
+            .namespace(
+                || "add",
+                |cb| {
+                    let config = AddInstruction::construct_circuit(cb);
+                    Ok(config)
+                },
             )
-            .expect("verifier failed");
-        // TODO verify opening via PCS
-    }
+            .unwrap()
+            .unwrap();
 
-    fn bench_add_instruction_helper<E: ExtensionField>(_instance_num_vars: usize) {}
+        let raw_witin = AddInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::default()],
+        )
+        .unwrap();
 
-    #[test]
-    fn bench_add_instruction() {
-        bench_add_instruction_helper::<GoldilocksExt2>(10);
+        MockProver::assert_satisfied(
+            &mut cb,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            None,
+        );
     }
 }

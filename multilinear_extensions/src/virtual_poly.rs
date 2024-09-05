@@ -1,10 +1,10 @@
-use std::{cmp::max, collections::HashMap, marker::PhantomData, mem, sync::Arc};
+use std::{cmp::max, collections::HashMap, marker::PhantomData, mem::MaybeUninit, sync::Arc};
 
 use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
-    util::bit_decompose,
+    util::{bit_decompose, create_uninit_vec},
 };
-use ark_std::{end_timer, rand::Rng, start_timer};
+use ark_std::{end_timer, iterable::Iterable, rand::Rng, start_timer};
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use rayon::{
@@ -389,20 +389,17 @@ pub fn build_eq_x_r_vec_sequential<E: ExtensionField>(r: &[E]) -> Vec<E> {
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
 
-    let mut evals = vec![E::ZERO; 1 << r.len()];
-    build_eq_x_r_helper_sequential(r, &mut evals);
+    let mut evals = create_uninit_vec(1 << r.len());
+    build_eq_x_r_helper_sequential(r, &mut evals, E::ONE);
 
-    evals
+    unsafe { std::mem::transmute(evals) }
 }
 
-/// A helper function to build eq(x, r) via dynamic programing tricks.
+/// A helper function to build eq(x, r)*init via dynamic programing tricks.
 /// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
-fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut Vec<E>) {
-    buf[0] = E::ONE;
-    if r.is_empty() {
-        buf.resize(1, E::ZERO);
-        return;
-    }
+fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut [MaybeUninit<E>], init: E) {
+    buf[0] = MaybeUninit::new(init);
+
     for (i, r) in r.iter().rev().enumerate() {
         let next_size = 1 << (i + 1);
         // suppose at the previous step we processed buf [0..size]
@@ -411,10 +408,10 @@ fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut Vec<E>) 
         // buf[2*j + 1] = r * buf[j]
         // buf[2*j] = (1 - r) * buf[j]
         (0..next_size).step_by(2).rev().for_each(|index| {
-            let prev_val = buf[index >> 1];
+            let prev_val = unsafe { buf[index >> 1].assume_init() };
             let tmp = *r * prev_val;
-            buf[index + 1] = tmp;
-            buf[index] = prev_val - tmp;
+            buf[index + 1] = MaybeUninit::new(tmp);
+            buf[index] = MaybeUninit::new(prev_val - tmp);
         });
     }
 }
@@ -455,20 +452,36 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
     //  ....
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
+    let nthreads =
+        std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
+    let nbits = nthreads.trailing_zeros() as usize;
+    assert_eq!(1 << nbits, nthreads);
 
-    let mut evals: [Vec<E>; 2] = (0..2) // allocate 2 vector as rolling buffer
-        .into_par_iter()
-        .map(|_| vec![E::ZERO; 1 << r.len()])
-        .collect::<Vec<Vec<E>>>()
-        .try_into()
-        .unwrap();
-    build_eq_x_r_helper(r, &mut evals);
+    if r.len() < nbits {
+        build_eq_x_r_vec_sequential(r)
+    } else {
+        let eq_ts = build_eq_x_r_vec_sequential(&r[(r.len() - nbits)..]);
+        let mut ret = create_uninit_vec(1 << r.len());
 
-    mem::take(&mut evals[0])
+        // eq(x, r) = eq(x_lo, r_lo) * eq(x_hi, r_hi)
+        // where rlen = r.len(), x_lo = x[0..rlen-nbits], x_hi = x[rlen-nbits..]
+        //  r_lo = r[0..rlen-nbits] and r_hi = r[rlen-nbits..]
+        // each thread is associated with x_hi, and it will computes the subset
+        // { eq(x_lo, r_lo) * eq(x_hi, r_hi) } whose cardinality equals to 2^{rlen-nbits}
+        ret.par_chunks_mut(1 << (r.len() - nbits))
+            .zip((0..nthreads).into_par_iter())
+            .for_each(|(chunks, tid)| {
+                let eq_t = eq_ts[tid];
+
+                build_eq_x_r_helper_sequential(&r[..(r.len() - nbits)], chunks, eq_t);
+            });
+        unsafe { std::mem::transmute::<Vec<MaybeUninit<E>>, Vec<E>>(ret) }
+    }
 }
 
 /// A helper function to build eq(x, r) via dynamic programing tricks.
 /// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
+#[allow(dead_code)]
 fn build_eq_x_r_helper<E: ExtensionField>(r: &[E], buf: &mut [Vec<E>; 2]) {
     buf[0][0] = E::ONE;
     if r.is_empty() {
@@ -494,5 +507,42 @@ fn build_eq_x_r_helper<E: ExtensionField>(r: &[E], buf: &mut [Vec<E>; 2]) {
                 next_vals[0] = *prev_val - tmp;
             });
         buf.swap(0, 1); // swap rolling buffer
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::virtual_poly::{build_eq_x_r_vec, build_eq_x_r_vec_sequential};
+    use ark_std::rand::thread_rng;
+    use ff::Field;
+    use goldilocks::GoldilocksExt2;
+
+    #[test]
+    fn test_build_eq() {
+        env_logger::init();
+        let mut rng = thread_rng();
+
+        for num_vars in 10..24 {
+            let r = (0..num_vars)
+                .map(|_| GoldilocksExt2::random(&mut rng))
+                .collect::<Vec<GoldilocksExt2>>();
+
+            let seq_start = std::time::Instant::now();
+            let eq_r_seq = build_eq_x_r_vec_sequential(&r);
+            let seq_time = seq_start.elapsed();
+
+            let par_start = std::time::Instant::now();
+            let eq_r_par = build_eq_x_r_vec(&r);
+            let par_time = par_start.elapsed();
+
+            assert_eq!(eq_r_par, eq_r_seq);
+            log::info!(
+                "nv = {}, par_time: {:?}, seq_time: {:?}, speedup: {}",
+                num_vars,
+                par_time,
+                seq_time,
+                (seq_time.as_micros() as f64) / (par_time.as_micros() as f64)
+            );
+        }
     }
 }
