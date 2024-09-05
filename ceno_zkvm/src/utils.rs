@@ -11,6 +11,7 @@ pub fn ext_to_u64<E: ExtensionField>(x: &E) -> u64 {
     bases[0].to_canonical_u64()
 }
 
+#[allow(dead_code)]
 pub fn i64_to_ext<E: ExtensionField>(x: i64) -> E {
     let x0 = if x >= 0 {
         E::BaseField::from(x as u64)

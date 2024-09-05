@@ -16,6 +16,13 @@ macro_rules! set_val {
     };
 }
 
+#[macro_export]
+macro_rules! set_field_val {
+    ($ins:ident, $field:expr, $val:expr) => {
+        $ins[$field.id as usize] = MaybeUninit::new($val);
+    };
+}
+
 pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
     values: Vec<MaybeUninit<T>>,

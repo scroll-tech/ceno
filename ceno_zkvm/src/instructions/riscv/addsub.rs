@@ -1,7 +1,9 @@
 use std::marker::PhantomData;
 
+use ark_std::iterable::Iterable;
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 
 use super::{
     constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
@@ -14,6 +16,7 @@ use crate::{
     expression::{ToExpr, WitIn},
     instructions::Instruction,
     set_val,
+    uint::UIntValue,
 };
 use core::mem::MaybeUninit;
 
@@ -147,28 +150,31 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
     #[allow(clippy::option_map_unit_fn)]
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E>],
-        _step: StepRecord,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        step: StepRecord,
     ) -> Result<(), ZKVMError> {
-        // TODO use field from step
+        // TODO use fields from step
         set_val!(instance, config.pc, 1);
         set_val!(instance, config.ts, 2);
-        config.prev_rd_value.wits_in().map(|prev_rd_value| {
-            set_val!(instance, prev_rd_value[0], 4);
-            set_val!(instance, prev_rd_value[1], 4);
-        });
-        config.addend_0.wits_in().map(|addend_0| {
-            set_val!(instance, addend_0[0], 4);
-            set_val!(instance, addend_0[1], 4);
-        });
-        config.addend_1.wits_in().map(|addend_1| {
-            set_val!(instance, addend_1[0], 4);
-            set_val!(instance, addend_1[1], 4);
-        });
-        config.outcome.carries.as_ref().map(|carry| {
-            set_val!(instance, carry[0], 0);
-            set_val!(instance, carry[1], 0);
-        });
+        let addend_0 = UIntValue(step.rs1().unwrap().value);
+        let addend_1 = UIntValue(step.rs2().unwrap().value);
+        config
+            .prev_rd_value
+            .assign_limbs(instance, [0, 0].iter().map(E::BaseField::from).collect());
+        config
+            .addend_0
+            .assign_limbs(instance, addend_0.as_u16_fields());
+        config
+            .addend_1
+            .assign_limbs(instance, addend_1.as_u16_fields());
+        let carries = addend_0.add_u16_carries(&addend_1);
+        config.outcome.assign_carries(
+            instance,
+            carries
+                .into_iter()
+                .map(|carry| E::BaseField::from(carry as u64))
+                .collect_vec(),
+        );
         // TODO #167
         set_val!(instance, config.rs1_id, 2);
         set_val!(instance, config.rs2_id, 2);
@@ -192,7 +198,7 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
     #[allow(clippy::option_map_unit_fn)]
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         _step: StepRecord,
     ) -> Result<(), ZKVMError> {
         // TODO use field from step
@@ -229,14 +235,16 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
 #[cfg(test)]
 mod test {
 
-    use ceno_emul::StepRecord;
+    use std::u32;
+
+    use ceno_emul::{ReadOp, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{riscv::constants::RegUInt, Instruction},
+        instructions::Instruction,
         scheme::mock_prover::MockProver,
     };
 
@@ -261,7 +269,19 @@ mod test {
         let raw_witin = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord::default()],
+            vec![StepRecord {
+                rs1: Some(ReadOp {
+                    addr: 0.into(),
+                    value: 11u32,
+                    previous_cycle: 0,
+                }),
+                rs2: Some(ReadOp {
+                    addr: 0.into(),
+                    value: 5u32,
+                    previous_cycle: 0,
+                }),
+                ..Default::default()
+            }],
         )
         .unwrap();
 
@@ -296,7 +316,19 @@ mod test {
         let raw_witin = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord::default()],
+            vec![StepRecord {
+                rs1: Some(ReadOp {
+                    addr: 0.into(),
+                    value: u32::MAX - 1,
+                    previous_cycle: 0,
+                }),
+                rs2: Some(ReadOp {
+                    addr: 0.into(),
+                    value: u32::MAX - 1,
+                    previous_cycle: 0,
+                }),
+                ..Default::default()
+            }],
         )
         .unwrap();
 
