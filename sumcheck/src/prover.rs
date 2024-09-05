@@ -1,6 +1,5 @@
 use std::{array, mem, sync::Arc};
 
-use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
@@ -58,7 +57,6 @@ impl<E: ExtensionField> IOPProverState<E> {
                 },
             );
         }
-        let start = start_timer!(|| "sum check prove");
 
         transcript.append_message(&(num_variables + log2_max_thread_id).to_le_bytes());
         transcript.append_message(&max_degree.to_le_bytes());
@@ -269,8 +267,6 @@ impl<E: ExtensionField> IOPProverState<E> {
                 });
         };
         exit_span!(span);
-
-        end_timer!(start);
         (
             IOPProof {
                 point: [
@@ -293,12 +289,10 @@ impl<E: ExtensionField> IOPProverState<E> {
         polynomial: VirtualPolynomial<E>,
         extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
     ) -> Self {
-        let start = start_timer!(|| "sum check prover init");
         assert_ne!(
             polynomial.aux_info.num_variables, 0,
             "Attempt to prove a constant."
         );
-        end_timer!(start);
 
         let max_degree = polynomial.aux_info.max_degree;
         assert!(extrapolation_aux.len() == max_degree - 1);
@@ -319,9 +313,6 @@ impl<E: ExtensionField> IOPProverState<E> {
         &mut self,
         challenge: &Option<Challenge<E>>,
     ) -> IOPProverMessage<E> {
-        let start =
-            start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
-
         assert!(
             self.round < self.poly.aux_info.num_variables,
             "Prover is not active"
@@ -445,8 +436,6 @@ impl<E: ExtensionField> IOPProverState<E> {
         );
         exit_span!(span);
 
-        end_timer!(start);
-
         IOPProverMessage {
             evaluations: products_sum,
         }
@@ -493,8 +482,6 @@ impl<E: ExtensionField> IOPProverState<E> {
                 },
             );
         }
-        let start = start_timer!(|| "sum check prove");
-
         transcript.append_message(&num_variables.to_le_bytes());
         transcript.append_message(&max_degree.to_le_bytes());
 
@@ -534,8 +521,6 @@ impl<E: ExtensionField> IOPProverState<E> {
                 });
         };
         exit_span!(span);
-
-        end_timer!(start);
         (
             IOPProof {
                 // the point consists of the first elements in the challenge
@@ -553,14 +538,13 @@ impl<E: ExtensionField> IOPProverState<E> {
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
     pub(crate) fn prover_init_parallel(polynomial: VirtualPolynomial<E>) -> Self {
-        let start = start_timer!(|| "sum check prover init");
         assert_ne!(
             polynomial.aux_info.num_variables, 0,
             "Attempt to prove a constant."
         );
 
         let max_degree = polynomial.aux_info.max_degree;
-        let prover_state = Self {
+        Self {
             challenges: Vec::with_capacity(polynomial.aux_info.num_variables),
             round: 0,
             poly: polynomial,
@@ -571,10 +555,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     (points, weights)
                 })
                 .collect(),
-        };
-
-        end_timer!(start);
-        prover_state
+        }
     }
 
     /// Receive message from verifier, generate prover message, and proceed to
@@ -586,9 +567,6 @@ impl<E: ExtensionField> IOPProverState<E> {
         &mut self,
         challenge: &Option<Challenge<E>>,
     ) -> IOPProverMessage<E> {
-        let start =
-            start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
-
         assert!(
             self.round < self.poly.aux_info.num_variables,
             "Prover is not active"
@@ -718,8 +696,6 @@ impl<E: ExtensionField> IOPProverState<E> {
             .reduce_with(|acc, item| acc + item)
             .unwrap();
         exit_span!(span);
-
-        end_timer!(start);
 
         IOPProverMessage {
             evaluations: products_sum,

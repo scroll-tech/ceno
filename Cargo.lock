@@ -288,8 +288,8 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
- "strum 0.25.0",
- "strum_macros 0.25.3",
+ "strum",
+ "strum_macros",
  "sumcheck",
  "tracing",
  "tracing-flame",
@@ -706,22 +706,6 @@ dependencies = [
  "tracing",
  "tracing-flame",
  "tracing-subscriber",
- "transcript",
-]
-
-[[package]]
-name = "gkr-graph"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "ff",
- "ff_ext",
- "gkr",
- "goldilocks",
- "itertools 0.12.1",
- "multilinear_extensions",
- "simple-frontend",
- "sumcheck",
  "transcript",
 ]
 
@@ -1666,76 +1650,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "singer"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "cfg-if",
- "const_env",
- "criterion",
- "ff",
- "ff_ext",
- "gkr",
- "gkr-graph",
- "goldilocks",
- "itertools 0.12.1",
- "mpcs",
- "multilinear_extensions",
- "paste",
- "pprof",
- "rayon",
- "serde",
- "simple-frontend",
- "singer-utils",
- "strum 0.25.0",
- "strum_macros 0.25.3",
- "tracing",
- "tracing-flame",
- "tracing-subscriber",
- "transcript",
-]
-
-[[package]]
-name = "singer-pro"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "ff",
- "ff_ext",
- "gkr",
- "gkr-graph",
- "goldilocks",
- "itertools 0.12.1",
- "paste",
- "rayon",
- "serde",
- "simple-frontend",
- "singer-utils",
- "strum 0.25.0",
- "strum_macros 0.25.3",
- "transcript",
-]
-
-[[package]]
-name = "singer-utils"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "ff",
- "ff_ext",
- "gkr",
- "gkr-graph",
- "goldilocks",
- "itertools 0.12.1",
- "multilinear_extensions",
- "simple-frontend",
- "strum 0.26.1",
- "strum_macros 0.26.1",
- "sumcheck",
- "transcript",
-]
-
-[[package]]
 name = "smallvec"
 version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1772,29 +1686,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 
 [[package]]
-name = "strum"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "723b93e8addf9aa965ebe2d11da6d7540fa2283fcea14b3371ff055f7ba13f5f"
-
-[[package]]
 name = "strum_macros"
 version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23dc1fa9ac9c169a78ba62f0b841814b7abae11bdd047b9c58f893439e309ea0"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "rustversion",
- "syn 2.0.49",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a3417fc93d76740d974a01654a09777cb500428cc874ca9f45edfe0c4d4cd18"
 dependencies = [
  "heck",
  "proc-macro2",
