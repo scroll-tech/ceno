@@ -235,18 +235,11 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
 mod test {
     use super::*;
     use ceno_emul::StepRecord;
-    use ff_ext::ExtensionField;
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
 
-    use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
-        scheme::mock_prover::MockProver,
-    };
-
-    use super::BltInstruction;
+    use crate::{circuit_builder::ConstraintSystem, scheme::mock_prover::MockProver};
 
     #[test]
     fn test_blt_circuit() -> Result<(), ZKVMError> {

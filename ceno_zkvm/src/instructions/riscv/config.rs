@@ -1,8 +1,6 @@
 use std::mem::MaybeUninit;
 
 use crate::{expression::WitIn, set_val, utils::i64_to_base};
-use ff::Field;
-use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 
