@@ -1,3 +1,5 @@
+extern crate core;
+
 pub(crate) mod constants;
 pub(crate) mod digest;
 pub(crate) mod poseidon;

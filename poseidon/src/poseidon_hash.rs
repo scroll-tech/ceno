@@ -18,11 +18,11 @@ impl PoseidonHash {
         compress(left, right)
     }
 
-    fn hash_or_noop<F: Poseidon + AdaptedField>(inputs: Vec<F>) -> Digest<F> {
+    fn hash_or_noop<F: Poseidon + AdaptedField>(inputs: &[F]) -> Digest<F> {
         if inputs.len() <= DIGEST_WIDTH {
-            Digest::from_partial(inputs.as_slice())
+            Digest::from_partial(inputs)
         } else {
-            hash_n_to_hash_no_pad(inputs.as_slice())
+            hash_n_to_hash_no_pad(inputs)
         }
     }
 }
@@ -86,6 +86,8 @@ mod tests {
     type PlonkyFieldElements = Vec<GoldilocksField>;
     type CenoFieldElements = Vec<Goldilocks>;
 
+    const N_ITERATIONS: usize = 100;
+
     fn ceno_goldy_from_plonky_goldy(values: &[GoldilocksField]) -> Vec<Goldilocks> {
         values
             .iter()
@@ -97,6 +99,16 @@ mod tests {
         let plonky_elems = GoldilocksField::rand_vec(n);
         let ceno_elems = ceno_goldy_from_plonky_goldy(plonky_elems.as_slice());
         (plonky_elems, ceno_elems)
+    }
+
+    fn random_hash_pair() -> (HashOut<GoldilocksField>, Digest<Goldilocks>) {
+        let plonky_random_hash = HashOut::<GoldilocksField>::rand();
+        let ceno_equivalent_hash = Digest(
+            ceno_goldy_from_plonky_goldy(plonky_random_hash.elements.as_slice())
+                .try_into()
+                .unwrap(),
+        );
+        (plonky_random_hash, ceno_equivalent_hash)
     }
 
     fn compare_hash_output(
@@ -112,12 +124,36 @@ mod tests {
     fn compare_hash_no_pad() {
         let mut rng = thread_rng();
 
-        for i in 0..100 {
+        for i in 0..N_ITERATIONS {
             let n: usize = rng.gen_range(0..=100);
             let (plonky_elems, ceno_elems) = n_test_vectors(n);
             let plonky_out = PlonkyPoseidonHash::hash_no_pad(plonky_elems.as_slice());
             let ceno_out = PoseidonHash::hash_no_pad(ceno_elems.as_slice());
             assert!(compare_hash_output(plonky_out, ceno_out));
+        }
+    }
+
+    #[test]
+    fn compare_hash_or_noop() {
+        let mut rng = thread_rng();
+        for i in 0..N_ITERATIONS {
+            let n = rng.gen_range(0..=100);
+            let (plonky_elems, ceno_elems) = n_test_vectors(n);
+            let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
+            let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
+            assert!(compare_hash_output(plonky_out, ceno_out));
+        }
+    }
+
+    #[test]
+    fn compare_two_to_one() {
+        let mut rng = thread_rng();
+        for i in 0..N_ITERATIONS {
+            let (plonky_hash_a, ceno_hash_a) = random_hash_pair();
+            let (plonky_hash_b, ceno_hash_b) = random_hash_pair();
+            let plonky_combined = PlonkyPoseidonHash::two_to_one(plonky_hash_a, plonky_hash_b);
+            let ceno_combined = PoseidonHash::two_to_one(ceno_hash_a, ceno_hash_b);
+            assert!(compare_hash_output(plonky_combined, ceno_combined));
         }
     }
 }
