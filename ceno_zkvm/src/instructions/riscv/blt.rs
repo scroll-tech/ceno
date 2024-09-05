@@ -1,3 +1,4 @@
+use goldilocks::SmallField;
 use std::mem::MaybeUninit;
 
 use ff_ext::ExtensionField;
@@ -12,8 +13,8 @@ use crate::{
         riscv::config::{LtConfig, LtInput},
         Instruction,
     },
-    set_field_val,
-    utils::{i64_to_base_field, limb_u8_to_u16},
+    set_val,
+    utils::{i64_to_base, limb_u8_to_u16},
 };
 
 use super::{
@@ -53,10 +54,10 @@ pub struct BltInput {
 
 impl BltInput {
     /// TODO: refactor after formalize the interface of opcode inputs
-    pub fn assign<E: ExtensionField>(
+    pub fn assign<F: SmallField, E: ExtensionField<BaseField = F>>(
         &self,
         config: &InstructionConfig<E>,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [MaybeUninit<F>],
     ) {
         assert!(!self.lhs_limb8.is_empty() && (self.lhs_limb8.len() == self.rhs_limb8.len()));
         // TODO: add boundary check for witin
@@ -64,59 +65,53 @@ impl BltInput {
             lhs_limbs: &self.lhs_limb8,
             rhs_limbs: &self.rhs_limb8,
         };
-        let is_lt = lt_input.assign::<E>(instance, &config.is_lt);
+        let is_lt = lt_input.assign(instance, &config.is_lt);
 
-        set_field_val!(instance, config.pc, {
-            i64_to_base_field::<E>(self.pc as i64)
-        });
-        set_field_val!(instance, config.next_pc, {
+        set_val!(instance, config.pc, { i64_to_base::<F>(self.pc as i64) });
+        set_val!(instance, config.next_pc, {
             if is_lt {
-                i64_to_base_field::<E>(self.pc as i64 + self.imm as i64)
+                i64_to_base::<F>(self.pc as i64 + self.imm as i64)
             } else {
-                i64_to_base_field::<E>(self.pc as i64 + PC_STEP_SIZE as i64)
+                i64_to_base::<F>(self.pc as i64 + PC_STEP_SIZE as i64)
             }
         });
-        set_field_val!(instance, config.ts, {
-            i64_to_base_field::<E>(self.ts as i64)
+        set_val!(instance, config.ts, { i64_to_base::<F>(self.ts as i64) });
+        set_val!(instance, config.imm, { i64_to_base::<F>(self.imm as i64) });
+        set_val!(instance, config.rs1_id, {
+            i64_to_base::<F>(self.rs1_id as i64)
         });
-        set_field_val!(instance, config.imm, {
-            i64_to_base_field::<E>(self.imm as i64)
+        set_val!(instance, config.rs2_id, {
+            i64_to_base::<F>(self.rs2_id as i64)
         });
-        set_field_val!(instance, config.rs1_id, {
-            i64_to_base_field::<E>(self.rs1_id as i64)
+        set_val!(instance, config.prev_rs1_ts, {
+            i64_to_base::<F>(self.prev_rs1_ts as i64)
         });
-        set_field_val!(instance, config.rs2_id, {
-            i64_to_base_field::<E>(self.rs2_id as i64)
-        });
-        set_field_val!(instance, config.prev_rs1_ts, {
-            i64_to_base_field::<E>(self.prev_rs1_ts as i64)
-        });
-        set_field_val!(instance, config.prev_rs2_ts, {
-            i64_to_base_field::<E>(self.prev_rs2_ts as i64)
+        set_val!(instance, config.prev_rs2_ts, {
+            i64_to_base::<F>(self.prev_rs2_ts as i64)
         });
 
         config.lhs_limb8.assign_limbs(instance, {
             self.lhs_limb8
                 .iter()
-                .map(|&limb| i64_to_base_field::<E>(limb as i64))
+                .map(|&limb| i64_to_base::<F>(limb as i64))
                 .collect()
         });
         config.rhs_limb8.assign_limbs(instance, {
             self.rhs_limb8
                 .iter()
-                .map(|&limb| i64_to_base_field::<E>(limb as i64))
+                .map(|&limb| i64_to_base::<F>(limb as i64))
                 .collect()
         });
         let lhs = limb_u8_to_u16(&self.lhs_limb8);
         let rhs = limb_u8_to_u16(&self.rhs_limb8);
         config.lhs.assign_limbs(instance, {
             lhs.iter()
-                .map(|&limb| i64_to_base_field::<E>(limb as i64))
+                .map(|&limb| i64_to_base::<F>(limb as i64))
                 .collect()
         });
         config.rhs.assign_limbs(instance, {
             rhs.iter()
-                .map(|&limb| i64_to_base_field::<E>(limb as i64))
+                .map(|&limb| i64_to_base::<F>(limb as i64))
                 .collect()
         });
     }
@@ -240,18 +235,11 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
 mod test {
     use super::*;
     use ceno_emul::StepRecord;
-    use ff_ext::ExtensionField;
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
 
-    use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
-        scheme::mock_prover::MockProver,
-    };
-
-    use super::BltInstruction;
+    use crate::{circuit_builder::ConstraintSystem, scheme::mock_prover::MockProver};
 
     #[test]
     fn test_blt_circuit() -> Result<(), ZKVMError> {
