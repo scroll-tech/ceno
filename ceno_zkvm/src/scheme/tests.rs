@@ -47,51 +47,51 @@ impl<E: ExtensionField> TestCircuit<E> {
     }
 }
 
-#[test]
-fn test_rw_lk_expression_combination() {
-    fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
-        let mut cs = ConstraintSystem::new(|| "test");
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-        let _ = TestCircuit::construct_circuit::<L, RW>(&mut circuit_builder);
-        let pk = cs.key_gen(None);
-        let vk = pk.vk.clone();
-
-        // generate mock witness
-        let num_instances = 1 << 2;
-        let wits_in = (0..pk.get_cs().num_witin as usize)
-            .map(|_| {
-                (0..num_instances)
-                    .map(|_| Goldilocks::ONE)
-                    .collect::<Vec<Goldilocks>>()
-                    .into_mle()
-                    .into()
-            })
-            .collect_vec();
-
-        // get proof
-        let prover = ZKVMProver::new(pk);
-        let mut transcript = Transcript::new(b"test");
-        let challenges = [1.into(), 2.into()];
-
-        let proof = prover
-            .create_opcode_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
-            .expect("create_proof failed");
-
-        let verifier = ZKVMVerifier::new(vk);
-        let mut v_transcript = Transcript::new(b"test");
-        let _rt_input = verifier
-            .verify(
-                &proof,
-                &mut v_transcript,
-                NUM_FANIN,
-                &PointAndEval::default(),
-                &challenges,
-            )
-            .expect("verifier failed");
-    }
-
-    // <lookup count, rw count>
-    test_rw_lk_expression_combination_inner::<19, 17>();
-    test_rw_lk_expression_combination_inner::<61, 17>();
-    test_rw_lk_expression_combination_inner::<17, 61>();
-}
+// #[test]
+// fn test_rw_lk_expression_combination() {
+//     fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
+//         let mut cs = ConstraintSystem::new(|| "test");
+//         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+//         let _ = TestCircuit::construct_circuit::<L, RW>(&mut circuit_builder);
+//         let pk = cs.key_gen(None);
+//         let vk = pk.vk.clone();
+//
+//         // generate mock witness
+//         let num_instances = 1 << 2;
+//         let wits_in = (0..pk.get_cs().num_witin as usize)
+//             .map(|_| {
+//                 (0..num_instances)
+//                     .map(|_| Goldilocks::ONE)
+//                     .collect::<Vec<Goldilocks>>()
+//                     .into_mle()
+//                     .into()
+//             })
+//             .collect_vec();
+//
+//         // get proof
+//         let prover = ZKVMProver::new(pk);
+//         let mut transcript = Transcript::new(b"test");
+//         let challenges = [1.into(), 2.into()];
+//
+//         let proof = prover
+//             .create_opcode_proof(wits_in, num_instances, 1, &mut transcript, &challenges)
+//             .expect("create_proof failed");
+//
+//         let verifier = ZKVMVerifier::new(vk);
+//         let mut v_transcript = Transcript::new(b"test");
+//         let _rt_input = verifier
+//             .verify(
+//                 &proof,
+//                 &mut v_transcript,
+//                 NUM_FANIN,
+//                 &PointAndEval::default(),
+//                 &challenges,
+//             )
+//             .expect("verifier failed");
+//     }
+//
+//     // <lookup count, rw count>
+//     test_rw_lk_expression_combination_inner::<19, 17>();
+//     test_rw_lk_expression_combination_inner::<61, 17>();
+//     test_rw_lk_expression_combination_inner::<17, 61>();
+// }

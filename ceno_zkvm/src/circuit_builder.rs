@@ -1,8 +1,5 @@
 use itertools::Itertools;
-use std::{
-    collections::{BTreeMap, HashMap},
-    marker::PhantomData,
-};
+use std::{collections::BTreeMap, marker::PhantomData};
 
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLEs};
@@ -140,7 +137,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
-    pub fn key_gen(self, fixed_traces: Option<RowMajorMatrix<E>>) -> ProvingKey<E> {
+    pub fn key_gen(self, fixed_traces: Option<RowMajorMatrix<E::BaseField>>) -> ProvingKey<E> {
         // TODO: commit to fixed_traces
 
         // transpose from row-major to column-major
@@ -342,6 +339,18 @@ pub struct ZKVMConstraintSystem<E: ExtensionField> {
 pub struct ZKVMProvingKey<E: ExtensionField> {
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
+}
+
+impl<E: ExtensionField> ZKVMProvingKey<E> {
+    pub fn get_vk(&self) -> ZKVMVerifyingKey<E> {
+        ZKVMVerifyingKey {
+            circuit_vks: self
+                .circuit_pks
+                .iter()
+                .map(|(name, pk)| (name.clone(), pk.vk.clone()))
+                .collect(),
+        }
+    }
 }
 
 #[derive(Default)]

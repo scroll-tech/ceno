@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn key_gen(
         self,
-        mut vm_fixed_traces: BTreeMap<String, Option<RowMajorMatrix<E>>>,
+        mut vm_fixed_traces: BTreeMap<String, Option<RowMajorMatrix<E::BaseField>>>,
     ) -> ZKVMProvingKey<E> {
         let mut vm_pk = ZKVMProvingKey::default();
 

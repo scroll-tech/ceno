@@ -124,7 +124,7 @@ pub trait IntoMLEs<T>: Sized {
     fn into_mles(self) -> Vec<T>;
 }
 
-impl<F: Field, E: ExtensionField> IntoMLEs<DenseMultilinearExtension<E>> for Vec<Vec<F>> {
+impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtension<E>> for Vec<Vec<F>> {
     fn into_mles(self) -> Vec<DenseMultilinearExtension<E>> {
         self.into_iter().map(|v| v.into_mle()).collect()
     }

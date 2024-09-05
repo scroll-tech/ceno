@@ -48,7 +48,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
     /// create proof for zkvm execution
     pub fn create_proof(
         &self,
-        mut witnesses: HashMap<String, RowMajorMatrix<E>>,
+        mut witnesses: HashMap<String, RowMajorMatrix<E::BaseField>>,
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
