@@ -17,8 +17,8 @@ use crate::{
 };
 use core::mem::MaybeUninit;
 
-pub struct AddInstruction;
-pub struct SubInstruction;
+pub struct AddInstruction<E>(PhantomData<E>);
+pub struct SubInstruction<E>(PhantomData<E>);
 
 #[derive(Debug)]
 pub struct InstructionConfig<E: ExtensionField> {
@@ -37,11 +37,11 @@ pub struct InstructionConfig<E: ExtensionField> {
     phantom: PhantomData<E>,
 }
 
-impl<E: ExtensionField> RIVInstruction<E> for AddInstruction {
+impl<E: ExtensionField> RIVInstruction<E> for AddInstruction<E> {
     const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0000000);
 }
 
-impl<E: ExtensionField> RIVInstruction<E> for SubInstruction {
+impl<E: ExtensionField> RIVInstruction<E> for SubInstruction<E> {
     const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0100000);
 }
 
@@ -134,7 +134,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     })
 }
 
-impl<E: ExtensionField> Instruction<E> for AddInstruction {
+impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     // const NAME: &'static str = "ADD";
     fn name() -> String {
         "ADD".into()
@@ -183,7 +183,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
     }
 }
 
-impl<E: ExtensionField> Instruction<E> for SubInstruction {
+impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
     // const NAME: &'static str = "ADD";
     fn name() -> String {
         "SUB".into()

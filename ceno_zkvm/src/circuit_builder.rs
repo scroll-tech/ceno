@@ -335,6 +335,12 @@ pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub circuit_css: BTreeMap<String, ConstraintSystem<E>>,
 }
 
+impl<E: ExtensionField> ZKVMConstraintSystem<E> {
+    pub fn add_cs(&mut self, name: String, cs: ConstraintSystem<E>) {
+        assert!(self.circuit_css.insert(name, cs).is_none());
+    }
+}
+
 #[derive(Default)]
 pub struct ZKVMProvingKey<E: ExtensionField> {
     // pk for opcode and table circuits

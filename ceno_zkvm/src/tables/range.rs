@@ -1,6 +1,14 @@
-use std::mem::MaybeUninit;
+use std::{marker::PhantomData, mem::MaybeUninit};
 
-use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, expression::{Expression, Fixed, ToExpr, WitIn}, set_fixed_val, set_val, structs::ROMType, tables::TableCircuit, witness::RowMajorMatrix};
+use crate::{
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{Expression, Fixed, ToExpr, WitIn},
+    set_fixed_val, set_val,
+    structs::ROMType,
+    tables::TableCircuit,
+    witness::RowMajorMatrix,
+};
 use ff_ext::ExtensionField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -10,9 +18,9 @@ pub struct RangeTableConfig {
     u16_mlt: WitIn,
 }
 
-pub struct RangeTableCircuit;
+pub struct RangeTableCircuit<E>(PhantomData<E>);
 
-impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit {
+impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
     type TableConfig = RangeTableConfig;
     type Input = usize;
 

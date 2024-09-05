@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{collections::BTreeMap, time::Instant};
 
 use ark_std::test_rng;
 use ceno_zkvm::{
@@ -8,6 +8,12 @@ use ceno_zkvm::{
 };
 use const_env::from_env;
 
+use ceno_emul::StepRecord;
+use ceno_zkvm::{
+    circuit_builder::{ZKVMConstraintSystem, ZKVMVerifyingKey},
+    scheme::verifier::ZKVMVerifier,
+    tables::{RangeTableCircuit, TableCircuit},
+};
 use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
@@ -21,6 +27,8 @@ use transcript::Transcript;
 const RAYON_NUM_THREADS: usize = 8;
 
 fn main() {
+    type E = GoldilocksExt2;
+
     let max_threads = {
         if !is_power_of_2(RAYON_NUM_THREADS) {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
@@ -41,16 +49,6 @@ fn main() {
             RAYON_NUM_THREADS
         }
     };
-    let mut cs = ConstraintSystem::new(|| "risv_add");
-    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let _ = AddInstruction::construct_circuit(&mut circuit_builder);
-    let pk = cs.key_gen(None);
-    let num_witin = pk.get_cs().num_witin;
-
-    let prover = ZKVMProver::new(pk);
-    let mut transcript = Transcript::new(b"riscv");
-    let mut rng = test_rng();
-    let real_challenges = [E::random(&mut rng), E::random(&mut rng)];
 
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let subscriber = Registry::default()
@@ -64,34 +62,82 @@ fn main() {
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
+    // keygen
+    let mut zkvm_fixed_traces = BTreeMap::default();
+    let mut zkvm_cs = ZKVMConstraintSystem::default();
+
+    let (add_cs, add_config) = {
+        let mut cs = ConstraintSystem::new(|| "riscv_add");
+        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+        let config = AddInstruction::construct_circuit(&mut circuit_builder).unwrap();
+        zkvm_cs.add_cs(AddInstruction::<E>::name(), cs.clone());
+        zkvm_fixed_traces.insert(AddInstruction::<E>::name(), None);
+        (cs, config)
+    };
+    let (range_cs, range_config) = {
+        let mut cs = ConstraintSystem::new(|| "riscv_range");
+        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+        let config = RangeTableCircuit::construct_circuit(&mut circuit_builder).unwrap();
+        zkvm_cs.add_cs(
+            <RangeTableCircuit<E> as TableCircuit<E>>::name(),
+            cs.clone(),
+        );
+        zkvm_fixed_traces.insert(
+            <RangeTableCircuit<E> as TableCircuit<E>>::name(),
+            Some(RangeTableCircuit::<E>::generate_fixed_traces(
+                &config,
+                cs.num_fixed,
+            )),
+        );
+        (cs, config)
+    };
+    let pk = zkvm_cs.key_gen(zkvm_fixed_traces);
+    let vk = pk.get_vk();
+
+    // proving
+    let prover = ZKVMProver::new(pk);
+    let verifier = ZKVMVerifier::new(vk);
+
     for instance_num_vars in 20..22 {
-        // generate mock witness
+        // TODO: witness generation from step records emitted by tracer
         let num_instances = 1 << instance_num_vars;
-        let wits_in = (0..num_witin as usize)
-            .map(|_| {
-                (0..num_instances)
-                    .map(|_| Goldilocks::random(&mut rng))
-                    .collect::<Vec<Goldilocks>>()
-                    .into_mle()
-                    .into()
-            })
-            .collect_vec();
+        let mut zkvm_witness = BTreeMap::default();
+        let add_witness = AddInstruction::assign_instances(
+            &add_config,
+            add_cs.num_witin as usize,
+            vec![StepRecord::default(); num_instances],
+        )
+        .unwrap();
+        let range_witness = RangeTableCircuit::<E>::assign_instances(
+            &range_config,
+            range_cs.num_witin as usize,
+            &[],
+        )
+        .unwrap();
+
+        zkvm_witness.insert(AddInstruction::<E>::name(), add_witness);
+        zkvm_witness.insert(RangeTableCircuit::<E>::name(), range_witness);
+
         let timer = Instant::now();
-        let _ = prover
-            .create_opcode_proof(
-                wits_in,
-                num_instances,
-                max_threads,
-                &mut transcript,
-                &real_challenges,
-            )
+
+        let mut transcript = Transcript::new(b"riscv");
+        let mut rng = test_rng();
+        let real_challenges = [E::random(&mut rng), E::random(&mut rng)];
+
+        let zkvm_proof = prover
+            .create_proof(zkvm_witness, max_threads, &mut transcript, &real_challenges)
             .expect("create_proof failed");
+
+        assert!(
+            verifier
+                .verify_proof(zkvm_proof, &mut transcript, &real_challenges,)
+                .expect("verify proof return with error"),
+        );
+
         println!(
             "AddInstruction::create_proof, instance_num_vars = {}, time = {}",
             instance_num_vars,
             timer.elapsed().as_secs_f64()
         );
     }
-
-    type E = GoldilocksExt2;
 }

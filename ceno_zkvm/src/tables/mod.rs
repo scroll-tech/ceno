@@ -2,6 +2,7 @@ use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, witness::RowMajor
 use ff_ext::ExtensionField;
 
 mod range;
+pub use range::RangeTableCircuit;
 
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;
