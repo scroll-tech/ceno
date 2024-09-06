@@ -11,6 +11,17 @@ use crate::{
     structs::ROMType,
 };
 
+#[derive(Debug)]
+pub struct LtWtns {
+    pub is_lt: WitIn,
+    pub diff_lo: WitIn,
+    pub diff_hi: WitIn,
+    #[cfg(feature = "riv64")]
+    pub diff_lo_2: WitIn,
+    #[cfg(feature = "riv64")]
+    pub diff_hi_2: WitIn,
+}
+
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn new(cs: &'a mut ConstraintSystem<E>) -> Self {
         Self { cs }
@@ -272,7 +283,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
-    ) -> Result<(WitIn, WitIn, WitIn), ZKVMError>
+    ) -> Result<LtWtns, ZKVMError>
     where
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
@@ -295,15 +306,43 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                 };
 
                 let diff_lo = witin_u16("diff_lo")?;
-                let diff_hi = witin_u16("diff_lo")?;
+                let diff_hi = witin_u16("diff_hi")?;
+                #[cfg(feature = "riv64")]
+                let diff_lo_2 = witin_u16("diff_lo_2")?;
+                #[cfg(feature = "riv64")]
+                let diff_hi_2 = witin_u16("diff_hi_2")?;
 
+                #[cfg(feature = "riv32")]
                 let range = Expression::Constant((u32::MAX as u64).into());
+                #[cfg(feature = "riv64")]
+                let range = Expression::Constant(u64::MAX.into());
+
                 cb.require_equal(
                     || name.clone(),
                     lhs - rhs,
-                    diff_lo.expr() + diff_hi.expr() * 2usize.pow(16).into() - is_lt.expr() * range,
+                    #[cfg(feature = "riv32")]
+                    {
+                        diff_lo.expr() + diff_hi.expr() * (1 << 16).into() - is_lt.expr() * range
+                    },
+                    #[cfg(feature = "riv64")]
+                    {
+                        diff_lo.expr()
+                            + diff_hi.expr() * (1 << 16).into()
+                            + diff_lo_2.expr() * (1 << 32).into()
+                            + diff_hi_2.expr() * (1 << 48).into()
+                            - is_lt.expr() * range
+                    },
                 )?;
-                Ok((is_lt, diff_lo, diff_hi))
+
+                Ok(LtWtns {
+                    is_lt,
+                    diff_lo,
+                    diff_hi,
+                    #[cfg(feature = "riv64")]
+                    diff_lo_2,
+                    #[cfg(feature = "riv64")]
+                    diff_hi_2,
+                })
             },
         )
     }
@@ -313,7 +352,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
-    ) -> Result<(WitIn, WitIn, WitIn), ZKVMError>
+    ) -> Result<LtWtns, ZKVMError>
     where
         NR: Into<String> + Clone + Display,
         N: FnOnce() -> NR,
@@ -322,9 +361,9 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             || "assert_less_than",
             |cb| {
                 let name = name_fn();
-                let (is_lt, diff_lo, diff_hi) = cb.less_than::<_, _>(|| name.clone(), lhs, rhs)?;
-                cb.require_one(|| name, is_lt.expr())?;
-                Ok((is_lt, diff_lo, diff_hi))
+                let lt_wtns = cb.less_than::<_, _>(|| name.clone(), lhs, rhs)?;
+                cb.require_one(|| name, lt_wtns.is_lt.expr())?;
+                Ok(lt_wtns)
             },
         )
     }

@@ -9,7 +9,9 @@ use super::{
     RIVInstruction,
 };
 use crate::{
-    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
+    chip_handler::{
+        general::LtWtns, GlobalStateRegisterMachineChipOperations, RegisterChipOperations,
+    },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
@@ -37,9 +39,9 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
     pub prev_rd_ts: WitIn,
-    pub lt_wtns_rs1: (WitIn, WitIn, WitIn),
-    pub lt_wtns_rs2: (WitIn, WitIn, WitIn),
-    pub lt_wtns_rd: (WitIn, WitIn, WitIn),
+    pub lt_wtns_rs1: LtWtns,
+    pub lt_wtns_rs2: LtWtns,
+    pub lt_wtns_rd: LtWtns,
     phantom: PhantomData<E>,
 }
 
@@ -209,17 +211,17 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
 
         let u16_max = u16::MAX as u64;
 
-        set_val!(instance, config.lt_wtns_rs1.0, 1);
-        set_val!(instance, config.lt_wtns_rs1.1, u16_max - 2 + 1); // range - lhs + rhs
-        set_val!(instance, config.lt_wtns_rs1.2, u16_max);
+        set_val!(instance, config.lt_wtns_rs1.is_lt, 1);
+        set_val!(instance, config.lt_wtns_rs1.diff_lo, u16_max - 2 + 1); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rs1.diff_hi, u16_max);
 
-        set_val!(instance, config.lt_wtns_rs2.0, 1);
-        set_val!(instance, config.lt_wtns_rs2.1, u16_max - 3 + 2); // range - lhs + rhs
-        set_val!(instance, config.lt_wtns_rs2.2, u16_max);
+        set_val!(instance, config.lt_wtns_rs2.is_lt, 1);
+        set_val!(instance, config.lt_wtns_rs2.diff_lo, u16_max - 3 + 2); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rs2.diff_hi, u16_max);
 
-        set_val!(instance, config.lt_wtns_rd.0, 1);
-        set_val!(instance, config.lt_wtns_rd.1, u16_max - 3 + 2); // range - lhs + rhs
-        set_val!(instance, config.lt_wtns_rd.2, u16_max);
+        set_val!(instance, config.lt_wtns_rd.is_lt, 1);
+        set_val!(instance, config.lt_wtns_rd.diff_lo, u16_max - 3 + 2); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rd.diff_hi, u16_max);
         Ok(())
     }
 }
