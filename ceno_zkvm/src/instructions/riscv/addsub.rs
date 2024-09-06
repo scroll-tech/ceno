@@ -274,7 +274,7 @@ mod test {
                 }),
                 rs2: Some(ReadOp {
                     addr: 0.into(),
-                    value: 5u32,
+                    value: 0xfffffffeu32,
                     previous_cycle: 0,
                 }),
                 ..Default::default()
