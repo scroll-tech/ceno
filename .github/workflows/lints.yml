@@ -33,6 +33,13 @@ jobs:
     timeout-minutes: 30
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, riscv32im-unknown-none-elf]
+        # Exclude the riscv32im-unknown-none-elf target
+        exclude:
+          - target: riscv32im-unknown-none-elf
+
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -61,6 +68,8 @@ jobs:
 
       - name: Run clippy
         uses: actions-rs/cargo@v1
+        env:
+          TAEGET: ${{ matrix.target }}
         with:
           command: make
           args: clippy-check-selected-packages
