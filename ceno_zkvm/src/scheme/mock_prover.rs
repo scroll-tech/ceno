@@ -8,7 +8,7 @@ use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
-use std::{marker::PhantomData, ops::Neg};
+use std::{collections::HashSet, hash::Hash, marker::PhantomData, ops::Neg};
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -192,7 +192,10 @@ pub(crate) struct MockProver<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 
-impl<'a, E: ExtensionField> MockProver<E> {
+impl<'a, E: ExtensionField> MockProver<E>
+where
+    E: Hash,
+{
     #[allow(dead_code)]
     pub fn run(
         cb: &mut CircuitBuilder<E>,
@@ -267,6 +270,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
         load_u5_table(&mut table_vec, cb, challenge);
         load_u16_table(&mut table_vec, cb, challenge);
         load_lt_table(&mut table_vec, cb, challenge);
+        let table: HashSet<E> = table_vec.into_iter().collect();
 
         // Lookup expressions
         for (expr, name) in cb
@@ -280,7 +284,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
 
             // Check each lookup expr exists in t vec
             for (inst_id, element) in expr_evaluated.iter().enumerate() {
-                if !table_vec.contains(element) {
+                if !table.contains(element) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
                         evaluated: *element,
