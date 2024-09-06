@@ -1,17 +1,16 @@
 extern crate core;
 
 pub(crate) mod constants;
-pub(crate) mod digest;
+pub mod digest;
 pub(crate) mod poseidon;
 mod poseidon_goldilocks;
-pub(crate) mod poseidon_hash;
+pub mod poseidon_hash;
 pub(crate) mod poseidon_permutation;
 
 use crate::poseidon::Poseidon;
 use goldilocks::{ExtensionField, SmallField};
 use serde::Serialize;
 
-// helpers
 #[inline(always)]
 const fn add_u160_u128((x_lo, x_hi): (u128, u32), y: u128) -> (u128, u32) {
     let (res_lo, over) = x_lo.overflowing_add(y);

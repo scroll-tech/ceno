@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ark-std = "0.4.0"
+criterion.workspace = true
+ff.workspace = true
 goldilocks.workspace = true
 serde.workspace = true
 unroll = "0.1.5"
@@ -12,3 +15,7 @@ unroll = "0.1.5"
 [dev-dependencies]
 plonky2 = "0.2.2"
 rand = "0.8.5"
+
+[[bench]]
+name = "hashing"
+harness = false

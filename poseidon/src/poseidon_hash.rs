@@ -14,11 +14,14 @@ impl PoseidonHash {
         hash_n_to_hash_no_pad(input)
     }
 
-    fn two_to_one<F: Poseidon + AdaptedField>(left: Digest<F>, right: Digest<F>) -> Digest<F> {
+    pub fn two_to_one<F: Poseidon + AdaptedField>(
+        left: &Digest<F>,
+        right: &Digest<F>,
+    ) -> Digest<F> {
         compress(left, right)
     }
 
-    fn hash_or_noop<F: Poseidon + AdaptedField>(inputs: &[F]) -> Digest<F> {
+    pub fn hash_or_noop<F: Poseidon + AdaptedField>(inputs: &[F]) -> Digest<F> {
         if inputs.len() <= DIGEST_WIDTH {
             Digest::from_partial(inputs)
         } else {
@@ -27,7 +30,6 @@ impl PoseidonHash {
     }
 }
 
-// Hashing
 pub fn hash_n_to_m_no_pad<F: Poseidon>(inputs: &[F], num_outputs: usize) -> Vec<F> {
     let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
 
@@ -55,7 +57,7 @@ pub fn hash_n_to_hash_no_pad<F: Poseidon>(inputs: &[F]) -> Digest<F> {
     hash_n_to_m_no_pad(inputs, DIGEST_WIDTH).try_into().unwrap()
 }
 
-pub fn compress<F: Poseidon>(x: Digest<F>, y: Digest<F>) -> Digest<F> {
+pub fn compress<F: Poseidon>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
     debug_assert!(SPONGE_RATE >= DIGEST_WIDTH);
     debug_assert_eq!(x.elements().len(), DIGEST_WIDTH);
     debug_assert_eq!(y.elements().len(), DIGEST_WIDTH);
@@ -152,7 +154,7 @@ mod tests {
             let (plonky_hash_a, ceno_hash_a) = random_hash_pair();
             let (plonky_hash_b, ceno_hash_b) = random_hash_pair();
             let plonky_combined = PlonkyPoseidonHash::two_to_one(plonky_hash_a, plonky_hash_b);
-            let ceno_combined = PoseidonHash::two_to_one(ceno_hash_a, ceno_hash_b);
+            let ceno_combined = PoseidonHash::two_to_one(&ceno_hash_a, &ceno_hash_b);
             assert!(compare_hash_output(plonky_combined, ceno_combined));
         }
     }

@@ -27,7 +27,6 @@ pub(crate) trait Poseidon: AdaptedField {
     const FAST_PARTIAL_ROUND_W_HATS: [[u64; SPONGE_WIDTH - 1]; N_PARTIAL_ROUNDS];
     const FAST_PARTIAL_ROUND_INITIAL_MATRIX: [[u64; SPONGE_WIDTH - 1]; SPONGE_WIDTH - 1];
 
-    // done
     #[inline]
     fn poseidon(input: [Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
         let mut state = input;
@@ -41,7 +40,6 @@ pub(crate) trait Poseidon: AdaptedField {
         state
     }
 
-    // done
     #[inline]
     fn full_rounds(state: &mut [Self; SPONGE_WIDTH], round_ctr: &mut usize) {
         for _ in 0..HALF_N_FULL_ROUNDS {
@@ -52,7 +50,6 @@ pub(crate) trait Poseidon: AdaptedField {
         }
     }
 
-    // done
     #[inline]
     fn partial_rounds(state: &mut [Self; SPONGE_WIDTH], round_ctr: &mut usize) {
         Self::partial_first_constant_layer(state);
@@ -91,7 +88,6 @@ pub(crate) trait Poseidon: AdaptedField {
         }
     }
 
-    // done
     #[inline(always)]
     #[unroll_for_loops]
     fn mds_layer(state_: &[Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
@@ -115,7 +111,6 @@ pub(crate) trait Poseidon: AdaptedField {
         result
     }
 
-    // done
     #[inline(always)]
     #[unroll_for_loops]
     fn partial_first_constant_layer(state: &mut [Self; SPONGE_WIDTH]) {
@@ -126,7 +121,6 @@ pub(crate) trait Poseidon: AdaptedField {
         }
     }
 
-    // done
     #[inline(always)]
     #[unroll_for_loops]
     fn mds_partial_layer_init(state: &[Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
@@ -155,7 +149,6 @@ pub(crate) trait Poseidon: AdaptedField {
         result
     }
 
-    // done
     #[inline(always)]
     fn sbox_monomial(x: Self) -> Self {
         // x |--> x^7
@@ -165,7 +158,6 @@ pub(crate) trait Poseidon: AdaptedField {
         x3 * x4
     }
 
-    // done
     /// Computes s*A where s is the state row vector and A is the matrix
     ///
     ///    [ M_00  | v  ]
@@ -204,7 +196,6 @@ pub(crate) trait Poseidon: AdaptedField {
         result
     }
 
-    // done
     #[inline(always)]
     #[unroll_for_loops]
     fn mds_row_shf(r: usize, v: &[u64; SPONGE_WIDTH]) -> u128 {
