@@ -6,7 +6,6 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
-    set_val,
     utils::add_one_to_big_num,
 };
 use ark_std::iterable::Iterable;
@@ -15,7 +14,10 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
-use std::{mem::MaybeUninit, ops::Index};
+use std::{
+    mem::{self, MaybeUninit},
+    ops::Index,
+};
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
@@ -60,13 +62,31 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
+        Self::new_maybe_unchecked(name_fn, circuit_builder, true)
+    }
+
+    pub fn new_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<Self, ZKVMError> {
+        Self::new_maybe_unchecked(name_fn, circuit_builder, false)
+    }
+
+    fn new_maybe_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+        is_check: bool,
+    ) -> Result<Self, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             Ok(UInt {
                 limbs: UintLimb::WitIn(
                     (0..Self::NUM_CELLS)
                         .map(|i| {
                             let w = cb.create_witin(|| format!("limb_{i}"))?;
-                            cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
+                            if is_check {
+                                cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
+                            }
+                            // skip range check
                             Ok(w)
                         })
                         .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
@@ -89,9 +109,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
-    pub fn new_limb_as_expr() -> Self {
+    /// expr_limbs is little endian order
+    pub fn new_as_empty() -> Self {
         Self {
-            limbs: UintLimb::Expression(Vec::new()),
+            limbs: UintLimb::Expression(vec![]),
             carries: None,
         }
     }
@@ -123,19 +144,51 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
-    pub fn assign(&self, instance: &mut [MaybeUninit<E::BaseField>], values: Vec<E::BaseField>) {
+    pub fn assign_limbs(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        limbs_values: Vec<E::BaseField>,
+    ) {
         assert!(
-            values.len() == Self::NUM_CELLS,
+            limbs_values.len() <= Self::NUM_CELLS,
             "assign input length mismatch. input_len={}, NUM_CELLS={}",
-            values.len(),
+            limbs_values.len(),
             Self::NUM_CELLS
         );
-        if let UintLimb::WitIn(c) = &self.limbs {
-            for (idx, wire) in c.iter().enumerate() {
-                set_val!(instance, wire, values[idx]);
+        if let UintLimb::WitIn(wires) = &self.limbs {
+            for (wire, limb) in wires.iter().zip(
+                limbs_values
+                    .into_iter()
+                    .chain(std::iter::repeat(E::BaseField::ZERO)),
+            ) {
+                instance[wire.id as usize] = MaybeUninit::new(limb);
             }
         }
-        // TODO: handle carries
+    }
+
+    pub fn assign_carries(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        carry_values: Vec<E::BaseField>,
+    ) {
+        assert!(
+            carry_values.len()
+                <= self
+                    .carries
+                    .as_ref()
+                    .map(|carries| carries.len())
+                    .unwrap_or_default(),
+            "assign input length mismatch",
+        );
+        if let Some(carries) = &self.carries {
+            for (wire, carry) in carries.iter().zip(
+                carry_values
+                    .into_iter()
+                    .chain(std::iter::repeat(E::BaseField::ZERO)),
+            ) {
+                instance[wire.id as usize] = MaybeUninit::new(carry);
+            }
+        }
     }
 
     /// conversion is needed for lt/ltu
@@ -211,6 +264,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         UInt::<M, 8, E>::create_witin_from_exprs(circuit_builder, split_limbs)
     }
 
+    pub fn new_from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Result<Self, ZKVMError> {
+        let n = Self {
+            limbs: UintLimb::Expression(expr_limbs),
+            carries: None,
+        };
+        Ok(n)
+    }
+
     /// If current limbs are Expression, this function will create witIn and replace the limbs
     pub fn replace_limbs_with_witin<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
@@ -239,11 +300,17 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         &mut self,
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
+        with_overflow: bool,
     ) -> Result<(), ZKVMError> {
         if self.carries.is_none() {
             circuit_builder.namespace(name_fn, |cb| {
+                let carries_len = if with_overflow {
+                    Self::NUM_CELLS
+                } else {
+                    Self::NUM_CELLS - 1
+                };
                 self.carries = Some(
-                    (0..Self::NUM_CELLS)
+                    (0..carries_len)
                         .map(|i| {
                             let c = cb.create_witin(|| format!("carry_{i}"))?;
                             cb.assert_ux::<_, _, C>(|| format!("carry_{i}_in_{C}"), c.expr())?;
@@ -392,6 +459,63 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UInt<M, C,
                 .collect::<Vec<Expression<E>>>(),
             UintLimb::Expression(e) => e.clone(),
         }
+    }
+}
+
+pub struct UIntValue<T: Into<u64> + Copy> {
+    #[allow(dead_code)]
+    val: T,
+    pub limbs: Vec<u16>,
+}
+
+// TODO generalize to support non 16 bit limbs
+// TODO optimize api with fixed size array
+impl<T: Into<u64> + Copy> UIntValue<T> {
+    const LIMBS: usize = {
+        let u16_bytes = (u16::BITS / 8) as usize;
+        mem::size_of::<T>() / u16_bytes
+    };
+
+    pub fn new(val: T) -> Self {
+        UIntValue::<T> {
+            val,
+            limbs: Self::split_to_u16(val),
+        }
+    }
+
+    fn split_to_u16(value: T) -> Vec<u16> {
+        let value: u64 = value.into(); // Convert to u64 for generality
+        (0..Self::LIMBS)
+            .scan(value, |acc, _| {
+                let limb = (*acc & 0xFFFF) as u16;
+                *acc >>= 16;
+                Some(limb)
+            })
+            .collect_vec()
+    }
+
+    pub fn as_u16_limbs(&self) -> &[u16] {
+        &self.limbs
+    }
+
+    pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {
+        self.limbs.iter().map(|v| F::from(*v as u64)).collect_vec()
+    }
+
+    pub fn add_u16_carries(&self, rhs: &Self) -> Vec<bool> {
+        self.as_u16_limbs().iter().zip(rhs.as_u16_limbs()).fold(
+            vec![],
+            |mut acc, (a_limb, b_limb)| {
+                let (a, b) = a_limb.overflowing_add(*b_limb);
+                if let Some(prev_carry) = acc.last() {
+                    let (_, d) = a.overflowing_add(*prev_carry as u16);
+                    acc.push(b || d);
+                } else {
+                    acc.push(b);
+                }
+                acc
+            },
+        )
     }
 }
 

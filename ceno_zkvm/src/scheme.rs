@@ -5,11 +5,12 @@ use sumcheck::structs::IOPProverMessage;
 use crate::structs::TowerProofs;
 
 pub mod constants;
-pub mod mock_prover;
 pub mod prover;
 pub mod utils;
 pub mod verifier;
 
+#[cfg(test)]
+pub mod mock_prover;
 #[cfg(test)]
 mod tests;
 

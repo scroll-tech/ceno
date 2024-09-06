@@ -6,6 +6,7 @@ use crate::{
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, Instruction, TrapCause},
     tracer::{Change, StepRecord, Tracer},
+    Program,
 };
 use anyhow::{anyhow, Result};
 use std::iter::from_fn;
@@ -35,6 +36,19 @@ impl VMState {
         }
     }
 
+    pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
+        let mut state = Self::new(platform);
+        let program = Program::load_elf(elf, u32::MAX).unwrap();
+        for (addr, word) in program.image.iter() {
+            let addr = ByteAddr(*addr).waddr();
+            state.init_memory(addr, *word);
+        }
+        if program.entry != state.platform.pc_start() {
+            return Err(anyhow!("Invalid entrypoint {:x}", program.entry));
+        }
+        Ok(state)
+    }
+
     pub fn succeeded(&self) -> bool {
         self.succeeded
     }
@@ -62,7 +76,11 @@ impl VMState {
     fn step(&mut self, emu: &Emulator) -> Result<StepRecord> {
         emu.step(self)?;
         let step = self.tracer().advance();
-        Ok(step)
+        if step.is_busy_loop() && !self.succeeded() {
+            Err(anyhow!("Stuck in loop {}", "{}"))
+        } else {
+            Ok(step)
+        }
     }
 }
 
@@ -76,7 +94,7 @@ impl EmuContext for VMState {
             self.succeeded = true;
             Ok(true)
         } else {
-            self.trap(TrapCause::EnvironmentCallFromUserMode)
+            self.trap(TrapCause::EcallError)
         }
     }
 
