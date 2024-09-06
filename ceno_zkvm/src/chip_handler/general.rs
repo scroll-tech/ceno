@@ -266,34 +266,40 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
-    pub(crate) fn less_than<N, NR>(
+    pub(crate) fn less_than<N, NR, const C: usize>(
         &mut self,
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
-    ) -> Result<WitIn, ZKVMError>
+    ) -> Result<(WitIn, WitIn), ZKVMError>
     where
-        NR: Into<String> + Display,
+        NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
     {
         self.namespace(
             || "less_than",
             |cb| {
                 let name = name_fn();
-                let is_lt = cb.create_witin(|| format!("{name} witin"))?;
-                // TODO add name_fn to lookup_ltu_limb8, not done yet to avoid merge conflicts
-                cb.lookup_ltu_limb8(is_lt.expr(), lhs, rhs)?;
-                Ok(is_lt)
+                let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
+                let diff = cb.create_witin(|| format!("{name} diff witin"))?;
+                let range = Expression::Constant(2u64.pow(C as u32).into());
+                cb.require_equal(
+                    || name.clone(),
+                    lhs - rhs,
+                    diff.expr() - is_lt.expr() * range,
+                )?;
+                cb.assert_ux::<_, _, C>(|| name, diff.expr())?;
+                Ok((is_lt, diff))
             },
         )
     }
 
-    pub(crate) fn assert_less_than<N, NR>(
+    pub(crate) fn assert_less_than<N, NR, const C: usize>(
         &mut self,
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
-    ) -> Result<WitIn, ZKVMError>
+    ) -> Result<(WitIn, WitIn), ZKVMError>
     where
         NR: Into<String> + Clone + Display,
         N: FnOnce() -> NR,
@@ -302,9 +308,9 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             || "assert_less_than",
             |cb| {
                 let name = name_fn();
-                let is_lt = cb.less_than(|| name.clone(), lhs, rhs)?;
+                let (is_lt, diff) = cb.less_than::<_, _, C>(|| name.clone(), lhs, rhs)?;
                 cb.require_one(|| name, is_lt.expr())?;
-                Ok(is_lt)
+                Ok((is_lt, diff))
             },
         )
     }

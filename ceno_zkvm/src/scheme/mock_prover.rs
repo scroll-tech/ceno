@@ -357,9 +357,9 @@ pub fn load_lt_table<E: ExtensionField>(
     cb: &CircuitBuilder<E>,
     challenge: [E; 2],
 ) {
-    t_vec.reserve(u16::MAX as usize);
-    for lhs in 0..(u8::MAX as usize) {
-        for rhs in 0..(u8::MAX as usize) {
+    t_vec.reserve(1 << 16);
+    for lhs in 0..(1 << 8) {
+        for rhs in 0..(1 << 8) {
             let is_lt = if lhs < rhs { 1 } else { 0 };
             let lhs_rhs = lhs * 256 + rhs;
             let rlc_record = cb.rlc_chip_record(vec![
