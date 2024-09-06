@@ -59,7 +59,7 @@ jobs:
 
       - name: Install cargo make
         run: |
-          cargo install --force cargo-make
+          cargo install cargo-make || echo "cargo-make already installed"
       - name: Check code format
         uses: actions-rs/cargo@v1
         with:
@@ -69,7 +69,7 @@ jobs:
       - name: Run clippy
         uses: actions-rs/cargo@v1
         env:
-          TAEGET: ${{ matrix.target }}
+          TARGET: ${{ matrix.target }}
         with:
           command: make
           args: clippy-check-selected-packages
