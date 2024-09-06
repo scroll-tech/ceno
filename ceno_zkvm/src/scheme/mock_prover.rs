@@ -352,14 +352,14 @@ pub fn load_u16_table<E: ExtensionField>(
     }
 }
 
-pub fn load_lt_table<F: SmallField, E: ExtensionField<BaseField = F>>(
+pub fn load_lt_table<E: ExtensionField>(
     t_vec: &mut Vec<E>,
     cb: &CircuitBuilder<E>,
     challenge: [E; 2],
 ) {
-    t_vec.reserve(65536);
-    for lhs in 0..256 {
-        for rhs in 0..256 {
+    t_vec.reserve(u16::MAX as usize);
+    for lhs in 0..(u8::MAX as usize) {
+        for rhs in 0..(u8::MAX as usize) {
             let is_lt = if lhs < rhs { 1 } else { 0 };
             let lhs_rhs = lhs * 256 + rhs;
             let rlc_record = cb.rlc_chip_record(vec![
