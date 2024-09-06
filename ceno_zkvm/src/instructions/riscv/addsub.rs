@@ -37,9 +37,9 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
     pub prev_rd_ts: WitIn,
-    pub lt_wtns_rs1: (WitIn, WitIn),
-    pub lt_wtns_rs2: (WitIn, WitIn),
-    pub lt_wtns_rd: (WitIn, WitIn),
+    pub lt_wtns_rs1: (WitIn, WitIn, WitIn),
+    pub lt_wtns_rs2: (WitIn, WitIn, WitIn),
+    pub lt_wtns_rd: (WitIn, WitIn, WitIn),
     phantom: PhantomData<E>,
 }
 
@@ -124,21 +124,18 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let next_ts = ts + 1.into();
     circuit_builder.state_out(next_pc, next_ts)?;
 
-    let lt_wtns_rs1 = circuit_builder.assert_less_than::<_, _, 16>(
+    let lt_wtns_rs1 = circuit_builder.assert_less_than(
         || "prev_rs1_ts < ts",
         prev_rs1_ts.expr(),
         cur_ts.expr(),
     )?;
-    let lt_wtns_rs2 = circuit_builder.assert_less_than::<_, _, 16>(
+    let lt_wtns_rs2 = circuit_builder.assert_less_than(
         || "prev_rs2_ts < ts",
         prev_rs2_ts.expr(),
         cur_ts.expr(),
     )?;
-    let lt_wtns_rd = circuit_builder.assert_less_than::<_, _, 16>(
-        || "prev_rd_ts < ts",
-        prev_rd_ts.expr(),
-        cur_ts.expr(),
-    )?;
+    let lt_wtns_rd =
+        circuit_builder.assert_less_than(|| "prev_rd_ts < ts", prev_rd_ts.expr(), cur_ts.expr())?;
 
     Ok(InstructionConfig {
         pc,
@@ -210,14 +207,19 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         set_val!(instance, config.prev_rs2_ts, 2);
         set_val!(instance, config.prev_rd_ts, 2);
 
+        let u16_max = u16::MAX as u64;
+
         set_val!(instance, config.lt_wtns_rs1.0, 1);
-        set_val!(instance, config.lt_wtns_rs1.1, 2u64.pow(16) - 2 + 1); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rs1.1, u16_max - 2 + 1); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rs1.2, u16_max);
 
         set_val!(instance, config.lt_wtns_rs2.0, 1);
-        set_val!(instance, config.lt_wtns_rs2.1, 2u64.pow(16) - 3 + 2); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rs2.1, u16_max - 3 + 2); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rs2.2, u16_max);
 
         set_val!(instance, config.lt_wtns_rd.0, 1);
-        set_val!(instance, config.lt_wtns_rd.1, 2u64.pow(16) - 3 + 2); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rd.1, u16_max - 3 + 2); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rd.2, u16_max);
         Ok(())
     }
 }

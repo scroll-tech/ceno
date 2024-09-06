@@ -385,6 +385,8 @@ mod tests {
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
         expression::{ToExpr, WitIn},
+        instructions::Instruction,
+        set_val,
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -518,5 +520,100 @@ mod tests {
                 inst_id: 0,
             }]
         );
+    }
+
+    #[allow(dead_code)]
+    #[derive(Debug)]
+    struct LtCircuit {
+        pub a: WitIn,
+        pub b: WitIn,
+        pub lt: WitIn,
+        pub diff_lo: WitIn,
+        pub diff_hi: WitIn,
+    }
+
+    impl LtCircuit {
+        fn construct_circuit(
+            cb: &mut CircuitBuilder<GoldilocksExt2>,
+        ) -> Result<LtCircuit, ZKVMError> {
+            let a = cb.create_witin(|| "a")?;
+            let b = cb.create_witin(|| "b")?;
+            let (lt, diff_lo, diff_hi) = cb.less_than(|| "lt", a.expr(), b.expr())?;
+            Ok(Self {
+                a,
+                b,
+                lt,
+                diff_lo,
+                diff_hi,
+            })
+        }
+    }
+
+    #[test]
+    fn test_lt_1() {
+        let mut cs = ConstraintSystem::new(|| "test_lt_1");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let _ = LtCircuit::construct_circuit(&mut builder).unwrap();
+
+        let wits_in = vec![
+            vec![Goldilocks::from(3u64), Goldilocks::from(5u64)]
+                .into_mle()
+                .into(),
+            vec![Goldilocks::from(5u64), Goldilocks::from(3u64)]
+                .into_mle()
+                .into(),
+            vec![Goldilocks::from(1u64), Goldilocks::from(0u64)]
+                .into_mle()
+                .into(),
+            vec![
+                Goldilocks::from(u16::MAX as u64 + 3 - 5),
+                Goldilocks::from(5 - 3),
+            ]
+            .into_mle()
+            .into(),
+            vec![Goldilocks::from(u16::MAX as u64), Goldilocks::from(0)]
+                .into_mle()
+                .into(),
+        ];
+
+        MockProver::assert_satisfied(&mut builder, &wits_in, None);
+    }
+
+    #[test]
+    fn test_lt_2() {
+        let mut cs = ConstraintSystem::new(|| "test_lt_1");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let _ = LtCircuit::construct_circuit(&mut builder).unwrap();
+
+        let wits_in = vec![
+            vec![
+                Goldilocks::from(u32::MAX as u64 - 5),
+                Goldilocks::from(u32::MAX as u64 - 3),
+            ]
+            .into_mle()
+            .into(),
+            vec![
+                Goldilocks::from(u32::MAX as u64 - 3),
+                Goldilocks::from(u32::MAX as u64 - 5),
+            ]
+            .into_mle()
+            .into(),
+            vec![Goldilocks::from(1u64), Goldilocks::from(0u64)]
+                .into_mle()
+                .into(),
+            vec![
+                Goldilocks::from(u16::MAX as u64 + 3 - 5),
+                Goldilocks::from(5 - 3),
+            ]
+            .into_mle()
+            .into(),
+            vec![Goldilocks::from(u16::MAX as u64), Goldilocks::from(0)]
+                .into_mle()
+                .into(),
+        ];
+
+        MockProver::assert_satisfied(&mut builder, &wits_in, None);
     }
 }

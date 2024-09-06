@@ -266,12 +266,13 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
-    pub(crate) fn less_than<N, NR, const C: usize>(
+    // TODO support riv64 feature
+    pub(crate) fn less_than<N, NR>(
         &mut self,
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
-    ) -> Result<(WitIn, WitIn), ZKVMError>
+    ) -> Result<(WitIn, WitIn, WitIn), ZKVMError>
     where
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
@@ -281,25 +282,38 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             |cb| {
                 let name = name_fn();
                 let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
-                let diff = cb.create_witin(|| format!("{name} diff witin"))?;
-                let range = Expression::Constant(2u64.pow(C as u32).into());
+
+                let mut witin_u16 = |var_name: &str| -> Result<WitIn, ZKVMError> {
+                    cb.namespace(
+                        || format!("var {var_name}"),
+                        |cb| {
+                            let witin = cb.create_witin(|| var_name.to_string())?;
+                            cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr())?;
+                            Ok(witin)
+                        },
+                    )
+                };
+
+                let diff_lo = witin_u16("diff_lo")?;
+                let diff_hi = witin_u16("diff_lo")?;
+
+                let range = Expression::Constant((u32::MAX as u64).into());
                 cb.require_equal(
                     || name.clone(),
                     lhs - rhs,
-                    diff.expr() - is_lt.expr() * range,
+                    diff_lo.expr() + diff_hi.expr() * 2usize.pow(16).into() - is_lt.expr() * range,
                 )?;
-                cb.assert_ux::<_, _, C>(|| name, diff.expr())?;
-                Ok((is_lt, diff))
+                Ok((is_lt, diff_lo, diff_hi))
             },
         )
     }
 
-    pub(crate) fn assert_less_than<N, NR, const C: usize>(
+    pub(crate) fn assert_less_than<N, NR>(
         &mut self,
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
-    ) -> Result<(WitIn, WitIn), ZKVMError>
+    ) -> Result<(WitIn, WitIn, WitIn), ZKVMError>
     where
         NR: Into<String> + Clone + Display,
         N: FnOnce() -> NR,
@@ -308,9 +322,9 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             || "assert_less_than",
             |cb| {
                 let name = name_fn();
-                let (is_lt, diff) = cb.less_than::<_, _, C>(|| name.clone(), lhs, rhs)?;
+                let (is_lt, diff_lo, diff_hi) = cb.less_than::<_, _>(|| name.clone(), lhs, rhs)?;
                 cb.require_one(|| name, is_lt.expr())?;
-                Ok((is_lt, diff))
+                Ok((is_lt, diff_lo, diff_hi))
             },
         )
     }
