@@ -14,7 +14,10 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
-use std::{mem::MaybeUninit, ops::Index};
+use std::{
+    mem::{self, MaybeUninit},
+    ops::Index,
+};
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
@@ -468,6 +471,11 @@ pub struct UIntValue<T: Into<u64> + Copy> {
 // TODO generalize to support non 16 bit limbs
 // TODO optimize api with fixed size array
 impl<T: Into<u64> + Copy> UIntValue<T> {
+    const LIMBS: usize = {
+        let u16_bytes = (u16::BITS / 8) as usize;
+        mem::size_of::<T>() / u16_bytes
+    };
+
     pub fn new(val: T) -> Self {
         UIntValue::<T> {
             val,
@@ -476,17 +484,14 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
     }
 
     fn split_to_u16(value: T) -> Vec<u16> {
-        let mut limbs = Vec::new();
         let value: u64 = value.into(); // Convert to u64 for generality
-        let mut remaining_value = value;
-
-        while remaining_value > 0 {
-            let limb = (remaining_value & 0xFFFF) as u16;
-            limbs.push(limb);
-            remaining_value >>= 16; // Shift by 16 bits to get the next limb
-        }
-
-        limbs
+        (0..Self::LIMBS)
+            .scan(value, |acc, _| {
+                let limb = (*acc & 0xFFFF) as u16;
+                *acc >>= 16;
+                Some(limb)
+            })
+            .collect_vec()
     }
 
     pub fn as_u16_limbs(&self) -> &[u16] {
