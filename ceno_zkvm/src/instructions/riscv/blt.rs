@@ -65,7 +65,7 @@ impl BltInput {
             lhs_limbs: &self.lhs_limb8,
             rhs_limbs: &self.rhs_limb8,
         };
-        let is_lt = lt_input.assign::<E::BaseField>(instance, &config.is_lt);
+        let is_lt = lt_input.assign(instance, &config.is_lt);
 
         set_val!(instance, config.pc, { i64_to_base::<F>(self.pc as i64) });
         set_val!(instance, config.next_pc, {
@@ -90,13 +90,13 @@ impl BltInput {
             i64_to_base::<F>(self.prev_rs2_ts as i64)
         });
 
-        config.lhs_limb8.assign(instance, {
+        config.lhs_limb8.assign_limbs(instance, {
             self.lhs_limb8
                 .iter()
                 .map(|&limb| i64_to_base::<F>(limb as i64))
                 .collect()
         });
-        config.rhs_limb8.assign(instance, {
+        config.rhs_limb8.assign_limbs(instance, {
             self.rhs_limb8
                 .iter()
                 .map(|&limb| i64_to_base::<F>(limb as i64))
@@ -104,12 +104,12 @@ impl BltInput {
         });
         let lhs = limb_u8_to_u16(&self.lhs_limb8);
         let rhs = limb_u8_to_u16(&self.rhs_limb8);
-        config.lhs.assign(instance, {
+        config.lhs.assign_limbs(instance, {
             lhs.iter()
                 .map(|&limb| i64_to_base::<F>(limb as i64))
                 .collect()
         });
-        config.rhs.assign(instance, {
+        config.rhs.assign_limbs(instance, {
             rhs.iter()
                 .map(|&limb| i64_to_base::<F>(limb as i64))
                 .collect()
