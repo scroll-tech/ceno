@@ -133,44 +133,45 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
         // result check
         let c_expr = c.expr();
-        let c_carries = c.carries.as_ref().unwrap();
+        let carries = c.carries.as_ref().unwrap();
 
-        // TODO #174
-        // a_expr[0] * b_expr[0] - c_carry[0] * 2^C = c_expr[0]
-        circuit_builder.require_equal(
-            || "c_expr[0]",
-            a_expr[0].clone() * b_expr[0].clone() - c_carries[0].expr() * Self::POW_OF_C.into(),
-            c_expr[0].clone(),
-        )?;
-        // a_expr[0] * b_expr[1] + a_expr[1] * b_expr[0] -  c_carry[1] * 2^C + c_carry[0] = c_expr[1]
-        circuit_builder.require_equal(
-            || "c_expr[1]",
-            a_expr[0].clone() * b_expr[0].clone() - c_carries[1].expr() * Self::POW_OF_C.into()
-                + c_carries[0].expr(),
-            c_expr[1].clone(),
-        )?;
-        // a_expr[0] * b_expr[2] + a_expr[1] * b_expr[1] + a_expr[2] * b_expr[0] -
-        // c_carry[2] * 2^C + c_carry[1] = c_expr[2]
-        circuit_builder.require_equal(
-            || "c_expr[2]",
-            a_expr[0].clone() * b_expr[2].clone()
-                + a_expr[1].clone() * b_expr[1].clone()
-                + a_expr[2].clone() * b_expr[0].clone()
-                - c_carries[2].expr() * Self::POW_OF_C.into()
-                + c_carries[1].expr(),
-            c_expr[2].clone(),
-        )?;
-        // a_expr[0] * b_expr[3] + a_expr[1] * b_expr[2] + a_expr[2] * b_expr[1] +
-        // a_expr[3] * b_expr[0] - c_carry[3] * 2^C + c_carry[2] = c_expr[3]
-        let mut target = a_expr[0].clone() * b_expr[3].clone()
-            + a_expr[1].clone() * b_expr[2].clone()
-            + a_expr[2].clone() * b_expr[1].clone()
-            + a_expr[3].clone() * b_expr[0].clone()
-            + c_carries[2].expr();
-        if let Some(overflow) = c_carries.get(3) {
-            target = target - overflow.expr() * Self::POW_OF_C.into();
-        }
-        circuit_builder.require_equal(|| "c_expr[3]", target, c_expr[3].clone())?;
+        // compute the result
+        let mut result_c: Vec<Expression<E>> = Vec::<Expression<E>>::with_capacity(Self::NUM_CELLS);
+        a_expr.iter().enumerate().for_each(|(i, a)| {
+            b_expr.iter().enumerate().for_each(|(j, b)| {
+                let idx = i + j;
+                if idx < Self::NUM_CELLS {
+                    if result_c.get(idx).is_none() {
+                        result_c.push(a.clone() * b.clone());
+                    } else {
+                        result_c[idx] = result_c[idx].clone() + a.clone() * b.clone();
+                    }
+                }
+            });
+
+            // take care carries
+            let carry = if i > 0 { carries.get(i - 1) } else { None };
+            let next_carry = carries.get(i);
+            if carry.is_some() {
+                result_c[i] = result_c[i].clone() + carry.unwrap().expr();
+            }
+            if next_carry.is_some() {
+                result_c[i] =
+                    result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C.into();
+            }
+        });
+
+        // result check
+        c_expr
+            .iter()
+            .zip(result_c)
+            .enumerate()
+            .for_each(|(i, (target, result))| {
+                circuit_builder
+                    .require_equal(|| format!("c_expr{i}"), target.clone(), result)
+                    .unwrap();
+            });
+
         Ok(c)
     }
 
