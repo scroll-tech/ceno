@@ -536,16 +536,14 @@ mod tests {
 
     #[allow(dead_code)]
     #[derive(Debug)]
-    struct LtCircuit {
+    struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
         pub lt_wtns: LtWtns,
     }
 
-    impl LtCircuit {
-        fn construct_circuit(
-            cb: &mut CircuitBuilder<GoldilocksExt2>,
-        ) -> Result<LtCircuit, ZKVMError> {
+    impl AssertLtCircuit {
+        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
             let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr(), Some(true))?;
@@ -554,8 +552,99 @@ mod tests {
     }
 
     #[test]
-    fn test_lt_1() {
+    fn test_assert_lt_1() {
         let mut cs = ConstraintSystem::new(|| "test_lt_1");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let _ = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+
+        let wits_in = vec![
+            vec![Goldilocks::from(3u64)].into_mle().into(),
+            vec![Goldilocks::from(5u64)].into_mle().into(),
+            vec![Goldilocks::from(u16::MAX as u64 + 3 - 5)]
+                .into_mle()
+                .into(),
+            vec![Goldilocks::from(u16::MAX as u64)].into_mle().into(),
+            #[cfg(feature = "riv64")]
+            vec![Goldilocks::from(u16::MAX as u64)].into_mle().into(),
+            #[cfg(feature = "riv64")]
+            vec![Goldilocks::from(u16::MAX as u64)].into_mle().into(),
+        ];
+
+        MockProver::assert_satisfied(&mut builder, &wits_in, None);
+    }
+
+    #[test]
+    fn test_assert_lt_u32() {
+        let mut cs = ConstraintSystem::new(|| "test_lt_u32");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let _ = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+
+        let wits_in = vec![
+            vec![Goldilocks::from(u32::MAX as u64 - 5)]
+                .into_mle()
+                .into(),
+            vec![Goldilocks::from(u32::MAX as u64 - 3)]
+                .into_mle()
+                .into(),
+            vec![Goldilocks::from(u16::MAX as u64 + 3 - 5)]
+                .into_mle()
+                .into(),
+            vec![Goldilocks::from(u16::MAX as u64)].into_mle().into(),
+            #[cfg(feature = "riv64")]
+            vec![Goldilocks::from(u16::MAX as u64)].into_mle().into(),
+            #[cfg(feature = "riv64")]
+            vec![Goldilocks::from(u16::MAX as u64)].into_mle().into(),
+        ];
+
+        MockProver::assert_satisfied(&mut builder, &wits_in, None);
+    }
+
+    #[test]
+    #[cfg(feature = "riv64")]
+    fn test_assert_lt_u64() {
+        let mut cs = ConstraintSystem::new(|| "test_lt_u64");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let _ = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+
+        let wits_in = vec![
+            vec![Goldilocks::from(u64::MAX - 5)].into_mle().into(),
+            vec![Goldilocks::from(u64::MAX - 3)].into_mle().into(),
+            vec![Goldilocks::from(u16::MAX as u64 + 3 - 5)]
+                .into_mle()
+                .into(),
+            vec![Goldilocks::from(u16::MAX as u64)].into_mle().into(),
+            #[cfg(feature = "riv64")]
+            vec![Goldilocks::from(u16::MAX as u64)].into_mle().into(),
+            #[cfg(feature = "riv64")]
+            vec![Goldilocks::from(u16::MAX as u64)].into_mle().into(),
+        ];
+
+        MockProver::assert_satisfied(&mut builder, &wits_in, None);
+    }
+
+    #[allow(dead_code)]
+    #[derive(Debug)]
+    struct LtCircuit {
+        pub a: WitIn,
+        pub b: WitIn,
+        pub lt_wtns: LtWtns,
+    }
+
+    impl LtCircuit {
+        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
+            let a = cb.create_witin(|| "a")?;
+            let b = cb.create_witin(|| "b")?;
+            let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr(), None)?;
+            Ok(Self { a, b, lt_wtns })
+        }
+    }
+
+    #[test]
+    fn test_lt_1() {
+        let mut cs = ConstraintSystem::new(|| "test_lt2_u32");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let _ = LtCircuit::construct_circuit(&mut builder).unwrap();

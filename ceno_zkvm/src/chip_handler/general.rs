@@ -11,15 +11,11 @@ use crate::{
     structs::ROMType,
 };
 
+// TODO move to correct file
 #[derive(Debug)]
 pub struct LtWtns {
     pub is_lt: Option<WitIn>,
-    pub diff_lo: WitIn,
-    pub diff_hi: WitIn,
-    #[cfg(feature = "riv64")]
-    pub diff_lo_2: WitIn,
-    #[cfg(feature = "riv64")]
-    pub diff_hi_2: WitIn,
+    pub diff: Vec<WitIn>,
 }
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
@@ -307,7 +303,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     (Some(is_lt), is_lt.expr())
                 };
 
-                let mut witin_u16 = |var_name: &str| -> Result<WitIn, ZKVMError> {
+                let mut witin_u16 = |var_name: String| -> Result<WitIn, ZKVMError> {
                     cb.namespace(
                         || format!("var {var_name}"),
                         |cb| {
@@ -318,44 +314,35 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     )
                 };
 
-                let diff_lo = witin_u16("diff_lo")?;
-                let diff_hi = witin_u16("diff_hi")?;
-                #[cfg(feature = "riv64")]
-                let diff_lo_2 = witin_u16("diff_lo_2")?;
-                #[cfg(feature = "riv64")]
-                let diff_hi_2 = witin_u16("diff_hi_2")?;
+                let diff = {
+                    #[cfg(feature = "riv32")]
+                    {
+                        0..2
+                    }
+                    #[cfg(feature = "riv64")]
+                    {
+                        0..4
+                    }
+                }
+                .map(|i| witin_u16(format!("diff_{i}")))
+                .collect::<Result<Vec<WitIn>, _>>()?;
+
+                let diff_expr = diff
+                    .iter()
+                    .enumerate()
+                    .map(|(i, diff)| (i, diff.expr()))
+                    .fold(Expression::ZERO, |sum, (i, a)| {
+                        sum + if i > 0 { a * (1 << (16 * i)).into() } else { a }
+                    });
 
                 #[cfg(feature = "riv32")]
                 let range = Expression::Constant((u32::MAX as u64).into());
                 #[cfg(feature = "riv64")]
-                let range = Expression::Constant(u64::MAX.into());
+                let range = Expression::Constant(u64::MAX.into()); // TODO beyond modulus
 
-                cb.require_equal(
-                    || name.clone(),
-                    lhs - rhs,
-                    #[cfg(feature = "riv32")]
-                    {
-                        diff_lo.expr() + diff_hi.expr() * (1 << 16).into() - is_lt_expr * range
-                    },
-                    #[cfg(feature = "riv64")]
-                    {
-                        diff_lo.expr()
-                            + diff_hi.expr() * (1 << 16).into()
-                            + diff_lo_2.expr() * (1 << 32).into()
-                            + diff_hi_2.expr() * (1 << 48).into()
-                            - is_lt.expr() * range
-                    },
-                )?;
+                cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
-                Ok(LtWtns {
-                    is_lt,
-                    diff_lo,
-                    diff_hi,
-                    #[cfg(feature = "riv64")]
-                    diff_lo_2,
-                    #[cfg(feature = "riv64")]
-                    diff_hi_2,
-                })
+                Ok(LtWtns { is_lt, diff })
             },
         )
     }

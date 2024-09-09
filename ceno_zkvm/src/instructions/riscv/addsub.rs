@@ -217,17 +217,14 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
 
         let u16_max = u16::MAX as u64;
 
-        set_val!(instance, config.lt_wtns_rs1.is_lt, 1);
-        set_val!(instance, config.lt_wtns_rs1.diff_lo, u16_max - 2 + 1); // range - lhs + rhs
-        set_val!(instance, config.lt_wtns_rs1.diff_hi, u16_max);
+        set_val!(instance, config.lt_wtns_rs1.diff[0], u16_max - 2 + 1); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rs1.diff[1], u16_max);
 
-        set_val!(instance, config.lt_wtns_rs2.is_lt, 1);
-        set_val!(instance, config.lt_wtns_rs2.diff_lo, u16_max - 3 + 2); // range - lhs + rhs
-        set_val!(instance, config.lt_wtns_rs2.diff_hi, u16_max);
+        set_val!(instance, config.lt_wtns_rs2.diff[0], u16_max - 3 + 2); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rs2.diff[1], u16_max);
 
-        set_val!(instance, config.lt_wtns_rd.is_lt, 1);
-        set_val!(instance, config.lt_wtns_rd.diff_lo, u16_max - 3 + 2); // range - lhs + rhs
-        set_val!(instance, config.lt_wtns_rd.diff_hi, u16_max);
+        set_val!(instance, config.lt_wtns_rd.diff[0], u16_max - 3 + 2); // range - lhs + rhs
+        set_val!(instance, config.lt_wtns_rd.diff[1], u16_max);
         Ok(())
     }
 }
