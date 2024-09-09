@@ -69,6 +69,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
         for limb in inputs {
             u16_mlt[*limb] += 1;
         }
+        tracing::debug!("u16_mult[4] = {}", u16_mlt[4]);
 
         let mut witness = RowMajorMatrix::<E::BaseField>::new(u16_mlt.len(), num_witin);
         witness

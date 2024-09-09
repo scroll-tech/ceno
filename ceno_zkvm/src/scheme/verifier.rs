@@ -46,7 +46,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
+        let dummy_table_item = challenges[0];
         let point_eval = PointAndEval::default();
+        let mut dummy_table_item_multiplicity = 0;
         for (name, opcode_proof) in vm_proof.opcode_proofs {
             let circuit_vk = self
                 .vk
@@ -61,6 +63,16 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 &point_eval,
                 challenges,
             )?;
+            tracing::info!("verified proof for opcode {}", name);
+
+            // getting the number of dummy padding item that we used in this opcode circuit
+            let num_lks = circuit_vk.get_cs().lk_expressions.len();
+            let num_padded_lks_per_instance = num_lks.next_power_of_two() - num_lks;
+            let num_padded_instance =
+                opcode_proof.num_instances.next_power_of_two() - opcode_proof.num_instances;
+            dummy_table_item_multiplicity += num_padded_lks_per_instance
+                * opcode_proof.num_instances
+                + num_lks.next_power_of_two() * num_padded_instance;
 
             prod_r *= opcode_proof.record_r_out_evals.iter().product::<E>();
             prod_w *= opcode_proof.record_w_out_evals.iter().product::<E>();
@@ -85,18 +97,26 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 &point_eval,
                 challenges,
             )?;
+            tracing::info!("verified proof for table {}", name);
 
             logup_sum -= table_proof.lk_p1_out_eval * table_proof.lk_q1_out_eval.invert().unwrap();
             logup_sum -= table_proof.lk_p2_out_eval * table_proof.lk_q2_out_eval.invert().unwrap();
         }
+        logup_sum -=
+            E::from(dummy_table_item_multiplicity as u64) * dummy_table_item.invert().unwrap();
+
         // check rw_set equality across all proofs
-        if prod_r != prod_w {
-            return Ok(false);
-        }
+        // TODO: enable this when we have cpu init/finalize and mem init/finalize
+        // if prod_r != prod_w {
+        //     return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
+        // }
 
         // check logup relation across all proofs
         if logup_sum != E::ZERO {
-            return Ok(false);
+            return Err(ZKVMError::VerifyError(format!(
+                "logup_sum({:?}) != 0",
+                logup_sum
+            )));
         }
 
         Ok(true)
@@ -159,7 +179,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         // index 0 is LogUp witness for Fixed Lookup table
         if logup_p_evals[0].eval != E::ONE {
             return Err(ZKVMError::VerifyError(
-                "Lookup table witness p(x) != constant 1",
+                "Lookup table witness p(x) != constant 1".into(),
             ));
         }
 
@@ -279,7 +299,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         .sum::<E>();
         if computed_evals != expected_evaluation {
             return Err(ZKVMError::VerifyError(
-                "main + sel evaluation verify failed",
+                "main + sel evaluation verify failed".into(),
             ));
         }
         // verify records (degree = 1) statement, thus no sumcheck
@@ -298,7 +318,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 eval_by_expr(&proof.wits_in_evals, challenges, expr) != *expected_evals
             })
         {
-            return Err(ZKVMError::VerifyError("record evaluate != expected_evals"));
+            return Err(ZKVMError::VerifyError(
+                "record evaluate != expected_evals".into(),
+            ));
         }
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
@@ -326,7 +348,6 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let cs = circuit_vk.get_cs();
         let lk_counts_per_instance = cs.lk_table_expressions.len();
         let log2_lk_count = ceil_log2(lk_counts_per_instance);
-        let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         let num_instances = proof.num_instances;
         let log2_num_instances = ceil_log2(num_instances);
@@ -394,8 +415,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 * ((0..lk_counts_per_instance)
                     .map(|i| proof.lk_d_in_evals[i] * eq_lk[i])
                     .sum::<E>()
-                    + chip_record_alpha
-                        * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE)),
+                    + (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE)),
             *alpha_lk_n
                 * sel_lk
                 * ((0..lk_counts_per_instance)
@@ -405,7 +425,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         .iter()
         .sum::<E>();
         if computed_evals != expected_evaluation {
-            return Err(ZKVMError::VerifyError("sel evaluation verify failed"));
+            return Err(ZKVMError::VerifyError(
+                "sel evaluation verify failed".into(),
+            ));
         }
         // verify records (degree = 1) statement, thus no sumcheck
         if cs
@@ -427,7 +449,9 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 ) != *expected_evals
             })
         {
-            return Err(ZKVMError::VerifyError("record evaluate != expected_evals"));
+            return Err(ZKVMError::VerifyError(
+                "record evaluate != expected_evals".into(),
+            ));
         }
 
         Ok(input_opening_point)
@@ -524,6 +548,7 @@ impl TowerVerify {
                     },
                     transcript,
                 );
+                tracing::debug!("verified tower proof at layer {}/{}", round + 1, expected_max_round-1);
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
@@ -555,7 +580,7 @@ impl TowerVerify {
                         })
                         .sum::<E>();
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
-                    return Err(ZKVMError::VerifyError("mismatch tower evaluation"));
+                    return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));
                 }
 
                 // derive single eval

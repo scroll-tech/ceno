@@ -10,14 +10,12 @@ use const_env::from_env;
 
 use ceno_emul::StepRecord;
 use ceno_zkvm::{
-    circuit_builder::{ZKVMConstraintSystem, ZKVMVerifyingKey},
+    circuit_builder::ZKVMConstraintSystem,
     scheme::verifier::ZKVMVerifier,
     tables::{RangeTableCircuit, TableCircuit},
 };
 use ff_ext::ff::Field;
-use goldilocks::{Goldilocks, GoldilocksExt2};
-use itertools::Itertools;
-use multilinear_extensions::mle::IntoMLE;
+use goldilocks::GoldilocksExt2;
 use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
@@ -98,7 +96,7 @@ fn main() {
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
-    for instance_num_vars in 20..22 {
+    for instance_num_vars in 15..22 {
         // TODO: witness generation from step records emitted by tracer
         let num_instances = 1 << instance_num_vars;
         let mut zkvm_witness = BTreeMap::default();
@@ -111,7 +109,10 @@ fn main() {
         let range_witness = RangeTableCircuit::<E>::assign_instances(
             &range_config,
             range_cs.num_witin as usize,
-            &[],
+            // TODO: use real data
+            vec![vec![0; num_instances * 2], vec![4; num_instances * 6]]
+                .concat()
+                .as_slice(),
         )
         .unwrap();
 
@@ -128,9 +129,10 @@ fn main() {
             .create_proof(zkvm_witness, max_threads, &mut transcript, &real_challenges)
             .expect("create_proof failed");
 
+        let mut transcript = Transcript::new(b"riscv");
         assert!(
             verifier
-                .verify_proof(zkvm_proof, &mut transcript, &real_challenges,)
+                .verify_proof(zkvm_proof, &mut transcript, &real_challenges)
                 .expect("verify proof return with error"),
         );
 

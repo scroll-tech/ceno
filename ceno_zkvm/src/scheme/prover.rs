@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
 
@@ -65,6 +65,17 @@ impl<E: ExtensionField> ZKVMProver<E> {
             let num_instances = witness.num_instances();
 
             if is_opcode_circuit {
+                tracing::debug!(
+                    "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
+                    circuit_name,
+                    cs.num_witin,
+                    cs.r_expressions.len(),
+                    cs.w_expressions.len(),
+                    cs.lk_expressions.len(),
+                );
+                for lk_s in cs.lk_expressions_namespace_map.iter() {
+                    tracing::debug!("opcode circuit {}: {}", circuit_name, lk_s);
+                }
                 let opcode_proof = self.create_opcode_proof(
                     pk,
                     witness
@@ -78,6 +89,11 @@ impl<E: ExtensionField> ZKVMProver<E> {
                     transcript,
                     challenges,
                 )?;
+                tracing::info!(
+                    "generated proof for opcode {} with num_instances={}",
+                    circuit_name,
+                    num_instances
+                );
                 vm_proof
                     .opcode_proofs
                     .insert(circuit_name.clone(), opcode_proof);
@@ -95,6 +111,11 @@ impl<E: ExtensionField> ZKVMProver<E> {
                     transcript,
                     challenges,
                 )?;
+                tracing::info!(
+                    "generated proof for table {} with num_instances={}",
+                    circuit_name,
+                    num_instances
+                );
                 vm_proof
                     .table_proofs
                     .insert(circuit_name.clone(), table_proof);

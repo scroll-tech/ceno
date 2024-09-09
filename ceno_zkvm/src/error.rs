@@ -7,7 +7,7 @@ pub enum UtilError {
 pub enum ZKVMError {
     CircuitError,
     UtilError(UtilError),
-    VerifyError(&'static str),
+    VerifyError(String),
 }
 
 impl From<UtilError> for ZKVMError {
