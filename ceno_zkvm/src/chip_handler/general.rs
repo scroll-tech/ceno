@@ -285,6 +285,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
     {
+        #[cfg(feature = "riv64")]
+        panic!("less_than is not supported for riv64 yet");
+
+        #[cfg(feature = "riv32")]
         self.namespace(
             || "less_than",
             |cb| {
@@ -314,18 +318,9 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     )
                 };
 
-                let diff = {
-                    #[cfg(feature = "riv32")]
-                    {
-                        0..2
-                    }
-                    #[cfg(feature = "riv64")]
-                    {
-                        0..4
-                    }
-                }
-                .map(|i| witin_u16(format!("diff_{i}")))
-                .collect::<Result<Vec<WitIn>, _>>()?;
+                let diff = (0..2)
+                    .map(|i| witin_u16(format!("diff_{i}")))
+                    .collect::<Result<Vec<WitIn>, _>>()?;
 
                 let diff_expr = diff
                     .iter()
@@ -335,10 +330,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                         sum + if i > 0 { a * (1 << (16 * i)).into() } else { a }
                     });
 
-                #[cfg(feature = "riv32")]
                 let range = Expression::Constant((u32::MAX as u64).into());
-                #[cfg(feature = "riv64")]
-                let range = Expression::Constant(u64::MAX.into()); // TODO beyond modulus
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
