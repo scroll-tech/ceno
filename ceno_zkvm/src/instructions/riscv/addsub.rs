@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use ark_std::iterable::Iterable;
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
