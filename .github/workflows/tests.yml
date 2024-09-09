@@ -31,6 +31,14 @@ jobs:
     name: Run Tests
     timeout-minutes: 30
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, riscv32im-unknown-none-elf]
+        # Exclude the riscv32im-unknown-none-elf target
+        exclude:
+          - target: riscv32im-unknown-none-elf
+
     steps:
       - uses: actions/checkout@v2
       - name: Cargo cache
@@ -46,9 +54,11 @@ jobs:
 
       - name: Install cargo make
         run: |
-          cargo install --force cargo-make
+          cargo install cargo-make || echo "cargo-make already installed"
       - name: run test
         uses: actions-rs/cargo@v1
+        env:
+          TARGET: ${{ matrix.target }}
         with:
           command: make
           args: tests
