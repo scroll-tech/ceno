@@ -352,7 +352,6 @@ pub fn load_u16_table<E: ExtensionField>(
     }
 }
 
-
 pub fn load_and_table<E: ExtensionField>(
     t_vec: &mut Vec<E>,
     cb: &CircuitBuilder<E>,
