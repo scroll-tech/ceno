@@ -183,6 +183,7 @@ impl<E: ExtensionField> MockProverError<E> {
             inst_id: usize,
         ) -> String {
             wtns.iter()
+                .sorted()
                 .map(|wt_id| {
                     let wit = &wits_in[*wt_id as usize];
                     let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
