@@ -455,15 +455,9 @@ mod tests {
                 eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
                 E::ZERO
             );
-            // overflow
-            assert_eq!(
-                eval_by_expr(
-                    &witness_values,
-                    &challenges,
-                    &c.carries.unwrap().last().unwrap().expr()
-                ),
-                E::ZERO
-            );
+
+            // non-overflow case, the len of carries should be (NUM_CELLS - 1)
+            assert_eq!(c.carries.unwrap().len(), 3)
         }
 
         #[test]
@@ -506,15 +500,8 @@ mod tests {
                 eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
                 E::ZERO
             );
-            // overflow
-            assert_eq!(
-                eval_by_expr(
-                    &witness_values,
-                    &challenges,
-                    &c.carries.unwrap().last().unwrap().expr()
-                ),
-                E::ZERO
-            );
+            // non-overflow case, the len of carries should be (NUM_CELLS - 1)
+            assert_eq!(c.carries.unwrap().len(), 3)
         }
 
         #[test]
@@ -556,15 +543,8 @@ mod tests {
                 eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
                 E::ZERO
             );
-            // overflow
-            assert_eq!(
-                eval_by_expr(
-                    &witness_values,
-                    &challenges,
-                    &c.carries.unwrap().last().unwrap().expr()
-                ),
-                E::ZERO
-            );
+            // non-overflow case, the len of carries should be (NUM_CELLS - 1)
+            assert_eq!(c.carries.unwrap().len(), 3)
         }
 
         #[test]
@@ -705,6 +685,7 @@ mod tests {
             scheme::utils::eval_by_expr,
             uint::UInt,
         };
+        use ark_std::iterable::Iterable;
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
@@ -719,9 +700,9 @@ mod tests {
             let wit_a = vec![1, 1, 0, 0];
             let wit_b = vec![2, 1, 0, 0];
             let wit_c = vec![2, 3, 1, 0];
-            let wit_carries = vec![0, 0, 0, 0];
+            let wit_carries = vec![0, 0, 0];
             let witness_values = [wit_a, wit_b, wit_c, wit_carries].concat();
-            verify::<E>(witness_values, false);
+            verify::<64, 16, E>(witness_values, false);
         }
 
         #[test]
@@ -732,9 +713,9 @@ mod tests {
             let wit_a = vec![256, 1, 0, 0];
             let wit_b = vec![257, 1, 0, 0];
             let wit_c = vec![256, 514, 1, 0];
-            let wit_carries = vec![1, 0, 0, 0];
+            let wit_carries = vec![1, 0, 0];
             let witness_values = [wit_a, wit_b, wit_c, wit_carries].concat();
-            verify::<E>(witness_values, false);
+            verify::<64, 16, E>(witness_values, false);
         }
 
         #[test]
@@ -748,51 +729,74 @@ mod tests {
             // ==> [256 + 1 * (2^16), 256 + 2 * (2^16), 0 + 1 * (2^16), 0]
             // so we get wit_c = [256, 256, 0, 0] and carries = [1, 2, 1, 0]
             let wit_c = vec![256, 257, 2, 1];
-            let wit_carries = vec![1, 2, 1, 0];
+            let wit_carries = vec![1, 2, 1];
             let witness_values = [wit_a, wit_b, wit_c, wit_carries].concat();
-            verify::<E>(witness_values, true);
+            verify::<64, 16, E>(witness_values, false);
         }
 
-        fn verify<E: ExtensionField>(witness_values: Vec<u64>, overflow: bool) {
+        fn verify<const M: usize, const C: usize, E: ExtensionField>(
+            witness_values: Vec<u64>,
+            overflow: bool,
+        ) {
             let mut cs = ConstraintSystem::new(|| "test");
             let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let mut uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut circuit_builder).unwrap();
-            let mut uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut circuit_builder).unwrap();
+            let mut uint_a = UInt::<M, C, E>::new(|| "uint_a", &mut circuit_builder).unwrap();
+            let mut uint_b = UInt::<M, C, E>::new(|| "uint_b", &mut circuit_builder).unwrap();
             let uint_c = uint_a
                 .mul(|| "uint_c", &mut circuit_builder, &mut uint_b, false)
                 .unwrap();
 
-            let a = &witness_values[0..4];
-            let b = &witness_values[4..8];
-            let c_carries = &witness_values[12..16];
+            let single_wit_size = UInt::<M, C, E>::NUM_CELLS;
+            let wit_end_idx = if overflow {
+                4 * single_wit_size
+            } else {
+                4 * single_wit_size - 1
+            };
+            let a = &witness_values[0..single_wit_size];
+            let b = &witness_values[single_wit_size..2 * single_wit_size];
+            let c_carries = &witness_values[3 * single_wit_size..wit_end_idx];
 
             // limbs cal.
-            let t0 = a[0] * b[0] - c_carries[0] * POW_OF_C;
-            let t1 = a[0] * b[1] + a[1] * b[0] - c_carries[1] * POW_OF_C + c_carries[0];
-            let t2 =
-                a[0] * b[2] + a[1] * b[1] + a[2] * b[0] - c_carries[2] * POW_OF_C + c_carries[1];
-            let t3 = a[0] * b[3] + a[1] * b[2] + a[2] * b[1] + a[3] * b[0]
-                - c_carries[3] * POW_OF_C
-                + c_carries[2];
+            let mut result = vec![0u64; single_wit_size];
+            a.iter().enumerate().for_each(|(i, a_limb)| {
+                b.iter().enumerate().for_each(|(j, b_limb)| {
+                    let idx = i + j;
+                    if idx < single_wit_size {
+                        result[idx] += a_limb * b_limb;
+                    }
+                });
+
+                // take care carries
+                if !overflow && c_carries.get(i).is_some() {
+                    result[i] -= c_carries[i] * POW_OF_C;
+                }
+                if i != 0 {
+                    result[i] += c_carries[i - 1];
+                }
+            });
 
             // verify
             let c_expr = uint_c.expr();
-            let w: Vec<E> = witness_values.iter().map(|&a| a.into()).collect_vec();
-            assert_eq!(eval_by_expr(&w, &challenges, &c_expr[0]), E::from(t0));
-            assert_eq!(eval_by_expr(&w, &challenges, &c_expr[1]), E::from(t1));
-            assert_eq!(eval_by_expr(&w, &challenges, &c_expr[2]), E::from(t2));
-            assert_eq!(eval_by_expr(&w, &challenges, &c_expr[3]), E::from(t3));
+            let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
+            c_expr.iter().zip(result).for_each(|(c, ret)| {
+                assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
+            });
             // overflow
-            assert_eq!(
-                eval_by_expr(
-                    &w,
-                    &challenges,
-                    &uint_c.carries.unwrap().last().unwrap().expr()
-                ),
-                if overflow { E::ONE } else { E::ZERO }
-            );
+            if overflow {
+                assert_eq!(
+                    eval_by_expr(
+                        &wit,
+                        &challenges,
+                        &uint_c.carries.unwrap().last().unwrap().expr()
+                    ),
+                    E::ONE
+                );
+            } else {
+                // non-overflow case, the len of carries should be (NUM_CELLS - 1)
+                assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
+            }
         }
     }
 
