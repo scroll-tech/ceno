@@ -109,7 +109,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     format!("WitIn({})", wit_in)
                 }
                 Expression::Challenge(id, _, _, _) => format!("Challenge({})", id),
-                Expression::Constant(constant) => fmt_base_field::<E>(constant).to_string(),
+                Expression::Constant(constant) => fmt_base_field::<E>(constant, true).to_string(),
                 Expression::Fixed(fixed) => format!("{:?}", fixed),
                 Expression::Sum(left, right) => {
                     let s = format!(
@@ -146,24 +146,35 @@ impl<E: ExtensionField> MockProverError<E> {
                 field
                     .as_bases()
                     .iter()
-                    .map(fmt_base_field::<E>)
+                    .map(|b| fmt_base_field::<E>(b, false))
                     .collect::<Vec<String>>()
                     .join(",")
             )
         }
 
-        fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField) -> String {
+        fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField, add_prn: bool) -> String {
             let value = base_field.to_canonical_u64();
 
             if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
                 // beautiful format for negative number > -65536
-                format!("(-{})", E::BaseField::MODULUS_U64 - value)
+                fmt_prn(format!("-{}", E::BaseField::MODULUS_U64 - value), add_prn)
             } else if value < u16::MAX as u64 {
                 format!("{value}")
             } else {
                 // hex
-                format!("{value:#x}")
+                if value > E::BaseField::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
+                    fmt_prn(
+                        format!("-{:#x}", E::BaseField::MODULUS_U64 - value),
+                        add_prn,
+                    )
+                } else {
+                    format!("{value:#x}")
+                }
             }
+        }
+
+        fn fmt_prn(s: String, add_prn: bool) -> String {
+            if add_prn { format!("({})", s) } else { s }
         }
 
         fn fmt_wtns<E: ExtensionField>(
@@ -177,7 +188,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
                         fmt_field(&e[inst_id])
                     } else if let Some(bf) = wit.get_base_field_vec_optn() {
-                        fmt_base_field::<E>(&bf[inst_id])
+                        fmt_base_field::<E>(&bf[inst_id], true)
                     } else {
                         "Unknown".to_string()
                     };
