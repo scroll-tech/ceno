@@ -254,7 +254,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         circuit_builder.lookup_and_byte(
             high_limb_no_msb.expr(),
             high_limb.clone(),
-            Expression::from(1 << 7),
+            Expression::from(0xFF),
         )?;
 
         let inv_128 = F::from(128).invert().unwrap();

@@ -266,6 +266,8 @@ impl<'a, E: ExtensionField> MockProver<E> {
         let mut table_vec = vec![];
         load_u5_table(&mut table_vec, cb, challenge);
         load_u16_table(&mut table_vec, cb, challenge);
+        load_and_table(&mut table_vec, cb, challenge);
+        load_ltu_table(&mut table_vec, cb, challenge);
 
         // Lookup expressions
         for (expr, name) in cb
@@ -344,6 +346,45 @@ pub fn load_u16_table<E: ExtensionField>(
         let rlc_record = cb.rlc_chip_record(vec![
             Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
             i.into(),
+        ]);
+        let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+        t_vec.push(rlc_record);
+    }
+}
+
+
+pub fn load_and_table<E: ExtensionField>(
+    t_vec: &mut Vec<E>,
+    cb: &CircuitBuilder<E>,
+    challenge: [E; 2],
+) {
+    for i in 0..(1 << 16) {
+        let a = i >> 8;
+        let b = i & 0b0111_1111;
+        let c = a & b;
+        let rlc_record = cb.rlc_chip_record(vec![
+            Expression::Constant(E::BaseField::from(ROMType::And as u64)),
+            i.into(),
+            c.into(),
+        ]);
+        let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+        t_vec.push(rlc_record);
+    }
+}
+
+pub fn load_ltu_table<E: ExtensionField>(
+    t_vec: &mut Vec<E>,
+    cb: &CircuitBuilder<E>,
+    challenge: [E; 2],
+) {
+    for i in 0..(1 << 16) {
+        let a = i >> 8;
+        let b = i & 0xFF;
+        let c = (a < b) as usize;
+        let rlc_record = cb.rlc_chip_record(vec![
+            Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
+            i.into(),
+            c.into(),
         ]);
         let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
         t_vec.push(rlc_record);

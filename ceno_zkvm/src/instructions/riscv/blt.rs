@@ -235,9 +235,12 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
 mod test {
     use super::*;
     use ceno_emul::StepRecord;
+    use ff::Field;
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
+    use std::array;
+    use rand::rngs::OsRng;
 
     use crate::{circuit_builder::ConstraintSystem, scheme::mock_prover::MockProver};
 
@@ -257,6 +260,8 @@ mod test {
         )
         .unwrap();
 
+        let rng = OsRng;
+        let challenges: [GoldilocksExt2;2] = array::from_fn(|_| GoldilocksExt2::random(rng));
         MockProver::run(
             &mut circuit_builder,
             &raw_witin
@@ -265,9 +270,8 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            None,
-        )
-        .expect_err("lookup will fail");
+            Some(challenges),
+        ).unwrap();
         Ok(())
     }
 
