@@ -359,7 +359,7 @@ pub fn load_and_table<E: ExtensionField>(
 ) {
     for i in 0..(1 << 16) {
         let a = i >> 8;
-        let b = i & 0b0111_1111;
+        let b = i & 0xFF;
         let c = a & b;
         let rlc_record = cb.rlc_chip_record(vec![
             Expression::Constant(E::BaseField::from(ROMType::And as u64)),

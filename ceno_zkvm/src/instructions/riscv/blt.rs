@@ -262,7 +262,7 @@ mod test {
 
         let rng = OsRng;
         let challenges: [GoldilocksExt2; 2] = array::from_fn(|_| GoldilocksExt2::random(rng));
-        MockProver::run(
+        MockProver::assert_satisfied(
             &mut circuit_builder,
             &raw_witin
                 .de_interleaving()
@@ -271,8 +271,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             Some(challenges),
-        )
-        .unwrap();
+        );
         Ok(())
     }
 
