@@ -58,7 +58,9 @@ where
     pub fn get_leaf_as_base(&self, index: usize) -> E::BaseField {
         match &self.leaves {
             FieldType::Base(leaves) => leaves[index],
-            FieldType::Ext(_) => panic!("Mismatching field type, calling get_leaf_as_base on a Merkle tree over extension fields"),
+            FieldType::Ext(_) => panic!(
+                "Mismatching field type, calling get_leaf_as_base on a Merkle tree over extension fields"
+            ),
             FieldType::Unreachable => unreachable!(),
         }
     }

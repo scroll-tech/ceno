@@ -1344,8 +1344,14 @@ dependencies = [
 name = "poseidon"
 version = "0.1.0"
 dependencies = [
+ "ark-std",
+ "criterion",
+ "ff",
  "goldilocks",
+ "plonky2",
+ "rand",
  "serde",
+ "unroll",
 ]
 
 [[package]]

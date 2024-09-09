@@ -48,3 +48,7 @@ print-trace = [ "ark-std/print-trace" ]
 [[bench]]
 name = "commit_open_verify"
 harness = false
+
+[[bench]]
+name = "hashing"
+harness = false

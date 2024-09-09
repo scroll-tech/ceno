@@ -104,11 +104,7 @@ pub fn lagrange_eval<F: PrimeField>(x: &[F], b: usize) -> F {
 
     product(x.iter().enumerate().map(
         |(idx, x_i)| {
-            if b.nth_bit(idx) {
-                *x_i
-            } else {
-                F::ONE - x_i
-            }
+            if b.nth_bit(idx) { *x_i } else { F::ONE - x_i }
         },
     ))
 }
