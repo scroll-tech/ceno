@@ -126,18 +126,24 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let next_ts = ts + 1.into();
     circuit_builder.state_out(next_pc, next_ts)?;
 
-    let lt_wtns_rs1 = circuit_builder.assert_less_than(
+    let lt_wtns_rs1 = circuit_builder.less_than(
         || "prev_rs1_ts < ts",
         prev_rs1_ts.expr(),
         cur_ts.expr(),
+        Some(true),
     )?;
-    let lt_wtns_rs2 = circuit_builder.assert_less_than(
+    let lt_wtns_rs2 = circuit_builder.less_than(
         || "prev_rs2_ts < ts",
         prev_rs2_ts.expr(),
         cur_ts.expr(),
+        Some(true),
     )?;
-    let lt_wtns_rd =
-        circuit_builder.assert_less_than(|| "prev_rd_ts < ts", prev_rd_ts.expr(), cur_ts.expr())?;
+    let lt_wtns_rd = circuit_builder.less_than(
+        || "prev_rd_ts < ts",
+        prev_rd_ts.expr(),
+        cur_ts.expr(),
+        Some(true),
+    )?;
 
     Ok(InstructionConfig {
         pc,

@@ -13,7 +13,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct LtWtns {
-    pub is_lt: WitIn,
+    pub is_lt: Option<WitIn>,
     pub diff_lo: WitIn,
     pub diff_hi: WitIn,
     #[cfg(feature = "riv64")]
@@ -277,12 +277,13 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
-    // TODO support riv64 feature
+    /// less_than
     pub(crate) fn less_than<N, NR>(
         &mut self,
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
+        assert_less_than: Option<bool>,
     ) -> Result<LtWtns, ZKVMError>
     where
         NR: Into<String> + Display + Clone,
@@ -292,7 +293,19 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             || "less_than",
             |cb| {
                 let name = name_fn();
-                let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
+                let (is_lt, is_lt_expr) = if let Some(lt) = assert_less_than {
+                    (
+                        None,
+                        if lt {
+                            Expression::ONE
+                        } else {
+                            Expression::ZERO
+                        },
+                    )
+                } else {
+                    let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
+                    (Some(is_lt), is_lt.expr())
+                };
 
                 let mut witin_u16 = |var_name: &str| -> Result<WitIn, ZKVMError> {
                     cb.namespace(
@@ -322,7 +335,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     lhs - rhs,
                     #[cfg(feature = "riv32")]
                     {
-                        diff_lo.expr() + diff_hi.expr() * (1 << 16).into() - is_lt.expr() * range
+                        diff_lo.expr() + diff_hi.expr() * (1 << 16).into() - is_lt_expr * range
                     },
                     #[cfg(feature = "riv64")]
                     {
@@ -343,27 +356,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     #[cfg(feature = "riv64")]
                     diff_hi_2,
                 })
-            },
-        )
-    }
-
-    pub(crate) fn assert_less_than<N, NR>(
-        &mut self,
-        name_fn: N,
-        lhs: Expression<E>,
-        rhs: Expression<E>,
-    ) -> Result<LtWtns, ZKVMError>
-    where
-        NR: Into<String> + Clone + Display,
-        N: FnOnce() -> NR,
-    {
-        self.namespace(
-            || "assert_less_than",
-            |cb| {
-                let name = name_fn();
-                let lt_wtns = cb.less_than::<_, _>(|| name.clone(), lhs, rhs)?;
-                cb.require_one(|| name, lt_wtns.is_lt.expr())?;
-                Ok(lt_wtns)
             },
         )
     }

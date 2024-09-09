@@ -537,7 +537,7 @@ mod tests {
         ) -> Result<LtCircuit, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr())?;
+            let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr(), Some(true))?;
             Ok(Self { a, b, lt_wtns })
         }
     }
