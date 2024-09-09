@@ -168,3 +168,29 @@ impl LtInput<'_> {
         is_lt > 0
     }
 }
+
+#[derive(Debug)]
+pub struct Lt2Config {
+    pub is_lt: Option<WitIn>,
+    pub diff: Vec<WitIn>,
+}
+
+pub struct Lt2Input {
+    pub lhs: u64,
+    pub rhs: u64,
+}
+
+impl Lt2Input {
+    pub fn assign<F: SmallField>(&self, instance: &mut [MaybeUninit<F>], config: &Lt2Config) {
+        if let Some(is_lt) = config.is_lt {
+            set_val!(instance, is_lt, { if self.lhs < self.rhs { 1 } else { 0 } });
+        }
+
+        let diff = self.lhs as i64 - self.rhs as i64;
+        config.diff.iter().enumerate().for_each(|(i, wit)| {
+            set_val!(instance, wit, {
+                i64_to_base::<F>((diff >> (i * 16)) & 0xffff)
+            });
+        });
+    }
+}

@@ -8,15 +8,9 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
+    instructions::riscv::config::Lt2Config,
     structs::ROMType,
 };
-
-// TODO move to correct file
-#[derive(Debug)]
-pub struct LtWtns {
-    pub is_lt: Option<WitIn>,
-    pub diff: Vec<WitIn>,
-}
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn new(cs: &'a mut ConstraintSystem<E>) -> Self {
@@ -280,7 +274,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         lhs: Expression<E>,
         rhs: Expression<E>,
         assert_less_than: Option<bool>,
-    ) -> Result<LtWtns, ZKVMError>
+    ) -> Result<Lt2Config, ZKVMError>
     where
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
@@ -330,11 +324,11 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                         sum + if i > 0 { a * (1 << (16 * i)).into() } else { a }
                     });
 
-                let range = Expression::Constant((u32::MAX as u64).into());
+                let range = Expression::Constant((1 << 32).into());
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
-                Ok(LtWtns { is_lt, diff })
+                Ok(Lt2Config { is_lt, diff })
             },
         )
     }

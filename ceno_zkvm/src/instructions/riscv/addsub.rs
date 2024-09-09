@@ -5,17 +5,16 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 
 use super::{
+    config::Lt2Config,
     constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
     RIVInstruction,
 };
 use crate::{
-    chip_handler::{
-        general::LtWtns, GlobalStateRegisterMachineChipOperations, RegisterChipOperations,
-    },
+    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    instructions::Instruction,
+    instructions::{riscv::config::Lt2Input, Instruction},
     set_val,
     uint::UIntValue,
     witness::LkMultiplicity,
@@ -39,9 +38,9 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
     pub prev_rd_ts: WitIn,
-    pub lt_wtns_rs1: LtWtns,
-    pub lt_wtns_rs2: LtWtns,
-    pub lt_wtns_rd: LtWtns,
+    pub lt_wtns_rs1: Lt2Config,
+    pub lt_wtns_rs2: Lt2Config,
+    pub lt_wtns_rd: Lt2Config,
     phantom: PhantomData<E>,
 }
 
@@ -215,16 +214,10 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         set_val!(instance, config.prev_rs2_ts, 2);
         set_val!(instance, config.prev_rd_ts, 2);
 
-        let u16_max = u16::MAX as u64;
+        Lt2Input { lhs: 2, rhs: 3 }.assign(instance, &config.lt_wtns_rs1);
+        Lt2Input { lhs: 2, rhs: 3 }.assign(instance, &config.lt_wtns_rs2);
+        Lt2Input { lhs: 2, rhs: 3 }.assign(instance, &config.lt_wtns_rd);
 
-        set_val!(instance, config.lt_wtns_rs1.diff[0], u16_max - 2 + 1); // range - lhs + rhs
-        set_val!(instance, config.lt_wtns_rs1.diff[1], u16_max);
-
-        set_val!(instance, config.lt_wtns_rs2.diff[0], u16_max - 3 + 2); // range - lhs + rhs
-        set_val!(instance, config.lt_wtns_rs2.diff[1], u16_max);
-
-        set_val!(instance, config.lt_wtns_rd.diff[0], u16_max - 3 + 2); // range - lhs + rhs
-        set_val!(instance, config.lt_wtns_rd.diff[1], u16_max);
         Ok(())
     }
 }
