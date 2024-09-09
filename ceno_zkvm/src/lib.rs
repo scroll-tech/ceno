@@ -1,5 +1,6 @@
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
+#![feature(variant_count)]
 
 pub mod error;
 pub mod instructions;

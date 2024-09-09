@@ -15,6 +15,7 @@ use crate::{
     },
     set_val,
     utils::{i64_to_base, limb_u8_to_u16},
+    witness::LkMultiplicity,
 };
 
 use super::{
@@ -222,6 +223,7 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [std::mem::MaybeUninit<E::BaseField>],
+        _lk_multiplicity: &mut LkMultiplicity,
         _step: ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         // take input from _step
@@ -250,7 +252,7 @@ mod test {
         let num_wits = circuit_builder.cs.num_witin as usize;
         // generate mock witness
         let num_instances = 1 << 4;
-        let raw_witin = BltInstruction::assign_instances(
+        let (raw_witin, _) = BltInstruction::assign_instances(
             &config,
             num_wits,
             vec![StepRecord::default(); num_instances],

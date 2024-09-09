@@ -7,6 +7,7 @@ use crate::{
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
     utils::add_one_to_big_num,
+    witness::LkMultiplicity,
 };
 use ark_std::iterable::Iterable;
 use constants::BYTE_BIT_WIDTH;
@@ -476,11 +477,27 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
         mem::size_of::<T>() / u16_bytes
     };
 
-    pub fn new(val: T) -> Self {
+    #[allow(dead_code)]
+    pub fn new(val: T, lkm: &mut LkMultiplicity) -> Self {
+        let uint = UIntValue::<T> {
+            val,
+            limbs: Self::split_to_u16(val),
+        };
+        Self::assert_u16(&uint.limbs, lkm);
+        uint
+    }
+
+    pub fn new_unchecked(val: T) -> Self {
         UIntValue::<T> {
             val,
             limbs: Self::split_to_u16(val),
         }
+    }
+
+    fn assert_u16(v: &[u16], lkm: &mut LkMultiplicity) {
+        v.iter().for_each(|v| {
+            lkm.assert_ux::<16>(*v as u64);
+        })
     }
 
     fn split_to_u16(value: T) -> Vec<u16> {
@@ -502,20 +519,35 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
         self.limbs.iter().map(|v| F::from(*v as u64)).collect_vec()
     }
 
-    pub fn add_u16_carries(&self, rhs: &Self) -> Vec<bool> {
-        self.as_u16_limbs().iter().zip(rhs.as_u16_limbs()).fold(
+    pub fn add(
+        &self,
+        rhs: &Self,
+        lkm: &mut LkMultiplicity,
+        with_overflow: bool,
+    ) -> (Vec<u16>, Vec<bool>) {
+        let res = self.as_u16_limbs().iter().zip(rhs.as_u16_limbs()).fold(
             vec![],
             |mut acc, (a_limb, b_limb)| {
                 let (a, b) = a_limb.overflowing_add(*b_limb);
-                if let Some(prev_carry) = acc.last() {
-                    let (_, d) = a.overflowing_add(*prev_carry as u16);
-                    acc.push(b || d);
+                if let Some((_, prev_carry)) = acc.last() {
+                    let (e, d) = a.overflowing_add(*prev_carry as u16);
+                    acc.push((e, b || d));
                 } else {
-                    acc.push(b);
+                    acc.push((a, b));
                 }
+                // range check
+                if let Some((limb, _)) = acc.last() {
+                    lkm.assert_ux::<16>(*limb as u64);
+                };
                 acc
             },
-        )
+        );
+        let (limbs, mut carries): (Vec<u16>, Vec<bool>) = res.into_iter().unzip();
+        if !with_overflow {
+            carries.resize(carries.len() - 1, false);
+        }
+        carries.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
+        (limbs, carries)
     }
 }
 

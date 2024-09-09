@@ -17,6 +17,7 @@ use crate::{
     instructions::Instruction,
     set_val,
     uint::UIntValue,
+    witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 
@@ -151,13 +152,14 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
+        lk_multiplicity: &mut LkMultiplicity,
         step: StepRecord,
     ) -> Result<(), ZKVMError> {
         // TODO use fields from step
         set_val!(instance, config.pc, 1);
         set_val!(instance, config.ts, 2);
-        let addend_0 = UIntValue::new(step.rs1().unwrap().value);
-        let addend_1 = UIntValue::new(step.rs2().unwrap().value);
+        let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
+        let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
         config
             .prev_rd_value
             .assign_limbs(instance, [0, 0].iter().map(E::BaseField::from).collect());
@@ -167,7 +169,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         config
             .addend_1
             .assign_limbs(instance, addend_1.u16_fields());
-        let carries = addend_0.add_u16_carries(&addend_1);
+        let (_, carries) = addend_0.add(&addend_1, lk_multiplicity, true);
         config.outcome.assign_carries(
             instance,
             carries
@@ -199,6 +201,7 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
+        _lk_multiplicity: &mut LkMultiplicity,
         _step: StepRecord,
     ) -> Result<(), ZKVMError> {
         // TODO use field from step
@@ -263,7 +266,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let raw_witin = AddInstruction::assign_instances(
+        let (raw_witin, _) = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord {
@@ -310,7 +313,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let raw_witin = AddInstruction::assign_instances(
+        let (raw_witin, _) = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord {
