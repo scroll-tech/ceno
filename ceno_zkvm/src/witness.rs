@@ -70,6 +70,7 @@ pub struct LkMultiplicity {
 
 #[allow(dead_code)]
 impl LkMultiplicity {
+    /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
         match C {
@@ -105,6 +106,17 @@ impl LkMultiplicity {
             .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
         (*multiplicity.borrow_mut()[ROMType::U16 as usize]
             .entry(v)
+            .or_default()) += 1;
+    }
+
+    /// lookup a < b as usigned byte
+    pub fn lookup_ltu_limb8(&mut self, a: u64, b: u64) {
+        let key = a.wrapping_mul(256) + b;
+        let multiplicity = self
+            .multiplicity
+            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
+        (*multiplicity.borrow_mut()[ROMType::Ltu as usize]
+            .entry(key)
             .or_default()) += 1;
     }
 
