@@ -7,6 +7,9 @@ pub enum UtilError {
 pub enum ZKVMError {
     CircuitError,
     UtilError(UtilError),
+    WitnessNotFound(String),
+    VKNotFound(String),
+    FixedTraceNotFound(String),
     VerifyError(String),
 }
 

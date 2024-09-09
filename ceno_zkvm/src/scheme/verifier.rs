@@ -54,7 +54,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 .vk
                 .circuit_vks
                 .get(&name)
-                .expect(format!("vk of opcode circuit {} is not present", name).as_str());
+                .ok_or(ZKVMError::VKNotFound(name.clone()))?;
             let _rand_point = self.verify_opcode_proof(
                 circuit_vk,
                 &opcode_proof,
@@ -88,7 +88,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 .vk
                 .circuit_vks
                 .get(&name)
-                .expect(format!("vk of table circuit {} is not present", name).as_str());
+                .ok_or(ZKVMError::VKNotFound(name.clone()))?;
             let _rand_point = self.verify_table_proof(
                 circuit_vk,
                 &table_proof,

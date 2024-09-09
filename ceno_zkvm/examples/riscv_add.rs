@@ -5,10 +5,11 @@ use ceno_zkvm::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::{riscv::addsub::AddInstruction, Instruction},
     scheme::prover::ZKVMProver,
+    UIntValue,
 };
 use const_env::from_env;
 
-use ceno_emul::StepRecord;
+use ceno_emul::{ByteAddr, InsnKind::ADD, StepRecord, VMState, CENO_PLATFORM};
 use ceno_zkvm::{
     circuit_builder::ZKVMConstraintSystem,
     scheme::verifier::ZKVMVerifier,
@@ -16,6 +17,7 @@ use ceno_zkvm::{
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
+use itertools::Itertools;
 use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
@@ -23,6 +25,20 @@ use transcript::Transcript;
 
 #[from_env]
 const RAYON_NUM_THREADS: usize = 8;
+
+// For now, we assume registers
+//  - x0 is not touched,
+//  - x1 is initialized to 1,
+//  - x2 is initialized to -1,
+//  - x3 is initialized to loop bound.
+// we use x4 to hold the acc_sum.
+const PROGRAM_ADD_LOOP: [u32; 4] = [
+    // func7   rs2   rs1   f3  rd    opcode
+    0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
+    0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
+    0b_1_111111_00000_00011_001_1100_1_1100011, // bne x3, x0, -8
+    0b_000000000000_00000_000_00000_1110011,  // ecall halt
+];
 
 fn main() {
     type E = GoldilocksExt2;
@@ -89,30 +105,63 @@ fn main() {
         );
         (cs, config)
     };
-    let pk = zkvm_cs.key_gen(zkvm_fixed_traces);
+    let pk = zkvm_cs.key_gen(zkvm_fixed_traces).expect("keygen failed");
     let vk = pk.get_vk();
 
     // proving
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
-    for instance_num_vars in 15..22 {
-        // TODO: witness generation from step records emitted by tracer
+    for instance_num_vars in 8..22 {
         let num_instances = 1 << instance_num_vars;
+        let mut vm = VMState::new(CENO_PLATFORM);
+        let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
+
+        // init vm.x1 = 1, vm.x2 = -1, vm.x3 = num_instances
+        // vm.x4 += vm.x1
+        vm.init_register_unsafe(1usize, 1);
+        vm.init_register_unsafe(2usize, u32::MAX); // -1 in two's complement
+        vm.init_register_unsafe(3usize, num_instances as u32);
+        for (i, inst) in PROGRAM_ADD_LOOP.iter().enumerate() {
+            vm.init_memory(pc_start + i, *inst);
+        }
+        let records = vm
+            .iter_until_success()
+            .collect::<Result<Vec<StepRecord>, _>>()
+            .expect("vm exec failed")
+            .into_iter()
+            .filter(|record| record.insn().kind == ADD)
+            .collect::<Vec<_>>();
+        tracing::info!("tracer generated {} ADD records", records.len());
+
+        // TODO: generate range check inputs from opcode_circuit::assign_instances()
+        let rc_inputs = records
+            .iter()
+            .flat_map(|record| {
+                let rs1 = UIntValue::new(record.rs1().unwrap().value);
+                let rs2 = UIntValue::new(record.rs2().unwrap().value);
+
+                let rd_prev = UIntValue::new(record.rd().unwrap().value.before);
+                let rd = UIntValue::new(record.rd().unwrap().value.after);
+                let carries = rs1
+                    .add_u16_carries(&rs2)
+                    .into_iter()
+                    .map(|c| c as u16)
+                    .collect_vec();
+
+                [rd_prev.limbs, rd.limbs, carries].concat()
+            })
+            .map(|x| x as usize)
+            .collect::<Vec<_>>();
+
         let mut zkvm_witness = BTreeMap::default();
-        let add_witness = AddInstruction::assign_instances(
-            &add_config,
-            add_cs.num_witin as usize,
-            vec![StepRecord::default(); num_instances],
-        )
-        .unwrap();
+        let add_witness =
+            AddInstruction::assign_instances(&add_config, add_cs.num_witin as usize, records)
+                .unwrap();
         let range_witness = RangeTableCircuit::<E>::assign_instances(
             &range_config,
             range_cs.num_witin as usize,
-            // TODO: use real data
-            vec![vec![0; num_instances * 2], vec![4; num_instances * 6]]
-                .concat()
-                .as_slice(),
+            &rc_inputs,
         )
         .unwrap();
 

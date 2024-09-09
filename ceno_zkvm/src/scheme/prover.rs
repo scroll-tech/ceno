@@ -57,7 +57,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         for (circuit_name, pk) in self.pk.circuit_pks.iter() {
             let witness = witnesses
                 .remove(circuit_name)
-                .expect(format!("witness for circuit {} is not found", circuit_name).as_str());
+                .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
 
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();

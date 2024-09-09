@@ -141,13 +141,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         // TODO: commit to fixed_traces
 
         // transpose from row-major to column-major
-        let fixed_traces = fixed_traces.map(|t| {
-            t.de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec()
-        });
+        let fixed_traces =
+            fixed_traces.map(|t| t.de_interleaving().into_mles().into_iter().collect_vec());
 
         ProvingKey {
             fixed_traces,

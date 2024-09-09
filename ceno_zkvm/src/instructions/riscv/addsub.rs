@@ -161,9 +161,11 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         set_val!(instance, config.ts, 2);
         let addend_0 = UIntValue::new(step.rs1().unwrap().value);
         let addend_1 = UIntValue::new(step.rs2().unwrap().value);
+        let outcome = UIntValue::new(step.rd().unwrap().value.after);
+        let rd_prev = UIntValue::new(step.rd().unwrap().value.before);
         config
             .prev_rd_value
-            .assign_limbs(instance, [0, 0].iter().map(E::BaseField::from).collect());
+            .assign_limbs(instance, rd_prev.u16_fields());
         config
             .addend_0
             .assign_limbs(instance, addend_0.u16_fields());
@@ -178,6 +180,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
                 .map(|carry| E::BaseField::from(carry as u64))
                 .collect_vec(),
         );
+        config.outcome.assign_limbs(instance, outcome.u16_fields());
         // TODO #167
         set_val!(instance, config.rs1_id, 2);
         set_val!(instance, config.rs2_id, 2);

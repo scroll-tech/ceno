@@ -15,3 +15,5 @@ mod uint;
 mod utils;
 mod virtual_polys;
 mod witness;
+
+pub use uint::UIntValue;
