@@ -25,7 +25,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         let mut c = UInt::<M, C, E>::new_as_empty();
 
         // allocate witness cells and do range checks for carries
-        c.create_carry_witin(|| "carry", circuit_builder, with_overflow)?;
+        c.create_carry_witin(|| "add_carry", circuit_builder, with_overflow)?;
 
         // perform add operation
         // c[i] = a[i] + b[i] + carry[i-1] - carry[i] * 2 ^ C
@@ -36,25 +36,18 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                 .enumerate()
                 .map(|(i, (a, b))| {
                     let carries = c.carries.as_ref().unwrap();
-                    let limb_expr = match (
-                        if i > 0 { carries.get(i - 1) } else { None },
-                        carries.get(i),
-                    ) {
-                        // first limb
-                        (None, Some(next_carry)) => {
-                            a.clone() + b.clone() - next_carry.expr() * Self::POW_OF_C.into()
-                        }
-                        // assert no overflow
-                        (Some(carry), None) => {
-                            debug_assert!(!with_overflow);
-                            a.clone() + b.clone() + carry.expr()
-                        }
-                        (Some(carry), Some(next_carry)) => {
-                            a.clone() + b.clone() + carry.expr()
-                                - next_carry.expr() * Self::POW_OF_C.into()
-                        }
-                        (None, None) => unreachable!(),
-                    };
+                    let carry = if i > 0 { carries.get(i - 1) } else { None };
+                    let next_carry = carries.get(i);
+
+                    let mut limb_expr = a.clone() + b.clone();
+                    if carry.is_some() {
+                        limb_expr = limb_expr.clone() + carry.unwrap().expr();
+                    }
+                    if next_carry.is_some() {
+                        limb_expr =
+                            limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C.into();
+                    }
+
                     circuit_builder
                         .assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb_expr.clone())?;
                     Ok(limb_expr)
@@ -110,7 +103,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     ) -> Result<UInt<M, C, E>, ZKVMError> {
         let mut c = UInt::<M, C, E>::new(|| "c", circuit_builder)?;
         // allocate witness cells and do range checks for carries
-        c.create_carry_witin(|| "carry", circuit_builder, with_overflow)?;
+        c.create_carry_witin(|| "mul_carry", circuit_builder, with_overflow)?;
 
         // We only allow expressions are in monomial form
         // if any of a or b is in Expression term, it would cause error.
