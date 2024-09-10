@@ -155,7 +155,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
-        step: StepRecord,
+        step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         // TODO use fields from step
         set_val!(instance, config.pc, 1);
@@ -208,7 +208,7 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
         _lk_multiplicity: &mut LkMultiplicity,
-        _step: StepRecord,
+        _step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         // TODO use field from step
         set_val!(instance, config.pc, _step.pc().before.0 as u64);

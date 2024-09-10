@@ -1,6 +1,12 @@
-#![no_main]
 #![no_std]
+
+mod io;
+pub use io::info_out;
+
 use core::arch::{asm, global_asm};
+
+mod params;
+pub use params::*;
 
 #[cfg(not(test))]
 mod panic_handler {
