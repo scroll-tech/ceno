@@ -38,9 +38,9 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
     pub prev_rd_ts: WitIn,
-    pub lt_wtns_rs1: Lt2Config,
-    pub lt_wtns_rs2: Lt2Config,
-    pub lt_wtns_rd: Lt2Config,
+    pub lt_rs1_cfg: Lt2Config,
+    pub lt_rs2_cfg: Lt2Config,
+    pub lt_prev_ts_cfg: Lt2Config,
     phantom: PhantomData<E>,
 }
 
@@ -113,9 +113,11 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let ts =
         circuit_builder.register_read(|| "read_rs2", &rs2_id, prev_rs2_ts.expr(), ts, &addend_1)?;
 
-    let ts = circuit_builder.register_write(
+    let (ts, lt_rs1_cfg, lt_rs2_cfg, lt_prev_ts_cfg) = circuit_builder.register_write(
         || "write_rd",
         &rd_id,
+        prev_rs1_ts.expr(),
+        prev_rs2_ts.expr(),
         prev_rd_ts.expr(),
         ts,
         &prev_rd_value,
@@ -124,25 +126,6 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
 
     let next_ts = ts + 1.into();
     circuit_builder.state_out(next_pc, next_ts)?;
-
-    let lt_wtns_rs1 = circuit_builder.less_than(
-        || "prev_rs1_ts < ts",
-        prev_rs1_ts.expr(),
-        cur_ts.expr(),
-        Some(true),
-    )?;
-    let lt_wtns_rs2 = circuit_builder.less_than(
-        || "prev_rs2_ts < ts",
-        prev_rs2_ts.expr(),
-        cur_ts.expr(),
-        Some(true),
-    )?;
-    let lt_wtns_rd = circuit_builder.less_than(
-        || "prev_rd_ts < ts",
-        prev_rd_ts.expr(),
-        cur_ts.expr(),
-        Some(true),
-    )?;
 
     Ok(InstructionConfig {
         pc,
@@ -157,9 +140,9 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         prev_rs1_ts,
         prev_rs2_ts,
         prev_rd_ts,
-        lt_wtns_rs1,
-        lt_wtns_rs2,
-        lt_wtns_rd,
+        lt_rs1_cfg,
+        lt_rs2_cfg,
+        lt_prev_ts_cfg,
         phantom: PhantomData,
     })
 }
@@ -214,9 +197,21 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         set_val!(instance, config.prev_rs2_ts, 2);
         set_val!(instance, config.prev_rd_ts, 2);
 
-        Lt2Input { lhs: 2, rhs: 3 }.assign(instance, &config.lt_wtns_rs1);
-        Lt2Input { lhs: 2, rhs: 3 }.assign(instance, &config.lt_wtns_rs2);
-        Lt2Input { lhs: 2, rhs: 3 }.assign(instance, &config.lt_wtns_rd);
+        Lt2Input {
+            lhs: 2,         // rs1
+            rhs: 3 + 1 + 1, // ts = cur_ts + 1 + 1
+        }
+        .assign(instance, &config.lt_rs1_cfg);
+        Lt2Input {
+            lhs: 2,         // rs2
+            rhs: 3 + 1 + 1, // ts = cur_ts + 1 + 1
+        }
+        .assign(instance, &config.lt_rs2_cfg);
+        Lt2Input {
+            lhs: 2,         // rd
+            rhs: 3 + 1 + 1, // ts = cur_ts + 1 + 1
+        }
+        .assign(instance, &config.lt_prev_ts_cfg);
 
         Ok(())
     }
