@@ -109,7 +109,7 @@ impl LkMultiplicity {
             .or_default()) += 1;
     }
 
-    /// lookup a < b as usigned byte
+    /// lookup a < b as unsigned byte
     pub fn lookup_ltu_limb8(&mut self, a: u64, b: u64) {
         let key = a.wrapping_mul(256) + b;
         let multiplicity = self
