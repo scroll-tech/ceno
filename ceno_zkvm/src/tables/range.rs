@@ -4,6 +4,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
+    scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
     tables::TableCircuit,
@@ -29,7 +30,6 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
         "RANGE".into()
     }
 
-    #[allow(unused)]
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<RangeTableConfig, ZKVMError> {
         let u16_tbl = cb.create_fixed(|| "u16_tbl")?;
         let u16_mlt = cb.create_witin(|| "u16_mlt")?;
@@ -52,6 +52,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_u16s, num_fixed);
         fixed
             .par_iter_mut()
+            .with_min_len(MIN_PAR_SIZE)
             .zip((0..num_u16s).into_par_iter())
             .for_each(|(row, i)| {
                 set_fixed_val!(row, config.u16_tbl.0, E::BaseField::from(i as u64));
@@ -59,7 +60,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
 
         fixed
     }
-    #[allow(unused)]
+
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
@@ -73,6 +74,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
         let mut witness = RowMajorMatrix::<E::BaseField>::new(u16_mlt.len(), num_witin);
         witness
             .par_iter_mut()
+            .with_min_len(MIN_PAR_SIZE)
             .zip(u16_mlt.into_par_iter())
             .for_each(|(row, mlt)| {
                 set_val!(row, config.u16_mlt, E::BaseField::from(mlt as u64));
