@@ -6,22 +6,17 @@ use goldilocks::GoldilocksExt2;
 
 use itertools::{chain, Itertools};
 use mpcs::{
-    util::{
-        plonky2_util::log2_ceil,
-        transcript::{
-            FieldTranscript, FieldTranscriptRead, FieldTranscriptWrite, InMemoryTranscript,
-            PoseidonTranscript,
-        },
-    },
-    Basefold, BasefoldBasecodeParams, Evaluation, PolynomialCommitmentScheme,
+    util::plonky2_util::log2_ceil, Basefold, BasefoldBasecodeParams, Evaluation,
+    PolynomialCommitmentScheme,
 };
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use transcript::Transcript;
 
 type Pcs = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;
-type T = PoseidonTranscript<GoldilocksExt2>;
+type T = Transcript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
 const NUM_SAMPLES: usize = 10;
@@ -32,7 +27,7 @@ const BATCH_SIZE_LOG_END: usize = 5;
 
 fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     let mut group = c.benchmark_group(format!(
-        "commit_open_verify_goldilocks_rs_{}",
+        "commit_open_verify_goldilocks_basecode_{}",
         if is_base { "base" } else { "ext2" }
     ));
     group.sample_size(NUM_SAMPLES);
@@ -51,64 +46,56 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             Pcs::trim(&param, poly_size).unwrap()
         };
 
-        let proof = {
-            let mut transcript = T::new();
-            let poly = if is_base {
-                DenseMultilinearExtension::random(num_vars, &mut OsRng)
-            } else {
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    num_vars,
-                    (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
-                )
-            };
-
-            let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
-
-            group.bench_function(BenchmarkId::new("commit", format!("{}", num_vars)), |b| {
-                b.iter(|| {
-                    Pcs::commit(&pp, &poly).unwrap();
-                })
-            });
-
-            let point = transcript.squeeze_challenges(num_vars);
-            let eval = poly.evaluate(point.as_slice());
-            transcript.write_field_element_ext(&eval).unwrap();
-            Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
-
-            group.bench_function(BenchmarkId::new("open", format!("{}", num_vars)), |b| {
-                b.iter_batched(
-                    || transcript.clone(),
-                    |mut transcript| {
-                        Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
-                    },
-                    BatchSize::SmallInput,
-                );
-            });
-
-            transcript.into_proof()
+        let mut transcript = T::new(b"BaseFold");
+        let poly = if is_base {
+            DenseMultilinearExtension::random(num_vars, &mut OsRng)
+        } else {
+            DenseMultilinearExtension::from_evaluations_ext_vec(
+                num_vars,
+                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+            )
         };
+
+        let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
+
+        group.bench_function(BenchmarkId::new("commit", format!("{}", num_vars)), |b| {
+            b.iter(|| {
+                Pcs::commit(&pp, &poly).unwrap();
+            })
+        });
+
+        let point = (0..num_vars)
+            .map(|_| transcript.get_and_append_challenge(b"Point").elements)
+            .collect::<Vec<_>>();
+        let eval = poly.evaluate(point.as_slice());
+        transcript.append_field_element_ext(&eval);
+        let transcript_for_bench = transcript.clone();
+        let proof = Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
+
+        group.bench_function(BenchmarkId::new("open", format!("{}", num_vars)), |b| {
+            b.iter_batched(
+                || transcript_for_bench.clone(),
+                |mut transcript| {
+                    Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
+                },
+                BatchSize::SmallInput,
+            );
+        });
         // Verify
-        let mut transcript = T::from_proof(proof.as_slice());
-        Pcs::verify(
-            &vp,
-            &Pcs::read_commitment(&vp, &mut transcript).unwrap(),
-            &transcript.squeeze_challenges(num_vars),
-            &transcript.read_field_element_ext().unwrap(),
-            &mut transcript,
-        )
-        .unwrap();
+        let comm = Pcs::get_pure_commitment(&comm);
+        let mut transcript = T::new(b"BaseFold");
+        Pcs::write_commitment(&comm, &mut transcript).unwrap();
+        let point = (0..num_vars)
+            .map(|_| transcript.get_and_append_challenge(b"Point").elements)
+            .collect::<Vec<_>>();
+        transcript.append_field_element_ext(&eval);
+        let transcript_for_bench = transcript.clone();
+        Pcs::verify(&vp, &comm, &point, &eval, &proof, &mut transcript).unwrap();
         group.bench_function(BenchmarkId::new("verify", format!("{}", num_vars)), |b| {
             b.iter_batched(
-                || T::from_proof(proof.as_slice()),
+                || transcript_for_bench.clone(),
                 |mut transcript| {
-                    Pcs::verify(
-                        &vp,
-                        &Pcs::read_commitment(&vp, &mut transcript).unwrap(),
-                        &transcript.squeeze_challenges(num_vars),
-                        &transcript.read_field_element_ext().unwrap(),
-                        &mut transcript,
-                    )
-                    .unwrap();
+                    Pcs::verify(&vp, &comm, &point, &eval, &proof, &mut transcript).unwrap();
                 },
                 BatchSize::SmallInput,
             );
@@ -118,7 +105,7 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
 
 fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     let mut group = c.benchmark_group(format!(
-        "batch_commit_open_verify_goldilocks_rs_{}",
+        "batch_commit_open_verify_goldilocks_basecode_{}",
         if is_base { "base" } else { "ext2" }
     ));
     group.sample_size(NUM_SAMPLES);
@@ -142,96 +129,97 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             .unique()
             .collect_vec();
 
-            let proof = {
-                let mut transcript = T::new();
-                let polys = (0..batch_size)
-                    .map(|i| {
-                        if is_base {
-                            DenseMultilinearExtension::random(
-                                num_vars - log2_ceil((i >> 1) + 1),
-                                &mut rng.clone(),
-                            )
-                        } else {
-                            DenseMultilinearExtension::from_evaluations_ext_vec(
-                                num_vars - log2_ceil((i >> 1) + 1),
-                                (0..1 << (num_vars - log2_ceil((i >> 1) + 1)))
-                                    .map(|_| E::random(&mut OsRng))
-                                    .collect(),
-                            )
-                        }
-                    })
-                    .collect_vec();
-                let comms = polys
-                    .iter()
-                    .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
-                    .collect_vec();
-
-                let points = (0..num_points)
-                    .map(|i| transcript.squeeze_challenges(num_vars - log2_ceil(i + 1)))
-                    .take(num_points)
-                    .collect_vec();
-
-                let evals = evals
-                    .iter()
-                    .copied()
-                    .map(|(poly, point)| {
-                        Evaluation::new(poly, point, polys[poly].evaluate(&points[point]))
-                    })
-                    .collect_vec();
-                transcript
-                    .write_field_elements_ext(evals.iter().map(Evaluation::value))
-                    .unwrap();
-                Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
-
-                group.bench_function(
-                    BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
-                    |b| {
-                        b.iter_batched(
-                            || transcript.clone(),
-                            |mut transcript| {
-                                Pcs::batch_open(
-                                    &pp,
-                                    &polys,
-                                    &comms,
-                                    &points,
-                                    &evals,
-                                    &mut transcript,
-                                )
-                                .unwrap();
-                            },
-                            BatchSize::SmallInput,
-                        );
-                    },
-                );
-
-                transcript.into_proof()
-            };
-            // Batch verify
-            let mut transcript = T::from_proof(proof.as_slice());
-            let comms = &Pcs::read_commitments(&vp, batch_size, &mut transcript).unwrap();
+            let mut transcript = T::new(b"BaseFold");
+            let polys = (0..batch_size)
+                .map(|i| {
+                    if is_base {
+                        DenseMultilinearExtension::random(
+                            num_vars - log2_ceil((i >> 1) + 1),
+                            &mut rng.clone(),
+                        )
+                    } else {
+                        DenseMultilinearExtension::from_evaluations_ext_vec(
+                            num_vars - log2_ceil((i >> 1) + 1),
+                            (0..1 << (num_vars - log2_ceil((i >> 1) + 1)))
+                                .map(|_| E::random(&mut OsRng))
+                                .collect(),
+                        )
+                    }
+                })
+                .collect_vec();
+            let comms = polys
+                .iter()
+                .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
+                .collect_vec();
 
             let points = (0..num_points)
-                .map(|i| transcript.squeeze_challenges(num_vars - log2_ceil(i + 1)))
+                .map(|i| {
+                    (0..num_vars - i)
+                        .map(|_| transcript.get_and_append_challenge(b"Point").elements)
+                        .collect::<Vec<_>>()
+                })
                 .take(num_points)
                 .collect_vec();
 
-            let evals2 = transcript.read_field_elements_ext(evals.len()).unwrap();
+            let evals = evals
+                .iter()
+                .copied()
+                .map(|(poly, point)| {
+                    Evaluation::new(poly, point, polys[poly].evaluate(&points[point]))
+                })
+                .collect_vec();
+            let values: Vec<E> = evals
+                .iter()
+                .map(Evaluation::value)
+                .map(|x| *x)
+                .collect::<Vec<E>>();
+            transcript.append_field_element_exts(values.as_slice());
+            let transcript_for_bench = transcript.clone();
+            let proof =
+                Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
+
+            group.bench_function(
+                BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
+                |b| {
+                    b.iter_batched(
+                        || transcript_for_bench.clone(),
+                        |mut transcript| {
+                            Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript)
+                                .unwrap();
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
+            // Batch verify
+            let mut transcript = T::new(b"BaseFold");
+            let comms = comms
+                .iter()
+                .map(|comm| {
+                    let comm = Pcs::get_pure_commitment(comm);
+                    Pcs::write_commitment(&comm, &mut transcript).unwrap();
+                    comm
+                })
+                .collect_vec();
+            let points = (0..num_points)
+                .map(|i| {
+                    (0..num_vars - i)
+                        .map(|_| transcript.get_and_append_challenge(b"Point").elements)
+                        .collect::<Vec<_>>()
+                })
+                .take(num_points)
+                .collect_vec();
+
+            let values: Vec<E> = evals
+                .iter()
+                .map(Evaluation::value)
+                .map(|x| *x)
+                .collect::<Vec<E>>();
+            transcript.append_field_element_exts(values.as_slice());
 
             let backup_transcript = transcript.clone();
 
-            Pcs::batch_verify(
-                &vp,
-                comms,
-                &points,
-                &evals
-                    .iter()
-                    .copied()
-                    .zip(evals2.clone())
-                    .map(|((poly, point), eval)| Evaluation::new(poly, point, eval))
-                    .collect_vec(),
-                &mut transcript,
-            )
-            .unwrap();
+            Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_verify", format!("{}-{}", num_vars, batch_size)),
@@ -241,14 +229,10 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                         |mut transcript| {
                             Pcs::batch_verify(
                                 &vp,
-                                comms,
+                                &comms,
                                 &points,
-                                &evals
-                                    .iter()
-                                    .copied()
-                                    .zip(evals2.clone())
-                                    .map(|((poly, point), eval)| Evaluation::new(poly, point, eval))
-                                    .collect_vec(),
+                                &evals,
+                                &proof,
                                 &mut transcript,
                             )
                             .unwrap();
@@ -263,7 +247,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
 
 fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     let mut group = c.benchmark_group(format!(
-        "simple_batch_commit_open_verify_goldilocks_rs_{}",
+        "simple_batch_commit_open_verify_goldilocks_basecode_{}",
         if is_base { "base" } else { "extension" }
     ));
     group.sample_size(NUM_SAMPLES);
@@ -277,73 +261,76 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
                 let param = Pcs::setup(poly_size, &rng).unwrap();
                 Pcs::trim(&param, poly_size).unwrap()
             };
-            let proof = {
-                let mut transcript = T::new();
-                let polys = (0..batch_size)
-                    .map(|_| {
-                        if is_base {
-                            DenseMultilinearExtension::random(num_vars, &mut rng.clone())
-                        } else {
-                            DenseMultilinearExtension::from_evaluations_ext_vec(
-                                num_vars,
-                                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
-                            )
-                        }
+            let mut transcript = T::new(b"BaseFold");
+            let polys = (0..batch_size)
+                .map(|_| {
+                    if is_base {
+                        DenseMultilinearExtension::random(num_vars, &mut rng.clone())
+                    } else {
+                        DenseMultilinearExtension::from_evaluations_ext_vec(
+                            num_vars,
+                            (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                        )
+                    }
+                })
+                .collect_vec();
+            let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+
+            group.bench_function(
+                BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
+                |b| {
+                    b.iter(|| {
+                        Pcs::batch_commit(&pp, &polys).unwrap();
                     })
-                    .collect_vec();
-                let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                },
+            );
 
-                group.bench_function(
-                    BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
-                    |b| {
-                        b.iter(|| {
-                            Pcs::batch_commit(&pp, &polys).unwrap();
-                        })
-                    },
-                );
+            let point = (0..num_vars)
+                .map(|_| transcript.get_and_append_challenge(b"Point").elements)
+                .collect::<Vec<_>>();
 
-                let point = transcript.squeeze_challenges(num_vars);
+            let evals = (0..batch_size)
+                .map(|i| polys[i].evaluate(&point))
+                .collect_vec();
 
-                let evals = (0..batch_size)
-                    .map(|i| polys[i].evaluate(&point))
-                    .collect_vec();
+            transcript.append_field_element_exts(&evals);
+            let transcript_for_bench = transcript.clone();
+            let proof = Pcs::simple_batch_open(&pp, &polys, &comm, &point, &evals, &mut transcript)
+                .unwrap();
 
-                transcript.write_field_elements_ext(&evals).unwrap();
-                Pcs::simple_batch_open(&pp, &polys, &comm, &point, &evals, &mut transcript)
-                    .unwrap();
+            group.bench_function(
+                BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
+                |b| {
+                    b.iter_batched(
+                        || transcript_for_bench.clone(),
+                        |mut transcript| {
+                            Pcs::simple_batch_open(
+                                &pp,
+                                &polys,
+                                &comm,
+                                &point,
+                                &evals,
+                                &mut transcript,
+                            )
+                            .unwrap();
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
+            let comm = Pcs::get_pure_commitment(&comm);
 
-                group.bench_function(
-                    BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
-                    |b| {
-                        b.iter_batched(
-                            || transcript.clone(),
-                            |mut transcript| {
-                                Pcs::simple_batch_open(
-                                    &pp,
-                                    &polys,
-                                    &comm,
-                                    &point,
-                                    &evals,
-                                    &mut transcript,
-                                )
-                                .unwrap();
-                            },
-                            BatchSize::SmallInput,
-                        );
-                    },
-                );
-                transcript.into_proof()
-            };
             // Batch verify
-            let mut transcript = T::from_proof(proof.as_slice());
-            let comms = &Pcs::read_commitment(&vp, &mut transcript).unwrap();
+            let mut transcript = Transcript::new(b"BaseFold");
+            Pcs::write_commitment(&comm, &mut transcript).unwrap();
 
-            let point = transcript.squeeze_challenges(num_vars);
-            let evals = transcript.read_field_elements_ext(batch_size).unwrap();
-
+            let point = (0..num_vars)
+                .map(|_| transcript.get_and_append_challenge(b"Point").elements)
+                .collect::<Vec<_>>();
+            transcript.append_field_element_exts(&evals);
             let backup_transcript = transcript.clone();
 
-            Pcs::simple_batch_verify(&vp, comms, &point, &evals, &mut transcript).unwrap();
+            Pcs::simple_batch_verify(&vp, &comm, &point, &evals, &proof, &mut transcript).unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_verify", format!("{}-{}", num_vars, batch_size)),
@@ -351,8 +338,15 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
                     b.iter_batched(
                         || backup_transcript.clone(),
                         |mut transcript| {
-                            Pcs::simple_batch_verify(&vp, comms, &point, &evals, &mut transcript)
-                                .unwrap();
+                            Pcs::simple_batch_verify(
+                                &vp,
+                                &comm,
+                                &point,
+                                &evals,
+                                &proof,
+                                &mut transcript,
+                            )
+                            .unwrap();
                         },
                         BatchSize::SmallInput,
                     );

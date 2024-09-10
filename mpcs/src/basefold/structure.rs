@@ -1,4 +1,7 @@
-use crate::util::{hash::Digest, merkle_tree::MerkleTree};
+use crate::{
+    sum_check::classic::{Coefficients, SumcheckProof},
+    util::{hash::Digest, merkle_tree::MerkleTree},
+};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 
@@ -11,7 +14,13 @@ use rand_chacha::ChaCha8Rng;
 use std::{marker::PhantomData, slice};
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
-use super::{Basecode, BasecodeDefaultSpec};
+use super::{
+    query_phase::{
+        BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
+        SimpleBatchQueriesResultWithMerklePath,
+    },
+    Basecode, BasecodeDefaultSpec,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -89,7 +98,7 @@ where
         self.codeword_tree.leaves()
     }
 
-    pub fn batch_codewords(&self, coeffs: &Vec<E>) -> Vec<E> {
+    pub fn batch_codewords(&self, coeffs: &[E]) -> Vec<E> {
         self.codeword_tree.batch_leaves(coeffs)
     }
 
@@ -261,4 +270,62 @@ where
         let root = self.get_root_ref();
         slice::from_ref(root)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProofQueriesResultWithMerklePath<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    Single(QueriesResultWithMerklePath<E>),
+    Batched(BatchedQueriesResultWithMerklePath<E>),
+    SimpleBatched(SimpleBatchQueriesResultWithMerklePath<E>),
+}
+
+impl<E: ExtensionField> ProofQueriesResultWithMerklePath<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn as_single<'a>(&'a self) -> &'a QueriesResultWithMerklePath<E> {
+        match self {
+            Self::Single(x) => x,
+            _ => panic!("Not a single query result"),
+        }
+    }
+
+    pub fn as_batched<'a>(&'a self) -> &'a BatchedQueriesResultWithMerklePath<E> {
+        match self {
+            Self::Batched(x) => x,
+            _ => panic!("Not a batched query result"),
+        }
+    }
+
+    pub fn as_simple_batched<'a>(&'a self) -> &'a SimpleBatchQueriesResultWithMerklePath<E> {
+        match self {
+            Self::SimpleBatched(x) => x,
+            _ => panic!("Not a simple batched query result"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BasefoldProof<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub(crate) sumcheck_messages: Vec<Vec<E>>,
+    pub(crate) roots: Vec<Digest<E::BaseField>>,
+    pub(crate) final_message: Vec<E>,
+    pub(crate) query_result_with_merkle_path: ProofQueriesResultWithMerklePath<E>,
+    pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BasefoldCommitPhaseProof<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub(crate) sumcheck_messages: Vec<Vec<E>>,
+    pub(crate) roots: Vec<Digest<E::BaseField>>,
+    pub(crate) final_message: Vec<E>,
 }
