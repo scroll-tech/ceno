@@ -224,7 +224,7 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
         config: &Self::InstructionConfig,
         instance: &mut [std::mem::MaybeUninit<E::BaseField>],
         _lk_multiplicity: &mut LkMultiplicity,
-        _step: ceno_emul::StepRecord,
+        _step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         // take input from _step
         let input = BltInput::random();
