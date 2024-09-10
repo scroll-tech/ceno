@@ -6,14 +6,15 @@ use crate::{
         impl_index,
         parallel::{num_threads, parallelize_iter},
         poly_index_ext, poly_iter_ext,
-        transcript::{FieldTranscriptRead, FieldTranscriptWrite},
     },
     Error,
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
+use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, iter, ops::AddAssign};
+use transcript::Transcript;
 
 macro_rules! zip_self {
     (@ $iter:expr, $step:expr, $skip:expr) => {
@@ -30,40 +31,21 @@ macro_rules! zip_self {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Coefficients<E: ExtensionField>(FieldType<E>);
 
 impl<E: ExtensionField> ClassicSumCheckRoundMessage<E> for Coefficients<E> {
     type Auxiliary = ();
 
-    fn write(&self, transcript: &mut impl FieldTranscriptWrite<E>) -> Result<(), Error> {
+    fn write(&self, transcript: &mut Transcript<E>) -> Result<(), Error> {
         match &self.0 {
-            FieldType::Ext(coeffs) => transcript.write_field_elements_ext(coeffs),
-            FieldType::Base(coeffs) => transcript.write_field_elements_base(coeffs),
+            FieldType::Ext(coeffs) => transcript.append_field_element_exts(coeffs),
+            FieldType::Base(coeffs) => coeffs
+                .iter()
+                .for_each(|c| transcript.append_field_element(c)),
             FieldType::Unreachable => unreachable!(),
-        }
-    }
-
-    fn read_base(
-        degree: usize,
-        transcript: &mut impl FieldTranscriptRead<E>,
-    ) -> Result<Self, Error> {
-        Ok(Self(
-            transcript
-                .read_field_elements_base(degree + 1)
-                .map(FieldType::Base)?,
-        ))
-    }
-
-    fn read_ext(
-        degree: usize,
-        transcript: &mut impl FieldTranscriptRead<E>,
-    ) -> Result<Self, Error> {
-        Ok(Self(
-            transcript
-                .read_field_elements_ext(degree + 1)
-                .map(FieldType::Ext)?,
-        ))
+        };
+        Ok(())
     }
 
     fn sum(&self) -> E {
@@ -205,7 +187,7 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
                 products.iter_mut().for_each(|(lhs, _)| {
                     *lhs *= &rhs;
                 });
-                (constant * &rhs, products)
+                (constant * rhs, products)
             },
         );
         Self(constant, flattened)
@@ -215,7 +197,7 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
         // Initialize h(X) to zero
         let mut coeffs = Coefficients(FieldType::Ext(vec![E::ZERO; state.expression.degree() + 1]));
         // First, sum the constant over the hypercube and add to h(X)
-        coeffs += &(E::from(state.size() as u64) * &self.0);
+        coeffs += &(E::from(state.size() as u64) * self.0);
         // Next, for every product of polynomials, where each product is assumed to be exactly 2
         // put this into h(X).
         if self.1.iter().all(|(_, products)| products.len() == 2) {
@@ -287,11 +269,11 @@ impl<E: ExtensionField> CoefficientsProver<E> {
                     .take(n)
                     .for_each(|((lhs_0, lhs_1), (rhs_0, rhs_1))| {
                         let coeff_0 = lhs_0 * rhs_0;
-                        let coeff_2 = (lhs_1 - lhs_0) * &(rhs_1 - rhs_0);
+                        let coeff_2 = (lhs_1 - lhs_0) * (rhs_1 - rhs_0);
                         coeffs[0] += &coeff_0;
                         coeffs[2] += &coeff_2;
                         if !LAZY {
-                            coeffs[1] += &(lhs_1 * rhs_1 - &coeff_0 - &coeff_2);
+                            coeffs[1] += &(lhs_1 * rhs_1 - coeff_0 - coeff_2);
                         }
                     });
                 };

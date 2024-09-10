@@ -21,17 +21,16 @@ pub trait FieldTranscript<E: ExtensionField> {
     fn common_field_element_ext(&mut self, fe: &E) -> Result<(), Error>;
 
     fn common_field_elements(&mut self, fes: FieldType<E>) -> Result<(), Error> {
-        Ok(match fes {
+        match fes {
             FieldType::Base(fes) => fes
                 .iter()
-                .map(|fe| self.common_field_element_base(fe))
-                .try_collect()?,
+                .try_for_each(|fe| self.common_field_element_base(fe))?,
             FieldType::Ext(fes) => fes
                 .iter()
-                .map(|fe| self.common_field_element_ext(fe))
-                .try_collect()?,
+                .try_for_each(|fe| self.common_field_element_ext(fe))?,
             FieldType::Unreachable => unreachable!(),
-        })
+        };
+        Ok(())
     }
 }
 
@@ -146,7 +145,7 @@ impl<T: Copy> Stream<T> {
         self.inner.len() - self.pointer
     }
 
-    pub fn read_exact(&mut self, output: &mut Vec<T>) -> Result<(), Error> {
+    pub fn read_exact(&mut self, output: &mut [T]) -> Result<(), Error> {
         let left = self.left();
         if left < output.len() {
             return Err(Error::Transcript(

@@ -246,7 +246,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
-    /// lookup a < b as usigned byte
+    /// lookup a < b as unsigned byte
     pub(crate) fn lookup_ltu_limb8(
         &mut self,
         res: Expression<E>,

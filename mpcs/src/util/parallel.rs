@@ -1,10 +1,7 @@
 pub fn num_threads() -> usize {
     #[cfg(feature = "parallel")]
     let nt = rayon::current_num_threads();
-    return nt;
-
-    #[cfg(not(feature = "parallel"))]
-    return 1;
+    if cfg!(feature = "parallel") { nt } else { 1 }
 }
 
 pub fn parallelize_iter<I, T, F>(iter: I, f: F)

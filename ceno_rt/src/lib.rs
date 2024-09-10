@@ -4,6 +4,12 @@ use core::arch::{asm, global_asm};
 
 mod allocator;
 
+mod io;
+pub use io::info_out;
+
+mod params;
+pub use params::*;
+
 #[cfg(not(test))]
 mod panic_handler {
     use core::panic::PanicInfo;
