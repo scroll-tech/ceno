@@ -42,6 +42,13 @@ pub struct MemOp<T> {
     pub previous_cycle: Cycle,
 }
 
+impl<T> MemOp<T> {
+    /// Get the register index of this operation.
+    pub fn register_index(&self) -> RegIdx {
+        CENO_PLATFORM.register_index(self.addr.into())
+    }
+}
+
 pub type ReadOp = MemOp<Word>;
 pub type WriteOp = MemOp<Change<Word>>;
 
