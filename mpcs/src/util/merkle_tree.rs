@@ -2,7 +2,9 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+    },
     slice::ParallelSlice,
 };
 
@@ -64,12 +66,13 @@ where
         &self.leaves
     }
 
-    pub fn batch_leaves(&self, coeffs: &Vec<E>) -> Vec<E> {
+    pub fn batch_leaves(&self, coeffs: &[E]) -> Vec<E> {
         (0..self.leaves[0].len())
+            .into_par_iter()
             .map(|i| {
                 self.leaves
                     .iter()
-                    .zip(coeffs)
+                    .zip(coeffs.iter())
                     .map(|(leaf, coeff)| field_type_index_ext(leaf, i) * *coeff)
                     .sum()
             })

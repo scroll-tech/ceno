@@ -23,7 +23,8 @@ use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
 use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator, ParallelSlice,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+    ParallelSlice,
 };
 
 use super::structure::BasefoldCommitmentWithData;
@@ -339,10 +340,14 @@ where
     let timer = start_timer!(|| "Simple batch commit phase");
     assert_eq!(point.len(), num_vars);
     assert_eq!(comm.num_polys, batch_coeffs.len());
+    let prepare_timer = start_timer!(|| "Prepare");
     let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
-    let mut running_oracle = comm.batch_codewords(&batch_coeffs.to_vec());
+    let batch_codewords_timer = start_timer!(|| "Batch codewords");
+    let mut running_oracle = comm.batch_codewords(batch_coeffs);
+    end_timer!(batch_codewords_timer);
     let mut running_evals = (0..(1 << num_vars))
+        .into_par_iter()
         .map(|i| {
             comm.polynomials_bh_evals
                 .iter()
@@ -350,13 +355,17 @@ where
                 .map(|(eval, coeff)| field_type_index_ext(eval, i) * *coeff)
                 .sum()
         })
-        .collect_vec();
+        .collect();
+    end_timer!(prepare_timer);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let build_eq_timer = start_timer!(|| "Basefold::open");
+    let build_eq_timer = start_timer!(|| "Basefold::build eq");
     let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
+
+    let reverse_bits_timer = start_timer!(|| "Basefold::reverse bits");
     reverse_index_bits_in_place(&mut eq);
+    end_timer!(reverse_bits_timer);
 
     let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round(&mut eq, &mut running_evals);
