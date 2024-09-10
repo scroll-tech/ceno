@@ -188,6 +188,7 @@ impl ExprLtInput {
 
         let diff = self.lhs as i64 - self.rhs as i64;
         config.diff.iter().enumerate().for_each(|(i, wit)| {
+            // extract the 16 bit limb from diff and assign to instance
             set_val!(instance, wit, {
                 i64_to_base::<F>((diff >> (i * 16)) & 0xffff)
             });
