@@ -45,6 +45,13 @@ impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
         self.values.par_chunks_mut(self.num_col)
     }
 
+    pub fn par_batch_iter_mut(
+        &mut self,
+        num_rows: usize,
+    ) -> rayon::slice::ChunksMut<MaybeUninit<T>> {
+        self.values.par_chunks_mut(num_rows * self.num_col)
+    }
+
     pub fn de_interleaving(mut self) -> Vec<Vec<T>> {
         (0..self.num_col)
             .map(|i| {
