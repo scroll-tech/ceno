@@ -1,10 +1,7 @@
 use std::time::Instant;
 
 use ark_std::test_rng;
-use ceno_zkvm::{
-    instructions::{riscv::addsub::AddInstruction},
-    scheme::prover::ZKVMProver,
-};
+use ceno_zkvm::{instructions::riscv::addsub::AddInstruction, scheme::prover::ZKVMProver};
 use const_env::from_env;
 
 use ceno_emul::{ByteAddr, InsnKind::ADD, StepRecord, VMState, CENO_PLATFORM};
