@@ -43,7 +43,7 @@ fn ceno_hash_60_to_1(values: &[Goldilocks]) {
     let result = black_box(PoseidonHash::hash_or_noop(values));
 }
 
-pub fn criterion_benchmark(c: &mut Criterion) {
+pub fn hashing_benchmark(c: &mut Criterion) {
     let p_a = black_box(random_plonky_2_goldy());
     c.bench_function("plonky hash single", |bencher| {
         bencher.iter(|| plonky_hash_single(p_a))
@@ -102,5 +102,5 @@ pub fn permutation_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark, permutation_benchmark);
+criterion_group!(benches, permutation_benchmark, hashing_benchmark);
 criterion_main!(benches);
