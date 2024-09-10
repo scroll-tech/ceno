@@ -1,14 +1,57 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
+    chip_handler::general::rlc_chip_record,
     circuit_builder::CircuitBuilder,
     expression::Expression,
     structs::{ROMType, WitnessId},
 };
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use goldilocks::{GoldilocksExt2, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
-use std::{marker::PhantomData, ops::Neg};
+use once_cell::sync::Lazy;
+use std::{
+    collections::HashSet,
+    hash::Hash,
+    marker::PhantomData,
+    ops::Neg,
+    sync::{Mutex, MutexGuard},
+};
+
+fn default_challenge<E: ExtensionField>() -> [E; 2] {
+    [1.into(), 1000.into()]
+}
+
+static GLOBAL_LOOKUP_TABLE: Lazy<Mutex<HashSet<GoldilocksExt2>>> =
+    Lazy::new(|| Mutex::new(load_tables(default_challenge())));
+
+pub(crate) struct MockProver;
+
+impl MockProver {
+    pub fn run(
+        cb: &mut CircuitBuilder<GoldilocksExt2>,
+        wits_in: &[ArcMultilinearExtension<'_, GoldilocksExt2>],
+    ) -> Result<(), Vec<MockProverError<GoldilocksExt2>>> {
+        MockProverGeneral::<GoldilocksExt2>::run(
+            cb,
+            wits_in,
+            Some(default_challenge()),
+            Some(GLOBAL_LOOKUP_TABLE.lock().unwrap()),
+        )
+    }
+
+    pub fn assert_satisfied(
+        cb: &mut CircuitBuilder<GoldilocksExt2>,
+        wits_in: &[ArcMultilinearExtension<'_, GoldilocksExt2>],
+    ) {
+        MockProverGeneral::<GoldilocksExt2>::assert_satisfied(
+            cb,
+            wits_in,
+            Some(default_challenge()),
+            Some(GLOBAL_LOOKUP_TABLE.lock().unwrap()),
+        );
+    }
+}
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -188,16 +231,16 @@ impl<E: ExtensionField> MockProverError<E> {
     }
 }
 
-pub(crate) struct MockProver<E: ExtensionField> {
+pub(crate) struct MockProverGeneral<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 
-impl<'a, E: ExtensionField> MockProver<E> {
-    #[allow(dead_code)]
+impl<'a, E: ExtensionField + Hash> MockProverGeneral<E> {
     pub fn run(
         cb: &mut CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
+        lookup_table_cache: Option<MutexGuard<HashSet<E>>>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         let challenge = challenge.unwrap_or([E::ONE, E::ONE]);
 
@@ -261,11 +304,20 @@ impl<'a, E: ExtensionField> MockProver<E> {
             }
         }
 
-        // TODO load more tables here
-        // TODO cache table_vec across unittest
-        let mut table_vec = vec![];
-        load_u5_table(&mut table_vec, cb, challenge);
-        load_u16_table(&mut table_vec, cb, challenge);
+        // Load the table if we don't have cache.
+        let lookup_table = if lookup_table_cache.is_none() {
+            Some(load_tables(challenge))
+        } else {
+            None
+        };
+
+        let table_contains = |element: &E| {
+            if let Some(lookup_table) = &lookup_table {
+                lookup_table.contains(element)
+            } else {
+                lookup_table_cache.as_ref().unwrap().contains(element)
+            }
+        };
 
         // Lookup expressions
         for (expr, name) in cb
@@ -279,7 +331,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
 
             // Check each lookup expr exists in t vec
             for (inst_id, element) in expr_evaluated.iter().enumerate() {
-                if !table_vec.contains(element) {
+                if !table_contains(element) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
                         evaluated: *element,
@@ -297,13 +349,13 @@ impl<'a, E: ExtensionField> MockProver<E> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn assert_satisfied(
         cb: &mut CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
+        lookup_table: Option<MutexGuard<HashSet<E>>>,
     ) {
-        let result = Self::run(cb, wits_in, challenge);
+        let result = Self::run(cb, wits_in, challenge, lookup_table);
         match result {
             Ok(_) => {}
             Err(errors) => {
@@ -320,31 +372,40 @@ impl<'a, E: ExtensionField> MockProver<E> {
     }
 }
 
-pub fn load_u5_table<E: ExtensionField>(
-    t_vec: &mut Vec<E>,
-    cb: &CircuitBuilder<E>,
-    challenge: [E; 2],
-) {
+// TODO load more tables here
+pub fn load_tables<E: ExtensionField + Hash>(challenge: [E; 2]) -> HashSet<E> {
+    let mut table_vec = vec![];
+    load_u5_table(&mut table_vec, challenge);
+    load_u16_table(&mut table_vec, challenge);
+    table_vec.into_iter().collect()
+}
+
+pub fn load_u5_table<E: ExtensionField>(t_vec: &mut Vec<E>, challenge: [E; 2]) {
     for i in 0..(1 << 5) {
-        let rlc_record = cb.rlc_chip_record(vec![
-            Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
-            i.into(),
-        ]);
+        let rlc_record = rlc_chip_record(
+            vec![
+                Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
+                i.into(),
+            ],
+            Expression::Challenge(0, 1, E::ONE, E::ZERO),
+            Expression::Challenge(1, 1, E::ONE, E::ZERO),
+        );
         let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
         t_vec.push(rlc_record);
     }
 }
 
-pub fn load_u16_table<E: ExtensionField>(
-    t_vec: &mut Vec<E>,
-    cb: &CircuitBuilder<E>,
-    challenge: [E; 2],
-) {
+pub fn load_u16_table<E: ExtensionField>(t_vec: &mut Vec<E>, challenge: [E; 2]) {
+    t_vec.reserve(1 << 16);
     for i in 0..(1 << 16) {
-        let rlc_record = cb.rlc_chip_record(vec![
-            Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
-            i.into(),
-        ]);
+        let rlc_record = rlc_chip_record(
+            vec![
+                Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
+                i.into(),
+            ],
+            Expression::Challenge(0, 1, E::ONE, E::ZERO),
+            Expression::Challenge(1, 1, E::ONE, E::ZERO),
+        );
         let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
         t_vec.push(rlc_record);
     }
@@ -416,7 +477,7 @@ mod tests {
                 .into(),
         ];
 
-        MockProver::assert_satisfied(&mut builder, &wits_in, None);
+        MockProver::assert_satisfied(&mut builder, &wits_in);
     }
 
     #[derive(Debug)]
@@ -448,8 +509,7 @@ mod tests {
                 .into(),
         ];
 
-        let challenge = [1.into(), 1000.into()];
-        MockProver::assert_satisfied(&mut builder, &wits_in, Some(challenge));
+        MockProver::assert_satisfied(&mut builder, &wits_in);
     }
 
     #[test]
@@ -462,8 +522,7 @@ mod tests {
 
         let wits_in = vec![vec![Goldilocks::from(123)].into_mle().into()];
 
-        let challenge = [2.into(), 1000.into()];
-        let result = MockProver::run(&mut builder, &wits_in, Some(challenge));
+        let result = MockProver::run(&mut builder, &wits_in);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
         assert_eq!(
@@ -486,7 +545,7 @@ mod tests {
                         GoldilocksExt2::ZERO,
                     )),
                 ),
-                evaluated: 123002.into(), // 123 * 1000 + 2
+                evaluated: 123001.into(), // 123 * 1000 + 1
                 name: "test_lookup_error/assert_u5/assert u5".to_string(),
                 inst_id: 0,
             }]

@@ -292,6 +292,7 @@ dependencies = [
  "goldilocks",
  "itertools 0.12.1",
  "multilinear_extensions",
+ "once_cell",
  "paste",
  "pprof",
  "rand",
