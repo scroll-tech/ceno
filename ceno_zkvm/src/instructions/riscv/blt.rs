@@ -270,7 +270,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            None,
+            Some([1.into(), 1000.into()]),
         )
         .expect_err("lookup will fail");
         Ok(())
