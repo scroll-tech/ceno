@@ -1,19 +1,17 @@
-use std::{collections::BTreeMap, time::Instant};
+use std::time::Instant;
 
 use ark_std::test_rng;
 use ceno_zkvm::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::{riscv::addsub::AddInstruction, Instruction},
+    instructions::{riscv::addsub::AddInstruction},
     scheme::prover::ZKVMProver,
-    ROMType,
 };
 use const_env::from_env;
 
 use ceno_emul::{ByteAddr, InsnKind::ADD, StepRecord, VMState, CENO_PLATFORM};
 use ceno_zkvm::{
-    circuit_builder::ZKVMConstraintSystem,
     scheme::verifier::ZKVMVerifier,
-    tables::{RangeTableCircuit, TableCircuit},
+    structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    tables::RangeTableCircuit,
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
@@ -76,35 +74,19 @@ fn main() {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     // keygen
-    let mut zkvm_fixed_traces = BTreeMap::default();
     let mut zkvm_cs = ZKVMConstraintSystem::default();
+    let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
+    let range_config = zkvm_cs.register_table_circuit::<RangeTableCircuit<E>>();
 
-    let (add_cs, add_config) = {
-        let mut cs = ConstraintSystem::new(|| "riscv_add");
-        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let config = AddInstruction::construct_circuit(&mut circuit_builder).unwrap();
-        zkvm_cs.add_cs(AddInstruction::<E>::name(), cs.clone());
-        zkvm_fixed_traces.insert(AddInstruction::<E>::name(), None);
-        (cs, config)
-    };
-    let (range_cs, range_config) = {
-        let mut cs = ConstraintSystem::new(|| "riscv_range");
-        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let config = RangeTableCircuit::construct_circuit(&mut circuit_builder).unwrap();
-        zkvm_cs.add_cs(
-            <RangeTableCircuit<E> as TableCircuit<E>>::name(),
-            cs.clone(),
-        );
-        zkvm_fixed_traces.insert(
-            <RangeTableCircuit<E> as TableCircuit<E>>::name(),
-            Some(RangeTableCircuit::<E>::generate_fixed_traces(
-                &config,
-                cs.num_fixed,
-            )),
-        );
-        (cs, config)
-    };
-    let pk = zkvm_cs.key_gen(zkvm_fixed_traces).expect("keygen failed");
+    let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
+    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
+    zkvm_fixed_traces
+        .register_table_circuit::<RangeTableCircuit<E>>(&zkvm_cs, range_config.clone());
+
+    let pk = zkvm_cs
+        .clone()
+        .key_gen(zkvm_fixed_traces)
+        .expect("keygen failed");
     let vk = pk.get_vk();
 
     // proving
@@ -133,20 +115,16 @@ fn main() {
             .collect::<Vec<_>>();
         tracing::info!("tracer generated {} ADD records", records.len());
 
-        let mut zkvm_witness = BTreeMap::default();
-        let (add_witness, table_inputs) =
-            AddInstruction::assign_instances(&add_config, add_cs.num_witin as usize, records)
-                .unwrap();
-        let table_inputs = table_inputs.into_finalize_result();
-        let range_witness = RangeTableCircuit::<E>::assign_instances(
-            &range_config,
-            range_cs.num_witin as usize,
-            &table_inputs[ROMType::U16 as usize],
-        )
-        .unwrap();
-
-        zkvm_witness.insert(AddInstruction::<E>::name(), add_witness);
-        zkvm_witness.insert(RangeTableCircuit::<E>::name(), range_witness);
+        let mut zkvm_witness = ZKVMWitnesses::default();
+        // assign opcode circuits
+        zkvm_witness
+            .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, records)
+            .unwrap();
+        zkvm_witness.finalize_lk_multiplicities();
+        // assign table circuits
+        zkvm_witness
+            .assign_table_circuit::<RangeTableCircuit<E>>(&zkvm_cs, &range_config)
+            .unwrap();
 
         let timer = Instant::now();
 

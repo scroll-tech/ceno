@@ -1,8 +1,5 @@
 use ff_ext::ExtensionField;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -19,7 +16,6 @@ use sumcheck::{
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::{ProvingKey, ZKVMProvingKey},
     error::ZKVMError,
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
@@ -28,10 +24,11 @@ use crate::{
             wit_infer_by_expr,
         },
     },
-    structs::{Point, TowerProofs, TowerProver, TowerProverSpec},
+    structs::{
+        Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
+    },
     utils::{get_challenge_pows, proper_num_threads},
     virtual_polys::VirtualPolynomials,
-    witness::RowMajorMatrix,
 };
 
 use super::{ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
@@ -48,7 +45,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
     /// create proof for zkvm execution
     pub fn create_proof(
         &self,
-        mut witnesses: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+        mut witnesses: ZKVMWitnesses<E>,
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
@@ -56,6 +53,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let mut vm_proof = ZKVMProof::default();
         for (circuit_name, pk) in self.pk.circuit_pks.iter() {
             let witness = witnesses
+                .witnesses
                 .remove(circuit_name)
                 .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
 

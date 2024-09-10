@@ -11,7 +11,7 @@ mod chip_handler;
 pub mod circuit_builder;
 pub mod expression;
 mod keygen;
-mod structs;
+pub mod structs;
 mod uint;
 mod utils;
 mod virtual_polys;

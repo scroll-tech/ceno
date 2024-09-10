@@ -1,13 +1,13 @@
 use itertools::Itertools;
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLEs};
+use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
     error::ZKVMError,
     expression::{Expression, Fixed, WitIn},
-    structs::WitnessId,
+    structs::{ProvingKey, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
 
@@ -300,62 +300,4 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 #[derive(Debug)]
 pub struct CircuitBuilder<'a, E: ExtensionField> {
     pub(crate) cs: &'a mut ConstraintSystem<E>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProvingKey<E: ExtensionField> {
-    pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
-    pub vk: VerifyingKey<E>,
-}
-
-impl<E: ExtensionField> ProvingKey<E> {
-    pub fn get_cs(&self) -> &ConstraintSystem<E> {
-        self.vk.get_cs()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct VerifyingKey<E: ExtensionField> {
-    cs: ConstraintSystem<E>,
-}
-
-impl<E: ExtensionField> VerifyingKey<E> {
-    pub fn get_cs(&self) -> &ConstraintSystem<E> {
-        &self.cs
-    }
-}
-
-#[derive(Default)]
-pub struct ZKVMConstraintSystem<E: ExtensionField> {
-    pub circuit_css: BTreeMap<String, ConstraintSystem<E>>,
-}
-
-impl<E: ExtensionField> ZKVMConstraintSystem<E> {
-    pub fn add_cs(&mut self, name: String, cs: ConstraintSystem<E>) {
-        assert!(self.circuit_css.insert(name, cs).is_none());
-    }
-}
-
-#[derive(Default)]
-pub struct ZKVMProvingKey<E: ExtensionField> {
-    // pk for opcode and table circuits
-    pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
-}
-
-impl<E: ExtensionField> ZKVMProvingKey<E> {
-    pub fn get_vk(&self) -> ZKVMVerifyingKey<E> {
-        ZKVMVerifyingKey {
-            circuit_vks: self
-                .circuit_pks
-                .iter()
-                .map(|(name, pk)| (name.clone(), pk.vk.clone()))
-                .collect(),
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct ZKVMVerifyingKey<E: ExtensionField> {
-    // pk for opcode and table circuits
-    pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
 }

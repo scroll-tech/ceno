@@ -64,8 +64,9 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
-        multiplicity: &HashMap<Self::Input, usize>,
+        multiplicity: &[HashMap<u64, usize>],
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+        let multiplicity = &multiplicity[ROMType::U16 as usize];
         let mut u16_mlt = vec![0; 1 << RANGE_CHIP_BIT_WIDTH];
         for (limb, mlt) in multiplicity {
             u16_mlt[*limb as usize] = *mlt;

@@ -13,13 +13,12 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::{VerifyingKey, ZKVMVerifyingKey},
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_fixed,
     },
-    structs::{Point, PointAndEval, TowerProofs},
+    structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{get_challenge_pows, sel_eval},
 };
 

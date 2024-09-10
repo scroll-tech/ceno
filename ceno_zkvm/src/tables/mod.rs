@@ -23,6 +23,6 @@ pub trait TableCircuit<E: ExtensionField> {
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
-        multiplicity: &HashMap<Self::Input, usize>,
+        multiplicity: &[HashMap<u64, usize>],
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
 }
