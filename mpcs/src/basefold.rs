@@ -8,17 +8,14 @@ use crate::{
         arithmetic::{
             inner_product, inner_product_three, interpolate_field_type_over_boolean_hypercube,
         },
-        base_to_usize,
         expression::{Expression, Query, Rotation},
         ext_to_usize,
-        hash::{new_hasher, Digest},
+        hash::{new_hasher, write_digest_to_transcript, Digest},
         log2_strict,
         merkle_tree::MerkleTree,
         multiply_poly,
         plonky2_util::reverse_index_bits_in_place_field_type,
         poly_index_ext, poly_iter_ext,
-        transcript::{TranscriptRead, TranscriptWrite},
-        u32_to_field,
     },
     validate_input, Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
 };
@@ -37,6 +34,8 @@ use query_phase::{
 };
 use std::{borrow::BorrowMut, ops::Deref};
 pub use structure::BasefoldSpec;
+use structure::{BasefoldProof, ProofQueriesResultWithMerklePath};
+use transcript::Transcript;
 
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Serialize};
@@ -182,6 +181,7 @@ where
     type CommitmentWithData = BasefoldCommitmentWithData<E>;
     type Commitment = BasefoldCommitment<E>;
     type CommitmentChunk = Digest<E::BaseField>;
+    type Proof = BasefoldProof<E>;
     type Rng = ChaCha8Rng;
 
     fn setup(poly_size: usize, rng: &Self::Rng) -> Result<Self::Param, Error> {
@@ -240,27 +240,6 @@ where
         })
     }
 
-    fn batch_commit_and_write(
-        pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
-        transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, E>,
-    ) -> Result<Self::CommitmentWithData, Error> {
-        let timer = start_timer!(|| "Basefold::batch_commit_and_write");
-        let comm = Self::batch_commit(pp, polys)?;
-        transcript.write_commitment(&comm.get_root_as()).unwrap();
-        transcript
-            .write_field_element_base(&u32_to_field::<E>(comm.num_vars as u32))
-            .unwrap();
-        transcript
-            .write_field_element_base(&u32_to_field::<E>(comm.is_base as u32))
-            .unwrap();
-        transcript
-            .write_field_element_base(&u32_to_field::<E>(comm.num_polys as u32))
-            .unwrap();
-        end_timer!(timer);
-        Ok(comm)
-    }
-
     fn batch_commit(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
@@ -313,6 +292,18 @@ where
         })
     }
 
+    fn write_commitment(
+        comm: &Self::Commitment,
+        transcript: &mut Transcript<E>,
+    ) -> Result<(), Error> {
+        write_digest_to_transcript(&comm.root(), transcript);
+        Ok(())
+    }
+
+    fn get_pure_commitment(comm: &Self::CommitmentWithData) -> Self::Commitment {
+        comm.to_commitment()
+    }
+
     /// Open a single polynomial commitment at one point. If the given
     /// commitment with data contains more than one polynomial, this function
     /// will panic.
@@ -322,13 +313,13 @@ where
         comm: &Self::CommitmentWithData,
         point: &[E],
         _eval: &E, // Opening does not need eval, except for sanity check
-        transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, E>,
-    ) -> Result<(), Error> {
+        transcript: &mut Transcript<E>,
+    ) -> Result<Self::Proof, Error> {
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
         assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
         assert!(comm.num_polys == 1);
-        let (trees, oracles) = commit_phase::<E, Spec>(
+        let (trees, oracles, commit_phase_proof) = commit_phase::<E, Spec>(
             &pp.encoding_params,
             point,
             comm,
@@ -356,7 +347,15 @@ where
 
         end_timer!(timer);
 
-        Ok(())
+        Ok(Self::Proof {
+            sumcheck_messages: commit_phase_proof.sumcheck_messages,
+            roots: commit_phase_proof.roots,
+            final_message: commit_phase_proof.final_message,
+            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Single(
+                queries_with_merkle_path,
+            ),
+            sumcheck_proof: None,
+        })
     }
 
     /// Open a batch of polynomial commitments at several points.
@@ -370,8 +369,8 @@ where
         comms: &[Self::CommitmentWithData],
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
-        transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, E>,
-    ) -> Result<(), Error> {
+        transcript: &mut Transcript<E>,
+    ) -> Result<Self::Proof, Error> {
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
@@ -396,7 +395,13 @@ where
         let sumcheck_timer = start_timer!(|| "Basefold::batch_open::initial sumcheck");
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = transcript.squeeze_challenges(batch_size_log);
+        let t = (0..batch_size_log)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"batch coeffs")
+                    .elements
+            })
+            .collect::<Vec<_>>();
 
         // Use eq(X,t) where t is random to batch the different evaluation queries.
         // Note that this is a small polynomial (only batch_size) compared to the polynomials
@@ -487,7 +492,7 @@ where
         let virtual_poly =
             VirtualPolynomial::new(&expression, sumcheck_polys, &[], points.as_slice());
 
-        let (challenges, merged_poly_evals) =
+        let (challenges, merged_poly_evals, sumcheck_proof) =
             SumCheck::prove(&(), num_vars, virtual_poly, target_sum, transcript)?;
 
         end_timer!(sumcheck_timer);
@@ -533,7 +538,7 @@ where
 
         let point = challenges;
 
-        let (trees, oracles) = batch_commit_phase::<E, Spec>(
+        let (trees, oracles, commit_phase_proof) = batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
             &point,
             comms,
@@ -568,7 +573,15 @@ where
         end_timer!(query_timer);
         end_timer!(timer);
 
-        Ok(())
+        Ok(Self::Proof {
+            sumcheck_messages: commit_phase_proof.sumcheck_messages,
+            roots: commit_phase_proof.roots,
+            final_message: commit_phase_proof.final_message,
+            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Batched(
+                query_result_with_merkle_path,
+            ),
+            sumcheck_proof: Some(sumcheck_proof),
+        })
     }
 
     /// This is a simple version of batch open:
@@ -582,8 +595,8 @@ where
         comm: &Self::CommitmentWithData,
         point: &[E],
         evals: &[E],
-        transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, E>,
-    ) -> Result<(), Error> {
+        transcript: &mut Transcript<E>,
+    ) -> Result<Self::Proof, Error> {
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys[0].num_vars;
@@ -603,7 +616,13 @@ where
         }
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = transcript.squeeze_challenges(batch_size_log);
+        let t = (0..batch_size_log)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"batch coeffs")
+                    .elements
+            })
+            .collect::<Vec<_>>();
 
         // Use eq(X,t) where t is random to batch the different evaluation queries.
         // Note that this is a small polynomial (only batch_size) compared to the polynomials
@@ -616,7 +635,7 @@ where
         // The remaining tasks for the prover is to prove that
         // sum_i coeffs[i] poly_evals[i] is equal to
         // the new target sum, where coeffs is computed as follows
-        let (trees, oracles) = simple_batch_commit_phase::<E, Spec>(
+        let (trees, oracles, commit_phase_proof) = simple_batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
             point,
             &eq_xt,
@@ -646,46 +665,15 @@ where
 
         end_timer!(timer);
 
-        Ok(())
-    }
-
-    fn read_commitments(
-        _: &Self::VerifierParam,
-        num_polys: usize,
-        transcript: &mut impl TranscriptRead<Self::CommitmentChunk, E>,
-    ) -> Result<Vec<Self::Commitment>, Error> {
-        let roots = (0..num_polys)
-            .map(|_| {
-                let commitment = transcript.read_commitment().unwrap();
-                let num_vars = base_to_usize::<E>(&transcript.read_field_element_base().unwrap());
-                let is_base =
-                    base_to_usize::<E>(&transcript.read_field_element_base().unwrap()) != 0;
-                let num_polys = base_to_usize::<E>(&transcript.read_field_element_base().unwrap());
-                (num_vars, commitment, is_base, num_polys)
-            })
-            .collect_vec();
-
-        Ok(roots
-            .iter()
-            .map(|(num_vars, commitment, is_base, num_polys)| {
-                BasefoldCommitment::new(commitment.clone(), *num_vars, *is_base, *num_polys)
-            })
-            .collect_vec())
-    }
-
-    fn commit_and_write(
-        pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
-        transcript: &mut impl TranscriptWrite<Self::CommitmentChunk, E>,
-    ) -> Result<Self::CommitmentWithData, Error> {
-        let comm = Self::commit(pp, poly)?;
-
-        transcript.write_commitment(&comm.get_root_as())?;
-        transcript.write_field_element_base(&u32_to_field::<E>(comm.num_vars as u32))?;
-        transcript.write_field_element_base(&u32_to_field::<E>(comm.is_base as u32))?;
-        transcript.write_field_element_base(&u32_to_field::<E>(comm.num_polys as u32))?;
-
-        Ok(comm)
+        Ok(Self::Proof {
+            sumcheck_messages: commit_phase_proof.sumcheck_messages,
+            roots: commit_phase_proof.roots,
+            final_message: commit_phase_proof.final_message,
+            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::SimpleBatched(
+                queries_with_merkle_path,
+            ),
+            sumcheck_proof: None,
+        })
     }
 
     fn verify(
@@ -693,7 +681,8 @@ where
         comm: &Self::Commitment,
         point: &[E],
         eval: &E,
-        transcript: &mut impl TranscriptRead<Self::CommitmentChunk, E>,
+        proof: &Self::Proof,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::verify");
         assert!(comm.num_vars().unwrap() >= Spec::get_basecode_msg_size_log());
@@ -706,47 +695,33 @@ where
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
-        let mut roots = Vec::new();
-        let mut sumcheck_messages = Vec::with_capacity(num_rounds);
-        let sumcheck_timer = start_timer!(|| "Basefold::verify::interaction");
+        let roots = &proof.roots;
+        let sumcheck_messages = &proof.sumcheck_messages;
         for i in 0..num_rounds {
-            sumcheck_messages.push(transcript.read_field_elements_ext(3).unwrap());
-            fold_challenges.push(transcript.squeeze_challenge());
+            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
+            fold_challenges.push(
+                transcript
+                    .get_and_append_challenge(b"commit round")
+                    .elements,
+            );
             if i < num_rounds - 1 {
-                roots.push(transcript.read_commitment().unwrap());
+                write_digest_to_transcript(&roots[i], transcript);
             }
         }
-        end_timer!(sumcheck_timer);
 
-        let read_timer = start_timer!(|| "Basefold::verify::read transcript");
-        let final_message = transcript
-            .read_field_elements_ext(1 << Spec::get_basecode_msg_size_log())
-            .unwrap();
-        let query_challenges = transcript
-            .squeeze_challenges(Spec::get_number_queries())
-            .iter()
-            .map(|index| ext_to_usize(index) % (1 << (num_vars + Spec::get_rate_log())))
-            .collect_vec();
-        let read_query_timer = start_timer!(|| "Basefold::verify::read query");
-        let query_result_with_merkle_path = if comm.is_base() {
-            QueriesResultWithMerklePath::read_transcript_base(
-                transcript,
-                num_rounds,
-                Spec::get_rate_log(),
-                num_vars,
-                query_challenges.as_slice(),
-            )
-        } else {
-            QueriesResultWithMerklePath::read_transcript_ext(
-                transcript,
-                num_rounds,
-                Spec::get_rate_log(),
-                num_vars,
-                query_challenges.as_slice(),
-            )
-        };
-        end_timer!(read_query_timer);
-        end_timer!(read_timer);
+        let final_message = &proof.final_message;
+        transcript.append_field_element_exts(final_message.as_slice());
+
+        let queries: Vec<_> = (0..Spec::get_number_queries())
+            .map(|_| {
+                ext_to_usize(
+                    &transcript
+                        .get_and_append_challenge(b"query indices")
+                        .elements,
+                ) % (1 << (num_vars + Spec::get_rate_log()))
+            })
+            .collect();
+        let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_single();
 
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
@@ -760,6 +735,7 @@ where
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         verifier_query_phase::<E, Spec>(
+            queries.as_slice(),
             &vp.encoding_params,
             &query_result_with_merkle_path,
             &sumcheck_messages,
@@ -783,7 +759,8 @@ where
         comms: &[Self::Commitment],
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
-        transcript: &mut impl TranscriptRead<Self::CommitmentChunk, E>,
+        proof: &Self::Proof,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::batch_verify");
         // 	let key = "RAYON_NUM_THREADS";
@@ -804,7 +781,13 @@ where
 
         let sumcheck_timer = start_timer!(|| "Basefold::batch_verify::initial sumcheck");
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = transcript.squeeze_challenges(batch_size_log);
+        let t = (0..batch_size_log)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"batch coeffs")
+                    .elements
+            })
+            .collect::<Vec<_>>();
 
         let eq_xt =
             DenseMultilinearExtension::from_evaluations_ext_vec(t.len(), build_eq_x_r_vec(&t));
@@ -817,8 +800,14 @@ where
             &poly_iter_ext(&eq_xt).take(evals.len()).collect_vec(),
         );
 
-        let (new_target_sum, verify_point) =
-            SumCheck::verify(&(), num_vars, 2, target_sum, transcript)?;
+        let (new_target_sum, verify_point) = SumCheck::verify(
+            &(),
+            num_vars,
+            2,
+            target_sum,
+            proof.sumcheck_proof.as_ref().unwrap(),
+            transcript,
+        )?;
         end_timer!(sumcheck_timer);
 
         // Now the goal is to use the BaseFold to check the new target sum. Note that this time
@@ -832,52 +821,33 @@ where
             coeffs[eval.poly()] += eq_xy_evals[eval.point()] * poly_index_ext(&eq_xt, i)
         });
 
-        // start of verify
-        // read first $(num_var - 1) commitments
-        let read_timer = start_timer!(|| "Basefold::verify::read transcript");
-        let mut sumcheck_messages: Vec<Vec<E>> = Vec::with_capacity(num_rounds);
-        let mut roots: Vec<Digest<E::BaseField>> = Vec::with_capacity(num_rounds - 1);
-        let mut fold_challenges: Vec<E> = Vec::with_capacity(num_rounds);
+        let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
+        let roots = &proof.roots;
+        let sumcheck_messages = &proof.sumcheck_messages;
         for i in 0..num_rounds {
-            sumcheck_messages.push(transcript.read_field_elements_ext(3).unwrap());
-            fold_challenges.push(transcript.squeeze_challenge());
+            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
+            fold_challenges.push(
+                transcript
+                    .get_and_append_challenge(b"commit round")
+                    .elements,
+            );
             if i < num_rounds - 1 {
-                roots.push(transcript.read_commitment().unwrap());
+                write_digest_to_transcript(&roots[i], transcript);
             }
         }
-        let final_message = transcript
-            .read_field_elements_ext(1 << Spec::get_basecode_msg_size_log())
-            .unwrap();
+        let final_message = &proof.final_message;
+        transcript.append_field_element_exts(final_message.as_slice());
 
-        let query_challenges = transcript
-            .squeeze_challenges(Spec::get_number_queries())
-            .iter()
-            .map(|index| ext_to_usize(index) % (1 << (num_vars + Spec::get_rate_log())))
-            .collect_vec();
-
-        let read_query_timer = start_timer!(|| "Basefold::verify::read query");
-        // Here we assumed that all the commitments have the same type:
-        // either all base field or all extension field. Need to handle
-        // more complex case later.
-        let query_result_with_merkle_path = if comms[0].is_base {
-            BatchedQueriesResultWithMerklePath::read_transcript_base(
-                transcript,
-                num_rounds,
-                Spec::get_rate_log(),
-                poly_num_vars.as_slice(),
-                query_challenges.as_slice(),
-            )
-        } else {
-            BatchedQueriesResultWithMerklePath::read_transcript_ext(
-                transcript,
-                num_rounds,
-                Spec::get_rate_log(),
-                poly_num_vars.as_slice(),
-                query_challenges.as_slice(),
-            )
-        };
-        end_timer!(read_query_timer);
-        end_timer!(read_timer);
+        let queries: Vec<_> = (0..Spec::get_number_queries())
+            .map(|_| {
+                ext_to_usize(
+                    &transcript
+                        .get_and_append_challenge(b"query indices")
+                        .elements,
+                ) % (1 << (num_vars + Spec::get_rate_log()))
+            })
+            .collect();
+        let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_batched();
 
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
@@ -893,6 +863,7 @@ where
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         batch_verifier_query_phase::<E, Spec>(
+            queries.as_slice(),
             &vp.encoding_params,
             &query_result_with_merkle_path,
             &sumcheck_messages,
@@ -916,7 +887,8 @@ where
         comm: &Self::Commitment,
         point: &[E],
         evals: &[E],
-        transcript: &mut impl TranscriptRead<Self::CommitmentChunk, E>,
+        proof: &Self::Proof,
+        transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::simple batch verify");
         assert!(comm.num_vars().unwrap() >= Spec::get_basecode_msg_size_log());
@@ -934,53 +906,42 @@ where
 
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = transcript.squeeze_challenges(batch_size_log);
+        let t = (0..batch_size_log)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"batch coeffs")
+                    .elements
+            })
+            .collect::<Vec<_>>();
         let eq_xt = build_eq_x_r_vec(&t)[..evals.len()].to_vec();
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
-        let mut roots = Vec::new();
-        let mut sumcheck_messages = Vec::with_capacity(num_rounds);
-        let sumcheck_timer = start_timer!(|| "Basefold::simple_batch_verify::interaction");
+        let roots = &proof.roots;
+        let sumcheck_messages = &proof.sumcheck_messages;
         for i in 0..num_rounds {
-            sumcheck_messages.push(transcript.read_field_elements_ext(3).unwrap());
-            fold_challenges.push(transcript.squeeze_challenge());
+            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
+            fold_challenges.push(
+                transcript
+                    .get_and_append_challenge(b"commit round")
+                    .elements,
+            );
             if i < num_rounds - 1 {
-                roots.push(transcript.read_commitment().unwrap());
+                write_digest_to_transcript(&roots[i], transcript);
             }
         }
-        end_timer!(sumcheck_timer);
+        let final_message = &proof.final_message;
+        transcript.append_field_element_exts(final_message.as_slice());
 
-        let read_timer = start_timer!(|| "Basefold::verify::read transcript");
-        let final_message = transcript
-            .read_field_elements_ext(1 << Spec::get_basecode_msg_size_log())
-            .unwrap();
-        let query_challenges = transcript
-            .squeeze_challenges(Spec::get_number_queries())
-            .iter()
-            .map(|index| ext_to_usize(index) % (1 << (num_vars + Spec::get_rate_log())))
-            .collect_vec();
-        let read_query_timer = start_timer!(|| "Basefold::verify::read query");
-        let query_result_with_merkle_path = if comm.is_base() {
-            SimpleBatchQueriesResultWithMerklePath::read_transcript_base(
-                transcript,
-                num_rounds,
-                Spec::get_rate_log(),
-                num_vars,
-                query_challenges.as_slice(),
-                batch_size,
-            )
-        } else {
-            SimpleBatchQueriesResultWithMerklePath::read_transcript_ext(
-                transcript,
-                num_rounds,
-                Spec::get_rate_log(),
-                num_vars,
-                query_challenges.as_slice(),
-                batch_size,
-            )
-        };
-        end_timer!(read_query_timer);
-        end_timer!(read_timer);
+        let queries: Vec<_> = (0..Spec::get_number_queries())
+            .map(|_| {
+                ext_to_usize(
+                    &transcript
+                        .get_and_append_challenge(b"query indices")
+                        .elements,
+                ) % (1 << (num_vars + Spec::get_rate_log()))
+            })
+            .collect();
+        let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();
 
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
@@ -994,6 +955,7 @@ where
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         simple_batch_verifier_query_phase::<E, Spec>(
+            queries.as_slice(),
             &vp.encoding_params,
             &query_result_with_merkle_path,
             &sumcheck_messages,
@@ -1030,7 +992,6 @@ mod test {
             run_batch_commit_open_verify, run_commit_open_verify,
             run_simple_batch_commit_open_verify,
         },
-        util::transcript::PoseidonTranscript,
     };
     use goldilocks::GoldilocksExt2;
     use rand_chacha::ChaCha8Rng;
@@ -1043,112 +1004,78 @@ mod test {
     #[test]
     fn commit_open_verify_goldilocks_basecode_base() {
         // Challenge is over extension field, poly over the base field
-        run_commit_open_verify::<
-            GoldilocksExt2,
-            PcsGoldilocksBaseCode,
-            PoseidonTranscript<GoldilocksExt2>,
-        >(true, 10, 11);
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(true, 10, 11);
     }
 
     #[test]
     fn commit_open_verify_goldilocks_rscode_base() {
         // Challenge is over extension field, poly over the base field
-        run_commit_open_verify::<
-            GoldilocksExt2,
-            PcsGoldilocksRSCode,
-            PoseidonTranscript<GoldilocksExt2>,
-        >(true, 10, 11);
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11);
     }
 
     #[test]
     fn commit_open_verify_goldilocks_basecode_2() {
         // Both challenge and poly are over extension field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode, PoseidonTranscript<_>>(
-            false, 10, 11,
-        );
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(false, 10, 11);
     }
 
     #[test]
     fn commit_open_verify_goldilocks_rscode_2() {
         // Both challenge and poly are over extension field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode, PoseidonTranscript<_>>(
-            false, 10, 11,
-        );
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(false, 10, 11);
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_basecode_base() {
         // Both challenge and poly are over base field
-        run_simple_batch_commit_open_verify::<
-            GoldilocksExt2,
-            PcsGoldilocksBaseCode,
-            PoseidonTranscript<GoldilocksExt2>,
-        >(true, 10, 11, 4);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            true, 10, 11, 4,
+        );
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_rscode_base() {
         // Both challenge and poly are over base field
-        run_simple_batch_commit_open_verify::<
-            GoldilocksExt2,
-            PcsGoldilocksRSCode,
-            PoseidonTranscript<GoldilocksExt2>,
-        >(true, 10, 11, 4);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11, 4);
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_basecode_2() {
         // Both challenge and poly are over extension field
-        run_simple_batch_commit_open_verify::<
-            GoldilocksExt2,
-            PcsGoldilocksBaseCode,
-            PoseidonTranscript<_>,
-        >(false, 10, 11, 4);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            false, 10, 11, 4,
+        );
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_rscode_2() {
         // Both challenge and poly are over extension field
-        run_simple_batch_commit_open_verify::<
-            GoldilocksExt2,
-            PcsGoldilocksRSCode,
-            PoseidonTranscript<_>,
-        >(false, 10, 11, 4);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+            false, 10, 11, 4,
+        );
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_basecode_base() {
         // Both challenge and poly are over base field
-        run_batch_commit_open_verify::<
-            GoldilocksExt2,
-            PcsGoldilocksBaseCode,
-            PoseidonTranscript<GoldilocksExt2>,
-        >(true, 10, 11);
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(true, 10, 11);
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_rscode_base() {
         // Both challenge and poly are over base field
-        run_batch_commit_open_verify::<
-            GoldilocksExt2,
-            PcsGoldilocksRSCode,
-            PoseidonTranscript<GoldilocksExt2>,
-        >(true, 10, 11);
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11);
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_basecode_2() {
         // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode, PoseidonTranscript<_>>(
-            false, 10, 11,
-        );
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(false, 10, 11);
     }
 
     #[test]
     fn batch_commit_open_verify_goldilocks_rscode_2() {
         // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode, PoseidonTranscript<_>>(
-            false, 10, 11,
-        );
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(false, 10, 11);
     }
 }

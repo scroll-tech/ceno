@@ -12,12 +12,13 @@ use crate::util::{
         hash_two_digests, hash_two_leaves_base, hash_two_leaves_batch_base,
         hash_two_leaves_batch_ext, hash_two_leaves_ext, Digest, Hasher,
     },
-    log2_strict,
-    transcript::{TranscriptRead, TranscriptWrite},
-    Deserialize, DeserializeOwned, Serialize,
+    log2_strict, Deserialize, DeserializeOwned, Serialize,
 };
+use transcript::Transcript;
 
 use ark_std::{end_timer, start_timer};
+
+use super::hash::write_digest_to_transcript;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
@@ -155,22 +156,10 @@ where
         self.inner.iter()
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.inner
             .iter()
-            .for_each(|hash| transcript.write_commitment(hash).unwrap());
-    }
-
-    pub fn read_transcript(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        height: usize,
-    ) -> Self {
-        // Since no root, the number of digests is height - 1
-        let mut inner = Vec::with_capacity(height - 1);
-        for _ in 0..(height - 1) {
-            inner.push(transcript.read_commitment().unwrap());
-        }
-        Self { inner }
+            .for_each(|hash| write_digest_to_transcript(hash, transcript));
     }
 
     pub fn authenticate_leaves_root_ext(

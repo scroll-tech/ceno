@@ -5,7 +5,6 @@ use crate::{
         expression::{Expression, Rotation},
         parallel::par_map_collect,
         poly_index_ext,
-        transcript::{FieldTranscriptRead, FieldTranscriptWrite},
     },
     Error,
 };
@@ -14,13 +13,16 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use num_integer::Integer;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap, fmt::Debug, marker::PhantomData};
+use transcript::Transcript;
 mod coeff;
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::build_eq_x_r_vec,
 };
 
+pub(crate) use coeff::Coefficients;
 pub use coeff::CoefficientsProver;
 
 #[derive(Debug)]
@@ -162,8 +164,17 @@ impl<'a, E: ExtensionField> ProverState<'a, E> {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SumcheckProof<E: ExtensionField, RoundMessage: ClassicSumCheckRoundMessage<E>>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    rounds: Vec<RoundMessage>,
+    phantom: PhantomData<E>,
+}
+
 pub trait ClassicSumCheckProver<E: ExtensionField>: Clone + Debug {
-    type RoundMessage: ClassicSumCheckRoundMessage<E>;
+    type RoundMessage: ClassicSumCheckRoundMessage<E> + Clone + Debug;
 
     fn new(state: &ProverState<E>) -> Self;
 
@@ -175,15 +186,7 @@ pub trait ClassicSumCheckProver<E: ExtensionField>: Clone + Debug {
 pub trait ClassicSumCheckRoundMessage<E: ExtensionField>: Sized + Debug {
     type Auxiliary: Default;
 
-    fn write(&self, transcript: &mut impl FieldTranscriptWrite<E>) -> Result<(), Error>;
-
-    fn read_base(
-        degree: usize,
-        transcript: &mut impl FieldTranscriptRead<E>,
-    ) -> Result<Self, Error>;
-
-    fn read_ext(degree: usize, transcript: &mut impl FieldTranscriptRead<E>)
-    -> Result<Self, Error>;
+    fn write(&self, transcript: &mut Transcript<E>) -> Result<(), Error>;
 
     fn sum(&self) -> E;
 
@@ -218,17 +221,21 @@ pub trait ClassicSumCheckRoundMessage<E: ExtensionField>: Sized + Debug {
 #[derive(Clone, Debug)]
 pub struct ClassicSumCheck<P>(PhantomData<P>);
 
-impl<E: ExtensionField, P: ClassicSumCheckProver<E>> SumCheck<E> for ClassicSumCheck<P> {
+impl<E: ExtensionField, P: ClassicSumCheckProver<E>> SumCheck<E> for ClassicSumCheck<P>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
     type ProverParam = ();
     type VerifierParam = ();
+    type RoundMessage = P::RoundMessage;
 
     fn prove(
         _: &Self::ProverParam,
         num_vars: usize,
         virtual_poly: VirtualPolynomial<E>,
         sum: E,
-        transcript: &mut impl FieldTranscriptWrite<E>,
-    ) -> Result<(Vec<E>, Vec<E>), Error> {
+        transcript: &mut Transcript<E>,
+    ) -> Result<(Vec<E>, Vec<E>, SumcheckProof<E, Self::RoundMessage>), Error> {
         let _timer = start_timer!(|| {
             let degree = virtual_poly.expression.degree();
             format!("sum_check_prove-{num_vars}-{degree}")
@@ -244,6 +251,8 @@ impl<E: ExtensionField, P: ClassicSumCheckProver<E>> SumCheck<E> for ClassicSumC
 
         let aux = P::RoundMessage::auxiliary(state.degree);
 
+        let mut prover_messages = Vec::with_capacity(num_vars);
+
         for _round in 0..num_vars {
             let timer = start_timer!(|| format!("sum_check_prove_round-{_round}"));
             let msg = prover.prove_round(&state);
@@ -257,15 +266,22 @@ impl<E: ExtensionField, P: ClassicSumCheckProver<E>> SumCheck<E> for ClassicSumC
                 );
             }
 
-            let challenge = transcript.squeeze_challenge();
+            let challenge = transcript
+                .get_and_append_challenge(b"sumcheck round")
+                .elements;
             challenges.push(challenge);
 
             let timer = start_timer!(|| format!("sum_check_next_round-{_round}"));
             state.next_round(msg.evaluate(&aux, &challenge), &challenge);
             end_timer!(timer);
+            prover_messages.push(msg);
         }
 
-        Ok((challenges, state.into_evals()))
+        let proof = SumcheckProof {
+            rounds: prover_messages,
+            phantom: PhantomData,
+        };
+        Ok((challenges, state.into_evals(), proof))
     }
 
     fn verify(
@@ -273,20 +289,26 @@ impl<E: ExtensionField, P: ClassicSumCheckProver<E>> SumCheck<E> for ClassicSumC
         num_vars: usize,
         degree: usize,
         sum: E,
-        transcript: &mut impl FieldTranscriptRead<E>,
+        proof: &SumcheckProof<E, P::RoundMessage>,
+        transcript: &mut Transcript<E>,
     ) -> Result<(E, Vec<E>), Error> {
         let (msgs, challenges) = {
             let mut msgs = Vec::with_capacity(num_vars);
             let mut challenges = Vec::with_capacity(num_vars);
-            for _ in 0..num_vars {
-                msgs.push(P::RoundMessage::read_ext(degree, transcript)?);
-                challenges.push(transcript.squeeze_challenge());
+            for i in 0..num_vars {
+                proof.rounds[i].write(transcript)?;
+                msgs.push(proof.rounds[i].clone());
+                challenges.push(
+                    transcript
+                        .get_and_append_challenge(b"sumcheck round")
+                        .elements,
+                );
             }
             (msgs, challenges)
         };
 
         Ok((
-            P::RoundMessage::verify_consistency(degree, sum, &msgs, &challenges)?,
+            P::RoundMessage::verify_consistency(degree, sum, msgs.as_slice(), &challenges)?,
             challenges,
         ))
     }
@@ -297,13 +319,9 @@ mod tests {
 
     use crate::{
         sum_check::eq_xy_eval,
-        util::{
-            arithmetic::inner_product,
-            expression::Query,
-            poly_iter_ext,
-            transcript::{InMemoryTranscript, PoseidonTranscript},
-        },
+        util::{arithmetic::inner_product, expression::Query, poly_iter_ext},
     };
+    use transcript::Transcript;
 
     use super::*;
     use goldilocks::{Goldilocks as Fr, GoldilocksExt2 as E};
@@ -346,26 +364,28 @@ mod tests {
                 &build_eq_x_r_vec(&points[1]),
             ) * Fr::from(4)
                 * Fr::from(2); // The third polynomial is summed twice because the hypercube is larger
-        let mut transcript = PoseidonTranscript::<E>::new();
-        let (challenges, evals) = <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<E>>::prove(
-            &(),
-            2,
-            virtual_poly.clone(),
-            sum,
-            &mut transcript,
-        )
-        .unwrap();
+        let mut transcript = Transcript::<E>::new(b"sumcheck");
+        let (challenges, evals, proof) =
+            <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<E>>::prove(
+                &(),
+                2,
+                virtual_poly.clone(),
+                sum,
+                &mut transcript,
+            )
+            .unwrap();
 
         assert_eq!(polys[0].evaluate(&challenges), evals[0]);
         assert_eq!(polys[1].evaluate(&challenges), evals[1]);
         assert_eq!(polys[2].evaluate(&challenges[..1]), evals[2]);
 
-        let proof = transcript.into_proof();
-        let mut transcript = PoseidonTranscript::<E>::from_proof(&proof);
+        let mut transcript = Transcript::<E>::new(b"sumcheck");
 
         let (new_sum, verifier_challenges) = <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<
             E,
-        >>::verify(&(), 2, 2, sum, &mut transcript)
+        >>::verify(
+            &(), 2, 2, sum, &proof, &mut transcript
+        )
         .unwrap();
 
         assert_eq!(verifier_challenges, challenges);
@@ -376,13 +396,14 @@ mod tests {
                 + evals[2] * eq_xy_eval(&points[1], &challenges[..1]) * Fr::from(4)
         );
 
-        let mut transcript = PoseidonTranscript::<E>::from_proof(&proof);
+        let mut transcript = Transcript::<E>::new(b"sumcheck");
 
         <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<E>>::verify(
             &(),
             2,
             2,
             sum + Fr::ONE,
+            &proof,
             &mut transcript,
         )
         .expect_err("Should panic");

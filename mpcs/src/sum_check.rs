@@ -2,17 +2,19 @@ use crate::{
     util::{
         arithmetic::{inner_product, powers, product, BooleanHypercube},
         expression::{CommonPolynomial, Expression, Query},
-        transcript::{FieldTranscriptRead, FieldTranscriptWrite},
         BitIndex,
     },
     Error,
 };
 use std::{collections::HashMap, fmt::Debug};
 
+use classic::{ClassicSumCheckRoundMessage, SumcheckProof};
 use ff::PrimeField;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
+use serde::{de::DeserializeOwned, Serialize};
+use transcript::Transcript;
 
 pub mod classic;
 
@@ -40,24 +42,29 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
     }
 }
 
-pub trait SumCheck<E: ExtensionField>: Clone + Debug {
+pub trait SumCheck<E: ExtensionField>: Clone + Debug
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
     type ProverParam: Clone + Debug;
     type VerifierParam: Clone + Debug;
+    type RoundMessage: ClassicSumCheckRoundMessage<E> + Clone + Debug;
 
     fn prove(
         pp: &Self::ProverParam,
         num_vars: usize,
         virtual_poly: VirtualPolynomial<E>,
         sum: E,
-        transcript: &mut impl FieldTranscriptWrite<E>,
-    ) -> Result<(Vec<E>, Vec<E>), Error>;
+        transcript: &mut Transcript<E>,
+    ) -> Result<(Vec<E>, Vec<E>, SumcheckProof<E, Self::RoundMessage>), Error>;
 
     fn verify(
         vp: &Self::VerifierParam,
         num_vars: usize,
         degree: usize,
         sum: E,
-        transcript: &mut impl FieldTranscriptRead<E>,
+        proof: &SumcheckProof<E, Self::RoundMessage>,
+        transcript: &mut Transcript<E>,
     ) -> Result<(E, Vec<E>), Error>;
 }
 

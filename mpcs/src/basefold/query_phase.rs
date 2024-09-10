@@ -7,19 +7,21 @@ use crate::util::{
     hash::{Digest, Hasher},
     log2_strict,
     merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree},
-    transcript::{TranscriptRead, TranscriptWrite},
 };
 use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
-
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use transcript::Transcript;
 
 use multilinear_extensions::mle::FieldType;
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use rayon::{
+    iter::IndexedParallelIterator,
+    prelude::{IntoParallelRefIterator, ParallelIterator},
+};
 
 use super::{
     encoding::EncodingScheme,
@@ -27,7 +29,7 @@ use super::{
 };
 
 pub fn prover_query_phase<E: ExtensionField>(
-    transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
+    transcript: &mut Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
     oracles: &[Vec<E>],
     num_verifier_queries: usize,
@@ -35,7 +37,13 @@ pub fn prover_query_phase<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let queries = transcript.squeeze_challenges(num_verifier_queries);
+    let queries: Vec<_> = (0..num_verifier_queries)
+        .map(|_| {
+            transcript
+                .get_and_append_challenge(b"query indices")
+                .elements
+        })
+        .collect();
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
@@ -57,7 +65,7 @@ where
 }
 
 pub fn batch_prover_query_phase<E: ExtensionField>(
-    transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
+    transcript: &mut Transcript<E>,
     codeword_size: usize,
     comms: &[BasefoldCommitmentWithData<E>],
     oracles: &[Vec<E>],
@@ -66,7 +74,13 @@ pub fn batch_prover_query_phase<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let queries = transcript.squeeze_challenges(num_verifier_queries);
+    let queries: Vec<_> = (0..num_verifier_queries)
+        .map(|_| {
+            transcript
+                .get_and_append_challenge(b"query indices")
+                .elements
+        })
+        .collect();
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
@@ -88,7 +102,7 @@ where
 }
 
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
-    transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>,
+    transcript: &mut Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
     oracles: &[Vec<E>],
     num_verifier_queries: usize,
@@ -96,7 +110,13 @@ pub fn simple_batch_prover_query_phase<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let queries = transcript.squeeze_challenges(num_verifier_queries);
+    let queries: Vec<_> = (0..num_verifier_queries)
+        .map(|_| {
+            transcript
+                .get_and_append_challenge(b"query indices")
+                .elements
+        })
+        .collect();
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
@@ -119,6 +139,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    indices: &[usize],
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     queries: &QueriesResultWithMerklePath<E>,
     sum_check_messages: &[Vec<E>],
@@ -152,6 +173,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     end_timer!(encode_timer);
 
     queries.check::<Spec>(
+        indices,
         vp,
         fold_challenges,
         num_rounds,
@@ -189,6 +211,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
 #[allow(clippy::too_many_arguments)]
 pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    indices: &[usize],
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     queries: &BatchedQueriesResultWithMerklePath<E>,
     sum_check_messages: &[Vec<E>],
@@ -225,6 +248,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     // the weights.
 
     queries.check::<Spec>(
+        indices,
         vp,
         fold_challenges,
         num_rounds,
@@ -263,6 +287,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
 #[allow(clippy::too_many_arguments)]
 pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    indices: &[usize],
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     queries: &SimpleBatchQueriesResultWithMerklePath<E>,
     sum_check_messages: &[Vec<E>],
@@ -299,6 +324,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
     queries.check::<Spec>(
+        indices,
         vp,
         fold_challenges,
         batch_coeffs,
@@ -596,47 +622,21 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         match self.codepoints {
             CodewordPointPair::Ext(x, y) => {
-                transcript.write_field_element_ext(&x).unwrap();
-                transcript.write_field_element_ext(&y).unwrap();
+                transcript.append_field_element_ext(&x);
+                transcript.append_field_element_ext(&y);
             }
             CodewordPointPair::Base(x, y) => {
-                transcript.write_field_element_base(&x).unwrap();
-                transcript.write_field_element_base(&y).unwrap();
+                transcript.append_field_element(&x);
+                transcript.append_field_element(&y);
             }
         };
     }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        full_codeword_size_log: usize,
-        codeword_size_log: usize,
-        index: usize,
-    ) -> Self {
-        Self::new_ext(
-            transcript.read_field_element_ext().unwrap(),
-            transcript.read_field_element_ext().unwrap(),
-            index >> (full_codeword_size_log - codeword_size_log),
-        )
-    }
-
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        full_codeword_size_log: usize,
-        codeword_size_log: usize,
-        index: usize,
-    ) -> Self {
-        Self::new_base(
-            transcript.read_field_element_base().unwrap(),
-            transcript.read_field_element_base().unwrap(),
-            index >> (full_codeword_size_log - codeword_size_log),
-        )
-    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CodewordSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -649,49 +649,9 @@ impl<E: ExtensionField> CodewordSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.query.write_transcript(transcript);
         self.merkle_path.write_transcript(transcript);
-    }
-
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        full_codeword_size_log: usize,
-        codeword_size_log: usize,
-        index: usize,
-    ) -> Self {
-        Self {
-            query: CodewordSingleQueryResult::read_transcript_base(
-                transcript,
-                full_codeword_size_log,
-                codeword_size_log,
-                index,
-            ),
-            merkle_path: MerklePathWithoutLeafOrRoot::read_transcript(
-                transcript,
-                codeword_size_log,
-            ),
-        }
-    }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        full_codeword_size_log: usize,
-        codeword_size_log: usize,
-        index: usize,
-    ) -> Self {
-        Self {
-            query: CodewordSingleQueryResult::read_transcript_ext(
-                transcript,
-                full_codeword_size_log,
-                codeword_size_log,
-                index,
-            ),
-            merkle_path: MerklePathWithoutLeafOrRoot::read_transcript(
-                transcript,
-                codeword_size_log,
-            ),
-        }
     }
 
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>, hasher: &Hasher<E::BaseField>) {
@@ -736,7 +696,7 @@ where
     inner: Vec<CodewordSingleQueryResult<E>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OracleListQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -744,89 +704,12 @@ where
     inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
 }
 
-impl<E: ExtensionField> OracleListQueryResultWithMerklePath<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    pub fn read_transcript(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        codeword_size_log: usize,
-        index: usize,
-    ) -> Self {
-        // Remember that the prover doesn't send the commitment in the last round.
-        // In the first round, the oracle is sent after folding, so the first oracle
-        // has half the size of the full codeword size.
-        Self {
-            inner: (0..num_rounds - 1)
-                .map(|round| {
-                    CodewordSingleQueryResultWithMerklePath::read_transcript_ext(
-                        transcript,
-                        codeword_size_log,
-                        codeword_size_log - round - 1,
-                        index,
-                    )
-                })
-                .collect(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CommitmentsQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
-}
-
-impl<E: ExtensionField> CommitmentsQueryResultWithMerklePath<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        max_num_vars: usize,
-        poly_num_vars: &[usize],
-        log_rate: usize,
-        index: usize,
-    ) -> Self {
-        Self {
-            inner: poly_num_vars
-                .iter()
-                .map(|num_vars| {
-                    CodewordSingleQueryResultWithMerklePath::read_transcript_base(
-                        transcript,
-                        max_num_vars + log_rate,
-                        num_vars + log_rate,
-                        index,
-                    )
-                })
-                .collect(),
-        }
-    }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        max_num_vars: usize,
-        poly_num_vars: &[usize],
-        log_rate: usize,
-        index: usize,
-    ) -> Self {
-        Self {
-            inner: poly_num_vars
-                .iter()
-                .map(|num_vars| {
-                    CodewordSingleQueryResultWithMerklePath::read_transcript_ext(
-                        transcript,
-                        max_num_vars + log_rate,
-                        num_vars + log_rate,
-                        index,
-                    )
-                })
-                .collect(),
-        }
-    }
 }
 
 impl<E: ExtensionField> ListQueryResult<E> for OracleListQueryResult<E>
@@ -930,7 +813,7 @@ where
         )
     }
 
-    fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.get_inner()
             .iter()
             .for_each(|q| q.write_transcript(transcript));
@@ -957,7 +840,7 @@ where
     commitment_query: CodewordSingleQueryResult<E>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -992,55 +875,9 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.oracle_query.write_transcript(transcript);
         self.commitment_query.write_transcript(transcript);
-    }
-
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        num_vars: usize,
-        index: usize,
-    ) -> Self {
-        Self {
-            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
-                transcript,
-                num_rounds,
-                num_vars + log_rate,
-                index,
-            ),
-            commitment_query: CodewordSingleQueryResultWithMerklePath::read_transcript_base(
-                transcript,
-                num_vars + log_rate,
-                num_vars + log_rate,
-                index,
-            ),
-        }
-    }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        num_vars: usize,
-        index: usize,
-    ) -> Self {
-        Self {
-            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
-                transcript,
-                num_rounds,
-                num_vars + log_rate,
-                index,
-            ),
-            commitment_query: CodewordSingleQueryResultWithMerklePath::read_transcript_ext(
-                transcript,
-                num_vars + log_rate,
-                num_vars + log_rate,
-                index,
-            ),
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1106,6 +943,7 @@ where
     inner: Vec<(usize, SingleQueryResult<E>)>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1140,67 +978,16 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.inner.iter().for_each(|(_, q)| {
             q.write_transcript(transcript);
         });
     }
 
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        poly_num_vars: usize,
-        indices: &[usize],
-    ) -> Self {
-        Self {
-            inner: indices
-                .iter()
-                .map(|index| {
-                    (
-                        *index,
-                        SingleQueryResultWithMerklePath::read_transcript_base(
-                            transcript,
-                            num_rounds,
-                            log_rate,
-                            poly_num_vars,
-                            *index,
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        poly_num_vars: usize,
-        indices: &[usize],
-    ) -> Self {
-        Self {
-            inner: indices
-                .iter()
-                .map(|index| {
-                    (
-                        *index,
-                        SingleQueryResultWithMerklePath::read_transcript_ext(
-                            transcript,
-                            num_rounds,
-                            log_rate,
-                            poly_num_vars,
-                            *index,
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
+        indices: &[usize],
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &[E],
         num_rounds: usize,
@@ -1211,19 +998,22 @@ where
         hasher: &Hasher<E::BaseField>,
     ) {
         let timer = start_timer!(|| "QueriesResult::check");
-        self.inner.par_iter().for_each(|(index, query)| {
-            query.check::<Spec>(
-                vp,
-                fold_challenges,
-                num_rounds,
-                num_vars,
-                final_codeword,
-                roots,
-                comm,
-                *index,
-                hasher,
-            );
-        });
+        self.inner.par_iter().zip(indices.par_iter()).for_each(
+            |((index, query), index_in_proof)| {
+                assert_eq!(index_in_proof, index);
+                query.check::<Spec>(
+                    vp,
+                    fold_challenges,
+                    num_rounds,
+                    num_vars,
+                    final_codeword,
+                    roots,
+                    comm,
+                    *index,
+                    hasher,
+                );
+            },
+        );
         end_timer!(timer);
     }
 }
@@ -1237,7 +1027,7 @@ where
     commitments_query: CommitmentsQueryResult<E>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BatchedSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1271,59 +1061,9 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.oracle_query.write_transcript(transcript);
         self.commitments_query.write_transcript(transcript);
-    }
-
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        poly_num_vars: &[usize],
-        index: usize,
-    ) -> Self {
-        let num_vars = poly_num_vars.iter().max().unwrap();
-        Self {
-            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
-                transcript,
-                num_rounds,
-                *num_vars + log_rate,
-                index,
-            ),
-            commitments_query: CommitmentsQueryResultWithMerklePath::read_transcript_base(
-                transcript,
-                *num_vars,
-                poly_num_vars,
-                log_rate,
-                index,
-            ),
-        }
-    }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        poly_num_vars: &[usize],
-        index: usize,
-    ) -> Self {
-        let num_vars = poly_num_vars.iter().max().unwrap();
-        Self {
-            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
-                transcript,
-                num_rounds,
-                *num_vars + log_rate,
-                index,
-            ),
-            commitments_query: CommitmentsQueryResultWithMerklePath::read_transcript_ext(
-                transcript,
-                *num_vars,
-                poly_num_vars,
-                log_rate,
-                index,
-            ),
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1440,6 +1180,7 @@ where
     inner: Vec<(usize, BatchedSingleQueryResult<E>)>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchedQueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1474,67 +1215,16 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.inner
             .iter()
             .for_each(|(_, q)| q.write_transcript(transcript));
     }
 
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        poly_num_vars: &[usize],
-        indices: &[usize],
-    ) -> Self {
-        Self {
-            inner: indices
-                .iter()
-                .map(|index| {
-                    (
-                        *index,
-                        BatchedSingleQueryResultWithMerklePath::read_transcript_base(
-                            transcript,
-                            num_rounds,
-                            log_rate,
-                            poly_num_vars,
-                            *index,
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        poly_num_vars: &[usize],
-        indices: &[usize],
-    ) -> Self {
-        Self {
-            inner: indices
-                .iter()
-                .map(|index| {
-                    (
-                        *index,
-                        BatchedSingleQueryResultWithMerklePath::read_transcript_ext(
-                            transcript,
-                            num_rounds,
-                            log_rate,
-                            poly_num_vars,
-                            *index,
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
+        indices: &[usize],
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &[E],
         num_rounds: usize,
@@ -1546,20 +1236,23 @@ where
         hasher: &Hasher<E::BaseField>,
     ) {
         let timer = start_timer!(|| "BatchedQueriesResult::check");
-        self.inner.par_iter().for_each(|(index, query)| {
-            query.check::<Spec>(
-                vp,
-                fold_challenges,
-                num_rounds,
-                num_vars,
-                final_codeword,
-                roots,
-                comms,
-                coeffs,
-                *index,
-                hasher,
-            );
-        });
+        self.inner.par_iter().zip(indices.par_iter()).for_each(
+            |((index, query), index_in_proof)| {
+                assert_eq!(index, index_in_proof);
+                query.check::<Spec>(
+                    vp,
+                    fold_challenges,
+                    num_rounds,
+                    num_vars,
+                    final_codeword,
+                    roots,
+                    comms,
+                    coeffs,
+                    *index,
+                    hasher,
+                );
+            },
+        );
         end_timer!(timer);
     }
 }
@@ -1607,65 +1300,25 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         match &self.leaves {
             SimpleBatchLeavesPair::Ext(x) => {
                 x.iter().for_each(|(x, y)| {
-                    transcript.write_field_element_ext(x).unwrap();
-                    transcript.write_field_element_ext(y).unwrap();
+                    transcript.append_field_element_ext(x);
+                    transcript.append_field_element_ext(y);
                 });
             }
             SimpleBatchLeavesPair::Base(x) => {
                 x.iter().for_each(|(x, y)| {
-                    transcript.write_field_element_base(x).unwrap();
-                    transcript.write_field_element_base(y).unwrap();
+                    transcript.append_field_element(x);
+                    transcript.append_field_element(y);
                 });
             }
         };
     }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        full_codeword_size_log: usize,
-        codeword_size_log: usize,
-        index: usize,
-        batch_size: usize,
-    ) -> Self {
-        let mut left = vec![];
-        let mut right = vec![];
-        (0..batch_size).for_each(|_| {
-            left.push(transcript.read_field_element_ext().unwrap());
-            right.push(transcript.read_field_element_ext().unwrap());
-        });
-        Self::new_ext(
-            left,
-            right,
-            index >> (full_codeword_size_log - codeword_size_log),
-        )
-    }
-
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        full_codeword_size_log: usize,
-        codeword_size_log: usize,
-        index: usize,
-        batch_size: usize,
-    ) -> Self {
-        let mut left = vec![];
-        let mut right = vec![];
-        (0..batch_size).for_each(|_| {
-            left.push(transcript.read_field_element_base().unwrap());
-            right.push(transcript.read_field_element_base().unwrap());
-        });
-        Self::new_base(
-            left,
-            right,
-            index >> (full_codeword_size_log - codeword_size_log),
-        )
-    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SimpleBatchCommitmentSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1678,53 +1331,9 @@ impl<E: ExtensionField> SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.query.write_transcript(transcript);
         self.merkle_path.write_transcript(transcript);
-    }
-
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        full_codeword_size_log: usize,
-        codeword_size_log: usize,
-        index: usize,
-        batch_size: usize,
-    ) -> Self {
-        Self {
-            query: SimpleBatchCommitmentSingleQueryResult::read_transcript_base(
-                transcript,
-                full_codeword_size_log,
-                codeword_size_log,
-                index,
-                batch_size,
-            ),
-            merkle_path: MerklePathWithoutLeafOrRoot::read_transcript(
-                transcript,
-                codeword_size_log,
-            ),
-        }
-    }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        full_codeword_size_log: usize,
-        codeword_size_log: usize,
-        index: usize,
-        batch_size: usize,
-    ) -> Self {
-        Self {
-            query: SimpleBatchCommitmentSingleQueryResult::read_transcript_ext(
-                transcript,
-                full_codeword_size_log,
-                codeword_size_log,
-                index,
-                batch_size,
-            ),
-            merkle_path: MerklePathWithoutLeafOrRoot::read_transcript(
-                transcript,
-                codeword_size_log,
-            ),
-        }
     }
 
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>, hasher: &Hasher<E::BaseField>) {
@@ -1762,7 +1371,7 @@ where
     commitment_query: SimpleBatchCommitmentSingleQueryResult<E>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SimpleBatchSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1796,61 +1405,9 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.oracle_query.write_transcript(transcript);
         self.commitment_query.write_transcript(transcript);
-    }
-
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        num_vars: usize,
-        index: usize,
-        batch_size: usize,
-    ) -> Self {
-        Self {
-            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
-                transcript,
-                num_rounds,
-                num_vars + log_rate,
-                index,
-            ),
-            commitment_query:
-                SimpleBatchCommitmentSingleQueryResultWithMerklePath::read_transcript_base(
-                    transcript,
-                    num_vars + log_rate,
-                    num_vars + log_rate,
-                    index,
-                    batch_size,
-                ),
-        }
-    }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        num_vars: usize,
-        index: usize,
-        batch_size: usize,
-    ) -> Self {
-        Self {
-            oracle_query: OracleListQueryResultWithMerklePath::read_transcript(
-                transcript,
-                num_rounds,
-                num_vars + log_rate,
-                index,
-            ),
-            commitment_query:
-                SimpleBatchCommitmentSingleQueryResultWithMerklePath::read_transcript_ext(
-                    transcript,
-                    num_vars + log_rate,
-                    num_vars + log_rate,
-                    index,
-                    batch_size,
-                ),
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1920,6 +1477,7 @@ where
     inner: Vec<(usize, SimpleBatchSingleQueryResult<E>)>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimpleBatchQueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1954,71 +1512,16 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut impl TranscriptWrite<Digest<E::BaseField>, E>) {
+    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.inner
             .iter()
             .for_each(|(_, q)| q.write_transcript(transcript));
     }
 
-    pub fn read_transcript_base(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        poly_num_vars: usize,
-        indices: &[usize],
-        batch_size: usize,
-    ) -> Self {
-        Self {
-            inner: indices
-                .iter()
-                .map(|index| {
-                    (
-                        *index,
-                        SimpleBatchSingleQueryResultWithMerklePath::read_transcript_base(
-                            transcript,
-                            num_rounds,
-                            log_rate,
-                            poly_num_vars,
-                            *index,
-                            batch_size,
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
-
-    pub fn read_transcript_ext(
-        transcript: &mut impl TranscriptRead<Digest<E::BaseField>, E>,
-        num_rounds: usize,
-        log_rate: usize,
-        poly_num_vars: usize,
-        indices: &[usize],
-        batch_size: usize,
-    ) -> Self {
-        Self {
-            inner: indices
-                .iter()
-                .map(|index| {
-                    (
-                        *index,
-                        SimpleBatchSingleQueryResultWithMerklePath::read_transcript_ext(
-                            transcript,
-                            num_rounds,
-                            log_rate,
-                            poly_num_vars,
-                            *index,
-                            batch_size,
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
+        indices: &[usize],
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &[E],
         batch_coeffs: &[E],
@@ -2030,20 +1533,23 @@ where
         hasher: &Hasher<E::BaseField>,
     ) {
         let timer = start_timer!(|| "QueriesResult::check");
-        self.inner.par_iter().for_each(|(index, query)| {
-            query.check::<Spec>(
-                vp,
-                fold_challenges,
-                batch_coeffs,
-                num_rounds,
-                num_vars,
-                final_codeword,
-                roots,
-                comm,
-                *index,
-                hasher,
-            );
-        });
+        self.inner.par_iter().zip(indices.par_iter()).for_each(
+            |((index, query), index_in_proof)| {
+                assert_eq!(index, index_in_proof);
+                query.check::<Spec>(
+                    vp,
+                    fold_challenges,
+                    batch_coeffs,
+                    num_rounds,
+                    num_vars,
+                    final_codeword,
+                    roots,
+                    comm,
+                    *index,
+                    hasher,
+                );
+            },
+        );
         end_timer!(timer);
     }
 }

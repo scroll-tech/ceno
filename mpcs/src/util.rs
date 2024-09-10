@@ -3,7 +3,6 @@ pub mod expression;
 pub mod hash;
 pub mod parallel;
 pub mod plonky2_util;
-pub mod transcript;
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;

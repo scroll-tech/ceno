@@ -5,11 +5,22 @@ use goldilocks::SmallField;
 use poseidon::Poseidon;
 
 use serde::{Deserialize, Serialize};
+use transcript::Transcript;
 
-pub const DIGEST_WIDTH: usize = super::transcript::OUTPUT_WIDTH;
+pub const DIGEST_WIDTH: usize = transcript::basic::OUTPUT_WIDTH;
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Digest<F: SmallField + Serialize>(pub [F; DIGEST_WIDTH]);
 pub type Hasher<F> = Poseidon<F, 12, 11>;
+
+pub fn write_digest_to_transcript<E: ExtensionField>(
+    digest: &Digest<E::BaseField>,
+    transcript: &mut Transcript<E>,
+) {
+    digest
+        .0
+        .iter()
+        .for_each(|x| transcript.append_field_element(x));
+}
 
 pub fn new_hasher<F: SmallField>() -> Hasher<F> {
     // FIXME: Change to the right parameter
