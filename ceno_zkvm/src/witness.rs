@@ -126,9 +126,11 @@ impl LkMultiplicity {
             .unwrap()
             .into_iter()
             .fold(array::from_fn(|_| HashMap::new()), |mut x, y| {
-                x.iter_mut()
-                    .zip(y.borrow().iter())
-                    .for_each(|(m1, m2)| m1.extend(m2.iter().map(|(k, v)| (*k, *v))));
+                x.iter_mut().zip(y.borrow().iter()).for_each(|(m1, m2)| {
+                    for (key, value) in m2 {
+                        *m1.entry(*key).or_insert(0) += value;
+                    }
+                });
                 x
             })
     }
@@ -142,6 +144,7 @@ mod tests {
 
     #[test]
     fn test_lk_multiplicity_threads() {
+        // TODO figure out a way to verify thread_local hit/miss in unittest env
         let lkm = LkMultiplicity::default();
         let thread_count = 20;
         // each thread calling assert_byte once
