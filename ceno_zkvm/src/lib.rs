@@ -1,5 +1,6 @@
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
+#![feature(variant_count)]
 
 pub mod error;
 pub mod instructions;
@@ -16,4 +17,5 @@ mod utils;
 mod virtual_polys;
 mod witness;
 
+pub use structs::ROMType;
 pub use uint::UIntValue;

@@ -16,6 +16,7 @@ use crate::{
     instructions::Instruction,
     set_val,
     uint::UIntValue,
+    witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 
@@ -59,7 +60,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let next_pc = pc.expr() + PC_STEP_SIZE.into();
 
     // Execution result = addend0 + addend1, with carry.
-    let prev_rd_value = RegUInt::new(|| "prev_rd_value", circuit_builder)?;
+    let prev_rd_value = RegUInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
 
     let (addend_0, addend_1, outcome) = if IS_ADD {
         // outcome = addend_0 + addend_1
@@ -153,15 +154,15 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
+        lk_multiplicity: &mut LkMultiplicity,
         step: StepRecord,
     ) -> Result<(), ZKVMError> {
         // TODO use fields from step
         set_val!(instance, config.pc, 1);
         set_val!(instance, config.ts, 2);
-        let addend_0 = UIntValue::new(step.rs1().unwrap().value);
-        let addend_1 = UIntValue::new(step.rs2().unwrap().value);
-        let outcome = UIntValue::new(step.rd().unwrap().value.after);
-        let rd_prev = UIntValue::new(step.rd().unwrap().value.before);
+        let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
+        let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
+        let rd_prev = UIntValue::new_unchecked(step.rd().unwrap().value.before);
         config
             .prev_rd_value
             .assign_limbs(instance, rd_prev.u16_fields());
@@ -171,7 +172,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         config
             .addend_1
             .assign_limbs(instance, addend_1.u16_fields());
-        let carries = addend_0.add_u16_carries(&addend_1);
+        let (_, carries) = addend_0.add(&addend_1, lk_multiplicity, true);
         config.outcome.assign_carries(
             instance,
             carries
@@ -179,7 +180,6 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
                 .map(|carry| E::BaseField::from(carry as u64))
                 .collect_vec(),
         );
-        config.outcome.assign_limbs(instance, outcome.u16_fields());
         // TODO #167
         set_val!(instance, config.rs1_id, 2);
         set_val!(instance, config.rs2_id, 2);
@@ -207,6 +207,7 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
+        _lk_multiplicity: &mut LkMultiplicity,
         _step: StepRecord,
     ) -> Result<(), ZKVMError> {
         // TODO use field from step
@@ -271,7 +272,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let raw_witin = AddInstruction::assign_instances(
+        let (raw_witin, _) = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord {
@@ -326,7 +327,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let raw_witin = AddInstruction::assign_instances(
+        let (raw_witin, _) = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord {

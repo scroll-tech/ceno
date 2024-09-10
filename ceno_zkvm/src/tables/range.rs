@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -7,6 +7,7 @@ use crate::{
     set_fixed_val, set_val,
     structs::ROMType,
     tables::TableCircuit,
+    uint::constants::RANGE_CHIP_BIT_WIDTH,
     witness::RowMajorMatrix,
 };
 use ff_ext::ExtensionField;
@@ -22,7 +23,7 @@ pub struct RangeTableCircuit<E>(PhantomData<E>);
 
 impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
     type TableConfig = RangeTableConfig;
-    type Input = usize;
+    type Input = u64;
 
     fn name() -> String {
         "RANGE".into()
@@ -62,21 +63,19 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
-        inputs: &[Self::Input],
+        multiplicity: &HashMap<Self::Input, usize>,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        let num_u16s = 1 << 16;
-        let mut u16_mlt = vec![0; num_u16s];
-        for limb in inputs {
-            u16_mlt[*limb] += 1;
+        let mut u16_mlt = vec![0; 1 << RANGE_CHIP_BIT_WIDTH];
+        for (limb, mlt) in multiplicity {
+            u16_mlt[*limb as usize] = *mlt;
         }
-        tracing::debug!("u16_mult[4] = {}", u16_mlt[4]);
 
         let mut witness = RowMajorMatrix::<E::BaseField>::new(u16_mlt.len(), num_witin);
         witness
             .par_iter_mut()
             .zip(u16_mlt.into_par_iter())
             .for_each(|(row, mlt)| {
-                set_val!(row, config.u16_mlt, E::BaseField::from(mlt));
+                set_val!(row, config.u16_mlt, E::BaseField::from(mlt as u64));
             });
 
         Ok(witness)

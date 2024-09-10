@@ -5,7 +5,7 @@ use ceno_zkvm::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::{riscv::addsub::AddInstruction, Instruction},
     scheme::prover::ZKVMProver,
-    UIntValue,
+    ROMType,
 };
 use const_env::from_env;
 
@@ -17,7 +17,6 @@ use ceno_zkvm::{
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
 use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
@@ -134,34 +133,15 @@ fn main() {
             .collect::<Vec<_>>();
         tracing::info!("tracer generated {} ADD records", records.len());
 
-        // TODO: generate range check inputs from opcode_circuit::assign_instances()
-        let rc_inputs = records
-            .iter()
-            .flat_map(|record| {
-                let rs1 = UIntValue::new(record.rs1().unwrap().value);
-                let rs2 = UIntValue::new(record.rs2().unwrap().value);
-
-                let rd_prev = UIntValue::new(record.rd().unwrap().value.before);
-                let rd = UIntValue::new(record.rd().unwrap().value.after);
-                let carries = rs1
-                    .add_u16_carries(&rs2)
-                    .into_iter()
-                    .map(|c| c as u16)
-                    .collect_vec();
-
-                [rd_prev.limbs, rd.limbs, carries].concat()
-            })
-            .map(|x| x as usize)
-            .collect::<Vec<_>>();
-
         let mut zkvm_witness = BTreeMap::default();
-        let add_witness =
+        let (add_witness, table_inputs) =
             AddInstruction::assign_instances(&add_config, add_cs.num_witin as usize, records)
                 .unwrap();
+        let table_inputs = table_inputs.into_finalize_result();
         let range_witness = RangeTableCircuit::<E>::assign_instances(
             &range_config,
             range_cs.num_witin as usize,
-            &rc_inputs,
+            &table_inputs[ROMType::U16 as usize],
         )
         .unwrap();
 

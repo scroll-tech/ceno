@@ -28,10 +28,10 @@ pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
 pub enum ROMType {
-    U5,  // 2^5 = 32
-    U16, // 2^16 = 65,536
-    And, // a ^ b where a, b are bytes
-    Ltu, // a <(usign) b where a, b are bytes
+    U5 = 0, // 2^5 = 32
+    U16,    // 2^16 = 65,536
+    And,    // a ^ b where a, b are bytes
+    Ltu,    // a <(usign) b where a, b are bytes
 }
 
 #[derive(Clone, Debug, Copy)]
