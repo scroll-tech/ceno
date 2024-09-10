@@ -5,7 +5,7 @@ pub mod digest;
 pub(crate) mod poseidon;
 mod poseidon_goldilocks;
 pub mod poseidon_hash;
-pub(crate) mod poseidon_permutation;
+pub mod poseidon_permutation;
 
 use crate::poseidon::Poseidon;
 use goldilocks::{ExtensionField, SmallField};

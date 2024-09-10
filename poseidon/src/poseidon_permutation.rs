@@ -3,7 +3,7 @@ use crate::{
     poseidon::Poseidon,
 };
 
-pub(crate) struct PoseidonPermutation<T> {
+pub struct PoseidonPermutation<T> {
     state: [T; SPONGE_WIDTH],
 }
 
@@ -15,7 +15,7 @@ impl<T: Poseidon> PoseidonPermutation<T> {
     /// different value, instead of your original `iter` pass
     /// `iter.chain(core::iter::repeat(F::from_canonical_u64(12345)))`
     /// or similar.
-    pub(crate) fn new<I: IntoIterator<Item = T>>(elts: I) -> Self {
+    pub fn new<I: IntoIterator<Item = T>>(elts: I) -> Self {
         let mut perm = Self {
             state: [T::default(); SPONGE_WIDTH],
         };
@@ -46,12 +46,12 @@ impl<T: Poseidon> PoseidonPermutation<T> {
     }
 
     /// Apply permutation to internal state
-    pub(crate) fn permute(&mut self) {
+    pub fn permute(&mut self) {
         self.state = T::poseidon(self.state);
     }
 
     /// Return a slice of `RATE` elements
-    pub(crate) fn squeeze(&self) -> &[T] {
+    pub fn squeeze(&self) -> &[T] {
         &self.state[..SPONGE_RATE]
     }
 }

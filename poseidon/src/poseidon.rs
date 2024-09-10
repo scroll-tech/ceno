@@ -8,6 +8,12 @@ use crate::{
 use goldilocks::{ExtensionField, Goldilocks, SmallField, EPSILON};
 use unroll::unroll_for_loops;
 
+// pub static mut N_ADD: usize = 0;
+// pub static mut N_MUL: usize = 0;
+// pub static mut N_SQUARE: usize = 0;
+//
+// pub static mut N_EXP: usize = 0;
+
 pub(crate) trait Poseidon: AdaptedField {
     // Total number of round constants required: width of the input
     // times number of rounds.

@@ -7,6 +7,8 @@ use plonky2::{
     hash::{hash_types::HashOut, poseidon::PoseidonHash as PlonkyPoseidonHash},
     plonk::config::Hasher,
 };
+use plonky2::hash::hashing::PlonkyPermutation;
+use plonky2::hash::poseidon::PoseidonPermutation;
 use poseidon::{digest::Digest, poseidon_hash::PoseidonHash};
 
 fn random_plonky_2_goldy() -> GoldilocksField {
@@ -85,5 +87,20 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+
+// bench permutation
+pub fn permutation_benchmark(c: &mut Criterion) {
+    let mut plonky_permutation = PoseidonPermutation::new(core::iter::repeat(GoldilocksField(0)));
+    let mut ceno_permutation = poseidon::poseidon_permutation::PoseidonPermutation::new(core::iter::repeat(Goldilocks::ZERO));
+
+    c.bench_function("plonky permute", |bencher| {
+        bencher.iter(|| black_box(plonky_permutation.permute()))
+    });
+
+    c.bench_function("ceno permute", |bencher| {
+        bencher.iter(|| black_box(ceno_permutation.permute()))
+    });
+}
+
+criterion_group!(benches, criterion_benchmark, permutation_benchmark);
 criterion_main!(benches);
