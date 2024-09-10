@@ -8,7 +8,7 @@ use crate::{
     create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::config::{IsEqualConfig, LtConfig, LtuConfig, MsbConfig},
+    instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
 };
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
@@ -265,7 +265,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UInt<M, 8, E>,
-    ) -> Result<LtuConfig, ZKVMError> {
+    ) -> Result<UIntLtuConfig, ZKVMError> {
         let n_bytes = Self::NUM_CELLS;
         let indexes: Vec<WitIn> = (0..n_bytes)
             .map(|_| circuit_builder.create_witin(|| "index"))
@@ -343,7 +343,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         // circuit_builder.assert_bit(is_ltu.expr())?; // lookup ensure it is bit
         // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
         circuit_builder.lookup_ltu_limb8(is_ltu.expr(), lhs_ne_byte.expr(), rhs_ne_byte.expr())?;
-        Ok(LtuConfig {
+        Ok(UIntLtuConfig {
             byte_diff_inv,
             indexes,
             acc_indexes: si,
@@ -357,7 +357,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UInt<M, 8, E>,
-    ) -> Result<LtConfig, ZKVMError> {
+    ) -> Result<UIntLtConfig, ZKVMError> {
         let is_lt = circuit_builder.create_witin(|| "is_lt")?;
         circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
 
@@ -383,7 +383,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
                 + msb_is_equal.expr() * is_ltu.is_ltu.expr()
                 - is_lt.expr(),
         )?;
-        Ok(LtConfig {
+        Ok(UIntLtConfig {
             lhs_msb,
             rhs_msb,
             msb_is_equal,

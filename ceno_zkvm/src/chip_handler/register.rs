@@ -4,7 +4,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::config::Lt2Config,
+    instructions::riscv::config::ExprLtConfig,
     structs::RAMType,
 };
 
@@ -69,7 +69,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         ts: Expression<E>,
         prev_values: &V,
         values: &V,
-    ) -> Result<(Expression<E>, Lt2Config, Lt2Config, Lt2Config), ZKVMError> {
+    ) -> Result<(Expression<E>, ExprLtConfig, ExprLtConfig, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(

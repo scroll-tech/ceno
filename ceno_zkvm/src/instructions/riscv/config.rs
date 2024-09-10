@@ -42,7 +42,7 @@ impl MsbInput<'_> {
 }
 
 #[derive(Clone)]
-pub struct LtuConfig {
+pub struct UIntLtuConfig {
     pub indexes: Vec<WitIn>,
     pub acc_indexes: Vec<WitIn>,
     pub byte_diff_inv: WitIn,
@@ -51,16 +51,16 @@ pub struct LtuConfig {
     pub is_ltu: WitIn,
 }
 
-pub struct LtuInput<'a> {
+pub struct UIntLtuInput<'a> {
     pub lhs_limbs: &'a [u8],
     pub rhs_limbs: &'a [u8],
 }
 
-impl LtuInput<'_> {
+impl UIntLtuInput<'_> {
     pub fn assign<F: SmallField>(
         &self,
         instance: &mut [MaybeUninit<F>],
-        config: &LtuConfig,
+        config: &UIntLtuConfig,
     ) -> bool {
         let mut idx = 0;
         let mut flag: bool = false;
@@ -105,25 +105,25 @@ impl LtuInput<'_> {
 }
 
 #[derive(Clone)]
-pub struct LtConfig {
+pub struct UIntLtConfig {
     pub lhs_msb: MsbConfig,
     pub rhs_msb: MsbConfig,
     pub msb_is_equal: WitIn,
     pub msb_diff_inv: WitIn,
-    pub is_ltu: LtuConfig,
+    pub is_ltu: UIntLtuConfig,
     pub is_lt: WitIn,
 }
 
-pub struct LtInput<'a> {
+pub struct UIntLtInput<'a> {
     pub lhs_limbs: &'a [u8],
     pub rhs_limbs: &'a [u8],
 }
 
-impl LtInput<'_> {
+impl UIntLtInput<'_> {
     pub fn assign<F: SmallField>(
         &self,
         instance: &mut [MaybeUninit<F>],
-        config: &LtConfig,
+        config: &UIntLtConfig,
     ) -> bool {
         let n_limbs = self.lhs_limbs.len();
         let lhs_msb_input = MsbInput {
@@ -141,7 +141,7 @@ impl LtInput<'_> {
         let mut rhs_limbs_no_msb = self.rhs_limbs.iter().copied().collect_vec();
         rhs_limbs_no_msb[n_limbs - 1] = rhs_high_limb_no_msb;
 
-        let ltu_input = LtuInput {
+        let ltu_input = UIntLtuInput {
             lhs_limbs: &lhs_limbs_no_msb,
             rhs_limbs: &rhs_limbs_no_msb,
         };
@@ -170,18 +170,18 @@ impl LtInput<'_> {
 }
 
 #[derive(Debug)]
-pub struct Lt2Config {
+pub struct ExprLtConfig {
     pub is_lt: Option<WitIn>,
     pub diff: Vec<WitIn>,
 }
 
-pub struct Lt2Input {
+pub struct ExprLtInput {
     pub lhs: u64,
     pub rhs: u64,
 }
 
-impl Lt2Input {
-    pub fn assign<F: SmallField>(&self, instance: &mut [MaybeUninit<F>], config: &Lt2Config) {
+impl ExprLtInput {
+    pub fn assign<F: SmallField>(&self, instance: &mut [MaybeUninit<F>], config: &ExprLtConfig) {
         if let Some(is_lt) = config.is_lt {
             set_val!(instance, is_lt, { if self.lhs < self.rhs { 1 } else { 0 } });
         }

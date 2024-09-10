@@ -8,7 +8,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
-    instructions::riscv::config::Lt2Config,
+    instructions::riscv::config::ExprLtConfig,
     structs::ROMType,
 };
 
@@ -274,7 +274,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         lhs: Expression<E>,
         rhs: Expression<E>,
         assert_less_than: Option<bool>,
-    ) -> Result<Lt2Config, ZKVMError>
+    ) -> Result<ExprLtConfig, ZKVMError>
     where
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
@@ -328,7 +328,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
-                Ok(Lt2Config { is_lt, diff })
+                Ok(ExprLtConfig { is_lt, diff })
             },
         )
     }

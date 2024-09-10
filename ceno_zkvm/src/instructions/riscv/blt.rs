@@ -10,7 +10,7 @@ use crate::{
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
-        riscv::config::{LtConfig, LtInput},
+        riscv::config::{UIntLtConfig, UIntLtInput},
         Instruction,
     },
     set_val,
@@ -38,7 +38,7 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub rs2_id: WitIn,
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
-    pub is_lt: LtConfig,
+    pub is_lt: UIntLtConfig,
 }
 
 pub struct BltInput {
@@ -62,7 +62,7 @@ impl BltInput {
     ) {
         assert!(!self.lhs_limb8.is_empty() && (self.lhs_limb8.len() == self.rhs_limb8.len()));
         // TODO: add boundary check for witin
-        let lt_input = LtInput {
+        let lt_input = UIntLtInput {
             lhs_limbs: &self.lhs_limb8,
             rhs_limbs: &self.rhs_limb8,
         };

@@ -400,7 +400,7 @@ mod tests {
         error::ZKVMError,
         expression::{ToExpr, WitIn},
         instructions::{
-            riscv::config::{Lt2Config, Lt2Input, LtInput},
+            riscv::config::{ExprLtConfig, ExprLtInput},
             Instruction,
         },
         set_val,
@@ -546,7 +546,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: Lt2Config,
+        pub lt_wtns: ExprLtConfig,
     }
 
     struct AssertLtCircuitInput {
@@ -569,7 +569,7 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            Lt2Input {
+            ExprLtInput {
                 lhs: input.a,
                 rhs: input.b,
             }
@@ -663,7 +663,7 @@ mod tests {
     struct LtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: Lt2Config,
+        pub lt_wtns: ExprLtConfig,
     }
 
     struct LtCircuitInput {
@@ -686,7 +686,7 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            Lt2Input {
+            ExprLtInput {
                 lhs: input.a,
                 rhs: input.b,
             }

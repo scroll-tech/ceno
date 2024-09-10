@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 
 use super::{
-    config::Lt2Config,
+    config::ExprLtConfig,
     constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
     RIVInstruction,
 };
@@ -14,7 +14,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    instructions::{riscv::config::Lt2Input, Instruction},
+    instructions::{riscv::config::ExprLtInput, Instruction},
     set_val,
     uint::UIntValue,
     witness::LkMultiplicity,
@@ -38,9 +38,9 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
     pub prev_rd_ts: WitIn,
-    pub lt_rs1_cfg: Lt2Config,
-    pub lt_rs2_cfg: Lt2Config,
-    pub lt_prev_ts_cfg: Lt2Config,
+    pub lt_rs1_cfg: ExprLtConfig,
+    pub lt_rs2_cfg: ExprLtConfig,
+    pub lt_prev_ts_cfg: ExprLtConfig,
     phantom: PhantomData<E>,
 }
 
@@ -197,17 +197,17 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         set_val!(instance, config.prev_rs2_ts, 2);
         set_val!(instance, config.prev_rd_ts, 2);
 
-        Lt2Input {
+        ExprLtInput {
             lhs: 2,         // rs1
             rhs: 3 + 1 + 1, // ts = cur_ts + 1 + 1
         }
         .assign(instance, &config.lt_rs1_cfg);
-        Lt2Input {
+        ExprLtInput {
             lhs: 2,         // rs2
             rhs: 3 + 1 + 1, // ts = cur_ts + 1 + 1
         }
         .assign(instance, &config.lt_rs2_cfg);
-        Lt2Input {
+        ExprLtInput {
             lhs: 2,         // rd
             rhs: 3 + 1 + 1, // ts = cur_ts + 1 + 1
         }
