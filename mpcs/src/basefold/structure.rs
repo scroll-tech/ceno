@@ -89,7 +89,7 @@ where
         self.codeword_tree.leaves()
     }
 
-    pub fn batch_codewords(&self, coeffs: &Vec<E>) -> Vec<E> {
+    pub fn batch_codewords(&self, coeffs: &[E]) -> Vec<E> {
         self.codeword_tree.batch_leaves(coeffs)
     }
 
