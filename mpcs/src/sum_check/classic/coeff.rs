@@ -205,7 +205,7 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
                 products.iter_mut().for_each(|(lhs, _)| {
                     *lhs *= &rhs;
                 });
-                (constant * &rhs, products)
+                (constant * rhs, products)
             },
         );
         Self(constant, flattened)
@@ -215,7 +215,7 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
         // Initialize h(X) to zero
         let mut coeffs = Coefficients(FieldType::Ext(vec![E::ZERO; state.expression.degree() + 1]));
         // First, sum the constant over the hypercube and add to h(X)
-        coeffs += &(E::from(state.size() as u64) * &self.0);
+        coeffs += &(E::from(state.size() as u64) * self.0);
         // Next, for every product of polynomials, where each product is assumed to be exactly 2
         // put this into h(X).
         if self.1.iter().all(|(_, products)| products.len() == 2) {
@@ -287,11 +287,11 @@ impl<E: ExtensionField> CoefficientsProver<E> {
                     .take(n)
                     .for_each(|((lhs_0, lhs_1), (rhs_0, rhs_1))| {
                         let coeff_0 = lhs_0 * rhs_0;
-                        let coeff_2 = (lhs_1 - lhs_0) * &(rhs_1 - rhs_0);
+                        let coeff_2 = (lhs_1 - lhs_0) * (rhs_1 - rhs_0);
                         coeffs[0] += &coeff_0;
                         coeffs[2] += &coeff_2;
                         if !LAZY {
-                            coeffs[1] += &(lhs_1 * rhs_1 - &coeff_0 - &coeff_2);
+                            coeffs[1] += &(lhs_1 * rhs_1 - coeff_0 - coeff_2);
                         }
                     });
                 };

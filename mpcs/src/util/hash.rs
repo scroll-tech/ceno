@@ -40,6 +40,54 @@ pub fn hash_two_leaves_base<E: ExtensionField>(
     Digest(result)
 }
 
+pub fn hash_two_leaves_batch_ext<E: ExtensionField>(
+    a: &[E],
+    b: &[E],
+    hasher: &Hasher<E::BaseField>,
+) -> Digest<E::BaseField> {
+    let mut left_hasher = hasher.clone();
+    a.iter().for_each(|a| left_hasher.update(a.as_bases()));
+    let left = Digest(
+        left_hasher.squeeze_vec()[0..DIGEST_WIDTH]
+            .try_into()
+            .unwrap(),
+    );
+
+    let mut right_hasher = hasher.clone();
+    b.iter().for_each(|b| right_hasher.update(b.as_bases()));
+    let right = Digest(
+        right_hasher.squeeze_vec()[0..DIGEST_WIDTH]
+            .try_into()
+            .unwrap(),
+    );
+
+    hash_two_digests(&left, &right, hasher)
+}
+
+pub fn hash_two_leaves_batch_base<E: ExtensionField>(
+    a: &Vec<E::BaseField>,
+    b: &Vec<E::BaseField>,
+    hasher: &Hasher<E::BaseField>,
+) -> Digest<E::BaseField> {
+    let mut left_hasher = hasher.clone();
+    left_hasher.update(a.as_slice());
+    let left = Digest(
+        left_hasher.squeeze_vec()[0..DIGEST_WIDTH]
+            .try_into()
+            .unwrap(),
+    );
+
+    let mut right_hasher = hasher.clone();
+    right_hasher.update(b.as_slice());
+    let right = Digest(
+        right_hasher.squeeze_vec()[0..DIGEST_WIDTH]
+            .try_into()
+            .unwrap(),
+    );
+
+    hash_two_digests(&left, &right, hasher)
+}
+
 pub fn hash_two_digests<F: SmallField>(
     a: &Digest<F>,
     b: &Digest<F>,

@@ -80,7 +80,7 @@ pub fn inner_product<'a, 'b, F: Field>(
     rhs: impl IntoIterator<Item = &'b F>,
 ) -> F {
     lhs.into_iter()
-        .zip_eq(rhs.into_iter())
+        .zip_eq(rhs)
         .map(|(lhs, rhs)| *lhs * rhs)
         .reduce(|acc, product| acc + product)
         .unwrap_or_default()
@@ -92,8 +92,8 @@ pub fn inner_product_three<'a, 'b, 'c, F: Field>(
     c: impl IntoIterator<Item = &'c F>,
 ) -> F {
     a.into_iter()
-        .zip_eq(b.into_iter())
-        .zip_eq(c.into_iter())
+        .zip_eq(b)
+        .zip_eq(c)
         .map(|((a, b), c)| *a * b * c)
         .reduce(|acc, product| acc + product)
         .unwrap_or_default()
@@ -107,8 +107,9 @@ pub fn barycentric_weights<F: Field>(points: &[F]) -> Vec<F> {
             points
                 .iter()
                 .enumerate()
-                .filter_map(|(i, point_i)| (i != j).then(|| *point_j - point_i))
-                .reduce(|acc, value| acc * &value)
+                .filter(|&(i, _point_i)| (i != j))
+                .map(|(_i, point_i)| *point_j - point_i)
+                .reduce(|acc, value| acc * value)
                 .unwrap_or(F::ONE)
         })
         .collect_vec();
@@ -126,7 +127,7 @@ pub fn barycentric_interpolate<F: Field>(weights: &[F], points: &[F], evals: &[F
         let sum_inv = coeffs.iter().fold(F::ZERO, |sum, coeff| sum + coeff);
         (coeffs, sum_inv.invert().unwrap())
     };
-    inner_product(&coeffs, evals) * &sum_inv
+    inner_product(&coeffs, evals) * sum_inv
 }
 
 pub fn modulus<F: PrimeField>() -> BigUint {
@@ -134,11 +135,7 @@ pub fn modulus<F: PrimeField>() -> BigUint {
 }
 
 pub fn fe_from_bool<F: Field>(value: bool) -> F {
-    if value {
-        F::ONE
-    } else {
-        F::ZERO
-    }
+    if value { F::ONE } else { F::ZERO }
 }
 
 pub fn fe_mod_from_le_bytes<F: PrimeField>(bytes: impl AsRef<[u8]>) -> F {
@@ -221,17 +218,17 @@ pub fn interpolate2<F: Field>(points: [(F, F); 2], x: F) -> F {
     a1 + (x - a0) * (b1 - a1) * (b0 - a0).invert().unwrap()
 }
 
-pub fn degree_2_zero_plus_one<F: Field>(poly: &Vec<F>) -> F {
+pub fn degree_2_zero_plus_one<F: Field>(poly: &[F]) -> F {
     poly[0] + poly[0] + poly[1] + poly[2]
 }
 
-pub fn degree_2_eval<F: Field>(poly: &Vec<F>, point: F) -> F {
+pub fn degree_2_eval<F: Field>(poly: &[F], point: F) -> F {
     poly[0] + point * poly[1] + point * point * poly[2]
 }
 
-pub fn base_from_raw_bytes<E: ExtensionField>(bytes: &Vec<u8>) -> E::BaseField {
+pub fn base_from_raw_bytes<E: ExtensionField>(bytes: &[u8]) -> E::BaseField {
     let mut res = E::BaseField::ZERO;
-    bytes.into_iter().for_each(|b| {
+    bytes.iter().for_each(|b| {
         res += E::BaseField::from(u64::from(*b));
     });
     res
