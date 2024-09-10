@@ -46,5 +46,25 @@ sanity-check = []
 print-trace = [ "ark-std/print-trace" ]
 
 [[bench]]
-name = "commit_open_verify"
+name = "commit_open_verify_rs"
+harness = false
+
+[[bench]]
+name = "commit_open_verify_basecode"
+harness = false
+
+[[bench]]
+name = "basecode"
+harness = false
+
+[[bench]]
+name = "rscode"
+harness = false
+
+[[bench]]
+name = "interpolate"
+harness = false
+
+[[bench]]
+name = "fft"
 harness = false

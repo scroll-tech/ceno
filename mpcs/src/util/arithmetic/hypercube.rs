@@ -1,4 +1,3 @@
-use ark_std::{end_timer, start_timer};
 use ff::Field;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
@@ -30,7 +29,7 @@ pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut Vec<F>) {
         evals.par_chunks_mut(chunk_size).for_each(|chunk| {
             let half_chunk = chunk_size >> 1;
             for j in half_chunk..chunk_size {
-                chunk[j] = chunk[j] - chunk[j - half_chunk];
+                chunk[j] -= chunk[j - half_chunk];
             }
         });
     }

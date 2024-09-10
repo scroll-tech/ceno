@@ -3,7 +3,6 @@ pub mod expression;
 pub mod hash;
 pub mod parallel;
 pub mod plonky2_util;
-pub mod transcript;
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -109,6 +108,42 @@ pub fn field_type_index_ext<E: ExtensionField>(poly: &FieldType<E>, index: usize
     match &poly {
         FieldType::Ext(coeffs) => coeffs[index],
         FieldType::Base(coeffs) => E::from(coeffs[index]),
+        _ => unreachable!(),
+    }
+}
+
+pub fn field_type_index_mul_base<E: ExtensionField>(
+    poly: &mut FieldType<E>,
+    index: usize,
+    scalar: &E::BaseField,
+) {
+    match poly {
+        FieldType::Ext(coeffs) => coeffs[index] *= scalar,
+        FieldType::Base(coeffs) => coeffs[index] *= scalar,
+        _ => unreachable!(),
+    }
+}
+
+pub fn field_type_index_set_base<E: ExtensionField>(
+    poly: &mut FieldType<E>,
+    index: usize,
+    scalar: &E::BaseField,
+) {
+    match poly {
+        FieldType::Ext(coeffs) => coeffs[index] = E::from(*scalar),
+        FieldType::Base(coeffs) => coeffs[index] = *scalar,
+        _ => unreachable!(),
+    }
+}
+
+pub fn field_type_index_set_ext<E: ExtensionField>(
+    poly: &mut FieldType<E>,
+    index: usize,
+    scalar: &E,
+) {
+    match poly {
+        FieldType::Ext(coeffs) => coeffs[index] = *scalar,
+        FieldType::Base(_) => panic!("Cannot set base field from extension field"),
         _ => unreachable!(),
     }
 }

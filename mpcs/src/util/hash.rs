@@ -5,11 +5,22 @@ use goldilocks::SmallField;
 use poseidon::Poseidon;
 
 use serde::{Deserialize, Serialize};
+use transcript::Transcript;
 
-pub const DIGEST_WIDTH: usize = super::transcript::OUTPUT_WIDTH;
+pub const DIGEST_WIDTH: usize = transcript::basic::OUTPUT_WIDTH;
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Digest<F: SmallField + Serialize>(pub [F; DIGEST_WIDTH]);
 pub type Hasher<F> = Poseidon<F, 12, 11>;
+
+pub fn write_digest_to_transcript<E: ExtensionField>(
+    digest: &Digest<E::BaseField>,
+    transcript: &mut Transcript<E>,
+) {
+    digest
+        .0
+        .iter()
+        .for_each(|x| transcript.append_field_element(x));
+}
 
 pub fn new_hasher<F: SmallField>() -> Hasher<F> {
     // FIXME: Change to the right parameter
@@ -38,6 +49,54 @@ pub fn hash_two_leaves_base<E: ExtensionField>(
     hasher.update(&[*b]);
     let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
     Digest(result)
+}
+
+pub fn hash_two_leaves_batch_ext<E: ExtensionField>(
+    a: &[E],
+    b: &[E],
+    hasher: &Hasher<E::BaseField>,
+) -> Digest<E::BaseField> {
+    let mut left_hasher = hasher.clone();
+    a.iter().for_each(|a| left_hasher.update(a.as_bases()));
+    let left = Digest(
+        left_hasher.squeeze_vec()[0..DIGEST_WIDTH]
+            .try_into()
+            .unwrap(),
+    );
+
+    let mut right_hasher = hasher.clone();
+    b.iter().for_each(|b| right_hasher.update(b.as_bases()));
+    let right = Digest(
+        right_hasher.squeeze_vec()[0..DIGEST_WIDTH]
+            .try_into()
+            .unwrap(),
+    );
+
+    hash_two_digests(&left, &right, hasher)
+}
+
+pub fn hash_two_leaves_batch_base<E: ExtensionField>(
+    a: &Vec<E::BaseField>,
+    b: &Vec<E::BaseField>,
+    hasher: &Hasher<E::BaseField>,
+) -> Digest<E::BaseField> {
+    let mut left_hasher = hasher.clone();
+    left_hasher.update(a.as_slice());
+    let left = Digest(
+        left_hasher.squeeze_vec()[0..DIGEST_WIDTH]
+            .try_into()
+            .unwrap(),
+    );
+
+    let mut right_hasher = hasher.clone();
+    right_hasher.update(b.as_slice());
+    let right = Digest(
+        right_hasher.squeeze_vec()[0..DIGEST_WIDTH]
+            .try_into()
+            .unwrap(),
+    );
+
+    hash_two_digests(&left, &right, hasher)
 }
 
 pub fn hash_two_digests<F: SmallField>(
