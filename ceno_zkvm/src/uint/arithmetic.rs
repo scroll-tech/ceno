@@ -411,14 +411,13 @@ mod tests {
             scheme::utils::eval_by_expr,
             uint::UInt,
         };
-        use ff::Field;
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
 
         type E = GoldilocksExt2;
         #[test]
-        fn test_add_no_carries() {
+        fn test_add64_16_no_carries() {
             // a = 1 + 1 * 2^16
             // b = 2 + 1 * 2^16
             // c = 3 + 2 * 2^16 with 0 carries
@@ -430,7 +429,7 @@ mod tests {
         }
 
         #[test]
-        fn test_add_w_carry() {
+        fn test_add64_16_w_carry() {
             // a = 65535 + 1 * 2^16
             // b =   2   + 1 * 2^16
             // c =   1   + 3 * 2^16 with carries [1, 0, 0, 0]
@@ -442,7 +441,7 @@ mod tests {
         }
 
         #[test]
-        fn test_add_w_carries() {
+        fn test_add64_16_w_carries() {
             // a = 65535 + 65534 * 2^16
             // b =   2   +   1   * 2^16
             // c =   1   +   0   * 2^16 + 1 * 2^32 with carries [1, 1, 0, 0]
@@ -454,7 +453,7 @@ mod tests {
         }
 
         #[test]
-        fn test_add_w_overflow() {
+        fn test_add64_16_w_overflow() {
             // a = 1 + 1 * 2^16 + 0 + 65535 * 2^48
             // b = 2 + 1 * 2^16 + 0 +     2 * 2^48
             // c = 3 + 2 * 2^16 + 0 +     1 * 2^48 with carries [0, 0, 0, 1]
@@ -466,7 +465,31 @@ mod tests {
         }
 
         #[test]
-        fn test_add_const_no_carries() {
+        fn test_add32_16_w_carry() {
+            // a = 65535 + 1 * 2^16
+            // b =   2   + 1 * 2^16
+            // c =   1   + 3 * 2^16 with carries [1]
+            let a = vec![0xFFFF, 1];
+            let b = vec![2, 1];
+            let carries = vec![1]; // no overflow
+            let witness_values = [a, b, carries].concat();
+            verify::<32, 16, E>(witness_values, None, false);
+        }
+
+        #[test]
+        fn test_add32_5_w_carry() {
+            // a = 31
+            // b = 2 + 1 * 2^5
+            // c = 1 + 1 * 2^5 with carries [1, 0, 0, 0]
+            let a = vec![31, 1, 0, 0, 0, 0, 0];
+            let b = vec![2, 1, 0, 0, 0, 0, 0];
+            let carries = vec![1, 0, 0, 0, 0, 0]; // no overflow
+            let witness_values = [a, b, carries].concat();
+            verify::<32, 5, E>(witness_values, None, false);
+        }
+
+        #[test]
+        fn test_add_const64_16_no_carries() {
             // a = 1 + 1 * 2^16
             // const b = 2
             // c = 3 + 1 * 2^16 with 0 carries
@@ -477,14 +500,36 @@ mod tests {
         }
 
         #[test]
-        fn test_add_const_w_carries() {
+        fn test_add_const64_16_w_carries() {
             // a = 65535 + 65534 * 2^16
-            // b =   2   +   1   * 2^16
+            // const b =   2   +   1   * 2^16 = 65,538
             // c =   1   +   0   * 2^16 + 1 * 2^32 with carries [1, 1, 0, 0]
             let a = vec![0xFFFF, 0xFFFE, 0, 0];
             let carries = vec![1, 1, 0]; // no overflow
             let witness_values = [a, carries].concat();
             verify::<64, 16, E>(witness_values, Some(65538), false);
+        }
+
+        #[test]
+        fn test_add_const32_16_w_carry() {
+            // a = 65535 + 1 * 2^16
+            // const b =   2   + 1 * 2^16 = 65,538
+            // c =   1   + 3 * 2^16 with carries [1]
+            let a = vec![0xFFFF, 1];
+            let carries = vec![1]; // no overflow
+            let witness_values = [a, carries].concat();
+            verify::<32, 16, E>(witness_values, Some(65538), false);
+        }
+
+        #[test]
+        fn test_add_const32_5_w_carry() {
+            // a = 31
+            // const b = 2 + 1 * 2^5 = 34
+            // c = 1 + 1 * 2^5 with carries [1, 0, 0, 0]
+            let a = vec![31, 1, 0, 0, 0, 0, 0];
+            let carries = vec![1, 0, 0, 0, 0, 0]; // no overflow
+            let witness_values = [a, carries].concat();
+            verify::<32, 5, E>(witness_values, Some(34), false);
         }
 
         fn verify<const M: usize, const C: usize, E: ExtensionField>(
@@ -493,27 +538,21 @@ mod tests {
             overflow: bool,
         ) {
             let mut cs = ConstraintSystem::new(|| "test_add");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+            let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let mut uint_a = UInt::<M, C, E>::new(|| "uint_a", &mut circuit_builder).unwrap();
+            let uint_a = UInt::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
             let uint_c = if const_b.is_none() {
-                let mut uint_b = UInt::<M, C, E>::new(|| "uint_b", &mut circuit_builder).unwrap();
-                uint_a
-                    .add(|| "uint_c", &mut circuit_builder, &uint_b, overflow)
-                    .unwrap()
+                let uint_b = UInt::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
+                uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
             } else {
+                let const_b = Expression::Constant(const_b.unwrap().into());
                 uint_a
-                    .add_const(
-                        || "uint_c",
-                        &mut circuit_builder,
-                        Expression::Constant(const_b.unwrap().into()),
-                        overflow,
-                    )
+                    .add_const(|| "uint_c", &mut cb, const_b, overflow)
                     .unwrap()
             };
 
-            let POW_OF_C: u64 = 2_usize.pow(UInt::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
+            let pow_of_c: u64 = 2_usize.pow(UInt::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
             let single_wit_size = UInt::<M, C, E>::NUM_CELLS;
 
             let a = &witness_values[0..single_wit_size];
@@ -522,14 +561,16 @@ mod tests {
                 &witness_values[single_wit_size..2 * single_wit_size]
             } else {
                 let b = const_b.unwrap();
-                let LIMB_BIT_MASK: u64 = (1 << C) - 1;
+                let limb_bit_mask: u64 = (1 << C) - 1;
                 const_b_pre_allocated
                     .iter_mut()
                     .enumerate()
-                    .for_each(|(i, limb)| *limb = (b >> (C * i)) & LIMB_BIT_MASK);
+                    .for_each(|(i, limb)| *limb = (b >> (C * i)) & limb_bit_mask);
                 &const_b_pre_allocated
             };
 
+            // the num of witness is 3, a, b and c_carries if it's a `add`
+            // only the num is 2 if it's a `add_const` bcs there is no `b`
             let num_witness = if const_b.is_none() { 3 } else { 2 };
             let wit_end_idx = if overflow {
                 num_witness * single_wit_size
@@ -550,26 +591,20 @@ mod tests {
                         result[i] += carries[i - 1];
                     }
                     if !overflow && carry.is_some() {
-                        result[i] -= carry.unwrap() * POW_OF_C;
+                        result[i] -= carry.unwrap() * pow_of_c;
                     }
                 });
 
+            // verify
             let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
-            let c_expr = uint_c.expr();
-            c_expr.iter().zip(result).for_each(|(c, ret)| {
+            uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
                 assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
             });
 
             // overflow
             if overflow {
-                assert_eq!(
-                    eval_by_expr(
-                        &wit,
-                        &challenges,
-                        &uint_c.carries.unwrap().last().unwrap().expr()
-                    ),
-                    E::ONE
-                );
+                let carries = uint_c.carries.unwrap().last().unwrap().expr();
+                assert_eq!(eval_by_expr(&wit, &challenges, &carries), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
@@ -584,24 +619,11 @@ mod tests {
             scheme::utils::eval_by_expr,
             uint::UInt,
         };
-        use ark_std::iterable::Iterable;
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
 
         type E = GoldilocksExt2; // 18446744069414584321
-        // const POW_OF_C: u64 = 2_usize.pow(16u32) as u64;
-
-        // fn test_data() -> Vec<Vec<u64>> {
-        //     let d = vec![
-        //         [256, 256, 0, 0].into(),
-        //         [257, 256, 0, 0].into(),
-        //         [256, 257, 2, 1].into(),
-        //         [1, 2, 1].into(),
-        //     ];
-        //     d
-        // }
-
         #[test]
         fn test_mul64_16_no_carries() {
             // a = 1 + 1 * 2^16
@@ -688,16 +710,16 @@ mod tests {
             overflow: bool,
         ) {
             let mut cs = ConstraintSystem::new(|| "test_mul");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+            let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let mut uint_a = UInt::<M, C, E>::new(|| "uint_a", &mut circuit_builder).unwrap();
-            let mut uint_b = UInt::<M, C, E>::new(|| "uint_b", &mut circuit_builder).unwrap();
+            let mut uint_a = UInt::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
+            let mut uint_b = UInt::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
             let uint_c = uint_a
-                .mul(|| "uint_c", &mut circuit_builder, &mut uint_b, false)
+                .mul(|| "uint_c", &mut cb, &mut uint_b, false)
                 .unwrap();
 
-            let POW_OF_C: u64 = 2_usize.pow(UInt::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
+            let pow_of_c: u64 = 2_usize.pow(UInt::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
             let single_wit_size = UInt::<M, C, E>::NUM_CELLS;
             let wit_end_idx = if overflow {
                 4 * single_wit_size
@@ -706,7 +728,7 @@ mod tests {
             };
             let a = &witness_values[0..single_wit_size];
             let b = &witness_values[single_wit_size..2 * single_wit_size];
-            let c_carries = &witness_values[3 * single_wit_size..wit_end_idx];
+            let carries = &witness_values[3 * single_wit_size..wit_end_idx];
 
             // limbs cal.
             let mut result = vec![0u64; single_wit_size];
@@ -722,29 +744,23 @@ mod tests {
             // take care carries
             result.iter_mut().enumerate().for_each(|(i, ret)| {
                 if i != 0 {
-                    *ret += c_carries[i - 1];
+                    *ret += carries[i - 1];
                 }
-                if !overflow && c_carries.get(i).is_some() {
-                    *ret -= c_carries[i] * POW_OF_C;
+                if !overflow && carries.get(i).is_some() {
+                    *ret -= carries[i] * pow_of_c;
                 }
             });
 
             // verify
-            let c_expr = uint_c.expr();
             let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
-            c_expr.iter().zip(result).for_each(|(c, ret)| {
+            uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
                 assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
             });
+
             // overflow
             if overflow {
-                assert_eq!(
-                    eval_by_expr(
-                        &wit,
-                        &challenges,
-                        &uint_c.carries.unwrap().last().unwrap().expr()
-                    ),
-                    E::ONE
-                );
+                let carries = uint_c.carries.unwrap().last().unwrap().expr();
+                assert_eq!(eval_by_expr(&wit, &challenges, &carries), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
@@ -799,18 +815,16 @@ mod tests {
             .map(|&a| a.into())
             .collect_vec();
 
-            let mut cs = ConstraintSystem::new(|| "test");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+            let mut cs = ConstraintSystem::new(|| "test_add_mul");
+            let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut circuit_builder).unwrap();
-            let uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut circuit_builder).unwrap();
-            let mut uint_c = uint_a
-                .add(|| "uint_c", &mut circuit_builder, &uint_b, false)
-                .unwrap();
-            let mut uint_d = UInt::<64, 16, E>::new(|| "uint_d", &mut circuit_builder).unwrap();
+            let uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
+            let uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
+            let mut uint_c = uint_a.add(|| "uint_c", &mut cb, &uint_b, false).unwrap();
+            let mut uint_d = UInt::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
             let uint_e = uint_c
-                .mul(|| "uint_e", &mut circuit_builder, &mut uint_d, false)
+                .mul(|| "uint_e", &mut cb, &mut uint_d, false)
                 .unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
@@ -866,22 +880,18 @@ mod tests {
             .map(|&a| a.into())
             .collect_vec();
 
-            let mut cs = ConstraintSystem::new(|| "test");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+            let mut cs = ConstraintSystem::new(|| "test_add_mul2");
+            let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut circuit_builder).unwrap();
-            let uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut circuit_builder).unwrap();
-            let mut uint_c = uint_a
-                .add(|| "uint_c", &mut circuit_builder, &uint_b, false)
-                .unwrap();
-            let uint_d = UInt::<64, 16, E>::new(|| "uint_d", &mut circuit_builder).unwrap();
-            let uint_e = UInt::<64, 16, E>::new(|| "uint_e", &mut circuit_builder).unwrap();
-            let mut uint_f = uint_d
-                .add(|| "uint_f", &mut circuit_builder, &uint_e, false)
-                .unwrap();
+            let uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
+            let uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
+            let mut uint_c = uint_a.add(|| "uint_c", &mut cb, &uint_b, false).unwrap();
+            let uint_d = UInt::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
+            let uint_e = UInt::<64, 16, E>::new(|| "uint_e", &mut cb).unwrap();
+            let mut uint_f = uint_d.add(|| "uint_f", &mut cb, &uint_e, false).unwrap();
             let uint_g = uint_c
-                .mul(|| "unit_g", &mut circuit_builder, &mut uint_f, false)
+                .mul(|| "unit_g", &mut cb, &mut uint_f, false)
                 .unwrap();
 
             uint_g.expr().iter().enumerate().for_each(|(i, ret)| {
@@ -918,19 +928,17 @@ mod tests {
                 .map(|&a| a.into())
                 .collect_vec();
 
-            let mut cs = ConstraintSystem::new(|| "test");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+            let mut cs = ConstraintSystem::new(|| "test_mul_add");
+            let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let mut uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut circuit_builder).unwrap();
-            let mut uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut circuit_builder).unwrap();
+            let mut uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
+            let mut uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
             let uint_c = uint_a
-                .mul(|| "uint_c", &mut circuit_builder, &mut uint_b, false)
+                .mul(|| "uint_c", &mut cb, &mut uint_b, false)
                 .unwrap();
-            let uint_d = UInt::<64, 16, E>::new(|| "uint_d", &mut circuit_builder).unwrap();
-            let uint_e = uint_c
-                .add(|| "uint_e", &mut circuit_builder, &uint_d, false)
-                .unwrap();
+            let uint_d = UInt::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
+            let uint_e = uint_c.add(|| "uint_e", &mut cb, &uint_d, false).unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
                 // limbs check
