@@ -412,269 +412,168 @@ mod tests {
             uint::UInt,
         };
         use ff::Field;
+        use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
 
         type E = GoldilocksExt2;
         #[test]
         fn test_add_no_carries() {
-            let mut cs = ConstraintSystem::new(|| "test");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-
             // a = 1 + 1 * 2^16
             // b = 2 + 1 * 2^16
             // c = 3 + 2 * 2^16 with 0 carries
             let a = vec![1, 1, 0, 0];
             let b = vec![2, 1, 0, 0];
             let carries = vec![0; 3]; // no overflow
-            let witness_values = [a, b, carries]
-                .concat()
-                .iter()
-                .map(|&a| a.into())
-                .collect_vec();
-            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
-            let a = UInt::<64, 16, E>::new(|| "a", &mut circuit_builder).unwrap();
-            let b = UInt::<64, 16, E>::new(|| "b", &mut circuit_builder).unwrap();
-            let c = a.add(|| "c", &mut circuit_builder, &b, false).unwrap();
-
-            // verify limb_c[] = limb_a[] + limb_b[]
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-                E::from(3)
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-                E::from(2)
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-                E::ZERO
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-                E::ZERO
-            );
-
-            // non-overflow case, the len of carries should be (NUM_CELLS - 1)
-            assert_eq!(c.carries.unwrap().len(), 3)
+            let witness_values = [a, b, carries].concat();
+            verify::<64, 16, E>(witness_values, None, false);
         }
 
         #[test]
         fn test_add_w_carry() {
-            type E = GoldilocksExt2;
-            let mut cs = ConstraintSystem::new(|| "test");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-
             // a = 65535 + 1 * 2^16
             // b =   2   + 1 * 2^16
             // c =   1   + 3 * 2^16 with carries [1, 0, 0, 0]
             let a = vec![0xFFFF, 1, 0, 0];
             let b = vec![2, 1, 0, 0];
             let carries = vec![1, 0, 0]; // no overflow
-            let witness_values = [a, b, carries]
-                .concat()
-                .iter()
-                .map(|&a| a.into())
-                .collect_vec();
-            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
-            let a = UInt::<64, 16, E>::new(|| "a", &mut circuit_builder).unwrap();
-            let b = UInt::<64, 16, E>::new(|| "b", &mut circuit_builder).unwrap();
-            let c = a.add(|| "c", &mut circuit_builder, &b, false).unwrap();
-
-            // verify limb_c[] = limb_a[] + limb_b[]
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-                E::ONE
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-                E::from(3)
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-                E::ZERO
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-                E::ZERO
-            );
-            // non-overflow case, the len of carries should be (NUM_CELLS - 1)
-            assert_eq!(c.carries.unwrap().len(), 3)
+            let witness_values = [a, b, carries].concat();
+            verify::<64, 16, E>(witness_values, None, false);
         }
 
         #[test]
         fn test_add_w_carries() {
-            let mut cs = ConstraintSystem::new(|| "test");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-
             // a = 65535 + 65534 * 2^16
             // b =   2   +   1   * 2^16
             // c =   1   +   0   * 2^16 + 1 * 2^32 with carries [1, 1, 0, 0]
             let a = vec![0xFFFF, 0xFFFE, 0, 0];
             let b = vec![2, 1, 0, 0];
             let carries = vec![1, 1, 0]; // no overflow
-            let witness_values = [a, b, carries]
-                .concat()
-                .iter()
-                .map(|&a| a.into())
-                .collect_vec();
-            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
-            let a = UInt::<64, 16, E>::new(|| "a", &mut circuit_builder).unwrap();
-            let b = UInt::<64, 16, E>::new(|| "b", &mut circuit_builder).unwrap();
-            let c = a.add(|| "c", &mut circuit_builder, &b, false).unwrap();
-
-            // verify limb_c[] = limb_a[] + limb_b[]
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-                E::ONE
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-                E::ZERO
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-                E::ONE
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-                E::ZERO
-            );
-            // non-overflow case, the len of carries should be (NUM_CELLS - 1)
-            assert_eq!(c.carries.unwrap().len(), 3)
+            let witness_values = [a, b, carries].concat();
+            verify::<64, 16, E>(witness_values, None, false);
         }
 
         #[test]
         fn test_add_w_overflow() {
-            let mut cs = ConstraintSystem::new(|| "test");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-
             // a = 1 + 1 * 2^16 + 0 + 65535 * 2^48
             // b = 2 + 1 * 2^16 + 0 +     2 * 2^48
             // c = 3 + 2 * 2^16 + 0 +     1 * 2^48 with carries [0, 0, 0, 1]
             let a = vec![1, 1, 0, 0xFFFF];
             let b = vec![2, 1, 0, 2];
             let carries = vec![0, 0, 0, 1];
-            let witness_values = [a, b, carries]
-                .concat()
-                .iter()
-                .map(|&a| a.into())
-                .collect_vec();
-            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
-            let a = UInt::<64, 16, E>::new(|| "a", &mut circuit_builder).unwrap();
-            let b = UInt::<64, 16, E>::new(|| "b", &mut circuit_builder).unwrap();
-            let c = a.add(|| "c", &mut circuit_builder, &b, true).unwrap();
-
-            // verify limb_c[] = limb_a[] + limb_b[]
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-                E::from(3)
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-                E::from(2)
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-                E::ZERO
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-                E::ONE
-            );
-            // overflow
-            assert_eq!(
-                eval_by_expr(
-                    &witness_values,
-                    &challenges,
-                    &c.carries.unwrap().last().unwrap().expr()
-                ),
-                E::ONE
-            );
+            let witness_values = [a, b, carries].concat();
+            verify::<64, 16, E>(witness_values, None, false);
         }
 
         #[test]
         fn test_add_const_no_carries() {
-            let mut cs = ConstraintSystem::new(|| "test");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-
             // a = 1 + 1 * 2^16
             // const b = 2
             // c = 3 + 1 * 2^16 with 0 carries
             let a = vec![1, 1, 0, 0];
             let carries = vec![0; 3]; // no overflow
-            let witness_values = [a, carries]
-                .concat()
-                .iter()
-                .map(|&a| a.into())
-                .collect_vec();
-            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
-            let a = UInt::<64, 16, E>::new(|| "a", &mut circuit_builder).unwrap();
-            let b = Expression::Constant(2.into());
-            let c = a.add_const(|| "c", &mut circuit_builder, b, false).unwrap();
-
-            // verify limb_c[] = limb_a[] + limb_b[]
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-                E::from(3)
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-                E::ONE
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-                E::ZERO
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-                E::ZERO
-            );
+            let witness_values = [a, carries].concat();
+            verify::<64, 16, E>(witness_values, Some(2), false);
         }
 
         #[test]
         fn test_add_const_w_carries() {
-            let mut cs = ConstraintSystem::new(|| "test");
-            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-
             // a = 65535 + 65534 * 2^16
             // b =   2   +   1   * 2^16
             // c =   1   +   0   * 2^16 + 1 * 2^32 with carries [1, 1, 0, 0]
             let a = vec![0xFFFF, 0xFFFE, 0, 0];
             let carries = vec![1, 1, 0]; // no overflow
-            let witness_values = [a, carries]
-                .concat()
-                .iter()
-                .map(|&a| a.into())
-                .collect_vec();
+            let witness_values = [a, carries].concat();
+            verify::<64, 16, E>(witness_values, Some(65538), false);
+        }
+
+        fn verify<const M: usize, const C: usize, E: ExtensionField>(
+            witness_values: Vec<u64>,
+            const_b: Option<u64>,
+            overflow: bool,
+        ) {
+            let mut cs = ConstraintSystem::new(|| "test_add");
+            let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let a = UInt::<64, 16, E>::new(|| "a", &mut circuit_builder).unwrap();
-            let b = Expression::Constant(65538.into());
-            let c = a.add_const(|| "c", &mut circuit_builder, b, false).unwrap();
+            let mut uint_a = UInt::<M, C, E>::new(|| "uint_a", &mut circuit_builder).unwrap();
+            let uint_c = if const_b.is_none() {
+                let mut uint_b = UInt::<M, C, E>::new(|| "uint_b", &mut circuit_builder).unwrap();
+                uint_a
+                    .add(|| "uint_c", &mut circuit_builder, &uint_b, overflow)
+                    .unwrap()
+            } else {
+                uint_a
+                    .add_const(
+                        || "uint_c",
+                        &mut circuit_builder,
+                        Expression::Constant(const_b.unwrap().into()),
+                        overflow,
+                    )
+                    .unwrap()
+            };
 
-            // verify limb_c[] = limb_a[] + limb_b[]
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[0]),
-                E::ONE
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[1]),
-                E::ZERO
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[2]),
-                E::ONE
-            );
-            assert_eq!(
-                eval_by_expr(&witness_values, &challenges, &c.expr()[3]),
-                E::ZERO
-            );
+            let POW_OF_C: u64 = 2_usize.pow(UInt::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
+            let single_wit_size = UInt::<M, C, E>::NUM_CELLS;
+
+            let a = &witness_values[0..single_wit_size];
+            let mut const_b_pre_allocated = vec![0u64; single_wit_size];
+            let b = if const_b.is_none() {
+                &witness_values[single_wit_size..2 * single_wit_size]
+            } else {
+                let b = const_b.unwrap();
+                let LIMB_BIT_MASK: u64 = (1 << C) - 1;
+                const_b_pre_allocated
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(i, limb)| *limb = (b >> (C * i)) & LIMB_BIT_MASK);
+                &const_b_pre_allocated
+            };
+
+            let num_witness = if const_b.is_none() { 3 } else { 2 };
+            let wit_end_idx = if overflow {
+                num_witness * single_wit_size
+            } else {
+                num_witness * single_wit_size - 1
+            };
+            let carries = &witness_values[(num_witness - 1) * single_wit_size..wit_end_idx];
+
+            // limbs cal.
+            let mut result = vec![0u64; single_wit_size];
+            a.iter()
+                .zip(b)
+                .enumerate()
+                .for_each(|(i, (&limb_a, &limb_b))| {
+                    let carry = carries.get(i);
+                    result[i] = limb_a + limb_b;
+                    if i != 0 {
+                        result[i] += carries[i - 1];
+                    }
+                    if !overflow && carry.is_some() {
+                        result[i] -= carry.unwrap() * POW_OF_C;
+                    }
+                });
+
+            let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
+            let c_expr = uint_c.expr();
+            c_expr.iter().zip(result).for_each(|(c, ret)| {
+                assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
+            });
+
+            // overflow
+            if overflow {
+                assert_eq!(
+                    eval_by_expr(
+                        &wit,
+                        &challenges,
+                        &uint_c.carries.unwrap().last().unwrap().expr()
+                    ),
+                    E::ONE
+                );
+            } else {
+                // non-overflow case, the len of carries should be (NUM_CELLS - 1)
+                assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
+            }
         }
     }
 
@@ -822,11 +721,11 @@ mod tests {
 
             // take care carries
             result.iter_mut().enumerate().for_each(|(i, ret)| {
-                if !overflow && c_carries.get(i).is_some() {
-                    *ret -= c_carries[i] * POW_OF_C;
-                }
                 if i != 0 {
                     *ret += c_carries[i - 1];
+                }
+                if !overflow && c_carries.get(i).is_some() {
+                    *ret -= c_carries[i] * POW_OF_C;
                 }
             });
 
