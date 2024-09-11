@@ -259,7 +259,7 @@ impl<E: ExtensionField> ZKVMProvingKey<E> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ZKVMVerifyingKey<E: ExtensionField> {
     // pk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,

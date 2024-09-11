@@ -34,7 +34,7 @@ use crate::{
 use super::{ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
 pub struct ZKVMProver<E: ExtensionField> {
-    pk: ZKVMProvingKey<E>,
+    pub(crate) pk: ZKVMProvingKey<E>,
 }
 
 impl<E: ExtensionField> ZKVMProver<E> {

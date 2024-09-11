@@ -28,7 +28,7 @@ use super::{
 };
 
 pub struct ZKVMVerifier<E: ExtensionField> {
-    vk: ZKVMVerifyingKey<E>,
+    pub(crate) vk: ZKVMVerifyingKey<E>,
 }
 
 impl<E: ExtensionField> ZKVMVerifier<E> {
