@@ -103,21 +103,19 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
     let prev_rd_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
 
-    let ts = circuit_builder.register_read(
+    let (ts, lt_rs1_cfg) = circuit_builder.register_read(
         || "read_rs1",
         &rs1_id,
         prev_rs1_ts.expr(),
         cur_ts.expr(),
         &addend_0,
     )?;
-    let ts =
+    let (ts, lt_rs2_cfg) =
         circuit_builder.register_read(|| "read_rs2", &rs2_id, prev_rs2_ts.expr(), ts, &addend_1)?;
 
-    let (ts, lt_rs1_cfg, lt_rs2_cfg, lt_prev_ts_cfg) = circuit_builder.register_write(
+    let (ts, lt_prev_ts_cfg) = circuit_builder.register_write(
         || "write_rd",
         &rd_id,
-        prev_rs1_ts.expr(),
-        prev_rs2_ts.expr(),
         prev_rd_ts.expr(),
         ts,
         &prev_rd_value,
@@ -198,18 +196,18 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         set_val!(instance, config.prev_rd_ts, 2);
 
         ExprLtInput {
-            lhs: 2,         // rs1
-            rhs: 3 + 1 + 1, // ts = cur_ts + 1 + 1
+            lhs: 2, // rs1
+            rhs: 3, // cur_ts
         }
         .assign(instance, &config.lt_rs1_cfg);
         ExprLtInput {
-            lhs: 2,         // rs2
-            rhs: 3 + 1 + 1, // ts = cur_ts + 1 + 1
+            lhs: 2, // rs2
+            rhs: 4, // cur_ts
         }
         .assign(instance, &config.lt_rs2_cfg);
         ExprLtInput {
-            lhs: 2,         // rd
-            rhs: 3 + 1 + 1, // ts = cur_ts + 1 + 1
+            lhs: 2, // rd
+            rhs: 5, // cur_ts
         }
         .assign(instance, &config.lt_prev_ts_cfg);
 

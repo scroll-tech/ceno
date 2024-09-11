@@ -24,18 +24,16 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         prev_ts: Expression<E>,
         ts: Expression<E>,
         values: &V,
-    ) -> Result<Expression<E>, ZKVMError>;
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     fn register_write<V: ToExpr<E, Output = Vec<Expression<E>>>>(
         &mut self,
         name_fn: N,
         register_id: &WitIn,
-        prev_rs1_ts: Expression<E>,
-        prev_rs2_ts: Expression<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: &V,
         values: &V,
-    ) -> Result<(Expression<E>, ExprLtConfig, ExprLtConfig, ExprLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 }

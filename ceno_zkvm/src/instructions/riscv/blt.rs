@@ -19,6 +19,7 @@ use crate::{
 };
 
 use super::{
+    config::ExprLtConfig,
     constants::{OPType, OpcodeType, RegUInt, RegUInt8, PC_STEP_SIZE},
     RIVInstruction,
 };
@@ -39,6 +40,8 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
     pub is_lt: UIntLtConfig,
+    pub lt_rs1_cfg: ExprLtConfig,
+    pub lt_rs2_cfg: ExprLtConfig,
 }
 
 pub struct BltInput {
@@ -175,14 +178,14 @@ fn blt_gadget<E: ExtensionField>(
     let lhs = RegUInt::from_u8_limbs(circuit_builder, &lhs_limb8);
     let rhs = RegUInt::from_u8_limbs(circuit_builder, &rhs_limb8);
 
-    let ts = circuit_builder.register_read(
+    let (ts, lt_rs1_cfg) = circuit_builder.register_read(
         || "read ts for lhs",
         &rs1_id,
         prev_rs1_ts.expr(),
         cur_ts.expr(),
         &lhs,
     )?;
-    let ts = circuit_builder.register_read(
+    let (ts, lt_rs2_cfg) = circuit_builder.register_read(
         || "read ts for rhs",
         &rs2_id,
         prev_rs2_ts.expr(),
@@ -208,6 +211,8 @@ fn blt_gadget<E: ExtensionField>(
         prev_rs1_ts,
         prev_rs2_ts,
         is_lt,
+        lt_rs1_cfg,
+        lt_rs2_cfg,
     })
 }
 

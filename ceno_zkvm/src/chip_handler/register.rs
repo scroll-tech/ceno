@@ -20,7 +20,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         prev_ts: Expression<E>,
         ts: Expression<E>,
         values: &V,
-    ) -> Result<Expression<E>, ZKVMError> {
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -30,7 +30,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                     ))],
                     vec![register_id.expr()],
                     values.expr(),
-                    vec![prev_ts],
+                    vec![prev_ts.clone()],
                 ]
                 .concat(),
             );
@@ -50,12 +50,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             cb.write_record(|| "write_record", write_record)?;
 
             // assert prev_ts < current_ts
-            // TODO implement lt gadget
-            // let is_lt = prev_ts.lt(self, ts)?;
-            // self.require_one(is_lt)?;
+            let lt_cfg = cb.less_than(|| "prev_ts < ts", prev_ts, ts.clone(), Some(true))?;
+
             let next_ts = ts + 1.into();
 
-            Ok(next_ts)
+            Ok((next_ts, lt_cfg))
         })
     }
 
@@ -63,13 +62,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         &mut self,
         name_fn: N,
         register_id: &WitIn,
-        prev_rs1_ts: Expression<E>,
-        prev_rs2_ts: Expression<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: &V,
         values: &V,
-    ) -> Result<(Expression<E>, ExprLtConfig, ExprLtConfig, ExprLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -98,16 +95,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             cb.read_record(|| "read_record", read_record)?;
             cb.write_record(|| "write_record", write_record)?;
 
-            let lt_rs1_cfg =
-                cb.less_than(|| "prev_rs1_ts < ts", prev_rs1_ts, ts.clone(), Some(true))?;
-            let lt_rs2_cfg =
-                cb.less_than(|| "prev_rs2_ts < ts", prev_rs2_ts, ts.clone(), Some(true))?;
-            let lt_prev_ts_cfg =
-                cb.less_than(|| "prev_rd_ts < ts", prev_ts, ts.clone(), Some(true))?;
+            let lt_cfg = cb.less_than(|| "prev_ts < ts", prev_ts, ts.clone(), Some(true))?;
 
             let next_ts = ts + 1.into();
 
-            Ok((next_ts, lt_rs1_cfg, lt_rs2_cfg, lt_prev_ts_cfg))
+            Ok((next_ts, lt_cfg))
         })
     }
 }
