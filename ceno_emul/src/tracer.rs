@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt, mem};
 
 use crate::{
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
-    rv32im::DecodedInstruction,
+    rv32im::{DecodedInstruction, Instruction},
     CENO_PLATFORM,
 };
 
@@ -35,7 +35,7 @@ pub struct StepRecord {
 pub struct MemOp<T> {
     /// Virtual Memory Address.
     /// For registers, get it from `CENO_PLATFORM.register_vma(idx)`.
-    pub addr: WordAddr,
+    pub addr: ByteAddr,
     /// The Word read, or the Change<Word> to be written.
     pub value: T,
     /// The cycle when this memory address was last accessed before this operation.
@@ -96,7 +96,7 @@ impl StepRecord {
 pub struct Tracer {
     record: StepRecord,
 
-    latest_accesses: HashMap<WordAddr, Cycle>,
+    latest_accesses: HashMap<ByteAddr, Cycle>,
 }
 
 impl Default for Tracer {
@@ -187,6 +187,7 @@ impl Tracer {
             unimplemented!("Only one memory access is supported");
         }
 
+        let addr = addr.baddr();
         self.record.memory_op = Some(WriteOp {
             addr,
             value,
@@ -198,14 +199,14 @@ impl Tracer {
     /// - Return 0 if this is the first access.
     /// - Record the current instruction as the origin of the latest access.
     /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
-    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
+    fn track_access(&mut self, addr: ByteAddr, subcycle: Cycle) -> Cycle {
         self.latest_accesses
             .insert(addr, self.record.cycle + subcycle)
             .unwrap_or(0)
     }
 
     /// Return all the addresses that were accessed and the cycle when they were last accessed.
-    pub fn final_accesses(&self) -> &HashMap<WordAddr, Cycle> {
+    pub fn final_accesses(&self) -> &HashMap<ByteAddr, Cycle> {
         &self.latest_accesses
     }
 }

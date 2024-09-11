@@ -42,7 +42,7 @@ fn test_ceno_rt_alloc() -> Result<()> {
         if !CENO_PLATFORM.is_ram(addr.into()) {
             continue;
         }
-        let value = state.peek_memory(addr);
+        let value = state.peek_memory(addr.into());
         if value == 0xf00d {
             found.0 = true;
         }

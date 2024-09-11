@@ -38,13 +38,12 @@ impl Platform {
 
     /// Virtual address of a register.
     pub const fn register_vma(&self, index: RegIdx) -> Addr {
-        // Register VMAs are aligned, cannot be confused with indices, and readable in hex.
-        (index << 8) as Addr
+        index as Addr
     }
 
     /// Register index from a virtual address (unchecked).
     pub const fn register_index(&self, vma: Addr) -> RegIdx {
-        (vma >> 8) as RegIdx
+        vma as RegIdx
     }
 
     /// Virtual address of the program counter.

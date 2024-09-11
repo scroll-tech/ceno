@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 
 use ceno_emul::{
-    ByteAddr, Cycle, EmuContext, InsnKind, StepRecord, Tracer, VMState, WordAddr, CENO_PLATFORM,
+    ByteAddr, Cycle, EmuContext, InsnKind, StepRecord, Tracer, VMState, CENO_PLATFORM,
 };
 
 #[test]
@@ -99,9 +99,9 @@ fn expected_ops_fibonacci_20() -> Vec<InsnKind> {
 }
 
 /// Reconstruct the last access of each register.
-fn expected_final_accesses_fibonacci_20() -> HashMap<WordAddr, Cycle> {
+fn expected_final_accesses_fibonacci_20() -> HashMap<ByteAddr, Cycle> {
     let mut accesses = HashMap::new();
-    let x = |i| WordAddr::from(CENO_PLATFORM.register_vma(i));
+    let x = |i| ByteAddr::from(CENO_PLATFORM.register_vma(i));
     const C: Cycle = Tracer::SUBCYCLES_PER_INSN;
 
     let mut cycle = C; // First cycle.
