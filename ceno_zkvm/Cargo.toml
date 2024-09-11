@@ -29,6 +29,7 @@ tracing = "0.1.40"
 
 rand = "0.8"
 thread_local = "1.1.8"
+generic_static = "0.2.0"
 
 [dev-dependencies]
 pprof = { version = "0.13", features = ["flamegraph"]}
