@@ -24,7 +24,7 @@ pub struct RangeTableCircuit<E>(PhantomData<E>);
 
 impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
     type TableConfig = RangeTableConfig;
-    type Input = u64;
+    type Input = ();
 
     fn name() -> String {
         "RANGE".into()
@@ -47,6 +47,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
     fn generate_fixed_traces(
         config: &RangeTableConfig,
         num_fixed: usize,
+        _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
         let num_u16s = 1 << 16;
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_u16s, num_fixed);

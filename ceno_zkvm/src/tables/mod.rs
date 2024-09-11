@@ -5,9 +5,12 @@ use std::collections::HashMap;
 mod range;
 pub use range::RangeTableCircuit;
 
+mod program;
+pub use program::ProgramTableCircuit;
+
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;
-    type Input: Send + Sync;
+    type Input: Send + Sync + ?Sized;
 
     fn name() -> String;
 
@@ -18,6 +21,7 @@ pub trait TableCircuit<E: ExtensionField> {
     fn generate_fixed_traces(
         config: &Self::TableConfig,
         num_fixed: usize,
+        input: &Self::Input,
     ) -> RowMajorMatrix<E::BaseField>;
 
     fn assign_instances(

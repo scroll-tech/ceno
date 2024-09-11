@@ -1,7 +1,10 @@
 use std::time::Instant;
 
 use ark_std::test_rng;
-use ceno_zkvm::{instructions::riscv::addsub::AddInstruction, scheme::prover::ZKVMProver};
+use ceno_zkvm::{
+    instructions::riscv::addsub::AddInstruction, scheme::prover::ZKVMProver,
+    tables::ProgramTableCircuit,
+};
 use const_env::from_env;
 
 use ceno_emul::{ByteAddr, InsnKind::ADD, StepRecord, VMState, CENO_PLATFORM};
@@ -63,6 +66,7 @@ fn main() {
         .with(
             fmt::layer()
                 .compact()
+                .without_time()
                 .with_thread_ids(false)
                 .with_thread_names(false),
         )
@@ -74,11 +78,20 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let range_config = zkvm_cs.register_table_circuit::<RangeTableCircuit<E>>();
+    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces
-        .register_table_circuit::<RangeTableCircuit<E>>(&zkvm_cs, range_config.clone());
+    zkvm_fixed_traces.register_table_circuit::<RangeTableCircuit<E>>(
+        &zkvm_cs,
+        range_config.clone(),
+        &(),
+    );
+    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
+        &zkvm_cs,
+        prog_config.clone(),
+        &PROGRAM_ADD_LOOP,
+    );
 
     let pk = zkvm_cs
         .clone()
@@ -90,7 +103,8 @@ fn main() {
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
-    for instance_num_vars in 8..22 {
+    // for instance_num_vars in 8..22 {
+    for instance_num_vars in 2..3 {
         let num_instances = 1 << instance_num_vars;
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
@@ -121,6 +135,9 @@ fn main() {
         // assign table circuits
         zkvm_witness
             .assign_table_circuit::<RangeTableCircuit<E>>(&zkvm_cs, &range_config)
+            .unwrap();
+        zkvm_witness
+            .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config)
             .unwrap();
 
         let timer = Instant::now();
