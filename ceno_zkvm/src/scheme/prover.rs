@@ -1,10 +1,9 @@
-use std::{collections::BTreeSet, sync::Arc};
-
 use ff_ext::ExtensionField;
+use std::{collections::BTreeSet, sync::Arc};
 
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::{IntoMLE, MultilinearExtension},
+    mle::{IntoMLE, IntoMLEs, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
@@ -17,7 +16,6 @@ use sumcheck::{
 use transcript::Transcript;
 
 use crate::{
-    circuit_builder::ProvingKey,
     error::ZKVMError,
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
@@ -26,35 +24,118 @@ use crate::{
             wit_infer_by_expr,
         },
     },
-    structs::{Point, TowerProofs, TowerProver, TowerProverSpec},
+    structs::{
+        Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
+    },
     utils::{get_challenge_pows, proper_num_threads},
     virtual_polys::VirtualPolynomials,
 };
 
-use super::{ZKVMProof, ZKVMTableProof};
+use super::{ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
 pub struct ZKVMProver<E: ExtensionField> {
-    pk: ProvingKey<E>,
+    pub(crate) pk: ZKVMProvingKey<E>,
 }
 
 impl<E: ExtensionField> ZKVMProver<E> {
-    pub fn new(pk: ProvingKey<E>) -> Self {
+    pub fn new(pk: ZKVMProvingKey<E>) -> Self {
         ZKVMProver { pk }
     }
 
+    /// create proof for zkvm execution
+    pub fn create_proof(
+        &self,
+        mut witnesses: ZKVMWitnesses<E>,
+        max_threads: usize,
+        transcript: &mut Transcript<E>,
+        challenges: &[E; 2],
+    ) -> Result<ZKVMProof<E>, ZKVMError> {
+        let mut vm_proof = ZKVMProof::default();
+        for (circuit_name, pk) in self.pk.circuit_pks.iter() {
+            let witness = witnesses
+                .witnesses
+                .remove(circuit_name)
+                .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
+
+            // TODO: add an enum for circuit type either in constraint_system or vk
+            let cs = pk.get_cs();
+            let is_opcode_circuit = cs.lk_table_expressions.is_empty();
+            let num_instances = witness.num_instances();
+
+            if is_opcode_circuit {
+                tracing::debug!(
+                    "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
+                    circuit_name,
+                    cs.num_witin,
+                    cs.r_expressions.len(),
+                    cs.w_expressions.len(),
+                    cs.lk_expressions.len(),
+                );
+                for lk_s in cs.lk_expressions_namespace_map.iter() {
+                    tracing::debug!("opcode circuit {}: {}", circuit_name, lk_s);
+                }
+                let opcode_proof = self.create_opcode_proof(
+                    pk,
+                    witness
+                        .de_interleaving()
+                        .into_mles()
+                        .into_iter()
+                        .map(|v| v.into())
+                        .collect_vec(),
+                    num_instances,
+                    max_threads,
+                    transcript,
+                    challenges,
+                )?;
+                tracing::info!(
+                    "generated proof for opcode {} with num_instances={}",
+                    circuit_name,
+                    num_instances
+                );
+                vm_proof
+                    .opcode_proofs
+                    .insert(circuit_name.clone(), opcode_proof);
+            } else {
+                let table_proof = self.create_table_proof(
+                    pk,
+                    witness
+                        .de_interleaving()
+                        .into_mles()
+                        .into_iter()
+                        .map(|v| v.into())
+                        .collect_vec(),
+                    num_instances,
+                    max_threads,
+                    transcript,
+                    challenges,
+                )?;
+                tracing::info!(
+                    "generated proof for table {} with num_instances={}",
+                    circuit_name,
+                    num_instances
+                );
+                vm_proof
+                    .table_proofs
+                    .insert(circuit_name.clone(), table_proof);
+            }
+        }
+
+        Ok(vm_proof)
+    }
     /// create proof giving witness and num_instances
     /// major flow break down into
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
-    pub fn create_proof(
+    pub fn create_opcode_proof(
         &self,
+        circuit_pk: &ProvingKey<E>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<ZKVMProof<E>, ZKVMError> {
-        let cs = self.pk.get_cs();
+    ) -> Result<ZKVMOpcodeProof<E>, ZKVMError> {
+        let cs = circuit_pk.get_cs();
         let log2_num_instances = ceil_log2(num_instances);
         let next_pow2_instances = 1 << log2_num_instances;
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
@@ -414,7 +495,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
             .collect();
         exit_span!(span);
 
-        Ok(ZKVMProof {
+        Ok(ZKVMOpcodeProof {
             num_instances,
             record_r_out_evals,
             record_w_out_evals,
@@ -433,15 +514,15 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
     pub fn create_table_proof(
         &self,
+        circuit_pk: &ProvingKey<E>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ZKVMTableProof<E>, ZKVMError> {
-        let cs = self.pk.get_cs();
-        let fixed = self
-            .pk
+        let cs = circuit_pk.get_cs();
+        let fixed = circuit_pk
             .fixed_traces
             .as_ref()
             .expect("pk.fixed_traces must not be none for table circuit")

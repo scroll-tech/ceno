@@ -183,6 +183,12 @@ pub struct Instruction {
     pub func7: u32,
 }
 
+impl Default for Instruction {
+    fn default() -> Self {
+        insn(InsnKind::INVALID, InsnCategory::Invalid, 0x00, 0x0, 0x00)
+    }
+}
+
 impl DecodedInstruction {
     pub fn new(insn: u32) -> Self {
         Self {

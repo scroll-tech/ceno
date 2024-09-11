@@ -1,5 +1,5 @@
 mod arithmetic;
-mod constants;
+pub mod constants;
 pub mod util;
 
 use crate::{

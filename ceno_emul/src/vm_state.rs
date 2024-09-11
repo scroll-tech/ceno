@@ -82,6 +82,10 @@ impl VMState {
             Ok(step)
         }
     }
+
+    pub fn init_register_unsafe(&mut self, idx: RegIdx, value: Word) {
+        self.registers[idx] = value;
+    }
 }
 
 impl EmuContext for VMState {
@@ -109,7 +113,9 @@ impl EmuContext for VMState {
         Err(anyhow!("Trap {:?}", cause)) // Crash.
     }
 
-    fn on_insn_decoded(&mut self, _kind: &Instruction, _decoded: &DecodedInstruction) {}
+    fn on_insn_decoded(&mut self, insn: &Instruction, _decoded: &DecodedInstruction) {
+        self.tracer.store_insn(*insn);
+    }
 
     fn on_normal_end(&mut self, _kind: &Instruction, _decoded: &DecodedInstruction) {
         self.tracer.store_pc(ByteAddr(self.pc));

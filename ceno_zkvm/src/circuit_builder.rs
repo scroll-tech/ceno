@@ -1,12 +1,14 @@
+use itertools::Itertools;
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
     error::ZKVMError,
     expression::{Expression, Fixed, WitIn},
-    structs::WitnessId,
+    structs::{ProvingKey, VerifyingKey, WitnessId},
+    witness::RowMajorMatrix,
 };
 
 /// namespace used for annotation, preserve meta info during circuit construction
@@ -135,7 +137,13 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
-    pub fn key_gen(self, fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>) -> ProvingKey<E> {
+    pub fn key_gen(self, fixed_traces: Option<RowMajorMatrix<E::BaseField>>) -> ProvingKey<E> {
+        // TODO: commit to fixed_traces
+
+        // transpose from row-major to column-major
+        let fixed_traces =
+            fixed_traces.map(|t| t.de_interleaving().into_mles().into_iter().collect_vec());
+
         ProvingKey {
             fixed_traces,
             vk: VerifyingKey { cs: self },
@@ -292,30 +300,4 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 #[derive(Debug)]
 pub struct CircuitBuilder<'a, E: ExtensionField> {
     pub(crate) cs: &'a mut ConstraintSystem<E>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProvingKey<E: ExtensionField> {
-    pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
-    pub vk: VerifyingKey<E>,
-}
-
-impl<E: ExtensionField> ProvingKey<E> {
-    // pub fn create_pk(vk: VerifyingKey<E>) -> Self {
-    //     Self { vk }
-    // }
-    pub fn get_cs(&self) -> &ConstraintSystem<E> {
-        self.vk.get_cs()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct VerifyingKey<E: ExtensionField> {
-    cs: ConstraintSystem<E>,
-}
-
-impl<E: ExtensionField> VerifyingKey<E> {
-    pub fn get_cs(&self) -> &ConstraintSystem<E> {
-        &self.cs
-    }
 }

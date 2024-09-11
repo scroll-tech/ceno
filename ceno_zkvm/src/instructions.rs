@@ -17,6 +17,8 @@ pub mod riscv;
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
+
+    fn name() -> String;
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError>;

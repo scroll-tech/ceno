@@ -213,6 +213,9 @@ fn blt_gadget<E: ExtensionField>(
 
 impl<E: ExtensionField> Instruction<E> for BltInstruction {
     // const NAME: &'static str = "BLT";
+    fn name() -> String {
+        "BLT".into()
+    }
     type InstructionConfig = InstructionConfig<E>;
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,

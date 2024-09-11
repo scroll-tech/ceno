@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use ark_std::iterable::Iterable;
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -21,8 +20,8 @@ use crate::{
 };
 use core::mem::MaybeUninit;
 
-pub struct AddInstruction;
-pub struct SubInstruction;
+pub struct AddInstruction<E>(PhantomData<E>);
+pub struct SubInstruction<E>(PhantomData<E>);
 
 #[derive(Debug)]
 pub struct InstructionConfig<E: ExtensionField> {
@@ -41,11 +40,11 @@ pub struct InstructionConfig<E: ExtensionField> {
     phantom: PhantomData<E>,
 }
 
-impl<E: ExtensionField> RIVInstruction<E> for AddInstruction {
+impl<E: ExtensionField> RIVInstruction<E> for AddInstruction<E> {
     const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0000000);
 }
 
-impl<E: ExtensionField> RIVInstruction<E> for SubInstruction {
+impl<E: ExtensionField> RIVInstruction<E> for SubInstruction<E> {
     const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0100000);
 }
 
@@ -61,7 +60,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let next_pc = pc.expr() + PC_STEP_SIZE.into();
 
     // Execution result = addend0 + addend1, with carry.
-    let prev_rd_value = RegUInt::new(|| "prev_rd_value", circuit_builder)?;
+    let prev_rd_value = RegUInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
 
     let (addend_0, addend_1, outcome) = if IS_ADD {
         // outcome = addend_0 + addend_1
@@ -139,8 +138,11 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     })
 }
 
-impl<E: ExtensionField> Instruction<E> for AddInstruction {
+impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     // const NAME: &'static str = "ADD";
+    fn name() -> String {
+        "ADD".into()
+    }
     type InstructionConfig = InstructionConfig<E>;
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
@@ -160,9 +162,10 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         set_val!(instance, config.ts, 2);
         let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
         let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
+        let rd_prev = UIntValue::new_unchecked(step.rd().unwrap().value.before);
         config
             .prev_rd_value
-            .assign_limbs(instance, [0, 0].iter().map(E::BaseField::from).collect());
+            .assign_limbs(instance, rd_prev.u16_fields());
         config
             .addend_0
             .assign_limbs(instance, addend_0.u16_fields());
@@ -188,8 +191,11 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
     }
 }
 
-impl<E: ExtensionField> Instruction<E> for SubInstruction {
+impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
     // const NAME: &'static str = "ADD";
+    fn name() -> String {
+        "SUB".into()
+    }
     type InstructionConfig = InstructionConfig<E>;
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
@@ -237,7 +243,7 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{ReadOp, StepRecord};
+    use ceno_emul::{Change, ReadOp, StepRecord, WriteOp};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -271,13 +277,21 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord {
                 rs1: Some(ReadOp {
-                    addr: 0.into(),
+                    addr: 2.into(),
                     value: 11u32,
                     previous_cycle: 0,
                 }),
                 rs2: Some(ReadOp {
-                    addr: 0.into(),
+                    addr: 3.into(),
                     value: 0xfffffffeu32,
+                    previous_cycle: 0,
+                }),
+                rd: Some(WriteOp {
+                    addr: 4.into(),
+                    value: Change {
+                        before: 0u32,
+                        after: 9u32,
+                    },
                     previous_cycle: 0,
                 }),
                 ..Default::default()
@@ -318,13 +332,21 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord {
                 rs1: Some(ReadOp {
-                    addr: 0.into(),
+                    addr: 2.into(),
                     value: u32::MAX - 1,
                     previous_cycle: 0,
                 }),
                 rs2: Some(ReadOp {
-                    addr: 0.into(),
+                    addr: 3.into(),
                     value: u32::MAX - 1,
+                    previous_cycle: 0,
+                }),
+                rd: Some(WriteOp {
+                    addr: 4.into(),
+                    value: Change {
+                        before: 0u32,
+                        after: u32::MAX - 2,
+                    },
                     previous_cycle: 0,
                 }),
                 ..Default::default()

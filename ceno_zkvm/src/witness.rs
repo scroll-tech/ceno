@@ -23,18 +23,33 @@ macro_rules! set_val {
     };
 }
 
+#[macro_export]
+macro_rules! set_fixed_val {
+    ($ins:ident, $field:expr, $val:expr) => {
+        $ins[$field as usize] = MaybeUninit::new($val);
+    };
+}
+
 pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
     values: Vec<MaybeUninit<T>>,
+    num_padding_rows: usize,
     num_col: usize,
 }
 
 impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
-    pub fn new(num_row: usize, num_col: usize) -> Self {
+    pub fn new(num_rows: usize, num_col: usize) -> Self {
+        let num_total_rows = num_rows.next_power_of_two();
+        let num_padding_rows = num_total_rows - num_rows;
         RowMajorMatrix {
-            values: create_uninit_vec(num_row * num_col),
+            values: create_uninit_vec(num_total_rows * num_col),
+            num_padding_rows,
             num_col,
         }
+    }
+
+    pub fn num_instances(&self) -> usize {
+        self.values.len() / self.num_col - self.num_padding_rows
     }
 
     pub fn iter_mut(&mut self) -> ChunksMut<MaybeUninit<T>> {
@@ -128,7 +143,7 @@ impl LkMultiplicity {
     }
 
     /// merge result from multiple thread local to single result
-    fn into_finalize_result(self) -> [HashMap<u64, usize>; mem::variant_count::<ROMType>()] {
+    pub fn into_finalize_result(self) -> [HashMap<u64, usize>; mem::variant_count::<ROMType>()] {
         Arc::try_unwrap(self.multiplicity)
             .unwrap()
             .into_iter()

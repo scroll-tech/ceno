@@ -5,6 +5,7 @@ use crate::{
     rv32im::DecodedInstruction,
     CENO_PLATFORM,
 };
+use crate::rv32im::Instruction;
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -22,6 +23,7 @@ pub struct StepRecord {
     pub cycle: Cycle,
     pub pc: Change<ByteAddr>,
     pub insn_code: Word,
+    pub insn: Instruction,
 
     pub rs1: Option<ReadOp>,
     pub rs2: Option<ReadOp>,
@@ -67,6 +69,10 @@ impl StepRecord {
 
     pub fn insn_decoded(&self) -> DecodedInstruction {
         DecodedInstruction::new(self.insn_code)
+    }
+
+    pub fn insn(&self) -> Instruction {
+        self.insn
     }
 
     pub fn rs1(&self) -> Option<ReadOp> {
@@ -139,6 +145,10 @@ impl Tracer {
     pub fn fetch(&mut self, pc: WordAddr, value: Word) {
         self.record.pc.before = pc.baddr();
         self.record.insn_code = value;
+    }
+
+    pub fn store_insn(&mut self, insn: Instruction) {
+        self.record.insn = insn;
     }
 
     pub fn load_register(&mut self, idx: RegIdx, value: Word) {
