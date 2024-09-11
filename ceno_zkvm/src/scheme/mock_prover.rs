@@ -4,11 +4,13 @@ use crate::{
     expression::Expression,
     structs::{ROMType, WitnessId},
 };
+use ark_std::test_rng;
 use ff_ext::ExtensionField;
+use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
-use std::{marker::PhantomData, ops::Neg};
+use std::{collections::HashSet, marker::PhantomData, ops::Neg, sync::OnceLock};
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -192,15 +194,87 @@ pub(crate) struct MockProver<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 
+fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> HashSet<Vec<u8>> {
+    fn load_u5_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u8>>,
+        cb: &CircuitBuilder<E>,
+        challenge: [E; 2],
+    ) {
+        for i in 0..(1 << 5) {
+            let rlc_record = cb.rlc_chip_record(vec![
+                Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
+                i.into(),
+            ]);
+            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+        }
+    }
+
+    fn load_u16_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u8>>,
+        cb: &CircuitBuilder<E>,
+        challenge: [E; 2],
+    ) {
+        for i in 0..=u16::MAX as usize {
+            let rlc_record = cb.rlc_chip_record(vec![
+                Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
+                i.into(),
+            ]);
+            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+        }
+    }
+
+    let mut table_vec = vec![];
+    // TODO load more tables here
+    load_u5_table::<E>(&mut table_vec, cb, challenge);
+    load_u16_table(&mut table_vec, cb, challenge);
+    HashSet::from_iter(table_vec)
+}
+
+fn table_lookup_with_default_challenge<E: ExtensionField + 'static + Sync + Send>(
+    cb: &CircuitBuilder<E>,
+    default_challenge: [E; 2],
+) -> &'static HashSet<Vec<u8>> {
+    static TABLE: OnceLock<StaticTypeMap<HashSet<Vec<u8>>>> = OnceLock::new();
+    let table = TABLE.get_or_init(StaticTypeMap::new);
+
+    // reinitialize per generic type E
+    table.call_once::<E, _>(|| load_tables(cb, default_challenge))
+}
+
 impl<'a, E: ExtensionField> MockProver<E> {
-    #[allow(dead_code)]
+    pub fn run_with_challenge(
+        cb: &mut CircuitBuilder<E>,
+        wits_in: &[ArcMultilinearExtension<'a, E>],
+        challenge: [E; 2],
+    ) -> Result<(), Vec<MockProverError<E>>> {
+        Self::run_maybe_challenge(cb, wits_in, Some(challenge))
+    }
+
     pub fn run(
+        cb: &mut CircuitBuilder<E>,
+        wits_in: &[ArcMultilinearExtension<'a, E>],
+    ) -> Result<(), Vec<MockProverError<E>>> {
+        Self::run_maybe_challenge(cb, wits_in, None)
+    }
+
+    fn run_maybe_challenge(
         cb: &mut CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        let challenge = challenge.unwrap_or([E::ONE, E::ONE]);
+        let (challenge, table) = if let Some(challenge) = challenge {
+            (challenge, &load_tables(cb, challenge))
+        } else {
+            let mut rng = test_rng();
+            let default_challenge = [E::random(&mut rng), E::random(&mut rng)];
 
+            (
+                default_challenge,
+                table_lookup_with_default_challenge(cb, default_challenge),
+            )
+        };
         let mut errors = vec![];
 
         // Assert zero expressions
@@ -261,12 +335,6 @@ impl<'a, E: ExtensionField> MockProver<E> {
             }
         }
 
-        // TODO load more tables here
-        // TODO cache table_vec across unittest
-        let mut table_vec = vec![];
-        load_u5_table(&mut table_vec, cb, challenge);
-        load_u16_table(&mut table_vec, cb, challenge);
-
         // Lookup expressions
         for (expr, name) in cb
             .cs
@@ -279,7 +347,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
 
             // Check each lookup expr exists in t vec
             for (inst_id, element) in expr_evaluated.iter().enumerate() {
-                if !table_vec.contains(element) {
+                if !table.contains(element.to_repr().as_ref()) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
                         evaluated: *element,
@@ -297,13 +365,16 @@ impl<'a, E: ExtensionField> MockProver<E> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn assert_satisfied(
         cb: &mut CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
     ) {
-        let result = Self::run(cb, wits_in, challenge);
+        let result = if let Some(challenge) = challenge {
+            Self::run_with_challenge(cb, wits_in, challenge)
+        } else {
+            Self::run(cb, wits_in)
+        };
         match result {
             Ok(_) => {}
             Err(errors) => {
@@ -320,37 +391,6 @@ impl<'a, E: ExtensionField> MockProver<E> {
     }
 }
 
-pub fn load_u5_table<E: ExtensionField>(
-    t_vec: &mut Vec<E>,
-    cb: &CircuitBuilder<E>,
-    challenge: [E; 2],
-) {
-    for i in 0..(1 << 5) {
-        let rlc_record = cb.rlc_chip_record(vec![
-            Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
-            i.into(),
-        ]);
-        let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-        t_vec.push(rlc_record);
-    }
-}
-
-pub fn load_u16_table<E: ExtensionField>(
-    t_vec: &mut Vec<E>,
-    cb: &CircuitBuilder<E>,
-    challenge: [E; 2],
-) {
-    for i in 0..(1 << 16) {
-        let rlc_record = cb.rlc_chip_record(vec![
-            Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
-            i.into(),
-        ]);
-        let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-        t_vec.push(rlc_record);
-    }
-}
-
-#[allow(unused_imports)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,7 +503,7 @@ mod tests {
         let wits_in = vec![vec![Goldilocks::from(123)].into_mle().into()];
 
         let challenge = [2.into(), 1000.into()];
-        let result = MockProver::run(&mut builder, &wits_in, Some(challenge));
+        let result = MockProver::run_with_challenge(&mut builder, &wits_in, challenge);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
         assert_eq!(
