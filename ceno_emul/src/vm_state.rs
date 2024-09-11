@@ -4,7 +4,7 @@ use super::rv32im::EmuContext;
 use crate::{
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
-    rv32im::{DecodedInstruction, Emulator, Instruction, TrapCause},
+    rv32im::{DecodedInstruction, Emulator, TrapCause},
     tracer::{Change, StepRecord, Tracer},
     Program,
 };
@@ -113,11 +113,7 @@ impl EmuContext for VMState {
         Err(anyhow!("Trap {:?}", cause)) // Crash.
     }
 
-    fn on_insn_decoded(&mut self, insn: &Instruction, _decoded: &DecodedInstruction) {
-        self.tracer.store_insn(*insn);
-    }
-
-    fn on_normal_end(&mut self, _kind: &Instruction, _decoded: &DecodedInstruction) {
+    fn on_normal_end(&mut self, _decoded: &DecodedInstruction) {
         self.tracer.store_pc(ByteAddr(self.pc));
     }
 

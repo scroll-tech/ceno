@@ -30,10 +30,10 @@ pub trait EmuContext {
     fn trap(&self, cause: TrapCause) -> Result<bool>;
 
     // Callback when instructions are decoded
-    fn on_insn_decoded(&mut self, kind: &Instruction, decoded: &DecodedInstruction);
+    fn on_insn_decoded(&mut self, _decoded: &DecodedInstruction) {}
 
     // Callback when instructions end normally
-    fn on_normal_end(&mut self, insn: &Instruction, decoded: &DecodedInstruction);
+    fn on_normal_end(&mut self, _decoded: &DecodedInstruction) {}
 
     // Get the program counter
     fn get_pc(&self) -> ByteAddr;
@@ -175,18 +175,12 @@ pub enum InsnKind {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Instruction {
+struct FastDecodeEntry {
     pub kind: InsnKind,
     category: InsnCategory,
     pub opcode: u32,
     pub func3: u32,
     pub func7: u32,
-}
-
-impl Default for Instruction {
-    fn default() -> Self {
-        insn(InsnKind::INVALID, InsnCategory::Invalid, 0x00, 0x0, 0x00)
-    }
 }
 
 impl DecodedInstruction {
@@ -275,8 +269,8 @@ const fn insn(
     opcode: u32,
     func3: i32,
     func7: i32,
-) -> Instruction {
-    Instruction {
+) -> FastDecodeEntry {
+    FastDecodeEntry {
         kind,
         category,
         opcode,
@@ -285,7 +279,7 @@ const fn insn(
     }
 }
 
-type InstructionTable = [Instruction; 48];
+type InstructionTable = [FastDecodeEntry; 48];
 type FastInstructionTable = [u8; 1 << 10];
 
 const RV32IM_ISA: InstructionTable = [
@@ -379,7 +373,7 @@ impl FastDecodeTable {
         ((op_high << 5) | (func72bits << 3) | func3) as usize
     }
 
-    fn add_insn(table: &mut FastInstructionTable, insn: &Instruction, isa_idx: usize) {
+    fn add_insn(table: &mut FastInstructionTable, insn: &FastDecodeEntry, isa_idx: usize) {
         let op_high = insn.opcode >> 2;
         if (insn.func3 as i32) < 0 {
             for f3 in 0..8 {
@@ -398,7 +392,7 @@ impl FastDecodeTable {
         }
     }
 
-    fn lookup(&self, decoded: &DecodedInstruction) -> Instruction {
+    fn lookup(&self, decoded: &DecodedInstruction) -> FastDecodeEntry {
         let isa_idx = self.table[Self::map10(decoded.opcode, decoded.func3, decoded.func7)];
         RV32IM_ISA[isa_idx as usize]
     }
@@ -434,7 +428,7 @@ impl Emulator {
 
         let decoded = DecodedInstruction::new(word);
         let insn = self.table.lookup(&decoded);
-        ctx.on_insn_decoded(&insn, &decoded);
+        ctx.on_insn_decoded(&decoded);
 
         if match insn.category {
             InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
@@ -443,7 +437,7 @@ impl Emulator {
             InsnCategory::System => self.step_system(ctx, insn.kind, &decoded)?,
             InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(word))?,
         } {
-            ctx.on_normal_end(&insn, &decoded);
+            ctx.on_normal_end(&decoded);
         };
 
         Ok(())
