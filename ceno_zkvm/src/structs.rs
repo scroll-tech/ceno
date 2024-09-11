@@ -244,7 +244,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 #[derive(Default)]
 pub struct ZKVMProvingKey<E: ExtensionField> {
     // pk for opcode and table circuits
-    pub(crate) circuit_pks: BTreeMap<String, ProvingKey<E>>,
+    pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
 }
 
 impl<E: ExtensionField> ZKVMProvingKey<E> {
