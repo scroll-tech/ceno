@@ -103,7 +103,7 @@ fn main() {
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
-    // for instance_num_vars in 8..22 {
+    // for instance_num_vars in 8..22 { // TODO: restore.
     for instance_num_vars in 2..3 {
         let num_instances = 1 << instance_num_vars;
         let mut vm = VMState::new(CENO_PLATFORM);

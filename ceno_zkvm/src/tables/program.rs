@@ -10,7 +10,7 @@ use crate::{
     tables::TableCircuit,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{CENO_PLATFORM, WORD_SIZE};
+use ceno_emul::{DecodedInstruction, Word, CENO_PLATFORM, WORD_SIZE};
 use ff_ext::ExtensionField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -80,10 +80,10 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     fn generate_fixed_traces(
         config: &ProgramTableConfig,
         num_fixed: usize,
-        input: &[u32],
+        program: &[Word],
     ) -> RowMajorMatrix<E::BaseField> {
         // TODO: get bytecode of the program.
-        let num_instructions = input.len();
+        let num_instructions = program.len();
         let pc_start = CENO_PLATFORM.pc_start() as u64;
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
@@ -94,13 +94,21 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .zip((0..num_instructions).into_par_iter())
             .for_each(|(row, i)| {
                 let pc = pc_start + (i * WORD_SIZE) as u64;
-                set_fixed_val!(row, config.pc, E::BaseField::from(pc));
-                set_fixed_val!(row, config.opcode, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.rd, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.funct3, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.rs1, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.rs2, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.imm_or_funct7, E::BaseField::from(0 as u64));
+                let insn = DecodedInstruction::new(program[i]);
+
+                tracing::debug!("pc=0x{:x} insn={:?}", pc, insn);
+
+                for (col, val) in [
+                    (&config.pc, pc as u32),
+                    (&config.opcode, insn.opcode()),
+                    (&config.rd, 0),
+                    (&config.funct3, 0),
+                    (&config.rs1, 0),
+                    (&config.rs2, 0),
+                    (&config.imm_or_funct7, 0),
+                ] {
+                    set_fixed_val!(row, *col, E::BaseField::from(val as u64));
+                }
             });
 
         fixed

@@ -56,12 +56,12 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     }
 
     /// Fetch an instruction at a given PC from the Program table.
-    pub fn lk_fetch(&mut self, pc: Expression<E>) -> Result<(), ZKVMError> {
+    pub fn lk_fetch(&mut self, pc: Expression<E>, opcode: Expression<E>) -> Result<(), ZKVMError> {
         let insn_record = self.rlc_chip_record(vec![
             E::BaseField::from(ROMType::Instruction as u64).expr(),
             pc,
             // TODO: instruction fields.
-            0_usize.into(),
+            opcode,
             0_usize.into(),
             0_usize.into(),
             0_usize.into(),

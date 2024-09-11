@@ -60,7 +60,7 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let next_pc = pc.expr() + PC_STEP_SIZE.into();
 
     // Instruction check.
-    circuit_builder.lk_fetch(pc.expr())?;
+    circuit_builder.lk_fetch(pc.expr(), 0x33.into())?;
 
     // Execution result = addend0 + addend1, with carry.
     let prev_rd_value = RegUInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
@@ -161,8 +161,8 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         lk_multiplicity.fetch(step.pc().before.0);
+        set_val!(instance, config.pc, step.pc().before.0 as u64);
         // TODO use fields from step
-        set_val!(instance, config.pc, 1);
         set_val!(instance, config.ts, 2);
         let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
         let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
