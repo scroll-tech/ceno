@@ -148,6 +148,8 @@ where
     end_timer!(timer);
     return (
         trees,
+        // FIXME: no need to return the oracles as the trees already have
+        // the leaves.
         oracles,
         BasefoldCommitPhaseProof {
             sumcheck_messages,
@@ -313,6 +315,8 @@ where
     end_timer!(timer);
     return (
         trees,
+        // FIXME: no need to return the oracles as the trees already have
+        // the leaves.
         oracles,
         BasefoldCommitPhaseProof {
             sumcheck_messages,
@@ -444,6 +448,8 @@ where
     end_timer!(timer);
     return (
         trees,
+        // FIXME: no need to return the oracles as the trees already have
+        // the leaves.
         oracles,
         BasefoldCommitPhaseProof {
             sumcheck_messages,

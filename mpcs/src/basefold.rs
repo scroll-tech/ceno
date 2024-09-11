@@ -315,7 +315,7 @@ where
         //  (2) The encoding of the coefficient vector (need an interpolation)
         let (bh_evals, codeword) = Self::get_poly_bh_evals_and_codeword(pp, poly);
 
-        // Compute and store all the layers of the Merkle tree
+        // 2. Compute and store all the layers of the Merkle tree
         let hasher = new_hasher::<E::BaseField>();
         let codeword_tree = MerkleTree::<E>::from_leaves(codeword, &hasher);
 
@@ -327,6 +327,8 @@ where
             _ => unreachable!(),
         };
 
+        // All these values are stored in the `CommitmentWithData` because
+        // they are useful in opening, and we don't want to recompute them.
         Ok(Self::CommitmentWithData {
             codeword_tree,
             polynomials_bh_evals: vec![bh_evals],
@@ -343,6 +345,8 @@ where
         // assumptions
         // 1. there must be at least one polynomial
         // 2. all polynomials must exist in the same field type
+        //    (TODO: eliminate this assumption by supporting commiting
+        //     and opening mixed-type polys)
         // 3. all polynomials must have the same number of variables
 
         if polys.is_empty() {
@@ -418,8 +422,20 @@ where
     ) -> Result<Self::Proof, Error> {
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
+        // The encoded polynomial should at least have the number of
+        // variables of the basecode, i.e., the size of the message
+        // when the protocol stops. If the polynomial is smaller
+        // the protocol won't work, and saves no verifier work anyway.
         assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
         assert!(comm.num_polys == 1);
+
+        // 1. Committing phase. This phase runs the sum-check and
+        //    the FRI protocols interleavingly. After this phase,
+        //    the sum-check protocol is finished, so nothing is
+        //    to return about the sum-check. However, for the FRI
+        //    part, the prover needs to prepare the answers to the
+        //    queries, so the prover needs the oracles and the Merkle
+        //    trees built over them.
         let (trees, oracles, commit_phase_proof) = commit_phase::<E, Spec>(
             &pp.encoding_params,
             point,
@@ -430,23 +446,35 @@ where
             &hasher,
         );
 
+        // 2. Query phase. ---------------------------------------
+        //    Compute the query indices by Fiat-Shamir.
+        //    For each index, prepare the answers and the Merkle paths.
+        //    Each entry in queried_els stores a list of triples
+        //    (F, F, i) indicating the position opened at each round and
+        //    the two values at that round
+
+        // 2.1 Prepare the answers. These include two values in each oracle,
+        //     in positions (i, i XOR 1), (i >> 1, (i >> 1) XOR 1), ...
+        //     respectively.
         let query_timer = start_timer!(|| "Basefold::open::query_phase");
-        // Each entry in queried_els stores a list of triples (F, F, i) indicating the
-        // position opened at each round and the two values at that round
         let queries = prover_query_phase(transcript, comm, &oracles, Spec::get_number_queries());
         end_timer!(query_timer);
 
+        // 2.2 Prepare the merkle paths for these answers.
         let query_timer = start_timer!(|| "Basefold::open::build_query_result");
-
         let queries_with_merkle_path =
             QueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
         end_timer!(query_timer);
 
+        // 2.3 Write the entire thing to the transcript. Note that these
+        //     are the dominant factor of the BaseFold proof size.
         let query_timer = start_timer!(|| "Basefold::open::write_queries");
         queries_with_merkle_path.write_transcript(transcript);
         end_timer!(query_timer);
 
         end_timer!(timer);
+
+        // End of query phase.----------------------------------
 
         Ok(Self::Proof {
             sumcheck_messages: commit_phase_proof.sumcheck_messages,
