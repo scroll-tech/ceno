@@ -66,7 +66,6 @@ fn main() {
         .with(
             fmt::layer()
                 .compact()
-                .without_time()
                 .with_thread_ids(false)
                 .with_thread_names(false),
         )
@@ -103,8 +102,17 @@ fn main() {
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
-    // for instance_num_vars in 8..22 { // TODO: restore.
-    for instance_num_vars in 2..3 {
+    let max_instance_num_vars = {
+        #[cfg(debug_assertions)]
+        {
+            tracing::info!("debug mode, testing only the smallest instance");
+            9
+        }
+        #[cfg(not(debug_assertions))]
+        22
+    };
+
+    for instance_num_vars in 8..max_instance_num_vars {
         let num_instances = 1 << instance_num_vars;
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
