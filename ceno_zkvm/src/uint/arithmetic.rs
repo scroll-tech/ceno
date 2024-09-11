@@ -660,6 +660,20 @@ mod tests {
         }
 
         #[test]
+        fn test_mul64_16_w_overflow() {
+            // 18,446,744,073,709,551,616
+            // a = 1 * 2^16 + 1 * 2^32 = 4,295,032,832
+            // b =            1 * 2^32 = 4,294,967,296
+            // c = 1 * 2^48 + 1 * 2^64 = 18,447,025,548,686,262,272
+            let wit_a = vec![0, 1, 1, 0];
+            let wit_b = vec![0, 0, 1, 0];
+            let wit_c = vec![0, 0, 0, 1];
+            let wit_carries = vec![0, 0, 0, 1];
+            let witness_values = [wit_a, wit_b, wit_c, wit_carries].concat();
+            verify::<64, 16, E>(witness_values, true);
+        }
+
+        #[test]
         fn test_mul64_8_w_carries() {
             // a = 256
             // b = 257
@@ -709,7 +723,7 @@ mod tests {
             let mut uint_a = UInt::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
             let mut uint_b = UInt::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
             let uint_c = uint_a
-                .mul(|| "uint_c", &mut cb, &mut uint_b, false)
+                .mul(|| "uint_c", &mut cb, &mut uint_b, overflow)
                 .unwrap();
 
             let pow_of_c: u64 = 2_usize.pow(UInt::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
@@ -752,8 +766,8 @@ mod tests {
 
             // overflow
             if overflow {
-                let carries = uint_c.carries.unwrap().last().unwrap().expr();
-                assert_eq!(eval_by_expr(&wit, &challenges, &carries), E::ONE);
+                let overflow = uint_c.carries.unwrap().last().unwrap().expr();
+                assert_eq!(eval_by_expr(&wit, &challenges, &overflow), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
