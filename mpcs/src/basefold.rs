@@ -100,21 +100,49 @@ where
 
         // Switch to coefficient form
         let mut coeffs = bh_evals.clone();
+        // TODO: directly return bit-reversed version if needed.
         interpolate_field_type_over_boolean_hypercube(&mut coeffs);
 
+        // The coefficients are originally stored in little endian,
+        // i.e., the left half correspond to the coefficients not multiplied
+        // by X0, and the right half are all multiplied by X0. That means
+        // for every step in sum-check, the encoded message is expected to
+        // left-right fold.
+        // For the foldable encoding scheme, the codeword is always left-right
+        // folded, but the message is not necessarily (depending on the choice
+        // of encoding scheme). That means either:
+        // encode(left_right_fold(msg)) = left_right_fold(encode(msg))
+        // or
+        // encode(even_odd_fold(msg)) = left_right_fold(encode(msg))
+        // If the message is left-right folded, then we don't need to do
+        // anything. But if the message is even-odd folded for this encoding
+        // scheme, we need to bit-reverse it before we encode the message,
+        // such that the folding of the message is consistent with the
+        // evaluation of the first variable of the polynomial.
         if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
             reverse_index_bits_in_place_field_type(&mut coeffs);
         }
         let mut codeword = Spec::EncodingScheme::encode(&pp.encoding_params, &coeffs);
 
-        // If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
-        //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
-
-        // The sum-check protocol starts from the first variable, but the FRI part
-        // will eventually produce the evaluation at (alpha_k, ..., alpha_1), so apply
-        // the bit-reversion to reverse the variable indices of the polynomial.
-        // In short: store the poly and codeword in big endian
+        // The evaluations over the hypercube are used in sum-check.
+        // They are bit-reversed because the hypercube is ordered in little
+        // endian, so the left half of the evaluation vector are evaluated
+        // at 0 for the first variable, and the right half are evaluated at
+        // 1 for the first variable.
+        // In each step of sum-check, we subsitute the first variable of the
+        // current polynomial with the random challenge, which is equivalent
+        // to a left-right folding of the evaluation vector.
+        // However, the algorithms that we will use are applying even-odd
+        // fold in each sum-check round (easier to program using `par_chunks`)
+        // so we bit-reverse it to store the evaluations in big-endian.
         reverse_index_bits_in_place_field_type(&mut bh_evals);
+        // The encoding scheme always folds the codeword in left-and-right
+        // manner. However, in query phase the two folded positions are
+        // always opened together, so it will be more efficient if the
+        // folded positions are simultaneously sibling nodes in the Merkle
+        // tree. Therefore, instead of left-and-right folding, we bit-reverse
+        // the codeword to make the folding even-and-odd, i.e., adjacent
+        // positions are folded.
         reverse_index_bits_in_place_field_type(&mut codeword);
 
         (bh_evals, codeword)
@@ -245,14 +273,19 @@ where
     type Rng = ChaCha8Rng;
 
     fn setup(poly_size: usize, rng: &Self::Rng) -> Result<Self::Param, Error> {
+        // Some encoding scheme (e.g., the one proposed in BaseFold) needs
+        // to generate parameters pseudorandomly. So provide a seed for this.
         let mut seed = [0u8; 32];
         let mut rng = rng.clone();
         rng.fill_bytes(&mut seed);
+
         let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict(poly_size), seed);
 
         Ok(BasefoldParams { params: pp })
     }
 
+    /// Derive the proving key and verification key from the public parameter.
+    /// This step simultaneously trims the parameter for the particular size.
     fn trim(
         pp: &Self::Param,
         poly_size: usize,
@@ -277,6 +310,9 @@ where
     ) -> Result<Self::CommitmentWithData, Error> {
         let timer = start_timer!(|| "Basefold::commit");
 
+        // 1. Encode the polynomials. Simultaneously get:
+        //  (1) The evaluations over the hypercube (just a clone of the input)
+        //  (2) The encoding of the coefficient vector (need an interpolation)
         let (bh_evals, codeword) = Self::get_poly_bh_evals_and_codeword(pp, poly);
 
         // Compute and store all the layers of the Merkle tree
@@ -323,12 +359,15 @@ where
                 ));
             }
         }
+        let timer = start_timer!(|| "Basefold::batch commit");
 
+        let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
         // convert each polynomial to a code word
         let (bh_evals, codewords) = polys
             .par_iter()
             .map(|poly| Self::get_poly_bh_evals_and_codeword(pp, poly))
             .collect::<(Vec<FieldType<E>>, Vec<FieldType<E>>)>();
+        end_timer!(encode_timer);
 
         // transpose the codewords, to group evaluations at the same point
         // let leaves = Self::transpose_field_type::<E>(codewords.as_slice())?;
@@ -336,6 +375,8 @@ where
         // build merkle tree from leaves
         let hasher = new_hasher::<E::BaseField>();
         let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, &hasher);
+
+        end_timer!(timer);
 
         let is_base = match polys[0].evaluations {
             FieldType::Ext(_) => false,
@@ -1096,7 +1137,9 @@ mod test {
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_rscode_base() {
         // Both challenge and poly are over base field
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11, 4);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+            true, 20, 21, 64,
+        );
     }
 
     #[test]

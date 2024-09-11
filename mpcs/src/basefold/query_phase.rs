@@ -172,6 +172,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     reverse_index_bits_in_place(&mut final_codeword);
     end_timer!(encode_timer);
 
+    let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
     queries.check::<Spec>(
         indices,
         vp,
@@ -183,6 +184,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         comm,
         hasher,
     );
+    end_timer!(queries_timer);
 
     let final_timer = start_timer!(|| "Final checks");
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
@@ -247,6 +249,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
 
+    let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
     queries.check::<Spec>(
         indices,
         vp,
@@ -259,6 +262,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         coeffs,
         hasher,
     );
+    end_timer!(queries_timer);
 
     #[allow(unused)]
     let final_timer = start_timer!(|| "Final checks");
@@ -323,6 +327,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
+    let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
     queries.check::<Spec>(
         indices,
         vp,
@@ -335,6 +340,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
         comm,
         hasher,
     );
+    end_timer!(queries_timer);
 
     let final_timer = start_timer!(|| "Final checks");
     assert_eq!(
@@ -997,7 +1003,6 @@ where
         comm: &BasefoldCommitment<E>,
         hasher: &Hasher<E::BaseField>,
     ) {
-        let timer = start_timer!(|| "QueriesResult::check");
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
                 assert_eq!(index_in_proof, index);
@@ -1014,7 +1019,6 @@ where
                 );
             },
         );
-        end_timer!(timer);
     }
 }
 
@@ -1424,7 +1428,6 @@ where
         index: usize,
         hasher: &Hasher<E::BaseField>,
     ) {
-        let timer = start_timer!(|| "Checking codeword single query");
         self.oracle_query.check_merkle_paths(roots, hasher);
         self.commitment_query
             .check_merkle_path(&Digest(comm.root().0), hasher);
@@ -1466,7 +1469,6 @@ where
             assert_eq!(res, next_oracle_value, "Failed at round {}", i);
             // end_timer!(round_timer);
         }
-        end_timer!(timer);
     }
 }
 
@@ -1532,7 +1534,6 @@ where
         comm: &BasefoldCommitment<E>,
         hasher: &Hasher<E::BaseField>,
     ) {
-        let timer = start_timer!(|| "QueriesResult::check");
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
                 assert_eq!(index, index_in_proof);
@@ -1550,6 +1551,5 @@ where
                 );
             },
         );
-        end_timer!(timer);
     }
 }

@@ -20,10 +20,10 @@ type T = Transcript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
 const NUM_SAMPLES: usize = 10;
-const NUM_VARS_START: usize = 15;
+const NUM_VARS_START: usize = 20;
 const NUM_VARS_END: usize = 20;
-const BATCH_SIZE_LOG_START: usize = 3;
-const BATCH_SIZE_LOG_END: usize = 5;
+const BATCH_SIZE_LOG_START: usize = 6;
+const BATCH_SIZE_LOG_END: usize = 6;
 
 fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     let mut group = c.benchmark_group(format!(
