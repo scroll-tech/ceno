@@ -160,7 +160,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         let mut prog_mlt = vec![0_usize; *num_instructions];
         for (pc, mlt) in multiplicity {
             let i = (*pc as usize - CENO_PLATFORM.pc_start() as usize) / WORD_SIZE;
-            tracing::debug!("pc=0x{:x} index={} mlt={}", *pc, i, mlt);
             prog_mlt[i] = *mlt;
         }
 

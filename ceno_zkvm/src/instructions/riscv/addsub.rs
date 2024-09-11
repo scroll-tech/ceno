@@ -21,6 +21,11 @@ use crate::{
 };
 use core::mem::MaybeUninit;
 
+const OPCODE_OP: usize = 0x33;
+const FUNCT3_ADD_SUB: usize = 0;
+const FUNCT7_ADD: usize = 0;
+const FUNCT7_SUB: usize = 0x20;
+
 pub struct AddInstruction<E>(PhantomData<E>);
 pub struct SubInstruction<E>(PhantomData<E>);
 
@@ -93,12 +98,12 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     // Fetch the instruction.
     circuit_builder.lk_fetch(&InsnRecord::new(
         pc.expr(),
-        0x33.into(),
+        OPCODE_OP.into(),
         rd_id.expr(),
-        0x0.into(),
+        FUNCT3_ADD_SUB.into(),
         rs1_id.expr(),
         rs2_id.expr(),
-        (if IS_ADD { 0 } else { 0x20 }).into(),
+        (if IS_ADD { FUNCT7_ADD } else { FUNCT7_SUB }).into(),
     ))?;
 
     // TODO remove me, this is just for testing degree > 1 sumcheck in main constraints
