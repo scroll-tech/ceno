@@ -42,6 +42,11 @@ impl Platform {
         (index << 8) as Addr
     }
 
+    /// Register index from a virtual address (unchecked).
+    pub const fn register_index(&self, vma: Addr) -> RegIdx {
+        (vma >> 8) as RegIdx
+    }
+
     /// Virtual address of the program counter.
     pub const fn pc_vma(&self) -> Addr {
         self.register_vma(32)
