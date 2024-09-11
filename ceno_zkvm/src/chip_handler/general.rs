@@ -7,6 +7,7 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     structs::ROMType,
+    tables::InsnRecord,
 };
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
@@ -56,19 +57,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     }
 
     /// Fetch an instruction at a given PC from the Program table.
-    pub fn lk_fetch(&mut self, pc: Expression<E>, opcode: Expression<E>) -> Result<(), ZKVMError> {
-        let insn_record = self.rlc_chip_record(vec![
-            E::BaseField::from(ROMType::Instruction as u64).expr(),
-            pc,
-            // TODO: instruction fields.
-            opcode,
-            0_usize.into(),
-            0_usize.into(),
-            0_usize.into(),
-            0_usize.into(),
-            0_usize.into(),
-        ]);
-        self.cs.lk_record(|| "fetch", insn_record)
+    pub fn lk_fetch(&mut self, record: &InsnRecord<Expression<E>>) -> Result<(), ZKVMError> {
+        let rlc_record = {
+            let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
+            fields.extend_from_slice(record.as_slice());
+            self.rlc_chip_record(fields)
+        };
+
+        self.cs.lk_record(|| "fetch", rlc_record)
     }
 
     pub fn read_record<NR, N>(

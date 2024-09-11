@@ -6,7 +6,7 @@ mod range;
 pub use range::RangeTableCircuit;
 
 mod program;
-pub use program::ProgramTableCircuit;
+pub use program::{InsnRecord, ProgramTableCircuit};
 
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;

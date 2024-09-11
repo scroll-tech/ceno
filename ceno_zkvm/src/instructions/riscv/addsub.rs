@@ -15,6 +15,7 @@ use crate::{
     expression::{ToExpr, WitIn},
     instructions::Instruction,
     set_val,
+    tables::InsnRecord,
     uint::UIntValue,
     witness::LkMultiplicity,
 };
@@ -59,8 +60,16 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
 
     let next_pc = pc.expr() + PC_STEP_SIZE.into();
 
-    // Instruction check.
-    circuit_builder.lk_fetch(pc.expr(), 0x33.into())?;
+    // Fetch the instruction.
+    circuit_builder.lk_fetch(&InsnRecord::new(
+        pc.expr(),
+        0x33.into(),
+        0x0.into(),
+        0x0.into(),
+        0x0.into(),
+        0x0.into(),
+        0x0.into(),
+    ))?;
 
     // Execution result = addend0 + addend1, with carry.
     let prev_rd_value = RegUInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;

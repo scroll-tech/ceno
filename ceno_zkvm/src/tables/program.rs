@@ -12,20 +12,72 @@ use crate::{
 };
 use ceno_emul::{DecodedInstruction, Word, CENO_PLATFORM, WORD_SIZE};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 #[derive(Clone, Debug)]
-pub struct ProgramTableConfig {
-    pc: Fixed,
-    // Decoded instruction fields.
-    opcode: Fixed,
-    rd: Fixed,
-    funct3: Fixed,
-    rs1: Fixed,
-    rs2: Fixed,
+pub struct InsnRecord<T>([T; 7]);
+
+impl<T> InsnRecord<T> {
+    pub fn new(pc: T, opcode: T, rd: T, funct3: T, rs1: T, rs2: T, imm_or_funct7: T) -> Self {
+        InsnRecord([pc, opcode, rd, funct3, rs1, rs2, imm_or_funct7])
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        &self.0
+    }
+
+    pub fn pc(&self) -> &T {
+        &self.0[0]
+    }
+
+    pub fn opcode(&self) -> &T {
+        &self.0[1]
+    }
+
+    pub fn rd(&self) -> &T {
+        &self.0[2]
+    }
+
+    pub fn funct3(&self) -> &T {
+        &self.0[3]
+    }
+
+    pub fn rs1(&self) -> &T {
+        &self.0[4]
+    }
+
+    pub fn rs2(&self) -> &T {
+        &self.0[5]
+    }
+
     /// The complete immediate value, for instruction types I/S/B/U/J.
     /// Otherwise, the field funct7 of R-Type instructions.
-    imm_or_funct7: Fixed,
+    pub fn imm_or_funct7(&self) -> &T {
+        &self.0[6]
+    }
+}
+
+impl InsnRecord<u32> {
+    fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
+        InsnRecord::new(
+            pc,
+            insn.opcode(),
+            // TODO: implement and remove the 0s.
+            0 * insn.rd(),
+            0 * insn.func3(),
+            0 * insn.rs1(),
+            0 * insn.rs2(),
+            0 * insn.func7(), // TODO: get immediate for all types.
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ProgramTableConfig {
+    /// The fixed table of instruction records.
+    record: InsnRecord<Fixed>,
+
     /// Multiplicity of the record - how many times an instruction is visited.
     mlt: WitIn,
 }
@@ -42,39 +94,32 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<ProgramTableConfig, ZKVMError> {
-        let pc = cb.create_fixed(|| "pc")?;
-        let opcode = cb.create_fixed(|| "opcode")?;
-        let rd = cb.create_fixed(|| "rd")?;
-        let funct3 = cb.create_fixed(|| "funct3")?;
-        let rs1 = cb.create_fixed(|| "rs1")?;
-        let rs2 = cb.create_fixed(|| "rs2")?;
-        let imm_or_funct7 = cb.create_fixed(|| "imm_or_funct7")?;
+        let record = InsnRecord([
+            cb.create_fixed(|| "pc")?,
+            cb.create_fixed(|| "opcode")?,
+            cb.create_fixed(|| "rd")?,
+            cb.create_fixed(|| "funct3")?,
+            cb.create_fixed(|| "rs1")?,
+            cb.create_fixed(|| "rs2")?,
+            cb.create_fixed(|| "imm_or_funct7")?,
+        ]);
 
         let mlt = cb.create_witin(|| "mlt")?;
 
-        let record_exprs = cb.rlc_chip_record(vec![
-            Expression::Constant(E::BaseField::from(ROMType::Instruction as u64)),
-            Expression::Fixed(pc.clone()),
-            Expression::Fixed(opcode.clone()),
-            Expression::Fixed(rd.clone()),
-            Expression::Fixed(funct3.clone()),
-            Expression::Fixed(rs1.clone()),
-            Expression::Fixed(rs2.clone()),
-            Expression::Fixed(imm_or_funct7.clone()),
-        ]);
+        let record_exprs = {
+            let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
+            fields.extend(
+                record
+                    .as_slice()
+                    .iter()
+                    .map(|f| Expression::Fixed(f.clone())),
+            );
+            cb.rlc_chip_record(fields)
+        };
 
         cb.lk_table_record(|| "prog table", record_exprs, mlt.expr())?;
 
-        Ok(ProgramTableConfig {
-            pc,
-            opcode,
-            rd,
-            funct3,
-            rs1,
-            rs2,
-            imm_or_funct7,
-            mlt,
-        })
+        Ok(ProgramTableConfig { record, mlt })
     }
 
     fn generate_fixed_traces(
@@ -84,7 +129,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     ) -> RowMajorMatrix<E::BaseField> {
         // TODO: get bytecode of the program.
         let num_instructions = program.len();
-        let pc_start = CENO_PLATFORM.pc_start() as u64;
+        let pc_start = CENO_PLATFORM.pc_start();
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
 
@@ -93,21 +138,12 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .with_min_len(MIN_PAR_SIZE)
             .zip((0..num_instructions).into_par_iter())
             .for_each(|(row, i)| {
-                let pc = pc_start + (i * WORD_SIZE) as u64;
+                let pc = pc_start + (i * WORD_SIZE) as u32;
                 let insn = DecodedInstruction::new(program[i]);
+                let values = InsnRecord::from_decoded(pc, &insn);
 
-                tracing::debug!("pc=0x{:x} insn={:?}", pc, insn);
-
-                for (col, val) in [
-                    (&config.pc, pc as u32),
-                    (&config.opcode, insn.opcode()),
-                    (&config.rd, 0),
-                    (&config.funct3, 0),
-                    (&config.rs1, 0),
-                    (&config.rs2, 0),
-                    (&config.imm_or_funct7, 0),
-                ] {
-                    set_fixed_val!(row, *col, E::BaseField::from(val as u64));
+                for (col, val) in config.record.as_slice().iter().zip_eq(values.as_slice()) {
+                    set_fixed_val!(row, *col, E::BaseField::from(*val as u64));
                 }
             });
 
@@ -120,12 +156,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         multiplicity: &[HashMap<u64, usize>],
         num_instructions: &usize,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        tracing::debug!(
-            "num_instructions: {}. num_witin: {}",
-            *num_instructions,
-            num_witin,
-        );
-
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
         let mut prog_mlt = vec![0_usize; *num_instructions];
