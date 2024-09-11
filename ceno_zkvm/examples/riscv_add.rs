@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use ark_std::test_rng;
 use ceno_zkvm::{instructions::riscv::addsub::AddInstruction, scheme::prover::ZKVMProver};
+use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{ByteAddr, InsnKind::ADD, StepRecord, VMState, CENO_PLATFORM};
@@ -34,7 +35,21 @@ const PROGRAM_ADD_LOOP: [u32; 4] = [
     0b_000000000000_00000_000_00000_1110011,  // ecall halt
 ];
 
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// start round
+    #[arg(short, long, default_value_t = 8)]
+    start: u8,
+
+    /// end round
+    #[arg(short, long, default_value_t = 22)]
+    end: u8,
+}
+
 fn main() {
+    let args = Args::parse();
     type E = GoldilocksExt2;
 
     let max_threads = {
@@ -90,7 +105,7 @@ fn main() {
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
-    for instance_num_vars in 8..22 {
+    for instance_num_vars in args.start..args.end {
         let num_instances = 1 << instance_num_vars;
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
