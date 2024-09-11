@@ -60,17 +60,6 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
 
     let next_pc = pc.expr() + PC_STEP_SIZE.into();
 
-    // Fetch the instruction.
-    circuit_builder.lk_fetch(&InsnRecord::new(
-        pc.expr(),
-        0x33.into(),
-        0x0.into(),
-        0x0.into(),
-        0x0.into(),
-        0x0.into(),
-        0x0.into(),
-    ))?;
-
     // Execution result = addend0 + addend1, with carry.
     let prev_rd_value = RegUInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
 
@@ -100,6 +89,17 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let rs1_id = circuit_builder.create_witin(|| "rs1_id")?;
     let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
     let rd_id = circuit_builder.create_witin(|| "rd_id")?;
+
+    // Fetch the instruction.
+    circuit_builder.lk_fetch(&InsnRecord::new(
+        pc.expr(),
+        0x33.into(),
+        rd_id.expr(),
+        0x0.into(),
+        rs1_id.expr(),
+        rs2_id.expr(),
+        (if IS_ADD { 0 } else { 0x20 }).into(),
+    ))?;
 
     // TODO remove me, this is just for testing degree > 1 sumcheck in main constraints
     circuit_builder.require_zero(
@@ -171,6 +171,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     ) -> Result<(), ZKVMError> {
         lk_multiplicity.fetch(step.pc().before.0);
         set_val!(instance, config.pc, step.pc().before.0 as u64);
+
         // TODO use fields from step
         set_val!(instance, config.ts, 2);
         let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
@@ -193,10 +194,17 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
                 .map(|carry| E::BaseField::from(carry as u64))
                 .collect_vec(),
         );
+
+        // Register IDs.
+        for (reg_col, reg_id) in [
+            (config.rs1_id, step.rs1().unwrap().register_index()),
+            (config.rs2_id, step.rs2().unwrap().register_index()),
+            (config.rd_id, step.rd().unwrap().register_index()),
+        ] {
+            set_val!(instance, reg_col, reg_id as u64);
+        }
+
         // TODO #167
-        set_val!(instance, config.rs1_id, 2);
-        set_val!(instance, config.rs2_id, 2);
-        set_val!(instance, config.rd_id, 2);
         set_val!(instance, config.prev_rs1_ts, 2);
         set_val!(instance, config.prev_rs2_ts, 2);
         set_val!(instance, config.prev_rd_ts, 2);
@@ -220,11 +228,13 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
-        _lk_multiplicity: &mut LkMultiplicity,
-        _step: &StepRecord,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
     ) -> Result<(), ZKVMError> {
+        lk_multiplicity.fetch(step.pc().before.0);
+        set_val!(instance, config.pc, step.pc().before.0 as u64);
+
         // TODO use field from step
-        set_val!(instance, config.pc, _step.pc().before.0 as u64);
         set_val!(instance, config.ts, 2);
         config.prev_rd_value.wits_in().map(|prev_rd_value| {
             set_val!(instance, prev_rd_value[0], 4);
@@ -243,10 +253,17 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
             set_val!(instance, carry[0], 4);
             set_val!(instance, carry[1], 0);
         });
+
+        // Register IDs.
+        for (reg_col, reg_id) in [
+            (config.rs1_id, step.rs1().unwrap().register_index()),
+            (config.rs2_id, step.rs2().unwrap().register_index()),
+            (config.rd_id, step.rd().unwrap().register_index()),
+        ] {
+            set_val!(instance, reg_col, reg_id as u64);
+        }
+
         // TODO #167
-        set_val!(instance, config.rs1_id, 2);
-        set_val!(instance, config.rs2_id, 2);
-        set_val!(instance, config.rd_id, 2);
         set_val!(instance, config.prev_rs1_ts, 2);
         set_val!(instance, config.prev_rs2_ts, 2);
         set_val!(instance, config.prev_rd_ts, 2);

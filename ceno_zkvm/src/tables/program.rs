@@ -63,12 +63,11 @@ impl InsnRecord<u32> {
         InsnRecord::new(
             pc,
             insn.opcode(),
-            // TODO: implement and remove the 0s.
-            0 * insn.rd(),
-            0 * insn.func3(),
-            0 * insn.rs1(),
-            0 * insn.rs2(),
-            0 * insn.func7(), // TODO: get immediate for all types.
+            insn.rd(),
+            insn.funct3(),
+            insn.rs1(),
+            insn.rs2(),
+            insn.funct7(), // TODO: get immediate for all types.
         )
     }
 }
