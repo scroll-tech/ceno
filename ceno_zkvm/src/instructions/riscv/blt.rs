@@ -262,7 +262,7 @@ mod test {
         )
         .unwrap();
 
-        MockProver::run(
+        MockProver::assert_satisfied(
             &mut circuit_builder,
             &raw_witin
                 .de_interleaving()
@@ -270,8 +270,8 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-        )
-        .expect_err("lookup will fail");
+            None,
+        );
         Ok(())
     }
 
