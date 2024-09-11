@@ -10,7 +10,8 @@ pub use program::ProgramTableCircuit;
 
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;
-    type Input: Send + Sync + ?Sized;
+    type FixedInput: Send + Sync + ?Sized;
+    type WitnessInput: Send + Sync + ?Sized;
 
     fn name() -> String;
 
@@ -21,12 +22,13 @@ pub trait TableCircuit<E: ExtensionField> {
     fn generate_fixed_traces(
         config: &Self::TableConfig,
         num_fixed: usize,
-        input: &Self::Input,
+        input: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField>;
 
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
+        input: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
 }

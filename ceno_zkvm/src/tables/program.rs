@@ -8,9 +8,9 @@ use crate::{
     set_fixed_val, set_val,
     structs::ROMType,
     tables::TableCircuit,
-    uint::constants::RANGE_CHIP_BIT_WIDTH,
     witness::RowMajorMatrix,
 };
+use ceno_emul::{CENO_PLATFORM, WORD_SIZE};
 use ff_ext::ExtensionField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -34,7 +34,8 @@ pub struct ProgramTableCircuit<E>(PhantomData<E>);
 
 impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     type TableConfig = ProgramTableConfig;
-    type Input = [u32];
+    type FixedInput = [u32];
+    type WitnessInput = usize;
 
     fn name() -> String {
         "PROGRAM".into()
@@ -79,10 +80,11 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     fn generate_fixed_traces(
         config: &ProgramTableConfig,
         num_fixed: usize,
-        _input: &[u32],
+        input: &[u32],
     ) -> RowMajorMatrix<E::BaseField> {
         // TODO: get bytecode of the program.
-        let num_instructions = 1 << RANGE_CHIP_BIT_WIDTH;
+        let num_instructions = input.len();
+        let pc_start = CENO_PLATFORM.pc_start() as u64;
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
 
@@ -91,13 +93,14 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .with_min_len(MIN_PAR_SIZE)
             .zip((0..num_instructions).into_par_iter())
             .for_each(|(row, i)| {
-                set_fixed_val!(row, config.pc.0, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.opcode.0, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.rd.0, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.funct3.0, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.rs1.0, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.rs2.0, E::BaseField::from(0 as u64));
-                set_fixed_val!(row, config.imm_or_funct7.0, E::BaseField::from(0 as u64));
+                let pc = pc_start + (i * WORD_SIZE) as u64;
+                set_fixed_val!(row, config.pc, E::BaseField::from(pc));
+                set_fixed_val!(row, config.opcode, E::BaseField::from(0 as u64));
+                set_fixed_val!(row, config.rd, E::BaseField::from(0 as u64));
+                set_fixed_val!(row, config.funct3, E::BaseField::from(0 as u64));
+                set_fixed_val!(row, config.rs1, E::BaseField::from(0 as u64));
+                set_fixed_val!(row, config.rs2, E::BaseField::from(0 as u64));
+                set_fixed_val!(row, config.imm_or_funct7, E::BaseField::from(0 as u64));
             });
 
         fixed
@@ -107,17 +110,21 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
+        num_instructions: &usize,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        // TODO: get instruction count.
-        tracing::debug!("num_witin: {}", num_witin);
-        let num_instructions = 1 << RANGE_CHIP_BIT_WIDTH;
+        tracing::debug!(
+            "num_instructions: {}. num_witin: {}",
+            *num_instructions,
+            num_witin,
+        );
 
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
-        tracing::debug!("multiplicity: {:?}", multiplicity);
 
-        let mut prog_mlt = vec![0_usize; num_instructions];
-        for (limb, mlt) in multiplicity {
-            prog_mlt[*limb as usize] = *mlt;
+        let mut prog_mlt = vec![0_usize; *num_instructions];
+        for (pc, mlt) in multiplicity {
+            let i = (*pc as usize - CENO_PLATFORM.pc_start() as usize) / WORD_SIZE;
+            tracing::debug!("pc=0x{:x} index={} mlt={}", *pc, i, mlt);
+            prog_mlt[i] = *mlt;
         }
 
         let mut witness = RowMajorMatrix::<E::BaseField>::new(prog_mlt.len(), num_witin);
@@ -126,7 +133,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .with_min_len(MIN_PAR_SIZE)
             .zip(prog_mlt.into_par_iter())
             .for_each(|(row, mlt)| {
-                set_val!(row, config.mlt, E::BaseField::from(0 as u64)); // TODO
+                set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
         Ok(witness)

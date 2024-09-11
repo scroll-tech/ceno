@@ -134,10 +134,14 @@ fn main() {
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
         zkvm_witness
-            .assign_table_circuit::<RangeTableCircuit<E>>(&zkvm_cs, &range_config)
+            .assign_table_circuit::<RangeTableCircuit<E>>(&zkvm_cs, &range_config, &())
             .unwrap();
         zkvm_witness
-            .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config)
+            .assign_table_circuit::<ProgramTableCircuit<E>>(
+                &zkvm_cs,
+                &prog_config,
+                &PROGRAM_ADD_LOOP.len(),
+            )
             .unwrap();
 
         let timer = Instant::now();

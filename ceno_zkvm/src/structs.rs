@@ -155,7 +155,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: TC::TableConfig,
-        input: &TC::Input,
+        input: &TC::FixedInput,
     ) {
         let cs = cs.get_cs(&TC::name()).expect("cs not found");
         assert!(
@@ -228,6 +228,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: &TC::TableConfig,
+        input: &TC::WitnessInput,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
 
@@ -236,6 +237,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             config,
             cs.num_witin as usize,
             self.combined_lk_mlt.as_ref().unwrap(),
+            input,
         )?;
         assert!(self.witnesses.insert(TC::name(), witness).is_none());
 

@@ -26,7 +26,7 @@ macro_rules! set_val {
 #[macro_export]
 macro_rules! set_fixed_val {
     ($ins:ident, $field:expr, $val:expr) => {
-        $ins[$field as usize] = MaybeUninit::new($val);
+        $ins[$field.0] = MaybeUninit::new($val);
     };
 }
 
@@ -139,6 +139,15 @@ impl LkMultiplicity {
             .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
         (*multiplicity.borrow_mut()[ROMType::Ltu as usize]
             .entry(key)
+            .or_default()) += 1;
+    }
+
+    pub fn fetch(&mut self, pc: u32) {
+        let multiplicity = self
+            .multiplicity
+            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
+        (*multiplicity.borrow_mut()[ROMType::Instruction as usize]
+            .entry(pc as u64)
             .or_default()) += 1;
     }
 
