@@ -305,15 +305,21 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     HashSet::from_iter(table_vec)
 }
 
-fn table_lookup_with_default_challenge<E: ExtensionField + 'static + Sync + Send>(
+// table only load once when extension field change
+// return default challenge and table
+fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     cb: &CircuitBuilder<E>,
-    default_challenge: [E; 2],
-) -> &'static HashSet<Vec<u8>> {
+) -> ([E; 2], &'static HashSet<Vec<u8>>) {
+    let mut rng = test_rng();
+    let challenge = [E::random(&mut rng), E::random(&mut rng)];
     static TABLE: OnceLock<StaticTypeMap<HashSet<Vec<u8>>>> = OnceLock::new();
     let table = TABLE.get_or_init(StaticTypeMap::new);
 
     // reinitialize per generic type E
-    table.call_once::<E, _>(|| load_tables(cb, default_challenge))
+    (
+        challenge,
+        table.call_once::<E, _>(|| load_tables(cb, challenge)),
+    )
 }
 
 impl<'a, E: ExtensionField + Hash> MockProver<E> {
@@ -340,13 +346,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let (challenge, table) = if let Some(challenge) = challenge {
             (challenge, &load_tables(cb, challenge))
         } else {
-            let mut rng = test_rng();
-            let default_challenge = [E::random(&mut rng), E::random(&mut rng)];
-
-            (
-                default_challenge,
-                table_lookup_with_default_challenge(cb, default_challenge),
-            )
+            load_once_tables(cb)
         };
         let mut errors = vec![];
 
