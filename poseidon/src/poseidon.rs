@@ -158,8 +158,8 @@ pub(crate) trait Poseidon: AdaptedField {
     #[inline(always)]
     fn sbox_monomial(x: Self) -> Self {
         // x |--> x^7
-        let x2 = x.square();
-        let x4 = x2.square();
+        let x2 = x * x;
+        let x4 = x2 * x2;
         let x3 = x * x2;
         x3 * x4
     }
