@@ -23,11 +23,6 @@ impl<T: Poseidon> PoseidonPermutation<T> {
         perm
     }
 
-    /// Set idx-th state element to be `elt`. Panics if `idx >= WIDTH`.
-    fn set_elt(&mut self, elt: T, idx: usize) {
-        self.state[idx] = elt;
-    }
-
     /// Set state element `i` to be `elts[i] for i =
     /// start_idx..start_idx + n` where `n = min(elts.len(),
     /// WIDTH-start_idx)`. Panics if `start_idx > WIDTH`.

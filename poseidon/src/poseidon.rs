@@ -1,9 +1,7 @@
-use crate::{
-    constants::{
-        ALL_ROUND_CONSTANTS, HALF_N_FULL_ROUNDS, N_PARTIAL_ROUNDS, N_ROUNDS, SPONGE_WIDTH,
-    },
+use crate::constants::{
+    ALL_ROUND_CONSTANTS, HALF_N_FULL_ROUNDS, N_PARTIAL_ROUNDS, N_ROUNDS, SPONGE_WIDTH,
 };
-use goldilocks::{SmallField};
+use goldilocks::SmallField;
 use unroll::unroll_for_loops;
 
 // pub static mut N_ADD: usize = 0;

@@ -8,12 +8,6 @@ use crate::{
 pub struct PoseidonHash;
 
 impl PoseidonHash {
-    const HASH_SIZE: usize = DIGEST_WIDTH * 8;
-
-    fn hash_no_pad<F: Poseidon + AdaptedField>(input: &[F]) -> Digest<F> {
-        hash_n_to_hash_no_pad(input)
-    }
-
     pub fn two_to_one<F: Poseidon + AdaptedField>(
         left: &Digest<F>,
         right: &Digest<F>,

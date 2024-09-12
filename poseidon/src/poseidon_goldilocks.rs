@@ -293,7 +293,6 @@ fn reduce128(x: u128) -> Goldilocks {
     Goldilocks(t2)
 }
 
-
 #[inline]
 const fn split(x: u128) -> (u64, u64) {
     (x as u64, (x >> 64) as u64)
