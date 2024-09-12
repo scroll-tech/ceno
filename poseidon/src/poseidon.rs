@@ -1,11 +1,9 @@
 use crate::{
-    add_u160_u128,
     constants::{
         ALL_ROUND_CONSTANTS, HALF_N_FULL_ROUNDS, N_PARTIAL_ROUNDS, N_ROUNDS, SPONGE_WIDTH,
     },
-    reduce_u160,
 };
-use goldilocks::{ExtensionField, Goldilocks, SmallField, EPSILON};
+use goldilocks::{SmallField};
 use unroll::unroll_for_loops;
 
 // pub static mut N_ADD: usize = 0;
@@ -14,7 +12,7 @@ use unroll::unroll_for_loops;
 //
 // pub static mut N_EXP: usize = 0;
 
-pub(crate) trait Poseidon: AdaptedField {
+pub trait Poseidon: AdaptedField {
     // Total number of round constants required: width of the input
     // times number of rounds.
     const N_ROUND_CONSTANTS: usize = SPONGE_WIDTH * N_ROUNDS;
@@ -227,7 +225,23 @@ pub(crate) trait Poseidon: AdaptedField {
     }
 }
 
-pub(crate) trait AdaptedField: SmallField {
+#[inline(always)]
+const fn add_u160_u128((x_lo, x_hi): (u128, u32), y: u128) -> (u128, u32) {
+    let (res_lo, over) = x_lo.overflowing_add(y);
+    let res_hi = x_hi + (over as u32);
+    (res_lo, res_hi)
+}
+
+#[inline(always)]
+fn reduce_u160<F: Poseidon>((n_lo, n_hi): (u128, u32)) -> F {
+    let n_lo_hi = (n_lo >> 64) as u64;
+    let n_lo_lo = n_lo as u64;
+    let reduced_hi: u64 = F::from_noncanonical_u96(n_lo_hi, n_hi).to_noncanonical_u64();
+    let reduced128: u128 = ((reduced_hi as u128) << 64) + (n_lo_lo as u128);
+    F::from_noncanonical_u128(reduced128)
+}
+
+pub trait AdaptedField: SmallField {
     const ORDER: u64;
 
     fn from_noncanonical_u96(n_lo: u64, n_hi: u32) -> Self;
