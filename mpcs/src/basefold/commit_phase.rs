@@ -38,14 +38,13 @@ pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     num_vars: usize,
     num_rounds: usize,
     hasher: &Hasher<E::BaseField>,
-) -> (Vec<MerkleTree<E>>, Vec<Vec<E>>, BasefoldCommitPhaseProof<E>)
+) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     let timer = start_timer!(|| "Commit phase");
     #[cfg(feature = "sanity-check")]
     assert_eq!(point.len(), num_vars);
-    let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let mut running_oracle = field_type_iter_ext(&comm.get_codewords()[0]).collect_vec();
     let mut running_evals = comm.polynomials_bh_evals[0].clone();
@@ -106,8 +105,6 @@ where
             let running_root = running_tree.root();
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root.clone());
-
-            oracles.push(running_oracle.clone());
             trees.push(running_tree);
         } else {
             // The difference of the last round is that we don't need to compute the message,
@@ -148,9 +145,6 @@ where
     end_timer!(timer);
     return (
         trees,
-        // FIXME: no need to return the oracles as the trees already have
-        // the leaves.
-        oracles,
         BasefoldCommitPhaseProof {
             sumcheck_messages,
             roots,
@@ -170,13 +164,12 @@ pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     num_rounds: usize,
     coeffs: &[E],
     hasher: &Hasher<E::BaseField>,
-) -> (Vec<MerkleTree<E>>, Vec<Vec<E>>, BasefoldCommitPhaseProof<E>)
+) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     let timer = start_timer!(|| "Batch Commit phase");
     assert_eq!(point.len(), num_vars);
-    let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let mut running_oracle = vec![E::ZERO; 1 << (num_vars + Spec::get_rate_log())];
 
@@ -260,8 +253,6 @@ where
             let running_root = running_tree.root();
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
-
-            oracles.push(running_oracle.clone());
             trees.push(running_tree);
 
             // Then merge the rest polynomials whose sizes match the current running oracle
@@ -315,9 +306,6 @@ where
     end_timer!(timer);
     return (
         trees,
-        // FIXME: no need to return the oracles as the trees already have
-        // the leaves.
-        oracles,
         BasefoldCommitPhaseProof {
             sumcheck_messages,
             roots,
@@ -337,7 +325,7 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     num_vars: usize,
     num_rounds: usize,
     hasher: &Hasher<E::BaseField>,
-) -> (Vec<MerkleTree<E>>, Vec<Vec<E>>, BasefoldCommitPhaseProof<E>)
+) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -345,7 +333,6 @@ where
     assert_eq!(point.len(), num_vars);
     assert_eq!(comm.num_polys, batch_coeffs.len());
     let prepare_timer = start_timer!(|| "Prepare");
-    let mut oracles = Vec::with_capacity(num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
     let mut running_oracle = comm.batch_codewords(batch_coeffs);
@@ -406,8 +393,6 @@ where
             let running_root = running_tree.root();
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
-
-            oracles.push(running_oracle.clone());
             trees.push(running_tree);
         } else {
             // The difference of the last round is that we don't need to compute the message,
@@ -448,9 +433,6 @@ where
     end_timer!(timer);
     return (
         trees,
-        // FIXME: no need to return the oracles as the trees already have
-        // the leaves.
-        oracles,
         BasefoldCommitPhaseProof {
             sumcheck_messages,
             roots,

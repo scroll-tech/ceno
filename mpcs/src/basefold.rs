@@ -436,7 +436,7 @@ where
         //    part, the prover needs to prepare the answers to the
         //    queries, so the prover needs the oracles and the Merkle
         //    trees built over them.
-        let (trees, oracles, commit_phase_proof) = commit_phase::<E, Spec>(
+        let (trees, commit_phase_proof) = commit_phase::<E, Spec>(
             &pp.encoding_params,
             point,
             comm,
@@ -457,7 +457,7 @@ where
         //     in positions (i, i XOR 1), (i >> 1, (i >> 1) XOR 1), ...
         //     respectively.
         let query_timer = start_timer!(|| "Basefold::open::query_phase");
-        let queries = prover_query_phase(transcript, comm, &oracles, Spec::get_number_queries());
+        let queries = prover_query_phase(transcript, comm, &trees, Spec::get_number_queries());
         end_timer!(query_timer);
 
         // 2.2 Prepare the merkle paths for these answers.
@@ -667,7 +667,7 @@ where
 
         let point = challenges;
 
-        let (trees, oracles, commit_phase_proof) = batch_commit_phase::<E, Spec>(
+        let (trees, commit_phase_proof) = batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
             &point,
             comms,
@@ -683,7 +683,7 @@ where
             transcript,
             1 << (num_vars + Spec::get_rate_log()),
             comms,
-            &oracles,
+            &trees,
             Spec::get_number_queries(),
         );
         end_timer!(query_timer);
@@ -764,7 +764,7 @@ where
         // The remaining tasks for the prover is to prove that
         // sum_i coeffs[i] poly_evals[i] is equal to
         // the new target sum, where coeffs is computed as follows
-        let (trees, oracles, commit_phase_proof) = simple_batch_commit_phase::<E, Spec>(
+        let (trees, commit_phase_proof) = simple_batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
             point,
             &eq_xt,
@@ -779,7 +779,7 @@ where
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
         let queries =
-            simple_batch_prover_query_phase(transcript, comm, &oracles, Spec::get_number_queries());
+            simple_batch_prover_query_phase(transcript, comm, &trees, Spec::get_number_queries());
         end_timer!(query_timer);
 
         let query_timer = start_timer!(|| "Basefold::open::build_query_result");
@@ -1165,9 +1165,7 @@ mod test {
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_rscode_base() {
         // Both challenge and poly are over base field
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-            true, 20, 21, 64,
-        );
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11, 4);
     }
 
     #[test]

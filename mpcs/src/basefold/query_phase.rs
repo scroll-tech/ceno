@@ -31,7 +31,7 @@ use super::{
 pub fn prover_query_phase<E: ExtensionField>(
     transcript: &mut Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
 ) -> QueriesResult<E>
 where
@@ -57,7 +57,7 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    basefold_get_query::<E>(&comm.get_codewords()[0], oracles, *x_index),
+                    basefold_get_query::<E>(&comm.get_codewords()[0], trees, *x_index),
                 )
             })
             .collect(),
@@ -68,7 +68,7 @@ pub fn batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut Transcript<E>,
     codeword_size: usize,
     comms: &[BasefoldCommitmentWithData<E>],
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
 ) -> BatchedQueriesResult<E>
 where
@@ -94,7 +94,7 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    batch_basefold_get_query::<E>(comms, oracles, codeword_size, *x_index),
+                    batch_basefold_get_query::<E>(comms, trees, codeword_size, *x_index),
                 )
             })
             .collect(),
@@ -104,7 +104,7 @@ where
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
 ) -> SimpleBatchQueriesResult<E>
 where
@@ -130,7 +130,7 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    simple_batch_basefold_get_query::<E>(comm.get_codewords(), oracles, *x_index),
+                    simple_batch_basefold_get_query::<E>(comm.get_codewords(), trees, *x_index),
                 )
             })
             .collect(),
@@ -372,7 +372,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
 fn basefold_get_query<E: ExtensionField>(
     poly_codeword: &FieldType<E>,
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     x_index: usize,
 ) -> SingleQueryResult<E>
 where
@@ -393,13 +393,15 @@ where
     };
     index >>= 1;
 
-    let mut oracle_queries = Vec::with_capacity(oracles.len() + 1);
-    for oracle in oracles {
+    let mut oracle_queries = Vec::with_capacity(trees.len() + 1);
+    for tree in trees {
         let p1 = index | 1;
         let p0 = p1 - 1;
 
         oracle_queries.push(CodewordSingleQueryResult::new_ext(
-            oracle[p0], oracle[p1], p0,
+            tree.get_leaf_as_extension(p0)[0],
+            tree.get_leaf_as_extension(p1)[0],
+            p0,
         ));
         index >>= 1;
     }
@@ -416,22 +418,24 @@ where
 
 fn batch_basefold_get_query<E: ExtensionField>(
     comms: &[BasefoldCommitmentWithData<E>],
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     codeword_size: usize,
     x_index: usize,
 ) -> BatchedSingleQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let mut oracle_list_queries = Vec::with_capacity(oracles.len());
+    let mut oracle_list_queries = Vec::with_capacity(trees.len());
 
     let mut index = x_index;
     index >>= 1;
-    for oracle in oracles {
+    for tree in trees {
         let p1 = index | 1;
         let p0 = p1 - 1;
         oracle_list_queries.push(CodewordSingleQueryResult::<E>::new_ext(
-            oracle[p0], oracle[p1], p0,
+            tree.get_leaf_as_extension(p0)[0],
+            tree.get_leaf_as_extension(p1)[0],
+            p0,
         ));
         index >>= 1;
     }
@@ -469,7 +473,7 @@ where
 
 fn simple_batch_basefold_get_query<E: ExtensionField>(
     poly_codewords: &[FieldType<E>],
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     x_index: usize,
 ) -> SimpleBatchSingleQueryResult<E>
 where
@@ -506,13 +510,15 @@ where
     };
     index >>= 1;
 
-    let mut oracle_queries = Vec::with_capacity(oracles.len() + 1);
-    for oracle in oracles {
+    let mut oracle_queries = Vec::with_capacity(trees.len() + 1);
+    for tree in trees {
         let p1 = index | 1;
         let p0 = p1 - 1;
 
         oracle_queries.push(CodewordSingleQueryResult::new_ext(
-            oracle[p0], oracle[p1], p0,
+            tree.get_leaf_as_extension(p0)[0],
+            tree.get_leaf_as_extension(p1)[0],
+            p0,
         ));
         index >>= 1;
     }
