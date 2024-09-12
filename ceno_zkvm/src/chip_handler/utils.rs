@@ -8,14 +8,7 @@ pub fn rlc_chip_record<E: ExtensionField>(
     chip_record_beta: Expression<E>,
 ) -> Expression<E> {
     assert!(!records.is_empty());
-    let beta_pows = {
-        let mut beta_pows = Vec::with_capacity(records.len());
-        beta_pows.push(Expression::Constant(E::BaseField::ONE));
-        (0..records.len() - 1).for_each(|_| {
-            beta_pows.push(chip_record_beta.clone() * beta_pows.last().unwrap().clone())
-        });
-        beta_pows
-    };
+    let beta_pows = pows_expr(chip_record_beta, records.len());
 
     let item_rlc = beta_pows
         .into_iter()
@@ -25,4 +18,20 @@ pub fn rlc_chip_record<E: ExtensionField>(
         .expect("reduce error");
 
     item_rlc + chip_record_alpha.clone()
+}
+
+pub fn pows_expr<E: ExtensionField>(base: Expression<E>, len: usize) -> Vec<Expression<E>> {
+    assert!(
+        matches!(
+            base,
+            Expression::Constant { .. } | Expression::Challenge { .. }
+        ),
+        "expression must be constant or challenge"
+    );
+    let mut beta_pows = Vec::with_capacity(len);
+    beta_pows.push(Expression::Constant(E::BaseField::ONE));
+    if len > 0 {
+        (0..len - 1).for_each(|_| beta_pows.push(base.clone() * beta_pows.last().unwrap().clone()));
+    }
+    beta_pows
 }

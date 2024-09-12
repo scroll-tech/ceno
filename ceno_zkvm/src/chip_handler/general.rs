@@ -1,8 +1,10 @@
 use std::fmt::Display;
 
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 
 use crate::{
+    chip_handler::utils::pows_expr,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
@@ -303,15 +305,16 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     .map(|i| witin_u16(format!("diff_{i}")))
                     .collect::<Result<Vec<WitIn>, _>>()?;
 
+                let pows = pows_expr((1 << u16::BITS).into(), diff.len());
+
                 let diff_expr = diff
                     .iter()
-                    .enumerate()
-                    .map(|(i, diff)| (i, diff.expr()))
-                    .fold(Expression::ZERO, |sum, (i, a)| {
-                        sum + if i > 0 { a * (1 << (16 * i)).into() } else { a }
-                    });
+                    .zip_eq(pows)
+                    .map(|(record, beta)| beta * record.expr())
+                    .reduce(|a, b| a + b)
+                    .expect("reduce error");
 
-                let range = Expression::Constant((1 << 32).into());
+                let range = (1 << u32::BITS).into();
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 

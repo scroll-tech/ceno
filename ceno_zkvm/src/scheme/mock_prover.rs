@@ -41,7 +41,7 @@ pub(crate) enum MockProverError<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> MockProverError<E> {
-    pub fn print(&self, wits_in: &[ArcMultilinearExtension<E>]) {
+    pub fn print(&self, wits_in: &[ArcMultilinearExtension<E>], wits_in_name: &[String]) {
         let mut wtns = vec![];
 
         match self {
@@ -52,7 +52,7 @@ impl<E: ExtensionField> MockProverError<E> {
                 inst_id,
             } => {
                 let expression_fmt = fmt_expr(expression, &mut wtns, false);
-                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id);
+                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id, wits_in_name);
                 let eval_fmt = fmt_field::<E>(evaluated);
                 println!(
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
@@ -71,7 +71,7 @@ impl<E: ExtensionField> MockProverError<E> {
             } => {
                 let left_expression_fmt = fmt_expr(left_expression, &mut wtns, false);
                 let right_expression_fmt = fmt_expr(right_expression, &mut wtns, false);
-                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id);
+                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id, wits_in_name);
                 let left_eval_fmt = fmt_field::<E>(left);
                 let right_eval_fmt = fmt_field::<E>(right);
                 println!(
@@ -89,7 +89,7 @@ impl<E: ExtensionField> MockProverError<E> {
                 inst_id,
             } => {
                 let expression_fmt = fmt_expr(expression, &mut wtns, false);
-                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id);
+                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id, wits_in_name);
                 let eval_fmt = fmt_field::<E>(evaluated);
                 println!(
                     "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\n\
@@ -183,11 +183,13 @@ impl<E: ExtensionField> MockProverError<E> {
             wtns: &[WitnessId],
             wits_in: &[ArcMultilinearExtension<E>],
             inst_id: usize,
+            wits_in_name: &[String],
         ) -> String {
             wtns.iter()
                 .sorted()
                 .map(|wt_id| {
                     let wit = &wits_in[*wt_id as usize];
+                    let name = &wits_in_name[*wt_id as usize];
                     let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
                         fmt_field(&e[inst_id])
                     } else if let Some(bf) = wit.get_base_field_vec_optn() {
@@ -195,9 +197,9 @@ impl<E: ExtensionField> MockProverError<E> {
                     } else {
                         "Unknown".to_string()
                     };
-                    format!("WitIn({wt_id})={value_fmt}")
+                    format!("\nWitIn({wt_id})\npath={name}\nvalue={value_fmt}\n")
                 })
-                .join(",")
+                .join("----\n")
         }
     }
 }
@@ -465,7 +467,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 println!("Error: {} constraints not satisfied", errors.len());
 
                 for error in errors {
-                    error.print(wits_in);
+                    error.print(wits_in, &cb.cs.witin_namespace_map);
                 }
                 println!("======================================================");
                 panic!("Constraints not satisfied");
