@@ -305,8 +305,8 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     HashSet::from_iter(table_vec)
 }
 
-// table only load once when extension field change
-// return default challenge and table
+// load once per generic type E instantiation
+// return challenge and table
 #[allow(clippy::type_complexity)]
 fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     cb: &CircuitBuilder<E>,
@@ -324,9 +324,10 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     });
     // reinitialize per generic type E
     (
-        challenges_repr
-            .clone()
-            .map(|repr| E::from_uniform_bytes(repr.as_slice().try_into().unwrap())),
+        challenges_repr.clone().map(|repr| unsafe {
+            let ptr = repr.as_slice().as_ptr() as *const E;
+            *ptr
+        }),
         table,
     )
 }
