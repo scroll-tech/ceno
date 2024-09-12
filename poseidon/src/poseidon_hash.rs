@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn compare_hash_or_noop() {
         let mut rng = thread_rng();
-        for i in 0..N_ITERATIONS {
+        for _ in 0..N_ITERATIONS {
             let n = rng.gen_range(0..=100);
             let (plonky_elems, ceno_elems) = n_test_vectors(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
@@ -129,8 +129,7 @@ mod tests {
 
     #[test]
     fn compare_two_to_one() {
-        let mut rng = thread_rng();
-        for i in 0..N_ITERATIONS {
+        for _ in 0..N_ITERATIONS {
             let (plonky_hash_a, ceno_hash_a) = random_hash_pair();
             let (plonky_hash_b, ceno_hash_b) = random_hash_pair();
             let plonky_combined = PlonkyPoseidonHash::two_to_one(plonky_hash_a, plonky_hash_b);
