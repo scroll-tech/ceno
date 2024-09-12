@@ -307,18 +307,27 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
 
 // table only load once when extension field change
 // return default challenge and table
+#[allow(clippy::type_complexity)]
 fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     cb: &CircuitBuilder<E>,
 ) -> ([E; 2], &'static HashSet<Vec<u8>>) {
-    let mut rng = test_rng();
-    let challenge = [E::random(&mut rng), E::random(&mut rng)];
-    static TABLE: OnceLock<StaticTypeMap<HashSet<Vec<u8>>>> = OnceLock::new();
-    let table = TABLE.get_or_init(StaticTypeMap::new);
+    static CACHE: OnceLock<StaticTypeMap<([Vec<u8>; 2], HashSet<Vec<u8>>)>> = OnceLock::new();
+    let cache = CACHE.get_or_init(StaticTypeMap::new);
 
+    let (challenges_repr, table) = cache.call_once::<E, _>(|| {
+        let mut rng = test_rng();
+        let challenge = [E::random(&mut rng), E::random(&mut rng)];
+        (
+            challenge.map(|c| c.to_repr().as_ref().to_vec()),
+            load_tables(cb, challenge),
+        )
+    });
     // reinitialize per generic type E
     (
-        challenge,
-        table.call_once::<E, _>(|| load_tables(cb, challenge)),
+        challenges_repr
+            .clone()
+            .map(|repr| E::from_uniform_bytes(repr.as_slice().try_into().unwrap())),
+        table,
     )
 }
 
