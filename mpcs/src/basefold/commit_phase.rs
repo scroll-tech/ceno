@@ -79,6 +79,7 @@ where
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut roots = Vec::with_capacity(num_rounds - 1);
     let mut final_message = Vec::new();
+    let mut running_tree_inner = Vec::new();
     for i in 0..num_rounds {
         let sumcheck_timer = start_timer!(|| format!("Basefold round {}", i));
         // For the first round, no need to send the running root, because this root is
@@ -90,25 +91,43 @@ where
         let challenge = transcript.get_and_append_challenge(b"commit round");
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
+        let new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
             pp,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
             challenge.elements,
         );
 
+        if i > 0 {
+            let running_tree = MerkleTree::<E>::from_inner_leaves(
+                running_tree_inner,
+                FieldType::Ext(running_oracle),
+            );
+            trees.push(running_tree);
+        }
+
         if i < num_rounds - 1 {
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge.elements);
-            let running_tree =
-                MerkleTree::<E>::from_leaves(FieldType::Ext(running_oracle.clone()), hasher);
-            let running_root = running_tree.root();
+
+            // To avoid cloning the running oracle, explicitly separate the
+            // computation of Merkle tree inner nodes and the building of
+            // entire Merkle tree. First compute the inner nodes without
+            // consuming the leaves, so that we can get the challenge.
+            // Then the oracle will be used to fold to the next oracle in the next
+            // round. After that, this oracle is free to be moved to build the
+            // complete Merkle tree.
+            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle, hasher);
+            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root.clone());
-            trees.push(running_tree);
+
+            running_oracle = new_running_oracle;
         } else {
             // Clear this so the compiler knows the old value is safe to move.
             last_sumcheck_message = Vec::new();
+            running_oracle = Vec::new();
+            running_tree_inner = Vec::new();
             // The difference of the last round is that we don't need to compute the message,
             // and we don't interpolate the small polynomials. So after the last round,
             // running_evals is exactly the evaluation representation of the
@@ -227,6 +246,7 @@ where
 
     let mut roots = Vec::with_capacity(num_rounds - 1);
     let mut final_message = Vec::new();
+    let mut running_tree_inner = Vec::new();
     for i in 0..num_rounds {
         let sumcheck_timer = start_timer!(|| format!("Batch basefold round {}", i));
         // For the first round, no need to send the running root, because this root is
@@ -239,37 +259,47 @@ where
             .elements;
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
+        let mut new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
             pp,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
             challenge,
         );
 
+        if i > 0 {
+            let running_tree = MerkleTree::<E>::from_inner_leaves(
+                running_tree_inner,
+                FieldType::Ext(running_oracle),
+            );
+            trees.push(running_tree);
+        }
+
         if i < num_rounds - 1 {
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
             sumcheck_messages.push(last_sumcheck_message.clone());
-            let running_tree =
-                MerkleTree::<E>::from_leaves(FieldType::Ext(running_oracle.clone()), hasher);
-            let running_root = running_tree.root();
+            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle, hasher);
+            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
-            trees.push(running_tree);
 
             // Then merge the rest polynomials whose sizes match the current running oracle
-            let running_oracle_len = running_oracle.len();
+            let running_oracle_len = new_running_oracle.len();
             comms
                 .iter()
                 .enumerate()
                 .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
                 .for_each(|(index, comm)| {
-                    running_oracle
+                    new_running_oracle
                         .iter_mut()
                         .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
                         .for_each(|(r, a)| *r += a * coeffs[index]);
                 });
+            running_oracle = new_running_oracle;
         } else {
+            // Clear the value so the compiler does not think they are moved
+            running_oracle = Vec::new();
+            running_tree_inner = Vec::new();
             // The difference of the last round is that we don't need to compute the message,
             // and we don't interpolate the small polynomials. So after the last round,
             // sum_of_all_evals_for_sumcheck is exactly the evaluation representation of the
@@ -367,6 +397,7 @@ where
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut roots = Vec::with_capacity(num_rounds - 1);
     let mut final_message = Vec::new();
+    let mut running_tree_inner = Vec::new();
     for i in 0..num_rounds {
         let sumcheck_timer = start_timer!(|| format!("Basefold round {}", i));
         // For the first round, no need to send the running root, because this root is
@@ -380,26 +411,35 @@ where
             .elements;
 
         // Fold the current oracle for FRI
-        running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
+        let new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
             pp,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
             challenge,
         );
 
+        if i > 0 {
+            let running_tree = MerkleTree::<E>::from_inner_leaves(
+                running_tree_inner,
+                FieldType::Ext(running_oracle),
+            );
+            trees.push(running_tree);
+        }
+
         if i < num_rounds - 1 {
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
-            let running_tree =
-                MerkleTree::<E>::from_leaves(FieldType::Ext(running_oracle.clone()), hasher);
-            let running_root = running_tree.root();
+            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle, hasher);
+            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
-            trees.push(running_tree);
+            running_oracle = new_running_oracle;
         } else {
-            // Assign a new value to the sumcheck message so that the compiler
+            // Assign a new value to the old running vars so that the compiler
             // knows the old value is safe to move.
             last_sumcheck_message = Vec::new();
+            running_oracle = Vec::new();
+            running_tree_inner = Vec::new();
             // The difference of the last round is that we don't need to compute the message,
             // and we don't interpolate the small polynomials. So after the last round,
             // running_evals is exactly the evaluation representation of the

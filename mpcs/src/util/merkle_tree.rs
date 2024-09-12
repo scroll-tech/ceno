@@ -36,9 +36,41 @@ impl<E: ExtensionField> MerkleTree<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    pub fn compute_inner(
+        leaves: &FieldType<E>,
+        hasher: &Hasher<E::BaseField>,
+    ) -> Vec<Vec<Digest<E::BaseField>>> {
+        merkelize::<E>(&[&leaves], hasher)
+    }
+
+    pub fn compute_inner_base(
+        leaves: &Vec<E::BaseField>,
+        hasher: &Hasher<E::BaseField>,
+    ) -> Vec<Vec<Digest<E::BaseField>>> {
+        merkelize_base::<E>(&[&leaves], hasher)
+    }
+
+    pub fn compute_inner_ext(
+        leaves: &Vec<E>,
+        hasher: &Hasher<E::BaseField>,
+    ) -> Vec<Vec<Digest<E::BaseField>>> {
+        merkelize_ext::<E>(&[&leaves], hasher)
+    }
+
+    pub fn root_from_inner(inner: &Vec<Vec<Digest<E::BaseField>>>) -> Digest<E::BaseField> {
+        inner.last().unwrap()[0].clone()
+    }
+
+    pub fn from_inner_leaves(inner: Vec<Vec<Digest<E::BaseField>>>, leaves: FieldType<E>) -> Self {
+        Self {
+            inner,
+            leaves: vec![leaves],
+        }
+    }
+
     pub fn from_leaves(leaves: FieldType<E>, hasher: &Hasher<E::BaseField>) -> Self {
         Self {
-            inner: merkelize::<E>(&[&leaves], hasher),
+            inner: Self::compute_inner(&leaves, hasher),
             leaves: vec![leaves],
         }
     }
@@ -51,7 +83,7 @@ where
     }
 
     pub fn root(&self) -> Digest<E::BaseField> {
-        self.inner.last().unwrap()[0].clone()
+        Self::root_from_inner(&self.inner)
     }
 
     pub fn root_ref(&self) -> &Digest<E::BaseField> {
@@ -236,6 +268,8 @@ where
     }
 }
 
+/// Merkle tree construction
+/// TODO: Support merkelizing mixed-type values
 fn merkelize<E: ExtensionField>(
     values: &[&FieldType<E>],
     hasher: &Hasher<E::BaseField>,
@@ -268,11 +302,13 @@ fn merkelize<E: ExtensionField>(
                     &values
                         .iter()
                         .map(|values| field_type_index_base(values, i << 1))
-                        .collect(),
+                        .collect_vec()
+                        .as_slice(),
                     &values
                         .iter()
                         .map(|values| field_type_index_base(values, (i << 1) + 1))
-                        .collect(),
+                        .collect_vec()
+                        .as_slice(),
                     hasher,
                 ),
                 FieldType::Ext(_) => hash_two_leaves_batch_ext::<E>(
@@ -290,6 +326,104 @@ fn merkelize<E: ExtensionField>(
                 ),
                 FieldType::Unreachable => unreachable!(),
             };
+        });
+    }
+
+    tree.push(hashes);
+
+    for i in 1..(log_v) {
+        let oracle = tree[i - 1]
+            .par_chunks_exact(2)
+            .map(|ys| hash_two_digests(&ys[0], &ys[1], hasher))
+            .collect::<Vec<_>>();
+
+        tree.push(oracle);
+    }
+    end_timer!(timer);
+    tree
+}
+
+fn merkelize_base<E: ExtensionField>(
+    values: &[&[E::BaseField]],
+    hasher: &Hasher<E::BaseField>,
+) -> Vec<Vec<Digest<E::BaseField>>> {
+    #[cfg(feature = "sanity-check")]
+    for i in 0..(values.len() - 1) {
+        assert_eq!(values[i].len(), values[i + 1].len());
+    }
+    let timer = start_timer!(|| format!("merkelize {} values", values[0].len() * values.len()));
+    let log_v = log2_strict(values[0].len());
+    let mut tree = Vec::with_capacity(log_v);
+    // The first layer of hashes, half the number of leaves
+    let mut hashes = vec![Digest::default(); values[0].len() >> 1];
+    if values.len() == 1 {
+        hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
+            *hash = hash_two_leaves_base::<E>(&values[0][i << 1], &values[0][(i << 1) + 1], hasher);
+        });
+    } else {
+        hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
+            *hash = hash_two_leaves_batch_base::<E>(
+                &values
+                    .iter()
+                    .map(|values| values[i << 1])
+                    .collect_vec()
+                    .as_slice(),
+                &values
+                    .iter()
+                    .map(|values| values[(i << 1) + 1])
+                    .collect_vec()
+                    .as_slice(),
+                hasher,
+            );
+        });
+    }
+
+    tree.push(hashes);
+
+    for i in 1..(log_v) {
+        let oracle = tree[i - 1]
+            .par_chunks_exact(2)
+            .map(|ys| hash_two_digests(&ys[0], &ys[1], hasher))
+            .collect::<Vec<_>>();
+
+        tree.push(oracle);
+    }
+    end_timer!(timer);
+    tree
+}
+
+fn merkelize_ext<E: ExtensionField>(
+    values: &[&[E]],
+    hasher: &Hasher<E::BaseField>,
+) -> Vec<Vec<Digest<E::BaseField>>> {
+    #[cfg(feature = "sanity-check")]
+    for i in 0..(values.len() - 1) {
+        assert_eq!(values[i].len(), values[i + 1].len());
+    }
+    let timer = start_timer!(|| format!("merkelize {} values", values[0].len() * values.len()));
+    let log_v = log2_strict(values[0].len());
+    let mut tree = Vec::with_capacity(log_v);
+    // The first layer of hashes, half the number of leaves
+    let mut hashes = vec![Digest::default(); values[0].len() >> 1];
+    if values.len() == 1 {
+        hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
+            *hash = hash_two_leaves_ext::<E>(&values[0][i << 1], &values[0][(i << 1) + 1], hasher);
+        });
+    } else {
+        hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
+            *hash = hash_two_leaves_batch_ext::<E>(
+                &values
+                    .iter()
+                    .map(|values| values[i << 1])
+                    .collect_vec()
+                    .as_slice(),
+                &values
+                    .iter()
+                    .map(|values| values[(i << 1) + 1])
+                    .collect_vec()
+                    .as_slice(),
+                hasher,
+            );
         });
     }
 
