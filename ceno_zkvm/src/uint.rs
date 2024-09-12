@@ -562,11 +562,11 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
             b_limbs.iter().enumerate().for_each(|(j, b_limb)| {
                 let idx = i + j;
                 if idx < num_limbs {
-                    let (c, overflow) = a_limb.overflowing_mul(*b_limb);
-                    c_limbs[idx] += c;
-                    if overflow {
-                        carries[idx] += 1;
-                    }
+                    let (c, overflow_mul) = a_limb.overflowing_mul(*b_limb);
+                    let (ret, overflow_add) = c_limbs[idx].overflowing_add(c);
+
+                    c_limbs[idx] = ret;
+                    carries[idx] += (overflow_add as u16) + (overflow_mul as u16);
                 }
             })
         });
