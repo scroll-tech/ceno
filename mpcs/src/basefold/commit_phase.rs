@@ -85,7 +85,7 @@ where
         // committing to a vector that can be recovered from linearly combining other
         // already-committed vectors.
         transcript.append_field_element_exts(&last_sumcheck_message);
-        sumcheck_messages.push(last_sumcheck_message.clone());
+        sumcheck_messages.push(last_sumcheck_message);
 
         let challenge = transcript.get_and_append_challenge(b"commit round");
 
@@ -107,6 +107,8 @@ where
             roots.push(running_root.clone());
             trees.push(running_tree);
         } else {
+            // Clear this so the compiler knows the old value is safe to move.
+            last_sumcheck_message = Vec::new();
             // The difference of the last round is that we don't need to compute the message,
             // and we don't interpolate the small polynomials. So after the last round,
             // running_evals is exactly the evaluation representation of the
@@ -371,7 +373,7 @@ where
         // committing to a vector that can be recovered from linearly combining other
         // already-committed vectors.
         transcript.append_field_element_exts(&last_sumcheck_message);
-        sumcheck_messages.push(last_sumcheck_message.clone());
+        sumcheck_messages.push(last_sumcheck_message);
 
         let challenge = transcript
             .get_and_append_challenge(b"commit round")
@@ -395,6 +397,9 @@ where
             roots.push(running_root);
             trees.push(running_tree);
         } else {
+            // Assign a new value to the sumcheck message so that the compiler
+            // knows the old value is safe to move.
+            last_sumcheck_message = Vec::new();
             // The difference of the last round is that we don't need to compute the message,
             // and we don't interpolate the small polynomials. So after the last round,
             // running_evals is exactly the evaluation representation of the
