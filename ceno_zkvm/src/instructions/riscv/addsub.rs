@@ -188,20 +188,20 @@ fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
     set_val!(instance, config.rs2_id, step.insn().rs2() as u64);
     set_val!(instance, config.rd_id, step.insn().rd() as u64);
     ExprLtInput {
-        lhs: step.rs1().unwrap().previous_cycle, // rs1
-        rhs: step.cycle(),                       // cur_ts
+        lhs: step.rs1().unwrap().previous_cycle,
+        rhs: step.cycle(),
     }
-    .assign(instance, &config.lt_rs1_cfg);
+    .assign(instance, &config.lt_rs1_cfg, lk_multiplicity);
     ExprLtInput {
-        lhs: step.rs2().unwrap().previous_cycle, // rs2
-        rhs: step.cycle() + 1,                   // cur_ts
+        lhs: step.rs2().unwrap().previous_cycle,
+        rhs: step.cycle() + 1,
     }
-    .assign(instance, &config.lt_rs2_cfg);
+    .assign(instance, &config.lt_rs2_cfg, lk_multiplicity);
     ExprLtInput {
-        lhs: step.rd().unwrap().previous_cycle, // rd
-        rhs: step.cycle() + 2,                  // cur_ts
+        lhs: step.rd().unwrap().previous_cycle,
+        rhs: step.cycle() + 2,
     }
-    .assign(instance, &config.lt_prev_ts_cfg);
+    .assign(instance, &config.lt_prev_ts_cfg, lk_multiplicity);
     set_val!(
         instance,
         config.prev_rs1_ts,

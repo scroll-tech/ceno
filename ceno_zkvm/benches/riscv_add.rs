@@ -2,9 +2,10 @@ use std::time::{Duration, Instant};
 
 use ark_std::test_rng;
 use ceno_zkvm::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
+    self,
     instructions::{riscv::addsub::AddInstruction, Instruction},
     scheme::prover::ZKVMProver,
+    structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
 use const_env::from_env;
 use criterion::*;
@@ -62,11 +63,22 @@ fn bench_add(c: &mut Criterion) {
             RAYON_NUM_THREADS
         }
     };
-    let mut cs = ConstraintSystem::new(|| "risv_add");
-    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let _ = AddInstruction::construct_circuit(&mut circuit_builder);
-    let pk = cs.key_gen(None);
-    let num_witin = pk.get_cs().num_witin;
+    let mut zkvm_cs = ZKVMConstraintSystem::default();
+    let _ = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
+    let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
+    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
+
+    let pk = zkvm_cs
+        .clone()
+        .key_gen(zkvm_fixed_traces)
+        .expect("keygen failed");
+
+    let circuit_pk = pk
+        .circuit_pks
+        .get(&AddInstruction::<E>::name())
+        .unwrap()
+        .clone();
+    let num_witin = circuit_pk.get_cs().num_witin;
 
     let prover = ZKVMProver::new(pk);
     let mut transcript = Transcript::new(b"riscv");
@@ -101,6 +113,7 @@ fn bench_add(c: &mut Criterion) {
                         let timer = Instant::now();
                         let _ = prover
                             .create_opcode_proof(
+                                &circuit_pk,
                                 wits_in,
                                 num_instances,
                                 max_threads,
