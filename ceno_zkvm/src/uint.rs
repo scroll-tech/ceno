@@ -545,6 +545,42 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
         carries.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
         (limbs, carries)
     }
+
+    pub fn mul(
+        &self,
+        rhs: &Self,
+        lkm: &mut LkMultiplicity,
+        with_overflow: bool,
+    ) -> (Vec<u16>, Vec<u16>) {
+        let a_limbs = self.as_u16_limbs();
+        let b_limbs = rhs.as_u16_limbs();
+
+        let num_limbs = a_limbs.len();
+        let mut c_limbs = vec![0u16; num_limbs];
+        let mut carries = vec![0u16; num_limbs];
+        a_limbs.iter().enumerate().for_each(|(i, a_limb)| {
+            b_limbs.iter().enumerate().for_each(|(j, b_limb)| {
+                let idx = i + j;
+                if idx < num_limbs {
+                    let (c, overflow) = a_limb.overflowing_mul(*b_limb);
+                    c_limbs[idx] += c;
+                    if overflow {
+                        carries[idx] += 1;
+                    }
+                }
+            })
+        });
+
+        if !with_overflow {
+            carries.resize(carries.len() - 1, 0);
+        }
+
+        // range check
+        c_limbs.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
+        carries.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
+
+        (c_limbs, carries)
+    }
 }
 
 // #[cfg(test)]
