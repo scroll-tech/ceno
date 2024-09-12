@@ -2,6 +2,7 @@ use ff_ext::ExtensionField;
 use std::{collections::BTreeSet, sync::Arc};
 
 use itertools::Itertools;
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, IntoMLEs, MultilinearExtension},
     util::ceil_log2,
@@ -33,12 +34,12 @@ use crate::{
 
 use super::{ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
-pub struct ZKVMProver<E: ExtensionField> {
-    pub(crate) pk: ZKVMProvingKey<E>,
+pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    pub(crate) pk: ZKVMProvingKey<E, PCS>,
 }
 
-impl<E: ExtensionField> ZKVMProver<E> {
-    pub fn new(pk: ZKVMProvingKey<E>) -> Self {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
+    pub fn new(pk: ZKVMProvingKey<E, PCS>) -> Self {
         ZKVMProver { pk }
     }
 
@@ -128,7 +129,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
     /// 2: proof (sumcheck reduce) from output to input
     pub fn create_opcode_proof(
         &self,
-        circuit_pk: &ProvingKey<E>,
+        circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         num_instances: usize,
         max_threads: usize,
@@ -514,7 +515,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
 
     pub fn create_table_proof(
         &self,
-        circuit_pk: &ProvingKey<E>,
+        circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         num_instances: usize,
         max_threads: usize,

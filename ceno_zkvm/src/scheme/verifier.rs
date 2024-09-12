@@ -4,6 +4,7 @@ use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 
 use itertools::{izip, Itertools};
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
@@ -27,12 +28,12 @@ use super::{
     ZKVMTableProof,
 };
 
-pub struct ZKVMVerifier<E: ExtensionField> {
-    pub(crate) vk: ZKVMVerifyingKey<E>,
+pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    pub(crate) vk: ZKVMVerifyingKey<E, PCS>,
 }
 
-impl<E: ExtensionField> ZKVMVerifier<E> {
-    pub fn new(vk: ZKVMVerifyingKey<E>) -> Self {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
+    pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
         ZKVMVerifier { vk }
     }
 
@@ -124,7 +125,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
     /// verify proof and return input opening point
     pub fn verify_opcode_proof(
         &self,
-        circuit_vk: &VerifyingKey<E>,
+        circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMOpcodeProof<E>,
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
@@ -337,7 +338,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
 
     pub fn verify_table_proof(
         &self,
-        circuit_vk: &VerifyingKey<E>,
+        circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMTableProof<E>,
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,

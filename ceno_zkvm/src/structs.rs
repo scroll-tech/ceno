@@ -8,6 +8,7 @@ use crate::{
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
 };
@@ -89,23 +90,24 @@ impl<F: Clone> PointAndEval<F> {
 }
 
 #[derive(Clone, Debug)]
-pub struct ProvingKey<E: ExtensionField> {
+pub struct ProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
-    pub vk: VerifyingKey<E>,
+    pub vk: VerifyingKey<E, PCS>,
 }
 
-impl<E: ExtensionField> ProvingKey<E> {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProvingKey<E, PCS> {
     pub fn get_cs(&self) -> &ConstraintSystem<E> {
         self.vk.get_cs()
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct VerifyingKey<E: ExtensionField> {
+pub struct VerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub(crate) cs: ConstraintSystem<E>,
+    pub fixed_commit: PCS::Commitment,
 }
 
-impl<E: ExtensionField> VerifyingKey<E> {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS> {
     pub fn get_cs(&self) -> &ConstraintSystem<E> {
         &self.cs
     }
@@ -242,13 +244,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 }
 
 #[derive(Default)]
-pub struct ZKVMProvingKey<E: ExtensionField> {
+pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     // pk for opcode and table circuits
-    pub(crate) circuit_pks: BTreeMap<String, ProvingKey<E>>,
+    pub(crate) circuit_pks: BTreeMap<String, ProvingKey<E, PCS>>,
 }
 
-impl<E: ExtensionField> ZKVMProvingKey<E> {
-    pub fn get_vk(&self) -> ZKVMVerifyingKey<E> {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
+    pub fn get_vk(&self) -> ZKVMVerifyingKey<E, PCS> {
         ZKVMVerifyingKey {
             circuit_vks: self
                 .circuit_pks
@@ -260,7 +262,7 @@ impl<E: ExtensionField> ZKVMProvingKey<E> {
 }
 
 #[derive(Default, Clone)]
-pub struct ZKVMVerifyingKey<E: ExtensionField> {
+pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     // pk for opcode and table circuits
-    pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
+    pub circuit_vks: BTreeMap<String, VerifyingKey<E, PCS>>,
 }

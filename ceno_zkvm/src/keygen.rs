@@ -3,12 +3,13 @@ use crate::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
+use mpcs::PolynomialCommitmentScheme;
 
 impl<E: ExtensionField> ZKVMConstraintSystem<E> {
-    pub fn key_gen(
+    pub fn key_gen<PCS: PolynomialCommitmentScheme<E>>(
         self,
         mut vm_fixed_traces: ZKVMFixedTraces<E>,
-    ) -> Result<ZKVMProvingKey<E>, ZKVMError> {
+    ) -> Result<ZKVMProvingKey<E, PCS>, ZKVMError> {
         let mut vm_pk = ZKVMProvingKey::default();
 
         for (c_name, cs) in self.circuit_css.into_iter() {
