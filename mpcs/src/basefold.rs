@@ -51,6 +51,7 @@ use rayon::{
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
 };
 use std::borrow::Cow;
+pub use sumcheck::{one_level_eval_hc, one_level_interp_hc};
 
 type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 

@@ -145,7 +145,7 @@ where
                 // If the prover is honest, in the last round, the running oracle
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
-                let mut coeffs = running_evals.clone();
+                let mut coeffs = final_message.clone();
                 interpolate_over_boolean_hypercube(&mut coeffs);
                 if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
                     reverse_index_bits_in_place(&mut coeffs);
@@ -159,8 +159,9 @@ where
                     _ => panic!("Should be ext field"),
                 };
 
-                reverse_index_bits_in_place(&mut running_oracle);
-                assert_eq!(basecode, running_oracle);
+                let mut new_running_oracle = new_running_oracle;
+                reverse_index_bits_in_place(&mut new_running_oracle);
+                assert_eq!(basecode, new_running_oracle);
             }
         }
         end_timer!(sumcheck_timer);
@@ -319,7 +320,7 @@ where
                 // If the prover is honest, in the last round, the running oracle
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
-                let mut coeffs = sum_of_all_evals_for_sumcheck.clone();
+                let mut coeffs = final_message.clone();
                 if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
@@ -333,8 +334,8 @@ where
                     _ => panic!("Expected ext field"),
                 };
 
-                reverse_index_bits_in_place(&mut running_oracle);
-                assert_eq!(basecode, running_oracle);
+                reverse_index_bits_in_place(&mut new_running_oracle);
+                assert_eq!(basecode, new_running_oracle);
             }
         }
         end_timer!(sumcheck_timer);
@@ -461,7 +462,7 @@ where
                 // If the prover is honest, in the last round, the running oracle
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
-                let mut coeffs = running_evals.clone();
+                let mut coeffs = final_message.clone();
                 if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
@@ -475,8 +476,9 @@ where
                     _ => panic!("Should be ext field"),
                 };
 
-                reverse_index_bits_in_place(&mut running_oracle);
-                assert_eq!(basecode, running_oracle);
+                let mut new_running_oracle = new_running_oracle;
+                reverse_index_bits_in_place(&mut new_running_oracle);
+                assert_eq!(basecode, new_running_oracle);
             }
         }
         end_timer!(sumcheck_timer);
