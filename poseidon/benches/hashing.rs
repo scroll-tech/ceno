@@ -4,11 +4,13 @@ use ff::Field;
 use goldilocks::Goldilocks;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Sample},
-    hash::{hash_types::HashOut, poseidon::PoseidonHash as PlonkyPoseidonHash},
+    hash::{
+        hash_types::HashOut,
+        hashing::PlonkyPermutation,
+        poseidon::{PoseidonHash as PlonkyPoseidonHash, PoseidonPermutation},
+    },
     plonk::config::Hasher,
 };
-use plonky2::hash::hashing::PlonkyPermutation;
-use plonky2::hash::poseidon::PoseidonPermutation;
 use poseidon::{digest::Digest, poseidon_hash::PoseidonHash};
 
 fn random_plonky_2_goldy() -> GoldilocksField {
@@ -87,11 +89,12 @@ pub fn hashing_benchmark(c: &mut Criterion) {
     });
 }
 
-
 // bench permutation
 pub fn permutation_benchmark(c: &mut Criterion) {
     let mut plonky_permutation = PoseidonPermutation::new(core::iter::repeat(GoldilocksField(0)));
-    let mut ceno_permutation = poseidon::poseidon_permutation::PoseidonPermutation::new(core::iter::repeat(Goldilocks::ZERO));
+    let mut ceno_permutation = poseidon::poseidon_permutation::PoseidonPermutation::new(
+        core::iter::repeat(Goldilocks::ZERO),
+    );
 
     c.bench_function("plonky permute", |bencher| {
         bencher.iter(|| black_box(plonky_permutation.permute()))

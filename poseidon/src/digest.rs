@@ -6,7 +6,6 @@ use serde::Serialize;
 pub struct Digest<F: SmallField + Serialize>(pub [F; DIGEST_WIDTH]);
 
 impl<F: SmallField> TryFrom<Vec<F>> for Digest<F> {
-    // TODO: create custom error type
     type Error = &'static str;
 
     fn try_from(values: Vec<F>) -> Result<Self, Self::Error> {

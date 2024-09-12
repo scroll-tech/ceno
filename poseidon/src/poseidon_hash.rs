@@ -53,7 +53,6 @@ pub fn hash_n_to_m_no_pad<F: Poseidon>(inputs: &[F], num_outputs: usize) -> Vec<
 }
 
 pub fn hash_n_to_hash_no_pad<F: Poseidon>(inputs: &[F]) -> Digest<F> {
-    // TODO: either explain why it is safe to unwrap or return error type
     hash_n_to_m_no_pad(inputs, DIGEST_WIDTH).try_into().unwrap()
 }
 
