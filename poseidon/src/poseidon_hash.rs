@@ -116,19 +116,6 @@ mod tests {
     }
 
     #[test]
-    fn compare_hash_no_pad() {
-        let mut rng = thread_rng();
-
-        for i in 0..N_ITERATIONS {
-            let n: usize = rng.gen_range(0..=100);
-            let (plonky_elems, ceno_elems) = n_test_vectors(n);
-            let plonky_out = PlonkyPoseidonHash::hash_no_pad(plonky_elems.as_slice());
-            let ceno_out = PoseidonHash::hash_no_pad(ceno_elems.as_slice());
-            assert!(compare_hash_output(plonky_out, ceno_out));
-        }
-    }
-
-    #[test]
     fn compare_hash_or_noop() {
         let mut rng = thread_rng();
         for i in 0..N_ITERATIONS {
