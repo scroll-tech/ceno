@@ -3,6 +3,7 @@ use ff_ext::ExtensionField;
 use crate::{
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
+    instructions::riscv::config::ExprLtConfig,
 };
 
 pub mod general;
@@ -23,8 +24,9 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         prev_ts: Expression<E>,
         ts: Expression<E>,
         values: &V,
-    ) -> Result<Expression<E>, ZKVMError>;
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 
+    #[allow(clippy::too_many_arguments)]
     fn register_write<V: ToExpr<E, Output = Vec<Expression<E>>>>(
         &mut self,
         name_fn: N,
@@ -33,5 +35,5 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         ts: Expression<E>,
         prev_values: &V,
         values: &V,
-    ) -> Result<Expression<E>, ZKVMError>;
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 }

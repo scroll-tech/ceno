@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use ff_ext::ExtensionField;
 
 use ff::Field;
@@ -5,7 +7,8 @@ use ff::Field;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    expression::{Expression, WitIn},
+    expression::{Expression, Fixed, ToExpr, WitIn},
+    instructions::riscv::config::ExprLtConfig,
     structs::ROMType,
 };
 
@@ -22,6 +25,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_witin(name_fn)
     }
 
+    pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Result<Fixed, ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.create_fixed(name_fn)
+    }
+
     pub fn lk_record<NR, N>(
         &mut self,
         name_fn: N,
@@ -32,6 +43,19 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.lk_record(name_fn, rlc_record)
+    }
+
+    pub fn lk_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        rlc_record: Expression<E>,
+        multiplicity: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.lk_table_record(name_fn, rlc_record, multiplicity)
     }
 
     pub fn read_record<NR, N>(
@@ -132,6 +156,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         match C {
             16 => self.assert_u16(name_fn, expr),
+            8 => self.assert_byte(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
             _ => panic!("Unsupported bit range"),
         }
@@ -179,5 +204,153 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             let mut inner_circuit_builder = CircuitBuilder::new(cs);
             cb(&mut inner_circuit_builder)
         })
+    }
+
+    pub(crate) fn assert_byte<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.assert_u16(name_fn, expr * Expression::from(1 << 8))
+    }
+
+    pub(crate) fn assert_bit<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.assert_u16(name_fn, expr * Expression::from(1 << 15))
+    }
+
+    /// lookup a ^ b = res
+    /// a and b are bytes
+    pub(crate) fn lookup_and_byte(
+        &mut self,
+        res: Expression<E>,
+        a: Expression<E>,
+        b: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        let key = a * 256.into() + b;
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(ROMType::And as u64)),
+            key,
+            res,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(|| "and lookup record", rlc_record)?;
+        Ok(())
+    }
+
+    /// lookup a < b as unsigned byte
+    pub(crate) fn lookup_ltu_limb8(
+        &mut self,
+        res: Expression<E>,
+        a: Expression<E>,
+        b: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        let key = a * 256.into() + b;
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
+            key,
+            res,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(|| "ltu lookup record", rlc_record)?;
+        Ok(())
+    }
+
+    /// less_than
+    pub(crate) fn less_than<N, NR>(
+        &mut self,
+        name_fn: N,
+        lhs: Expression<E>,
+        rhs: Expression<E>,
+        assert_less_than: Option<bool>,
+    ) -> Result<ExprLtConfig, ZKVMError>
+    where
+        NR: Into<String> + Display + Clone,
+        N: FnOnce() -> NR,
+    {
+        #[cfg(feature = "riv64")]
+        panic!("less_than is not supported for riv64 yet");
+
+        #[cfg(feature = "riv32")]
+        self.namespace(
+            || "less_than",
+            |cb| {
+                let name = name_fn();
+                let (is_lt, is_lt_expr) = if let Some(lt) = assert_less_than {
+                    (
+                        None,
+                        if lt {
+                            Expression::ONE
+                        } else {
+                            Expression::ZERO
+                        },
+                    )
+                } else {
+                    let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
+                    (Some(is_lt), is_lt.expr())
+                };
+
+                let mut witin_u16 = |var_name: String| -> Result<WitIn, ZKVMError> {
+                    cb.namespace(
+                        || format!("var {var_name}"),
+                        |cb| {
+                            let witin = cb.create_witin(|| var_name.to_string())?;
+                            cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr())?;
+                            Ok(witin)
+                        },
+                    )
+                };
+
+                let diff = (0..2)
+                    .map(|i| witin_u16(format!("diff_{i}")))
+                    .collect::<Result<Vec<WitIn>, _>>()?;
+
+                let diff_expr = diff
+                    .iter()
+                    .enumerate()
+                    .map(|(i, diff)| (i, diff.expr()))
+                    .fold(Expression::ZERO, |sum, (i, a)| {
+                        sum + if i > 0 { a * (1 << (16 * i)).into() } else { a }
+                    });
+
+                let range = Expression::Constant((1 << 32).into());
+
+                cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
+
+                Ok(ExprLtConfig { is_lt, diff })
+            },
+        )
+    }
+
+    pub(crate) fn is_equal(
+        &mut self,
+        lhs: Expression<E>,
+        rhs: Expression<E>,
+    ) -> Result<(WitIn, WitIn), ZKVMError> {
+        let is_eq = self.create_witin(|| "is_eq")?;
+        let diff_inverse = self.create_witin(|| "diff_inverse")?;
+
+        self.require_zero(
+            || "is equal",
+            is_eq.expr().clone() * lhs.clone() - is_eq.expr() * rhs.clone(),
+        )?;
+        self.require_zero(
+            || "is equal",
+            Expression::from(1) - is_eq.expr().clone() - diff_inverse.expr() * lhs
+                + diff_inverse.expr() * rhs,
+        )?;
+
+        Ok((is_eq, diff_inverse))
     }
 }

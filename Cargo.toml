@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "ceno_emul",
+    "ceno_rt",
     "gkr",
     "gkr-graph",
     "mpcs",

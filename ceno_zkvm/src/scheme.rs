@@ -1,19 +1,21 @@
 use ff_ext::ExtensionField;
+use std::collections::HashMap;
 use sumcheck::structs::IOPProverMessage;
 
 use crate::structs::TowerProofs;
 
 pub mod constants;
-pub mod mock_prover;
 pub mod prover;
 pub mod utils;
 pub mod verifier;
 
 #[cfg(test)]
+pub mod mock_prover;
+#[cfg(test)]
 mod tests;
 
 #[derive(Clone)]
-pub struct ZKVMProof<E: ExtensionField> {
+pub struct ZKVMOpcodeProof<E: ExtensionField> {
     // TODO support >1 opcodes
     pub num_instances: usize,
 
@@ -36,4 +38,30 @@ pub struct ZKVMProof<E: ExtensionField> {
     pub lk_records_in_evals: Vec<E>,
 
     pub wits_in_evals: Vec<E>,
+}
+
+#[derive(Clone)]
+pub struct ZKVMTableProof<E: ExtensionField> {
+    pub num_instances: usize,
+    // logup sum at layer 1
+    pub lk_p1_out_eval: E,
+    pub lk_p2_out_eval: E,
+    pub lk_q1_out_eval: E,
+    pub lk_q2_out_eval: E,
+
+    pub tower_proof: TowerProofs<E>,
+
+    // select layer sumcheck proof
+    pub sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
+    pub lk_d_in_evals: Vec<E>,
+    pub lk_n_in_evals: Vec<E>,
+
+    pub fixed_in_evals: Vec<E>,
+    pub wits_in_evals: Vec<E>,
+}
+
+#[derive(Default, Clone)]
+pub struct ZKVMProof<E: ExtensionField> {
+    opcode_proofs: HashMap<String, ZKVMOpcodeProof<E>>,
+    table_proofs: HashMap<String, ZKVMTableProof<E>>,
 }

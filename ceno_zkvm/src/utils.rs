@@ -1,7 +1,36 @@
 use ff::Field;
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 use itertools::Itertools;
 use transcript::Transcript;
+
+/// convert ext field element to u64, assume it is inside the range
+#[allow(dead_code)]
+pub fn ext_to_u64<E: ExtensionField>(x: &E) -> u64 {
+    let bases = x.as_bases();
+    bases[0].to_canonical_u64()
+}
+
+pub fn i64_to_base<F: SmallField>(x: i64) -> F {
+    if x >= 0 {
+        F::from(x as u64)
+    } else {
+        -F::from((-x) as u64)
+    }
+}
+
+/// This is helper function to convert witness of u8 limb into u16 limb
+/// TODO: need a better way to keep consistency of VALUE_BIT_WIDTH
+pub fn limb_u8_to_u16(input: &[u8]) -> Vec<u16> {
+    input
+        .chunks(2)
+        .map(|chunk| {
+            let low = chunk[0] as u16;
+            let high = if chunk.len() > 1 { chunk[1] as u16 } else { 0 };
+            high * 256 + low
+        })
+        .collect()
+}
 
 /// Compile time evaluated minimum function
 /// returns min(a, b)
