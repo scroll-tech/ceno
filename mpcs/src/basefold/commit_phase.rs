@@ -137,7 +137,9 @@ where
             // Transform it back into little endiean before sending it
             reverse_index_bits_in_place(&mut running_evals);
             transcript.append_field_element_exts(&running_evals);
-            final_message = running_evals.clone();
+            final_message = running_evals;
+            // To prevent the compiler from complaining that the value is moved
+            running_evals = Vec::new();
 
             if cfg!(feature = "sanity-check") {
                 // If the prover is honest, in the last round, the running oracle
@@ -309,7 +311,9 @@ where
             // Transform it back into little endiean before sending it
             reverse_index_bits_in_place(&mut sum_of_all_evals_for_sumcheck);
             transcript.append_field_element_exts(&sum_of_all_evals_for_sumcheck);
-            final_message = sum_of_all_evals_for_sumcheck.clone();
+            final_message = sum_of_all_evals_for_sumcheck;
+            // To prevent the compiler from complaining that the value is moved
+            sum_of_all_evals_for_sumcheck = Vec::new();
 
             if cfg!(feature = "sanity-check") {
                 // If the prover is honest, in the last round, the running oracle
@@ -449,7 +453,9 @@ where
             // Transform it back into little endiean before sending it
             reverse_index_bits_in_place(&mut running_evals);
             transcript.append_field_element_exts(&running_evals);
-            final_message = running_evals.clone();
+            final_message = running_evals;
+            // To avoid the compiler complaining that running_evals is moved.
+            running_evals = Vec::new();
 
             if cfg!(feature = "sanity-check") {
                 // If the prover is honest, in the last round, the running oracle
