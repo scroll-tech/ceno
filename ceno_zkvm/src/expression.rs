@@ -38,6 +38,9 @@ enum MonomialState {
 }
 
 impl<E: ExtensionField> Expression<E> {
+    pub const ZERO: Expression<E> = Expression::Constant(E::BaseField::ZERO);
+    pub const ONE: Expression<E> = Expression::Constant(E::BaseField::ONE);
+
     pub fn degree(&self) -> usize {
         match self {
             Expression::Fixed(_) => 1,

@@ -108,7 +108,7 @@ fn main() {
             .collect::<Result<Vec<StepRecord>, _>>()
             .expect("vm exec failed")
             .into_iter()
-            .filter(|record| record.insn().kind == ADD)
+            .filter(|record| record.insn().kind().1 == ADD)
             .collect::<Vec<_>>();
         tracing::info!("tracer generated {} ADD records", records.len());
 

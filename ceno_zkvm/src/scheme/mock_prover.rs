@@ -8,7 +8,7 @@ use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
-use std::{marker::PhantomData, ops::Neg};
+use std::{collections::HashSet, hash::Hash, marker::PhantomData, ops::Neg};
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -109,7 +109,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     format!("WitIn({})", wit_in)
                 }
                 Expression::Challenge(id, _, _, _) => format!("Challenge({})", id),
-                Expression::Constant(constant) => fmt_base_field::<E>(constant).to_string(),
+                Expression::Constant(constant) => fmt_base_field::<E>(constant, true).to_string(),
                 Expression::Fixed(fixed) => format!("{:?}", fixed),
                 Expression::Sum(left, right) => {
                     let s = format!(
@@ -146,24 +146,35 @@ impl<E: ExtensionField> MockProverError<E> {
                 field
                     .as_bases()
                     .iter()
-                    .map(fmt_base_field::<E>)
+                    .map(|b| fmt_base_field::<E>(b, false))
                     .collect::<Vec<String>>()
                     .join(",")
             )
         }
 
-        fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField) -> String {
+        fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField, add_prn: bool) -> String {
             let value = base_field.to_canonical_u64();
 
             if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
                 // beautiful format for negative number > -65536
-                format!("(-{})", E::BaseField::MODULUS_U64 - value)
+                fmt_prn(format!("-{}", E::BaseField::MODULUS_U64 - value), add_prn)
             } else if value < u16::MAX as u64 {
                 format!("{value}")
             } else {
                 // hex
-                format!("{value:#x}")
+                if value > E::BaseField::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
+                    fmt_prn(
+                        format!("-{:#x}", E::BaseField::MODULUS_U64 - value),
+                        add_prn,
+                    )
+                } else {
+                    format!("{value:#x}")
+                }
             }
+        }
+
+        fn fmt_prn(s: String, add_prn: bool) -> String {
+            if add_prn { format!("({})", s) } else { s }
         }
 
         fn fmt_wtns<E: ExtensionField>(
@@ -172,12 +183,13 @@ impl<E: ExtensionField> MockProverError<E> {
             inst_id: usize,
         ) -> String {
             wtns.iter()
+                .sorted()
                 .map(|wt_id| {
                     let wit = &wits_in[*wt_id as usize];
                     let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
                         fmt_field(&e[inst_id])
                     } else if let Some(bf) = wit.get_base_field_vec_optn() {
-                        fmt_base_field::<E>(&bf[inst_id])
+                        fmt_base_field::<E>(&bf[inst_id], true)
                     } else {
                         "Unknown".to_string()
                     };
@@ -192,7 +204,10 @@ pub(crate) struct MockProver<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 
-impl<'a, E: ExtensionField> MockProver<E> {
+impl<'a, E: ExtensionField> MockProver<E>
+where
+    E: Hash,
+{
     #[allow(dead_code)]
     pub fn run(
         cb: &mut CircuitBuilder<E>,
@@ -266,6 +281,8 @@ impl<'a, E: ExtensionField> MockProver<E> {
         let mut table_vec = vec![];
         load_u5_table(&mut table_vec, cb, challenge);
         load_u16_table(&mut table_vec, cb, challenge);
+        load_lt_table(&mut table_vec, cb, challenge);
+        let table: HashSet<E> = table_vec.into_iter().collect();
 
         // Lookup expressions
         for (expr, name) in cb
@@ -279,7 +296,7 @@ impl<'a, E: ExtensionField> MockProver<E> {
 
             // Check each lookup expr exists in t vec
             for (inst_id, element) in expr_evaluated.iter().enumerate() {
-                if !table_vec.contains(element) {
+                if !table.contains(element) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
                         evaluated: *element,
@@ -340,6 +357,7 @@ pub fn load_u16_table<E: ExtensionField>(
     cb: &CircuitBuilder<E>,
     challenge: [E; 2],
 ) {
+    t_vec.reserve(1 << 16);
     for i in 0..(1 << 16) {
         let rlc_record = cb.rlc_chip_record(vec![
             Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
@@ -350,18 +368,48 @@ pub fn load_u16_table<E: ExtensionField>(
     }
 }
 
+pub fn load_lt_table<E: ExtensionField>(
+    t_vec: &mut Vec<E>,
+    cb: &CircuitBuilder<E>,
+    challenge: [E; 2],
+) {
+    t_vec.reserve(1 << 16);
+    for lhs in 0..(1 << 8) {
+        for rhs in 0..(1 << 8) {
+            let is_lt = if lhs < rhs { 1 } else { 0 };
+            let lhs_rhs = lhs * 256 + rhs;
+            let rlc_record = cb.rlc_chip_record(vec![
+                Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
+                lhs_rhs.into(),
+                is_lt.into(),
+            ]);
+            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            t_vec.push(rlc_record);
+        }
+    }
+}
+
 #[allow(unused_imports)]
 #[cfg(test)]
 mod tests {
+    use std::mem::MaybeUninit;
+
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
         expression::{ToExpr, WitIn},
+        instructions::{
+            riscv::config::{ExprLtConfig, ExprLtInput},
+            Instruction,
+        },
+        set_val,
+        witness::RowMajorMatrix,
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use multilinear_extensions::mle::IntoMLE;
+    use multilinear_extensions::mle::{IntoMLE, IntoMLEs};
+    use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
     #[derive(Debug)]
     #[allow(dead_code)]
@@ -490,6 +538,241 @@ mod tests {
                 name: "test_lookup_error/assert_u5/assert u5".to_string(),
                 inst_id: 0,
             }]
+        );
+    }
+
+    #[allow(dead_code)]
+    #[derive(Debug)]
+    struct AssertLtCircuit {
+        pub a: WitIn,
+        pub b: WitIn,
+        pub lt_wtns: ExprLtConfig,
+    }
+
+    struct AssertLtCircuitInput {
+        pub a: u64,
+        pub b: u64,
+    }
+
+    impl AssertLtCircuit {
+        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
+            let a = cb.create_witin(|| "a")?;
+            let b = cb.create_witin(|| "b")?;
+            let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr(), Some(true))?;
+            Ok(Self { a, b, lt_wtns })
+        }
+
+        fn assign_instance<E: ExtensionField>(
+            &self,
+            instance: &mut [MaybeUninit<E::BaseField>],
+            input: AssertLtCircuitInput,
+        ) -> Result<(), ZKVMError> {
+            set_val!(instance, self.a, input.a);
+            set_val!(instance, self.b, input.b);
+            ExprLtInput {
+                lhs: input.a,
+                rhs: input.b,
+            }
+            .assign(instance, &self.lt_wtns);
+
+            Ok(())
+        }
+
+        fn assign_instances<E: ExtensionField>(
+            &self,
+            num_witin: usize,
+            instances: Vec<AssertLtCircuitInput>,
+        ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let raw_witin_iter = raw_witin.par_iter_mut();
+
+            raw_witin_iter
+                .zip_eq(instances.into_par_iter())
+                .map(|(instance, input)| self.assign_instance::<E>(instance, input))
+                .collect::<Result<(), ZKVMError>>()?;
+
+            Ok(raw_witin)
+        }
+    }
+
+    #[test]
+    fn test_assert_lt_1() {
+        let mut cs = ConstraintSystem::new(|| "test_assert_lt_1");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+
+        let raw_witin = circuit
+            .assign_instances::<GoldilocksExt2>(
+                builder.cs.num_witin as usize,
+                vec![
+                    AssertLtCircuitInput { a: 3, b: 5 },
+                    AssertLtCircuitInput { a: 7, b: 11 },
+                ],
+            )
+            .unwrap();
+
+        MockProver::assert_satisfied(
+            &mut builder,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            Some([1.into(), 1000.into()]),
+        );
+    }
+
+    #[test]
+    fn test_assert_lt_u32() {
+        let mut cs = ConstraintSystem::new(|| "test_assert_lt_u32");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+        let raw_witin = circuit
+            .assign_instances::<GoldilocksExt2>(
+                builder.cs.num_witin as usize,
+                vec![
+                    AssertLtCircuitInput {
+                        a: u32::MAX as u64 - 5,
+                        b: u32::MAX as u64 - 3,
+                    },
+                    AssertLtCircuitInput {
+                        a: u32::MAX as u64 - 3,
+                        b: u32::MAX as u64 - 2,
+                    },
+                ],
+            )
+            .unwrap();
+
+        MockProver::assert_satisfied(
+            &mut builder,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            Some([1.into(), 1000.into()]),
+        );
+    }
+
+    #[allow(dead_code)]
+    #[derive(Debug)]
+    struct LtCircuit {
+        pub a: WitIn,
+        pub b: WitIn,
+        pub lt_wtns: ExprLtConfig,
+    }
+
+    struct LtCircuitInput {
+        pub a: u64,
+        pub b: u64,
+    }
+
+    impl LtCircuit {
+        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
+            let a = cb.create_witin(|| "a")?;
+            let b = cb.create_witin(|| "b")?;
+            let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr(), None)?;
+            Ok(Self { a, b, lt_wtns })
+        }
+
+        fn assign_instance<E: ExtensionField>(
+            &self,
+            instance: &mut [MaybeUninit<E::BaseField>],
+            input: LtCircuitInput,
+        ) -> Result<(), ZKVMError> {
+            set_val!(instance, self.a, input.a);
+            set_val!(instance, self.b, input.b);
+            ExprLtInput {
+                lhs: input.a,
+                rhs: input.b,
+            }
+            .assign(instance, &self.lt_wtns);
+
+            Ok(())
+        }
+
+        fn assign_instances<E: ExtensionField>(
+            &self,
+            num_witin: usize,
+            instances: Vec<LtCircuitInput>,
+        ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let raw_witin_iter = raw_witin.par_iter_mut();
+
+            raw_witin_iter
+                .zip_eq(instances.into_par_iter())
+                .map(|(instance, input)| self.assign_instance::<E>(instance, input))
+                .collect::<Result<(), ZKVMError>>()?;
+
+            Ok(raw_witin)
+        }
+    }
+
+    #[test]
+    fn test_lt_1() {
+        let mut cs = ConstraintSystem::new(|| "test_lt_1");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();
+
+        let raw_witin = circuit
+            .assign_instances::<GoldilocksExt2>(
+                builder.cs.num_witin as usize,
+                vec![
+                    LtCircuitInput { a: 3, b: 5 },
+                    LtCircuitInput { a: 7, b: 11 },
+                ],
+            )
+            .unwrap();
+
+        MockProver::assert_satisfied(
+            &mut builder,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            Some([1.into(), 1000.into()]),
+        );
+    }
+
+    #[test]
+    fn test_lt_u32() {
+        let mut cs = ConstraintSystem::new(|| "test_lt_u32");
+        let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+
+        let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();
+
+        let raw_witin = circuit
+            .assign_instances::<GoldilocksExt2>(
+                builder.cs.num_witin as usize,
+                vec![
+                    LtCircuitInput {
+                        a: u32::MAX as u64 - 5,
+                        b: u32::MAX as u64 - 3,
+                    },
+                    LtCircuitInput {
+                        a: u32::MAX as u64 - 3,
+                        b: u32::MAX as u64 - 5,
+                    },
+                ],
+            )
+            .unwrap();
+
+        MockProver::assert_satisfied(
+            &mut builder,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            Some([1.into(), 1000.into()]),
         );
     }
 }

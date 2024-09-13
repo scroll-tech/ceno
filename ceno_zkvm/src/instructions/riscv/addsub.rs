@@ -5,6 +5,7 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 
 use super::{
+    config::ExprLtConfig,
     constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
     RIVInstruction,
 };
@@ -13,7 +14,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    instructions::Instruction,
+    instructions::{riscv::config::ExprLtInput, Instruction},
     set_val,
     uint::UIntValue,
     witness::LkMultiplicity,
@@ -37,6 +38,9 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
     pub prev_rd_ts: WitIn,
+    pub lt_rs1_cfg: ExprLtConfig,
+    pub lt_rs2_cfg: ExprLtConfig,
+    pub lt_prev_ts_cfg: ExprLtConfig,
     phantom: PhantomData<E>,
 }
 
@@ -99,17 +103,17 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
     let prev_rd_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
 
-    let ts = circuit_builder.register_read(
+    let (ts, lt_rs1_cfg) = circuit_builder.register_read(
         || "read_rs1",
         &rs1_id,
         prev_rs1_ts.expr(),
         cur_ts.expr(),
         &addend_0,
     )?;
-    let ts =
+    let (ts, lt_rs2_cfg) =
         circuit_builder.register_read(|| "read_rs2", &rs2_id, prev_rs2_ts.expr(), ts, &addend_1)?;
 
-    let ts = circuit_builder.register_write(
+    let (ts, lt_prev_ts_cfg) = circuit_builder.register_write(
         || "write_rd",
         &rd_id,
         prev_rd_ts.expr(),
@@ -134,6 +138,9 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         prev_rs1_ts,
         prev_rs2_ts,
         prev_rd_ts,
+        lt_rs1_cfg,
+        lt_rs2_cfg,
+        lt_prev_ts_cfg,
         phantom: PhantomData,
     })
 }
@@ -159,7 +166,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     ) -> Result<(), ZKVMError> {
         // TODO use fields from step
         set_val!(instance, config.pc, 1);
-        set_val!(instance, config.ts, 2);
+        set_val!(instance, config.ts, 3);
         let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
         let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
         let rd_prev = UIntValue::new_unchecked(step.rd().unwrap().value.before);
@@ -187,6 +194,23 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         set_val!(instance, config.prev_rs1_ts, 2);
         set_val!(instance, config.prev_rs2_ts, 2);
         set_val!(instance, config.prev_rd_ts, 2);
+
+        ExprLtInput {
+            lhs: 2, // rs1
+            rhs: 3, // cur_ts
+        }
+        .assign(instance, &config.lt_rs1_cfg);
+        ExprLtInput {
+            lhs: 2, // rs2
+            rhs: 4, // cur_ts
+        }
+        .assign(instance, &config.lt_rs2_cfg);
+        ExprLtInput {
+            lhs: 2, // rd
+            rhs: 5, // cur_ts
+        }
+        .assign(instance, &config.lt_prev_ts_cfg);
+
         Ok(())
     }
 }
@@ -362,7 +386,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            None,
+            Some([100.into(), 100000.into()]),
         );
     }
 }
