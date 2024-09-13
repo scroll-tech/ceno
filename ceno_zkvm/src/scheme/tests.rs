@@ -111,7 +111,7 @@ fn test_rw_lk_expression_combination() {
             .collect_vec();
         let proof = prover
             .create_opcode_proof(
-                &prover.pk.circuit_pks.get(&name).unwrap(),
+                prover.pk.circuit_pks.get(&name).unwrap(),
                 wits_in,
                 num_instances,
                 1,
