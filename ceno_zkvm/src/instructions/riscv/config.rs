@@ -77,6 +77,9 @@ impl UIntLtuInput<'_> {
                 break;
             }
         }
+        config.indexes.iter().for_each(|witin| {
+            set_val!(instance, witin, { i64_to_base::<F>(0) });
+        });
         set_val!(instance, config.indexes[idx], {
             i64_to_base::<F>(flag as i64)
         });
@@ -182,16 +185,19 @@ pub struct ExprLtInput {
 
 impl ExprLtInput {
     pub fn assign<F: SmallField>(&self, instance: &mut [MaybeUninit<F>], config: &ExprLtConfig) {
-        if let Some(is_lt) = config.is_lt {
-            set_val!(instance, is_lt, { if self.lhs < self.rhs { 1 } else { 0 } });
-        }
+        let is_lt = if let Some(is_lt_wit) = config.is_lt {
+            let is_lt = self.lhs < self.rhs;
+            set_val!(instance, is_lt_wit, is_lt as u64);
+            is_lt
+        } else {
+            // assert is_lt == true
+            true
+        };
 
-        let diff = self.lhs as i64 - self.rhs as i64;
+        let diff = if is_lt { 1u64 << u32::BITS } else { 0 } + self.lhs - self.rhs;
         config.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
-            set_val!(instance, wit, {
-                i64_to_base::<F>((diff >> (i * 16)) & 0xffff)
-            });
+            set_val!(instance, wit, (diff >> (i * u16::BITS as usize)) & 0xffff);
         });
     }
 }

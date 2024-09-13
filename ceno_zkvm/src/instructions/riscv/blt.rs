@@ -10,11 +10,11 @@ use crate::{
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
-        riscv::config::{UIntLtConfig, UIntLtInput},
+        riscv::config::{ExprLtInput, UIntLtConfig, UIntLtInput},
         Instruction,
     },
     set_val,
-    utils::{i64_to_base, limb_u8_to_u16},
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 
@@ -31,8 +31,6 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub next_pc: WitIn,
     pub ts: WitIn,
     pub imm: WitIn,
-    pub lhs: RegUInt<E>,
-    pub rhs: RegUInt<E>,
     pub lhs_limb8: RegUInt8<E>,
     pub rhs_limb8: RegUInt8<E>,
     pub rs1_id: WitIn,
@@ -106,23 +104,21 @@ impl BltInput {
                 .map(|&limb| i64_to_base::<F>(limb as i64))
                 .collect()
         });
-        let lhs = limb_u8_to_u16(&self.lhs_limb8);
-        let rhs = limb_u8_to_u16(&self.rhs_limb8);
-        config.lhs.assign_limbs(instance, {
-            lhs.iter()
-                .map(|&limb| i64_to_base::<F>(limb as i64))
-                .collect()
-        });
-        config.rhs.assign_limbs(instance, {
-            rhs.iter()
-                .map(|&limb| i64_to_base::<F>(limb as i64))
-                .collect()
-        });
+        ExprLtInput {
+            lhs: self.prev_rs1_ts as u64,
+            rhs: self.ts as u64,
+        }
+        .assign(instance, &config.lt_rs1_cfg);
+        ExprLtInput {
+            lhs: self.prev_rs2_ts as u64,
+            rhs: (self.ts + 1) as u64,
+        }
+        .assign(instance, &config.lt_rs2_cfg);
     }
 
     pub fn random() -> Self {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
+        use ark_std::{rand::Rng, test_rng};
+        let mut rng = test_rng();
 
         // hack to generate valid inputs
         let ts_bound: u16 = rng.gen_range(100..1000);
@@ -173,27 +169,25 @@ fn blt_gadget<E: ExtensionField>(
     // update ts
     let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
     let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
-    // TODO: replace it with `new_from_exprs_unchecked` after PR 181
-    // so we can remove lhs/rhs from config
-    let lhs = RegUInt::from_u8_limbs(circuit_builder, &lhs_limb8);
-    let rhs = RegUInt::from_u8_limbs(circuit_builder, &rhs_limb8);
+    let lhs = RegUInt::from_u8_limbs(&lhs_limb8)?;
+    let rhs = RegUInt::from_u8_limbs(&rhs_limb8)?;
 
     let (ts, lt_rs1_cfg) = circuit_builder.register_read(
-        || "read ts for lhs",
+        || "read ts for rs1",
         &rs1_id,
         prev_rs1_ts.expr(),
         cur_ts.expr(),
         &lhs,
     )?;
     let (ts, lt_rs2_cfg) = circuit_builder.register_read(
-        || "read ts for rhs",
+        || "read ts for rs2",
         &rs2_id,
         prev_rs2_ts.expr(),
         ts,
         &rhs,
     )?;
 
-    let next_pc = create_witin_from_expr!(circuit_builder, false, next_pc)?;
+    let next_pc = create_witin_from_expr!(|| "next_pc", circuit_builder, false, next_pc)?;
     let next_ts = ts + 1.into();
     circuit_builder.state_out(next_pc.expr(), next_ts)?;
 
@@ -201,8 +195,6 @@ fn blt_gadget<E: ExtensionField>(
         pc,
         next_pc,
         ts: cur_ts,
-        lhs,
-        rhs,
         lhs_limb8,
         rhs_limb8,
         imm,
@@ -267,7 +259,7 @@ mod test {
         )
         .unwrap();
 
-        MockProver::run(
+        MockProver::assert_satisfied(
             &mut circuit_builder,
             &raw_witin
                 .de_interleaving()
@@ -275,9 +267,8 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            Some([1.into(), 1000.into()]),
-        )
-        .expect_err("lookup will fail");
+            None,
+        );
         Ok(())
     }
 

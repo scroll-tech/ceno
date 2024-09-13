@@ -4,11 +4,13 @@ use crate::{
     expression::Expression,
     structs::{ROMType, WitnessId},
 };
+use ark_std::test_rng;
 use ff_ext::ExtensionField;
+use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
-use std::{collections::HashSet, hash::Hash, marker::PhantomData, ops::Neg};
+use std::{collections::HashSet, hash::Hash, marker::PhantomData, ops::Neg, sync::OnceLock};
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -39,7 +41,7 @@ pub(crate) enum MockProverError<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> MockProverError<E> {
-    pub fn print(&self, wits_in: &[ArcMultilinearExtension<E>]) {
+    pub fn print(&self, wits_in: &[ArcMultilinearExtension<E>], wits_in_name: &[String]) {
         let mut wtns = vec![];
 
         match self {
@@ -50,7 +52,7 @@ impl<E: ExtensionField> MockProverError<E> {
                 inst_id,
             } => {
                 let expression_fmt = fmt_expr(expression, &mut wtns, false);
-                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id);
+                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id, wits_in_name);
                 let eval_fmt = fmt_field::<E>(evaluated);
                 println!(
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
@@ -69,7 +71,7 @@ impl<E: ExtensionField> MockProverError<E> {
             } => {
                 let left_expression_fmt = fmt_expr(left_expression, &mut wtns, false);
                 let right_expression_fmt = fmt_expr(right_expression, &mut wtns, false);
-                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id);
+                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id, wits_in_name);
                 let left_eval_fmt = fmt_field::<E>(left);
                 let right_eval_fmt = fmt_field::<E>(right);
                 println!(
@@ -87,7 +89,7 @@ impl<E: ExtensionField> MockProverError<E> {
                 inst_id,
             } => {
                 let expression_fmt = fmt_expr(expression, &mut wtns, false);
-                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id);
+                let wtns_fmt = fmt_wtns::<E>(&wtns, wits_in, *inst_id, wits_in_name);
                 let eval_fmt = fmt_field::<E>(evaluated);
                 println!(
                     "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\n\
@@ -181,11 +183,13 @@ impl<E: ExtensionField> MockProverError<E> {
             wtns: &[WitnessId],
             wits_in: &[ArcMultilinearExtension<E>],
             inst_id: usize,
+            wits_in_name: &[String],
         ) -> String {
             wtns.iter()
                 .sorted()
                 .map(|wt_id| {
                     let wit = &wits_in[*wt_id as usize];
+                    let name = &wits_in_name[*wt_id as usize];
                     let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
                         fmt_field(&e[inst_id])
                     } else if let Some(bf) = wit.get_base_field_vec_optn() {
@@ -193,9 +197,9 @@ impl<E: ExtensionField> MockProverError<E> {
                     } else {
                         "Unknown".to_string()
                     };
-                    format!("WitIn({wt_id})={value_fmt}")
+                    format!("\nWitIn({wt_id})\npath={name}\nvalue={value_fmt}\n")
                 })
-                .join(",")
+                .join("----\n")
         }
     }
 }
@@ -204,18 +208,158 @@ pub(crate) struct MockProver<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 
-impl<'a, E: ExtensionField> MockProver<E>
-where
-    E: Hash,
-{
-    #[allow(dead_code)]
+fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> HashSet<Vec<u8>> {
+    fn load_u5_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u8>>,
+        cb: &CircuitBuilder<E>,
+        challenge: [E; 2],
+    ) {
+        for i in 0..(1 << 5) {
+            let rlc_record = cb.rlc_chip_record(vec![
+                Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
+                i.into(),
+            ]);
+            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+        }
+    }
+
+    fn load_u16_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u8>>,
+        cb: &CircuitBuilder<E>,
+        challenge: [E; 2],
+    ) {
+        for i in 0..=u16::MAX as usize {
+            let rlc_record = cb.rlc_chip_record(vec![
+                Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
+                i.into(),
+            ]);
+            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+        }
+    }
+
+    fn load_lt_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u8>>,
+        cb: &CircuitBuilder<E>,
+        challenge: [E; 2],
+    ) {
+        for lhs in 0..(1 << 8) {
+            for rhs in 0..(1 << 8) {
+                let is_lt = if lhs < rhs { 1 } else { 0 };
+                let lhs_rhs = lhs * 256 + rhs;
+                let rlc_record = cb.rlc_chip_record(vec![
+                    Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
+                    lhs_rhs.into(),
+                    is_lt.into(),
+                ]);
+                let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+                t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+            }
+        }
+    }
+
+    fn load_and_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u8>>,
+        cb: &CircuitBuilder<E>,
+        challenge: [E; 2],
+    ) {
+        for i in 0..=u16::MAX as usize {
+            let a = i >> 8;
+            let b = i & 0xFF;
+            let c = a & b;
+            let rlc_record = cb.rlc_chip_record(vec![
+                Expression::Constant(E::BaseField::from(ROMType::And as u64)),
+                i.into(),
+                c.into(),
+            ]);
+            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+        }
+    }
+
+    fn load_ltu_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u8>>,
+        cb: &CircuitBuilder<E>,
+        challenge: [E; 2],
+    ) {
+        for i in 0..=u16::MAX as usize {
+            let a = i >> 8;
+            let b = i & 0xFF;
+            let c = (a < b) as usize;
+            let rlc_record = cb.rlc_chip_record(vec![
+                Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
+                i.into(),
+                c.into(),
+            ]);
+            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+        }
+    }
+
+    let mut table_vec = vec![];
+    // TODO load more tables here
+    load_u5_table(&mut table_vec, cb, challenge);
+    load_u16_table(&mut table_vec, cb, challenge);
+    load_lt_table(&mut table_vec, cb, challenge);
+    load_and_table(&mut table_vec, cb, challenge);
+    load_ltu_table(&mut table_vec, cb, challenge);
+    HashSet::from_iter(table_vec)
+}
+
+// load once per generic type E instantiation
+// return challenge and table
+#[allow(clippy::type_complexity)]
+fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
+    cb: &CircuitBuilder<E>,
+) -> ([E; 2], &'static HashSet<Vec<u8>>) {
+    static CACHE: OnceLock<StaticTypeMap<([Vec<u8>; 2], HashSet<Vec<u8>>)>> = OnceLock::new();
+    let cache = CACHE.get_or_init(StaticTypeMap::new);
+
+    let (challenges_repr, table) = cache.call_once::<E, _>(|| {
+        let mut rng = test_rng();
+        let challenge = [E::random(&mut rng), E::random(&mut rng)];
+        (
+            challenge.map(|c| c.to_repr().as_ref().to_vec()),
+            load_tables(cb, challenge),
+        )
+    });
+    // reinitialize per generic type E
+    (
+        challenges_repr.clone().map(|repr| unsafe {
+            let ptr = repr.as_slice().as_ptr() as *const E;
+            *ptr
+        }),
+        table,
+    )
+}
+
+impl<'a, E: ExtensionField + Hash> MockProver<E> {
+    pub fn run_with_challenge(
+        cb: &mut CircuitBuilder<E>,
+        wits_in: &[ArcMultilinearExtension<'a, E>],
+        challenge: [E; 2],
+    ) -> Result<(), Vec<MockProverError<E>>> {
+        Self::run_maybe_challenge(cb, wits_in, Some(challenge))
+    }
+
     pub fn run(
+        cb: &mut CircuitBuilder<E>,
+        wits_in: &[ArcMultilinearExtension<'a, E>],
+    ) -> Result<(), Vec<MockProverError<E>>> {
+        Self::run_maybe_challenge(cb, wits_in, None)
+    }
+
+    fn run_maybe_challenge(
         cb: &mut CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        let challenge = challenge.unwrap_or([E::ONE, E::ONE]);
-
+        let (challenge, table) = if let Some(challenge) = challenge {
+            (challenge, &load_tables(cb, challenge))
+        } else {
+            load_once_tables(cb)
+        };
         let mut errors = vec![];
 
         // Assert zero expressions
@@ -276,14 +420,6 @@ where
             }
         }
 
-        // TODO load more tables here
-        // TODO cache table_vec across unittest
-        let mut table_vec = vec![];
-        load_u5_table(&mut table_vec, cb, challenge);
-        load_u16_table(&mut table_vec, cb, challenge);
-        load_lt_table(&mut table_vec, cb, challenge);
-        let table: HashSet<E> = table_vec.into_iter().collect();
-
         // Lookup expressions
         for (expr, name) in cb
             .cs
@@ -296,7 +432,7 @@ where
 
             // Check each lookup expr exists in t vec
             for (inst_id, element) in expr_evaluated.iter().enumerate() {
-                if !table.contains(element) {
+                if !table.contains(element.to_repr().as_ref()) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
                         evaluated: *element,
@@ -314,13 +450,16 @@ where
         }
     }
 
-    #[allow(dead_code)]
     pub fn assert_satisfied(
         cb: &mut CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
     ) {
-        let result = Self::run(cb, wits_in, challenge);
+        let result = if let Some(challenge) = challenge {
+            Self::run_with_challenge(cb, wits_in, challenge)
+        } else {
+            Self::run(cb, wits_in)
+        };
         match result {
             Ok(_) => {}
             Err(errors) => {
@@ -328,7 +467,7 @@ where
                 println!("Error: {} constraints not satisfied", errors.len());
 
                 for error in errors {
-                    error.print(wits_in);
+                    error.print(wits_in, &cb.cs.witin_namespace_map);
                 }
                 println!("======================================================");
                 panic!("Constraints not satisfied");
@@ -337,59 +476,6 @@ where
     }
 }
 
-pub fn load_u5_table<E: ExtensionField>(
-    t_vec: &mut Vec<E>,
-    cb: &CircuitBuilder<E>,
-    challenge: [E; 2],
-) {
-    for i in 0..(1 << 5) {
-        let rlc_record = cb.rlc_chip_record(vec![
-            Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
-            i.into(),
-        ]);
-        let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-        t_vec.push(rlc_record);
-    }
-}
-
-pub fn load_u16_table<E: ExtensionField>(
-    t_vec: &mut Vec<E>,
-    cb: &CircuitBuilder<E>,
-    challenge: [E; 2],
-) {
-    t_vec.reserve(1 << 16);
-    for i in 0..(1 << 16) {
-        let rlc_record = cb.rlc_chip_record(vec![
-            Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
-            i.into(),
-        ]);
-        let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-        t_vec.push(rlc_record);
-    }
-}
-
-pub fn load_lt_table<E: ExtensionField>(
-    t_vec: &mut Vec<E>,
-    cb: &CircuitBuilder<E>,
-    challenge: [E; 2],
-) {
-    t_vec.reserve(1 << 16);
-    for lhs in 0..(1 << 8) {
-        for rhs in 0..(1 << 8) {
-            let is_lt = if lhs < rhs { 1 } else { 0 };
-            let lhs_rhs = lhs * 256 + rhs;
-            let rlc_record = cb.rlc_chip_record(vec![
-                Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
-                lhs_rhs.into(),
-                is_lt.into(),
-            ]);
-            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-            t_vec.push(rlc_record);
-        }
-    }
-}
-
-#[allow(unused_imports)]
 #[cfg(test)]
 mod tests {
     use std::mem::MaybeUninit;
@@ -399,10 +485,7 @@ mod tests {
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        instructions::{
-            riscv::config::{ExprLtConfig, ExprLtInput},
-            Instruction,
-        },
+        instructions::riscv::config::{ExprLtConfig, ExprLtInput},
         set_val,
         witness::RowMajorMatrix,
     };
@@ -511,7 +594,7 @@ mod tests {
         let wits_in = vec![vec![Goldilocks::from(123)].into_mle().into()];
 
         let challenge = [2.into(), 1000.into()];
-        let result = MockProver::run(&mut builder, &wits_in, Some(challenge));
+        let result = MockProver::run_with_challenge(&mut builder, &wits_in, challenge);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
         assert_eq!(
@@ -658,7 +741,6 @@ mod tests {
         );
     }
 
-    #[allow(dead_code)]
     #[derive(Debug)]
     struct LtCircuit {
         pub a: WitIn,
