@@ -194,10 +194,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
     /// conversion is needed for lt/ltu
     /// TODO: add general conversion between any two limb sizes C1 <-> C2
-    pub fn from_u8_limbs(
-        circuit_builder: &mut CircuitBuilder<E>,
-        x: &UInt<M, 8, E>,
-    ) -> UInt<M, C, E> {
+    pub fn from_u8_limbs(x: &UInt<M, 8, E>) -> Result<UInt<M, C, E>, ZKVMError> {
         assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
         assert!(x.carries.is_none());
         let k = C / 8;
@@ -223,7 +220,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                     .unwrap()
             })
             .collect_vec();
-        UInt::<M, C, E>::create_witin_from_exprs(circuit_builder, combined_limbs)
+        UInt::<M, C, E>::new_from_exprs_unchecked(combined_limbs)
     }
 
     pub fn to_u8_limbs(circuit_builder: &mut CircuitBuilder<E>, x: UInt<M, C, E>) -> UInt<M, 8, E> {

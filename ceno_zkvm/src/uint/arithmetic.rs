@@ -8,7 +8,7 @@ use crate::{
     create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::config::{IsEqualConfig, LtConfig, LtuConfig, MsbConfig},
+    instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
 };
 
 impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
@@ -220,7 +220,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
             .iter()
             .fold(Expression::from(0), |acc, flag| acc.clone() + flag.expr());
 
-        let sum_flag = create_witin_from_expr!(circuit_builder, false, sum_expr)?;
+        let sum_flag = create_witin_from_expr!(|| "sum_flag", circuit_builder, false, sum_expr)?;
         let (is_equal, diff_inv) =
             circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))?;
         Ok(IsEqualConfig {
@@ -248,12 +248,12 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         circuit_builder.lookup_and_byte(
             high_limb_no_msb.expr(),
             high_limb.clone(),
-            Expression::from(1 << 7),
+            Expression::from(0b0111_1111),
         )?;
 
         let inv_128 = F::from(128).invert().unwrap();
         let msb = (high_limb - high_limb_no_msb.expr()) * Expression::Constant(inv_128);
-        let msb = create_witin_from_expr!(circuit_builder, false, msb)?;
+        let msb = create_witin_from_expr!(|| "msb", circuit_builder, false, msb)?;
         Ok(MsbConfig {
             msb,
             high_limb_no_msb,
@@ -265,7 +265,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UInt<M, 8, E>,
-    ) -> Result<LtuConfig, ZKVMError> {
+    ) -> Result<UIntLtuConfig, ZKVMError> {
         let n_bytes = Self::NUM_CELLS;
         let indexes: Vec<WitIn> = (0..n_bytes)
             .map(|_| circuit_builder.create_witin(|| "index"))
@@ -296,7 +296,10 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         let si = si_expr
             .into_iter()
             .rev()
-            .map(|expr| create_witin_from_expr!(circuit_builder, false, expr))
+            .enumerate()
+            .map(|(i, expr)| {
+                create_witin_from_expr!(|| format!("si_expr_{i}"), circuit_builder, false, expr)
+            })
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
 
         // check byte diff that before the first non-zero i_0 equals zero
@@ -329,8 +332,10 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
 
         // check the first byte difference has a inverse
         // unwrap is safe because vector len > 0
-        let lhs_ne_byte = create_witin_from_expr!(circuit_builder, false, sa.clone())?;
-        let rhs_ne_byte = create_witin_from_expr!(circuit_builder, false, sb.clone())?;
+        let lhs_ne_byte =
+            create_witin_from_expr!(|| "lhs_ne_byte", circuit_builder, false, sa.clone())?;
+        let rhs_ne_byte =
+            create_witin_from_expr!(|| "rhs_ne_byte", circuit_builder, false, sb.clone())?;
         let index_ne = si.first().unwrap();
         circuit_builder.require_zero(
             || "byte inverse check",
@@ -343,7 +348,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         // circuit_builder.assert_bit(is_ltu.expr())?; // lookup ensure it is bit
         // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
         circuit_builder.lookup_ltu_limb8(is_ltu.expr(), lhs_ne_byte.expr(), rhs_ne_byte.expr())?;
-        Ok(LtuConfig {
+        Ok(UIntLtuConfig {
             byte_diff_inv,
             indexes,
             acc_indexes: si,
@@ -357,7 +362,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UInt<M, 8, E>,
-    ) -> Result<LtConfig, ZKVMError> {
+    ) -> Result<UIntLtConfig, ZKVMError> {
         let is_lt = circuit_builder.create_witin(|| "is_lt")?;
         circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
 
@@ -383,7 +388,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
                 + msb_is_equal.expr() * is_ltu.is_ltu.expr()
                 - is_lt.expr(),
         )?;
-        Ok(LtConfig {
+        Ok(UIntLtConfig {
             lhs_msb,
             rhs_msb,
             msb_is_equal,

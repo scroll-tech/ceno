@@ -42,7 +42,7 @@ impl MsbInput<'_> {
 }
 
 #[derive(Clone)]
-pub struct LtuConfig {
+pub struct UIntLtuConfig {
     pub indexes: Vec<WitIn>,
     pub acc_indexes: Vec<WitIn>,
     pub byte_diff_inv: WitIn,
@@ -51,16 +51,16 @@ pub struct LtuConfig {
     pub is_ltu: WitIn,
 }
 
-pub struct LtuInput<'a> {
+pub struct UIntLtuInput<'a> {
     pub lhs_limbs: &'a [u8],
     pub rhs_limbs: &'a [u8],
 }
 
-impl LtuInput<'_> {
+impl UIntLtuInput<'_> {
     pub fn assign<F: SmallField>(
         &self,
         instance: &mut [MaybeUninit<F>],
-        config: &LtuConfig,
+        config: &UIntLtuConfig,
     ) -> bool {
         let mut idx = 0;
         let mut flag: bool = false;
@@ -77,6 +77,9 @@ impl LtuInput<'_> {
                 break;
             }
         }
+        config.indexes.iter().for_each(|witin| {
+            set_val!(instance, witin, { i64_to_base::<F>(0) });
+        });
         set_val!(instance, config.indexes[idx], {
             i64_to_base::<F>(flag as i64)
         });
@@ -105,25 +108,25 @@ impl LtuInput<'_> {
 }
 
 #[derive(Clone)]
-pub struct LtConfig {
+pub struct UIntLtConfig {
     pub lhs_msb: MsbConfig,
     pub rhs_msb: MsbConfig,
     pub msb_is_equal: WitIn,
     pub msb_diff_inv: WitIn,
-    pub is_ltu: LtuConfig,
+    pub is_ltu: UIntLtuConfig,
     pub is_lt: WitIn,
 }
 
-pub struct LtInput<'a> {
+pub struct UIntLtInput<'a> {
     pub lhs_limbs: &'a [u8],
     pub rhs_limbs: &'a [u8],
 }
 
-impl LtInput<'_> {
+impl UIntLtInput<'_> {
     pub fn assign<F: SmallField>(
         &self,
         instance: &mut [MaybeUninit<F>],
-        config: &LtConfig,
+        config: &UIntLtConfig,
     ) -> bool {
         let n_limbs = self.lhs_limbs.len();
         let lhs_msb_input = MsbInput {
@@ -141,7 +144,7 @@ impl LtInput<'_> {
         let mut rhs_limbs_no_msb = self.rhs_limbs.iter().copied().collect_vec();
         rhs_limbs_no_msb[n_limbs - 1] = rhs_high_limb_no_msb;
 
-        let ltu_input = LtuInput {
+        let ltu_input = UIntLtuInput {
             lhs_limbs: &lhs_limbs_no_msb,
             rhs_limbs: &rhs_limbs_no_msb,
         };
@@ -166,5 +169,35 @@ impl LtInput<'_> {
 
         assert!(is_lt == 0 || is_lt == 1);
         is_lt > 0
+    }
+}
+
+#[derive(Debug)]
+pub struct ExprLtConfig {
+    pub is_lt: Option<WitIn>,
+    pub diff: Vec<WitIn>,
+}
+
+pub struct ExprLtInput {
+    pub lhs: u64,
+    pub rhs: u64,
+}
+
+impl ExprLtInput {
+    pub fn assign<F: SmallField>(&self, instance: &mut [MaybeUninit<F>], config: &ExprLtConfig) {
+        let is_lt = if let Some(is_lt_wit) = config.is_lt {
+            let is_lt = self.lhs < self.rhs;
+            set_val!(instance, is_lt_wit, is_lt as u64);
+            is_lt
+        } else {
+            // assert is_lt == true
+            true
+        };
+
+        let diff = if is_lt { 1u64 << u32::BITS } else { 0 } + self.lhs - self.rhs;
+        config.diff.iter().enumerate().for_each(|(i, wit)| {
+            // extract the 16 bit limb from diff and assign to instance
+            set_val!(instance, wit, (diff >> (i * u16::BITS as usize)) & 0xffff);
+        });
     }
 }
