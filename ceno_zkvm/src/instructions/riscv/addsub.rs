@@ -300,15 +300,15 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, ReadOp, StepRecord, WriteOp};
+    use ceno_emul::{Change, ReadOp, StepRecord, WriteOp, CENO_PLATFORM};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
-        scheme::mock_prover::MockProver,
+        instructions::{riscv::constants::PC_STEP_SIZE, Instruction},
+        scheme::mock_prover::{MockProver, MOCK_PC_ADD},
     };
 
     use super::AddInstruction;
@@ -333,18 +333,19 @@ mod test {
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord {
+                pc: Change::new(MOCK_PC_ADD, MOCK_PC_ADD + PC_STEP_SIZE),
                 rs1: Some(ReadOp {
-                    addr: 2.into(),
+                    addr: CENO_PLATFORM.register_vma(2).into(),
                     value: 11u32,
                     previous_cycle: 0,
                 }),
                 rs2: Some(ReadOp {
-                    addr: 3.into(),
+                    addr: CENO_PLATFORM.register_vma(3).into(),
                     value: 0xfffffffeu32,
                     previous_cycle: 0,
                 }),
                 rd: Some(WriteOp {
-                    addr: 4.into(),
+                    addr: CENO_PLATFORM.register_vma(4).into(),
                     value: Change {
                         before: 0u32,
                         after: 9u32,
@@ -388,18 +389,19 @@ mod test {
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord {
+                pc: Change::new(MOCK_PC_ADD, MOCK_PC_ADD + PC_STEP_SIZE),
                 rs1: Some(ReadOp {
-                    addr: 2.into(),
+                    addr: CENO_PLATFORM.register_vma(2).into(),
                     value: u32::MAX - 1,
                     previous_cycle: 0,
                 }),
                 rs2: Some(ReadOp {
-                    addr: 3.into(),
+                    addr: CENO_PLATFORM.register_vma(3).into(),
                     value: u32::MAX - 1,
                     previous_cycle: 0,
                 }),
                 rd: Some(WriteOp {
-                    addr: 4.into(),
+                    addr: CENO_PLATFORM.register_vma(4).into(),
                     value: Change {
                         before: 0u32,
                         after: u32::MAX - 2,

@@ -3,7 +3,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     mem::{self, MaybeUninit},
-    slice::ChunksMut,
+    slice::{Chunks, ChunksMut},
     sync::Arc,
 };
 
@@ -50,6 +50,10 @@ impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
 
     pub fn num_instances(&self) -> usize {
         self.values.len() / self.num_col - self.num_padding_rows
+    }
+
+    pub fn iter_rows(&self) -> Chunks<MaybeUninit<T>> {
+        self.values.chunks(self.num_col)
     }
 
     pub fn iter_mut(&mut self) -> ChunksMut<MaybeUninit<T>> {
