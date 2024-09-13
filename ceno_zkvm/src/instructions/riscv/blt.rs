@@ -187,7 +187,7 @@ fn blt_gadget<E: ExtensionField>(
         &rhs,
     )?;
 
-    let next_pc = create_witin_from_expr!(circuit_builder, false, next_pc)?;
+    let next_pc = create_witin_from_expr!(|| "next_pc", circuit_builder, false, next_pc)?;
     let next_ts = ts + 1.into();
     circuit_builder.state_out(next_pc.expr(), next_ts)?;
 
