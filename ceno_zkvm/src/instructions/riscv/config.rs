@@ -77,6 +77,9 @@ impl UIntLtuInput<'_> {
                 break;
             }
         }
+        config.indexes.iter().for_each(|witin| {
+            set_val!(instance, witin, { i64_to_base::<F>(0) });
+        });
         set_val!(instance, config.indexes[idx], {
             i64_to_base::<F>(flag as i64)
         });
