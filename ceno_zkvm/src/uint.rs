@@ -572,6 +572,8 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
         });
 
         if !with_overflow {
+            // If the outcome overflows, `with_overflow` can't be false
+            assert_eq!(carries[carries.len() - 1], 0, "incorrect overflow flag");
             carries.resize(carries.len() - 1, 0);
         }
 

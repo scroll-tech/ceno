@@ -1,4 +1,3 @@
-use ark_std::iterable::Iterable;
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -14,7 +13,6 @@ use crate::{
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{riscv::config::ExprLtInput, Instruction},
-    set_val,
     uint::UIntValue,
     witness::LkMultiplicity,
 };
@@ -148,31 +146,30 @@ impl<E: ExtensionField> Instruction<E> for MulInstruction {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        // TODO use fields from step
-        set_val!(instance, config.pc, 1);
-        set_val!(instance, config.ts, 3);
+        config
+            .pc
+            .assign::<E>(instance, E::BaseField::from(step.pc.before.0.into()));
+        config
+            .ts
+            .assign::<E>(instance, E::BaseField::from(step.cycle));
 
         let multiplier_1 = UIntValue::new_unchecked(step.rs1().unwrap().value);
         let multiplier_2 = UIntValue::new_unchecked(step.rs2().unwrap().value);
+        let prev_rd_value = UIntValue::new_unchecked(step.rd().unwrap().value.before);
+        let outcome = UIntValue::new_unchecked(step.rd().unwrap().value.after);
 
         config
             .prev_rd_value
-            .assign_limbs(instance, [0, 0].iter().map(E::BaseField::from).collect());
+            .assign_limbs(instance, prev_rd_value.u16_fields());
         config
             .multiplier_1
             .assign_limbs(instance, multiplier_1.u16_fields());
         config
             .multiplier_2
             .assign_limbs(instance, multiplier_2.u16_fields());
-        let (outcome, carries) = multiplier_1.mul(&multiplier_2, lk_multiplicity, true);
+        let (_, carries) = multiplier_1.mul(&multiplier_2, lk_multiplicity, true);
 
-        config.outcome.assign_limbs(
-            instance,
-            outcome
-                .into_iter()
-                .map(|c| E::BaseField::from(c as u64))
-                .collect_vec(),
-        );
+        config.outcome.assign_limbs(instance, outcome.u16_fields());
         config.outcome.assign_carries(
             instance,
             carries
@@ -181,26 +178,44 @@ impl<E: ExtensionField> Instruction<E> for MulInstruction {
                 .collect_vec(),
         );
 
-        set_val!(instance, config.rs1_id, 1);
-        set_val!(instance, config.rs2_id, 2);
-        set_val!(instance, config.rd_id, 3);
-        set_val!(instance, config.prev_rs1_ts, 2);
-        set_val!(instance, config.prev_rs2_ts, 2);
-        set_val!(instance, config.prev_rd_ts, 2);
+        config.rs1_id.assign::<E>(
+            instance,
+            E::BaseField::from(step.rs1().unwrap().addr.into()),
+        );
+        config.rs2_id.assign::<E>(
+            instance,
+            E::BaseField::from(step.rs2().unwrap().addr.into()),
+        );
+        config
+            .rd_id
+            .assign::<E>(instance, E::BaseField::from(step.rd().unwrap().addr.into()));
+
+        let prev_rs1_ts = step.rs1().unwrap().previous_cycle;
+        let prev_rs2_ts = step.rs2().unwrap().previous_cycle;
+        let prev_rd_ts = step.rd().unwrap().previous_cycle;
+        config
+            .prev_rs1_ts
+            .assign::<E>(instance, E::BaseField::from(prev_rs1_ts.into()));
+        config
+            .prev_rs2_ts
+            .assign::<E>(instance, E::BaseField::from(prev_rs2_ts.into()));
+        config
+            .prev_rd_ts
+            .assign::<E>(instance, E::BaseField::from(prev_rd_ts.into()));
 
         ExprLtInput {
-            lhs: 2, // rs1_ts
-            rhs: 3, // cur_ts
+            lhs: prev_rs1_ts, // rs1_ts
+            rhs: step.cycle,  // cur_ts
         }
         .assign(instance, &config.lt_rs1_ts_cfg);
         ExprLtInput {
-            lhs: 2, // rs2_ts
-            rhs: 4, // cur_ts
+            lhs: prev_rs2_ts,    // rs2_ts
+            rhs: step.cycle + 1, // cur_ts
         }
         .assign(instance, &config.lt_rs2_ts_cfg);
         ExprLtInput {
-            lhs: 2, // rd_ts
-            rhs: 5, // cur_ts
+            lhs: prev_rd_ts,     // rd_ts
+            rhs: step.cycle + 2, // cur_ts
         }
         .assign(instance, &config.lt_rd_ts_cfg);
 
@@ -224,7 +239,6 @@ mod test {
     use super::MulInstruction;
 
     #[test]
-    #[allow(clippy::option_map_unit_fn)]
     fn test_opcode_mul() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -235,28 +249,29 @@ mod test {
 
         // values assignment
         let rs1 = Some(ReadOp {
-            addr: 0.into(),
+            addr: 1.into(),
             value: 11u32,
-            previous_cycle: 0,
+            previous_cycle: 2,
         });
         let rs2 = Some(ReadOp {
-            addr: 0.into(),
+            addr: 2.into(),
             value: 2u32,
-            previous_cycle: 0,
+            previous_cycle: 2,
         });
         let rd = Some(WriteOp {
-            addr: 2.into(),
+            addr: 3.into(),
             value: Change {
                 before: 0u32,
                 after: 22u32,
             },
-            previous_cycle: 0,
+            previous_cycle: 2,
         });
 
         let (raw_witin, _) = MulInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord {
+                cycle: 3,
                 rs1,
                 rs2,
                 rd,
@@ -278,7 +293,6 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::option_map_unit_fn)]
     fn test_opcode_mul_overflow() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -289,28 +303,84 @@ mod test {
 
         // values assignment
         let rs1 = Some(ReadOp {
-            addr: 0.into(),
+            addr: 1.into(),
             value: u32::MAX / 2 + 1, // equals to 2^32 / 2
-            previous_cycle: 0,
+            previous_cycle: 2,
         });
         let rs2 = Some(ReadOp {
-            addr: 0.into(),
+            addr: 2.into(),
             value: 2u32,
-            previous_cycle: 0,
+            previous_cycle: 2,
         });
         let rd = Some(WriteOp {
-            addr: 2.into(),
+            addr: 3.into(),
             value: Change {
                 before: 0u32,
                 after: 0u32,
             },
-            previous_cycle: 0,
+            previous_cycle: 2,
         });
 
         let (raw_witin, _) = MulInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord {
+                cycle: 3,
+                rs1,
+                rs2,
+                rd,
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+
+        MockProver::assert_satisfied(
+            &mut cb,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            None,
+        );
+    }
+
+    #[test]
+    fn test_opcode_mul_overflow2() {
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = cb
+            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
+            .unwrap()
+            .unwrap();
+
+        // values assignment
+        let rs1 = Some(ReadOp {
+            addr: 0.into(),
+            value: 4294901760u32, // equals [0, u16::MAX]
+            previous_cycle: 2,
+        });
+        let rs2 = Some(ReadOp {
+            addr: 1.into(),
+            value: 4294901760u32, // equals [0, u16::MAX]
+            previous_cycle: 2,
+        });
+        // 429490176 * 429490176 % 2^32 = 0
+        let rd = Some(WriteOp {
+            addr: 2.into(),
+            value: Change {
+                before: 0u32,
+                after: 1u32,
+            },
+            previous_cycle: 2,
+        });
+
+        let (raw_witin, _) = MulInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord {
+                cycle: 3,
                 rs1,
                 rs2,
                 rd,

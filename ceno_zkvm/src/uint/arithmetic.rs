@@ -721,6 +721,14 @@ mod tests {
             witness_values: Vec<u64>,
             overflow: bool,
         ) {
+            if overflow {
+                assert_eq!(
+                    witness_values.len() % single_wit_size,
+                    0,
+                    "witness len is incorrect"
+                )
+            }
+
             let mut cs = ConstraintSystem::new(|| "test_mul");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
