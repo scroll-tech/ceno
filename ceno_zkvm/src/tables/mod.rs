@@ -5,6 +5,8 @@ use std::collections::HashMap;
 mod range;
 pub use range::RangeTableCircuit;
 
+mod u8_pair;
+
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;
     type Input: Send + Sync;

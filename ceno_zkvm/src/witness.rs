@@ -97,7 +97,7 @@ impl LkMultiplicity {
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
         match C {
             16 => self.assert_u16(v),
-            8 => self.assert_byte(v),
+            8 => self.assert_byte(v as u8),
             5 => self.assert_u5(v),
             _ => panic!("Unsupported bit range"),
         }
@@ -112,6 +112,16 @@ impl LkMultiplicity {
             .or_default()) += 1;
     }
 
+    pub fn assert_u8_pair(&mut self, a: u8, b: u8) {
+        let key = a as u64 | (b as u64) << 8;
+        let multiplicity = self
+            .multiplicity
+            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
+        (*multiplicity.borrow_mut()[ROMType::U8Pair as usize]
+            .entry(key)
+            .or_default()) += 1;
+    }
+
     fn assert_u16(&mut self, v: u64) {
         let multiplicity = self
             .multiplicity
@@ -121,14 +131,8 @@ impl LkMultiplicity {
             .or_default()) += 1;
     }
 
-    fn assert_byte(&mut self, v: u64) {
-        let v = v * (1 << u8::BITS);
-        let multiplicity = self
-            .multiplicity
-            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
-        (*multiplicity.borrow_mut()[ROMType::U16 as usize]
-            .entry(v)
-            .or_default()) += 1;
+    fn assert_byte(&mut self, v: u8) {
+        self.assert_u8_pair(v, 0)
     }
 
     /// lookup a < b as unsigned byte
@@ -172,10 +176,10 @@ mod tests {
         // each thread calling assert_byte once
         for _ in 0..thread_count {
             let mut lkm = lkm.clone();
-            thread::spawn(move || lkm.assert_byte(8u64)).join().unwrap();
+            thread::spawn(move || lkm.assert_byte(8)).join().unwrap();
         }
         let res = lkm.into_finalize_result();
         // check multiplicity counts of assert_byte
-        assert_eq!(res[ROMType::U16 as usize][&(8 << 8)], thread_count);
+        assert_eq!(res[ROMType::U8Pair as usize][&8], thread_count);
     }
 }

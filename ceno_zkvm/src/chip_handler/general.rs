@@ -145,7 +145,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         match C {
             16 => self.assert_u16(name_fn, expr),
-            8 => self.assert_byte(name_fn, expr),
+            8 => self.assert_byte_slow(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
             _ => panic!("Unsupported bit range"),
         }
@@ -167,6 +167,24 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                 cb.cs.lk_record(name_fn, rlc_record)
             },
         )
+    }
+
+    /// Ensure that a and b are both bytes.
+    /// This is more efficient than two separate assert_byte.
+    pub(crate) fn assert_u8_pair<NR, N>(
+        &mut self,
+        name_fn: N,
+        a: Expression<E>,
+        b: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        let fields: Vec<Expression<E>> = vec![(ROMType::U8Pair as usize).into(), a, b];
+        let rlc_record = self.rlc_chip_record(fields);
+        self.lk_record(name_fn, rlc_record)?;
+        Ok(())
     }
 
     fn assert_u16<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
@@ -195,7 +213,9 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         })
     }
 
-    pub(crate) fn assert_byte<NR, N>(
+    /// Ensure that expr is a byte.
+    /// This is "slow" because `assert_u8_pair` is more efficient if you have multiple bytes.
+    pub(crate) fn assert_byte_slow<NR, N>(
         &mut self,
         name_fn: N,
         expr: Expression<E>,
@@ -204,7 +224,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.assert_u16(name_fn, expr * Expression::from(1 << 8))
+        self.assert_u8_pair(name_fn, expr, Expression::ZERO)
     }
 
     pub(crate) fn assert_bit<NR, N>(
@@ -216,6 +236,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        // TODO: Replace with `x * (1 - x)` or a multi-bit lookup similar to assert_u8_pair.
         self.assert_u16(name_fn, expr * Expression::from(1 << 15))
     }
 

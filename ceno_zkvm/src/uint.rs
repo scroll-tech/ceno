@@ -242,7 +242,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                 let limbs = (0..k)
                     .map(|_| {
                         let w = circuit_builder.create_witin(|| "").unwrap();
-                        circuit_builder.assert_byte(|| "", w.expr()).unwrap();
+                        circuit_builder.assert_byte_slow(|| "", w.expr()).unwrap();
                         w.expr()
                     })
                     .collect_vec();

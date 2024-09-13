@@ -224,6 +224,21 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
         }
     }
 
+    fn load_u8_pair_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u8>>,
+        cb: &CircuitBuilder<E>,
+        challenge: [E; 2],
+    ) {
+        for i in 0..=u16::MAX as usize {
+            let a = i & 0xff;
+            let b = (i >> 8) & 0xff;
+            let rlc_record =
+                cb.rlc_chip_record(vec![(ROMType::U8Pair as usize).into(), a.into(), b.into()]);
+            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+        }
+    }
+
     fn load_u16_table<E: ExtensionField>(
         t_vec: &mut Vec<Vec<u8>>,
         cb: &CircuitBuilder<E>,
@@ -300,6 +315,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     let mut table_vec = vec![];
     // TODO load more tables here
     load_u5_table(&mut table_vec, cb, challenge);
+    load_u8_pair_table(&mut table_vec, cb, challenge);
     load_u16_table(&mut table_vec, cb, challenge);
     load_lt_table(&mut table_vec, cb, challenge);
     load_and_table(&mut table_vec, cb, challenge);
