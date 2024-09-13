@@ -4,6 +4,11 @@ use crate::uint::UInt;
 
 pub(crate) const PC_STEP_SIZE: usize = 4;
 
+pub const OPCODE_OP: usize = 0x33;
+pub const FUNCT3_ADD_SUB: usize = 0;
+pub const FUNCT7_ADD: usize = 0;
+pub const FUNCT7_SUB: usize = 0x20;
+
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, Copy)]
 pub enum OPType {

@@ -102,6 +102,7 @@ fn main() {
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
+    // TODO: remove after #211.
     let max_instance_num_vars = {
         #[cfg(debug_assertions)]
         {

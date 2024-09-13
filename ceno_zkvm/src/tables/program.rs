@@ -135,8 +135,8 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         fixed
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
-            .zip((0..num_instructions).into_par_iter())
-            .for_each(|(row, i)| {
+            .enumerate()
+            .for_each(|(i, row)| {
                 let pc = pc_start + (i * WORD_SIZE) as u32;
                 let insn = DecodedInstruction::new(program[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);

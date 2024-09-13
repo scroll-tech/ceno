@@ -6,7 +6,10 @@ use itertools::Itertools;
 
 use super::{
     config::ExprLtConfig,
-    constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
+    constants::{
+        OPType, OpcodeType, RegUInt, FUNCT3_ADD_SUB, FUNCT7_ADD, FUNCT7_SUB, OPCODE_OP,
+        PC_STEP_SIZE,
+    },
     RIVInstruction,
 };
 use crate::{
@@ -21,11 +24,6 @@ use crate::{
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
-
-const OPCODE_OP: usize = 0x33;
-const FUNCT3_ADD_SUB: usize = 0;
-const FUNCT7_ADD: usize = 0;
-const FUNCT7_SUB: usize = 0x20;
 
 pub struct AddInstruction<E>(PhantomData<E>);
 pub struct SubInstruction<E>(PhantomData<E>);
