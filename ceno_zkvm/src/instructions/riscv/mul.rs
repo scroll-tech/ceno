@@ -195,13 +195,13 @@ impl<E: ExtensionField> Instruction<E> for MulInstruction {
         let prev_rd_ts = step.rd().unwrap().previous_cycle;
         config
             .prev_rs1_ts
-            .assign::<E>(instance, E::BaseField::from(prev_rs1_ts.into()));
+            .assign::<E>(instance, E::BaseField::from(prev_rs1_ts));
         config
             .prev_rs2_ts
-            .assign::<E>(instance, E::BaseField::from(prev_rs2_ts.into()));
+            .assign::<E>(instance, E::BaseField::from(prev_rs2_ts));
         config
             .prev_rd_ts
-            .assign::<E>(instance, E::BaseField::from(prev_rd_ts.into()));
+            .assign::<E>(instance, E::BaseField::from(prev_rd_ts));
 
         ExprLtInput {
             lhs: prev_rs1_ts, // rs1_ts
@@ -371,7 +371,7 @@ mod test {
             addr: WordAddr::from(3),
             value: Change {
                 before: 0u32,
-                after: 1u32,
+                after: 0u32,
             },
             previous_cycle: 2,
         });
