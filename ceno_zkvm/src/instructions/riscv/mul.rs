@@ -225,7 +225,7 @@ impl<E: ExtensionField> Instruction<E> for MulInstruction {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, ReadOp, StepRecord, WriteOp};
+    use ceno_emul::{Change, ReadOp, StepRecord, WordAddr, WriteOp};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -249,17 +249,17 @@ mod test {
 
         // values assignment
         let rs1 = Some(ReadOp {
-            addr: 1.into(),
+            addr: WordAddr::from(1),
             value: 11u32,
             previous_cycle: 2,
         });
         let rs2 = Some(ReadOp {
-            addr: 2.into(),
+            addr: WordAddr::from(2),
             value: 2u32,
             previous_cycle: 2,
         });
         let rd = Some(WriteOp {
-            addr: 3.into(),
+            addr: WordAddr::from(3),
             value: Change {
                 before: 0u32,
                 after: 22u32,
@@ -303,17 +303,17 @@ mod test {
 
         // values assignment
         let rs1 = Some(ReadOp {
-            addr: 1.into(),
+            addr: WordAddr::from(1),
             value: u32::MAX / 2 + 1, // equals to 2^32 / 2
             previous_cycle: 2,
         });
         let rs2 = Some(ReadOp {
-            addr: 2.into(),
+            addr: WordAddr::from(2),
             value: 2u32,
             previous_cycle: 2,
         });
         let rd = Some(WriteOp {
-            addr: 3.into(),
+            addr: WordAddr::from(3),
             value: Change {
                 before: 0u32,
                 after: 0u32,
@@ -357,18 +357,18 @@ mod test {
 
         // values assignment
         let rs1 = Some(ReadOp {
-            addr: 0.into(),
+            addr: WordAddr::from(1),
             value: 4294901760u32, // equals [0, u16::MAX]
             previous_cycle: 2,
         });
         let rs2 = Some(ReadOp {
-            addr: 1.into(),
+            addr: WordAddr::from(2),
             value: 4294901760u32, // equals [0, u16::MAX]
             previous_cycle: 2,
         });
         // 429490176 * 429490176 % 2^32 = 0
         let rd = Some(WriteOp {
-            addr: 2.into(),
+            addr: WordAddr::from(3),
             value: Change {
                 before: 0u32,
                 after: 1u32,
