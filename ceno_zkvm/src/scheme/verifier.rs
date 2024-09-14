@@ -49,6 +49,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         let point_eval = PointAndEval::default();
         let mut dummy_table_item_multiplicity = 0;
         for (name, opcode_proof) in vm_proof.opcode_proofs {
+            let mut transcript = transcript.clone();
             let circuit_vk = self
                 .vk
                 .circuit_vks
@@ -57,7 +58,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             let _rand_point = self.verify_opcode_proof(
                 circuit_vk,
                 &opcode_proof,
-                transcript,
+                &mut transcript,
                 NUM_FANIN,
                 &point_eval,
                 challenges,
@@ -83,6 +84,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
         }
 
         for (name, table_proof) in vm_proof.table_proofs {
+            let mut transcript = transcript.clone();
             let circuit_vk = self
                 .vk
                 .circuit_vks
@@ -91,7 +93,7 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             let _rand_point = self.verify_table_proof(
                 circuit_vk,
                 &table_proof,
-                transcript,
+                &mut transcript,
                 NUM_FANIN_LOGUP,
                 &point_eval,
                 challenges,

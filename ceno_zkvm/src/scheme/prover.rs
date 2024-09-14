@@ -52,6 +52,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
     ) -> Result<ZKVMProof<E>, ZKVMError> {
         let mut vm_proof = ZKVMProof::default();
         for (circuit_name, pk) in self.pk.circuit_pks.iter() {
+            // each circuit should be proved independently
+            let mut transcript = transcript.clone();
             let witness = witnesses
                 .witnesses
                 .remove(circuit_name)
@@ -84,7 +86,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
                         .collect_vec(),
                     num_instances,
                     max_threads,
-                    transcript,
+                    &mut transcript,
                     challenges,
                 )?;
                 tracing::info!(
@@ -106,7 +108,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
                         .collect_vec(),
                     num_instances,
                     max_threads,
-                    transcript,
+                    &mut transcript,
                     challenges,
                 )?;
                 tracing::info!(
