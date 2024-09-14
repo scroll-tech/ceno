@@ -487,12 +487,11 @@ mod tests {
         expression::{ToExpr, WitIn},
         instructions::riscv::config::{ExprLtConfig, ExprLtInput},
         set_val,
-        witness::RowMajorMatrix,
+        witness::{LkMultiplicity, RowMajorMatrix},
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use multilinear_extensions::mle::{IntoMLE, IntoMLEs};
-    use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
     #[derive(Debug)]
     #[allow(dead_code)]
@@ -649,6 +648,7 @@ mod tests {
             &self,
             instance: &mut [MaybeUninit<E::BaseField>],
             input: AssertLtCircuitInput,
+            lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
@@ -656,7 +656,7 @@ mod tests {
                 lhs: input.a,
                 rhs: input.b,
             }
-            .assign(instance, &self.lt_wtns);
+            .assign(instance, &self.lt_wtns, lk_multiplicity);
 
             Ok(())
         }
@@ -665,14 +665,16 @@ mod tests {
             &self,
             num_witin: usize,
             instances: Vec<AssertLtCircuitInput>,
+            lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
             let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
-            let raw_witin_iter = raw_witin.par_iter_mut();
+            let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
-                .zip_eq(instances.into_par_iter())
-                .map(|(instance, input)| self.assign_instance::<E>(instance, input))
-                .collect::<Result<(), ZKVMError>>()?;
+                .zip_eq(instances.into_iter())
+                .try_for_each(|(instance, input)| {
+                    self.assign_instance::<E>(instance, input, lk_multiplicity)
+                })?;
 
             Ok(raw_witin)
         }
@@ -685,6 +687,7 @@ mod tests {
 
         let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
 
+        let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
@@ -692,6 +695,7 @@ mod tests {
                     AssertLtCircuitInput { a: 3, b: 5 },
                     AssertLtCircuitInput { a: 7, b: 11 },
                 ],
+                &mut lk_multiplicity,
             )
             .unwrap();
 
@@ -713,6 +717,7 @@ mod tests {
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+        let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
@@ -726,6 +731,7 @@ mod tests {
                         b: u32::MAX as u64 - 2,
                     },
                 ],
+                &mut lk_multiplicity,
             )
             .unwrap();
 
@@ -765,6 +771,7 @@ mod tests {
             &self,
             instance: &mut [MaybeUninit<E::BaseField>],
             input: LtCircuitInput,
+            lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
@@ -772,7 +779,7 @@ mod tests {
                 lhs: input.a,
                 rhs: input.b,
             }
-            .assign(instance, &self.lt_wtns);
+            .assign(instance, &self.lt_wtns, lk_multiplicity);
 
             Ok(())
         }
@@ -781,14 +788,16 @@ mod tests {
             &self,
             num_witin: usize,
             instances: Vec<LtCircuitInput>,
+            lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
             let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
-            let raw_witin_iter = raw_witin.par_iter_mut();
+            let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
-                .zip_eq(instances.into_par_iter())
-                .map(|(instance, input)| self.assign_instance::<E>(instance, input))
-                .collect::<Result<(), ZKVMError>>()?;
+                .zip_eq(instances.into_iter())
+                .try_for_each(|(instance, input)| {
+                    self.assign_instance::<E>(instance, input, lk_multiplicity)
+                })?;
 
             Ok(raw_witin)
         }
@@ -801,6 +810,7 @@ mod tests {
 
         let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();
 
+        let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
@@ -808,6 +818,7 @@ mod tests {
                     LtCircuitInput { a: 3, b: 5 },
                     LtCircuitInput { a: 7, b: 11 },
                 ],
+                &mut lk_multiplicity,
             )
             .unwrap();
 
@@ -830,6 +841,7 @@ mod tests {
 
         let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();
 
+        let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
@@ -843,6 +855,7 @@ mod tests {
                         b: u32::MAX as u64 - 5,
                     },
                 ],
+                &mut lk_multiplicity,
             )
             .unwrap();
 
