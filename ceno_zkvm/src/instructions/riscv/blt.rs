@@ -60,6 +60,7 @@ impl BltInput {
         &self,
         config: &InstructionConfig<E>,
         instance: &mut [MaybeUninit<F>],
+        lk_multiplicity: &mut LkMultiplicity,
     ) {
         assert!(!self.lhs_limb8.is_empty() && (self.lhs_limb8.len() == self.rhs_limb8.len()));
         // TODO: add boundary check for witin
@@ -108,12 +109,12 @@ impl BltInput {
             lhs: self.prev_rs1_ts as u64,
             rhs: self.ts as u64,
         }
-        .assign(instance, &config.lt_rs1_cfg);
+        .assign(instance, &config.lt_rs1_cfg, lk_multiplicity);
         ExprLtInput {
             lhs: self.prev_rs2_ts as u64,
             rhs: (self.ts + 1) as u64,
         }
-        .assign(instance, &config.lt_rs2_cfg);
+        .assign(instance, &config.lt_rs2_cfg, lk_multiplicity);
     }
 
     pub fn random() -> Self {
@@ -223,12 +224,12 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [std::mem::MaybeUninit<E::BaseField>],
-        _lk_multiplicity: &mut LkMultiplicity,
+        lk_multiplicity: &mut LkMultiplicity,
         _step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         // take input from _step
         let input = BltInput::random();
-        input.assign(config, instance);
+        input.assign(config, instance, lk_multiplicity);
         Ok(())
     }
 }

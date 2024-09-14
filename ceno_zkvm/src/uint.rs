@@ -474,7 +474,6 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
         mem::size_of::<T>() / u16_bytes
     };
 
-    #[allow(dead_code)]
     pub fn new(val: T, lkm: &mut LkMultiplicity) -> Self {
         let uint = UIntValue::<T> {
             val,

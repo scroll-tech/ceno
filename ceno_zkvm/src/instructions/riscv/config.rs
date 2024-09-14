@@ -1,6 +1,6 @@
 use std::mem::MaybeUninit;
 
-use crate::{expression::WitIn, set_val, utils::i64_to_base};
+use crate::{expression::WitIn, set_val, utils::i64_to_base, witness::LkMultiplicity};
 use goldilocks::SmallField;
 use itertools::Itertools;
 
@@ -184,7 +184,12 @@ pub struct ExprLtInput {
 }
 
 impl ExprLtInput {
-    pub fn assign<F: SmallField>(&self, instance: &mut [MaybeUninit<F>], config: &ExprLtConfig) {
+    pub fn assign<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        config: &ExprLtConfig,
+        lkm: &mut LkMultiplicity,
+    ) {
         let is_lt = if let Some(is_lt_wit) = config.is_lt {
             let is_lt = self.lhs < self.rhs;
             set_val!(instance, is_lt_wit, is_lt as u64);
@@ -197,7 +202,9 @@ impl ExprLtInput {
         let diff = if is_lt { 1u64 << u32::BITS } else { 0 } + self.lhs - self.rhs;
         config.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
-            set_val!(instance, wit, (diff >> (i * u16::BITS as usize)) & 0xffff);
+            let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
+            lkm.assert_ux::<16>(val);
+            set_val!(instance, wit, val);
         });
     }
 }
