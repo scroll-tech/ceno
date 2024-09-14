@@ -51,7 +51,11 @@ impl<E: ExtensionField> ZKVMProver<E> {
         challenges: &[E; 2],
     ) -> Result<ZKVMProof<E>, ZKVMError> {
         let mut vm_proof = ZKVMProof::default();
-        for (circuit_name, pk) in self.pk.circuit_pks.iter() {
+        let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
+
+        for ((circuit_name, pk), transcript) in
+            self.pk.circuit_pks.iter().zip_eq(transcripts.iter_mut())
+        {
             let witness = witnesses
                 .witnesses
                 .remove(circuit_name)

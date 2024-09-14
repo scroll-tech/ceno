@@ -27,6 +27,25 @@ impl<E: ExtensionField> Transcript<E> {
 }
 
 impl<E: ExtensionField> Transcript<E> {
+    /// Fork this transcript into n different threads.
+    pub fn fork(&mut self, n: usize) -> Vec<Self> {
+        let mut forks = Vec::with_capacity(n);
+        for i in 0..n {
+            let mut t = self.clone();
+            t.append_field_element(&(i as u64).into());
+            forks.push(t);
+        }
+        forks
+    }
+
+    /// Include the history of the forks into the current transcript.
+    /// NOT IMPLEMENTED.
+    pub fn merge(&mut self, forks: Vec<Self>) {
+        for fork in forks {
+            self.append_field_element_ext(&fork.read_field_element_ext());
+        }
+    }
+
     // Append the message to the transcript.
     pub fn append_message(&mut self, msg: &[u8]) {
         let msg_f = E::BaseField::bytes_to_field_elements(msg);
