@@ -292,7 +292,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{riscv::constants::PC_STEP_SIZE, Instruction},
-        scheme::mock_prover::{MockProver, MOCK_PC_ADD},
+        scheme::mock_prover::{MockProver, MOCK_PC_ADD, MOCK_PC_SUB, MOCK_PROGRAM},
     };
 
     use super::{AddInstruction, SubInstruction};
@@ -319,6 +319,7 @@ mod test {
             vec![StepRecord {
                 cycle: 3,
                 pc: Change::new(MOCK_PC_ADD, MOCK_PC_ADD + PC_STEP_SIZE),
+                insn_code: MOCK_PROGRAM[0],
                 rs1: Some(ReadOp {
                     addr: CENO_PLATFORM.register_vma(2).into(),
                     value: 11u32,
@@ -376,6 +377,7 @@ mod test {
             vec![StepRecord {
                 cycle: 3,
                 pc: Change::new(MOCK_PC_ADD, MOCK_PC_ADD + PC_STEP_SIZE),
+                insn_code: MOCK_PROGRAM[0],
                 rs1: Some(ReadOp {
                     addr: CENO_PLATFORM.register_vma(2).into(),
                     value: u32::MAX - 1,
@@ -432,7 +434,8 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord {
                 cycle: 3,
-                pc: Change::new(MOCK_PC_ADD, MOCK_PC_ADD + PC_STEP_SIZE), // TODO
+                pc: Change::new(MOCK_PC_SUB, MOCK_PC_SUB + PC_STEP_SIZE),
+                insn_code: MOCK_PROGRAM[1],
                 rs1: Some(ReadOp {
                     addr: CENO_PLATFORM.register_vma(2).into(),
                     value: 11u32,
@@ -489,7 +492,8 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord {
                 cycle: 3,
-                pc: Change::new(MOCK_PC_ADD, MOCK_PC_ADD + PC_STEP_SIZE), // TODO
+                pc: Change::new(MOCK_PC_SUB, MOCK_PC_SUB + PC_STEP_SIZE),
+                insn_code: MOCK_PROGRAM[1],
                 rs1: Some(ReadOp {
                     addr: CENO_PLATFORM.register_vma(2).into(),
                     value: 3u32,
