@@ -141,12 +141,12 @@ fn main() {
 
         let timer = Instant::now();
 
-        let mut transcript = Transcript::new(b"riscv");
+        let transcript = Transcript::new(b"riscv");
         let mut rng = test_rng();
         let real_challenges = [E::random(&mut rng), E::random(&mut rng)];
 
         let zkvm_proof = prover
-            .create_proof(zkvm_witness, max_threads, &mut transcript, &real_challenges)
+            .create_proof(zkvm_witness, max_threads, transcript, &real_challenges)
             .expect("create_proof failed");
 
         println!(
@@ -155,10 +155,10 @@ fn main() {
             timer.elapsed().as_secs_f64()
         );
 
-        let mut transcript = Transcript::new(b"riscv");
+        let transcript = Transcript::new(b"riscv");
         assert!(
             verifier
-                .verify_proof(zkvm_proof, &mut transcript, &real_challenges)
+                .verify_proof(zkvm_proof, transcript, &real_challenges)
                 .expect("verify proof return with error"),
         );
     }

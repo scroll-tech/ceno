@@ -47,14 +47,17 @@ impl<E: ExtensionField> ZKVMProver<E> {
         &self,
         mut witnesses: ZKVMWitnesses<E>,
         max_threads: usize,
-        transcript: &mut Transcript<E>,
+        transcript: Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ZKVMProof<E>, ZKVMError> {
         let mut vm_proof = ZKVMProof::default();
         let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
 
-        for ((circuit_name, pk), transcript) in
-            self.pk.circuit_pks.iter().zip_eq(transcripts.iter_mut())
+        for ((circuit_name, pk), (i, transcript)) in self
+            .pk
+            .circuit_pks
+            .iter() // Sorted by key.
+            .zip_eq(transcripts.iter_mut().enumerate())
         {
             let witness = witnesses
                 .witnesses
@@ -98,7 +101,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 );
                 vm_proof
                     .opcode_proofs
-                    .insert(circuit_name.clone(), opcode_proof);
+                    .insert(circuit_name.clone(), (i, opcode_proof));
             } else {
                 let table_proof = self.create_table_proof(
                     pk,
@@ -120,7 +123,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
                 );
                 vm_proof
                     .table_proofs
-                    .insert(circuit_name.clone(), table_proof);
+                    .insert(circuit_name.clone(), (i, table_proof));
             }
         }
 
