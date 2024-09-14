@@ -160,6 +160,7 @@ fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
     lk_multiplicity: &mut LkMultiplicity,
     step: &StepRecord,
 ) -> Result<(), ZKVMError> {
+    lk_multiplicity.fetch(step.pc().before.0);
     set_val!(instance, config.pc, step.pc().before.0 as u64);
     set_val!(instance, config.ts, step.cycle());
     let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
@@ -277,43 +278,7 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        lk_multiplicity.fetch(step.pc().before.0);
-        set_val!(instance, config.pc, step.pc().before.0 as u64);
-
-        // TODO use field from step
-        set_val!(instance, config.ts, 2);
-        config.prev_rd_value.wits_in().map(|prev_rd_value| {
-            set_val!(instance, prev_rd_value[0], 4);
-            set_val!(instance, prev_rd_value[1], 4);
-        });
-        config.addend_0.wits_in().map(|addend_0| {
-            set_val!(instance, addend_0[0], 4);
-            set_val!(instance, addend_0[1], 4);
-        });
-        config.addend_1.wits_in().map(|addend_1| {
-            set_val!(instance, addend_1[0], 4);
-            set_val!(instance, addend_1[1], 4);
-        });
-        // TODO #174
-        config.outcome.carries.as_ref().map(|carry| {
-            set_val!(instance, carry[0], 4);
-            set_val!(instance, carry[1], 0);
-        });
-
-        // Register IDs.
-        for (reg_col, reg_id) in [
-            (config.rs1_id, step.rs1().unwrap().register_index()),
-            (config.rs2_id, step.rs2().unwrap().register_index()),
-            (config.rd_id, step.rd().unwrap().register_index()),
-        ] {
-            set_val!(instance, reg_col, reg_id as u64);
-        }
-
-        // TODO #167
-        set_val!(instance, config.prev_rs1_ts, 2);
-        set_val!(instance, config.prev_rs2_ts, 2);
-        set_val!(instance, config.prev_rd_ts, 2);
-        Ok(())
+        add_sub_assignment::<_, false>(config, instance, lk_multiplicity, step)
     }
 }
 
