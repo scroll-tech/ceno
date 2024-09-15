@@ -10,6 +10,7 @@ use crate::{
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::riscv::config::ExprLtConfig,
     structs::ROMType,
+    tables::InsnRecord,
 };
 
 use super::utils::rlc_chip_record;
@@ -58,6 +59,17 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.lk_table_record(name_fn, rlc_record, multiplicity)
+    }
+
+    /// Fetch an instruction at a given PC from the Program table.
+    pub fn lk_fetch(&mut self, record: &InsnRecord<Expression<E>>) -> Result<(), ZKVMError> {
+        let rlc_record = {
+            let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
+            fields.extend_from_slice(record.as_slice());
+            self.rlc_chip_record(fields)
+        };
+
+        self.cs.lk_record(|| "fetch", rlc_record)
     }
 
     pub fn read_record<NR, N>(
