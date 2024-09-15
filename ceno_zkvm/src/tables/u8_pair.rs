@@ -24,7 +24,8 @@ pub struct U8PairTableCircuit<E>(PhantomData<E>);
 
 impl<E: ExtensionField> TableCircuit<E> for U8PairTableCircuit<E> {
     type TableConfig = U8PairTableConfig;
-    type Input = u64;
+    type FixedInput = ();
+    type WitnessInput = ();
 
     fn name() -> String {
         "U8_PAIR".into()
@@ -49,6 +50,7 @@ impl<E: ExtensionField> TableCircuit<E> for U8PairTableCircuit<E> {
     fn generate_fixed_traces(
         config: &U8PairTableConfig,
         num_fixed: usize,
+        _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
         let num_u16s = 1 << 16;
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_u16s, num_fixed);
@@ -59,8 +61,8 @@ impl<E: ExtensionField> TableCircuit<E> for U8PairTableCircuit<E> {
             .for_each(|(row, i)| {
                 let a = i & 0xff;
                 let b = (i >> 8) & 0xff;
-                set_fixed_val!(row, config.tbl_a.0, E::BaseField::from(a as u64));
-                set_fixed_val!(row, config.tbl_b.0, E::BaseField::from(b as u64));
+                set_fixed_val!(row, config.tbl_a, E::BaseField::from(a as u64));
+                set_fixed_val!(row, config.tbl_b, E::BaseField::from(b as u64));
             });
 
         fixed
@@ -70,6 +72,7 @@ impl<E: ExtensionField> TableCircuit<E> for U8PairTableCircuit<E> {
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
+        _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[ROMType::U8Pair as usize];
         let mut mlts = vec![0; 1 << 16];
