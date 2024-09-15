@@ -1,3 +1,6 @@
+use ff::Field;
+use ff_ext::ExtensionField;
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
@@ -9,8 +12,6 @@ use crate::{
     structs::ROMType,
     witness::RowMajorMatrix,
 };
-use ff_ext::ExtensionField;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 const NUM_U8_PAIRS: usize = 1 << 16;
 
@@ -56,6 +57,12 @@ impl<E: ExtensionField> U8PairTableCircuit<E> {
                 set_fixed_val!(row, config.tbl_a, E::BaseField::from(a as u64));
                 set_fixed_val!(row, config.tbl_b, E::BaseField::from(b as u64));
             });
+
+        // Fill the rest with zeros.
+        fixed.par_iter_mut().skip(NUM_U8_PAIRS).for_each(|row| {
+            set_fixed_val!(row, config.tbl_a, E::BaseField::ZERO);
+            set_fixed_val!(row, config.tbl_b, E::BaseField::ZERO);
+        });
     }
 
     pub fn assign_instances(
@@ -77,5 +84,10 @@ impl<E: ExtensionField> U8PairTableCircuit<E> {
             .for_each(|(row, mlt)| {
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
+
+        // Fill the rest with zeros.
+        witness.par_iter_mut().skip(NUM_U8_PAIRS).for_each(|row| {
+            set_val!(row, config.mlt, E::BaseField::ZERO);
+        });
     }
 }
