@@ -1,3 +1,6 @@
+mod u8_pair;
+use u8_pair::{U8PairTableCircuit, U8PairTableConfig};
+
 use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
@@ -18,6 +21,8 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 pub struct RangeTableConfig {
     u16_tbl: Fixed,
     u16_mlt: WitIn,
+
+    u8_pair: U8PairTableConfig,
 }
 
 pub struct RangeTableCircuit<E>(PhantomData<E>);
@@ -42,7 +47,16 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
 
         cb.lk_table_record(|| "u16 table", u16_table_values, u16_mlt.expr())?;
 
-        Ok(RangeTableConfig { u16_tbl, u16_mlt })
+        let u8_pair = cb.namespace(
+            || "u8_pair",
+            |cb| U8PairTableCircuit::<E>::construct_circuit(cb),
+        )?;
+
+        Ok(RangeTableConfig {
+            u16_tbl,
+            u16_mlt,
+            u8_pair,
+        })
     }
 
     fn generate_fixed_traces(
@@ -60,6 +74,8 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
                 set_fixed_val!(row, config.u16_tbl, E::BaseField::from(i as u64));
             });
 
+        U8PairTableCircuit::<E>::generate_fixed_traces(&config.u8_pair, &mut fixed);
+
         fixed
     }
 
@@ -69,9 +85,8 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        let multiplicity = &multiplicity[ROMType::U16 as usize];
         let mut u16_mlt = vec![0; 1 << RANGE_CHIP_BIT_WIDTH];
-        for (limb, mlt) in multiplicity {
+        for (limb, mlt) in &multiplicity[ROMType::U16 as usize] {
             u16_mlt[*limb as usize] = *mlt;
         }
 
@@ -83,6 +98,8 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
             .for_each(|(row, mlt)| {
                 set_val!(row, config.u16_mlt, E::BaseField::from(mlt as u64));
             });
+
+        U8PairTableCircuit::<E>::assign_instances(&config.u8_pair, multiplicity, &mut witness);
 
         Ok(witness)
     }
