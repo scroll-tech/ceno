@@ -1,23 +1,16 @@
-use std::marker::PhantomData;
-
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 
 use super::{
     config::ExprLtConfig,
-    constants::{
-        OPType, OpcodeType, RegUInt, FUNCT3_ADD_SUB, FUNCT7_ADD, FUNCT7_SUB, OPCODE_OP,
-        PC_STEP_SIZE,
-    },
-    RIVInstruction,
+    constants::{RegUInt, PC_STEP_SIZE},
 };
 use crate::{
     chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::{riscv::config::ExprLtInput, Instruction},
+    instructions::riscv::config::ExprLtInput,
     set_val,
     tables::InsnRecord,
     uint::UIntValue,

@@ -10,11 +10,7 @@ use super::{
     RIVInstruction,
 };
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    instructions::{riscv::config::ExprLtInput, Instruction},
-    set_val,
-    uint::UIntValue,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::UIntValue,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
