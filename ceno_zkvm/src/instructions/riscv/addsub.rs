@@ -74,15 +74,9 @@ fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
     lk_multiplicity: &mut LkMultiplicity,
     step: &StepRecord,
 ) -> Result<(), ZKVMError> {
-    lk_multiplicity.fetch(step.pc().before.0);
-    set_val!(instance, config.pc, step.pc().before.0 as u64);
-    set_val!(instance, config.ts, step.cycle());
-    let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
-    let rd_prev = UIntValue::new_unchecked(step.rd().unwrap().value.before);
-    config
-        .prev_rd_value
-        .assign_limbs(instance, rd_prev.u16_fields());
+    config.assign_instance(instance, lk_multiplicity, step)?;
 
+    let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
     config
         .addend_1
         .assign_limbs(instance, addend_1.u16_fields());
@@ -114,39 +108,7 @@ fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
                 .collect_vec(),
         );
     }
-    set_val!(instance, config.rs1_id, step.insn().rs1() as u64);
-    set_val!(instance, config.rs2_id, step.insn().rs2() as u64);
-    set_val!(instance, config.rd_id, step.insn().rd() as u64);
-    ExprLtInput {
-        lhs: step.rs1().unwrap().previous_cycle,
-        rhs: step.cycle(),
-    }
-    .assign(instance, &config.lt_rs1_cfg, lk_multiplicity);
-    ExprLtInput {
-        lhs: step.rs2().unwrap().previous_cycle,
-        rhs: step.cycle() + 1,
-    }
-    .assign(instance, &config.lt_rs2_cfg, lk_multiplicity);
-    ExprLtInput {
-        lhs: step.rd().unwrap().previous_cycle,
-        rhs: step.cycle() + 2,
-    }
-    .assign(instance, &config.lt_prev_ts_cfg, lk_multiplicity);
-    set_val!(
-        instance,
-        config.prev_rs1_ts,
-        step.rs1().unwrap().previous_cycle
-    );
-    set_val!(
-        instance,
-        config.prev_rs2_ts,
-        step.rs2().unwrap().previous_cycle
-    );
-    set_val!(
-        instance,
-        config.prev_rd_ts,
-        step.rd().unwrap().previous_cycle
-    );
+
     Ok(())
 }
 

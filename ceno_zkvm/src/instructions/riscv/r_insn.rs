@@ -74,11 +74,13 @@ impl<E: ExtensionField> RInstructionConfig<E> {
             funct7.into(),
         ))?;
 
+        // Register state.
         let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
         let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
         let prev_rd_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
         let prev_rd_value = RegUInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
 
+        // Register read and write.
         let (ts, lt_rs1_cfg) = circuit_builder.register_read(
             || "read_rs1",
             &rs1_id,
@@ -127,11 +129,57 @@ impl<E: ExtensionField> RInstructionConfig<E> {
     }
 
     pub fn assign_instance(
-        config: &Self,
+        &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        todo!()
+        // State in.
+        set_val!(instance, self.pc, step.pc().before.0 as u64);
+        set_val!(instance, self.ts, step.cycle());
+
+        // Register indexes.
+        set_val!(instance, self.rs1_id, step.insn().rs1() as u64);
+        set_val!(instance, self.rs2_id, step.insn().rs2() as u64);
+        set_val!(instance, self.rd_id, step.insn().rd() as u64);
+
+        // Fetch the instruction.
+        lk_multiplicity.fetch(step.pc().before.0);
+
+        // Register state.
+        set_val!(
+            instance,
+            self.prev_rs1_ts,
+            step.rs1().unwrap().previous_cycle
+        );
+        set_val!(
+            instance,
+            self.prev_rs2_ts,
+            step.rs2().unwrap().previous_cycle
+        );
+        set_val!(instance, self.prev_rd_ts, step.rd().unwrap().previous_cycle);
+        self.prev_rd_value.assign_limbs(
+            instance,
+            UIntValue::new_unchecked(step.rd().unwrap().value.before).u16_fields(),
+        );
+
+        // Register read and write.
+        ExprLtInput {
+            lhs: step.rs1().unwrap().previous_cycle,
+            rhs: step.cycle(),
+        }
+        .assign(instance, &self.lt_rs1_cfg, lk_multiplicity);
+        ExprLtInput {
+            lhs: step.rs2().unwrap().previous_cycle,
+            rhs: step.cycle() + 1,
+        }
+        .assign(instance, &self.lt_rs2_cfg, lk_multiplicity);
+        ExprLtInput {
+            lhs: step.rd().unwrap().previous_cycle,
+            rhs: step.cycle() + 2,
+        }
+        .assign(instance, &self.lt_prev_ts_cfg, lk_multiplicity);
+
+        Ok(())
     }
 }
