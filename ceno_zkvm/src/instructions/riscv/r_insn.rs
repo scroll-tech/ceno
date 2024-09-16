@@ -20,18 +20,18 @@ use core::mem::MaybeUninit;
 
 #[derive(Debug)]
 pub struct RInstructionConfig<E: ExtensionField> {
-    pub pc: WitIn,
-    pub ts: WitIn,
-    pub rs1_id: WitIn,
-    pub rs2_id: WitIn,
-    pub rd_id: WitIn,
-    pub prev_rd_value: RegUInt<E>,
-    pub prev_rs1_ts: WitIn,
-    pub prev_rs2_ts: WitIn,
-    pub prev_rd_ts: WitIn,
-    pub lt_rs1_cfg: ExprLtConfig,
-    pub lt_rs2_cfg: ExprLtConfig,
-    pub lt_prev_ts_cfg: ExprLtConfig,
+    pc: WitIn,
+    ts: WitIn,
+    rs1_id: WitIn,
+    rs2_id: WitIn,
+    rd_id: WitIn,
+    prev_rd_value: RegUInt<E>,
+    prev_rs1_ts: WitIn,
+    prev_rs2_ts: WitIn,
+    prev_rd_ts: WitIn,
+    lt_rs1_cfg: ExprLtConfig,
+    lt_rs2_cfg: ExprLtConfig,
+    lt_prev_ts_cfg: ExprLtConfig,
 }
 
 impl<E: ExtensionField> RInstructionConfig<E> {
