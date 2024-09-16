@@ -3,6 +3,7 @@ use ff_ext::ExtensionField;
 
 use super::Instruction;
 
+mod r_insn;
 pub mod addsub;
 pub mod blt;
 pub mod config;

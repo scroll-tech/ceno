@@ -5,21 +5,15 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 
 use super::{
-    config::ExprLtConfig,
-    constants::{
-        OPType, OpcodeType, RegUInt, FUNCT3_ADD_SUB, FUNCT7_ADD, FUNCT7_SUB, OPCODE_OP,
-        PC_STEP_SIZE,
-    },
+    constants::{OPType, OpcodeType, RegUInt, FUNCT3_ADD_SUB, FUNCT7_ADD, FUNCT7_SUB, OPCODE_OP},
+    r_insn::RInstructionConfig,
     RIVInstruction,
 };
 use crate::{
-    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
     instructions::{riscv::config::ExprLtInput, Instruction},
     set_val,
-    tables::InsnRecord,
     uint::UIntValue,
     witness::LkMultiplicity,
 };
@@ -27,26 +21,6 @@ use core::mem::MaybeUninit;
 
 pub struct AddInstruction<E>(PhantomData<E>);
 pub struct SubInstruction<E>(PhantomData<E>);
-
-#[derive(Debug)]
-pub struct InstructionConfig<E: ExtensionField> {
-    pub pc: WitIn,
-    pub ts: WitIn,
-    pub prev_rd_value: RegUInt<E>,
-    pub addend_0: RegUInt<E>,
-    pub addend_1: RegUInt<E>,
-    pub outcome: RegUInt<E>,
-    pub rs1_id: WitIn,
-    pub rs2_id: WitIn,
-    pub rd_id: WitIn,
-    pub prev_rs1_ts: WitIn,
-    pub prev_rs2_ts: WitIn,
-    pub prev_rd_ts: WitIn,
-    pub lt_rs1_cfg: ExprLtConfig,
-    pub lt_rs2_cfg: ExprLtConfig,
-    pub lt_prev_ts_cfg: ExprLtConfig,
-    phantom: PhantomData<E>,
-}
 
 impl<E: ExtensionField> RIVInstruction<E> for AddInstruction<E> {
     const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0000000);
@@ -58,18 +32,8 @@ impl<E: ExtensionField> RIVInstruction<E> for SubInstruction<E> {
 
 fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     circuit_builder: &mut CircuitBuilder<E>,
-) -> Result<InstructionConfig<E>, ZKVMError> {
-    let pc = circuit_builder.create_witin(|| "pc")?;
-    let cur_ts = circuit_builder.create_witin(|| "cur_ts")?;
-
-    // state in
-    circuit_builder.state_in(pc.expr(), cur_ts.expr())?;
-
-    let next_pc = pc.expr() + PC_STEP_SIZE.into();
-
+) -> Result<RInstructionConfig<E>, ZKVMError> {
     // Execution result = addend0 + addend1, with carry.
-    let prev_rd_value = RegUInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
-
     let (addend_0, addend_1, outcome) = if IS_ADD {
         // outcome = addend_0 + addend_1
         let addend_0 = RegUInt::new_unchecked(|| "addend_0", circuit_builder)?;
@@ -93,69 +57,19 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         )
     };
 
-    let rs1_id = circuit_builder.create_witin(|| "rs1_id")?;
-    let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
-    let rd_id = circuit_builder.create_witin(|| "rd_id")?;
+    let funct7 = if IS_ADD { FUNCT7_ADD } else { FUNCT7_SUB };
 
-    // Fetch the instruction.
-    circuit_builder.lk_fetch(&InsnRecord::new(
-        pc.expr(),
-        OPCODE_OP.into(),
-        rd_id.expr(),
-        FUNCT3_ADD_SUB.into(),
-        rs1_id.expr(),
-        rs2_id.expr(),
-        (if IS_ADD { FUNCT7_ADD } else { FUNCT7_SUB }).into(),
-    ))?;
-
-    let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
-    let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
-    let prev_rd_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
-
-    let (ts, lt_rs1_cfg) = circuit_builder.register_read(
-        || "read_rs1",
-        &rs1_id,
-        prev_rs1_ts.expr(),
-        cur_ts.expr(),
-        &addend_0,
-    )?;
-    let (ts, lt_rs2_cfg) =
-        circuit_builder.register_read(|| "read_rs2", &rs2_id, prev_rs2_ts.expr(), ts, &addend_1)?;
-
-    let (ts, lt_prev_ts_cfg) = circuit_builder.register_write(
-        || "write_rd",
-        &rd_id,
-        prev_rd_ts.expr(),
-        ts,
-        &prev_rd_value,
-        &outcome,
-    )?;
-
-    let next_ts = ts + 1.into();
-    circuit_builder.state_out(next_pc, next_ts)?;
-
-    Ok(InstructionConfig {
-        pc,
-        ts: cur_ts,
-        prev_rd_value,
-        addend_0,
-        addend_1,
-        outcome,
-        rs1_id,
-        rs2_id,
-        rd_id,
-        prev_rs1_ts,
-        prev_rs2_ts,
-        prev_rd_ts,
-        lt_rs1_cfg,
-        lt_rs2_cfg,
-        lt_prev_ts_cfg,
-        phantom: PhantomData,
-    })
+    RInstructionConfig::<E>::construct_circuit(
+        circuit_builder,
+        (OPCODE_OP, FUNCT3_ADD_SUB, funct7),
+        addend_0.clone(),
+        addend_1.clone(),
+        outcome.clone(),
+    )
 }
 
 fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
-    config: &InstructionConfig<E>,
+    config: &RInstructionConfig<E>,
     instance: &mut [MaybeUninit<E::BaseField>],
     lk_multiplicity: &mut LkMultiplicity,
     step: &StepRecord,
@@ -241,10 +155,10 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     fn name() -> String {
         "ADD".into()
     }
-    type InstructionConfig = InstructionConfig<E>;
+    type InstructionConfig = RInstructionConfig<E>;
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<InstructionConfig<E>, ZKVMError> {
+    ) -> Result<RInstructionConfig<E>, ZKVMError> {
         add_sub_gadget::<E, true>(circuit_builder)
     }
 
@@ -264,10 +178,10 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
     fn name() -> String {
         "SUB".into()
     }
-    type InstructionConfig = InstructionConfig<E>;
+    type InstructionConfig = RInstructionConfig<E>;
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<InstructionConfig<E>, ZKVMError> {
+    ) -> Result<RInstructionConfig<E>, ZKVMError> {
         add_sub_gadget::<E, false>(circuit_builder)
     }
 
