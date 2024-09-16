@@ -143,15 +143,15 @@ impl<E: ExtensionField> Instruction<E> for MulInstruction {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
-        lk_multiplicity: &mut LkMultiplicity,
+        lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         config
             .pc
-            .assign::<E>(instance, E::BaseField::from(step.pc.before.0.into()));
+            .assign::<E>(instance, E::BaseField::from(step.pc().before.0.into()));
         config
             .ts
-            .assign::<E>(instance, E::BaseField::from(step.cycle));
+            .assign::<E>(instance, E::BaseField::from(step.cycle()));
 
         let multiplier_1 = UIntValue::new_unchecked(step.rs1().unwrap().value);
         let multiplier_2 = UIntValue::new_unchecked(step.rs2().unwrap().value);
@@ -167,7 +167,7 @@ impl<E: ExtensionField> Instruction<E> for MulInstruction {
         config
             .multiplier_2
             .assign_limbs(instance, multiplier_2.u16_fields());
-        let (_, carries) = multiplier_1.mul(&multiplier_2, lk_multiplicity, true);
+        let (_, carries) = multiplier_1.mul(&multiplier_2, lkm, true);
 
         config.outcome.assign_limbs(instance, outcome.u16_fields());
         config.outcome.assign_carries(
@@ -204,20 +204,20 @@ impl<E: ExtensionField> Instruction<E> for MulInstruction {
             .assign::<E>(instance, E::BaseField::from(prev_rd_ts));
 
         ExprLtInput {
-            lhs: prev_rs1_ts, // rs1_ts
-            rhs: step.cycle,  // cur_ts
+            lhs: prev_rs1_ts,  // rs1_ts
+            rhs: step.cycle(), // cur_ts
         }
-        .assign(instance, &config.lt_rs1_ts_cfg);
+        .assign(instance, &config.lt_rs1_ts_cfg, lkm);
         ExprLtInput {
-            lhs: prev_rs2_ts,    // rs2_ts
-            rhs: step.cycle + 1, // cur_ts
+            lhs: prev_rs2_ts,      // rs2_ts
+            rhs: step.cycle() + 1, // cur_ts
         }
-        .assign(instance, &config.lt_rs2_ts_cfg);
+        .assign(instance, &config.lt_rs2_ts_cfg, lkm);
         ExprLtInput {
-            lhs: prev_rd_ts,     // rd_ts
-            rhs: step.cycle + 2, // cur_ts
+            lhs: prev_rd_ts,       // rd_ts
+            rhs: step.cycle() + 2, // cur_ts
         }
-        .assign(instance, &config.lt_rd_ts_cfg);
+        .assign(instance, &config.lt_rd_ts_cfg, lkm);
 
         Ok(())
     }
