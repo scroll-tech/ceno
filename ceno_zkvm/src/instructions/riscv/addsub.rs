@@ -19,6 +19,15 @@ use crate::{
 };
 use core::mem::MaybeUninit;
 
+#[derive(Debug)]
+pub struct AddSubConfig<E: ExtensionField> {
+    r_insn: RInstructionConfig<E>,
+
+    addend_0: RegUInt<E>,
+    addend_1: RegUInt<E>,
+    outcome: RegUInt<E>,
+}
+
 pub struct AddInstruction<E>(PhantomData<E>);
 pub struct SubInstruction<E>(PhantomData<E>);
 
@@ -32,7 +41,7 @@ impl<E: ExtensionField> RIVInstruction<E> for SubInstruction<E> {
 
 fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     circuit_builder: &mut CircuitBuilder<E>,
-) -> Result<RInstructionConfig<E>, ZKVMError> {
+) -> Result<AddSubConfig<E>, ZKVMError> {
     // Execution result = addend0 + addend1, with carry.
     let (addend_0, addend_1, outcome) = if IS_ADD {
         // outcome = addend_0 + addend_1
@@ -59,22 +68,31 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
 
     let funct7 = if IS_ADD { FUNCT7_ADD } else { FUNCT7_SUB };
 
-    RInstructionConfig::<E>::construct_circuit(
+    let r_insn = RInstructionConfig::<E>::construct_circuit(
         circuit_builder,
         (OPCODE_OP, FUNCT3_ADD_SUB, funct7),
-        addend_0.clone(),
-        addend_1.clone(),
-        outcome.clone(),
-    )
+        &addend_0,
+        &addend_1,
+        &outcome,
+    )?;
+
+    Ok(AddSubConfig {
+        r_insn,
+        addend_0,
+        addend_1,
+        outcome,
+    })
 }
 
 fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
-    config: &RInstructionConfig<E>,
+    config: &AddSubConfig<E>,
     instance: &mut [MaybeUninit<E::BaseField>],
     lk_multiplicity: &mut LkMultiplicity,
     step: &StepRecord,
 ) -> Result<(), ZKVMError> {
-    config.assign_instance(instance, lk_multiplicity, step)?;
+    config
+        .r_insn
+        .assign_instance(instance, lk_multiplicity, step)?;
 
     let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
     config
@@ -117,10 +135,11 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     fn name() -> String {
         "ADD".into()
     }
-    type InstructionConfig = RInstructionConfig<E>;
+    type InstructionConfig = AddSubConfig<E>;
+
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<RInstructionConfig<E>, ZKVMError> {
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         add_sub_gadget::<E, true>(circuit_builder)
     }
 
@@ -140,10 +159,11 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
     fn name() -> String {
         "SUB".into()
     }
-    type InstructionConfig = RInstructionConfig<E>;
+    type InstructionConfig = AddSubConfig<E>;
+
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<RInstructionConfig<E>, ZKVMError> {
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         add_sub_gadget::<E, false>(circuit_builder)
     }
 

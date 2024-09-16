@@ -16,7 +16,7 @@ use crate::{
     chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
+    expression::{Expression, ToExpr, WitIn},
     instructions::{riscv::config::ExprLtInput, Instruction},
     set_val,
     tables::InsnRecord,
@@ -29,13 +29,10 @@ use core::mem::MaybeUninit;
 pub struct RInstructionConfig<E: ExtensionField> {
     pub pc: WitIn,
     pub ts: WitIn,
-    pub prev_rd_value: RegUInt<E>,
-    pub addend_0: RegUInt<E>,
-    pub addend_1: RegUInt<E>,
-    pub outcome: RegUInt<E>,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub rd_id: WitIn,
+    pub prev_rd_value: RegUInt<E>,
     pub prev_rs1_ts: WitIn,
     pub prev_rs2_ts: WitIn,
     pub prev_rd_ts: WitIn,
@@ -48,9 +45,9 @@ impl<E: ExtensionField> RInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         opcode_funct_3_7: (usize, usize, usize),
-        addend_0: RegUInt<E>,
-        addend_1: RegUInt<E>,
-        outcome: RegUInt<E>,
+        addend_0: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        addend_1: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        outcome: &impl ToExpr<E, Output = Vec<Expression<E>>>,
     ) -> Result<Self, ZKVMError> {
         // State in.
         let pc = circuit_builder.create_witin(|| "pc")?;
@@ -86,14 +83,14 @@ impl<E: ExtensionField> RInstructionConfig<E> {
             &rs1_id,
             prev_rs1_ts.expr(),
             cur_ts.expr(),
-            &addend_0,
+            addend_0,
         )?;
         let (ts, lt_rs2_cfg) = circuit_builder.register_read(
             || "read_rs2",
             &rs2_id,
             prev_rs2_ts.expr(),
             ts,
-            &addend_1,
+            addend_1,
         )?;
         let (ts, lt_prev_ts_cfg) = circuit_builder.register_write(
             || "write_rd",
@@ -101,7 +98,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
             prev_rd_ts.expr(),
             ts,
             &prev_rd_value,
-            &outcome,
+            outcome,
         )?;
 
         // State out.
@@ -112,13 +109,10 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         Ok(RInstructionConfig {
             pc,
             ts: cur_ts,
-            prev_rd_value,
-            addend_0,
-            addend_1,
-            outcome,
             rs1_id,
             rs2_id,
             rd_id,
+            prev_rd_value,
             prev_rs1_ts,
             prev_rs2_ts,
             prev_rd_ts,

@@ -13,13 +13,13 @@ use super::RegisterChipOperations;
 impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperations<E, NR, N>
     for CircuitBuilder<'a, E>
 {
-    fn register_read<V: ToExpr<E, Output = Vec<Expression<E>>>>(
+    fn register_read(
         &mut self,
         name_fn: N,
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        values: &V,
+        values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
@@ -58,14 +58,14 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         })
     }
 
-    fn register_write<V: ToExpr<E, Output = Vec<Expression<E>>>>(
+    fn register_write(
         &mut self,
         name_fn: N,
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: &V,
-        values: &V,
+        prev_values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
