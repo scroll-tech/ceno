@@ -284,14 +284,14 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, ReadOp, StepRecord, WriteOp, CENO_PLATFORM};
+    use ceno_emul::{Change, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{riscv::constants::PC_STEP_SIZE, Instruction},
+        instructions::Instruction,
         scheme::mock_prover::{MockProver, MOCK_PC_ADD, MOCK_PC_SUB, MOCK_PROGRAM},
     };
 
@@ -316,30 +316,14 @@ mod test {
         let (raw_witin, _) = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord {
-                cycle: 3,
-                pc: Change::new(MOCK_PC_ADD, MOCK_PC_ADD + PC_STEP_SIZE),
-                insn_code: MOCK_PROGRAM[0],
-                rs1: Some(ReadOp {
-                    addr: CENO_PLATFORM.register_vma(2).into(),
-                    value: 11u32,
-                    previous_cycle: 0,
-                }),
-                rs2: Some(ReadOp {
-                    addr: CENO_PLATFORM.register_vma(3).into(),
-                    value: 0xfffffffeu32,
-                    previous_cycle: 0,
-                }),
-                rd: Some(WriteOp {
-                    addr: CENO_PLATFORM.register_vma(4).into(),
-                    value: Change {
-                        before: 0u32,
-                        after: 11u32.wrapping_add(0xfffffffeu32),
-                    },
-                    previous_cycle: 0,
-                }),
-                ..Default::default()
-            }],
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_ADD,
+                MOCK_PROGRAM[0],
+                11,
+                0xfffffffe,
+                Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
+            )],
         )
         .unwrap();
 
@@ -374,30 +358,14 @@ mod test {
         let (raw_witin, _) = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord {
-                cycle: 3,
-                pc: Change::new(MOCK_PC_ADD, MOCK_PC_ADD + PC_STEP_SIZE),
-                insn_code: MOCK_PROGRAM[0],
-                rs1: Some(ReadOp {
-                    addr: CENO_PLATFORM.register_vma(2).into(),
-                    value: u32::MAX - 1,
-                    previous_cycle: 0,
-                }),
-                rs2: Some(ReadOp {
-                    addr: CENO_PLATFORM.register_vma(3).into(),
-                    value: u32::MAX - 1,
-                    previous_cycle: 0,
-                }),
-                rd: Some(WriteOp {
-                    addr: CENO_PLATFORM.register_vma(4).into(),
-                    value: Change {
-                        before: 0u32,
-                        after: (u32::MAX - 1).wrapping_add(u32::MAX - 1),
-                    },
-                    previous_cycle: 0,
-                }),
-                ..Default::default()
-            }],
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_ADD,
+                MOCK_PROGRAM[0],
+                u32::MAX - 1,
+                u32::MAX - 1,
+                Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
+            )],
         )
         .unwrap();
 
@@ -432,30 +400,14 @@ mod test {
         let (raw_witin, _) = SubInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord {
-                cycle: 3,
-                pc: Change::new(MOCK_PC_SUB, MOCK_PC_SUB + PC_STEP_SIZE),
-                insn_code: MOCK_PROGRAM[1],
-                rs1: Some(ReadOp {
-                    addr: CENO_PLATFORM.register_vma(2).into(),
-                    value: 11u32,
-                    previous_cycle: 0,
-                }),
-                rs2: Some(ReadOp {
-                    addr: CENO_PLATFORM.register_vma(3).into(),
-                    value: 2u32,
-                    previous_cycle: 0,
-                }),
-                rd: Some(WriteOp {
-                    addr: CENO_PLATFORM.register_vma(4).into(),
-                    value: Change {
-                        before: 0u32,
-                        after: 11u32.wrapping_sub(2u32),
-                    },
-                    previous_cycle: 0,
-                }),
-                ..Default::default()
-            }],
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_SUB,
+                MOCK_PROGRAM[1],
+                11,
+                2,
+                Change::new(0, 11_u32.wrapping_sub(2)),
+            )],
         )
         .unwrap();
 
@@ -490,30 +442,14 @@ mod test {
         let (raw_witin, _) = SubInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord {
-                cycle: 3,
-                pc: Change::new(MOCK_PC_SUB, MOCK_PC_SUB + PC_STEP_SIZE),
-                insn_code: MOCK_PROGRAM[1],
-                rs1: Some(ReadOp {
-                    addr: CENO_PLATFORM.register_vma(2).into(),
-                    value: 3u32,
-                    previous_cycle: 0,
-                }),
-                rs2: Some(ReadOp {
-                    addr: CENO_PLATFORM.register_vma(3).into(),
-                    value: 11u32,
-                    previous_cycle: 0,
-                }),
-                rd: Some(WriteOp {
-                    addr: CENO_PLATFORM.register_vma(4).into(),
-                    value: Change {
-                        before: 0u32,
-                        after: 3u32.wrapping_sub(11u32),
-                    },
-                    previous_cycle: 0,
-                }),
-                ..Default::default()
-            }],
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_SUB,
+                MOCK_PROGRAM[1],
+                3,
+                11,
+                Change::new(0, 3_u32.wrapping_sub(11)),
+            )],
         )
         .unwrap();
 

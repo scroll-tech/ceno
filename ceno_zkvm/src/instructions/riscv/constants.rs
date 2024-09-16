@@ -1,8 +1,7 @@
 use std::fmt;
 
 use crate::uint::UInt;
-
-pub(crate) const PC_STEP_SIZE: usize = 4;
+pub use ceno_emul::PC_STEP_SIZE;
 
 pub const OPCODE_OP: usize = 0x33;
 pub const FUNCT3_ADD_SUB: usize = 0;
