@@ -175,7 +175,7 @@ pub enum InsnKind {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct FastDecodeEntry {
+pub struct FastDecodeEntry {
     pub kind: InsnKind,
     category: InsnCategory,
     pub opcode: u32,
@@ -282,7 +282,7 @@ const fn insn(
 type InstructionTable = [FastDecodeEntry; 48];
 type FastInstructionTable = [u8; 1 << 10];
 
-const RV32IM_ISA: InstructionTable = [
+pub const RV32IM_ISA: InstructionTable = [
     insn(InsnKind::INVALID, InsnCategory::Invalid, 0x00, 0x0, 0x00),
     insn(InsnKind::ADD, InsnCategory::Compute, 0x33, 0x0, 0x00),
     insn(InsnKind::SUB, InsnCategory::Compute, 0x33, 0x0, 0x20),

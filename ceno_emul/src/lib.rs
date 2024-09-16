@@ -11,7 +11,9 @@ mod vm_state;
 pub use vm_state::VMState;
 
 mod rv32im;
-pub use rv32im::{DecodedInstruction, EmuContext, InsnCategory, InsnKind};
+pub use rv32im::{
+    DecodedInstruction, EmuContext, FastDecodeEntry, InsnCategory, InsnKind, RV32IM_ISA,
+};
 
 mod elf;
 pub use elf::Program;

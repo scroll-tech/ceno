@@ -12,7 +12,7 @@ pub struct IsEqualConfig {
     pub is_equal: WitIn,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MsbConfig {
     pub msb: WitIn,
     pub high_limb_no_msb: WitIn,
@@ -41,7 +41,7 @@ impl MsbInput<'_> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UIntLtuConfig {
     pub indexes: Vec<WitIn>,
     pub acc_indexes: Vec<WitIn>,
@@ -107,7 +107,7 @@ impl UIntLtuInput<'_> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UIntLtConfig {
     pub lhs_msb: MsbConfig,
     pub rhs_msb: MsbConfig,
