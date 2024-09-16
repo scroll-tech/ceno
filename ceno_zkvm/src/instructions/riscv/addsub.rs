@@ -6,10 +6,7 @@ use itertools::Itertools;
 
 use super::{
     config::ExprLtConfig,
-    constants::{
-        OPType, OpcodeType, RegUInt, FUNCT3_ADD_SUB, FUNCT7_ADD, FUNCT7_SUB, OPCODE_OP,
-        PC_STEP_SIZE,
-    },
+    constants::{RegUInt, RvInstruction, RvOpcode, PC_STEP_SIZE},
     RIVInstruction,
 };
 use crate::{
@@ -49,11 +46,11 @@ pub struct InstructionConfig<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for AddInstruction<E> {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0000000);
+    const OPCODE_TYPE: RvInstruction = RvInstruction::ADD;
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for SubInstruction<E> {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0100000);
+    const OPCODE_TYPE: RvInstruction = RvInstruction::SUB;
 }
 
 fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
@@ -97,15 +94,20 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
     let rd_id = circuit_builder.create_witin(|| "rd_id")?;
 
+    let opcode: RvOpcode = if IS_ADD {
+        AddInstruction::<E>::OPCODE_TYPE.into()
+    } else {
+        SubInstruction::<E>::OPCODE_TYPE.into()
+    };
     // Fetch the instruction.
     circuit_builder.lk_fetch(&InsnRecord::new(
         pc.expr(),
-        OPCODE_OP.into(),
+        (opcode.opcode as usize).into(),
         rd_id.expr(),
-        FUNCT3_ADD_SUB.into(),
+        (opcode.funct3.unwrap() as usize).into(),
         rs1_id.expr(),
         rs2_id.expr(),
-        (if IS_ADD { FUNCT7_ADD } else { FUNCT7_SUB }).into(),
+        (opcode.funct7.unwrap() as usize).into(),
     ))?;
 
     let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
@@ -237,9 +239,8 @@ fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
 }
 
 impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
-    // const NAME: &'static str = "ADD";
     fn name() -> String {
-        "ADD".into()
+        Self::OPCODE_TYPE.to_string()
     }
     type InstructionConfig = InstructionConfig<E>;
     fn construct_circuit(
@@ -260,9 +261,8 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
 }
 
 impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
-    // const NAME: &'static str = "ADD";
     fn name() -> String {
-        "SUB".into()
+        Self::OPCODE_TYPE.to_string()
     }
     type InstructionConfig = InstructionConfig<E>;
     fn construct_circuit(

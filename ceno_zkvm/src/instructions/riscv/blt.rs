@@ -20,7 +20,7 @@ use crate::{
 
 use super::{
     config::ExprLtConfig,
-    constants::{OPType, OpcodeType, RegUInt, RegUInt8, PC_STEP_SIZE},
+    constants::{RegUInt, RegUInt8, RvInstruction, PC_STEP_SIZE},
     RIVInstruction,
 };
 
@@ -141,7 +141,7 @@ impl BltInput {
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for BltInstruction {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::BType(OPType::Branch, 0x004);
+    const OPCODE_TYPE: RvInstruction = RvInstruction::BLT;
 }
 
 /// if (rs1 < rs2) PC += sext(imm)
@@ -210,7 +210,6 @@ fn blt_gadget<E: ExtensionField>(
 }
 
 impl<E: ExtensionField> Instruction<E> for BltInstruction {
-    // const NAME: &'static str = "BLT";
     fn name() -> String {
         "BLT".into()
     }
