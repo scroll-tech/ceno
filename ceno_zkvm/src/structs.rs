@@ -89,7 +89,7 @@ impl<F: Clone> PointAndEval<F> {
     }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct ProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
     pub vk: VerifyingKey<E, PCS>,
@@ -101,7 +101,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProvingKey<E, PCS> {
     }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct VerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub(crate) cs: ConstraintSystem<E>,
     pub fixed_commit: Option<PCS::CommitmentWithData>,
@@ -243,10 +243,20 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug)]
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    pub pp: PCS::Param,
     // pk for opcode and table circuits
     pub(crate) circuit_pks: BTreeMap<String, ProvingKey<E, PCS>>,
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
+    pub(crate) fn new(pp: PCS::Param) -> Self {
+        Self {
+            pp,
+            circuit_pks: BTreeMap::new(),
+        }
+    }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {

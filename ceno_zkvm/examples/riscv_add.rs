@@ -12,9 +12,12 @@ use ceno_zkvm::{
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
+use mpcs::{Basefold, BasefoldBasecodeParams, BasefoldRSParams, PolynomialCommitmentScheme};
 use transcript::Transcript;
 
 #[from_env]
@@ -36,6 +39,7 @@ const PROGRAM_ADD_LOOP: [u32; 4] = [
 
 fn main() {
     type E = GoldilocksExt2;
+    type PCS = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 
     let max_threads = {
         if !is_power_of_2(RAYON_NUM_THREADS) {
@@ -71,6 +75,8 @@ fn main() {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     // keygen
+    let rng = ChaCha8Rng::from_seed([0u8; 32]);
+    let pp = PCS::setup(1<<24, &rng).expect("basefold setup");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let range_config = zkvm_cs.register_table_circuit::<RangeTableCircuit<E>>();
@@ -82,7 +88,7 @@ fn main() {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen(zkvm_fixed_traces)
+        .key_gen::<PCS>(pp, zkvm_fixed_traces)
         .expect("keygen failed");
     let vk = pk.get_vk();
 

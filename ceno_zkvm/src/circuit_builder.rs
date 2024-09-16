@@ -149,15 +149,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
         let fixed_commit = fixed_traces
             .as_ref()
-            .map(
-                |traces| {
-                    PCS::batch_commit(pp, traces).unwrap()
-                }
-            );
+            .map(|traces| PCS::batch_commit(pp, traces).unwrap());
 
         ProvingKey {
             fixed_traces,
-            vk: VerifyingKey { cs: self, fixed_commit },
+            vk: VerifyingKey {
+                cs: self,
+                fixed_commit,
+            },
         }
     }
 

@@ -12,6 +12,7 @@ ff.workspace = true
 goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
+rand_chacha.workspace = true
 
 transcript = { path = "../transcript" }
 sumcheck = { version = "0.1.0", path = "../sumcheck" }

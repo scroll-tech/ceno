@@ -296,6 +296,7 @@ dependencies = [
  "paste",
  "pprof",
  "rand",
+ "rand_chacha",
  "rayon",
  "serde",
  "strum 0.25.0",
