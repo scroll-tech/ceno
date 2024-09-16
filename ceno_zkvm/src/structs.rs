@@ -40,11 +40,13 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
+#[derive(Debug)]
 pub enum ROMType {
-    U5 = 0, // 2^5 = 32
-    U16,    // 2^16 = 65,536
-    And,    // a ^ b where a, b are bytes
-    Ltu,    // a <(usign) b where a, b are bytes
+    U5 = 0,      // 2^5 = 32
+    U16,         // 2^16 = 65,536
+    And,         // a ^ b where a, b are bytes
+    Ltu,         // a <(usign) b where a, b are bytes
+    Instruction, // Decoded instruction from the fixed program.
 }
 
 #[derive(Clone, Debug, Copy)]
@@ -156,13 +158,14 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: TC::TableConfig,
+        input: &TC::FixedInput,
     ) {
         let cs = cs.get_cs(&TC::name()).expect("cs not found");
         assert!(
             self.circuit_fixed_traces
                 .insert(
                     TC::name(),
-                    Some(TC::generate_fixed_traces(&config, cs.num_fixed,)),
+                    Some(TC::generate_fixed_traces(&config, cs.num_fixed, input)),
                 )
                 .is_none()
         );
@@ -228,6 +231,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: &TC::TableConfig,
+        input: &TC::WitnessInput,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
 
@@ -236,6 +240,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             config,
             cs.num_witin as usize,
             self.combined_lk_mlt.as_ref().unwrap(),
+            input,
         )?;
         assert!(self.witnesses.insert(TC::name(), witness).is_none());
 
@@ -247,7 +252,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::Param,
     // pk for opcode and table circuits
-    pub(crate) circuit_pks: BTreeMap<String, ProvingKey<E, PCS>>,
+    pub circuit_pks: BTreeMap<String, ProvingKey<E, PCS>>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {

@@ -40,7 +40,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn verify_proof(
         &self,
         vm_proof: ZKVMProof<E>,
-        transcript: &mut Transcript<E>,
+        transcript: Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<bool, ZKVMError> {
         let mut prod_r = E::ONE;
@@ -49,7 +49,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let dummy_table_item = challenges[0];
         let point_eval = PointAndEval::default();
         let mut dummy_table_item_multiplicity = 0;
-        for (name, opcode_proof) in vm_proof.opcode_proofs {
+        let mut transcripts = transcript.fork(vm_proof.num_circuits());
+
+        for (name, (i, opcode_proof)) in vm_proof.opcode_proofs {
+            let transcript = &mut transcripts[i];
+
             let circuit_vk = self
                 .vk
                 .circuit_vks
@@ -83,7 +87,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.invert().unwrap();
         }
 
-        for (name, table_proof) in vm_proof.table_proofs {
+        for (name, (i, table_proof)) in vm_proof.table_proofs {
+            let transcript = &mut transcripts[i];
+
             let circuit_vk = self
                 .vk
                 .circuit_vks

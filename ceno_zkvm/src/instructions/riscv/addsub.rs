@@ -6,7 +6,10 @@ use itertools::Itertools;
 
 use super::{
     config::ExprLtConfig,
-    constants::{OPType, OpcodeType, RegUInt, PC_STEP_SIZE},
+    constants::{
+        OPType, OpcodeType, RegUInt, FUNCT3_ADD_SUB, FUNCT7_ADD, FUNCT7_SUB, OPCODE_OP,
+        PC_STEP_SIZE,
+    },
     RIVInstruction,
 };
 use crate::{
@@ -16,6 +19,7 @@ use crate::{
     expression::{ToExpr, WitIn},
     instructions::{riscv::config::ExprLtInput, Instruction},
     set_val,
+    tables::InsnRecord,
     uint::UIntValue,
     witness::LkMultiplicity,
 };
@@ -93,11 +97,16 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
     let rd_id = circuit_builder.create_witin(|| "rd_id")?;
 
-    // TODO remove me, this is just for testing degree > 1 sumcheck in main constraints
-    circuit_builder.require_zero(
-        || "test_degree > 1",
-        rs1_id.expr() * rs1_id.expr() - rs1_id.expr() * rs1_id.expr(),
-    )?;
+    // Fetch the instruction.
+    circuit_builder.lk_fetch(&InsnRecord::new(
+        pc.expr(),
+        OPCODE_OP.into(),
+        rd_id.expr(),
+        FUNCT3_ADD_SUB.into(),
+        rs1_id.expr(),
+        rs2_id.expr(),
+        (if IS_ADD { FUNCT7_ADD } else { FUNCT7_SUB }).into(),
+    ))?;
 
     let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
     let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
@@ -145,6 +154,88 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
     })
 }
 
+fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
+    config: &InstructionConfig<E>,
+    instance: &mut [MaybeUninit<E::BaseField>],
+    lk_multiplicity: &mut LkMultiplicity,
+    step: &StepRecord,
+) -> Result<(), ZKVMError> {
+    lk_multiplicity.fetch(step.pc().before.0);
+    set_val!(instance, config.pc, step.pc().before.0 as u64);
+    set_val!(instance, config.ts, step.cycle());
+    let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
+    let rd_prev = UIntValue::new_unchecked(step.rd().unwrap().value.before);
+    config
+        .prev_rd_value
+        .assign_limbs(instance, rd_prev.u16_fields());
+
+    config
+        .addend_1
+        .assign_limbs(instance, addend_1.u16_fields());
+
+    if IS_ADD {
+        // addend_0 + addend_1 = outcome
+        let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
+        config
+            .addend_0
+            .assign_limbs(instance, addend_0.u16_fields());
+        let (_, outcome_carries) = addend_0.add(&addend_1, lk_multiplicity, true);
+        config.outcome.assign_carries(
+            instance,
+            outcome_carries
+                .into_iter()
+                .map(|carry| E::BaseField::from(carry as u64))
+                .collect_vec(),
+        );
+    } else {
+        // addend_0 = outcome + addend_1
+        let outcome = UIntValue::new(step.rd().unwrap().value.after, lk_multiplicity);
+        config.outcome.assign_limbs(instance, outcome.u16_fields());
+        let (_, addend_0_carries) = addend_1.add(&outcome, lk_multiplicity, true);
+        config.addend_0.assign_carries(
+            instance,
+            addend_0_carries
+                .into_iter()
+                .map(|carry| E::BaseField::from(carry as u64))
+                .collect_vec(),
+        );
+    }
+    set_val!(instance, config.rs1_id, step.insn().rs1() as u64);
+    set_val!(instance, config.rs2_id, step.insn().rs2() as u64);
+    set_val!(instance, config.rd_id, step.insn().rd() as u64);
+    ExprLtInput {
+        lhs: step.rs1().unwrap().previous_cycle,
+        rhs: step.cycle(),
+    }
+    .assign(instance, &config.lt_rs1_cfg, lk_multiplicity);
+    ExprLtInput {
+        lhs: step.rs2().unwrap().previous_cycle,
+        rhs: step.cycle() + 1,
+    }
+    .assign(instance, &config.lt_rs2_cfg, lk_multiplicity);
+    ExprLtInput {
+        lhs: step.rd().unwrap().previous_cycle,
+        rhs: step.cycle() + 2,
+    }
+    .assign(instance, &config.lt_prev_ts_cfg, lk_multiplicity);
+    set_val!(
+        instance,
+        config.prev_rs1_ts,
+        step.rs1().unwrap().previous_cycle
+    );
+    set_val!(
+        instance,
+        config.prev_rs2_ts,
+        step.rs2().unwrap().previous_cycle
+    );
+    set_val!(
+        instance,
+        config.prev_rd_ts,
+        step.rd().unwrap().previous_cycle
+    );
+    Ok(())
+}
+
 impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     // const NAME: &'static str = "ADD";
     fn name() -> String {
@@ -164,54 +255,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        // TODO use fields from step
-        set_val!(instance, config.pc, 1);
-        set_val!(instance, config.ts, 3);
-        let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
-        let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
-        let rd_prev = UIntValue::new_unchecked(step.rd().unwrap().value.before);
-        config
-            .prev_rd_value
-            .assign_limbs(instance, rd_prev.u16_fields());
-        config
-            .addend_0
-            .assign_limbs(instance, addend_0.u16_fields());
-        config
-            .addend_1
-            .assign_limbs(instance, addend_1.u16_fields());
-        let (_, carries) = addend_0.add(&addend_1, lk_multiplicity, true);
-        config.outcome.assign_carries(
-            instance,
-            carries
-                .into_iter()
-                .map(|carry| E::BaseField::from(carry as u64))
-                .collect_vec(),
-        );
-        // TODO #167
-        set_val!(instance, config.rs1_id, 2);
-        set_val!(instance, config.rs2_id, 2);
-        set_val!(instance, config.rd_id, 2);
-        set_val!(instance, config.prev_rs1_ts, 2);
-        set_val!(instance, config.prev_rs2_ts, 2);
-        set_val!(instance, config.prev_rd_ts, 2);
-
-        ExprLtInput {
-            lhs: 2, // rs1
-            rhs: 3, // cur_ts
-        }
-        .assign(instance, &config.lt_rs1_cfg);
-        ExprLtInput {
-            lhs: 2, // rs2
-            rhs: 4, // cur_ts
-        }
-        .assign(instance, &config.lt_rs2_cfg);
-        ExprLtInput {
-            lhs: 2, // rd
-            rhs: 5, // cur_ts
-        }
-        .assign(instance, &config.lt_prev_ts_cfg);
-
-        Ok(())
+        add_sub_assignment::<_, true>(config, instance, lk_multiplicity, step)
     }
 }
 
@@ -231,43 +275,16 @@ impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
-        _lk_multiplicity: &mut LkMultiplicity,
-        _step: &StepRecord,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        // TODO use field from step
-        set_val!(instance, config.pc, _step.pc().before.0 as u64);
-        set_val!(instance, config.ts, 2);
-        config.prev_rd_value.wits_in().map(|prev_rd_value| {
-            set_val!(instance, prev_rd_value[0], 4);
-            set_val!(instance, prev_rd_value[1], 4);
-        });
-        config.addend_0.wits_in().map(|addend_0| {
-            set_val!(instance, addend_0[0], 4);
-            set_val!(instance, addend_0[1], 4);
-        });
-        config.addend_1.wits_in().map(|addend_1| {
-            set_val!(instance, addend_1[0], 4);
-            set_val!(instance, addend_1[1], 4);
-        });
-        // TODO #174
-        config.outcome.carries.as_ref().map(|carry| {
-            set_val!(instance, carry[0], 4);
-            set_val!(instance, carry[1], 0);
-        });
-        // TODO #167
-        set_val!(instance, config.rs1_id, 2);
-        set_val!(instance, config.rs2_id, 2);
-        set_val!(instance, config.rd_id, 2);
-        set_val!(instance, config.prev_rs1_ts, 2);
-        set_val!(instance, config.prev_rs2_ts, 2);
-        set_val!(instance, config.prev_rd_ts, 2);
-        Ok(())
+        add_sub_assignment::<_, false>(config, instance, lk_multiplicity, step)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, ReadOp, StepRecord, WriteOp};
+    use ceno_emul::{Change, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -275,10 +292,10 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::MockProver,
+        scheme::mock_prover::{MockProver, MOCK_PC_ADD, MOCK_PC_SUB, MOCK_PROGRAM},
     };
 
-    use super::AddInstruction;
+    use super::{AddInstruction, SubInstruction};
 
     #[test]
     #[allow(clippy::option_map_unit_fn)]
@@ -299,27 +316,14 @@ mod test {
         let (raw_witin, _) = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord {
-                rs1: Some(ReadOp {
-                    addr: 2.into(),
-                    value: 11u32,
-                    previous_cycle: 0,
-                }),
-                rs2: Some(ReadOp {
-                    addr: 3.into(),
-                    value: 0xfffffffeu32,
-                    previous_cycle: 0,
-                }),
-                rd: Some(WriteOp {
-                    addr: 4.into(),
-                    value: Change {
-                        before: 0u32,
-                        after: 9u32,
-                    },
-                    previous_cycle: 0,
-                }),
-                ..Default::default()
-            }],
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_ADD,
+                MOCK_PROGRAM[0],
+                11,
+                0xfffffffe,
+                Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
+            )],
         )
         .unwrap();
 
@@ -354,27 +358,14 @@ mod test {
         let (raw_witin, _) = AddInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord {
-                rs1: Some(ReadOp {
-                    addr: 2.into(),
-                    value: u32::MAX - 1,
-                    previous_cycle: 0,
-                }),
-                rs2: Some(ReadOp {
-                    addr: 3.into(),
-                    value: u32::MAX - 1,
-                    previous_cycle: 0,
-                }),
-                rd: Some(WriteOp {
-                    addr: 4.into(),
-                    value: Change {
-                        before: 0u32,
-                        after: u32::MAX - 2,
-                    },
-                    previous_cycle: 0,
-                }),
-                ..Default::default()
-            }],
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_ADD,
+                MOCK_PROGRAM[0],
+                u32::MAX - 1,
+                u32::MAX - 1,
+                Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
+            )],
         )
         .unwrap();
 
@@ -386,7 +377,91 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            Some([100.into(), 100000.into()]),
+            None,
+        );
+    }
+
+    #[test]
+    #[allow(clippy::option_map_unit_fn)]
+    fn test_opcode_sub() {
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = cb
+            .namespace(
+                || "sub",
+                |cb| {
+                    let config = SubInstruction::construct_circuit(cb);
+                    Ok(config)
+                },
+            )
+            .unwrap()
+            .unwrap();
+
+        let (raw_witin, _) = SubInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_SUB,
+                MOCK_PROGRAM[1],
+                11,
+                2,
+                Change::new(0, 11_u32.wrapping_sub(2)),
+            )],
+        )
+        .unwrap();
+
+        MockProver::assert_satisfied(
+            &mut cb,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            None,
+        );
+    }
+
+    #[test]
+    #[allow(clippy::option_map_unit_fn)]
+    fn test_opcode_sub_underflow() {
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = cb
+            .namespace(
+                || "sub",
+                |cb| {
+                    let config = SubInstruction::construct_circuit(cb);
+                    Ok(config)
+                },
+            )
+            .unwrap()
+            .unwrap();
+
+        let (raw_witin, _) = SubInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_SUB,
+                MOCK_PROGRAM[1],
+                3,
+                11,
+                Change::new(0, 3_u32.wrapping_sub(11)),
+            )],
+        )
+        .unwrap();
+
+        MockProver::assert_satisfied(
+            &mut cb,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            None,
         );
     }
 }

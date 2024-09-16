@@ -27,6 +27,17 @@ impl<E: ExtensionField> Transcript<E> {
 }
 
 impl<E: ExtensionField> Transcript<E> {
+    /// Fork this transcript into n different threads.
+    pub fn fork(self, n: usize) -> Vec<Self> {
+        let mut forks = Vec::with_capacity(n);
+        for i in 0..n {
+            let mut fork = self.clone();
+            fork.append_field_element(&(i as u64).into());
+            forks.push(fork);
+        }
+        forks
+    }
+
     // Append the message to the transcript.
     pub fn append_message(&mut self, msg: &[u8]) {
         let msg_f = E::BaseField::bytes_to_field_elements(msg);

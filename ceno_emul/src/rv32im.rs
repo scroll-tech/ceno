@@ -209,7 +209,7 @@ impl DecodedInstruction {
         self.rd
     }
 
-    pub fn func3(&self) -> u32 {
+    pub fn funct3(&self) -> u32 {
         self.func3
     }
 
@@ -221,7 +221,7 @@ impl DecodedInstruction {
         self.rs2
     }
 
-    pub fn func7(&self) -> u32 {
+    pub fn funct7(&self) -> u32 {
         self.func7
     }
 

@@ -48,11 +48,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         &self,
         mut witnesses: ZKVMWitnesses<E>,
         max_threads: usize,
-        transcript: &mut Transcript<E>,
+        transcript: Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ZKVMProof<E>, ZKVMError> {
         let mut vm_proof = ZKVMProof::default();
-        for (circuit_name, pk) in self.pk.circuit_pks.iter() {
+        let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
+
+        for ((circuit_name, pk), (i, transcript)) in self
+            .pk
+            .circuit_pks
+            .iter() // Sorted by key.
+            .zip_eq(transcripts.iter_mut().enumerate())
+        {
             let witness = witnesses
                 .witnesses
                 .remove(circuit_name)
@@ -95,7 +102,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .opcode_proofs
-                    .insert(circuit_name.clone(), opcode_proof);
+                    .insert(circuit_name.clone(), (i, opcode_proof));
             } else {
                 let table_proof = self.create_table_proof(
                     pk,
@@ -117,7 +124,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .table_proofs
-                    .insert(circuit_name.clone(), table_proof);
+                    .insert(circuit_name.clone(), (i, table_proof));
             }
         }
 

@@ -24,7 +24,8 @@ pub struct RangeTableCircuit<E>(PhantomData<E>);
 
 impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
     type TableConfig = RangeTableConfig;
-    type Input = u64;
+    type FixedInput = ();
+    type WitnessInput = ();
 
     fn name() -> String {
         "RANGE".into()
@@ -47,6 +48,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
     fn generate_fixed_traces(
         config: &RangeTableConfig,
         num_fixed: usize,
+        _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
         let num_u16s = 1 << 16;
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_u16s, num_fixed);
@@ -55,7 +57,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
             .with_min_len(MIN_PAR_SIZE)
             .zip((0..num_u16s).into_par_iter())
             .for_each(|(row, i)| {
-                set_fixed_val!(row, config.u16_tbl.0, E::BaseField::from(i as u64));
+                set_fixed_val!(row, config.u16_tbl, E::BaseField::from(i as u64));
             });
 
         fixed
@@ -65,6 +67,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
+        _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[ROMType::U16 as usize];
         let mut u16_mlt = vec![0; 1 << RANGE_CHIP_BIT_WIDTH];

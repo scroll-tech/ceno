@@ -1,16 +1,19 @@
 use std::fmt::Display;
 
 use ff_ext::ExtensionField;
-
-use ff::Field;
+use itertools::Itertools;
 
 use crate::{
+    chip_handler::utils::pows_expr,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::riscv::config::ExprLtConfig,
     structs::ROMType,
+    tables::InsnRecord,
 };
+
+use super::utils::rlc_chip_record;
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn new(cs: &'a mut ConstraintSystem<E>) -> Self {
@@ -58,6 +61,17 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.lk_table_record(name_fn, rlc_record, multiplicity)
     }
 
+    /// Fetch an instruction at a given PC from the Program table.
+    pub fn lk_fetch(&mut self, record: &InsnRecord<Expression<E>>) -> Result<(), ZKVMError> {
+        let rlc_record = {
+            let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
+            fields.extend_from_slice(record.as_slice());
+            self.rlc_chip_record(fields)
+        };
+
+        self.cs.lk_record(|| "fetch", rlc_record)
+    }
+
     pub fn read_record<NR, N>(
         &mut self,
         name_fn: N,
@@ -83,24 +97,11 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     }
 
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
-        assert!(!records.is_empty());
-        let beta_pows = {
-            let mut beta_pows = Vec::with_capacity(records.len());
-            beta_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..records.len() - 1).for_each(|_| {
-                beta_pows.push(self.cs.chip_record_beta.clone() * beta_pows.last().unwrap().clone())
-            });
-            beta_pows
-        };
-
-        let item_rlc = beta_pows
-            .into_iter()
-            .zip(records.iter())
-            .map(|(beta, record)| beta * record.clone())
-            .reduce(|a, b| a + b)
-            .expect("reduce error");
-
-        item_rlc + self.cs.chip_record_alpha.clone()
+        rlc_chip_record(
+            records,
+            self.cs.chip_record_alpha.clone(),
+            self.cs.chip_record_beta.clone(),
+        )
     }
 
     pub fn require_zero<NR, N>(
@@ -316,15 +317,16 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     .map(|i| witin_u16(format!("diff_{i}")))
                     .collect::<Result<Vec<WitIn>, _>>()?;
 
+                let pows = pows_expr((1 << u16::BITS).into(), diff.len());
+
                 let diff_expr = diff
                     .iter()
-                    .enumerate()
-                    .map(|(i, diff)| (i, diff.expr()))
-                    .fold(Expression::ZERO, |sum, (i, a)| {
-                        sum + if i > 0 { a * (1 << (16 * i)).into() } else { a }
-                    });
+                    .zip_eq(pows)
+                    .map(|(record, beta)| beta * record.expr())
+                    .reduce(|a, b| a + b)
+                    .expect("reduce error");
 
-                let range = Expression::Constant((1 << 32).into());
+                let range = (1 << u32::BITS).into();
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 

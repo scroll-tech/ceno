@@ -60,8 +60,17 @@ pub struct ZKVMTableProof<E: ExtensionField> {
     pub wits_in_evals: Vec<E>,
 }
 
+/// Map circuit names to
+/// - an opcode or table proof,
+/// - an index unique across both types.
 #[derive(Default, Clone)]
 pub struct ZKVMProof<E: ExtensionField> {
-    opcode_proofs: HashMap<String, ZKVMOpcodeProof<E>>,
-    table_proofs: HashMap<String, ZKVMTableProof<E>>,
+    opcode_proofs: HashMap<String, (usize, ZKVMOpcodeProof<E>)>,
+    table_proofs: HashMap<String, (usize, ZKVMTableProof<E>)>,
+}
+
+impl<E: ExtensionField> ZKVMProof<E> {
+    pub fn num_circuits(&self) -> usize {
+        self.opcode_proofs.len() + self.table_proofs.len()
+    }
 }

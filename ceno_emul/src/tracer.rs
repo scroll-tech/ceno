@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt, mem};
 use crate::{
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     rv32im::DecodedInstruction,
-    CENO_PLATFORM,
+    CENO_PLATFORM, PC_STEP_SIZE,
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -17,18 +17,18 @@ use crate::{
 /// - Any of `rs1 / rs2 / rd` **may be `x0`**. The trace handles this like any register, including the value that was _supposed_ to be stored. The circuits must handle this case: either **store `0` or skip `x0` operations**.
 ///
 /// - Any pair of `rs1 / rs2 / rd` **may be the same**. Then, one op will point to the other op in the same instruction but a different subcycle. The circuits may follow the operations **without special handling** of repeated registers.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StepRecord {
-    pub cycle: Cycle,
-    pub pc: Change<ByteAddr>,
-    pub insn_code: Word,
+    cycle: Cycle,
+    pc: Change<ByteAddr>,
+    insn_code: Word,
 
-    pub rs1: Option<ReadOp>,
-    pub rs2: Option<ReadOp>,
+    rs1: Option<ReadOp>,
+    rs2: Option<ReadOp>,
 
-    pub rd: Option<WriteOp>,
+    rd: Option<WriteOp>,
 
-    pub memory_op: Option<WriteOp>,
+    memory_op: Option<WriteOp>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -53,6 +53,38 @@ pub type ReadOp = MemOp<Word>;
 pub type WriteOp = MemOp<Change<Word>>;
 
 impl StepRecord {
+    pub fn new_r_instruction(
+        cycle: Cycle,
+        pc: ByteAddr,
+        insn_code: Word,
+        rs1_read: Word,
+        rs2_read: Word,
+        rd: Change<Word>,
+    ) -> StepRecord {
+        let insn = DecodedInstruction::new(insn_code);
+        StepRecord {
+            cycle,
+            pc: Change::new(pc, pc + PC_STEP_SIZE),
+            insn_code,
+            rs1: Some(ReadOp {
+                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
+                value: rs1_read,
+                previous_cycle: 0,
+            }),
+            rs2: Some(ReadOp {
+                addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
+                value: rs2_read,
+                previous_cycle: 0,
+            }),
+            rd: Some(WriteOp {
+                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
+                value: rd,
+                previous_cycle: 0,
+            }),
+            memory_op: None,
+        }
+    }
+
     pub fn cycle(&self) -> Cycle {
         self.cycle
     }
@@ -210,7 +242,7 @@ impl Tracer {
     }
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct Change<T> {
     pub before: T,
     pub after: T,

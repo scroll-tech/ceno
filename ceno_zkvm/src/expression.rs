@@ -404,16 +404,27 @@ pub struct WitIn {
 pub struct Fixed(pub usize);
 
 impl WitIn {
-    pub fn from_expr<E: ExtensionField>(
+    pub fn from_expr<E: ExtensionField, N, NR>(
+        name: N,
         circuit_builder: &mut CircuitBuilder<E>,
         input: Expression<E>,
         debug: bool,
-    ) -> Result<Self, ZKVMError> {
-        let wit = circuit_builder.create_witin(|| "wit_from_expr")?;
-        if !debug {
-            circuit_builder.require_zero(|| "create_wit_from_expr", wit.expr() - input)?;
-        }
-        Ok(wit)
+    ) -> Result<Self, ZKVMError>
+    where
+        NR: Into<String> + Clone,
+        N: FnOnce() -> NR,
+    {
+        circuit_builder.namespace(
+            || "from_expr",
+            |cb| {
+                let name = name().into();
+                let wit = cb.create_witin(|| name.clone())?;
+                if !debug {
+                    cb.require_zero(|| name.clone(), wit.expr() - input)?;
+                }
+                Ok(wit)
+            },
+        )
     }
 }
 
@@ -421,14 +432,14 @@ impl WitIn {
 /// this is to avoid non-monomial expression
 macro_rules! create_witin_from_expr {
     // Handle the case for a single expression
-    ($builder:expr, $debug:expr, $e:expr) => {
-        WitIn::from_expr($builder, $e, $debug)
+    ($name:expr, $builder:expr, $debug:expr, $e:expr) => {
+        WitIn::from_expr($name, $builder, $e, $debug)
     };
     // Recursively handle multiple expressions and create a flat tuple with error handling
-    ($builder:expr, $debug:expr, $e:expr, $($rest:expr),+) => {
+    ($name:expr, $builder:expr, $debug:expr, $e:expr, $($rest:expr),+) => {
         {
             // Return a Result tuple, handling errors
-            Ok::<_, ZKVMError>((WitIn::from_expr($builder, $e, $debug)?, $(WitIn::from_expr($builder, $rest)?),*))
+            Ok::<_, ZKVMError>((WitIn::from_expr($name, $builder, $e, $debug)?, $(WitIn::from_expr($name, $builder, $rest)?),*))
         }
     };
 }
