@@ -120,10 +120,22 @@ mod tests {
     }
 
     #[test]
-    fn compare_hash_or_noop() {
+    fn compare_hash() {
         let mut rng = thread_rng();
         for _ in 0..N_ITERATIONS {
-            let n = rng.gen_range(0..=100);
+            let n = rng.gen_range(5..=100);
+            let (plonky_elems, ceno_elems) = test_vector_pair(n);
+            let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
+            let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
+            assert!(compare_hash_output(plonky_out, ceno_out));
+        }
+    }
+
+    #[test]
+    fn compare_noop() {
+        let mut rng = thread_rng();
+        for _ in 0..N_ITERATIONS {
+            let n = rng.gen_range(0..=4);
             let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
             let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
