@@ -126,11 +126,10 @@ impl LkMultiplicity {
     }
 
     fn assert_byte(&mut self, v: u64) {
-        let v = v * (1 << u8::BITS);
         let multiplicity = self
             .multiplicity
             .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
-        (*multiplicity.borrow_mut()[ROMType::U16 as usize]
+        (*multiplicity.borrow_mut()[ROMType::U8 as usize]
             .entry(v)
             .or_default()) += 1;
     }
@@ -189,6 +188,6 @@ mod tests {
         }
         let res = lkm.into_finalize_result();
         // check multiplicity counts of assert_byte
-        assert_eq!(res[ROMType::U16 as usize][&(8 << 8)], thread_count);
+        assert_eq!(res[ROMType::U8 as usize][&8], thread_count);
     }
 }
