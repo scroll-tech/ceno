@@ -11,13 +11,14 @@ use crate::{
 };
 use core::mem::MaybeUninit;
 
+/// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]
-pub struct AddSubConfig<E: ExtensionField> {
+pub struct ArithConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
 
-    addend_0: RegUInt<E>,
-    addend_1: RegUInt<E>,
-    outcome: RegUInt<E>,
+    rs1_read: RegUInt<E>,
+    rs2_read: RegUInt<E>,
+    rd_written: RegUInt<E>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -35,7 +36,7 @@ impl RIVInstruction for SubOp {
 pub type SubInstruction<E> = ArithInstruction<E, SubOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
-    type InstructionConfig = AddSubConfig<E>;
+    type InstructionConfig = ArithConfig<E>;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -44,25 +45,27 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let (addend_0, addend_1, outcome) = match I::INST_KIND {
+        let (rs1_read, rs2_read, rd_written) = match I::INST_KIND {
             InsnKind::ADD => {
-                // outcome = addend_0 + addend_1
-                let addend_0 = RegUInt::new_unchecked(|| "addend_0", circuit_builder)?;
-                let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
-                let outcome = addend_0.add(|| "outcome", circuit_builder, &addend_1, true)?;
-                (addend_0, addend_1, outcome)
+                // rd_written = rs1_read + rs2_read
+                let rs1_read = RegUInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+                let rs2_read = RegUInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+                let rd_written = rs1_read.add(|| "rd_written", circuit_builder, &rs2_read, true)?;
+                (rs1_read, rs2_read, rd_written)
             }
 
             InsnKind::SUB => {
-                // outcome + addend_1 = addend_0
-                // outcome is the new value to be updated in register so we need to constrain its range.
-                let outcome = RegUInt::new(|| "outcome", circuit_builder)?;
-                let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
-                let addend_0 =
-                    addend_1
-                        .clone()
-                        .add(|| "addend_0", circuit_builder, &outcome.clone(), true)?;
-                (addend_0, addend_1, outcome)
+                // rd_written + rs2_read = rs1_read
+                // rd_written is the new value to be updated in register so we need to constrain its range.
+                let rd_written = RegUInt::new(|| "rd_written", circuit_builder)?;
+                let rs2_read = RegUInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+                let rs1_read = rs2_read.clone().add(
+                    || "rs1_read",
+                    circuit_builder,
+                    &rd_written.clone(),
+                    true,
+                )?;
+                (rs1_read, rs2_read, rd_written)
             }
 
             _ => unreachable!("Unsupported instruction kind"),
@@ -71,16 +74,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &addend_0,
-            &addend_1,
-            &outcome,
+            &rs1_read,
+            &rs2_read,
+            &rd_written,
         )?;
 
-        Ok(AddSubConfig {
+        Ok(ArithConfig {
             r_insn,
-            addend_0,
-            addend_1,
-            outcome,
+            rs1_read,
+            rs2_read,
+            rd_written,
         })
     }
 
@@ -94,20 +97,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             .r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
-        let addend_1 = UIntValue::new_unchecked(step.rs2().unwrap().value);
+        let rs2_read = UIntValue::new_unchecked(step.rs2().unwrap().value);
         config
-            .addend_1
-            .assign_limbs(instance, addend_1.u16_fields());
+            .rs2_read
+            .assign_limbs(instance, rs2_read.u16_fields());
 
         match I::INST_KIND {
             InsnKind::ADD => {
-                // addend_0 + addend_1 = outcome
-                let addend_0 = UIntValue::new_unchecked(step.rs1().unwrap().value);
+                // rs1_read + rs2_read = rd_written
+                let rs1_read = UIntValue::new_unchecked(step.rs1().unwrap().value);
                 config
-                    .addend_0
-                    .assign_limbs(instance, addend_0.u16_fields());
-                let (_, outcome_carries) = addend_0.add(&addend_1, lk_multiplicity, true);
-                config.outcome.assign_carries(
+                    .rs1_read
+                    .assign_limbs(instance, rs1_read.u16_fields());
+                let (_, outcome_carries) = rs1_read.add(&rs2_read, lk_multiplicity, true);
+                config.rd_written.assign_carries(
                     instance,
                     outcome_carries
                         .into_iter()
@@ -117,11 +120,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             }
 
             InsnKind::SUB => {
-                // addend_0 = outcome + addend_1
-                let outcome = UIntValue::new(step.rd().unwrap().value.after, lk_multiplicity);
-                config.outcome.assign_limbs(instance, outcome.u16_fields());
-                let (_, addend_0_carries) = addend_1.add(&outcome, lk_multiplicity, true);
-                config.addend_0.assign_carries(
+                // rs1_read = rd_written + rs2_read
+                let rd_written = UIntValue::new(step.rd().unwrap().value.after, lk_multiplicity);
+                config
+                    .rd_written
+                    .assign_limbs(instance, rd_written.u16_fields());
+                let (_, addend_0_carries) = rs2_read.add(&rd_written, lk_multiplicity, true);
+                config.rs1_read.assign_carries(
                     instance,
                     addend_0_carries
                         .into_iter()
