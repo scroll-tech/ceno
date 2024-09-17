@@ -23,57 +23,6 @@ pub struct AddSubConfig<E: ExtensionField> {
 pub struct AddInstruction<E>(PhantomData<E>);
 pub struct SubInstruction<E>(PhantomData<E>);
 
-impl<E: ExtensionField> RIVInstruction<E> for AddInstruction<E> {
-    const INST_KIND: InsnKind = InsnKind::ADD;
-}
-
-impl<E: ExtensionField> RIVInstruction<E> for SubInstruction<E> {
-    const INST_KIND: InsnKind = InsnKind::SUB;
-}
-
-fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
-    circuit_builder: &mut CircuitBuilder<E>,
-) -> Result<AddSubConfig<E>, ZKVMError> {
-    // Execution result = addend0 + addend1, with carry.
-    let (addend_0, addend_1, outcome) = if IS_ADD {
-        // outcome = addend_0 + addend_1
-        let addend_0 = RegUInt::new_unchecked(|| "addend_0", circuit_builder)?;
-        let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
-        (
-            addend_0.clone(),
-            addend_1.clone(),
-            addend_0.add(|| "outcome", circuit_builder, &addend_1, true)?,
-        )
-    } else {
-        // outcome + addend_1 = addend_0
-        // outcome is the new value to be updated in register so we need to constrain its range
-        let outcome = RegUInt::new(|| "outcome", circuit_builder)?;
-        let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
-        (
-            addend_1
-                .clone()
-                .add(|| "addend_0", circuit_builder, &outcome.clone(), true)?,
-            addend_1,
-            outcome,
-        )
-    };
-
-    let r_insn = RInstructionConfig::<E>::construct_circuit(
-        circuit_builder,
-        if IS_ADD { InsnKind::ADD } else { InsnKind::SUB },
-        &addend_0,
-        &addend_1,
-        &outcome,
-    )?;
-
-    Ok(AddSubConfig {
-        r_insn,
-        addend_0,
-        addend_1,
-        outcome,
-    })
-}
-
 fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
     config: &AddSubConfig<E>,
     instance: &mut [MaybeUninit<E::BaseField>],
@@ -120,17 +69,38 @@ fn add_sub_assignment<E: ExtensionField, const IS_ADD: bool>(
     Ok(())
 }
 
+impl<E: ExtensionField> RIVInstruction<E> for AddInstruction<E> {
+    const INST_KIND: InsnKind = InsnKind::ADD;
+}
+
 impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
-    // const NAME: &'static str = "ADD";
     fn name() -> String {
-        "ADD".into()
+        format!("{:?}", Self::INST_KIND)
     }
     type InstructionConfig = AddSubConfig<E>;
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        add_sub_gadget::<E, true>(circuit_builder)
+        // outcome = addend_0 + addend_1
+        let addend_0 = RegUInt::new_unchecked(|| "addend_0", circuit_builder)?;
+        let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
+        let outcome = addend_0.add(|| "outcome", circuit_builder, &addend_1, true)?;
+
+        let r_insn = RInstructionConfig::<E>::construct_circuit(
+            circuit_builder,
+            InsnKind::ADD,
+            &addend_0,
+            &addend_1,
+            &outcome,
+        )?;
+
+        Ok(AddSubConfig {
+            r_insn,
+            addend_0,
+            addend_1,
+            outcome,
+        })
     }
 
     #[allow(clippy::option_map_unit_fn)]
@@ -144,17 +114,42 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction<E> {
     }
 }
 
+impl<E: ExtensionField> RIVInstruction<E> for SubInstruction<E> {
+    const INST_KIND: InsnKind = InsnKind::SUB;
+}
+
 impl<E: ExtensionField> Instruction<E> for SubInstruction<E> {
-    // const NAME: &'static str = "ADD";
     fn name() -> String {
-        "SUB".into()
+        format!("{:?}", Self::INST_KIND)
     }
     type InstructionConfig = AddSubConfig<E>;
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        add_sub_gadget::<E, false>(circuit_builder)
+        // outcome + addend_1 = addend_0
+        // outcome is the new value to be updated in register so we need to constrain its range.
+        let outcome = RegUInt::new(|| "outcome", circuit_builder)?;
+        let addend_1 = RegUInt::new_unchecked(|| "addend_1", circuit_builder)?;
+        let addend_0 =
+            addend_1
+                .clone()
+                .add(|| "addend_0", circuit_builder, &outcome.clone(), true)?;
+
+        let r_insn = RInstructionConfig::<E>::construct_circuit(
+            circuit_builder,
+            InsnKind::SUB,
+            &addend_0,
+            &addend_1,
+            &outcome,
+        )?;
+
+        Ok(AddSubConfig {
+            r_insn,
+            addend_0,
+            addend_1,
+            outcome,
+        })
     }
 
     #[allow(clippy::option_map_unit_fn)]
