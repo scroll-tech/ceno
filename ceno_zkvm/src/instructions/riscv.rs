@@ -1,7 +1,4 @@
-use ff_ext::ExtensionField;
-
-use super::Instruction;
-use ceno_emul::{InsnCodes, InsnKind};
+use ceno_emul::InsnKind;
 
 pub mod addsub;
 pub mod blt;
@@ -12,7 +9,6 @@ mod r_insn;
 #[cfg(test)]
 mod test;
 
-pub trait RIVInstruction<E: ExtensionField>: Instruction<E> {
+pub trait RIVInstruction {
     const INST_KIND: InsnKind;
-    const OPCODE_TYPE: InsnCodes = Self::INST_KIND.codes();
 }

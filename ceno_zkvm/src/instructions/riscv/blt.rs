@@ -141,7 +141,7 @@ impl BltInput {
     }
 }
 
-impl<E: ExtensionField> RIVInstruction<E> for BltInstruction {
+impl RIVInstruction for BltInstruction {
     const INST_KIND: InsnKind = InsnKind::BLT;
 }
 

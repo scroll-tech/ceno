@@ -18,6 +18,11 @@ use crate::{
 };
 use core::mem::MaybeUninit;
 
+/// This config handles the common part of R-type instructions:
+/// - PC, cycle, fetch.
+/// - Registers read and write.
+///
+/// It does not witness of the register values, nor the actual function (e.g. add, sub, etc).
 #[derive(Debug)]
 pub struct RInstructionConfig<E: ExtensionField> {
     pc: WitIn,
