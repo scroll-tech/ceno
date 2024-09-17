@@ -1,6 +1,8 @@
 mod u8_table;
 use u8_table::U8TableConfig;
 
+mod tables;
+
 use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
@@ -47,7 +49,10 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
 
         cb.lk_table_record(|| "u16 table", u16_table_values, u16_mlt.expr())?;
 
-        let u8_config = cb.namespace(|| "u8_table", |cb| U8TableConfig::construct_circuit(cb))?;
+        let u8_config = cb.namespace(
+            || "u8_table",
+            |cb| U8TableConfig::construct_circuit(cb, ROMType::U8),
+        )?;
 
         Ok(RangeTableConfig {
             u16_tbl,
@@ -71,6 +76,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
                 set_fixed_val!(row, config.u16_tbl, E::BaseField::from(i as u64));
             });
 
+        let v = vec![0_u64; 1 << 8];
         config.u8_config.generate_fixed_traces(&mut fixed);
 
         fixed

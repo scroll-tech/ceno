@@ -39,7 +39,7 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256

@@ -13,45 +13,52 @@ use crate::{
     witness::RowMajorMatrix,
 };
 
-const NUM_U8: usize = 1 << 8;
+pub type U8TableConfig = ScalarTableConfig;
 
 #[derive(Clone, Debug)]
-pub struct U8TableConfig {
-    u8_fixed: Fixed,
+pub struct ScalarTableConfig {
+    rom_type: ROMType,
+    fixed: Fixed,
     mlt: WitIn,
 }
 
-impl U8TableConfig {
+impl ScalarTableConfig {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
+        rom_type: ROMType,
     ) -> Result<Self, ZKVMError> {
-        let u8_fixed = cb.create_fixed(|| "u8_fixed")?;
+        let fixed = cb.create_fixed(|| "fixed")?;
         let mlt = cb.create_witin(|| "mlt")?;
 
         let rlc_record = cb.rlc_chip_record(vec![
-            Expression::Constant(E::BaseField::from(ROMType::U8 as u64)),
-            Expression::Fixed(u8_fixed.clone()),
+            Expression::Constant(E::BaseField::from(rom_type as u64)),
+            Expression::Fixed(fixed.clone()),
         ]);
 
-        cb.lk_table_record(|| "u8_record", rlc_record, mlt.expr())?;
+        cb.lk_table_record(|| "record", rlc_record, mlt.expr())?;
 
-        Ok(Self { u8_fixed, mlt })
+        Ok(Self {
+            fixed,
+            mlt,
+            rom_type,
+        })
     }
 
     pub fn generate_fixed_traces<F: SmallField>(&self, fixed: &mut RowMajorMatrix<F>) {
-        assert!(fixed.num_instances() >= NUM_U8);
+        let count = self.rom_type.count();
+        assert!(fixed.num_instances() >= count);
 
         fixed
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
-            .zip((0..NUM_U8).into_par_iter())
+            .zip(self.rom_type.gen().into_par_iter())
             .for_each(|(row, i)| {
-                set_fixed_val!(row, self.u8_fixed, F::from(i as u64));
+                set_fixed_val!(row, self.fixed, F::from(i));
             });
 
         // Fill the rest with zeros, if any.
-        fixed.par_iter_mut().skip(NUM_U8).for_each(|row| {
-            set_fixed_val!(row, self.u8_fixed, F::ZERO);
+        fixed.par_iter_mut().skip(count).for_each(|row| {
+            set_fixed_val!(row, self.fixed, F::ZERO);
         });
     }
 
@@ -60,9 +67,10 @@ impl U8TableConfig {
         multiplicity: &[HashMap<u64, usize>],
         witness: &mut RowMajorMatrix<F>,
     ) {
-        assert!(witness.num_instances() >= NUM_U8);
+        let count = self.rom_type.count();
+        assert!(witness.num_instances() >= count);
 
-        let mut mlts = vec![0; NUM_U8];
+        let mut mlts = vec![0; count];
         for (idx, mlt) in &multiplicity[ROMType::U8 as usize] {
             mlts[*idx as usize] = *mlt;
         }
@@ -76,7 +84,7 @@ impl U8TableConfig {
             });
 
         // Fill the rest with zeros, if any.
-        witness.par_iter_mut().skip(NUM_U8).for_each(|row| {
+        witness.par_iter_mut().skip(count).for_each(|row| {
             set_val!(row, self.mlt, F::ZERO);
         });
     }
