@@ -1,3 +1,4 @@
+use ceno_emul::InsnKind;
 use goldilocks::SmallField;
 use std::mem::MaybeUninit;
 
@@ -20,7 +21,7 @@ use crate::{
 
 use super::{
     config::ExprLtConfig,
-    constants::{OPType, OpcodeType, RegUInt, RegUInt8, PC_STEP_SIZE},
+    constants::{RegUInt, RegUInt8, PC_STEP_SIZE},
     RIVInstruction,
 };
 
@@ -140,8 +141,8 @@ impl BltInput {
     }
 }
 
-impl<E: ExtensionField> RIVInstruction<E> for BltInstruction {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::BType(OPType::Branch, 0x004);
+impl RIVInstruction for BltInstruction {
+    const INST_KIND: InsnKind = InsnKind::BLT;
 }
 
 /// if (rs1 < rs2) PC += sext(imm)
