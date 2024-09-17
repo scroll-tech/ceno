@@ -1,3 +1,5 @@
+//! The implementation of range tables. No generics.
+
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -13,16 +15,13 @@ use crate::{
     witness::RowMajorMatrix,
 };
 
-pub type U8TableConfig = ScalarTableConfig;
-
 #[derive(Clone, Debug)]
-pub struct ScalarTableConfig {
-    rom_type: ROMType,
+pub struct RangeTableConfig {
     fixed: Fixed,
     mlt: WitIn,
 }
 
-impl ScalarTableConfig {
+impl RangeTableConfig {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         rom_type: ROMType,
@@ -31,49 +30,55 @@ impl ScalarTableConfig {
         let mlt = cb.create_witin(|| "mlt")?;
 
         let rlc_record = cb.rlc_chip_record(vec![
-            Expression::Constant(E::BaseField::from(rom_type as u64)),
+            (rom_type as usize).into(),
             Expression::Fixed(fixed.clone()),
         ]);
 
         cb.lk_table_record(|| "record", rlc_record, mlt.expr())?;
 
-        Ok(Self {
-            fixed,
-            mlt,
-            rom_type,
-        })
+        Ok(Self { fixed, mlt })
     }
 
-    pub fn generate_fixed_traces<F: SmallField>(&self, fixed: &mut RowMajorMatrix<F>) {
-        let count = self.rom_type.count();
-        assert!(fixed.num_instances() >= count);
+    pub fn generate_fixed_traces<F: SmallField>(
+        &self,
+        num_fixed: usize,
+        content: Vec<u64>,
+    ) -> RowMajorMatrix<F> {
+        let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
+
+        // Fill the padding with zeros, if any.
+        fixed.par_iter_mut().skip(content.len()).for_each(|row| {
+            set_fixed_val!(row, self.fixed, F::ZERO);
+        });
 
         fixed
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
-            .zip(self.rom_type.gen().into_par_iter())
+            .zip(content.into_par_iter())
             .for_each(|(row, i)| {
                 set_fixed_val!(row, self.fixed, F::from(i));
             });
 
-        // Fill the rest with zeros, if any.
-        fixed.par_iter_mut().skip(count).for_each(|row| {
-            set_fixed_val!(row, self.fixed, F::ZERO);
-        });
+        fixed
     }
 
     pub fn assign_instances<F: SmallField>(
         &self,
-        multiplicity: &[HashMap<u64, usize>],
-        witness: &mut RowMajorMatrix<F>,
-    ) {
-        let count = self.rom_type.count();
-        assert!(witness.num_instances() >= count);
+        num_witin: usize,
+        multiplicity: &HashMap<u64, usize>,
+        length: usize,
+    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
+        let mut witness = RowMajorMatrix::<F>::new(length, num_witin);
 
-        let mut mlts = vec![0; count];
-        for (idx, mlt) in &multiplicity[ROMType::U8 as usize] {
+        let mut mlts = vec![0; length];
+        for (idx, mlt) in multiplicity {
             mlts[*idx as usize] = *mlt;
         }
+
+        // Fill the padding with zeros, if any.
+        witness.par_iter_mut().skip(length).for_each(|row| {
+            set_val!(row, self.mlt, F::ZERO);
+        });
 
         witness
             .par_iter_mut()
@@ -83,9 +88,6 @@ impl ScalarTableConfig {
                 set_val!(row, self.mlt, F::from(mlt as u64));
             });
 
-        // Fill the rest with zeros, if any.
-        witness.par_iter_mut().skip(count).for_each(|row| {
-            set_val!(row, self.mlt, F::ZERO);
-        });
+        Ok(witness)
     }
 }
