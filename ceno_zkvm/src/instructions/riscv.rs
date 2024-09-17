@@ -1,16 +1,14 @@
-use constants::OpcodeType;
-use ff_ext::ExtensionField;
-
-use super::Instruction;
+use ceno_emul::InsnKind;
 
 pub mod addsub;
 pub mod blt;
 pub mod config;
 pub mod constants;
+mod r_insn;
 
 #[cfg(test)]
 mod test;
 
-pub trait RIVInstruction<E: ExtensionField>: Instruction<E> {
-    const OPCODE_TYPE: OpcodeType;
+pub trait RIVInstruction {
+    const INST_KIND: InsnKind;
 }
