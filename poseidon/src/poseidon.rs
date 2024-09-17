@@ -147,6 +147,11 @@ pub trait Poseidon: AdaptedField {
 
     #[inline(always)]
     fn sbox_monomial(x: Self) -> Self {
+        // Observed a performance improvement by using x*x rather than x.square().
+        // In Plonky2, where this function originates, operations might be over an algebraic extension field.
+        // Specialized square functions could leverage the field's structure for potential savings.
+        // Adding this note in case future generalizations or optimizations are considered.
+
         // x |--> x^7
         let x2 = x * x;
         let x4 = x2 * x2;
