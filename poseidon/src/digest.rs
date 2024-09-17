@@ -1,16 +1,17 @@
 use crate::constants::DIGEST_WIDTH;
 use goldilocks::SmallField;
-use serde::Serialize;
 
 #[derive(Debug)]
-pub struct Digest<F: SmallField + Serialize>(pub [F; DIGEST_WIDTH]);
+pub struct Digest<F: SmallField>(pub [F; DIGEST_WIDTH]);
 
 impl<F: SmallField> TryFrom<Vec<F>> for Digest<F> {
-    type Error = &'static str;
+    type Error = String;
 
     fn try_from(values: Vec<F>) -> Result<Self, Self::Error> {
         if values.len() != DIGEST_WIDTH {
-            return Err("can only create digest from 4 elements");
+            return Err(format!(
+                "can only create digest from {DIGEST_WIDTH} elements"
+            ));
         }
 
         Ok(Digest(values.try_into().unwrap()))

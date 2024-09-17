@@ -1,5 +1,5 @@
 use crate::{
-    constants::{DIGEST_WIDTH, SPONGE_RATE},
+    constants::{DIGEST_WIDTH, SPONGE_RATE, SPONGE_WIDTH},
     digest::Digest,
     poseidon::{AdaptedField, Poseidon},
     poseidon_permutation::PoseidonPermutation,
@@ -29,12 +29,15 @@ pub fn hash_n_to_m_no_pad<F: Poseidon>(inputs: &[F], num_outputs: usize) -> Vec<
 
     // Absorb all input chunks.
     for input_chunk in inputs.chunks(SPONGE_RATE) {
+        // Overwrite the first r elements with the inputs. This differs from a standard sponge,
+        // where we would xor or add in the inputs. This is a well-known variant, though,
+        // sometimes called "overwrite mode".
         perm.set_from_slice(input_chunk, 0);
         perm.permute();
     }
 
     // Squeeze until we have the desired number of outputs
-    let mut outputs = Vec::new();
+    let mut outputs = Vec::with_capacity(num_outputs);
     loop {
         for &item in perm.squeeze() {
             outputs.push(item);
@@ -52,6 +55,7 @@ pub fn hash_n_to_hash_no_pad<F: Poseidon>(inputs: &[F]) -> Digest<F> {
 
 pub fn compress<F: Poseidon>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
     debug_assert!(SPONGE_RATE >= DIGEST_WIDTH);
+    debug_assert!(SPONGE_WIDTH >= 2 * DIGEST_WIDTH);
     debug_assert_eq!(x.elements().len(), DIGEST_WIDTH);
     debug_assert_eq!(y.elements().len(), DIGEST_WIDTH);
 
@@ -90,7 +94,7 @@ mod tests {
             .collect()
     }
 
-    fn n_test_vectors(n: usize) -> (PlonkyFieldElements, CenoFieldElements) {
+    fn test_vector_pair(n: usize) -> (PlonkyFieldElements, CenoFieldElements) {
         let plonky_elems = GoldilocksField::rand_vec(n);
         let ceno_elems = ceno_goldy_from_plonky_goldy(plonky_elems.as_slice());
         (plonky_elems, ceno_elems)
@@ -120,7 +124,7 @@ mod tests {
         let mut rng = thread_rng();
         for _ in 0..N_ITERATIONS {
             let n = rng.gen_range(0..=100);
-            let (plonky_elems, ceno_elems) = n_test_vectors(n);
+            let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
             let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
             assert!(compare_hash_output(plonky_out, ceno_out));

@@ -3,13 +3,13 @@ use crate::{
     poseidon::Poseidon,
 };
 
-pub struct PoseidonPermutation<T> {
+pub struct PoseidonPermutation<T: Poseidon> {
     state: [T; SPONGE_WIDTH],
 }
 
 impl<T: Poseidon> PoseidonPermutation<T> {
     /// Initialises internal state with values from `iter` until
-    /// `iter` is exhausted or `Self::WIDTH` values have been
+    /// `iter` is exhausted or `SPONGE_WIDTH` values have been
     /// received; remaining state (if any) initialised with
     /// `T::default()`. To initialise remaining elements with a
     /// different value, instead of your original `iter` pass
@@ -25,7 +25,7 @@ impl<T: Poseidon> PoseidonPermutation<T> {
 
     /// Set state element `i` to be `elts[i] for i =
     /// start_idx..start_idx + n` where `n = min(elts.len(),
-    /// WIDTH-start_idx)`. Panics if `start_idx > WIDTH`.
+    /// WIDTH-start_idx)`. Panics if `start_idx > SPONGE_WIDTH`.
     pub(crate) fn set_from_slice(&mut self, elts: &[T], start_idx: usize) {
         let begin = start_idx;
         let end = start_idx + elts.len();

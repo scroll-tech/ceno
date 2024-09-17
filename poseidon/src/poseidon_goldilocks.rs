@@ -3,6 +3,8 @@ use crate::{
     poseidon::{AdaptedField, Poseidon},
 };
 use goldilocks::{Goldilocks, SmallField, EPSILON};
+#[cfg(target_arch = "x86_64")]
+use std::hint::unreachable_unchecked;
 
 #[rustfmt::skip]
 impl Poseidon for Goldilocks {
@@ -296,6 +298,17 @@ fn reduce128(x: u128) -> Goldilocks {
 #[inline]
 const fn split(x: u128) -> (u64, u64) {
     (x as u64, (x >> 64) as u64)
+}
+
+#[inline(always)]
+#[cfg(target_arch = "x86_64")]
+pub fn assume(p: bool) {
+    debug_assert!(p);
+    if !p {
+        unsafe {
+            unreachable_unchecked();
+        }
+    }
 }
 
 /// Try to force Rust to emit a branch. Example:

@@ -1,5 +1,5 @@
 use ark_std::test_rng;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use ff::Field;
 use goldilocks::Goldilocks;
 use plonky2::{
@@ -21,6 +21,14 @@ fn random_ceno_goldy() -> Goldilocks {
     Goldilocks::random(&mut test_rng())
 }
 
+fn random_ceno_hash() -> Digest<Goldilocks> {
+    Digest(
+        vec![Goldilocks::random(&mut test_rng()); 4]
+            .try_into()
+            .unwrap(),
+    )
+}
+
 fn plonky_hash_single(a: GoldilocksField) {
     let result = black_box(PlonkyPoseidonHash::hash_or_noop(&[a]));
 }
@@ -37,55 +45,70 @@ fn ceno_hash_2_to_1(left: &Digest<Goldilocks>, right: &Digest<Goldilocks>) {
     let result = black_box(PoseidonHash::two_to_one(left, right));
 }
 
-fn plonky_hash_60_to_1(values: &[GoldilocksField]) {
+fn plonky_hash_many_to_1(values: &[GoldilocksField]) {
     let result = black_box(PlonkyPoseidonHash::hash_or_noop(values));
 }
 
-fn ceno_hash_60_to_1(values: &[Goldilocks]) {
+fn ceno_hash_many_to_1(values: &[Goldilocks]) {
     let result = black_box(PoseidonHash::hash_or_noop(values));
 }
 
 pub fn hashing_benchmark(c: &mut Criterion) {
-    let p_a = black_box(random_plonky_2_goldy());
     c.bench_function("plonky hash single", |bencher| {
-        bencher.iter(|| plonky_hash_single(p_a))
+        bencher.iter_batched(
+            || random_plonky_2_goldy(),
+            |p_a| plonky_hash_single(p_a),
+            BatchSize::SmallInput,
+        )
     });
 
-    let left = HashOut::<GoldilocksField>::rand();
-    let right = HashOut::<GoldilocksField>::rand();
     c.bench_function("plonky hash 2 to 1", |bencher| {
-        bencher.iter(|| plonky_hash_2_to_1(left, right))
+        bencher.iter_batched(
+            || {
+                (
+                    HashOut::<GoldilocksField>::rand(),
+                    HashOut::<GoldilocksField>::rand(),
+                )
+            },
+            |(left, right)| plonky_hash_2_to_1(left, right),
+            BatchSize::SmallInput,
+        )
     });
 
-    let sixty_elems = GoldilocksField::rand_vec(60);
     c.bench_function("plonky hash 60 to 1", |bencher| {
-        bencher.iter(|| plonky_hash_60_to_1(sixty_elems.as_slice()))
+        bencher.iter_batched(
+            || GoldilocksField::rand_vec(60),
+            |sixty_elems| plonky_hash_many_to_1(sixty_elems.as_slice()),
+            BatchSize::SmallInput,
+        )
     });
 
-    let c_a = black_box(random_ceno_goldy());
     c.bench_function("ceno hash single", |bencher| {
-        bencher.iter(|| ceno_hash_single(c_a))
+        bencher.iter_batched(
+            || random_ceno_goldy(),
+            |c_a| ceno_hash_single(c_a),
+            BatchSize::SmallInput,
+        )
     });
 
-    let left = Digest(
-        vec![Goldilocks::random(&mut test_rng()); 4]
-            .try_into()
-            .unwrap(),
-    );
-    let right = Digest(
-        vec![Goldilocks::random(&mut test_rng()); 4]
-            .try_into()
-            .unwrap(),
-    );
     c.bench_function("ceno hash 2 to 1", |bencher| {
-        bencher.iter(|| ceno_hash_2_to_1(&left, &right))
+        bencher.iter_batched(
+            || (random_ceno_hash(), random_ceno_hash()),
+            |(left, right)| ceno_hash_2_to_1(&left, &right),
+            BatchSize::SmallInput,
+        )
     });
 
-    let values = (0..60)
-        .map(|_| Goldilocks::random(&mut test_rng()))
-        .collect::<Vec<_>>();
     c.bench_function("ceno hash 60 to 1", |bencher| {
-        bencher.iter(|| ceno_hash_60_to_1(values.as_slice()))
+        bencher.iter_batched(
+            || {
+                (0..60)
+                    .map(|_| Goldilocks::random(&mut test_rng()))
+                    .collect::<Vec<_>>()
+            },
+            |values| ceno_hash_many_to_1(values.as_slice()),
+            BatchSize::SmallInput,
+        )
     });
 }
 
@@ -97,11 +120,11 @@ pub fn permutation_benchmark(c: &mut Criterion) {
     );
 
     c.bench_function("plonky permute", |bencher| {
-        bencher.iter(|| black_box(plonky_permutation.permute()))
+        bencher.iter(|| plonky_permutation.permute())
     });
 
     c.bench_function("ceno permute", |bencher| {
-        bencher.iter(|| black_box(ceno_permutation.permute()))
+        bencher.iter(|| ceno_permutation.permute())
     });
 }
 

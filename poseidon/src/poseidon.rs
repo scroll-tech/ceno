@@ -4,12 +4,6 @@ use crate::constants::{
 use goldilocks::SmallField;
 use unroll::unroll_for_loops;
 
-// pub static mut N_ADD: usize = 0;
-// pub static mut N_MUL: usize = 0;
-// pub static mut N_SQUARE: usize = 0;
-//
-// pub static mut N_EXP: usize = 0;
-
 pub trait Poseidon: AdaptedField {
     // Total number of round constants required: width of the input
     // times number of rounds.
@@ -231,7 +225,7 @@ const fn add_u160_u128((x_lo, x_hi): (u128, u32), y: u128) -> (u128, u32) {
 }
 
 #[inline(always)]
-fn reduce_u160<F: Poseidon>((n_lo, n_hi): (u128, u32)) -> F {
+fn reduce_u160<F: AdaptedField>((n_lo, n_hi): (u128, u32)) -> F {
     let n_lo_hi = (n_lo >> 64) as u64;
     let n_lo_lo = n_lo as u64;
     let reduced_hi: u64 = F::from_noncanonical_u96(n_lo_hi, n_hi).to_noncanonical_u64();
@@ -259,7 +253,6 @@ pub trait AdaptedField: SmallField {
     /// Equivalent to *self + Self::from_canonical_u64(rhs), but may be cheaper. The caller must
     /// ensure that 0 <= rhs < Self::ORDER. The function may return incorrect results if this
     /// precondition is not met. It is marked unsafe for this reason.
-    // TODO: Move to `Field`.
     #[inline]
     unsafe fn add_canonical_u64(&self, rhs: u64) -> Self {
         // Default implementation.
