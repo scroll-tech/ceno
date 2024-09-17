@@ -7,7 +7,7 @@ use std::{
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLE, MultilinearExtension},
+    mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
@@ -55,11 +55,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let mut vm_proof = ZKVMProof::empty();
 
+        // TODO: commit to fixed commitment
+
         // commit to main traces
         let (pp, _) = PCS::trim(&self.pk.pp, 1 << 24).map_err(|e| ZKVMError::PCSError(e))?;
         let mut commitments = BTreeMap::new();
         let mut wits = BTreeMap::new();
-        // sort by circuit name
+        // sort by circuit name, and we rely on an assumption that
+        // table circuit witnesses come after opcode circuit witnesses
         for (circuit_name, witness) in witnesses.witnesses {
             let num_instances = witness.num_instances();
             let witness = witness.into_mles();
@@ -522,14 +525,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         let span = entered_span!("pcs_open");
-        let witnesses: Vec<DenseMultilinearExtension<E>> = witnesses
-            .into_iter()
-            .map(|wit| DenseMultilinearExtension {
-                // TODO: find a way to unwrap DenseMultilinearExtension from Arc
-                evaluations: Arc::try_unwrap(wit).unwrap().evaluations_to_owned(),
-                num_vars: log2_num_instances,
-            })
-            .collect();
         let wits_opening_proof = PCS::simple_batch_open(
             pp,
             &witnesses,
@@ -742,14 +737,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         let span = entered_span!("pcs_opening");
-        let witnesses: Vec<DenseMultilinearExtension<E>> = witnesses
-            .into_iter()
-            .map(|wit| DenseMultilinearExtension {
-                // TODO: find a way to unwrap DenseMultilinearExtension from Arc
-                evaluations: Arc::try_unwrap(wit).unwrap().evaluations_to_owned(),
-                num_vars: log2_num_instances,
-            })
-            .collect();
         let wits_opening_proof = PCS::simple_batch_open(
             pp,
             &witnesses,

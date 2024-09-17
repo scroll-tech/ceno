@@ -1,5 +1,6 @@
 use crate::{
     error::ZKVMError,
+    scheme::constants::MAX_NUM_VARIABLES,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
@@ -12,7 +13,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         mut vm_fixed_traces: ZKVMFixedTraces<E>,
     ) -> Result<ZKVMProvingKey<E, PCS>, ZKVMError> {
         let mut vm_pk = ZKVMProvingKey::new(pp);
-        let (pp, _) = PCS::trim(&vm_pk.pp, 1 << 20).map_err(|err| ZKVMError::PCSError(err))?;
+        let (pp, _) =
+            PCS::trim(&vm_pk.pp, 1 << MAX_NUM_VARIABLES).map_err(|err| ZKVMError::PCSError(err))?;
 
         for (c_name, cs) in self.circuit_css.into_iter() {
             let fixed_traces = vm_fixed_traces

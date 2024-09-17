@@ -2,6 +2,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     instructions::Instruction,
+    scheme::constants::MAX_NUM_VARIABLES,
     tables::TableCircuit,
     witness::{LkMultiplicity, RowMajorMatrix},
 };
@@ -266,7 +267,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
     pub fn get_vk(&self) -> ZKVMVerifyingKey<E, PCS> {
+        let (_, vp) = PCS::trim(&self.pp, 1 << MAX_NUM_VARIABLES).unwrap();
         ZKVMVerifyingKey {
+            vp,
             circuit_vks: self
                 .circuit_pks
                 .iter()
@@ -278,6 +281,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 
 #[derive(Default, Clone)]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    pub vp: PCS::VerifierParam,
     // pk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E, PCS>>,
 }

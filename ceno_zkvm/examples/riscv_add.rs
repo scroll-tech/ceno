@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use ark_std::test_rng;
 use ceno_zkvm::{
     instructions::riscv::addsub::AddInstruction, scheme::prover::ZKVMProver,
     tables::ProgramTableCircuit,
@@ -14,7 +13,6 @@ use ceno_zkvm::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::RangeTableCircuit,
 };
-use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand::SeedableRng;

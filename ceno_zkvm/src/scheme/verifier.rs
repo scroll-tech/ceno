@@ -40,15 +40,39 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn verify_proof(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
-        transcript: Transcript<E>,
-        challenges: &[E; 2],
+        mut transcript: Transcript<E>,
     ) -> Result<bool, ZKVMError> {
+        // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
+
+        // TODO: write fixed commitment to transcript
+
+        for (_, (_, proof)) in vm_proof.opcode_proofs.iter() {
+            PCS::write_commitment(
+                &PCS::get_pure_commitment(&proof.wits_commit),
+                &mut transcript,
+            )
+            .map_err(|e| ZKVMError::PCSError(e))?;
+        }
+        for (_, (_, proof)) in vm_proof.table_proofs.iter() {
+            PCS::write_commitment(
+                &PCS::get_pure_commitment(&proof.wits_commit),
+                &mut transcript,
+            )
+            .map_err(|e| ZKVMError::PCSError(e))?;
+        }
+
+        // alpha, beta
+        let challenges = [
+            transcript.read_challenge().elements,
+            transcript.read_challenge().elements,
+        ];
+
         let dummy_table_item = challenges[0];
-        let point_eval = PointAndEval::default();
         let mut dummy_table_item_multiplicity = 0;
+        let point_eval = PointAndEval::default();
         let mut transcripts = transcript.fork(vm_proof.num_circuits());
 
         for (name, (i, opcode_proof)) in vm_proof.opcode_proofs {
@@ -60,12 +84,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .get(&name)
                 .ok_or(ZKVMError::VKNotFound(name.clone()))?;
             let _rand_point = self.verify_opcode_proof(
+                &self.vk.vp,
                 circuit_vk,
                 &opcode_proof,
                 transcript,
                 NUM_FANIN,
                 &point_eval,
-                challenges,
+                &challenges,
             )?;
             tracing::info!("verified proof for opcode {}", name);
 
@@ -96,12 +121,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .get(&name)
                 .ok_or(ZKVMError::VKNotFound(name.clone()))?;
             let _rand_point = self.verify_table_proof(
+                &self.vk.vp,
                 circuit_vk,
                 &table_proof,
                 transcript,
                 NUM_FANIN_LOGUP,
                 &point_eval,
-                challenges,
+                &challenges,
             )?;
             tracing::info!("verified proof for table {}", name);
 
@@ -131,6 +157,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     /// verify proof and return input opening point
     pub fn verify_opcode_proof(
         &self,
+        vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMOpcodeProof<E, PCS>,
         transcript: &mut Transcript<E>,
@@ -339,11 +366,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             // return Err(ZKVMError::VerifyError("zero expression != 0"));
         }
 
+        PCS::simple_batch_verify(
+            vp,
+            &PCS::get_pure_commitment(&proof.wits_commit),
+            &input_opening_point,
+            &proof.wits_in_evals,
+            &proof.wits_opening_proof,
+            transcript,
+        )
+        .map_err(|e| ZKVMError::PCSError(e))?;
+
         Ok(input_opening_point)
     }
 
     pub fn verify_table_proof(
         &self,
+        vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMTableProof<E, PCS>,
         transcript: &mut Transcript<E>,
@@ -459,6 +497,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 "record evaluate != expected_evals".into(),
             ));
         }
+
+        PCS::simple_batch_verify(
+            vp,
+            &PCS::get_pure_commitment(&proof.wits_commit),
+            &input_opening_point,
+            &proof.wits_in_evals,
+            &proof.wits_opening_proof,
+            transcript,
+        )
+        .map_err(|e| ZKVMError::PCSError(e))?;
+
+        // TODO: verify fixed opening proof
 
         Ok(input_opening_point)
     }

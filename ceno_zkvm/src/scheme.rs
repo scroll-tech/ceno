@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use sumcheck::structs::IOPProverMessage;
 
 use crate::structs::TowerProofs;
@@ -72,15 +72,15 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 /// - an index unique across both types.
 #[derive(Clone)]
 pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    opcode_proofs: HashMap<String, (usize, ZKVMOpcodeProof<E, PCS>)>,
-    table_proofs: HashMap<String, (usize, ZKVMTableProof<E, PCS>)>,
+    opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E, PCS>)>,
+    table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E, PCS>)>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn empty() -> Self {
         Self {
-            opcode_proofs: HashMap::new(),
-            table_proofs: HashMap::new(),
+            opcode_proofs: BTreeMap::new(),
+            table_proofs: BTreeMap::new(),
         }
     }
 }
