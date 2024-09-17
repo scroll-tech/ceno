@@ -7,6 +7,15 @@ use range_circuit::{RangeTable, RangeTableCircuit};
 
 use crate::structs::ROMType;
 
+pub struct U5Table;
+impl RangeTable for U5Table {
+    const ROM_TYPE: ROMType = ROMType::U5;
+    fn len() -> usize {
+        1 << 5
+    }
+}
+pub type U5TableCircuit<E> = RangeTableCircuit<E, U5Table>;
+
 pub struct U8Table;
 impl RangeTable for U8Table {
     const ROM_TYPE: ROMType = ROMType::U8;
