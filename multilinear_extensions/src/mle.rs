@@ -124,7 +124,9 @@ pub trait IntoMLEs<T>: Sized {
     fn into_mles(self) -> Vec<T>;
 }
 
-impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtension<E>> for Vec<Vec<F>> {
+impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtension<E>>
+    for Vec<Vec<F>>
+{
     fn into_mles(self) -> Vec<DenseMultilinearExtension<E>> {
         self.into_iter().map(|v| v.into_mle()).collect()
     }
@@ -1000,12 +1002,6 @@ macro_rules! op_mle {
         match &$a.evaluations() {
             $crate::mle::FieldType::Base(a) => {
                 let $tmp_a = if let Some((start, offset)) = $a.evaluations_range() {
-                    println!(
-                        "op_mle start {}, offset {}, a.len {}",
-                        start,
-                        offset,
-                        a.len()
-                    );
                     &a[start..][..offset]
                 } else {
                     &a[..]

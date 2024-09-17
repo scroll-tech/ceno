@@ -299,7 +299,7 @@ impl<E: ExtensionField> ZKVMProver<E> {
         );
         exit_span!(span);
 
-        // batch sumcheck: selector + main degree > 1 constraints
+        // batch sumcheck: selector
         let span = entered_span!("sumcheck::main_sel");
         let (rt_r, rt_w, rt_lk, rt_non_lc_sumcheck): (Vec<E>, Vec<E>, Vec<E>, Vec<E>) = (
             tower_proof.prod_specs_points[0]

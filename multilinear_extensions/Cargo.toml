@@ -11,6 +11,7 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing-flame = "0.2.0"
 ff_ext = { path = "../ff_ext" }
+itertools = "0.12.1"
 ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true

@@ -1,7 +1,6 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use multilinear_extensions::virtual_poly::VPAuxInfo;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use transcript::{Challenge, Transcript};
 
 use crate::{
@@ -122,12 +121,10 @@ impl<E: ExtensionField> IOPVerifierState<E> {
 
         // the deferred check during the interactive phase:
         // 2. set `expected` to P(r)`
-
         let mut expected_vec = self
             .polynomials_received
-            .clone()
-            .into_par_iter()
-            .zip(self.challenges.clone().into_par_iter())
+            .iter()
+            .zip(self.challenges.iter())
             .map(|(evaluations, challenge)| {
                 if evaluations.len() != self.max_degree + 1 {
                     panic!(
@@ -136,11 +133,11 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                         self.max_degree + 1
                     );
                 }
-                interpolate_uni_poly::<E>(&evaluations, challenge.elements)
+                interpolate_uni_poly::<E>(evaluations, challenge.elements)
             })
             .collect::<Vec<_>>();
 
-        // insert the asserted_sum to the first position of the expected vector
+        // l-append asserted_sum to the first position of the expected vector
         expected_vec.insert(0, *asserted_sum);
 
         for (i, (evaluations, &expected)) in self
