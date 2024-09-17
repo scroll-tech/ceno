@@ -1,14 +1,10 @@
 use std::marker::PhantomData;
 
-use ceno_emul::StepRecord;
+use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
-use super::{
-    constants::{OPType, OpcodeType, RegUInt, FUNCT3_ADD_SUB, FUNCT7_ADD, FUNCT7_SUB, OPCODE_OP},
-    r_insn::RInstructionConfig,
-    RIVInstruction,
-};
+use super::{constants::RegUInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::UIntValue,
     witness::LkMultiplicity,
@@ -28,11 +24,11 @@ pub struct AddInstruction<E>(PhantomData<E>);
 pub struct SubInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> RIVInstruction<E> for AddInstruction<E> {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0000000);
+    const INST_KIND: InsnKind = InsnKind::ADD;
 }
 
 impl<E: ExtensionField> RIVInstruction<E> for SubInstruction<E> {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::RType(OPType::Op, 0x000, 0x0100000);
+    const INST_KIND: InsnKind = InsnKind::SUB;
 }
 
 fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
@@ -62,11 +58,9 @@ fn add_sub_gadget<E: ExtensionField, const IS_ADD: bool>(
         )
     };
 
-    let funct7 = if IS_ADD { FUNCT7_ADD } else { FUNCT7_SUB };
-
     let r_insn = RInstructionConfig::<E>::construct_circuit(
         circuit_builder,
-        (OPCODE_OP, FUNCT3_ADD_SUB, funct7),
+        if IS_ADD { InsnKind::ADD } else { InsnKind::SUB },
         &addend_0,
         &addend_1,
         &outcome,

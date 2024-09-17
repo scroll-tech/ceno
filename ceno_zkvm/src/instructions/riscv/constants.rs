@@ -1,34 +1,5 @@
-use std::fmt;
-
 use crate::uint::UInt;
 pub use ceno_emul::PC_STEP_SIZE;
-
-pub const OPCODE_OP: usize = 0x33;
-pub const FUNCT3_ADD_SUB: usize = 0;
-pub const FUNCT7_ADD: usize = 0;
-pub const FUNCT7_SUB: usize = 0x20;
-
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, Copy)]
-pub enum OPType {
-    Op,
-    Opimm,
-    Jal,
-    Jalr,
-    Branch,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum OpcodeType {
-    RType(OPType, usize, usize), // (OP, func3, func7)
-    BType(OPType, usize),        // (OP, func3)
-}
-
-impl fmt::Display for OpcodeType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
 
 pub const VALUE_BIT_WIDTH: usize = 16;
 

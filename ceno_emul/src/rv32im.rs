@@ -16,6 +16,7 @@
 
 use anyhow::{anyhow, Result};
 use std::sync::OnceLock;
+use strum_macros::EnumIter;
 
 use super::addr::{ByteAddr, RegIdx, Word, WordAddr, WORD_SIZE};
 
@@ -121,7 +122,7 @@ pub enum InsnCategory {
     Invalid,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, EnumIter)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum InsnKind {
     INVALID,
@@ -174,8 +175,14 @@ pub enum InsnKind {
     MRET,
 }
 
+impl InsnKind {
+    pub const fn codes(self) -> InsnCodes {
+        RV32IM_ISA[self as usize]
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
-struct FastDecodeEntry {
+pub struct InsnCodes {
     pub kind: InsnKind,
     category: InsnCategory,
     pub opcode: u32,
@@ -269,8 +276,8 @@ const fn insn(
     opcode: u32,
     func3: i32,
     func7: i32,
-) -> FastDecodeEntry {
-    FastDecodeEntry {
+) -> InsnCodes {
+    InsnCodes {
         kind,
         category,
         opcode,
@@ -279,7 +286,7 @@ const fn insn(
     }
 }
 
-type InstructionTable = [FastDecodeEntry; 48];
+type InstructionTable = [InsnCodes; 48];
 type FastInstructionTable = [u8; 1 << 10];
 
 const RV32IM_ISA: InstructionTable = [
@@ -333,6 +340,15 @@ const RV32IM_ISA: InstructionTable = [
     insn(InsnKind::MRET, InsnCategory::System, 0x73, 0x0, 0x18),
 ];
 
+#[cfg(test)]
+#[test]
+fn test_isa_table() {
+    use strum::IntoEnumIterator;
+    for kind in InsnKind::iter() {
+        assert_eq!(kind.codes().kind, kind);
+    }
+}
+
 // RISC-V instruction are determined by 3 parts:
 // - Opcode: 7 bits
 // - Func3: 3 bits
@@ -373,7 +389,7 @@ impl FastDecodeTable {
         ((op_high << 5) | (func72bits << 3) | func3) as usize
     }
 
-    fn add_insn(table: &mut FastInstructionTable, insn: &FastDecodeEntry, isa_idx: usize) {
+    fn add_insn(table: &mut FastInstructionTable, insn: &InsnCodes, isa_idx: usize) {
         let op_high = insn.opcode >> 2;
         if (insn.func3 as i32) < 0 {
             for f3 in 0..8 {
@@ -392,7 +408,7 @@ impl FastDecodeTable {
         }
     }
 
-    fn lookup(&self, decoded: &DecodedInstruction) -> FastDecodeEntry {
+    fn lookup(&self, decoded: &DecodedInstruction) -> InsnCodes {
         let isa_idx = self.table[Self::map10(decoded.opcode, decoded.func3, decoded.func7)];
         RV32IM_ISA[isa_idx as usize]
     }

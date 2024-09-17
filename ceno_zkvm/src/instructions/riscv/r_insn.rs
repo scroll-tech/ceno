@@ -1,4 +1,4 @@
-use ceno_emul::StepRecord;
+use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{
@@ -37,7 +37,7 @@ pub struct RInstructionConfig<E: ExtensionField> {
 impl<E: ExtensionField> RInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
-        opcode_funct_3_7: (usize, usize, usize),
+        insn_kind: InsnKind,
         addend_0: &impl ToExpr<E, Output = Vec<Expression<E>>>,
         addend_1: &impl ToExpr<E, Output = Vec<Expression<E>>>,
         outcome: &impl ToExpr<E, Output = Vec<Expression<E>>>,
@@ -53,15 +53,14 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         let rd_id = circuit_builder.create_witin(|| "rd_id")?;
 
         // Fetch the instruction.
-        let (opcode, funct3, funct7) = opcode_funct_3_7;
         circuit_builder.lk_fetch(&InsnRecord::new(
             pc.expr(),
-            opcode.into(),
+            (insn_kind.codes().opcode as usize).into(),
             rd_id.expr(),
-            funct3.into(),
+            (insn_kind.codes().func3 as usize).into(),
             rs1_id.expr(),
             rs2_id.expr(),
-            funct7.into(),
+            (insn_kind.codes().func7 as usize).into(),
         ))?;
 
         // Register state.
