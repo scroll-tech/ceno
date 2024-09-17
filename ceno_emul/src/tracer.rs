@@ -60,6 +60,7 @@ impl StepRecord {
         rs1_read: Word,
         rs2_read: Word,
         rd: Change<Word>,
+        previous_cycle: Cycle,
     ) -> StepRecord {
         let insn = DecodedInstruction::new(insn_code);
         StepRecord {
@@ -69,17 +70,17 @@ impl StepRecord {
             rs1: Some(ReadOp {
                 addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
                 value: rs1_read,
-                previous_cycle: 0,
+                previous_cycle,
             }),
             rs2: Some(ReadOp {
                 addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
                 value: rs2_read,
-                previous_cycle: 0,
+                previous_cycle,
             }),
             rd: Some(WriteOp {
                 addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
                 value: rd,
-                previous_cycle: 0,
+                previous_cycle,
             }),
             memory_op: None,
         }

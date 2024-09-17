@@ -225,7 +225,7 @@ impl<E: ExtensionField> Instruction<E> for MulInstruction {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, ReadOp, StepRecord, WordAddr, WriteOp};
+    use ceno_emul::{ByteAddr, Change, DecodedInstruction, StepRecord, CENO_PLATFORM};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -248,35 +248,19 @@ mod test {
             .unwrap();
 
         // values assignment
-        let rs1 = Some(ReadOp {
-            addr: WordAddr::from(1),
-            value: 11u32,
-            previous_cycle: 2,
-        });
-        let rs2 = Some(ReadOp {
-            addr: WordAddr::from(2),
-            value: 2u32,
-            previous_cycle: 2,
-        });
-        let rd = Some(WriteOp {
-            addr: WordAddr::from(3),
-            value: Change {
-                before: 0u32,
-                after: 22u32,
-            },
-            previous_cycle: 2,
-        });
-
+        let inst = DecodedInstruction::from_raw(0b0000001, 0, 1, 2, 3, 0);
         let (raw_witin, _) = MulInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord {
-                cycle: 3,
-                rs1,
-                rs2,
-                rd,
-                ..Default::default()
-            }],
+            vec![StepRecord::new_r_instruction(
+                3,
+                ByteAddr(CENO_PLATFORM.pc_start()),
+                inst.encoded(),
+                11,
+                2,
+                Change::new(0, 22),
+                0,
+            )],
         )
         .unwrap();
 
@@ -302,35 +286,19 @@ mod test {
             .unwrap();
 
         // values assignment
-        let rs1 = Some(ReadOp {
-            addr: WordAddr::from(1),
-            value: u32::MAX / 2 + 1, // equals to 2^32 / 2
-            previous_cycle: 2,
-        });
-        let rs2 = Some(ReadOp {
-            addr: WordAddr::from(2),
-            value: 2u32,
-            previous_cycle: 2,
-        });
-        let rd = Some(WriteOp {
-            addr: WordAddr::from(3),
-            value: Change {
-                before: 0u32,
-                after: 0u32,
-            },
-            previous_cycle: 2,
-        });
-
+        let inst = DecodedInstruction::from_raw(0b0000001, 0, 1, 2, 3, 0);
         let (raw_witin, _) = MulInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord {
-                cycle: 3,
-                rs1,
-                rs2,
-                rd,
-                ..Default::default()
-            }],
+            vec![StepRecord::new_r_instruction(
+                3,
+                ByteAddr(CENO_PLATFORM.pc_start()),
+                inst.encoded(),
+                u32::MAX / 2 + 1,
+                2,
+                Change::new(0, 0),
+                0,
+            )],
         )
         .unwrap();
 
@@ -356,36 +324,19 @@ mod test {
             .unwrap();
 
         // values assignment
-        let rs1 = Some(ReadOp {
-            addr: WordAddr::from(1),
-            value: 4294901760u32, // equals [0, u16::MAX]
-            previous_cycle: 2,
-        });
-        let rs2 = Some(ReadOp {
-            addr: WordAddr::from(2),
-            value: 4294901760u32, // equals [0, u16::MAX]
-            previous_cycle: 2,
-        });
-        // 429490176 * 429490176 % 2^32 = 0
-        let rd = Some(WriteOp {
-            addr: WordAddr::from(3),
-            value: Change {
-                before: 0u32,
-                after: 0u32,
-            },
-            previous_cycle: 2,
-        });
-
+        let inst = DecodedInstruction::from_raw(0b0000001, 0, 1, 2, 3, 0);
         let (raw_witin, _) = MulInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,
-            vec![StepRecord {
-                cycle: 3,
-                rs1,
-                rs2,
-                rd,
-                ..Default::default()
-            }],
+            vec![StepRecord::new_r_instruction(
+                3,
+                ByteAddr(CENO_PLATFORM.pc_start()),
+                inst.encoded(),
+                4294901760,
+                4294901760,
+                Change::new(0, 0),
+                0,
+            )],
         )
         .unwrap();
 

@@ -183,6 +183,7 @@ mod test {
                 11,
                 0xfffffffe,
                 Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
+                0,
             )],
         )
         .unwrap();
@@ -225,6 +226,7 @@ mod test {
                 u32::MAX - 1,
                 u32::MAX - 1,
                 Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
+                0,
             )],
         )
         .unwrap();
@@ -267,6 +269,7 @@ mod test {
                 11,
                 2,
                 Change::new(0, 11_u32.wrapping_sub(2)),
+                0,
             )],
         )
         .unwrap();
@@ -309,6 +312,7 @@ mod test {
                 3,
                 11,
                 Change::new(0, 3_u32.wrapping_sub(11)),
+                0,
             )],
         )
         .unwrap();
