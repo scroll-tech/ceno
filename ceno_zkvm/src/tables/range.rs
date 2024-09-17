@@ -1,5 +1,5 @@
 mod u8_table;
-use u8_table::{U8TableCircuit, U8TableConfig};
+use u8_table::U8TableConfig;
 
 use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
@@ -47,10 +47,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
 
         cb.lk_table_record(|| "u16 table", u16_table_values, u16_mlt.expr())?;
 
-        let u8_config = cb.namespace(
-            || "u8_table",
-            |cb| U8TableCircuit::<E>::construct_circuit(cb),
-        )?;
+        let u8_config = cb.namespace(|| "u8_table", |cb| U8TableConfig::construct_circuit(cb))?;
 
         Ok(RangeTableConfig {
             u16_tbl,
@@ -74,7 +71,7 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
                 set_fixed_val!(row, config.u16_tbl, E::BaseField::from(i as u64));
             });
 
-        U8TableCircuit::<E>::generate_fixed_traces(&config.u8_config, &mut fixed);
+        config.u8_config.generate_fixed_traces(&mut fixed);
 
         fixed
     }
@@ -99,7 +96,9 @@ impl<E: ExtensionField> TableCircuit<E> for RangeTableCircuit<E> {
                 set_val!(row, config.u16_mlt, E::BaseField::from(mlt as u64));
             });
 
-        U8TableCircuit::<E>::assign_instances(&config.u8_config, multiplicity, &mut witness);
+        config
+            .u8_config
+            .assign_instances(multiplicity, &mut witness);
 
         Ok(witness)
     }

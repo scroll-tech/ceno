@@ -1,7 +1,7 @@
-use ff::Field;
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
+use std::{collections::HashMap, mem::MaybeUninit};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -21,10 +21,10 @@ pub struct U8TableConfig {
     mlt: WitIn,
 }
 
-pub struct U8TableCircuit<E>(PhantomData<E>);
-
-impl<E: ExtensionField> U8TableCircuit<E> {
-    pub fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<U8TableConfig, ZKVMError> {
+impl U8TableConfig {
+    pub fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<Self, ZKVMError> {
         let u8_fixed = cb.create_fixed(|| "u8_fixed")?;
         let mlt = cb.create_witin(|| "mlt")?;
 
@@ -35,10 +35,10 @@ impl<E: ExtensionField> U8TableCircuit<E> {
 
         cb.lk_table_record(|| "u8_record", rlc_record, mlt.expr())?;
 
-        Ok(U8TableConfig { u8_fixed, mlt })
+        Ok(Self { u8_fixed, mlt })
     }
 
-    pub fn generate_fixed_traces(config: &U8TableConfig, fixed: &mut RowMajorMatrix<E::BaseField>) {
+    pub fn generate_fixed_traces<F: SmallField>(&self, fixed: &mut RowMajorMatrix<F>) {
         assert!(fixed.num_instances() >= NUM_U8);
 
         fixed
@@ -46,19 +46,19 @@ impl<E: ExtensionField> U8TableCircuit<E> {
             .with_min_len(MIN_PAR_SIZE)
             .zip((0..NUM_U8).into_par_iter())
             .for_each(|(row, i)| {
-                set_fixed_val!(row, config.u8_fixed, E::BaseField::from(i as u64));
+                set_fixed_val!(row, self.u8_fixed, F::from(i as u64));
             });
 
         // Fill the rest with zeros, if any.
         fixed.par_iter_mut().skip(NUM_U8).for_each(|row| {
-            set_fixed_val!(row, config.u8_fixed, E::BaseField::ZERO);
+            set_fixed_val!(row, self.u8_fixed, F::ZERO);
         });
     }
 
-    pub fn assign_instances(
-        config: &U8TableConfig,
+    pub fn assign_instances<F: SmallField>(
+        &self,
         multiplicity: &[HashMap<u64, usize>],
-        witness: &mut RowMajorMatrix<E::BaseField>,
+        witness: &mut RowMajorMatrix<F>,
     ) {
         assert!(witness.num_instances() >= NUM_U8);
 
@@ -72,12 +72,12 @@ impl<E: ExtensionField> U8TableCircuit<E> {
             .with_min_len(MIN_PAR_SIZE)
             .zip(mlts.into_par_iter())
             .for_each(|(row, mlt)| {
-                set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
+                set_val!(row, self.mlt, F::from(mlt as u64));
             });
 
         // Fill the rest with zeros, if any.
         witness.par_iter_mut().skip(NUM_U8).for_each(|row| {
-            set_val!(row, config.mlt, E::BaseField::ZERO);
+            set_val!(row, self.mlt, F::ZERO);
         });
     }
 }
