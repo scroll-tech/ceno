@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use mpcs::PolynomialCommitmentScheme;
 use std::collections::HashMap;
 use sumcheck::structs::IOPProverMessage;
 
@@ -15,7 +16,7 @@ pub mod mock_prover;
 mod tests;
 
 #[derive(Clone)]
-pub struct ZKVMOpcodeProof<E: ExtensionField> {
+pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     // TODO support >1 opcodes
     pub num_instances: usize,
 
@@ -23,7 +24,7 @@ pub struct ZKVMOpcodeProof<E: ExtensionField> {
     pub record_r_out_evals: Vec<E>,
     pub record_w_out_evals: Vec<E>,
 
-    // logup constraint
+    // logup sum at layer 1
     pub lk_p1_out_eval: E,
     pub lk_p2_out_eval: E,
     pub lk_q1_out_eval: E,
@@ -37,11 +38,13 @@ pub struct ZKVMOpcodeProof<E: ExtensionField> {
     pub w_records_in_evals: Vec<E>,
     pub lk_records_in_evals: Vec<E>,
 
+    pub wits_commit: PCS::CommitmentWithData,
+    pub wits_opening_proof: PCS::Proof,
     pub wits_in_evals: Vec<E>,
 }
 
 #[derive(Clone)]
-pub struct ZKVMTableProof<E: ExtensionField> {
+pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub num_instances: usize,
     // logup sum at layer 1
     pub lk_p1_out_eval: E,
@@ -57,19 +60,32 @@ pub struct ZKVMTableProof<E: ExtensionField> {
     pub lk_n_in_evals: Vec<E>,
 
     pub fixed_in_evals: Vec<E>,
+    // TODO: add fixed_opening_proof
+    // pub fixed_opening_proof: PCS::Proof,
+    pub wits_commit: PCS::CommitmentWithData,
     pub wits_in_evals: Vec<E>,
+    pub wits_opening_proof: PCS::Proof,
 }
 
 /// Map circuit names to
 /// - an opcode or table proof,
 /// - an index unique across both types.
-#[derive(Default, Clone)]
-pub struct ZKVMProof<E: ExtensionField> {
-    opcode_proofs: HashMap<String, (usize, ZKVMOpcodeProof<E>)>,
-    table_proofs: HashMap<String, (usize, ZKVMTableProof<E>)>,
+#[derive(Clone)]
+pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    opcode_proofs: HashMap<String, (usize, ZKVMOpcodeProof<E, PCS>)>,
+    table_proofs: HashMap<String, (usize, ZKVMTableProof<E, PCS>)>,
 }
 
-impl<E: ExtensionField> ZKVMProof<E> {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
+    pub fn empty() -> Self {
+        Self {
+            opcode_proofs: HashMap::new(),
+            table_proofs: HashMap::new(),
+        }
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn num_circuits(&self) -> usize {
         self.opcode_proofs.len() + self.table_proofs.len()
     }

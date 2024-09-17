@@ -93,7 +93,7 @@ where
         );
         assert!(
             num_vars >= Spec::get_basecode_msg_size_log(),
-            "num_vars {} < Spec::get_basecode_msg_size_log() {}",
+            "num_vars < Spec::get_basecode_msg_size_log(): {}, {}",
             num_vars,
             Spec::get_basecode_msg_size_log()
         );

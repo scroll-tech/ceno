@@ -16,12 +16,12 @@ use ceno_zkvm::{
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
-use mpcs::{Basefold, BasefoldBasecodeParams, BasefoldRSParams, PolynomialCommitmentScheme};
 use transcript::Transcript;
 
 #[from_env]
@@ -95,7 +95,7 @@ fn main() {
 
     // keygen
     let rng = ChaCha8Rng::from_seed([0u8; 32]);
-    let pp = PCS::setup(1<<24, &rng).expect("basefold setup");
+    let pp = PCS::setup(1 << 24, &rng).expect("basefold setup");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let range_config = zkvm_cs.register_table_circuit::<RangeTableCircuit<E>>();
@@ -167,11 +167,8 @@ fn main() {
         let timer = Instant::now();
 
         let transcript = Transcript::new(b"riscv");
-        let mut rng = test_rng();
-        let real_challenges = [E::random(&mut rng), E::random(&mut rng)];
-
         let zkvm_proof = prover
-            .create_proof(zkvm_witness, max_threads, transcript, &real_challenges)
+            .create_proof(zkvm_witness, max_threads, transcript)
             .expect("create_proof failed");
 
         println!(
@@ -183,7 +180,7 @@ fn main() {
         let transcript = Transcript::new(b"riscv");
         assert!(
             verifier
-                .verify_proof(zkvm_proof, transcript, &real_challenges)
+                .verify_proof(zkvm_proof, transcript)
                 .expect("verify proof return with error"),
         );
     }

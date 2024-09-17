@@ -39,7 +39,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
     pub fn verify_proof(
         &self,
-        vm_proof: ZKVMProof<E>,
+        vm_proof: ZKVMProof<E, PCS>,
         transcript: Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<bool, ZKVMError> {
@@ -132,7 +132,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn verify_opcode_proof(
         &self,
         circuit_vk: &VerifyingKey<E, PCS>,
-        proof: &ZKVMOpcodeProof<E>,
+        proof: &ZKVMOpcodeProof<E, PCS>,
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -345,7 +345,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn verify_table_proof(
         &self,
         circuit_vk: &VerifyingKey<E, PCS>,
-        proof: &ZKVMTableProof<E>,
+        proof: &ZKVMTableProof<E, PCS>,
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
