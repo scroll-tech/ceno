@@ -23,7 +23,7 @@ pub trait Instruction<E: ExtensionField> {
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError>;
 
-    // assign single instance given step from trace
+    // assign single instance giving step from trace
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [MaybeUninit<E::BaseField>],
