@@ -18,6 +18,7 @@ use transcript::Transcript;
 use multilinear_extensions::mle::FieldType;
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
+use poseidon::poseidon::Poseidon;
 use rayon::{
     iter::IndexedParallelIterator,
     prelude::{IntoParallelRefIterator, ParallelIterator},
@@ -35,7 +36,7 @@ pub fn prover_query_phase<E: ExtensionField>(
     num_verifier_queries: usize,
 ) -> QueriesResult<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     let queries: Vec<_> = (0..num_verifier_queries)
         .map(|_| {
@@ -72,7 +73,7 @@ pub fn batch_prover_query_phase<E: ExtensionField>(
     num_verifier_queries: usize,
 ) -> BatchedQueriesResult<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     let queries: Vec<_> = (0..num_verifier_queries)
         .map(|_| {
@@ -108,7 +109,7 @@ pub fn simple_batch_prover_query_phase<E: ExtensionField>(
     num_verifier_queries: usize,
 ) -> SimpleBatchQueriesResult<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     let queries: Vec<_> = (0..num_verifier_queries)
         .map(|_| {
@@ -152,7 +153,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     partial_eq: &[E],
     eval: &E,
 ) where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     let timer = start_timer!(|| "Verifier query phase");
 
@@ -223,7 +224,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     partial_eq: &[E],
     eval: &E,
 ) where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     let timer = start_timer!(|| "Verifier batch query phase");
     let encode_timer = start_timer!(|| "Encode final codeword");
@@ -297,7 +298,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     partial_eq: &[E],
     evals: &[E],
 ) where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     let timer = start_timer!(|| "Verifier query phase");
 
@@ -364,7 +365,7 @@ fn basefold_get_query<E: ExtensionField>(
     x_index: usize,
 ) -> SingleQueryResult<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     let mut index = x_index;
     let p1 = index | 1;
@@ -409,7 +410,7 @@ fn batch_basefold_get_query<E: ExtensionField>(
     x_index: usize,
 ) -> BatchedSingleQueryResult<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     let mut oracle_list_queries = Vec::with_capacity(oracles.len());
 
@@ -461,7 +462,7 @@ fn simple_batch_basefold_get_query<E: ExtensionField>(
     x_index: usize,
 ) -> SimpleBatchSingleQueryResult<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     let mut index = x_index;
     let p1 = index | 1;
@@ -633,7 +634,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CodewordSingleQueryResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     query: CodewordSingleQueryResult<E>,
     merkle_path: MerklePathWithoutLeafOrRoot<E>,
@@ -641,7 +642,7 @@ where
 
 impl<E: ExtensionField> CodewordSingleQueryResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.query.write_transcript(transcript);
@@ -652,20 +653,12 @@ where
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
         match self.query.codepoints {
             CodewordPointPair::Ext(left, right) => {
-                self.merkle_path.authenticate_leaves_root_ext(
-                    left,
-                    right,
-                    self.query.index,
-                    root,
-                );
+                self.merkle_path
+                    .authenticate_leaves_root_ext(left, right, self.query.index, root);
             }
             CodewordPointPair::Base(left, right) => {
-                self.merkle_path.authenticate_leaves_root_base(
-                    left,
-                    right,
-                    self.query.index,
-                    root,
-                );
+                self.merkle_path
+                    .authenticate_leaves_root_base(left, right, self.query.index, root);
             }
         }
         // end_timer!(timer);
@@ -675,7 +668,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct OracleListQueryResult<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<CodewordSingleQueryResult<E>>,
 }
@@ -683,7 +676,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CommitmentsQueryResult<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<CodewordSingleQueryResult<E>>,
 }
@@ -691,7 +684,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct OracleListQueryResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
 }
@@ -699,14 +692,14 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CommitmentsQueryResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
 }
 
 impl<E: ExtensionField> ListQueryResult<E> for OracleListQueryResult<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>> {
         &self.inner
@@ -719,7 +712,7 @@ where
 
 impl<E: ExtensionField> ListQueryResult<E> for CommitmentsQueryResult<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>> {
         &self.inner
@@ -732,7 +725,7 @@ where
 
 impl<E: ExtensionField> ListQueryResultWithMerklePath<E> for OracleListQueryResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E>> {
         &self.inner
@@ -745,7 +738,7 @@ where
 
 impl<E: ExtensionField> ListQueryResultWithMerklePath<E> for CommitmentsQueryResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E>> {
         &self.inner
@@ -758,7 +751,7 @@ where
 
 trait ListQueryResult<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>>;
 
@@ -780,7 +773,7 @@ where
 
 trait ListQueryResultWithMerklePath<E: ExtensionField>: Sized
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>) -> Self;
 
@@ -826,7 +819,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SingleQueryResult<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     oracle_query: OracleListQueryResult<E>,
     commitment_query: CodewordSingleQueryResult<E>,
@@ -835,7 +828,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SingleQueryResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     oracle_query: OracleListQueryResultWithMerklePath<E>,
     commitment_query: CodewordSingleQueryResultWithMerklePath<E>,
@@ -843,7 +836,7 @@ where
 
 impl<E: ExtensionField> SingleQueryResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn from_single_query_result(
         single_query_result: SingleQueryResult<E>,
@@ -929,7 +922,7 @@ where
 
 pub struct QueriesResult<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<(usize, SingleQueryResult<E>)>,
 }
@@ -937,14 +930,14 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueriesResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<(usize, SingleQueryResultWithMerklePath<E>)>,
 }
 
 impl<E: ExtensionField> QueriesResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn from_query_result(
         query_result: QueriesResult<E>,
@@ -1010,7 +1003,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BatchedSingleQueryResult<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     oracle_query: OracleListQueryResult<E>,
     commitments_query: CommitmentsQueryResult<E>,
@@ -1019,7 +1012,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BatchedSingleQueryResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     oracle_query: OracleListQueryResultWithMerklePath<E>,
     commitments_query: CommitmentsQueryResultWithMerklePath<E>,
@@ -1027,7 +1020,7 @@ where
 
 impl<E: ExtensionField> BatchedSingleQueryResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn from_batched_single_query_result(
         batched_single_query_result: BatchedSingleQueryResult<E>,
@@ -1162,7 +1155,7 @@ where
 
 pub struct BatchedQueriesResult<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<(usize, BatchedSingleQueryResult<E>)>,
 }
@@ -1170,14 +1163,14 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchedQueriesResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<(usize, BatchedSingleQueryResultWithMerklePath<E>)>,
 }
 
 impl<E: ExtensionField> BatchedQueriesResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn from_batched_query_result(
         batched_query_result: BatchedQueriesResult<E>,
@@ -1314,7 +1307,7 @@ where
 
 impl<E: ExtensionField> SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
         self.query.write_transcript(transcript);
@@ -1348,7 +1341,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SimpleBatchSingleQueryResult<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     oracle_query: OracleListQueryResult<E>,
     commitment_query: SimpleBatchCommitmentSingleQueryResult<E>,
@@ -1357,7 +1350,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SimpleBatchSingleQueryResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     oracle_query: OracleListQueryResultWithMerklePath<E>,
     commitment_query: SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>,
@@ -1365,7 +1358,7 @@ where
 
 impl<E: ExtensionField> SimpleBatchSingleQueryResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn from_single_query_result(
         single_query_result: SimpleBatchSingleQueryResult<E>,
@@ -1454,7 +1447,7 @@ where
 
 pub struct SimpleBatchQueriesResult<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<(usize, SimpleBatchSingleQueryResult<E>)>,
 }
@@ -1462,14 +1455,14 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimpleBatchQueriesResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     inner: Vec<(usize, SimpleBatchSingleQueryResultWithMerklePath<E>)>,
 }
 
 impl<E: ExtensionField> SimpleBatchQueriesResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn from_query_result(
         query_result: SimpleBatchQueriesResult<E>,

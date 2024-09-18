@@ -1,6 +1,6 @@
 use crate::{
     sum_check::classic::{Coefficients, SumcheckProof},
-    util::{hash::Digest, merkle_tree::MerkleTree},
+    util::{hash2::Digest, merkle_tree::MerkleTree},
 };
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
@@ -10,6 +10,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use multilinear_extensions::mle::FieldType;
 
+use poseidon::poseidon::Poseidon;
 use rand_chacha::ChaCha8Rng;
 use std::{marker::PhantomData, slice};
 
@@ -64,7 +65,7 @@ pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
 #[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
 pub struct BasefoldCommitmentWithData<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub(crate) codeword_tree: MerkleTree<E>,
     pub(crate) polynomials_bh_evals: Vec<FieldType<E>>,
@@ -75,7 +76,7 @@ where
 
 impl<E: ExtensionField> BasefoldCommitmentWithData<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
         BasefoldCommitment::new(
@@ -129,7 +130,7 @@ where
 
 impl<E: ExtensionField> From<BasefoldCommitmentWithData<E>> for Digest<E::BaseField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn from(val: BasefoldCommitmentWithData<E>) -> Self {
         val.get_root_as()
@@ -138,7 +139,7 @@ where
 
 impl<E: ExtensionField> From<&BasefoldCommitmentWithData<E>> for BasefoldCommitment<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn from(val: &BasefoldCommitmentWithData<E>) -> Self {
         val.to_commitment()
@@ -149,7 +150,7 @@ where
 #[serde(bound(serialize = "", deserialize = ""))]
 pub struct BasefoldCommitment<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub(super) root: Digest<E::BaseField>,
     pub(super) num_vars: Option<usize>,
@@ -159,7 +160,7 @@ where
 
 impl<E: ExtensionField> BasefoldCommitment<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn new(
         root: Digest<E::BaseField>,
@@ -190,7 +191,7 @@ where
 
 impl<E: ExtensionField> PartialEq for BasefoldCommitmentWithData<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn eq(&self, other: &Self) -> bool {
         self.get_codewords().eq(other.get_codewords())
@@ -199,7 +200,7 @@ where
 }
 
 impl<E: ExtensionField> Eq for BasefoldCommitmentWithData<E> where
-    E::BaseField: Serialize + DeserializeOwned
+    E::BaseField: Serialize + DeserializeOwned + Poseidon
 {
 }
 
@@ -254,7 +255,7 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore> Clone for Basefold<
 
 impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitment<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn as_ref(&self) -> &[Digest<E::BaseField>] {
         let root = &self.root;
@@ -264,7 +265,7 @@ where
 
 impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitmentWithData<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     fn as_ref(&self) -> &[Digest<E::BaseField>] {
         let root = self.get_root_ref();
@@ -275,7 +276,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProofQueriesResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     Single(QueriesResultWithMerklePath<E>),
     Batched(BatchedQueriesResultWithMerklePath<E>),
@@ -284,7 +285,7 @@ where
 
 impl<E: ExtensionField> ProofQueriesResultWithMerklePath<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn as_single<'a>(&'a self) -> &'a QueriesResultWithMerklePath<E> {
         match self {
@@ -311,7 +312,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasefoldProof<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) roots: Vec<Digest<E::BaseField>>,
@@ -323,7 +324,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasefoldCommitPhaseProof<E: ExtensionField>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) roots: Vec<Digest<E::BaseField>>,

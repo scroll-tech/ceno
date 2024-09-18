@@ -64,6 +64,8 @@ mod commit_phase;
 use commit_phase::{batch_commit_phase, commit_phase, simple_batch_commit_phase};
 mod encoding;
 pub use encoding::{coset_fft, fft, fft_root_table};
+use poseidon::poseidon::Poseidon;
+
 mod query_phase;
 // This sumcheck module is different from the mpcs::sumcheck module, in that
 // it deals only with the special case of the form \sum eq(r_i)f_i().
@@ -72,7 +74,7 @@ mod sumcheck;
 impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore> Basefold<E, Spec, Rng>
 where
     E: Serialize + DeserializeOwned,
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     /// Converts a polynomial to a code word, also returns the evaluations over the boolean hypercube
     /// for said polynomial
@@ -173,7 +175,7 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug>
     PolynomialCommitmentScheme<E> for Basefold<E, Spec, Rng>
 where
     E: Serialize + DeserializeOwned,
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     type Param = BasefoldParams<E, Spec>;
     type ProverParam = BasefoldProverParams<E, Spec>;
@@ -966,7 +968,7 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug> N
     for Basefold<E, Spec, Rng>
 where
     E: Serialize + DeserializeOwned,
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
 }
 

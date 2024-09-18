@@ -1,11 +1,11 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
+use poseidon::digest::Digest;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use transcript::Transcript;
-use poseidon::digest::Digest;
 
 pub mod sum_check;
 pub mod util;

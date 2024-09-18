@@ -19,6 +19,7 @@ use crate::util::{
 use transcript::Transcript;
 
 use ark_std::{end_timer, start_timer};
+use poseidon::poseidon::Poseidon;
 
 use super::hash2::write_digest_to_transcript;
 
@@ -34,7 +35,7 @@ where
 
 impl<E: ExtensionField> MerkleTree<E>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned + Poseidon,
 {
     pub fn from_leaves(leaves: FieldType<E>) -> Self {
         Self {
@@ -171,7 +172,9 @@ where
         right: E,
         index: usize,
         root: &Digest<E::BaseField>,
-    ) {
+    ) where
+        E::BaseField: Poseidon,
+    {
         authenticate_merkle_path_root::<E>(
             &self.inner,
             FieldType::Ext(vec![left, right]),
@@ -186,7 +189,9 @@ where
         right: E::BaseField,
         index: usize,
         root: &Digest<E::BaseField>,
-    ) {
+    ) where
+        E::BaseField: Poseidon,
+    {
         authenticate_merkle_path_root::<E>(
             &self.inner,
             FieldType::Base(vec![left, right]),
@@ -201,7 +206,9 @@ where
         right: Vec<E>,
         index: usize,
         root: &Digest<E::BaseField>,
-    ) {
+    ) where
+        E::BaseField: Poseidon,
+    {
         authenticate_merkle_path_root_batch::<E>(
             &self.inner,
             FieldType::Ext(left),
@@ -217,7 +224,9 @@ where
         right: Vec<E::BaseField>,
         index: usize,
         root: &Digest<E::BaseField>,
-    ) {
+    ) where
+        E::BaseField: Poseidon,
+    {
         authenticate_merkle_path_root_batch::<E>(
             &self.inner,
             FieldType::Base(left),
@@ -228,9 +237,10 @@ where
     }
 }
 
-fn merkelize<E: ExtensionField>(
-    values: &[&FieldType<E>],
-) -> Vec<Vec<Digest<E::BaseField>>> {
+fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::BaseField>>>
+where
+    E::BaseField: Poseidon,
+{
     #[cfg(feature = "sanity-check")]
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
@@ -259,11 +269,13 @@ fn merkelize<E: ExtensionField>(
                     &values
                         .iter()
                         .map(|values| field_type_index_base(values, i << 1))
-                        .collect(),
+                        .collect_vec()
+                        .as_slice(),
                     &values
                         .iter()
                         .map(|values| field_type_index_base(values, (i << 1) + 1))
-                        .collect(),
+                        .collect_vec()
+                        .as_slice(),
                 ),
                 FieldType::Ext(_) => hash_two_leaves_batch_ext::<E>(
                     values
@@ -301,7 +313,9 @@ fn authenticate_merkle_path_root<E: ExtensionField>(
     leaves: FieldType<E>,
     x_index: usize,
     root: &Digest<E::BaseField>,
-) {
+) where
+    E::BaseField: Poseidon,
+{
     let mut x_index = x_index;
     assert_eq!(leaves.len(), 2);
     let mut hash = match leaves {
@@ -329,7 +343,9 @@ fn authenticate_merkle_path_root_batch<E: ExtensionField>(
     right: FieldType<E>,
     x_index: usize,
     root: &Digest<E::BaseField>,
-) {
+) where
+    E::BaseField: Poseidon,
+{
     let mut x_index = x_index;
     let mut hash = match (left, right) {
         (FieldType::Base(left), FieldType::Base(right)) => {
