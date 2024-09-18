@@ -4,6 +4,7 @@ pub mod addsub;
 pub mod blt;
 pub mod config;
 pub mod constants;
+pub mod logic;
 pub mod mul;
 
 mod r_insn;
