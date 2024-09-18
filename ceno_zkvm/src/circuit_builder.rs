@@ -150,7 +150,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let fixed_commit_wd = fixed_traces
             .as_ref()
             .map(|traces| PCS::batch_commit(pp, traces).unwrap());
-        let fixed_commit = fixed_commit_wd.as_ref().map(|commit_wd| PCS::get_pure_commitment(commit_wd));
+        let fixed_commit = fixed_commit_wd
+            .as_ref()
+            .map(|commit_wd| PCS::get_pure_commitment(commit_wd));
 
         ProvingKey {
             fixed_traces,

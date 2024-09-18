@@ -130,11 +130,7 @@ fn test_rw_lk_expression_combination() {
         let verifier = ZKVMVerifier::new(vk.clone());
         let mut v_transcript = Transcript::new(b"test");
         // write commitment into transcript and derive challenges from it
-        Pcs::write_commitment(
-            &proof.wits_commit,
-            &mut v_transcript,
-        )
-        .unwrap();
+        Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let challenges = [
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
