@@ -358,6 +358,7 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
 
 #[cfg(test)]
 pub mod test_util {
+
     use crate::{Evaluation, PolynomialCommitmentScheme};
     use ff_ext::ExtensionField;
     use itertools::{chain, Itertools};
@@ -577,9 +578,19 @@ pub mod test_util {
                     .collect_vec();
 
                 transcript.append_field_element_exts(&evals);
-                let proof =
-                    Pcs::simple_batch_open(&pp, &polys, &comm, &point, &evals, &mut transcript)
-                        .unwrap();
+                let proof = Pcs::simple_batch_open(
+                    &pp,
+                    polys
+                        .into_iter()
+                        .map(|x| x.into())
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                    &comm,
+                    &point,
+                    &evals,
+                    &mut transcript,
+                )
+                .unwrap();
                 (Pcs::get_pure_commitment(&comm), evals, proof)
             };
             // Batch verify
