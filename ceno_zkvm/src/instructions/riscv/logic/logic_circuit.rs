@@ -12,7 +12,6 @@ use crate::{
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
         Instruction,
     },
-    uint::Value,
     witness::LkMultiplicity,
     ROMType,
 };
@@ -104,16 +103,24 @@ impl<E: ExtensionField> LogicConfig<E> {
         self.r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
-        let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-        self.rs1_read.assign_limbs(instance, rs1_read.u16_fields());
+        let rs1_read = Self::u8_limbs(step.rs1().unwrap().value);
+        self.rs1_read.assign_limbs(instance, rs1_read);
 
-        let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
-        self.rs2_read.assign_limbs(instance, rs2_read.u16_fields());
+        let rs2_read = Self::u8_limbs(step.rs2().unwrap().value);
+        self.rs2_read.assign_limbs(instance, rs2_read);
 
-        let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
-        self.rd_written
-            .assign_limbs(instance, rd_written.u16_fields());
+        let rd_written = Self::u8_limbs(step.rd().unwrap().value.after);
+        self.rd_written.assign_limbs(instance, rd_written);
 
         Ok(())
+    }
+
+    /// Decompose a u32 into 4 * u8 field elements in little-endian order.
+    fn u8_limbs(v: u32) -> Vec<E::BaseField> {
+        let mut limbs = Vec::with_capacity(4);
+        for i in 0..4 {
+            limbs.push(E::BaseField::from(((v >> (i * 8)) & 0xff) as u64));
+        }
+        limbs
     }
 }

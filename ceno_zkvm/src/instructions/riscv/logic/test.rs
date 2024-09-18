@@ -35,8 +35,8 @@ fn test_opcode_and() {
             MOCK_PC_AND,
             MOCK_PROGRAM[3],
             0xbead1234,
-            0x5678f00d,
-            Change::new(0, 0xbead1234 & 0x5678f00d),
+            0xef550123,
+            Change::new(0, 0xbead1234 & 0xef550123),
             0,
         )],
     )
