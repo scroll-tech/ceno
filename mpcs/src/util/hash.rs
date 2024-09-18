@@ -1,6 +1,7 @@
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
+use rayon::prelude::IntoParallelRefIterator;
 use poseidon::poseidon_hash::PoseidonHash;
 use transcript::Transcript;
 
@@ -39,12 +40,12 @@ pub fn hash_two_leaves_batch_ext<E: ExtensionField>(a: &[E], b: &[E]) -> Digest<
 where
     E::BaseField: Poseidon,
 {
-    // TODO: can make this parallel
     let a_as_bases = a.iter().map(|v| v.as_bases()).collect_vec().concat();
     let a_m_to_1_hash = PoseidonHash::hash_or_noop(&a_as_bases);
 
     let b_as_bases = b.iter().map(|v| v.as_bases()).collect_vec().concat();
     let b_m_to_1_hash = PoseidonHash::hash_or_noop(&b_as_bases);
+
     hash_two_digests(&a_m_to_1_hash, &b_m_to_1_hash)
 }
 
@@ -55,7 +56,6 @@ pub fn hash_two_leaves_batch_base<E: ExtensionField>(
 where
     E::BaseField: Poseidon,
 {
-    // TODO: can make the parallel
     let a_m_to_1_hash = PoseidonHash::hash_or_noop(a);
     let b_m_to_1_hash = PoseidonHash::hash_or_noop(b);
     hash_two_digests(&a_m_to_1_hash, &b_m_to_1_hash)
