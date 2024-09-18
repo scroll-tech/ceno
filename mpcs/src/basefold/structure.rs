@@ -286,21 +286,21 @@ impl<E: ExtensionField> ProofQueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn as_single<'a>(&'a self) -> &'a QueriesResultWithMerklePath<E> {
+    pub fn as_single(&self) -> &QueriesResultWithMerklePath<E> {
         match self {
             Self::Single(x) => x,
             _ => panic!("Not a single query result"),
         }
     }
 
-    pub fn as_batched<'a>(&'a self) -> &'a BatchedQueriesResultWithMerklePath<E> {
+    pub fn as_batched(&self) -> &BatchedQueriesResultWithMerklePath<E> {
         match self {
             Self::Batched(x) => x,
             _ => panic!("Not a batched query result"),
         }
     }
 
-    pub fn as_simple_batched<'a>(&'a self) -> &'a SimpleBatchQueriesResultWithMerklePath<E> {
+    pub fn as_simple_batched(&self) -> &SimpleBatchQueriesResultWithMerklePath<E> {
         match self {
             Self::SimpleBatched(x) => x,
             _ => panic!("Not a simple batched query result"),
