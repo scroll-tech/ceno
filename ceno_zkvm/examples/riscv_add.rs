@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{iter, time::Instant};
 
 use ceno_zkvm::{
     instructions::riscv::addsub::AddInstruction, scheme::prover::ZKVMProver,
@@ -9,7 +9,7 @@ use const_env::from_env;
 
 use ceno_emul::{ByteAddr, InsnKind::ADD, StepRecord, VMState, CENO_PLATFORM};
 use ceno_zkvm::{
-    scheme::verifier::ZKVMVerifier,
+    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::RangeTableCircuit,
 };
@@ -32,12 +32,14 @@ const RAYON_NUM_THREADS: usize = 8;
 //  - x3 is initialized to loop bound.
 // we use x4 to hold the acc_sum.
 #[allow(clippy::unusual_byte_groupings)]
+const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
+#[allow(clippy::unusual_byte_groupings)]
 const PROGRAM_ADD_LOOP: [u32; 4] = [
     // func7   rs2   rs1   f3  rd    opcode
     0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
     0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
     0b_1_111111_00000_00011_001_1100_1_1100011, // bne x3, x0, -8
-    0b_000000000000_00000_000_00000_1110011,  // ecall halt
+    ECALL_HALT,                               // ecall halt
 ];
 
 /// Simple program to greet a person
@@ -56,7 +58,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
-    type PCS = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 
     let max_threads = {
         if !is_power_of_2(RAYON_NUM_THREADS) {
@@ -93,12 +95,18 @@ fn main() {
 
     // keygen
     let rng = ChaCha8Rng::from_seed([0u8; 32]);
-    let pp = PCS::setup(1 << 24, &rng).expect("basefold setup");
+    let pp = Pcs::setup(1 << MAX_NUM_VARIABLES, &rng).expect("basefold setup");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let range_config = zkvm_cs.register_table_circuit::<RangeTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
+    let program_add_loop: Vec<u32> = PROGRAM_ADD_LOOP
+        .iter()
+        .cloned()
+        .chain(iter::repeat(ECALL_HALT))
+        .take(512)
+        .collect();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_table_circuit::<RangeTableCircuit<E>>(
@@ -109,12 +117,12 @@ fn main() {
     zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
         &zkvm_cs,
         prog_config.clone(),
-        &PROGRAM_ADD_LOOP,
+        &program_add_loop,
     );
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<PCS>(pp, zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp, zkvm_fixed_traces)
         .expect("keygen failed");
     let vk = pk.get_vk();
 
@@ -132,7 +140,7 @@ fn main() {
         vm.init_register_unsafe(1usize, 1);
         vm.init_register_unsafe(2usize, u32::MAX); // -1 in two's complement
         vm.init_register_unsafe(3usize, step_loop as u32);
-        for (i, inst) in PROGRAM_ADD_LOOP.iter().enumerate() {
+        for (i, inst) in program_add_loop.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
         let records = vm
@@ -158,7 +166,7 @@ fn main() {
             .assign_table_circuit::<ProgramTableCircuit<E>>(
                 &zkvm_cs,
                 &prog_config,
-                &PROGRAM_ADD_LOOP.len(),
+                &program_add_loop.len(),
             )
             .unwrap();
 

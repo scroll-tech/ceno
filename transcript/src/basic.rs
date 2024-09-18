@@ -105,7 +105,7 @@ impl<E: ExtensionField> Transcript<E> {
     }
 
     pub fn read_challenge(&mut self) -> Challenge<E> {
-        let r = E::from_bases(&self.sponge_hasher.squeeze_vec());
+        let r = E::from_bases(&self.sponge_hasher.squeeze_vec()[..2]);
 
         Challenge {
             elements: r,
