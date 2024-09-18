@@ -253,17 +253,17 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
-    /// lookup a < b as unsigned byte
+    /// Assert that `(a < b) == res as bool`, that `a, b` are unsigned bytes, and that `res` is 0 or 1.
     pub(crate) fn lookup_ltu_limb8(
         &mut self,
         a: Expression<E>,
         b: Expression<E>,
         res: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        let key = a * 256.into() + b;
         let items: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
-            key,
+            a,
+            b,
             res,
         ];
         let rlc_record = self.rlc_chip_record(items);

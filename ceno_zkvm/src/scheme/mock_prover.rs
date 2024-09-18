@@ -4,7 +4,10 @@ use crate::{
     expression::Expression,
     scheme::utils::eval_by_expr_with_fixed,
     structs::{ROMType, WitnessId},
-    tables::{AndTable, OpsTable, ProgramTableCircuit, TableCircuit},
+    tables::{
+        AndTable, LtuTable, OpsTable, OrTable, ProgramTableCircuit, RangeTable, TableCircuit,
+        U16Table, U5Table, U8Table, XorTable,
+    },
 };
 use ark_std::test_rng;
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
@@ -233,98 +236,30 @@ pub(crate) struct MockProver<E: ExtensionField> {
 }
 
 fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> HashSet<Vec<u8>> {
-    fn load_u5_table<E: ExtensionField>(
+    fn load_range_table<RANGE: RangeTable, E: ExtensionField>(
         t_vec: &mut Vec<Vec<u8>>,
         cb: &CircuitBuilder<E>,
         challenge: [E; 2],
     ) {
-        for i in 0..(1 << 5) {
-            let rlc_record = cb.rlc_chip_record(vec![
-                Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
-                i.into(),
-            ]);
+        for i in RANGE::content() {
+            let rlc_record =
+                cb.rlc_chip_record(vec![(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
             let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_repr().as_ref().to_vec());
         }
     }
 
-    fn load_u8_table<E: ExtensionField>(
+    fn load_op_table<OP: OpsTable, E: ExtensionField>(
         t_vec: &mut Vec<Vec<u8>>,
         cb: &CircuitBuilder<E>,
         challenge: [E; 2],
     ) {
-        for i in 0..=u8::MAX as usize {
-            let rlc_record = cb.rlc_chip_record(vec![(ROMType::U8 as usize).into(), i.into()]);
-            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
-        }
-    }
-
-    fn load_u16_table<E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
-        cb: &CircuitBuilder<E>,
-        challenge: [E; 2],
-    ) {
-        for i in 0..=u16::MAX as usize {
+        for [a, b, c] in OP::content() {
             let rlc_record = cb.rlc_chip_record(vec![
-                Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
-                i.into(),
-            ]);
-            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
-        }
-    }
-
-    fn load_lt_table<E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
-        cb: &CircuitBuilder<E>,
-        challenge: [E; 2],
-    ) {
-        for lhs in 0..(1 << 8) {
-            for rhs in 0..(1 << 8) {
-                let is_lt = if lhs < rhs { 1 } else { 0 };
-                let lhs_rhs = lhs * 256 + rhs;
-                let rlc_record = cb.rlc_chip_record(vec![
-                    Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
-                    lhs_rhs.into(),
-                    is_lt.into(),
-                ]);
-                let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-                t_vec.push(rlc_record.to_repr().as_ref().to_vec());
-            }
-        }
-    }
-
-    fn load_and_table<E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
-        cb: &CircuitBuilder<E>,
-        challenge: [E; 2],
-    ) {
-        for [a, b, c] in AndTable::content() {
-            let rlc_record = cb.rlc_chip_record(vec![
-                Expression::Constant(E::BaseField::from(ROMType::And as u64)),
+                (OP::ROM_TYPE as usize).into(),
                 (a as usize).into(),
                 (b as usize).into(),
                 (c as usize).into(),
-            ]);
-            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
-        }
-    }
-
-    fn load_ltu_table<E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
-        cb: &CircuitBuilder<E>,
-        challenge: [E; 2],
-    ) {
-        for i in 0..=u16::MAX as usize {
-            let a = i >> 8;
-            let b = i & 0xFF;
-            let c = (a < b) as usize;
-            let rlc_record = cb.rlc_chip_record(vec![
-                Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
-                i.into(),
-                c.into(),
             ]);
             let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_repr().as_ref().to_vec());
@@ -355,13 +290,13 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     }
 
     let mut table_vec = vec![];
-    // TODO load more tables here
-    load_u5_table(&mut table_vec, cb, challenge);
-    load_u8_table(&mut table_vec, cb, challenge);
-    load_u16_table(&mut table_vec, cb, challenge);
-    load_lt_table(&mut table_vec, cb, challenge);
-    load_and_table(&mut table_vec, cb, challenge);
-    load_ltu_table(&mut table_vec, cb, challenge);
+    load_range_table::<U5Table, _>(&mut table_vec, cb, challenge);
+    load_range_table::<U8Table, _>(&mut table_vec, cb, challenge);
+    load_range_table::<U16Table, _>(&mut table_vec, cb, challenge);
+    load_op_table::<AndTable, _>(&mut table_vec, cb, challenge);
+    load_op_table::<OrTable, _>(&mut table_vec, cb, challenge);
+    load_op_table::<XorTable, _>(&mut table_vec, cb, challenge);
+    load_op_table::<LtuTable, _>(&mut table_vec, cb, challenge);
     load_program_table(&mut table_vec, cb, challenge);
     HashSet::from_iter(table_vec)
 }

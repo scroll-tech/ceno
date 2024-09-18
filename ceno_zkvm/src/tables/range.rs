@@ -3,7 +3,7 @@
 mod range_impl;
 
 mod range_circuit;
-use range_circuit::{RangeTable, RangeTableCircuit};
+pub use range_circuit::{RangeTable, RangeTableCircuit};
 
 use crate::structs::ROMType;
 
