@@ -131,7 +131,7 @@ fn test_rw_lk_expression_combination() {
         let mut v_transcript = Transcript::new(b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(
-            &Pcs::get_pure_commitment(&proof.wits_commit),
+            &proof.wits_commit,
             &mut v_transcript,
         )
         .unwrap();

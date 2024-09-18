@@ -147,12 +147,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let fixed_traces =
             fixed_traces.map(|t| t.de_interleaving().into_mles().into_iter().collect_vec());
 
-        let fixed_commit = fixed_traces
+        let fixed_commit_wd = fixed_traces
             .as_ref()
             .map(|traces| PCS::batch_commit(pp, traces).unwrap());
+        let fixed_commit = fixed_commit_wd.as_ref().map(|commit_wd| PCS::get_pure_commitment(commit_wd));
 
         ProvingKey {
             fixed_traces,
+            fixed_commit_wd,
             vk: VerifyingKey {
                 cs: self,
                 fixed_commit,

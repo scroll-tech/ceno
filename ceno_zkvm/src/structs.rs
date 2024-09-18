@@ -95,6 +95,7 @@ impl<F: Clone> PointAndEval<F> {
 #[derive(Clone, Debug)]
 pub struct ProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
+    pub fixed_commit_wd: Option<PCS::CommitmentWithData>,
     pub vk: VerifyingKey<E, PCS>,
 }
 
@@ -107,7 +108,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProvingKey<E, PCS> {
 #[derive(Clone, Debug)]
 pub struct VerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub(crate) cs: ConstraintSystem<E>,
-    pub fixed_commit: Option<PCS::CommitmentWithData>,
+    pub fixed_commit: Option<PCS::Commitment>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS> {
