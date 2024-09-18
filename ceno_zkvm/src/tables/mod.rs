@@ -5,6 +5,9 @@ use std::collections::HashMap;
 mod range;
 pub use range::RangeTableCircuit;
 
+mod ops;
+pub use ops::*;
+
 mod program;
 pub use program::{InsnRecord, ProgramTableCircuit};
 
