@@ -10,13 +10,22 @@ use crate::{
     },
 };
 use ark_std::test_rng;
+use base64::Engine;
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
-use std::{collections::HashSet, hash::Hash, marker::PhantomData, ops::Neg, sync::OnceLock};
+use std::{
+    collections::HashSet,
+    fs::{self, File},
+    hash::Hash,
+    io::{BufReader, ErrorKind},
+    marker::PhantomData,
+    ops::Neg,
+    sync::OnceLock,
+};
 
 pub const MOCK_RS1: u32 = 2;
 pub const MOCK_RS2: u32 = 3;
@@ -311,12 +320,31 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     let cache = CACHE.get_or_init(StaticTypeMap::new);
 
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
+        use base64::engine::general_purpose::STANDARD_NO_PAD;
         let mut rng = test_rng();
         let challenge = [E::random(&mut rng), E::random(&mut rng)];
-        (
-            challenge.map(|c| c.to_repr().as_ref().to_vec()),
-            load_tables(cb, challenge),
-        )
+        let base64_encoded =
+            STANDARD_NO_PAD.encode(serde_json::to_string(&challenge).unwrap().as_bytes());
+        let file_path = format!("table_cache_dev_{:?}.json", base64_encoded);
+        // Check if the cache file exists
+        let table = match fs::metadata(file_path.clone()) {
+            Ok(_) => {
+                // if file exist, we deserialize from file to get table
+                let file = File::open(file_path).unwrap();
+                let reader = BufReader::new(file);
+                serde_json::from_reader(reader).unwrap()
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                // load new table and seserialize to file for later use
+                let table = load_tables(cb, challenge);
+                let file = File::create(file_path).unwrap();
+                serde_json::to_writer(file, &table).unwrap();
+                table
+            }
+            Err(e) => panic!("{:?}", e),
+        };
+
+        (challenge.map(|c| c.to_repr().as_ref().to_vec()), table)
     });
     // reinitialize per generic type E
     (

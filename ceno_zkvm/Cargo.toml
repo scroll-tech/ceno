@@ -37,6 +37,8 @@ pprof = { version = "0.13", features = ["flamegraph"]}
 criterion = { version = "0.5", features = ["html_reports"] }
 cfg-if = "1.0.0"
 const_env = "0.1.2"
+serde_json = "1.0.108"
+base64 = "0.22.1"
 
 [features]
 default = ["riv32"]
