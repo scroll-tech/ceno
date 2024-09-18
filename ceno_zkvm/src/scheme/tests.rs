@@ -116,6 +116,7 @@ fn test_rw_lk_expression_combination() {
 
         let proof = prover
             .create_opcode_proof(
+                name.as_str(),
                 &pp,
                 prover.pk.circuit_pks.get(&name).unwrap(),
                 wits_in,
@@ -138,6 +139,7 @@ fn test_rw_lk_expression_combination() {
 
         let _rt_input = verifier
             .verify_opcode_proof(
+                name.as_str(),
                 &vp,
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,

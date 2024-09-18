@@ -126,6 +126,7 @@ fn bench_add(c: &mut Criterion) {
 
                         let _ = prover
                             .create_opcode_proof(
+                                "ADD",
                                 &pp,
                                 &circuit_pk,
                                 wits_in.into_iter().map(|mle| mle.into()).collect_vec(),

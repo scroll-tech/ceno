@@ -112,6 +112,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     tracing::debug!("opcode circuit {}: {}", circuit_name, lk_s);
                 }
                 let opcode_proof = self.create_opcode_proof(
+                    circuit_name,
                     &pp,
                     pk,
                     witness.into_iter().map(|w| w.into()).collect_vec(),
@@ -131,6 +132,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .insert(circuit_name.clone(), (i, opcode_proof));
             } else {
                 let table_proof = self.create_table_proof(
+                    circuit_name,
                     pk,
                     &pp,
                     witness.into_iter().map(|v| v.into()).collect_vec(),
@@ -160,6 +162,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     #[allow(clippy::too_many_arguments)]
     pub fn create_opcode_proof(
         &self,
+        name: &str,
         pp: &PCS::ProverParam,
         circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
@@ -530,6 +533,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         let span = entered_span!("pcs_open");
+        tracing::debug!(
+            "[opcode {}]: build opening proof for {} polys at {:?}",
+            name,
+            witnesses.len(),
+            input_open_point
+        );
         let wits_opening_proof = PCS::simple_batch_open(
             pp,
             &witnesses,
@@ -564,6 +573,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     #[allow(clippy::too_many_arguments)]
     pub fn create_table_proof(
         &self,
+        name: &str,
         circuit_pk: &ProvingKey<E, PCS>,
         pp: &PCS::ProverParam,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
@@ -755,6 +765,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         .map_err(ZKVMError::PCSError)?;
         exit_span!(span);
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
+        tracing::debug!(
+            "[table {}] build opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+            name,
+            witnesses.len(),
+            input_open_point,
+            wits_in_evals,
+            wits_commit,
+        );
 
         Ok(ZKVMTableProof {
             num_instances,
