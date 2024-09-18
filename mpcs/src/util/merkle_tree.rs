@@ -10,7 +10,7 @@ use rayon::{
 
 use crate::util::{
     field_type_index_base, field_type_index_ext,
-    hash2::{
+    hash::{
         hash_two_digests, hash_two_leaves_base, hash_two_leaves_batch_base,
         hash_two_leaves_batch_ext, hash_two_leaves_ext, Digest,
     },
@@ -21,7 +21,7 @@ use transcript::Transcript;
 use ark_std::{end_timer, start_timer};
 use poseidon::poseidon::Poseidon;
 
-use super::hash2::write_digest_to_transcript;
+use super::hash::write_digest_to_transcript;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]

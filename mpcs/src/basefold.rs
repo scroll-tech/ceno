@@ -10,7 +10,7 @@ use crate::{
         },
         expression::{Expression, Query, Rotation},
         ext_to_usize,
-        hash2::{write_digest_to_transcript, Digest},
+        hash::{write_digest_to_transcript, Digest},
         log2_strict,
         merkle_tree::MerkleTree,
         multiply_poly,

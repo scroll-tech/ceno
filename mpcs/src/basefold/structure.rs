@@ -1,6 +1,6 @@
 use crate::{
     sum_check::classic::{Coefficients, SumcheckProof},
-    util::{hash2::Digest, merkle_tree::MerkleTree},
+    util::{hash::Digest, merkle_tree::MerkleTree},
 };
 use core::fmt::Debug;
 use ff_ext::ExtensionField;

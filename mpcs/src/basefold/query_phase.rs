@@ -4,7 +4,7 @@ use crate::util::{
         interpolate_over_boolean_hypercube,
     },
     ext_to_usize, field_type_index_base, field_type_index_ext,
-    hash2::Digest,
+    hash::Digest,
     log2_strict,
     merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree},
 };

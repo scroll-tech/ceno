@@ -1,6 +1,5 @@
 pub mod arithmetic;
 pub mod expression;
-pub mod hash;
 pub mod parallel;
 pub mod plonky2_util;
 use ff::{Field, PrimeField};
@@ -9,7 +8,7 @@ use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-pub(crate) mod hash2;
+pub mod hash;
 pub mod merkle_tree;
 
 use crate::{util::parallel::parallelize, Error};

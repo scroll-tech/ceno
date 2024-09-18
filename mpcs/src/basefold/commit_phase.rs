@@ -9,7 +9,7 @@ use super::{
 use crate::util::{
     arithmetic::{interpolate2_weights, interpolate_over_boolean_hypercube},
     field_type_index_ext, field_type_iter_ext,
-    hash2::write_digest_to_transcript,
+    hash::write_digest_to_transcript,
     log2_strict,
     merkle_tree::MerkleTree,
 };
