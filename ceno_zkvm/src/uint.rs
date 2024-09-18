@@ -570,6 +570,14 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
                 }
             })
         });
+        // complete the computation by adding prev_carry
+        (1..num_limbs).for_each(|i| {
+            if carries[i - 1] > 0 {
+                let (ret, overflow) = c_limbs[i].overflowing_add(carries[i - 1]);
+                c_limbs[i] = ret;
+                carries[i] += overflow as u16;
+            }
+        });
 
         if !with_overflow {
             // If the outcome overflows, `with_overflow` can't be false
@@ -585,132 +593,194 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::uint::uint::UInt;
-//     use gkr::structs::{Circuit, CircuitWitness};
-//     use goldilocks::{Goldilocks, GoldilocksExt2};
-//     use itertools::Itertools;
-//     use simple_frontend::structs::CircuitBuilder;
+#[cfg(test)]
+mod tests {
+    use crate::witness::LkMultiplicity;
 
-//     #[test]
-//     fn test_uint_from_cell_ids() {
-//         // 33 total bits and each cells holds just 4 bits
-//         // to hold all 33 bits without truncations, we'd need 9 cells
-//         // 9 * 4 = 36 > 33
-//         type UInt33 = UInt<33, 4>;
-//         assert!(UInt33::try_from(vec![1, 2, 3, 4, 5, 6, 7, 8, 9]).is_ok());
-//         assert!(UInt33::try_from(vec![1, 2, 3]).is_err());
-//         assert!(UInt33::try_from(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).is_err());
-//     }
+    use super::UIntValue;
 
-//     #[test]
-//     fn test_uint_from_different_sized_cell_values() {
-//         // build circuit
-//         let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
-//         let (_, small_values) = circuit_builder.create_witness_in(8);
-//         type UInt30 = UInt<30, 6>;
-//         let uint_instance =
-//             UInt30::from_different_sized_cell_values(&mut circuit_builder, &small_values, 2, true)
-//                 .unwrap();
-//         circuit_builder.configure();
-//         let circuit = Circuit::new(&circuit_builder);
+    #[test]
+    fn test_add() {
+        let a = UIntValue::new_unchecked(1u32);
+        let b = UIntValue::new_unchecked(2u32);
+        let mut lkm = LkMultiplicity::default();
 
-//         // input
-//         // we start with cells of bit width 2 (8 of them)
-//         // 11 00 10 11 01 10 01 01 (bit representation)
-//         //  3  0  2  3  1  2  1  1 (field representation)
-//         //
-//         // repacking into cells of bit width 6
-//         // 110010 110110 010100
-//         // since total bit = 30 then expect 5 cells ( 30 / 6)
-//         // since we have 3 cells, we need to pad with 2 more
-//         // hence expected output:
-//         // 100011 100111 000101 000000 000000(bit representation)
-//         //     35     39      5      0      0
+        let (c, carries) = a.add(&b, &mut lkm, true);
+        assert_eq!(c[0], 3);
+        assert_eq!(c[1], 0);
+        assert_eq!(carries[0], false);
+        assert_eq!(carries[1], false);
+    }
 
-//         let witness_values = vec![3, 0, 2, 3, 1, 2, 1, 1]
-//             .into_iter()
-//             .map(|v| Goldilocks::from(v))
-//             .collect_vec();
-//         let circuit_witness = {
-//             let challenges = vec![GoldilocksExt2::from(2)];
-//             let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
-//             circuit_witness.add_instance(&circuit, vec![witness_values]);
-//             circuit_witness
-//         };
-//         circuit_witness.check_correctness(&circuit);
+    #[test]
+    fn test_add_carry() {
+        let a = UIntValue::new_unchecked(u16::MAX as u32);
+        let b = UIntValue::new_unchecked(2u32);
+        let mut lkm = LkMultiplicity::default();
 
-//         let output = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
-//         assert_eq!(
-//             &output[..5],
-//             vec![35, 39, 5, 0, 0]
-//                 .into_iter()
-//                 .map(|v| Goldilocks::from(v))
-//                 .collect_vec()
-//         );
+        let (c, carries) = a.add(&b, &mut lkm, true);
+        assert_eq!(c[0], 1);
+        assert_eq!(c[1], 1);
+        assert_eq!(carries[0], true);
+        assert_eq!(carries[1], false);
+    }
 
-//         // padding to power of 2
-//         assert_eq!(
-//             &output[5..],
-//             vec![0, 0, 0]
-//                 .into_iter()
-//                 .map(|v| Goldilocks::from(v))
-//                 .collect_vec()
-//         );
-//     }
+    #[test]
+    fn test_mul() {
+        let a = UIntValue::new_unchecked(1u32);
+        let b = UIntValue::new_unchecked(2u32);
+        let mut lkm = LkMultiplicity::default();
 
-//     #[test]
-//     fn test_counter_vector() {
-//         // each limb has 5 bits so all number from 0..3 should require only 1 limb
-//         type UInt30 = UInt<30, 5>;
-//         let res = UInt30::counter_vector::<Goldilocks>(3);
-//         assert_eq!(
-//             res,
-//             vec![
-//                 vec![Goldilocks::from(0)],
-//                 vec![Goldilocks::from(1)],
-//                 vec![Goldilocks::from(2)]
-//             ]
-//         );
+        let (c, carries) = a.mul(&b, &mut lkm, true);
+        assert_eq!(c[0], 2);
+        assert_eq!(c[1], 0);
+        assert_eq!(carries[0], 0);
+        assert_eq!(carries[1], 0);
+    }
 
-//         // each limb has a single bit, number from 0..5 should require 3 limbs each
-//         type UInt50 = UInt<50, 1>;
-//         let res = UInt50::counter_vector::<Goldilocks>(5);
-//         assert_eq!(
-//             res,
-//             vec![
-//                 // 0
-//                 vec![
-//                     Goldilocks::from(0),
-//                     Goldilocks::from(0),
-//                     Goldilocks::from(0)
-//                 ],
-//                 // 1
-//                 vec![
-//                     Goldilocks::from(1),
-//                     Goldilocks::from(0),
-//                     Goldilocks::from(0)
-//                 ],
-//                 // 2
-//                 vec![
-//                     Goldilocks::from(0),
-//                     Goldilocks::from(1),
-//                     Goldilocks::from(0)
-//                 ],
-//                 // 3
-//                 vec![
-//                     Goldilocks::from(1),
-//                     Goldilocks::from(1),
-//                     Goldilocks::from(0)
-//                 ],
-//                 // 4
-//                 vec![
-//                     Goldilocks::from(0),
-//                     Goldilocks::from(0),
-//                     Goldilocks::from(1)
-//                 ],
-//             ]
-//         );
-//     }
-// }
+    #[test]
+    fn test_mul_carry() {
+        let a = UIntValue::new_unchecked(u16::MAX as u32);
+        let b = UIntValue::new_unchecked(2u32);
+        let mut lkm = LkMultiplicity::default();
+
+        let (c, carries) = a.mul(&b, &mut lkm, true);
+        assert_eq!(c[0], u16::MAX - 1);
+        assert_eq!(c[1], 1);
+        assert_eq!(carries[0], 1);
+        assert_eq!(carries[1], 0);
+    }
+
+    #[test]
+    fn test_mul_overflow() {
+        let a = UIntValue::new_unchecked(u32::MAX / 2 + 1);
+        let b = UIntValue::new_unchecked(2u32);
+        let mut lkm = LkMultiplicity::default();
+
+        let (c, carries) = a.mul(&b, &mut lkm, true);
+        assert_eq!(c[0], 0);
+        assert_eq!(c[1], 0);
+        assert_eq!(carries[0], 0);
+        assert_eq!(carries[1], 1);
+    }
+    // #[test]
+    // fn test_uint_from_cell_ids() {
+    //     // 33 total bits and each cells holds just 4 bits
+    //     // to hold all 33 bits without truncations, we'd need 9 cells
+    //     // 9 * 4 = 36 > 33
+    //     type UInt33 = UInt<33, 4>;
+    //     assert!(UInt33::try_from(vec![1, 2, 3, 4, 5, 6, 7, 8, 9]).is_ok());
+    //     assert!(UInt33::try_from(vec![1, 2, 3]).is_err());
+    //     assert!(UInt33::try_from(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).is_err());
+    // }
+
+    // #[test]
+    // fn test_uint_from_different_sized_cell_values() {
+    //     // build circuit
+    //     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+    //     let (_, small_values) = circuit_builder.create_witness_in(8);
+    //     type UInt30 = UInt<30, 6>;
+    //     let uint_instance =
+    //         UInt30::from_different_sized_cell_values(&mut circuit_builder, &small_values, 2, true)
+    //             .unwrap();
+    //     circuit_builder.configure();
+    //     let circuit = Circuit::new(&circuit_builder);
+
+    //     // input
+    //     // we start with cells of bit width 2 (8 of them)
+    //     // 11 00 10 11 01 10 01 01 (bit representation)
+    //     //  3  0  2  3  1  2  1  1 (field representation)
+    //     //
+    //     // repacking into cells of bit width 6
+    //     // 110010 110110 010100
+    //     // since total bit = 30 then expect 5 cells ( 30 / 6)
+    //     // since we have 3 cells, we need to pad with 2 more
+    //     // hence expected output:
+    //     // 100011 100111 000101 000000 000000(bit representation)
+    //     //     35     39      5      0      0
+
+    //     let witness_values = vec![3, 0, 2, 3, 1, 2, 1, 1]
+    //         .into_iter()
+    //         .map(|v| Goldilocks::from(v))
+    //         .collect_vec();
+    //     let circuit_witness = {
+    //         let challenges = vec![GoldilocksExt2::from(2)];
+    //         let mut circuit_witness = CircuitWitness::new(&circuit, challenges);
+    //         circuit_witness.add_instance(&circuit, vec![witness_values]);
+    //         circuit_witness
+    //     };
+    //     circuit_witness.check_correctness(&circuit);
+
+    //     let output = circuit_witness.output_layer_witness_ref().instances[0].to_vec();
+    //     assert_eq!(
+    //         &output[..5],
+    //         vec![35, 39, 5, 0, 0]
+    //             .into_iter()
+    //             .map(|v| Goldilocks::from(v))
+    //             .collect_vec()
+    //     );
+
+    //     // padding to power of 2
+    //     assert_eq!(
+    //         &output[5..],
+    //         vec![0, 0, 0]
+    //             .into_iter()
+    //             .map(|v| Goldilocks::from(v))
+    //             .collect_vec()
+    //     );
+    // }
+
+    // #[test]
+    // fn test_counter_vector() {
+    //     // each limb has 5 bits so all number from 0..3 should require only 1 limb
+    //     type UInt30 = UInt<30, 5>;
+    //     let res = UInt30::counter_vector::<Goldilocks>(3);
+    //     assert_eq!(
+    //         res,
+    //         vec![
+    //             vec![Goldilocks::from(0)],
+    //             vec![Goldilocks::from(1)],
+    //             vec![Goldilocks::from(2)]
+    //         ]
+    //     );
+
+    //     // each limb has a single bit, number from 0..5 should require 3 limbs each
+    //     type UInt50 = UInt<50, 1>;
+    //     let res = UInt50::counter_vector::<Goldilocks>(5);
+    //     assert_eq!(
+    //         res,
+    //         vec![
+    //             // 0
+    //             vec![
+    //                 Goldilocks::from(0),
+    //                 Goldilocks::from(0),
+    //                 Goldilocks::from(0)
+    //             ],
+    //             // 1
+    //             vec![
+    //                 Goldilocks::from(1),
+    //                 Goldilocks::from(0),
+    //                 Goldilocks::from(0)
+    //             ],
+    //             // 2
+    //             vec![
+    //                 Goldilocks::from(0),
+    //                 Goldilocks::from(1),
+    //                 Goldilocks::from(0)
+    //             ],
+    //             // 3
+    //             vec![
+    //                 Goldilocks::from(1),
+    //                 Goldilocks::from(1),
+    //                 Goldilocks::from(0)
+    //             ],
+    //             // 4
+    //             vec![
+    //                 Goldilocks::from(0),
+    //                 Goldilocks::from(0),
+    //                 Goldilocks::from(1)
+    //             ],
+    //         ]
+    //     );
+    // }
+}
