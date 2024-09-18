@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use ark_std::test_rng;
-use base64::Engine;
+use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
@@ -32,6 +32,7 @@ pub const MOCK_RS2: u32 = 3;
 pub const MOCK_RD: u32 = 4;
 /// The program baked in the MockProver.
 /// TODO: Make this a parameter?
+#[allow(clippy::identity_op)]
 pub const MOCK_PROGRAM: &[u32] = &[
     // R-Type
     // funct7 | rs2 | rs1 | funct3 | rd | opcode
@@ -290,7 +291,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
                 // TODO: Find a better way to obtain the row content.
                 let row = row
                     .iter()
-                    .map(|v| unsafe { v.clone().assume_init() }.into())
+                    .map(|v| unsafe { (*v).assume_init() }.into())
                     .collect::<Vec<_>>();
                 let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_repr().as_ref().to_vec());
@@ -320,7 +321,6 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     let cache = CACHE.get_or_init(StaticTypeMap::new);
 
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
-        use base64::engine::general_purpose::STANDARD_NO_PAD;
         let mut rng = test_rng();
         let challenge = [E::random(&mut rng), E::random(&mut rng)];
         let base64_encoded =
@@ -568,7 +568,7 @@ mod tests {
                 .into(),
         ];
 
-        MockProver::assert_satisfied(&mut builder, &wits_in, None);
+        MockProver::assert_satisfied(&builder, &wits_in, None);
     }
 
     #[derive(Debug)]
@@ -601,7 +601,7 @@ mod tests {
         ];
 
         let challenge = [1.into(), 1000.into()];
-        MockProver::assert_satisfied(&mut builder, &wits_in, Some(challenge));
+        MockProver::assert_satisfied(&builder, &wits_in, Some(challenge));
     }
 
     #[test]
@@ -615,7 +615,7 @@ mod tests {
         let wits_in = vec![vec![Goldilocks::from(123)].into_mle().into()];
 
         let challenge = [2.into(), 1000.into()];
-        let result = MockProver::run_with_challenge(&mut builder, &wits_in, challenge);
+        let result = MockProver::run_with_challenge(&builder, &wits_in, challenge);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
         assert_eq!(
@@ -722,7 +722,7 @@ mod tests {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut builder,
+            &builder,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
@@ -758,7 +758,7 @@ mod tests {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut builder,
+            &builder,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
@@ -845,7 +845,7 @@ mod tests {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut builder,
+            &builder,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
@@ -882,7 +882,7 @@ mod tests {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut builder,
+            &builder,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
