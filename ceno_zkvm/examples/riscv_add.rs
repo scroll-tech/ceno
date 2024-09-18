@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use ark_std::test_rng;
 use ceno_zkvm::{
-    instructions::riscv::addsub::AddInstruction, scheme::prover::ZKVMProver,
+    instructions::riscv::arith::AddInstruction, scheme::prover::ZKVMProver,
     tables::ProgramTableCircuit,
 };
 use clap::Parser;
