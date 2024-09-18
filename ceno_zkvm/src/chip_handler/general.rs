@@ -216,7 +216,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.assert_u16(name_fn, expr * Expression::from(1 << 8))
+        let items: Vec<Expression<E>> = vec![(ROMType::U8 as usize).into(), expr];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(name_fn, rlc_record)?;
+        Ok(())
     }
 
     pub(crate) fn assert_bit<NR, N>(
@@ -228,6 +231,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        // TODO: Replace with `x * (1 - x)` or a multi-bit lookup similar to assert_u8_pair.
         self.assert_u16(name_fn, expr * Expression::from(1 << 15))
     }
 

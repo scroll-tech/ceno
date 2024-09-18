@@ -15,17 +15,26 @@ use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{collections::HashSet, hash::Hash, marker::PhantomData, ops::Neg, sync::OnceLock};
 
+pub const MOCK_RS1: u32 = 2;
+pub const MOCK_RS2: u32 = 3;
+pub const MOCK_RD: u32 = 4;
 /// The program baked in the MockProver.
 /// TODO: Make this a parameter?
 pub const MOCK_PROGRAM: &[u32] = &[
+    // R-Type
+    // funct7 | rs2 | rs1 | funct3 | rd | opcode
+    // -----------------------------------------
     // add x4, x2, x3
-    0x00 << 25 | 3 << 20 | 2 << 15 | 4 << 7 | 0x33,
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
     // sub  x4, x2, x3
-    0x20 << 25 | 3 << 20 | 2 << 15 | 4 << 7 | 0x33,
+    0x20 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+    // mul (0x01, 0x00, 0x33)
+    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
 pub const MOCK_PC_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 4);
+pub const MOCK_PC_MUL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 8);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -239,6 +248,18 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
         }
     }
 
+    fn load_u8_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u8>>,
+        cb: &CircuitBuilder<E>,
+        challenge: [E; 2],
+    ) {
+        for i in 0..=u8::MAX as usize {
+            let rlc_record = cb.rlc_chip_record(vec![(ROMType::U8 as usize).into(), i.into()]);
+            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+        }
+    }
+
     fn load_u16_table<E: ExtensionField>(
         t_vec: &mut Vec<Vec<u8>>,
         cb: &CircuitBuilder<E>,
@@ -336,6 +357,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     let mut table_vec = vec![];
     // TODO load more tables here
     load_u5_table(&mut table_vec, cb, challenge);
+    load_u8_table(&mut table_vec, cb, challenge);
     load_u16_table(&mut table_vec, cb, challenge);
     load_lt_table(&mut table_vec, cb, challenge);
     load_and_table(&mut table_vec, cb, challenge);

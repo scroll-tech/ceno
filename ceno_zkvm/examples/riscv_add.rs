@@ -12,7 +12,7 @@ use ceno_emul::{ByteAddr, InsnKind::ADD, StepRecord, VMState, CENO_PLATFORM};
 use ceno_zkvm::{
     scheme::verifier::ZKVMVerifier,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::RangeTableCircuit,
+    tables::U16TableCircuit,
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
@@ -92,12 +92,12 @@ fn main() {
     // keygen
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
-    let range_config = zkvm_cs.register_table_circuit::<RangeTableCircuit<E>>();
+    let range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces.register_table_circuit::<RangeTableCircuit<E>>(
+    zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
         range_config.clone(),
         &(),
@@ -148,7 +148,7 @@ fn main() {
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
         zkvm_witness
-            .assign_table_circuit::<RangeTableCircuit<E>>(&zkvm_cs, &range_config, &())
+            .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &range_config, &())
             .unwrap();
         zkvm_witness
             .assign_table_circuit::<ProgramTableCircuit<E>>(
