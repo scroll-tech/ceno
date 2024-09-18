@@ -204,14 +204,15 @@ impl DecodedInstruction {
         }
     }
 
-    pub fn from_raw(func7: u32, func3: u32, rs1: u32, rs2: u32, rd: u32, opcode: u32) -> Self {
+    #[allow(dead_code)]
+    pub fn from_raw(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> Self {
         // limit the range of inputs
-        let func7 = func7 & 0x7f; // 7bits mask
         let rs2 = rs2 & 0x1f; // 5bits mask
         let rs1 = rs1 & 0x1f;
-        let func3 = func3 & 0x07; // 3 bits mask
         let rd = rd & 0x1f;
-        let opcode = opcode & 0x7f;
+        let func7 = kind.codes().func7;
+        let func3 = kind.codes().func3;
+        let opcode = kind.codes().opcode;
         let insn = func7 << 25 | rs2 << 20 | rs1 << 15 | func3 << 12 | rd << 7 | opcode;
         Self {
             insn,

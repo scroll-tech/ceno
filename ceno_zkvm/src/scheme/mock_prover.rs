@@ -15,17 +15,26 @@ use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{collections::HashSet, hash::Hash, marker::PhantomData, ops::Neg, sync::OnceLock};
 
+pub const MOCK_RS1: u32 = 2;
+pub const MOCK_RS2: u32 = 3;
+pub const MOCK_RD: u32 = 4;
 /// The program baked in the MockProver.
 /// TODO: Make this a parameter?
 pub const MOCK_PROGRAM: &[u32] = &[
+    // R-Type
+    // funct7 | rs2 | rs1 | funct3 | rd | opcode
+    // -----------------------------------------
     // add x4, x2, x3
-    0x00 << 25 | 3 << 20 | 2 << 15 | 4 << 7 | 0x33,
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
     // sub  x4, x2, x3
-    0x20 << 25 | 3 << 20 | 2 << 15 | 4 << 7 | 0x33,
+    0x20 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+    // mul (0x01, 0x00, 0x33)
+    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
 pub const MOCK_PC_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 4);
+pub const MOCK_PC_MUL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 8);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
