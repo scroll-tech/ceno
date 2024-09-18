@@ -193,11 +193,11 @@ pub struct RSCodeDefaultSpec {}
 
 impl RSCodeSpec for RSCodeDefaultSpec {
     fn get_number_queries() -> usize {
-        336
+        972
     }
 
     fn get_rate_log() -> usize {
-        3
+        1
     }
 
     fn get_basecode_msg_size_log() -> usize {
