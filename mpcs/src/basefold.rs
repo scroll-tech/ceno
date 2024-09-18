@@ -10,7 +10,7 @@ use crate::{
         },
         expression::{Expression, Query, Rotation},
         ext_to_usize,
-        hash::{new_hasher, write_digest_to_transcript, Digest},
+        hash2::{write_digest_to_transcript, Digest},
         log2_strict,
         merkle_tree::MerkleTree,
         multiply_poly,
@@ -220,8 +220,7 @@ where
         let (bh_evals, codeword) = Self::get_poly_bh_evals_and_codeword(pp, poly);
 
         // Compute and store all the layers of the Merkle tree
-        let hasher = new_hasher::<E::BaseField>();
-        let codeword_tree = MerkleTree::<E>::from_leaves(codeword, &hasher);
+        let codeword_tree = MerkleTree::<E>::from_leaves(codeword);
 
         end_timer!(timer);
 
@@ -274,8 +273,7 @@ where
         // let leaves = Self::transpose_field_type::<E>(codewords.as_slice())?;
 
         // build merkle tree from leaves
-        let hasher = new_hasher::<E::BaseField>();
-        let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, &hasher);
+        let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords);
 
         let is_base = match polys[0].evaluations {
             FieldType::Ext(_) => false,
@@ -315,7 +313,6 @@ where
         _eval: &E, // Opening does not need eval, except for sanity check
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
         assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
         assert!(comm.num_polys == 1);
@@ -326,7 +323,6 @@ where
             transcript,
             poly.num_vars,
             poly.num_vars - Spec::get_basecode_msg_size_log(),
-            &hasher,
         );
 
         let query_timer = start_timer!(|| "Basefold::open::query_phase");
@@ -371,7 +367,6 @@ where
         evals: &[Evaluation<E>],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
         let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
@@ -546,7 +541,6 @@ where
             num_vars,
             num_vars - Spec::get_basecode_msg_size_log(),
             coeffs.as_slice(),
-            &hasher,
         );
 
         let query_timer = start_timer!(|| "Basefold::batch_open query phase");
@@ -597,7 +591,6 @@ where
         evals: &[E],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys[0].num_vars;
 
@@ -643,7 +636,6 @@ where
             transcript,
             num_vars,
             num_vars - Spec::get_basecode_msg_size_log(),
-            &hasher,
         );
 
         let query_timer = start_timer!(|| "Basefold::open::query_phase");
@@ -686,7 +678,6 @@ where
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::verify");
         assert!(comm.num_vars().unwrap() >= Spec::get_basecode_msg_size_log());
-        let hasher = new_hasher::<E::BaseField>();
 
         let num_vars = point.len();
         if let Some(comm_num_vars) = comm.num_vars() {
@@ -747,7 +738,6 @@ where
             comm,
             eq.as_slice(),
             eval,
-            &hasher,
         );
         end_timer!(timer);
 
@@ -765,7 +755,6 @@ where
         let timer = start_timer!(|| "Basefold::batch_verify");
         // 	let key = "RAYON_NUM_THREADS";
         // 	env::set_var(key, "32");
-        let hasher = new_hasher::<E::BaseField>();
         let comms = comms.iter().collect_vec();
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
@@ -876,7 +865,6 @@ where
             &coeffs,
             eq.as_slice(),
             &new_target_sum,
-            &hasher,
         );
         end_timer!(timer);
         Ok(())
@@ -896,7 +884,6 @@ where
         if let Some(num_polys) = comm.num_polys {
             assert_eq!(num_polys, batch_size);
         }
-        let hasher = new_hasher::<E::BaseField>();
 
         let num_vars = point.len();
         if let Some(comm_num_vars) = comm.num_vars {
@@ -968,7 +955,6 @@ where
             comm,
             eq.as_slice(),
             evals,
-            &hasher,
         );
         end_timer!(timer);
 

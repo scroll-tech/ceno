@@ -1074,7 +1074,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "plonky2",
- "poseidon 0.2.0",
+ "poseidon 0.1.0",
  "rand",
  "rand_chacha",
  "rayon",

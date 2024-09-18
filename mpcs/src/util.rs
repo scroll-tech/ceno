@@ -10,6 +10,8 @@ use itertools::{izip, Itertools};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub mod merkle_tree;
+pub(crate) mod hash2;
+
 use crate::{util::parallel::parallelize, Error};
 pub use plonky2_util::log2_strict;
 

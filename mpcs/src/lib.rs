@@ -5,7 +5,7 @@ use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use transcript::Transcript;
-use util::hash::Digest;
+use poseidon::digest::Digest;
 
 pub mod sum_check;
 pub mod util;

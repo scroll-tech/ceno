@@ -26,7 +26,7 @@ blake2b_simd = "1.0.2"
 sha3 = "0.10.6"
 rayon = { version = "1.5.3", optional = true }
 blake2 = { version = "0.10.6" }
-poseidon.workspace = true
+poseidon = { path = "../poseidon" }
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 generic-array = { version = "0.14.7", features = ["serde"] }
 multilinear_extensions = { path = "../multilinear_extensions" }

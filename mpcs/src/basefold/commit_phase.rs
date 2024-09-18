@@ -9,7 +9,7 @@ use super::{
 use crate::util::{
     arithmetic::{interpolate2_weights, interpolate_over_boolean_hypercube},
     field_type_index_ext, field_type_iter_ext,
-    hash::{write_digest_to_transcript, Hasher},
+    hash2::{write_digest_to_transcript},
     log2_strict,
     merkle_tree::MerkleTree,
 };
@@ -37,7 +37,6 @@ pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     transcript: &mut Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
-    hasher: &Hasher<E::BaseField>,
 ) -> (Vec<MerkleTree<E>>, Vec<Vec<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -102,7 +101,7 @@ where
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge.elements);
             let running_tree =
-                MerkleTree::<E>::from_leaves(FieldType::Ext(running_oracle.clone()), hasher);
+                MerkleTree::<E>::from_leaves(FieldType::Ext(running_oracle.clone()));
             let running_root = running_tree.root();
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root.clone());
@@ -167,7 +166,6 @@ pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     num_vars: usize,
     num_rounds: usize,
     coeffs: &[E],
-    hasher: &Hasher<E::BaseField>,
 ) -> (Vec<MerkleTree<E>>, Vec<Vec<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -254,7 +252,7 @@ where
                 sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
             sumcheck_messages.push(last_sumcheck_message.clone());
             let running_tree =
-                MerkleTree::<E>::from_leaves(FieldType::Ext(running_oracle.clone()), hasher);
+                MerkleTree::<E>::from_leaves(FieldType::Ext(running_oracle.clone()));
             let running_root = running_tree.root();
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
@@ -332,7 +330,6 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     transcript: &mut Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
-    hasher: &Hasher<E::BaseField>,
 ) -> (Vec<MerkleTree<E>>, Vec<Vec<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -398,7 +395,7 @@ where
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
             let running_tree =
-                MerkleTree::<E>::from_leaves(FieldType::Ext(running_oracle.clone()), hasher);
+                MerkleTree::<E>::from_leaves(FieldType::Ext(running_oracle.clone()));
             let running_root = running_tree.root();
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
