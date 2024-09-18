@@ -22,7 +22,9 @@ use transcript::Transcript;
 use crate::{
     error::ZKVMError,
     scheme::{
-        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
+        constants::{
+            MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, MAX_NUM_VARIABLES, NUM_FANIN, NUM_FANIN_LOGUP,
+        },
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
             wit_infer_by_expr,
@@ -58,7 +60,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // TODO: commit to fixed commitment
 
         // commit to main traces
-        let (pp, _) = PCS::trim(&self.pk.pp, 1 << 24).map_err(|e| ZKVMError::PCSError(e))?;
+        let (pp, _) =
+            PCS::trim(&self.pk.pp, 1 << MAX_NUM_VARIABLES).map_err(ZKVMError::PCSError)?;
         let mut commitments = BTreeMap::new();
         let mut wits = BTreeMap::new();
         // sort by circuit name, and we rely on an assumption that
@@ -69,7 +72,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             commitments.insert(
                 circuit_name.clone(),
                 PCS::batch_commit_and_write(&pp, &witness, &mut transcript)
-                    .map_err(|e| ZKVMError::PCSError(e))?,
+                    .map_err(ZKVMError::PCSError)?,
             );
             wits.insert(circuit_name, (witness, num_instances));
         }
@@ -79,6 +82,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
+        tracing::debug!("challenges in prover: {:?}", challenges);
 
         let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
         for ((circuit_name, pk), (i, transcript)) in self
@@ -108,8 +112,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     tracing::debug!("opcode circuit {}: {}", circuit_name, lk_s);
                 }
                 let opcode_proof = self.create_opcode_proof(
-                    pk,
                     &pp,
+                    pk,
                     witness.into_iter().map(|w| w.into()).collect_vec(),
                     wits_commit,
                     num_instances,
@@ -153,10 +157,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// major flow break down into
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
+    #[allow(clippy::too_many_arguments)]
     pub fn create_opcode_proof(
         &self,
-        circuit_pk: &ProvingKey<E, PCS>,
         pp: &PCS::ProverParam,
+        circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithData,
         num_instances: usize,
@@ -533,7 +538,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             wits_in_evals.as_slice(),
             transcript,
         )
-        .map_err(|e| ZKVMError::PCSError(e))?;
+        .map_err(ZKVMError::PCSError)?;
         exit_span!(span);
 
         Ok(ZKVMOpcodeProof {
@@ -555,6 +560,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_table_proof(
         &self,
         circuit_pk: &ProvingKey<E, PCS>,
@@ -745,7 +751,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             wits_in_evals.as_slice(),
             transcript,
         )
-        .map_err(|e| ZKVMError::PCSError(e))?;
+        .map_err(ZKVMError::PCSError)?;
         exit_span!(span);
 
         Ok(ZKVMTableProof {

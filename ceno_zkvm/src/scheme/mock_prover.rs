@@ -394,8 +394,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
     ) -> Result<(), Vec<MockProverError<E>>> {
+        let table = challenge.map(|challenge| load_tables(cb, challenge));
         let (challenge, table) = if let Some(challenge) = challenge {
-            (challenge, &load_tables(cb, challenge))
+            (challenge, table.as_ref().unwrap())
         } else {
             load_once_tables(cb)
         };
@@ -521,7 +522,6 @@ mod tests {
 
     use super::*;
     use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
         expression::{ToExpr, WitIn},
         instructions::riscv::config::{ExprLtConfig, ExprLtInput},

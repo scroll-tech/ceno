@@ -5,8 +5,9 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
-use multilinear_extensions::mle::IntoMLEs;
-use rand::rngs::ThreadRng;
+use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use transcript::Transcript;
 
 use crate::{
@@ -73,6 +74,10 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 fn test_rw_lk_expression_combination() {
     fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
         type E = GoldilocksExt2;
+        type Pcs = BasefoldDefault<E>;
+        let rng = ChaCha8Rng::from_seed([0u8; 32]);
+        let param = Pcs::setup(1 << 20, &rng).unwrap();
+        let (pp, vp) = Pcs::trim(&param, 1 << 20).unwrap();
         let name = TestCircuit::<E, RW, L>::name();
         let mut zkvm_cs = ZKVMConstraintSystem::default();
         let config = zkvm_cs.register_opcode_circuit::<TestCircuit<E, RW, L>>();
@@ -80,7 +85,10 @@ fn test_rw_lk_expression_combination() {
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
         zkvm_fixed_traces.register_opcode_circuit::<TestCircuit<E, RW, L>>(&zkvm_cs);
 
-        let pk = zkvm_cs.clone().key_gen(zkvm_fixed_traces).unwrap();
+        let pk = zkvm_cs
+            .clone()
+            .key_gen::<Pcs>(param, zkvm_fixed_traces)
+            .unwrap();
         let vk = pk.get_vk();
 
         // generate mock witness
@@ -97,22 +105,21 @@ fn test_rw_lk_expression_combination() {
         // get proof
         let prover = ZKVMProver::new(pk);
         let mut transcript = Transcript::new(b"test");
-        let mut rng = ThreadRng::default();
-        let challenges = [E::random(&mut rng), E::random(&mut rng)];
+        let wits_in = zkvm_witness.witnesses.remove(&name).unwrap().into_mles();
+        // commit to main traces
+        let commit = Pcs::batch_commit_and_write(&pp, &wits_in, &mut transcript).unwrap();
+        let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
+        let challenges = [
+            transcript.read_challenge().elements,
+            transcript.read_challenge().elements,
+        ];
 
-        let wits_in = zkvm_witness
-            .witnesses
-            .remove(&name)
-            .unwrap()
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec();
         let proof = prover
             .create_opcode_proof(
+                &pp,
                 prover.pk.circuit_pks.get(&name).unwrap(),
                 wits_in,
+                commit,
                 num_instances,
                 1,
                 &mut transcript,
@@ -122,8 +129,20 @@ fn test_rw_lk_expression_combination() {
 
         let verifier = ZKVMVerifier::new(vk.clone());
         let mut v_transcript = Transcript::new(b"test");
+        // write commitment into transcript and derive challenges from it
+        Pcs::write_commitment(
+            &Pcs::get_pure_commitment(&proof.wits_commit),
+            &mut v_transcript,
+        )
+        .unwrap();
+        let challenges = [
+            transcript.read_challenge().elements,
+            transcript.read_challenge().elements,
+        ];
+
         let _rt_input = verifier
             .verify_opcode_proof(
+                &vp,
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
                 &mut v_transcript,

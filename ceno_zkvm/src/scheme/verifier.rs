@@ -54,14 +54,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &PCS::get_pure_commitment(&proof.wits_commit),
                 &mut transcript,
             )
-            .map_err(|e| ZKVMError::PCSError(e))?;
+            .map_err(ZKVMError::PCSError)?;
         }
         for (_, (_, proof)) in vm_proof.table_proofs.iter() {
             PCS::write_commitment(
                 &PCS::get_pure_commitment(&proof.wits_commit),
                 &mut transcript,
             )
-            .map_err(|e| ZKVMError::PCSError(e))?;
+            .map_err(ZKVMError::PCSError)?;
         }
 
         // alpha, beta
@@ -69,6 +69,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
+        tracing::debug!("challenges: {:?}", challenges);
 
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
@@ -155,6 +156,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     }
 
     /// verify proof and return input opening point
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_opcode_proof(
         &self,
         vp: &PCS::VerifierParam,
@@ -374,11 +376,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &proof.wits_opening_proof,
             transcript,
         )
-        .map_err(|e| ZKVMError::PCSError(e))?;
+        .map_err(ZKVMError::PCSError)?;
 
         Ok(input_opening_point)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_table_proof(
         &self,
         vp: &PCS::VerifierParam,
@@ -506,7 +509,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &proof.wits_opening_proof,
             transcript,
         )
-        .map_err(|e| ZKVMError::PCSError(e))?;
+        .map_err(ZKVMError::PCSError)?;
 
         // TODO: verify fixed opening proof
 
