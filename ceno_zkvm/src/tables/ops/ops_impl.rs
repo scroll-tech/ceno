@@ -17,7 +17,7 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub struct OpTableConfig {
-    fixed: Fixed,
+    abc: [Fixed; 3],
     mlt: WitIn,
 }
 
@@ -26,37 +26,47 @@ impl OpTableConfig {
         cb: &mut CircuitBuilder<E>,
         rom_type: ROMType,
     ) -> Result<Self, ZKVMError> {
-        let fixed = cb.create_fixed(|| "fixed")?;
+        let abc = [
+            cb.create_fixed(|| "a")?,
+            cb.create_fixed(|| "b")?,
+            cb.create_fixed(|| "c")?,
+        ];
         let mlt = cb.create_witin(|| "mlt")?;
 
         let rlc_record = cb.rlc_chip_record(vec![
             (rom_type as usize).into(),
-            Expression::Fixed(fixed.clone()),
+            Expression::Fixed(abc[0].clone()),
+            Expression::Fixed(abc[1].clone()),
+            Expression::Fixed(abc[2].clone()),
         ]);
 
         cb.lk_table_record(|| "record", rlc_record, mlt.expr())?;
 
-        Ok(Self { fixed, mlt })
+        Ok(Self { abc, mlt })
     }
 
     pub fn generate_fixed_traces<F: SmallField>(
         &self,
         num_fixed: usize,
-        content: Vec<u64>,
+        content: Vec<[u64; 3]>,
     ) -> RowMajorMatrix<F> {
         let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
 
         // Fill the padding with zeros, if any.
         fixed.par_iter_mut().skip(content.len()).for_each(|row| {
-            set_fixed_val!(row, self.fixed, F::ZERO);
+            for col in &self.abc {
+                set_fixed_val!(row, *col, F::ZERO);
+            }
         });
 
         fixed
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
             .zip(content.into_par_iter())
-            .for_each(|(row, i)| {
-                set_fixed_val!(row, self.fixed, F::from(i));
+            .for_each(|(row, abc)| {
+                for (col, val) in self.abc.iter().zip(abc.iter()) {
+                    set_fixed_val!(row, *col, F::from(*val));
+                }
             });
 
         fixed

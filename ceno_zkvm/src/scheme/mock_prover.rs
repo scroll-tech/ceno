@@ -4,7 +4,7 @@ use crate::{
     expression::Expression,
     scheme::utils::eval_by_expr_with_fixed,
     structs::{ROMType, WitnessId},
-    tables::{ProgramTableCircuit, TableCircuit},
+    tables::{AndTable, OpsTable, ProgramTableCircuit, TableCircuit},
 };
 use ark_std::test_rng;
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
@@ -279,14 +279,12 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
         cb: &CircuitBuilder<E>,
         challenge: [E; 2],
     ) {
-        for i in 0..=u16::MAX as usize {
-            let a = i >> 8;
-            let b = i & 0xFF;
-            let c = a & b;
+        for [a, b, c] in AndTable::content() {
             let rlc_record = cb.rlc_chip_record(vec![
                 Expression::Constant(E::BaseField::from(ROMType::And as u64)),
-                i.into(),
-                c.into(),
+                (a as usize).into(),
+                (b as usize).into(),
+                (c as usize).into(),
             ]);
             let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_repr().as_ref().to_vec());

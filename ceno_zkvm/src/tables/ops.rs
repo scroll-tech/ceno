@@ -3,7 +3,7 @@
 mod ops_impl;
 
 mod ops_circuit;
-use ops_circuit::{OpsTable, OpsTableCircuit};
+pub use ops_circuit::{OpsTable, OpsTableCircuit};
 
 use crate::structs::ROMType;
 
@@ -14,9 +14,13 @@ impl OpsTable for AndTable {
         1 << 16
     }
 
-    fn content() -> Vec<u64> {
-        // TODO
-        (0..Self::len()).map(|i| i as u64).collect()
+    fn content() -> Vec<[u64; 3]> {
+        (0..Self::len() as u64)
+            .map(|i| {
+                let (a, b) = Self::unpack(i);
+                [a, b, a & b]
+            })
+            .collect()
     }
 }
 pub type AndTableCircuit<E> = OpsTableCircuit<E, AndTable>;

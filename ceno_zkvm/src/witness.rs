@@ -14,7 +14,10 @@ use rayon::{
 };
 use thread_local::ThreadLocal;
 
-use crate::structs::ROMType;
+use crate::{
+    structs::ROMType,
+    tables::{AndTable, OpsTable},
+};
 
 #[macro_export]
 macro_rules! set_val {
@@ -135,6 +138,11 @@ impl LkMultiplicity {
             .or_default()) += 1;
     }
 
+    /// lookup a AND b
+    pub fn lookup_and_byte(&mut self, a: u64, b: u64) {
+        self.increment(ROMType::And, AndTable::pack(a, b));
+    }
+
     /// lookup a < b as unsigned byte
     pub fn lookup_ltu_limb8(&mut self, a: u64, b: u64) {
         let key = a.wrapping_mul(256) + b;
@@ -168,6 +176,15 @@ impl LkMultiplicity {
                 });
                 x
             })
+    }
+
+    fn increment(&mut self, rom_type: ROMType, key: u64) {
+        let multiplicity = self
+            .multiplicity
+            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
+        (*multiplicity.borrow_mut()[rom_type as usize]
+            .entry(key)
+            .or_default()) += 1;
     }
 }
 

@@ -231,18 +231,17 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.assert_u16(name_fn, expr * Expression::from(1 << 15))
     }
 
-    /// lookup a ^ b = res
-    /// a and b are bytes
+    /// Assert `a & b = res` and that `a, b, res` are all bytes.
     pub(crate) fn lookup_and_byte(
         &mut self,
-        res: Expression<E>,
         a: Expression<E>,
         b: Expression<E>,
+        res: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        let key = a * 256.into() + b;
         let items: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(ROMType::And as u64)),
-            key,
+            a,
+            b,
             res,
         ];
         let rlc_record = self.rlc_chip_record(items);
@@ -253,9 +252,9 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     /// lookup a < b as unsigned byte
     pub(crate) fn lookup_ltu_limb8(
         &mut self,
-        res: Expression<E>,
         a: Expression<E>,
         b: Expression<E>,
+        res: Expression<E>,
     ) -> Result<(), ZKVMError> {
         let key = a * 256.into() + b;
         let items: Vec<Expression<E>> = vec![

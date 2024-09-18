@@ -246,9 +246,9 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         let high_limb = self.limbs[Self::NUM_CELLS - 1].expr();
 
         circuit_builder.lookup_and_byte(
-            high_limb_no_msb.expr(),
             high_limb.clone(),
             Expression::from(0b0111_1111),
+            high_limb_no_msb.expr(),
         )?;
 
         let inv_128 = F::from(128).invert().unwrap();
@@ -347,7 +347,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
         let is_ltu = circuit_builder.create_witin(|| "is_ltu")?;
         // circuit_builder.assert_bit(is_ltu.expr())?; // lookup ensure it is bit
         // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
-        circuit_builder.lookup_ltu_limb8(is_ltu.expr(), lhs_ne_byte.expr(), rhs_ne_byte.expr())?;
+        circuit_builder.lookup_ltu_limb8(lhs_ne_byte.expr(), rhs_ne_byte.expr(), is_ltu.expr())?;
         Ok(UIntLtuConfig {
             byte_diff_inv,
             indexes,

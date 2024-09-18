@@ -16,7 +16,16 @@ pub trait OpsTable {
 
     fn len() -> usize;
 
-    fn content() -> Vec<u64>;
+    /// The content of the table: [[a, b, result], ...]
+    fn content() -> Vec<[u64; 3]>;
+
+    fn pack(a: u64, b: u64) -> u64 {
+        a | (b << 8)
+    }
+
+    fn unpack(i: u64) -> (u64, u64) {
+        (i & 0xff, (i >> 8) & 0xff)
+    }
 }
 
 pub struct OpsTableCircuit<E, R>(PhantomData<(E, R)>);
