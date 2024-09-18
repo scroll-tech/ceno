@@ -343,6 +343,7 @@ dependencies = [
  "ff",
  "ff_ext",
  "generic_static",
+ "glob",
  "goldilocks",
  "itertools 0.12.1",
  "multilinear_extensions",
@@ -837,6 +838,12 @@ dependencies = [
  "sumcheck",
  "transcript",
 ]
+
+[[package]]
+name = "glob"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 
 [[package]]
 name = "goldilocks"

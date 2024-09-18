@@ -3,7 +3,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     expression::Expression,
     scheme::utils::eval_by_expr_with_fixed,
-    structs::{ROMType, WitnessId},
+    structs::WitnessId,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, ProgramTableCircuit, RangeTable, TableCircuit,
         U16Table, U5Table, U8Table, XorTable,
