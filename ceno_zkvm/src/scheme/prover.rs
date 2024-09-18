@@ -540,6 +540,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         )
         .map_err(ZKVMError::PCSError)?;
         exit_span!(span);
+        let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
         Ok(ZKVMOpcodeProof {
             num_instances,
@@ -753,6 +754,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         )
         .map_err(ZKVMError::PCSError)?;
         exit_span!(span);
+        let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
         Ok(ZKVMTableProof {
             num_instances,

@@ -38,7 +38,7 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     pub w_records_in_evals: Vec<E>,
     pub lk_records_in_evals: Vec<E>,
 
-    pub wits_commit: PCS::CommitmentWithData,
+    pub wits_commit: PCS::Commitment,
     pub wits_opening_proof: PCS::Proof,
     pub wits_in_evals: Vec<E>,
 }
@@ -62,7 +62,7 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub fixed_in_evals: Vec<E>,
     // TODO: add fixed_opening_proof
     // pub fixed_opening_proof: PCS::Proof,
-    pub wits_commit: PCS::CommitmentWithData,
+    pub wits_commit: PCS::Commitment,
     pub wits_in_evals: Vec<E>,
     pub wits_opening_proof: PCS::Proof,
 }

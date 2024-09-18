@@ -50,18 +50,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // TODO: write fixed commitment to transcript
 
         for (_, (_, proof)) in vm_proof.opcode_proofs.iter() {
-            PCS::write_commitment(
-                &PCS::get_pure_commitment(&proof.wits_commit),
-                &mut transcript,
-            )
-            .map_err(ZKVMError::PCSError)?;
+            PCS::write_commitment(&proof.wits_commit, &mut transcript)
+                .map_err(ZKVMError::PCSError)?;
         }
         for (_, (_, proof)) in vm_proof.table_proofs.iter() {
-            PCS::write_commitment(
-                &PCS::get_pure_commitment(&proof.wits_commit),
-                &mut transcript,
-            )
-            .map_err(ZKVMError::PCSError)?;
+            PCS::write_commitment(&proof.wits_commit, &mut transcript)
+                .map_err(ZKVMError::PCSError)?;
         }
 
         // alpha, beta
@@ -370,7 +364,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         PCS::simple_batch_verify(
             vp,
-            &PCS::get_pure_commitment(&proof.wits_commit),
+            &proof.wits_commit,
             &input_opening_point,
             &proof.wits_in_evals,
             &proof.wits_opening_proof,
@@ -503,7 +497,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         PCS::simple_batch_verify(
             vp,
-            &PCS::get_pure_commitment(&proof.wits_commit),
+            &proof.wits_commit,
             &input_opening_point,
             &proof.wits_in_evals,
             &proof.wits_opening_proof,
