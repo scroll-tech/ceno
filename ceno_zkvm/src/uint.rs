@@ -52,13 +52,13 @@ impl<E: ExtensionField> Index<usize> for UintLimb<E> {
 #[derive(Clone, Debug)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
-pub struct UInt<const M: usize, const C: usize, E: ExtensionField> {
+pub struct UIntLimbs<const M: usize, const C: usize, E: ExtensionField> {
     pub limbs: UintLimb<E>,
     // We don't need `overflow` witness since the last element of `carries` represents it.
     pub carries: Option<Vec<WitIn>>,
 }
 
-impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn new<NR: Into<String>, N: FnOnce() -> NR>(
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
@@ -79,7 +79,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         is_check: bool,
     ) -> Result<Self, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            Ok(UInt {
+            Ok(UIntLimbs {
                 limbs: UintLimb::WitIn(
                     (0..Self::NUM_CELLS)
                         .map(|i| {
@@ -100,7 +100,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     /// this fn does not create new witness
     pub fn new_from_limbs(limbs: &[WitIn]) -> Self {
         assert!(limbs.len() == Self::NUM_CELLS);
-        UInt {
+        UIntLimbs {
             limbs: UintLimb::WitIn(
                 (0..Self::NUM_CELLS)
                     .map(|i| limbs[i])
@@ -194,7 +194,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
 
     /// conversion is needed for lt/ltu
     /// TODO: add general conversion between any two limb sizes C1 <-> C2
-    pub fn from_u8_limbs(x: &UInt<M, 8, E>) -> Result<UInt<M, C, E>, ZKVMError> {
+    pub fn from_u8_limbs(x: &UIntLimbs<M, 8, E>) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
         assert!(x.carries.is_none());
         let k = C / 8;
@@ -220,10 +220,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                     .unwrap()
             })
             .collect_vec();
-        UInt::<M, C, E>::new_from_exprs_unchecked(combined_limbs)
+        UIntLimbs::<M, C, E>::new_from_exprs_unchecked(combined_limbs)
     }
 
-    pub fn to_u8_limbs(circuit_builder: &mut CircuitBuilder<E>, x: UInt<M, C, E>) -> UInt<M, 8, E> {
+    pub fn to_u8_limbs(
+        circuit_builder: &mut CircuitBuilder<E>,
+        x: UIntLimbs<M, C, E>,
+    ) -> UIntLimbs<M, 8, E> {
         assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
         assert!(x.carries.is_none());
         let k = C / 8;
@@ -259,7 +262,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
                 limbs
             })
             .collect_vec();
-        UInt::<M, 8, E>::create_witin_from_exprs(circuit_builder, split_limbs)
+        UIntLimbs::<M, 8, E>::create_witin_from_exprs(circuit_builder, split_limbs)
     }
 
     pub fn new_from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Result<Self, ZKVMError> {
@@ -327,7 +330,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         matches!(&self.limbs, UintLimb::Expression(_))
     }
 
-    /// Return the `UInt` underlying cell id's
+    /// Return the `UIntLimbs` underlying cell id's
     pub fn wits_in(&self) -> Option<&[WitIn]> {
         match &self.limbs {
             UintLimb::WitIn(c) => Some(c),
@@ -335,7 +338,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         }
     }
 
-    /// Builds a `UInt` instance from a set of cells that represent `RANGE_VALUES`
+    /// Builds a `UIntLimbs` instance from a set of cells that represent `RANGE_VALUES`
     /// assumes range_values are represented in little endian form
     pub fn from_range_wits_in(
         _circuit_builder: &mut CircuitBuilder<E>,
@@ -350,7 +353,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         todo!()
     }
 
-    /// Builds a `UInt` instance from a set of cells that represent big-endian `BYTE_VALUES`
+    /// Builds a `UIntLimbs` instance from a set of cells that represent big-endian `BYTE_VALUES`
     pub fn from_bytes_big_endian(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[WitIn],
@@ -358,7 +361,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         Self::from_bytes(circuit_builder, bytes, false)
     }
 
-    /// Builds a `UInt` instance from a set of cells that represent little-endian `BYTE_VALUES`
+    /// Builds a `UIntLimbs` instance from a set of cells that represent little-endian `BYTE_VALUES`
     pub fn from_bytes_little_endian(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[WitIn],
@@ -366,7 +369,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         Self::from_bytes(circuit_builder, bytes, true)
     }
 
-    /// Builds a `UInt` instance from a set of cells that represent `BYTE_VALUES`
+    /// Builds a `UIntLimbs` instance from a set of cells that represent `BYTE_VALUES`
     pub fn from_bytes(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[WitIn],
@@ -380,7 +383,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         )
     }
 
-    /// Builds a `UInt` instance from a set of cell values of a certain `CELL_WIDTH`
+    /// Builds a `UIntLimbs` instance from a set of cell values of a certain `CELL_WIDTH`
     fn from_different_sized_cell_values(
         _circuit_builder: &mut CircuitBuilder<E>,
         _wits_in: &[WitIn],
@@ -416,14 +419,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     }
 }
 
-/// Construct `UInt` from `Vec<CellId>`
-impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for UInt<M, C, E> {
+/// Construct `UIntLimbs` from `Vec<CellId>`
+impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for UIntLimbs<M, C, E> {
     type Error = UtilError;
 
     fn try_from(limbs: Vec<WitIn>) -> Result<Self, Self::Error> {
         if limbs.len() != Self::NUM_CELLS {
             return Err(UtilError::UIntError(format!(
-                "cannot construct UInt<{}, {}> from {} cells, requires {} cells",
+                "cannot construct UIntLimbs<{}, {}> from {} cells, requires {} cells",
                 M,
                 C,
                 limbs.len(),
@@ -438,8 +441,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for 
     }
 }
 
-/// Construct `UInt` from `$[CellId]`
-impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UInt<M, C, E> {
+/// Construct `UIntLimbs` from `$[CellId]`
+impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UIntLimbs<M, C, E> {
     type Error = UtilError;
 
     fn try_from(values: &[WitIn]) -> Result<Self, Self::Error> {
@@ -447,7 +450,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UI
     }
 }
 
-impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UInt<M, C, E> {
+impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<M, C, E> {
     type Output = Vec<Expression<E>>;
     fn expr(&self) -> Vec<Expression<E>> {
         match &self.limbs {
@@ -460,7 +463,7 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UInt<M, C,
     }
 }
 
-pub struct UIntValue<T: Into<u64> + Copy> {
+pub struct Value<T: Into<u64> + Copy> {
     #[allow(dead_code)]
     val: T,
     pub limbs: Vec<u16>,
@@ -468,14 +471,14 @@ pub struct UIntValue<T: Into<u64> + Copy> {
 
 // TODO generalize to support non 16 bit limbs
 // TODO optimize api with fixed size array
-impl<T: Into<u64> + Copy> UIntValue<T> {
+impl<T: Into<u64> + Copy> Value<T> {
     const LIMBS: usize = {
         let u16_bytes = (u16::BITS / 8) as usize;
         mem::size_of::<T>() / u16_bytes
     };
 
     pub fn new(val: T, lkm: &mut LkMultiplicity) -> Self {
-        let uint = UIntValue::<T> {
+        let uint = Value::<T> {
             val,
             limbs: Self::split_to_u16(val),
         };
@@ -484,7 +487,7 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
     }
 
     pub fn new_unchecked(val: T) -> Self {
-        UIntValue::<T> {
+        Value::<T> {
             val,
             limbs: Self::split_to_u16(val),
         }
@@ -597,12 +600,12 @@ impl<T: Into<u64> + Copy> UIntValue<T> {
 mod tests {
     use crate::witness::LkMultiplicity;
 
-    use super::UIntValue;
+    use super::Value;
 
     #[test]
     fn test_add() {
-        let a = UIntValue::new_unchecked(1u32);
-        let b = UIntValue::new_unchecked(2u32);
+        let a = Value::new_unchecked(1u32);
+        let b = Value::new_unchecked(2u32);
         let mut lkm = LkMultiplicity::default();
 
         let (c, carries) = a.add(&b, &mut lkm, true);
@@ -614,8 +617,8 @@ mod tests {
 
     #[test]
     fn test_add_carry() {
-        let a = UIntValue::new_unchecked(u16::MAX as u32);
-        let b = UIntValue::new_unchecked(2u32);
+        let a = Value::new_unchecked(u16::MAX as u32);
+        let b = Value::new_unchecked(2u32);
         let mut lkm = LkMultiplicity::default();
 
         let (c, carries) = a.add(&b, &mut lkm, true);
@@ -627,8 +630,8 @@ mod tests {
 
     #[test]
     fn test_mul() {
-        let a = UIntValue::new_unchecked(1u32);
-        let b = UIntValue::new_unchecked(2u32);
+        let a = Value::new_unchecked(1u32);
+        let b = Value::new_unchecked(2u32);
         let mut lkm = LkMultiplicity::default();
 
         let (c, carries) = a.mul(&b, &mut lkm, true);
@@ -640,8 +643,8 @@ mod tests {
 
     #[test]
     fn test_mul_carry() {
-        let a = UIntValue::new_unchecked(u16::MAX as u32);
-        let b = UIntValue::new_unchecked(2u32);
+        let a = Value::new_unchecked(u16::MAX as u32);
+        let b = Value::new_unchecked(2u32);
         let mut lkm = LkMultiplicity::default();
 
         let (c, carries) = a.mul(&b, &mut lkm, true);
@@ -653,8 +656,8 @@ mod tests {
 
     #[test]
     fn test_mul_overflow() {
-        let a = UIntValue::new_unchecked(u32::MAX / 2 + 1);
-        let b = UIntValue::new_unchecked(2u32);
+        let a = Value::new_unchecked(u32::MAX / 2 + 1);
+        let b = Value::new_unchecked(2u32);
         let mut lkm = LkMultiplicity::default();
 
         let (c, carries) = a.mul(&b, &mut lkm, true);
@@ -668,7 +671,7 @@ mod tests {
     //     // 33 total bits and each cells holds just 4 bits
     //     // to hold all 33 bits without truncations, we'd need 9 cells
     //     // 9 * 4 = 36 > 33
-    //     type UInt33 = UInt<33, 4>;
+    //     type UInt33 = UIntLimbs<33, 4>;
     //     assert!(UInt33::try_from(vec![1, 2, 3, 4, 5, 6, 7, 8, 9]).is_ok());
     //     assert!(UInt33::try_from(vec![1, 2, 3]).is_err());
     //     assert!(UInt33::try_from(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).is_err());
@@ -679,7 +682,7 @@ mod tests {
     //     // build circuit
     //     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
     //     let (_, small_values) = circuit_builder.create_witness_in(8);
-    //     type UInt30 = UInt<30, 6>;
+    //     type UInt30 = UIntLimbs<30, 6>;
     //     let uint_instance =
     //         UInt30::from_different_sized_cell_values(&mut circuit_builder, &small_values, 2, true)
     //             .unwrap();
@@ -733,7 +736,7 @@ mod tests {
     // #[test]
     // fn test_counter_vector() {
     //     // each limb has 5 bits so all number from 0..3 should require only 1 limb
-    //     type UInt30 = UInt<30, 5>;
+    //     type UInt30 = UIntLimbs<30, 5>;
     //     let res = UInt30::counter_vector::<Goldilocks>(3);
     //     assert_eq!(
     //         res,
@@ -745,7 +748,7 @@ mod tests {
     //     );
 
     //     // each limb has a single bit, number from 0..5 should require 3 limbs each
-    //     type UInt50 = UInt<50, 1>;
+    //     type UInt50 = UIntLimbs<50, 1>;
     //     let res = UInt50::counter_vector::<Goldilocks>(5);
     //     assert_eq!(
     //         res,

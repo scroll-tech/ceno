@@ -2,9 +2,9 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
-use super::{constants::RegUInt, r_insn::RInstructionConfig, RIVInstruction};
+use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::UIntValue,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -14,9 +14,9 @@ use std::marker::PhantomData;
 pub struct ArithConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
 
-    multiplier_1: RegUInt<E>,
-    multiplier_2: RegUInt<E>,
-    outcome: RegUInt<E>,
+    multiplier_1: UInt<E>,
+    multiplier_2: UInt<E>,
+    outcome: UInt<E>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -37,8 +37,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let mut multiplier_1 = RegUInt::new_unchecked(|| "multiplier_1", circuit_builder)?;
-        let mut multiplier_2 = RegUInt::new_unchecked(|| "multiplier_2", circuit_builder)?;
+        let mut multiplier_1 = UInt::new_unchecked(|| "multiplier_1", circuit_builder)?;
+        let mut multiplier_2 = UInt::new_unchecked(|| "multiplier_2", circuit_builder)?;
         let outcome = multiplier_1.mul(|| "outcome", circuit_builder, &mut multiplier_2, true)?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
@@ -65,9 +65,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     ) -> Result<(), ZKVMError> {
         config.r_insn.assign_instance(instance, lkm, step)?;
 
-        let multiplier_1 = UIntValue::new_unchecked(step.rs1().unwrap().value);
-        let multiplier_2 = UIntValue::new_unchecked(step.rs2().unwrap().value);
-        let outcome = UIntValue::new_unchecked(step.rd().unwrap().value.after);
+        let multiplier_1 = Value::new_unchecked(step.rs1().unwrap().value);
+        let multiplier_2 = Value::new_unchecked(step.rs2().unwrap().value);
+        let outcome = Value::new_unchecked(step.rd().unwrap().value.after);
 
         config
             .multiplier_1

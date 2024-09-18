@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::{izip, Itertools};
 
-use super::{UInt, UintLimb};
+use super::{UIntLimbs, UintLimb};
 use crate::{
     circuit_builder::CircuitBuilder,
     create_witin_from_expr,
@@ -11,7 +11,7 @@ use crate::{
     instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
 };
 
-impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
     const LIMB_BIT_MASK: u64 = (1 << C) - 1;
 
@@ -21,8 +21,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         addend1: &Vec<Expression<E>>,
         addend2: &Vec<Expression<E>>,
         with_overflow: bool,
-    ) -> Result<UInt<M, C, E>, ZKVMError> {
-        let mut c = UInt::<M, C, E>::new_as_empty();
+    ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
+        let mut c = UIntLimbs::<M, C, E>::new_as_empty();
 
         // allocate witness cells and do range checks for carries
         c.create_carry_witin(|| "add_carry", circuit_builder, with_overflow)?;
@@ -87,9 +87,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         &self,
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
-        addend: &UInt<M, C, E>,
+        addend: &UIntLimbs<M, C, E>,
         with_overflow: bool,
-    ) -> Result<UInt<M, C, E>, ZKVMError> {
+    ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             self.internal_add(cb, &self.expr(), &addend.expr(), with_overflow)
         })
@@ -98,28 +98,29 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     fn internal_mul(
         &mut self,
         circuit_builder: &mut CircuitBuilder<E>,
-        multiplier: &mut UInt<M, C, E>,
+        multiplier: &mut UIntLimbs<M, C, E>,
         with_overflow: bool,
-    ) -> Result<UInt<M, C, E>, ZKVMError> {
-        let mut c = UInt::<M, C, E>::new(|| "c", circuit_builder)?;
+    ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
+        let mut c = UIntLimbs::<M, C, E>::new(|| "c", circuit_builder)?;
         // allocate witness cells and do range checks for carries
         c.create_carry_witin(|| "mul_carry", circuit_builder, with_overflow)?;
 
         // We only allow expressions are in monomial form
         // if any of a or b is in Expression term, it would cause error.
         // So a small trick here, creating a witness and constrain the witness and the expression is equal
-        let mut create_expr = |u: &mut UInt<M, C, E>| -> Result<Vec<Expression<E>>, ZKVMError> {
-            if u.is_expr() {
-                let existing_expr = u.expr();
-                // this will overwrite existing expressions
-                u.replace_limbs_with_witin(|| "replace_limbs_with_witin", circuit_builder)?;
-                // check if the new witness equals the existing expression
-                izip!(u.expr(), existing_expr).try_for_each(|(lhs, rhs)| {
-                    circuit_builder.require_equal(|| "new_witin_equal_expr", lhs, rhs)
-                })?;
-            }
-            Ok(u.expr())
-        };
+        let mut create_expr =
+            |u: &mut UIntLimbs<M, C, E>| -> Result<Vec<Expression<E>>, ZKVMError> {
+                if u.is_expr() {
+                    let existing_expr = u.expr();
+                    // this will overwrite existing expressions
+                    u.replace_limbs_with_witin(|| "replace_limbs_with_witin", circuit_builder)?;
+                    // check if the new witness equals the existing expression
+                    izip!(u.expr(), existing_expr).try_for_each(|(lhs, rhs)| {
+                        circuit_builder.require_equal(|| "new_witin_equal_expr", lhs, rhs)
+                    })?;
+                }
+                Ok(u.expr())
+            };
 
         let a_expr = create_expr(self)?;
         let b_expr = create_expr(multiplier)?;
@@ -172,20 +173,20 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
         &mut self,
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
-        multiplier: &mut UInt<M, C, E>,
+        multiplier: &mut UIntLimbs<M, C, E>,
         with_overflow: bool,
-    ) -> Result<UInt<M, C, E>, ZKVMError> {
+    ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             self.internal_mul(cb, multiplier, with_overflow)
         })
     }
 
-    /// Check two UInt are equal
+    /// Check two UIntLimbs are equal
     pub fn eq<NR: Into<String>, N: FnOnce() -> NR>(
         &self,
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
-        rhs: &UInt<M, C, E>,
+        rhs: &UIntLimbs<M, C, E>,
     ) -> Result<(), ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             izip!(self.expr(), rhs.expr())
@@ -196,7 +197,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     pub fn lt(
         &self,
         _circuit_builder: &mut CircuitBuilder<E>,
-        _rhs: &UInt<M, C, E>,
+        _rhs: &UIntLimbs<M, C, E>,
     ) -> Result<Expression<E>, ZKVMError> {
         Ok(self.expr().remove(0) + 1.into())
     }
@@ -204,7 +205,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     pub fn is_equal(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
-        rhs: &UInt<M, C, E>,
+        rhs: &UIntLimbs<M, C, E>,
     ) -> Result<IsEqualConfig, ZKVMError> {
         let n_limbs = Self::NUM_CELLS;
         let (is_equal_per_limb, diff_inv_per_limb): (Vec<WitIn>, Vec<WitIn>) = self
@@ -232,7 +233,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UInt<M, C, E> {
     }
 }
 
-impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
+impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
     /// decompose x = (x_s, x_{<s})
     /// where x_s is highest bit, x_{<s} is the rest
     pub fn msb_decompose<F: SmallField>(
@@ -264,7 +265,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
     pub fn ltu_limb8(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
-        rhs: &UInt<M, 8, E>,
+        rhs: &UIntLimbs<M, 8, E>,
     ) -> Result<UIntLtuConfig, ZKVMError> {
         let n_bytes = Self::NUM_CELLS;
         let indexes: Vec<WitIn> = (0..n_bytes)
@@ -361,7 +362,7 @@ impl<const M: usize, E: ExtensionField> UInt<M, 8, E> {
     pub fn lt_limb8(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
-        rhs: &UInt<M, 8, E>,
+        rhs: &UIntLimbs<M, 8, E>,
     ) -> Result<UIntLtConfig, ZKVMError> {
         let is_lt = circuit_builder.create_witin(|| "is_lt")?;
         circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
@@ -407,7 +408,7 @@ mod tests {
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             expression::{Expression, ToExpr},
             scheme::utils::eval_by_expr,
-            uint::UInt,
+            uint::UIntLimbs,
         };
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
@@ -539,9 +540,9 @@ mod tests {
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let uint_a = UInt::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
+            let uint_a = UIntLimbs::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
             let uint_c = if const_b.is_none() {
-                let uint_b = UInt::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
+                let uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
                 uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
             } else {
                 let const_b = Expression::Constant(const_b.unwrap().into());
@@ -550,8 +551,8 @@ mod tests {
                     .unwrap()
             };
 
-            let pow_of_c: u64 = 2_usize.pow(UInt::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
-            let single_wit_size = UInt::<M, C, E>::NUM_CELLS;
+            let pow_of_c: u64 = 2_usize.pow(UIntLimbs::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
+            let single_wit_size = UIntLimbs::<M, C, E>::NUM_CELLS;
 
             let a = &witness_values[0..single_wit_size];
             let mut const_b_pre_allocated = vec![0u64; single_wit_size];
@@ -615,7 +616,7 @@ mod tests {
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             expression::ToExpr,
             scheme::utils::eval_by_expr,
-            uint::UInt,
+            uint::UIntLimbs,
         };
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
@@ -721,8 +722,8 @@ mod tests {
             witness_values: Vec<u64>,
             overflow: bool,
         ) {
-            let pow_of_c: u64 = 2_usize.pow(UInt::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
-            let single_wit_size = UInt::<M, C, E>::NUM_CELLS;
+            let pow_of_c: u64 = 2_usize.pow(UIntLimbs::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
+            let single_wit_size = UIntLimbs::<M, C, E>::NUM_CELLS;
             if overflow {
                 assert_eq!(
                     witness_values.len() % single_wit_size,
@@ -735,8 +736,8 @@ mod tests {
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let mut uint_a = UInt::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
-            let mut uint_b = UInt::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
+            let mut uint_a = UIntLimbs::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
+            let mut uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
             let uint_c = uint_a
                 .mul(|| "uint_c", &mut cb, &mut uint_b, overflow)
                 .unwrap();
@@ -793,7 +794,7 @@ mod tests {
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             expression::ToExpr,
             scheme::utils::eval_by_expr,
-            uint::UInt,
+            uint::UIntLimbs,
         };
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
@@ -839,10 +840,10 @@ mod tests {
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
-            let uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
+            let uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
+            let uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
             let mut uint_c = uint_a.add(|| "uint_c", &mut cb, &uint_b, false).unwrap();
-            let mut uint_d = UInt::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
+            let mut uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
             let uint_e = uint_c
                 .mul(|| "uint_e", &mut cb, &mut uint_d, false)
                 .unwrap();
@@ -904,11 +905,11 @@ mod tests {
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
-            let uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
+            let uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
+            let uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
             let mut uint_c = uint_a.add(|| "uint_c", &mut cb, &uint_b, false).unwrap();
-            let uint_d = UInt::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
-            let uint_e = UInt::<64, 16, E>::new(|| "uint_e", &mut cb).unwrap();
+            let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
+            let uint_e = UIntLimbs::<64, 16, E>::new(|| "uint_e", &mut cb).unwrap();
             let mut uint_f = uint_d.add(|| "uint_f", &mut cb, &uint_e, false).unwrap();
             let uint_g = uint_c
                 .mul(|| "unit_g", &mut cb, &mut uint_f, false)
@@ -952,12 +953,12 @@ mod tests {
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let mut uint_a = UInt::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
-            let mut uint_b = UInt::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
+            let mut uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
+            let mut uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
             let uint_c = uint_a
                 .mul(|| "uint_c", &mut cb, &mut uint_b, false)
                 .unwrap();
-            let uint_d = UInt::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
+            let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
             let uint_e = uint_c.add(|| "uint_e", &mut cb, &uint_d, false).unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
