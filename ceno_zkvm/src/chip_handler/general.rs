@@ -235,6 +235,19 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.assert_u16(name_fn, expr * Expression::from(1 << 15))
     }
 
+    /// Assert `rom_type(a, b) = c` and that `a, b, c` are all bytes.
+    pub(crate) fn logic_u8(
+        &mut self,
+        rom_type: ROMType,
+        a: Expression<E>,
+        b: Expression<E>,
+        c: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        let items: Vec<Expression<E>> = vec![(rom_type as usize).into(), a, b, c];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(|| format!("lookup_{:?}", rom_type), rlc_record)
+    }
+
     /// Assert `a & b = res` and that `a, b, res` are all bytes.
     pub(crate) fn lookup_and_byte(
         &mut self,
@@ -242,15 +255,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         b: Expression<E>,
         res: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        let items: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from(ROMType::And as u64)),
-            a,
-            b,
-            res,
-        ];
-        let rlc_record = self.rlc_chip_record(items);
-        self.lk_record(|| "and lookup record", rlc_record)?;
-        Ok(())
+        self.logic_u8(ROMType::And, a, b, res)
     }
 
     /// Assert that `(a < b) == res as bool`, that `a, b` are unsigned bytes, and that `res` is 0 or 1.
