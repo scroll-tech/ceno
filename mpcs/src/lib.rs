@@ -20,9 +20,8 @@ pub type VerifierParam<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::Verifie
 
 pub fn pcs_setup<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     poly_size: usize,
-    rng: &Pcs::Rng,
 ) -> Result<Pcs::Param, Error> {
-    Pcs::setup(poly_size, rng)
+    Pcs::setup(poly_size)
 }
 
 pub fn pcs_trim<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -119,7 +118,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     type Proof: Clone + Debug + Serialize + DeserializeOwned;
     type Rng: RngCore + Clone;
 
-    fn setup(poly_size: usize, rng: &Self::Rng) -> Result<Self::Param, Error>;
+    fn setup(poly_size: usize) -> Result<Self::Param, Error>;
 
     fn trim(
         param: &Self::Param,
@@ -309,13 +308,17 @@ pub enum Error {
     Serialization(String),
     Transcript(String),
     ExtensionFieldElementNotFit,
+    PolynomialTooLarge(usize),
+    PolynomialSizesNotEqual,
+    MerkleRootMismatch,
 }
 
 mod basefold;
 pub use basefold::{
-    coset_fft, fft, fft_root_table, Basecode, BasecodeDefaultSpec, Basefold,
-    BasefoldBasecodeParams, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldDefault,
-    BasefoldParams, BasefoldRSParams, BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,
+    coset_fft, fft, fft_root_table, one_level_eval_hc, one_level_interp_hc, Basecode,
+    BasecodeDefaultSpec, Basefold, BasefoldBasecodeParams, BasefoldCommitment,
+    BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams, BasefoldRSParams, BasefoldSpec,
+    EncodingScheme, RSCode, RSCodeDefaultSpec,
 };
 
 fn validate_input<E: ExtensionField>(
@@ -375,9 +378,8 @@ pub mod test_util {
         for num_vars in num_vars_start..num_vars_end {
             // Setup
             let (pp, vp) = {
-                let rng = ChaCha8Rng::from_seed([0u8; 32]);
                 let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, &rng).unwrap();
+                let param = Pcs::setup(poly_size).unwrap();
                 Pcs::trim(&param, poly_size).unwrap()
             };
             // Commit and open
@@ -435,7 +437,7 @@ pub mod test_util {
             // Setup
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, &rng).unwrap();
+                let param = Pcs::setup(poly_size).unwrap();
                 Pcs::trim(&param, poly_size).unwrap()
             };
             // Batch commit and open
@@ -547,7 +549,7 @@ pub mod test_util {
             // Setup
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, &rng).unwrap();
+                let param = Pcs::setup(poly_size).unwrap();
                 Pcs::trim(&param, poly_size).unwrap()
             };
 

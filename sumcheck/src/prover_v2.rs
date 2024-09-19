@@ -8,6 +8,7 @@ use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, MultilinearExtension},
     op_mle, op_mle_3,
+    util::largest_even_below,
     virtual_poly_v2::VirtualPolynomialV2,
 };
 use rayon::{
@@ -47,11 +48,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         assert!(
             polys
                 .iter()
-                .map(|poly| (poly.aux_info.num_variables, poly.aux_info.max_degree))
+                .map(|poly| (poly.aux_info.max_num_variables, poly.aux_info.max_degree))
                 .all_equal()
         );
         let (num_variables, max_degree) = (
-            polys[0].aux_info.num_variables,
+            polys[0].aux_info.max_num_variables,
             polys[0].aux_info.max_degree,
         );
 
@@ -81,8 +82,6 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             })
             .collect::<Vec<_>>();
 
-        // rayon::in_place_scope(
-        // let (mut prover_states, mut prover_msgs) = rayon::in_place_scope(
         let scoped_fn = |s: &Scope<'a>| {
             // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last
             // work thread
@@ -120,7 +119,9 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             .iter_mut()
                             .for_each(|mle| {
                                 let mle = Arc::get_mut(mle).unwrap();
-                                mle.fix_variables_in_place(&[p.elements]);
+                                if mle.num_vars() > 0 {
+                                    mle.fix_variables_in_place(&[p.elements]);
+                                }
                             });
                         tx_prover_state
                             .send(Some((thread_id, prover_state)))
@@ -189,10 +190,20 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     .for_each(|mle| {
                         if num_variables == 1 {
                             // first time fix variable should be create new instance
-                            *mle = mle.fix_variables(&[p.elements]).into();
+                            if mle.num_vars() > 0 {
+                                *mle = mle.fix_variables(&[p.elements]).into();
+                            } else {
+                                *mle =
+                                    Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                                        0,
+                                        mle.get_base_field_vec().to_vec(),
+                                    ))
+                            }
                         } else {
                             let mle = Arc::get_mut(mle).unwrap();
-                            mle.fix_variables_in_place(&[p.elements]);
+                            if mle.num_vars() > 0 {
+                                mle.fix_variables_in_place(&[p.elements]);
+                            }
                         }
                     });
                 tx_prover_state
@@ -292,9 +303,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     |mle: &mut Arc<
                         dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>,
                     >| {
-                        Arc::get_mut(mle)
-                            .unwrap()
-                            .fix_variables_in_place(&[p.elements]);
+                        if mle.num_vars() > 0 {
+                            Arc::get_mut(mle)
+                                .unwrap()
+                                .fix_variables_in_place(&[p.elements]);
+                        }
                     },
                 );
         };
@@ -325,7 +338,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     ) -> Self {
         let start = start_timer!(|| "sum check prover init");
         assert_ne!(
-            polynomial.aux_info.num_variables, 0,
+            polynomial.aux_info.max_num_variables, 0,
             "Attempt to prove a constant."
         );
         end_timer!(start);
@@ -333,7 +346,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         let max_degree = polynomial.aux_info.max_degree;
         assert!(extrapolation_aux.len() == max_degree - 1);
         Self {
-            challenges: Vec::with_capacity(polynomial.aux_info.num_variables),
+            challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
             poly: polynomial,
             extrapolation_aux,
@@ -353,7 +366,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
 
         assert!(
-            self.round < self.poly.aux_info.num_variables,
+            self.round < self.poly.aux_info.max_num_variables,
             "Prover is not active"
         );
 
@@ -385,7 +398,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
             if self.challenges.len() == 1 {
                 self.poly.flattened_ml_extensions.iter_mut().for_each(|f| {
-                    *f = Arc::new(f.fix_variables(&[r.elements]));
+                    if f.num_vars() > 0 {
+                        *f = Arc::new(f.fix_variables(&[r.elements]));
+                    } else {
+                        panic!("calling sumcheck on constant")
+                    }
                 });
             } else {
                 self.poly
@@ -396,7 +413,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     // reason
                     .map(Arc::get_mut)
                     .for_each(|f| {
-                        f.unwrap().fix_variables_in_place(&[r.elements]);
+                        if let Some(f) = f {
+                            if f.num_vars() > 0 {
+                                f.fix_variables_in_place(&[r.elements]);
+                            }
+                        }
                     });
             }
         }
@@ -407,6 +428,16 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         // Step 2: generate sum for the partial evaluated polynomial:
         // f(r_1, ... r_m,, x_{m+1}... x_n)
+        //
+        // To deal with different num_vars, we exploit a fact that for each product which num_vars < max_num_vars,
+        // for it evaluation value we need to times 2^(max_num_vars - num_vars)
+        // E.g. Giving multivariate poly f(X) = f_1(X1) + f_2(X), X1 \in {F}^{n'}, X \in {F}^{n}, |X1| := n', |X| = n, n' <= n
+        // For i round univariate poly, f^i(x)
+        // f^i[0] = \sum_b f(r, 0, b), b \in {0, 1}^{n-i-1}, r \in {F}^{n-i-1} chanllenge get from prev rounds
+        //        = \sum_b f_1(r, 0, b1) + f_2(r, 0, b), |b| >= |b1|, |b| - |b1| = n - n'
+        //        = 2^(|b| - |b1|) * \sum_b1 f_1(r, 0, b1)  + \sum_b f_2(r, 0, b)
+        // same applied on f^i[1]
+        // It imply that, for every evals in f_1, to compute univariate poly, we just need to times a factor 2^(|b| - |b1|) for it evaluation value
         let span = entered_span!("products_sum");
         let AdditiveVec(products_sum) = self.poly.products.iter().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
@@ -418,13 +449,24 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         let f = &self.poly.flattened_ml_extensions[products[0]];
                         op_mle! {
                             |f| {
-                                (0..f.len())
+                                let res = (0..largest_even_below(f.len()))
                                     .step_by(2)
-                                    .fold(AdditiveArray::<E, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
+                                    .fold(AdditiveArray::<_, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
                                             acc.0[0] += f[b];
                                             acc.0[1] += f[b+1];
                                             acc
-                                    })
+                                });
+                                let res = if f.len() == 1 {
+                                    AdditiveArray::<_, 2>([f[0]; 2])
+                                } else {
+                                    res
+                                };
+                                let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
+                                if num_vars_multiplicity > 0 {
+                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                } else {
+                                    res
+                                }
                             },
                             |sum| AdditiveArray(sum.0.map(E::from))
                         }
@@ -436,16 +478,28 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             &self.poly.flattened_ml_extensions[products[1]],
                         );
                         commutative_op_mle_pair!(
-                            |f, g| (0..f.len()).step_by(2).fold(
-                                AdditiveArray::<E, 3>(array::from_fn(|_| 0.into())),
-                                |mut acc, b| {
-                                    acc.0[0] += f[b] * g[b];
-                                    acc.0[1] += f[b + 1] * g[b + 1];
-                                    acc.0[2] +=
-                                        (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]);
-                                    acc
+                            |f, g| {
+                                let res = (0..largest_even_below(f.len())).step_by(2).fold(
+                                    AdditiveArray::<_, 3>(array::from_fn(|_| 0.into())),
+                                    |mut acc, b| {
+                                        acc.0[0] += f[b] * g[b];
+                                        acc.0[1] += f[b + 1] * g[b + 1];
+                                        acc.0[2] +=
+                                            (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]);
+                                        acc
+                                });
+                                let res = if f.len() == 1 {
+                                    AdditiveArray::<_, 3>([f[0] * g[0]; 3])
+                                } else {
+                                    res
+                                };
+                                let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
+                                if num_vars_multiplicity > 0 {
+                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                } else {
+                                    res
                                 }
-                            ),
+                            },
                             |sum| AdditiveArray(sum.0.map(E::from))
                         )
                         .to_vec()
@@ -457,23 +511,36 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             &self.poly.flattened_ml_extensions[products[2]],
                         );
                         op_mle_3!(
-                            |f1, f2, f3| (0..f1.len())
-                                .step_by(2)
-                                .map(|b| {
-                                    // f = c x + d
-                                    let c1 = f1[b + 1] - f1[b];
-                                    let c2 = f2[b + 1] - f2[b];
-                                    let c3 = f3[b + 1] - f3[b];
-                                    AdditiveArray([
-                                        f1[b] * (f2[b] * f3[b]),
-                                        f1[b + 1] * (f2[b + 1] * f3[b + 1]),
-                                        (c1 + f1[b + 1])
-                                            * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
-                                        (c1 + c1 + f1[b + 1])
-                                            * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
-                                    ])
-                                })
-                                .sum::<AdditiveArray<_, 4>>(),
+                            |f1, f2, f3| {
+                                let res = (0..largest_even_below(f1.len()))
+                                    .step_by(2)
+                                    .map(|b| {
+                                        // f = c x + d
+                                        let c1 = f1[b + 1] - f1[b];
+                                        let c2 = f2[b + 1] - f2[b];
+                                        let c3 = f3[b + 1] - f3[b];
+                                        AdditiveArray([
+                                            f1[b] * (f2[b] * f3[b]),
+                                            f1[b + 1] * (f2[b + 1] * f3[b + 1]),
+                                            (c1 + f1[b + 1])
+                                                * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
+                                            (c1 + c1 + f1[b + 1])
+                                                * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
+                                        ])
+                                    })
+                                    .sum::<AdditiveArray<_, 4>>();
+                                let res = if f1.len() == 1 {
+                                    AdditiveArray::<_, 4>([f1[0] * f2[0] * f3[0]; 4])
+                                } else {
+                                    res
+                                };
+                                let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f1.len()).max(1) + self.round - 1);
+                                if num_vars_multiplicity > 0 {
+                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                } else {
+                                    res
+                                }
+                            },
                             |sum| AdditiveArray(sum.0.map(E::from))
                         )
                         .to_vec()
@@ -538,7 +605,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         poly: VirtualPolynomialV2<'a, E>,
         transcript: &mut Transcript<E>,
     ) -> (IOPProof<E>, IOPProverStateV2<'a, E>) {
-        let (num_variables, max_degree) = (poly.aux_info.num_variables, poly.aux_info.max_degree);
+        let (num_variables, max_degree) =
+            (poly.aux_info.max_num_variables, poly.aux_info.max_degree);
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
@@ -588,9 +656,14 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 .par_iter_mut()
                 .for_each(|mle| {
                     if let Some(mle) = Arc::get_mut(mle) {
-                        mle.fix_variables_in_place_parallel(&[p.elements])
+                        if mle.num_vars() > 0 {
+                            mle.fix_variables_in_place(&[p.elements])
+                        }
                     } else {
-                        *mle = mle.fix_variables(&[p.elements]).into()
+                        *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                            0,
+                            mle.get_base_field_vec().to_vec(),
+                        ))
                     }
                 });
         };
@@ -616,13 +689,13 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     pub(crate) fn prover_init_parallel(polynomial: VirtualPolynomialV2<'a, E>) -> Self {
         let start = start_timer!(|| "sum check prover init");
         assert_ne!(
-            polynomial.aux_info.num_variables, 0,
+            polynomial.aux_info.max_num_variables, 0,
             "Attempt to prove a constant."
         );
 
         let max_degree = polynomial.aux_info.max_degree;
         let prover_state = Self {
-            challenges: Vec::with_capacity(polynomial.aux_info.num_variables),
+            challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
             poly: polynomial,
             extrapolation_aux: (1..max_degree)
@@ -651,7 +724,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
 
         assert!(
-            self.round < self.poly.aux_info.num_variables,
+            self.round < self.poly.aux_info.max_num_variables,
             "Prover is not active"
         );
 
@@ -682,7 +755,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     .flattened_ml_extensions
                     .par_iter_mut()
                     .for_each(|f| {
-                        *f = Arc::new(f.fix_variables_parallel(&[r.elements]));
+                        if f.num_vars() > 0 {
+                            *f = Arc::new(f.fix_variables_parallel(&[r.elements]));
+                        } else {
+                            panic!("calling sumcheck on constant")
+                        }
                     });
             } else {
                 self.poly
@@ -693,7 +770,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     // reason
                     .map(Arc::get_mut)
                     .for_each(|f| {
-                        f.unwrap().fix_variables_in_place_parallel(&[r.elements]);
+                        if let Some(f) = f {
+                            if f.num_vars() > 0 {
+                                f.fix_variables_in_place_parallel(&[r.elements])
+                            }
+                        }
                     });
             }
         }
@@ -718,17 +799,30 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         1 => {
                             let f = &self.poly.flattened_ml_extensions[products[0]];
                             op_mle! {
-                                |f| (0..f.len())
-                                .into_par_iter()
-                                .step_by(2)
-                                .with_min_len(64)
-                                .map(|b| {
-                                    AdditiveArray([
-                                        f[b],
-                                        f[b + 1]
-                                    ])
-                                })
-                                .sum::<AdditiveArray<_, 2>>(),
+                                |f| {
+                                    let res = (0..largest_even_below(f.len()))
+                                        .into_par_iter()
+                                        .step_by(2)
+                                        .with_min_len(64)
+                                        .map(|b| {
+                                            AdditiveArray([
+                                                f[b],
+                                                f[b + 1]
+                                            ])
+                                        })
+                                        .sum::<AdditiveArray<_, 2>>();
+                                    let res = if f.len() == 1 {
+                                        AdditiveArray::<_, 2>([f[0]; 2])
+                                    } else {
+                                        res
+                                    };
+                                    let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
+                                    if num_vars_multiplicity > 0 {
+                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                    } else {
+                                        res
+                                    }
+                                },
                                 |sum| AdditiveArray(sum.0.map(E::from))
                             }
                             .to_vec()
@@ -739,7 +833,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                                 &self.poly.flattened_ml_extensions[products[1]],
                             );
                             commutative_op_mle_pair!(
-                                |f, g| (0..f.len())
+                                |f, g| {
+                                    let res = (0..largest_even_below(f.len()))
                                     .into_par_iter()
                                     .step_by(2)
                                     .with_min_len(64)
@@ -751,7 +846,19 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                                                 * (g[b + 1] + g[b + 1] - g[b]),
                                         ])
                                     })
-                                    .sum::<AdditiveArray<_, 3>>(),
+                                    .sum::<AdditiveArray<_, 3>>();
+                                    let res = if f.len() == 1 {
+                                        AdditiveArray::<_, 3>([f[0] * g[0]; 3])
+                                    } else {
+                                        res
+                                    };
+                                    let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
+                                    if num_vars_multiplicity > 0 {
+                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                    } else {
+                                        res
+                                    }
+                                },
                                 |sum| AdditiveArray(sum.0.map(E::from))
                             )
                             .to_vec()
@@ -763,7 +870,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                                 &self.poly.flattened_ml_extensions[products[2]],
                             );
                             op_mle_3!(
-                                |f1, f2, f3| (0..f1.len())
+                                |f1, f2, f3| {
+                                    let res = (0..largest_even_below(f1.len()))
                                     .step_by(2)
                                     .map(|b| {
                                         // f = c x + d
@@ -779,7 +887,19 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                                                 * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
                                         ])
                                     })
-                                    .sum::<AdditiveArray<_, 4>>(),
+                                    .sum::<AdditiveArray<_, 4>>();
+                                    let res = if f1.len() == 1 {
+                                        AdditiveArray::<_, 4>([f1[0] * f2[0] * f3[0]; 4])
+                                    } else {
+                                        res
+                                    };
+                                    let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f1.len()).max(1) + self.round - 1);
+                                    if num_vars_multiplicity > 0 {
+                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                    } else {
+                                        res
+                                    }
+                                },
                                 |sum| AdditiveArray(sum.0.map(E::from))
                             )
                             .to_vec()

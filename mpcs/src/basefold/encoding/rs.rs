@@ -193,11 +193,11 @@ pub struct RSCodeDefaultSpec {}
 
 impl RSCodeSpec for RSCodeDefaultSpec {
     fn get_number_queries() -> usize {
-        336
+        972
     }
 
     fn get_rate_log() -> usize {
-        3
+        1
     }
 
     fn get_basecode_msg_size_log() -> usize {
@@ -263,7 +263,7 @@ where
 
     type VerifierParameters = RSCodeVerifierParameters<E>;
 
-    fn setup(max_message_size_log: usize, _rng_seed: [u8; 32]) -> Self::PublicParameters {
+    fn setup(max_message_size_log: usize) -> Self::PublicParameters {
         RSCodeParameters {
             fft_root_table: fft_root_table(max_message_size_log + Spec::get_rate_log()),
         }
@@ -280,6 +280,25 @@ where
                 max_message_size_log,
             )));
         }
+        if max_message_size_log < Spec::get_basecode_msg_size_log() {
+            // Message smaller than this size will not be encoded in BaseFold.
+            // So just give trivial parameters.
+            return Ok((
+                Self::ProverParameters {
+                    fft_root_table: vec![],
+                    gamma_powers: vec![],
+                    gamma_powers_inv_div_two: vec![],
+                    full_message_size_log: max_message_size_log,
+                },
+                Self::VerifierParameters {
+                    fft_root_table: vec![],
+                    gamma_powers: vec![],
+                    gamma_powers_inv_div_two: vec![],
+                    full_message_size_log: max_message_size_log,
+                },
+            ));
+        }
+
         let mut gamma_powers = Vec::with_capacity(max_message_size_log);
         let mut gamma_powers_inv = Vec::with_capacity(max_message_size_log);
         gamma_powers.push(E::BaseField::MULTIPLICATIVE_GENERATOR);
@@ -318,6 +337,7 @@ where
     }
 
     fn encode(pp: &Self::ProverParameters, coeffs: &FieldType<E>) -> FieldType<E> {
+        assert!(log2_strict(coeffs.len()) >= Spec::get_basecode_msg_size_log());
         // Use the full message size to determine the shift factor.
         Self::encode_internal(&pp.fft_root_table, coeffs, pp.full_message_size_log)
     }
@@ -622,7 +642,7 @@ mod tests {
     #[test]
     fn prover_verifier_consistency() {
         type Code = RSCode<RSCodeDefaultSpec>;
-        let pp: RSCodeParameters<GoldilocksExt2> = Code::setup(10, [0; 32]);
+        let pp: RSCodeParameters<GoldilocksExt2> = Code::setup(10);
         let (pp, vp) = Code::trim(&pp, 10).unwrap();
         for level in 0..(10 + <Code as EncodingScheme<GoldilocksExt2>>::get_rate_log()) {
             for index in 0..(1 << level) {
@@ -659,8 +679,7 @@ mod tests {
         let poly: Vec<E> = (0..(1 << num_vars)).map(E::from).collect();
         let poly = FieldType::Ext(poly);
 
-        let rng_seed = [0; 32];
-        let pp = <Code as EncodingScheme<E>>::setup(num_vars, rng_seed);
+        let pp = <Code as EncodingScheme<E>>::setup(num_vars);
         let (pp, _) = Code::trim(&pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         reverse_index_bits_in_place_field_type(&mut codeword);
@@ -698,8 +717,7 @@ mod tests {
         let poly: Vec<E> = (0..(1 << num_vars)).map(E::from).collect();
         let poly = FieldType::Ext(poly);
 
-        let rng_seed = [0; 32];
-        let pp = <Code as EncodingScheme<E>>::setup(num_vars, rng_seed);
+        let pp = <Code as EncodingScheme<E>>::setup(num_vars);
         let (pp, _) = Code::trim(&pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         check_low_degree(&codeword, "low degree check for original codeword");

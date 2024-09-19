@@ -76,12 +76,12 @@ pub fn hash_two_leaves_batch_ext<E: ExtensionField>(
 }
 
 pub fn hash_two_leaves_batch_base<E: ExtensionField>(
-    a: &Vec<E::BaseField>,
-    b: &Vec<E::BaseField>,
+    a: &[E::BaseField],
+    b: &[E::BaseField],
     hasher: &Hasher<E::BaseField>,
 ) -> Digest<E::BaseField> {
     let mut left_hasher = hasher.clone();
-    left_hasher.update(a.as_slice());
+    left_hasher.update(a);
     let left = Digest(
         left_hasher.squeeze_vec()[0..DIGEST_WIDTH]
             .try_into()
@@ -89,7 +89,7 @@ pub fn hash_two_leaves_batch_base<E: ExtensionField>(
     );
 
     let mut right_hasher = hasher.clone();
-    right_hasher.update(b.as_slice());
+    right_hasher.update(b);
     let right = Digest(
         right_hasher.squeeze_vec()[0..DIGEST_WIDTH]
             .try_into()
