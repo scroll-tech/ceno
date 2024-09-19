@@ -25,4 +25,4 @@ args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
 
 [tasks.clippy-check-selected-packages]
 command = "cargo"
-args = ["clippy", "-p", "ceno_zkvm", "--target", "${TARGET}", "--", "-D", "warnings"]
+args = ["clippy", "-p", "ceno_zkvm", "-p", "mpcs", "--target", "${TARGET}", "--", "-D", "warnings"]
