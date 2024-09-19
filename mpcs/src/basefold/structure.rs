@@ -347,7 +347,7 @@ where
     }
 
     pub fn is_trivial(&self) -> bool {
-        self.trivial_proof.len() > 0
+        !self.trivial_proof.is_empty()
     }
 }
 
