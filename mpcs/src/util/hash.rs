@@ -1,7 +1,6 @@
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
-use rayon::prelude::IntoParallelRefIterator;
 use poseidon::poseidon_hash::PoseidonHash;
 use transcript::Transcript;
 
