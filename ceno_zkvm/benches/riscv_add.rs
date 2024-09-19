@@ -16,8 +16,6 @@ use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 use multilinear_extensions::mle::IntoMLE;
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
 use transcript::Transcript;
 
 cfg_if::cfg_if! {
@@ -73,8 +71,7 @@ fn bench_add(c: &mut Criterion) {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
 
-    let rng = ChaCha8Rng::from_seed([0u8; 32]);
-    let param = Pcs::setup(1 << MAX_NUM_VARIABLES, &rng).unwrap();
+    let param = Pcs::setup(1 << MAX_NUM_VARIABLES).unwrap();
     let (pp, vp) = Pcs::trim(&param, 1 << MAX_NUM_VARIABLES).unwrap();
 
     let pk = zkvm_cs
@@ -119,7 +116,8 @@ fn bench_add(c: &mut Criterion) {
                         let num_instances = 1 << instance_num_vars;
                         let mut transcript = Transcript::new(b"riscv");
                         let commit =
-                            Pcs::batch_commit_and_write(&pp, &wits_in, &mut transcript).unwrap();
+                            Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript)
+                                .unwrap();
                         let challenges = [
                             transcript.read_challenge().elements,
                             transcript.read_challenge().elements,
@@ -128,7 +126,7 @@ fn bench_add(c: &mut Criterion) {
                         let _ = prover
                             .create_opcode_proof(
                                 "ADD",
-                                &pk.pp,
+                                &prover.pk.pp,
                                 &circuit_pk,
                                 wits_in.into_iter().map(|mle| mle.into()).collect_vec(),
                                 commit,

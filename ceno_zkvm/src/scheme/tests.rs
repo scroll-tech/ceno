@@ -6,8 +6,6 @@ use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
 use transcript::Transcript;
 
 use crate::{
@@ -77,8 +75,7 @@ fn test_rw_lk_expression_combination() {
         type Pcs = BasefoldDefault<E>;
 
         // pcs setup
-        let rng = ChaCha8Rng::from_seed([0u8; 32]);
-        let param = Pcs::setup(1 << 13, &rng).unwrap();
+        let param = Pcs::setup(1 << 13).unwrap();
         let (pp, vp) = Pcs::trim(&param, 1 << 13).unwrap();
 
         // configure

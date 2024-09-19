@@ -38,7 +38,7 @@ use crate::{
 use super::{ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub(crate) pk: ZKVMProvingKey<E, PCS>,
+    pub pk: ZKVMProvingKey<E, PCS>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {

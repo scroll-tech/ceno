@@ -15,7 +15,6 @@ use ceno_zkvm::{
 };
 use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
@@ -94,8 +93,7 @@ fn main() {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     // keygen
-    let rng = ChaCha8Rng::from_seed([0u8; 32]);
-    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES, &rng).expect("Basefold PCS setup");
+    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();

@@ -1,7 +1,5 @@
 use goldilocks::GoldilocksExt2;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -32,8 +30,7 @@ fn test_multiple_opcode() {
             Ok(config)
         },
     );
-    let rng = ChaCha8Rng::from_seed([0u8; 32]);
-    let param = PCS::setup(1 << 10, &rng).unwrap();
+    let param = PCS::setup(1 << 10).unwrap();
     let (pp, _) = PCS::trim(&param, 1 << 10).unwrap();
     cs.key_gen::<PCS>(&pp, None);
 }
