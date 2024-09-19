@@ -63,12 +63,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // sort by circuit name, and we rely on an assumption that
         // table circuit witnesses come after opcode circuit witnesses
         for (circuit_name, witness) in witnesses.witnesses {
+            let commit_dur = std::time::Instant::now();
             let num_instances = witness.num_instances();
             let witness = witness.into_mles();
             commitments.insert(
                 circuit_name.clone(),
                 PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
                     .map_err(ZKVMError::PCSError)?,
+            );
+            tracing::info!(
+                "commit to {} traces took {:?}",
+                circuit_name,
+                commit_dur.elapsed()
             );
             wits.insert(circuit_name, (witness, num_instances));
         }
