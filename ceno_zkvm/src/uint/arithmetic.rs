@@ -190,7 +190,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     ) -> Result<(), ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             izip!(self.expr(), rhs.expr())
-                .try_for_each(|(lhs, rhs)| cb.require_equal(|| "uint_eq", lhs, rhs))
+                .enumerate()
+                .try_for_each(|(i, (lhs, rhs))| {
+                    cb.require_equal(|| format!("uint_eq_{i}"), lhs, rhs)
+                })
         })
     }
 

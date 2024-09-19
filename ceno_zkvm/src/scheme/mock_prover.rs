@@ -111,7 +111,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
                     Expression: {expression_fmt}\n\
                     Evaluation: {eval_fmt} != 0\n\
-                    Inst[{inst_id}]: {wtns_fmt}\n",
+                    Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
             Self::AssertEqualError {
@@ -132,7 +132,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     Left: {left_eval_fmt} != Right: {right_eval_fmt}\n\
                     Left Expression: {left_expression_fmt}\n\
                     Right Expression: {right_expression_fmt}\n\
-                    Inst[{inst_id}]: {wtns_fmt}\n",
+                    Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
             Self::LookupError {
@@ -148,7 +148,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\n\
                     Expression: {expression_fmt}\n\
                     Evaluation: {eval_fmt}\n\
-                    Inst[{inst_id}]: {wtns_fmt}\n",
+                    Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
         }
@@ -273,9 +273,9 @@ fn fmt_wtns<E: ExtensionField>(
             } else {
                 "Unknown".to_string()
             };
-            format!("\nWitIn({wt_id})\npath={name}\nvalue={value_fmt}\n")
+            format!("  WitIn({wt_id})={value_fmt} {name:?}")
         })
-        .join("----\n")
+        .join("\n")
 }
 
 pub(crate) struct MockProver<E: ExtensionField> {
