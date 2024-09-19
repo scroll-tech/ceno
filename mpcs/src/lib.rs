@@ -26,7 +26,7 @@ pub fn pcs_setup<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 }
 
 pub fn pcs_trim<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
-    param: &Pcs::Param,
+    param: Pcs::Param,
     poly_size: usize,
 ) -> Result<(Pcs::ProverParam, Pcs::VerifierParam), Error> {
     Pcs::trim(param, poly_size)
@@ -122,7 +122,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     fn setup(poly_size: usize, rng: &Self::Rng) -> Result<Self::Param, Error>;
 
     fn trim(
-        param: &Self::Param,
+        param: Self::Param,
         poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
@@ -378,7 +378,7 @@ pub mod test_util {
                 let rng = ChaCha8Rng::from_seed([0u8; 32]);
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, &rng).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
+                Pcs::trim(param, poly_size).unwrap()
             };
             // Commit and open
             let (comm, eval, proof) = {
@@ -436,7 +436,7 @@ pub mod test_util {
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, &rng).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
+                Pcs::trim(param, poly_size).unwrap()
             };
             // Batch commit and open
             let evals = chain![
@@ -548,7 +548,7 @@ pub mod test_util {
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size, &rng).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
+                Pcs::trim(param, poly_size).unwrap()
             };
 
             let (comm, evals, proof) = {

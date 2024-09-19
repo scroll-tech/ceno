@@ -270,7 +270,7 @@ where
     }
 
     fn trim(
-        pp: &Self::PublicParameters,
+        pp: Self::PublicParameters,
         max_message_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
         if pp.fft_root_table.len() < max_message_size_log + Spec::get_rate_log() {
@@ -280,6 +280,7 @@ where
                 max_message_size_log,
             )));
         }
+        let mut pp = pp;
         let mut gamma_powers = Vec::with_capacity(max_message_size_log);
         let mut gamma_powers_inv = Vec::with_capacity(max_message_size_log);
         gamma_powers.push(E::BaseField::MULTIPLICATIVE_GENERATOR);
@@ -290,26 +291,27 @@ where
         }
         let inv_of_two = E::BaseField::from(2).invert().unwrap();
         gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
+        pp.fft_root_table
+            .truncate(max_message_size_log + Spec::get_rate_log());
+        let verifier_fft_root_table = pp.fft_root_table
+            [..Spec::get_basecode_msg_size_log() + Spec::get_rate_log()]
+            .iter()
+            .cloned()
+            .chain(
+                pp.fft_root_table[Spec::get_basecode_msg_size_log() + Spec::get_rate_log()..]
+                    .iter()
+                    .map(|v| vec![v[1]]),
+            )
+            .collect();
         Ok((
             Self::ProverParameters {
-                fft_root_table: pp.fft_root_table[..max_message_size_log + Spec::get_rate_log()]
-                    .to_vec(),
+                fft_root_table: pp.fft_root_table,
                 gamma_powers: gamma_powers.clone(),
                 gamma_powers_inv_div_two: gamma_powers_inv.clone(),
                 full_message_size_log: max_message_size_log,
             },
             Self::VerifierParameters {
-                fft_root_table: pp.fft_root_table
-                    [..Spec::get_basecode_msg_size_log() + Spec::get_rate_log()]
-                    .iter()
-                    .cloned()
-                    .chain(
-                        pp.fft_root_table
-                            [Spec::get_basecode_msg_size_log() + Spec::get_rate_log()..]
-                            .iter()
-                            .map(|v| vec![v[1]]),
-                    )
-                    .collect(),
+                fft_root_table: verifier_fft_root_table,
                 full_message_size_log: max_message_size_log,
                 gamma_powers,
                 gamma_powers_inv_div_two: gamma_powers_inv,
@@ -623,7 +625,7 @@ mod tests {
     fn prover_verifier_consistency() {
         type Code = RSCode<RSCodeDefaultSpec>;
         let pp: RSCodeParameters<GoldilocksExt2> = Code::setup(10, [0; 32]);
-        let (pp, vp) = Code::trim(&pp, 10).unwrap();
+        let (pp, vp) = Code::trim(pp, 10).unwrap();
         for level in 0..(10 + <Code as EncodingScheme<GoldilocksExt2>>::get_rate_log()) {
             for index in 0..(1 << level) {
                 let (naive_x0, naive_x1, naive_w) =
@@ -661,7 +663,7 @@ mod tests {
 
         let rng_seed = [0; 32];
         let pp = <Code as EncodingScheme<E>>::setup(num_vars, rng_seed);
-        let (pp, _) = Code::trim(&pp, num_vars).unwrap();
+        let (pp, _) = Code::trim(pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         reverse_index_bits_in_place_field_type(&mut codeword);
         let challenge = E::from(2);
@@ -700,7 +702,7 @@ mod tests {
 
         let rng_seed = [0; 32];
         let pp = <Code as EncodingScheme<E>>::setup(num_vars, rng_seed);
-        let (pp, _) = Code::trim(&pp, num_vars).unwrap();
+        let (pp, _) = Code::trim(pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         check_low_degree(&codeword, "low degree check for original codeword");
         let c0 = field_type_index_ext(&codeword, 0);
