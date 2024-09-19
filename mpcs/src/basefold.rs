@@ -1029,6 +1029,9 @@ mod test {
     fn simple_batch_commit_open_verify_goldilocks_basecode_base() {
         // Both challenge and poly are over base field
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            true, 10, 11, 1,
+        );
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
             true, 10, 11, 4,
         );
     }
@@ -1036,12 +1039,16 @@ mod test {
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_rscode_base() {
         // Both challenge and poly are over base field
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11, 1);
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11, 4);
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_basecode_2() {
         // Both challenge and poly are over extension field
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            false, 10, 11, 1,
+        );
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
             false, 10, 11, 4,
         );
@@ -1050,6 +1057,9 @@ mod test {
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_rscode_2() {
         // Both challenge and poly are over extension field
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+            false, 10, 11, 1,
+        );
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
             false, 10, 11, 4,
         );

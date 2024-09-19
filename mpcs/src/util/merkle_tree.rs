@@ -344,14 +344,26 @@ fn authenticate_merkle_path_root_batch<E: ExtensionField>(
     hasher: &Hasher<E::BaseField>,
 ) {
     let mut x_index = x_index;
-    let mut hash = match (left, right) {
-        (FieldType::Base(left), FieldType::Base(right)) => {
-            hash_two_leaves_batch_base::<E>(&left, &right, hasher)
+    let mut hash = if left.len() > 1 {
+        match (left, right) {
+            (FieldType::Base(left), FieldType::Base(right)) => {
+                hash_two_leaves_batch_base::<E>(&left, &right, hasher)
+            }
+            (FieldType::Ext(left), FieldType::Ext(right)) => {
+                hash_two_leaves_batch_ext::<E>(&left, &right, hasher)
+            }
+            _ => unreachable!(),
         }
-        (FieldType::Ext(left), FieldType::Ext(right)) => {
-            hash_two_leaves_batch_ext::<E>(&left, &right, hasher)
+    } else {
+        match (left, right) {
+            (FieldType::Base(left), FieldType::Base(right)) => {
+                hash_two_leaves_base::<E>(&left[0], &right[0], hasher)
+            }
+            (FieldType::Ext(left), FieldType::Ext(right)) => {
+                hash_two_leaves_ext::<E>(&left[0], &right[0], hasher)
+            }
+            _ => unreachable!(),
         }
-        _ => unreachable!(),
     };
 
     // The lowest bit in the index is ignored. It can point to either leaves
