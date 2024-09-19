@@ -13,6 +13,8 @@ use crate::{
     util::interpolate_uni_poly,
 };
 
+// TODO add more tests related to various num_vars combination after PR #162
+
 fn test_sumcheck<E: ExtensionField>(
     nv: usize,
     num_multiplicands_range: (usize, usize),

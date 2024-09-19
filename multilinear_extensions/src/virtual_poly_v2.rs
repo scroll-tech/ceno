@@ -6,6 +6,7 @@ use crate::{
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 pub type ArcMultilinearExtension<'a, E> =
@@ -55,8 +56,8 @@ pub struct VirtualPolynomialV2<'a, E: ExtensionField> {
 pub struct VPAuxInfo<E> {
     /// max number of multiplicands in each product
     pub max_degree: usize,
-    /// number of variables of the polynomial
-    pub num_variables: usize,
+    /// max number of variables of the polynomial
+    pub max_num_variables: usize,
     /// Associated field
     #[doc(hidden)]
     pub phantom: PhantomData<E>,
@@ -69,12 +70,12 @@ impl<E: ExtensionField> AsRef<[u8]> for VPAuxInfo<E> {
 }
 
 impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
-    /// Creates an empty virtual polynomial with `num_variables`.
-    pub fn new(num_variables: usize) -> Self {
+    /// Creates an empty virtual polynomial with `max_num_variables`.
+    pub fn new(max_num_variables: usize) -> Self {
         VirtualPolynomialV2 {
             aux_info: VPAuxInfo {
                 max_degree: 0,
-                num_variables,
+                max_num_variables,
                 phantom: PhantomData,
             },
             products: Vec::new(),
@@ -93,7 +94,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
             aux_info: VPAuxInfo {
                 // The max degree is the max degree of any individual variable
                 max_degree: 1,
-                num_variables: mle.num_vars(),
+                max_num_variables: mle.num_vars(),
                 phantom: PhantomData,
             },
             // here `0` points to the first polynomial of `flattened_ml_extensions`
@@ -104,8 +105,10 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     }
 
     /// Add a product of list of multilinear extensions to self
-    /// Returns an error if the list is empty, or the MLE has a different
-    /// `num_vars()` from self.
+    /// Returns an error if the list is empty.
+    ///
+    /// mle in mle_list must be in same num_vars() in same product,
+    /// while different product can have different num_vars()
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
     /// `coefficient`.
@@ -114,18 +117,20 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
         let mut indexed_product = Vec::with_capacity(mle_list.len());
 
         assert!(!mle_list.is_empty(), "input mle_list is empty");
+        // sanity check: all mle in mle_list must have same num_vars()
+        assert!(
+            mle_list
+                .iter()
+                .map(|m| {
+                    assert!(m.num_vars() <= self.aux_info.max_num_variables);
+                    m.num_vars()
+                })
+                .all_equal()
+        );
 
         self.aux_info.max_degree = max(self.aux_info.max_degree, mle_list.len());
 
         for mle in mle_list {
-            assert_eq!(
-                mle.num_vars(),
-                self.aux_info.num_variables,
-                "product has a multiplicand with wrong number of variables {} vs {}",
-                mle.num_vars(),
-                self.aux_info.num_variables
-            );
-
             let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
             if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
                 indexed_product.push(*index)
@@ -163,10 +168,10 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
 
         assert_eq!(
             mle.num_vars(),
-            self.aux_info.num_variables,
+            self.aux_info.max_num_variables,
             "product has a multiplicand with wrong number of variables {} vs {}",
             mle.num_vars(),
-            self.aux_info.num_variables
+            self.aux_info.max_num_variables
         );
 
         let mle_ptr = Arc::as_ptr(&mle) as *const () as usize;
@@ -200,17 +205,17 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
         let start = start_timer!(|| "evaluation");
 
         assert_eq!(
-            self.aux_info.num_variables,
+            self.aux_info.max_num_variables,
             point.len(),
             "wrong number of variables {} vs {}",
-            self.aux_info.num_variables,
+            self.aux_info.max_num_variables,
             point.len()
         );
 
         let evals: Vec<E> = self
             .flattened_ml_extensions
             .iter()
-            .map(|x| x.evaluate(point))
+            .map(|x| x.evaluate(&point[0..x.num_vars()]))
             .collect();
 
         let res = self
@@ -225,11 +230,11 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
 
     /// Print out the evaluation map for testing. Panic if the num_vars() > 5.
     pub fn print_evals(&self) {
-        if self.aux_info.num_variables > 5 {
+        if self.aux_info.max_num_variables > 5 {
             panic!("this function is used for testing only. cannot print more than 5 num_vars()")
         }
-        for i in 0..1 << self.aux_info.num_variables {
-            let point = bit_decompose(i, self.aux_info.num_variables);
+        for i in 0..1 << self.aux_info.max_num_variables {
+            let point = bit_decompose(i, self.aux_info.max_num_variables);
             let point_fr: Vec<E> = point.iter().map(|&x| E::from(x as u64)).collect();
             println!("{} {:?}", i, self.evaluate(point_fr.as_ref()))
         }

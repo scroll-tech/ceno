@@ -168,19 +168,28 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 #[cfg(test)]
 mod tests {
 
+    use ark_std::test_rng;
+    use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
-    use multilinear_extensions::{mle::IntoMLE, virtual_poly_v2::ArcMultilinearExtension};
+    use multilinear_extensions::{
+        mle::IntoMLE,
+        virtual_poly::VPAuxInfo,
+        virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+    };
+    use sumcheck::structs::{IOPProverStateV2, IOPVerifierState};
+    use transcript::Transcript;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         expression::{Expression, ToExpr},
         virtual_polys::VirtualPolynomials,
     };
+    use ff::Field;
+    type E = GoldilocksExt2;
 
     #[test]
     fn test_add_mle_list_by_expr() {
-        type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
         let x = cb.create_witin(|| "x").unwrap();
@@ -217,5 +226,97 @@ mod tests {
         );
         assert!(distrinct_zerocheck_terms_set.len() == 1);
         assert!(virtual_polys.degree() == 3);
+    }
+
+    #[test]
+    fn test_sumcheck_different_degree() {
+        let max_num_vars = 3;
+        let fn_eval = |fs: &[ArcMultilinearExtension<E>]| -> E {
+            let base_2 = <E as ExtensionField>::BaseField::from(2);
+
+            let evals = fs.iter().fold(
+                vec![<E as ExtensionField>::BaseField::ONE; 1 << fs[0].num_vars()],
+                |mut evals, f| {
+                    evals
+                        .iter_mut()
+                        .zip(f.get_base_field_vec())
+                        .for_each(|(e, v)| {
+                            *e *= v;
+                        });
+                    evals
+                },
+            );
+
+            <<E as ExtensionField>::BaseField as std::convert::Into<E>>::into(
+                evals.iter().sum::<<E as ExtensionField>::BaseField>()
+                    * base_2.pow([(max_num_vars - fs[0].num_vars()) as u64]),
+            )
+        };
+        let num_threads = 1;
+        let mut transcript = Transcript::new(b"test");
+
+        let mut rng = test_rng();
+
+        let f1: [ArcMultilinearExtension<E>; 2] = std::array::from_fn(|_| {
+            (0..1 << (max_num_vars - 2))
+                .map(|_| <E as ExtensionField>::BaseField::random(&mut rng))
+                .collect_vec()
+                .into_mle()
+                .into()
+        });
+        let f2: [ArcMultilinearExtension<E>; 1] = std::array::from_fn(|_| {
+            (0..1 << (max_num_vars))
+                .map(|_| <E as ExtensionField>::BaseField::random(&mut rng))
+                .collect_vec()
+                .into_mle()
+                .into()
+        });
+        let f3: [ArcMultilinearExtension<E>; 3] = std::array::from_fn(|_| {
+            (0..1 << (max_num_vars - 1))
+                .map(|_| <E as ExtensionField>::BaseField::random(&mut rng))
+                .collect_vec()
+                .into_mle()
+                .into()
+        });
+
+        let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, max_num_vars);
+
+        virtual_polys.add_mle_list(f1.iter().collect(), E::ONE);
+        virtual_polys.add_mle_list(f2.iter().collect(), E::ONE);
+        virtual_polys.add_mle_list(f3.iter().collect(), E::ONE);
+
+        let (sumcheck_proofs, _) = IOPProverStateV2::prove_batch_polys(
+            num_threads,
+            virtual_polys.get_batched_polys(),
+            &mut transcript,
+        );
+
+        let mut transcript = Transcript::new(b"test");
+        let subclaim = IOPVerifierState::<E>::verify(
+            fn_eval(&f1) + fn_eval(&f2) + fn_eval(&f3),
+            &sumcheck_proofs,
+            &VPAuxInfo {
+                max_degree: 3,
+                num_variables: max_num_vars,
+                phantom: std::marker::PhantomData,
+            },
+            &mut transcript,
+        );
+
+        let mut verifier_poly = VirtualPolynomialV2::new(max_num_vars);
+        verifier_poly.add_mle_list(f1.to_vec(), E::ONE);
+        verifier_poly.add_mle_list(f2.to_vec(), E::ONE);
+        verifier_poly.add_mle_list(f3.to_vec(), E::ONE);
+        assert!(
+            verifier_poly.evaluate(
+                subclaim
+                    .point
+                    .iter()
+                    .map(|c| c.elements)
+                    .collect::<Vec<_>>()
+                    .as_ref()
+            ) == subclaim.expected_evaluation,
+            "wrong subclaim"
+        );
     }
 }
