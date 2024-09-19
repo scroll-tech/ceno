@@ -280,6 +280,25 @@ where
                 max_message_size_log,
             )));
         }
+        if max_message_size_log < Spec::get_basecode_msg_size_log() {
+            // Message smaller than this size will not be encoded in BaseFold.
+            // So just give trivial parameters.
+            return Ok((
+                Self::ProverParameters {
+                    fft_root_table: vec![],
+                    gamma_powers: vec![],
+                    gamma_powers_inv_div_two: vec![],
+                    full_message_size_log: max_message_size_log,
+                },
+                Self::VerifierParameters {
+                    fft_root_table: vec![],
+                    gamma_powers: vec![],
+                    gamma_powers_inv_div_two: vec![],
+                    full_message_size_log: max_message_size_log,
+                },
+            ));
+        }
+
         let mut gamma_powers = Vec::with_capacity(max_message_size_log);
         let mut gamma_powers_inv = Vec::with_capacity(max_message_size_log);
         gamma_powers.push(E::BaseField::MULTIPLICATIVE_GENERATOR);
@@ -318,6 +337,7 @@ where
     }
 
     fn encode(pp: &Self::ProverParameters, coeffs: &FieldType<E>) -> FieldType<E> {
+        assert!(log2_strict(coeffs.len()) >= Spec::get_basecode_msg_size_log());
         // Use the full message size to determine the shift factor.
         Self::encode_internal(&pp.fft_root_table, coeffs, pp.full_message_size_log)
     }

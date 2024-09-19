@@ -889,7 +889,6 @@ where
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::verify");
-        assert!(comm.num_vars().unwrap() >= Spec::get_basecode_msg_size_log());
         let hasher = new_hasher::<E::BaseField>();
 
         if proof.is_trivial() {
@@ -905,6 +904,7 @@ where
         let num_vars = point.len();
         if let Some(comm_num_vars) = comm.num_vars() {
             assert_eq!(num_vars, comm_num_vars);
+            assert!(num_vars >= Spec::get_basecode_msg_size_log());
         }
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
 
@@ -1106,7 +1106,6 @@ where
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::simple batch verify");
-        assert!(comm.num_vars().unwrap() >= Spec::get_basecode_msg_size_log());
         let batch_size = evals.len();
         if let Some(num_polys) = comm.num_polys {
             assert_eq!(num_polys, batch_size);
@@ -1124,8 +1123,9 @@ where
         }
 
         let num_vars = point.len();
-        if let Some(comm_num_vars) = comm.num_vars {
+        if let Some(comm_num_vars) = comm.num_vars() {
             assert_eq!(num_vars, comm_num_vars);
+            assert!(num_vars >= Spec::get_basecode_msg_size_log());
         }
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
 
@@ -1230,24 +1230,32 @@ mod test {
     fn commit_open_verify_goldilocks_basecode_base() {
         // Challenge is over extension field, poly over the base field
         run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(true, 10, 11);
+        // Test trivial proof with small num vars
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(true, 4, 6);
     }
 
     #[test]
     fn commit_open_verify_goldilocks_rscode_base() {
         // Challenge is over extension field, poly over the base field
         run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11);
+        // Test trivial proof with small num vars
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 4, 6);
     }
 
     #[test]
     fn commit_open_verify_goldilocks_basecode_2() {
         // Both challenge and poly are over extension field
         run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(false, 10, 11);
+        // Test trivial proof with small num vars
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(false, 4, 6);
     }
 
     #[test]
     fn commit_open_verify_goldilocks_rscode_2() {
         // Both challenge and poly are over extension field
         run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(false, 10, 11);
+        // Test trivial proof with small num vars
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(false, 4, 6);
     }
 
     #[test]
@@ -1256,12 +1264,16 @@ mod test {
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
             true, 10, 11, 4,
         );
+        // Test trivial proof with small num vars
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(true, 4, 6, 4);
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks_rscode_base() {
         // Both challenge and poly are over base field
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11, 4);
+        // Test trivial proof with small num vars
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 4, 6, 4);
     }
 
     #[test]
@@ -1269,6 +1281,10 @@ mod test {
         // Both challenge and poly are over extension field
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
             false, 10, 11, 4,
+        );
+        // Test trivial proof with small num vars
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            false, 4, 6, 4,
         );
     }
 
@@ -1278,6 +1294,8 @@ mod test {
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
             false, 10, 11, 4,
         );
+        // Test trivial proof with small num vars
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(false, 4, 6, 4);
     }
 
     #[test]
