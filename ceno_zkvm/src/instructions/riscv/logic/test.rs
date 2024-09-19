@@ -1,4 +1,4 @@
-use ceno_emul::{Change, StepRecord};
+use ceno_emul::{Change, StepRecord, Word};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
@@ -7,9 +7,15 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
     scheme::mock_prover::{MockProver, MOCK_PC_AND, MOCK_PC_OR, MOCK_PC_XOR, MOCK_PROGRAM},
+    ROMType,
 };
 
 use super::*;
+
+const A: Word = 0xbead1010;
+const B: Word = 0xef552020;
+// The pair of bytes from A and B.
+const LOOKUPS: &[(u64, usize)] = &[(0x2010, 2), (0x55ad, 1), (0xefbe, 1)];
 
 #[test]
 fn test_opcode_and() {
@@ -26,20 +32,23 @@ fn test_opcode_and() {
         .unwrap()
         .unwrap();
 
-    let (raw_witin, _) = AndInstruction::assign_instances(
+    let (raw_witin, lkm) = AndInstruction::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_AND,
             MOCK_PROGRAM[3],
-            0xbead1234,
-            0xef550123,
-            Change::new(0, 0xbead1234 & 0xef550123),
+            A,
+            B,
+            Change::new(0, A & B),
             0,
         )],
     )
     .unwrap();
+
+    let lkm = lkm.into_finalize_result()[ROMType::And as usize].clone();
+    assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
 
     MockProver::assert_satisfied(
         &mut cb,
@@ -68,20 +77,23 @@ fn test_opcode_or() {
         .unwrap()
         .unwrap();
 
-    let (raw_witin, _) = OrInstruction::assign_instances(
+    let (raw_witin, lkm) = OrInstruction::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_OR,
             MOCK_PROGRAM[4],
-            0xbead1234,
-            0xef550123,
-            Change::new(0, 0xbead1234 | 0xef550123),
+            A,
+            B,
+            Change::new(0, A | B),
             0,
         )],
     )
     .unwrap();
+
+    let lkm = lkm.into_finalize_result()[ROMType::Or as usize].clone();
+    assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
 
     MockProver::assert_satisfied(
         &mut cb,
@@ -110,20 +122,23 @@ fn test_opcode_xor() {
         .unwrap()
         .unwrap();
 
-    let (raw_witin, _) = XorInstruction::assign_instances(
+    let (raw_witin, lkm) = XorInstruction::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_XOR,
             MOCK_PROGRAM[5],
-            0xbead1234,
-            0xef550123,
-            Change::new(0, 0xbead1234 ^ 0xef550123),
+            A,
+            B,
+            Change::new(0, A ^ B),
             0,
         )],
     )
     .unwrap();
+
+    let lkm = lkm.into_finalize_result()[ROMType::Xor as usize].clone();
+    assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
 
     MockProver::assert_satisfied(
         &mut cb,
