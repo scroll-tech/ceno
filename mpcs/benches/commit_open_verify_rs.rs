@@ -13,8 +13,8 @@ use mpcs::{
 use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use transcript::Transcript;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use transcript::Transcript;
 
 type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 type T = Transcript<GoldilocksExt2>;
@@ -35,13 +35,12 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     // Challenge is over extension field, poly over the base field
     for num_vars in NUM_VARS_START..=NUM_VARS_END {
         let (pp, vp) = {
-            let rng = ChaCha8Rng::from_seed([0u8; 32]);
             let poly_size = 1 << num_vars;
-            let param = Pcs::setup(poly_size, &rng).unwrap();
+            let param = Pcs::setup(poly_size).unwrap();
 
             group.bench_function(BenchmarkId::new("setup", format!("{}", num_vars)), |b| {
                 b.iter(|| {
-                    Pcs::setup(poly_size, &rng).unwrap();
+                    Pcs::setup(poly_size).unwrap();
                 })
             });
             Pcs::trim(&param, poly_size).unwrap()
@@ -53,7 +52,10 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
         } else {
             DenseMultilinearExtension::from_evaluations_ext_vec(
                 num_vars,
-                (0..1 << num_vars).into_par_iter().map(|_| E::random(&mut OsRng)).collect(),
+                (0..1 << num_vars)
+                    .into_par_iter()
+                    .map(|_| E::random(&mut OsRng))
+                    .collect(),
             )
         };
 
@@ -119,7 +121,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             // Setup
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, &rng).unwrap();
+                let param = Pcs::setup(poly_size).unwrap();
                 Pcs::trim(&param, poly_size).unwrap()
             };
             // Batch commit and open
@@ -260,7 +262,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, &rng).unwrap();
+                let param = Pcs::setup(poly_size).unwrap();
                 Pcs::trim(&param, poly_size).unwrap()
             };
             let mut transcript = T::new(b"BaseFold");
@@ -271,7 +273,10 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
                     } else {
                         DenseMultilinearExtension::from_evaluations_ext_vec(
                             num_vars,
-                            (0..1 << num_vars).into_par_iter().map(|_| E::random(&mut OsRng)).collect(),
+                            (0..1 << num_vars)
+                                .into_par_iter()
+                                .map(|_| E::random(&mut OsRng))
+                                .collect(),
                         )
                     }
                 })

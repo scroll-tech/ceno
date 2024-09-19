@@ -41,7 +41,7 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
             let (pp, _) = {
                 let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size, &rng).unwrap();
+                let param = Pcs::setup(poly_size).unwrap();
                 Pcs::trim(&param, poly_size).unwrap()
             };
             let polys = (0..batch_size)

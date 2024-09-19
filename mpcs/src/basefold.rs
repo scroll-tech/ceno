@@ -277,14 +277,8 @@ where
     type Proof = BasefoldProof<E>;
     type Rng = ChaCha8Rng;
 
-    fn setup(poly_size: usize, rng: &Self::Rng) -> Result<Self::Param, Error> {
-        // Some encoding scheme (e.g., the one proposed in BaseFold) needs
-        // to generate parameters pseudorandomly. So provide a seed for this.
-        let mut seed = [0u8; 32];
-        let mut rng = rng.clone();
-        rng.fill_bytes(&mut seed);
-
-        let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict(poly_size), seed);
+    fn setup(poly_size: usize) -> Result<Self::Param, Error> {
+        let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict(poly_size));
 
         Ok(BasefoldParams { params: pp })
     }
