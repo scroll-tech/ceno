@@ -68,3 +68,7 @@ harness = false
 [[bench]]
 name = "fft"
 harness = false
+
+[[bench]]
+name = "utils"
+harness = false
