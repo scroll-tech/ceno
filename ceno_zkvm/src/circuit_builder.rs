@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
     error::ZKVMError,
@@ -144,8 +143,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
     ) -> ProvingKey<E, PCS> {
         // transpose from row-major to column-major
-        let fixed_traces =
-            fixed_traces.map(|t| t.de_interleaving().into_mles().into_iter().collect_vec());
+        let fixed_traces = fixed_traces.map(|t| t.into_mles().into_iter().collect_vec());
 
         let fixed_commit_wd = fixed_traces
             .as_ref()
