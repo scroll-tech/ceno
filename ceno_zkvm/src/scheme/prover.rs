@@ -535,6 +535,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         let span = entered_span!("pcs_open");
+        let opening_dur = std::time::Instant::now();
         tracing::debug!(
             "[opcode {}]: build opening proof for {} polys at {:?}",
             name,
@@ -550,6 +551,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             transcript,
         )
         .map_err(ZKVMError::PCSError)?;
+        tracing::info!(
+            "[opcode {}] build opening proof took {:?}",
+            name,
+            opening_dur.elapsed(),
+        );
         exit_span!(span);
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
