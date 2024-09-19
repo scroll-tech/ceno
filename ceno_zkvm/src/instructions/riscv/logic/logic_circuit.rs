@@ -1,9 +1,8 @@
 //! The circuit implementation of logic instructions.
 
-use std::marker::PhantomData;
-
-use ceno_emul::{InsnKind, StepRecord};
+use core::mem::MaybeUninit;
 use ff_ext::ExtensionField;
+use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -12,15 +11,15 @@ use crate::{
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
         Instruction,
     },
+    tables::OpsTable,
     witness::LkMultiplicity,
-    ROMType,
 };
-use core::mem::MaybeUninit;
+use ceno_emul::{InsnKind, StepRecord, Word, WORD_SIZE};
 
 /// This trait defines a logic instruction, connecting an instruction type to a lookup table.
 pub trait LogicOp {
     const INST_KIND: InsnKind;
-    const ROM_TYPE: ROMType;
+    type OpsTable: OpsTable;
 }
 
 /// The Instruction circuit for a given LogicOp.
@@ -39,7 +38,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         // Constrain the registers based on the given lookup table.
         UInt8::logic(
             cb,
-            I::ROM_TYPE,
+            I::OpsTable::ROM_TYPE,
             &config.rs1_read,
             &config.rs2_read,
             &config.rd_written,
@@ -54,6 +53,12 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
+        UInt8::<E>::logic_assign::<I::OpsTable>(
+            lk_multiplicity,
+            step.rs1().unwrap().value as u64,
+            step.rs2().unwrap().value as u64,
+        );
+
         config.assign_instance(instance, lk_multiplicity, step)
     }
 }
@@ -115,10 +120,10 @@ impl<E: ExtensionField> LogicConfig<E> {
         Ok(())
     }
 
-    /// Decompose a u32 into 4 * u8 field elements in little-endian order.
-    fn u8_limbs(v: u32) -> Vec<E::BaseField> {
-        let mut limbs = Vec::with_capacity(4);
-        for i in 0..4 {
+    /// Decompose a word into byte field elements in little-endian order.
+    fn u8_limbs(v: Word) -> Vec<E::BaseField> {
+        let mut limbs = Vec::with_capacity(WORD_SIZE);
+        for i in 0..WORD_SIZE {
             limbs.push(E::BaseField::from(((v >> (i * 8)) & 0xff) as u64));
         }
         limbs
