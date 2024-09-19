@@ -967,6 +967,10 @@ impl<E: ExtensionField> QueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    pub fn empty() -> Self {
+        Self { inner: vec![] }
+    }
+
     pub fn from_query_result(
         query_result: QueriesResult<E>,
         oracle_trees: &[MerkleTree<E>],

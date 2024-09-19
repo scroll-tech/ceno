@@ -309,6 +309,9 @@ pub enum Error {
     Serialization(String),
     Transcript(String),
     ExtensionFieldElementNotFit,
+    PolynomialTooLarge(usize),
+    PolynomialSizesNotEqual,
+    MerkleRootMismatch,
 }
 
 mod basefold;

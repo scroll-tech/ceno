@@ -125,6 +125,14 @@ where
     pub fn is_base(&self) -> bool {
         self.is_base
     }
+
+    pub fn trivial_num_vars<Spec: BasefoldSpec<E>>(num_vars: usize) -> bool {
+        num_vars <= Spec::get_basecode_msg_size_log()
+    }
+
+    pub fn is_trivial<Spec: BasefoldSpec<E>>(&self) -> bool {
+        Self::trivial_num_vars::<Spec>(self.num_vars)
+    }
 }
 
 impl<E: ExtensionField> From<BasefoldCommitmentWithData<E>> for Digest<E::BaseField>
@@ -318,6 +326,29 @@ where
     pub(crate) final_message: Vec<E>,
     pub(crate) query_result_with_merkle_path: ProofQueriesResultWithMerklePath<E>,
     pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
+    pub(crate) trivial_proof: Vec<FieldType<E>>,
+}
+
+impl<E: ExtensionField> BasefoldProof<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn trivial(evals: Vec<FieldType<E>>) -> Self {
+        Self {
+            sumcheck_messages: vec![],
+            roots: vec![],
+            final_message: vec![],
+            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Single(
+                QueriesResultWithMerklePath::empty(),
+            ),
+            sumcheck_proof: None,
+            trivial_proof: evals,
+        }
+    }
+
+    pub fn is_trivial(&self) -> bool {
+        self.trivial_proof.len() > 0
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

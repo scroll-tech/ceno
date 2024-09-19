@@ -70,6 +70,12 @@ mod query_phase;
 // it deals only with the special case of the form \sum eq(r_i)f_i().
 mod sumcheck;
 
+enum PolyEvalsCodeword<E: ExtensionField> {
+    Normal((FieldType<E>, FieldType<E>)),
+    TooSmall(FieldType<E>), // The polynomial is too small to apply FRI
+    TooBig(usize),
+}
+
 impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore> Basefold<E, Spec, Rng>
 where
     E: Serialize + DeserializeOwned,
@@ -80,24 +86,22 @@ where
     fn get_poly_bh_evals_and_codeword(
         pp: &BasefoldProverParams<E, Spec>,
         poly: &DenseMultilinearExtension<E>,
-    ) -> (FieldType<E>, FieldType<E>) {
+    ) -> PolyEvalsCodeword<E> {
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
         let mut bh_evals = poly.evaluations.clone();
         let num_vars = poly.num_vars;
-        assert!(
-            num_vars <= pp.encoding_params.get_max_message_size_log(),
-            "num_vars {} > pp.max_num_vars {}",
-            num_vars,
-            pp.encoding_params.get_max_message_size_log()
-        );
-        assert!(
-            num_vars >= Spec::get_basecode_msg_size_log(),
-            "num_vars {} < Spec::get_basecode_msg_size_log() {}",
-            num_vars,
-            Spec::get_basecode_msg_size_log()
-        );
+        if num_vars > pp.encoding_params.get_max_message_size_log() {
+            return PolyEvalsCodeword::TooBig(num_vars);
+        }
+
+        // In this case, the polynomial is so small that the opening is trivial.
+        // So we just build the Merkle tree over the polynomial evaluations.
+        // No codeword is needed.
+        if num_vars <= Spec::get_basecode_msg_size_log() {
+            return PolyEvalsCodeword::TooSmall(bh_evals);
+        }
 
         // Switch to coefficient form
         let mut coeffs = bh_evals.clone();
@@ -146,7 +150,7 @@ where
         // positions are folded.
         reverse_index_bits_in_place_field_type(&mut codeword);
 
-        (bh_evals, codeword)
+        PolyEvalsCodeword::Normal((bh_evals, codeword))
     }
 
     /// Transpose a matrix of field elements, generic over the type of field element
@@ -311,32 +315,51 @@ where
     ) -> Result<Self::CommitmentWithData, Error> {
         let timer = start_timer!(|| "Basefold::commit");
 
-        // 1. Encode the polynomials. Simultaneously get:
-        //  (1) The evaluations over the hypercube (just a clone of the input)
-        //  (2) The encoding of the coefficient vector (need an interpolation)
-        let (bh_evals, codeword) = Self::get_poly_bh_evals_and_codeword(pp, poly);
-
-        // 2. Compute and store all the layers of the Merkle tree
-        let hasher = new_hasher::<E::BaseField>();
-        let codeword_tree = MerkleTree::<E>::from_leaves(codeword, &hasher);
-
-        end_timer!(timer);
-
         let is_base = match poly.evaluations {
             FieldType::Ext(_) => false,
             FieldType::Base(_) => true,
             _ => unreachable!(),
         };
 
-        // All these values are stored in the `CommitmentWithData` because
-        // they are useful in opening, and we don't want to recompute them.
-        Ok(Self::CommitmentWithData {
-            codeword_tree,
-            polynomials_bh_evals: vec![bh_evals],
-            num_vars: poly.num_vars,
-            is_base,
-            num_polys: 1,
-        })
+        // 2. Compute and store all the layers of the Merkle tree
+        let hasher = new_hasher::<E::BaseField>();
+
+        // 1. Encode the polynomials. Simultaneously get:
+        //  (1) The evaluations over the hypercube (just a clone of the input)
+        //  (2) The encoding of the coefficient vector (need an interpolation)
+        let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
+            PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
+                let codeword_tree = MerkleTree::<E>::from_leaves(codeword, &hasher);
+
+                // All these values are stored in the `CommitmentWithData` because
+                // they are useful in opening, and we don't want to recompute them.
+                Ok(Self::CommitmentWithData {
+                    codeword_tree,
+                    polynomials_bh_evals: vec![bh_evals],
+                    num_vars: poly.num_vars,
+                    is_base,
+                    num_polys: 1,
+                })
+            }
+            PolyEvalsCodeword::TooSmall(evals) => {
+                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone(), &hasher);
+
+                // All these values are stored in the `CommitmentWithData` because
+                // they are useful in opening, and we don't want to recompute them.
+                Ok(Self::CommitmentWithData {
+                    codeword_tree,
+                    polynomials_bh_evals: vec![evals],
+                    num_vars: poly.num_vars,
+                    is_base,
+                    num_polys: 1,
+                })
+            }
+            PolyEvalsCodeword::TooBig(num_vars) => Err(Error::PolynomialTooLarge(num_vars)),
+        };
+
+        end_timer!(timer);
+
+        ret
     }
 
     fn batch_commit(
@@ -356,6 +379,12 @@ where
             ));
         }
 
+        let is_base = match polys[0].evaluations {
+            FieldType::Ext(_) => false,
+            FieldType::Base(_) => true,
+            _ => unreachable!(),
+        };
+
         for i in 1..polys.len() {
             if polys[i].num_vars != polys[0].num_vars {
                 return Err(Error::InvalidPcsParam(
@@ -368,34 +397,64 @@ where
 
         let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
         // convert each polynomial to a code word
-        let (bh_evals, codewords) = polys
+        let evals_codewords = polys
             .par_iter()
             .map(|poly| Self::get_poly_bh_evals_and_codeword(pp, poly))
-            .collect::<(Vec<FieldType<E>>, Vec<FieldType<E>>)>();
+            .collect::<Vec<PolyEvalsCodeword<E>>>();
         end_timer!(encode_timer);
-
-        // transpose the codewords, to group evaluations at the same point
-        // let leaves = Self::transpose_field_type::<E>(codewords.as_slice())?;
 
         // build merkle tree from leaves
         let hasher = new_hasher::<E::BaseField>();
-        let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, &hasher);
+
+        let ret = match evals_codewords[0] {
+            PolyEvalsCodeword::Normal(_) => {
+                let (bh_evals, codewords) = evals_codewords
+                    .into_iter()
+                    .map(|evals_codeword| match evals_codeword {
+                        PolyEvalsCodeword::Normal((bh_evals, codeword)) => (bh_evals, codeword),
+                        PolyEvalsCodeword::TooSmall(_) => {
+                            unreachable!();
+                        }
+                        PolyEvalsCodeword::TooBig(_) => {
+                            unreachable!();
+                        }
+                    })
+                    .collect::<(Vec<_>, Vec<_>)>();
+                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, &hasher);
+                Self::CommitmentWithData {
+                    codeword_tree,
+                    polynomials_bh_evals: bh_evals,
+                    num_vars: polys[0].num_vars,
+                    is_base,
+                    num_polys: polys.len(),
+                }
+            }
+            PolyEvalsCodeword::TooSmall(_) => {
+                let bh_evals = evals_codewords
+                    .into_iter()
+                    .map(|bh_evals| match bh_evals {
+                        PolyEvalsCodeword::Normal(_) => unreachable!(),
+                        PolyEvalsCodeword::TooSmall(evals) => evals,
+                        PolyEvalsCodeword::TooBig(_) => {
+                            unreachable!();
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone(), &hasher);
+                Self::CommitmentWithData {
+                    codeword_tree,
+                    polynomials_bh_evals: bh_evals,
+                    num_vars: polys[0].num_vars,
+                    is_base,
+                    num_polys: polys.len(),
+                }
+            }
+            PolyEvalsCodeword::TooBig(num_vars) => return Err(Error::PolynomialTooLarge(num_vars)),
+        };
 
         end_timer!(timer);
 
-        let is_base = match polys[0].evaluations {
-            FieldType::Ext(_) => false,
-            FieldType::Base(_) => true,
-            _ => unreachable!(),
-        };
-
-        Ok(Self::CommitmentWithData {
-            codeword_tree,
-            polynomials_bh_evals: bh_evals,
-            num_vars: polys[0].num_vars,
-            is_base,
-            num_polys: polys.len(),
-        })
+        Ok(ret)
     }
 
     fn write_commitment(
@@ -423,11 +482,18 @@ where
     ) -> Result<Self::Proof, Error> {
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
+
         // The encoded polynomial should at least have the number of
         // variables of the basecode, i.e., the size of the message
         // when the protocol stops. If the polynomial is smaller
         // the protocol won't work, and saves no verifier work anyway.
+        // In this case, simply return the evaluations as trivial proof.
+        if comm.is_trivial::<Spec>() {
+            return Ok(Self::Proof::trivial(vec![poly.evaluations.clone()]));
+        }
+
         assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
+
         assert!(comm.num_polys == 1);
 
         // 1. Committing phase. This phase runs the sum-check and
@@ -485,6 +551,7 @@ where
                 queries_with_merkle_path,
             ),
             sumcheck_proof: None,
+            trivial_proof: vec![],
         })
     }
 
@@ -509,6 +576,7 @@ where
 
         comms.iter().for_each(|comm| {
             assert!(comm.num_polys == 1);
+            assert!(!comm.is_trivial::<Spec>());
         });
 
         if cfg!(feature = "sanity-check") {
@@ -711,6 +779,7 @@ where
                 query_result_with_merkle_path,
             ),
             sumcheck_proof: Some(sumcheck_proof),
+            trivial_proof: vec![],
         })
     }
 
@@ -730,6 +799,10 @@ where
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys[0].num_vars;
+
+        if comm.is_trivial::<Spec>() {
+            return Ok(Self::Proof::trivial(comm.polynomials_bh_evals.clone()));
+        }
 
         polys
             .iter()
@@ -803,6 +876,7 @@ where
                 queries_with_merkle_path,
             ),
             sumcheck_proof: None,
+            trivial_proof: vec![],
         })
     }
 
@@ -817,6 +891,16 @@ where
         let timer = start_timer!(|| "Basefold::verify");
         assert!(comm.num_vars().unwrap() >= Spec::get_basecode_msg_size_log());
         let hasher = new_hasher::<E::BaseField>();
+
+        if proof.is_trivial() {
+            let trivial_proof = &proof.trivial_proof;
+            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), &hasher);
+            if comm.root() == merkle_tree.root() {
+                return Ok(());
+            } else {
+                return Err(Error::MerkleRootMismatch);
+            }
+        }
 
         let num_vars = point.len();
         if let Some(comm_num_vars) = comm.num_vars() {
@@ -908,6 +992,7 @@ where
             );
         });
         assert!(poly_num_vars.iter().min().unwrap() >= &Spec::get_basecode_msg_size_log());
+        assert!(!proof.is_trivial());
 
         let sumcheck_timer = start_timer!(|| "Basefold::batch_verify::initial sumcheck");
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
@@ -1027,6 +1112,16 @@ where
             assert_eq!(num_polys, batch_size);
         }
         let hasher = new_hasher::<E::BaseField>();
+
+        if proof.is_trivial() {
+            let trivial_proof = &proof.trivial_proof;
+            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), &hasher);
+            if comm.root() == merkle_tree.root() {
+                return Ok(());
+            } else {
+                return Err(Error::MerkleRootMismatch);
+            }
+        }
 
         let num_vars = point.len();
         if let Some(comm_num_vars) = comm.num_vars {
