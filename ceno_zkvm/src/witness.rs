@@ -3,7 +3,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     mem::{self, MaybeUninit},
-    slice::ChunksMut,
+    slice::{Chunks, ChunksMut},
     sync::Arc,
 };
 
@@ -14,7 +14,10 @@ use rayon::{
 };
 use thread_local::ThreadLocal;
 
-use crate::structs::ROMType;
+use crate::{
+    structs::ROMType,
+    tables::{AndTable, LtuTable, OpsTable},
+};
 
 #[macro_export]
 macro_rules! set_val {
@@ -26,7 +29,7 @@ macro_rules! set_val {
 #[macro_export]
 macro_rules! set_fixed_val {
     ($ins:ident, $field:expr, $val:expr) => {
-        $ins[$field as usize] = MaybeUninit::new($val);
+        $ins[$field.0] = MaybeUninit::new($val);
     };
 }
 
@@ -50,6 +53,10 @@ impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
 
     pub fn num_instances(&self) -> usize {
         self.values.len() / self.num_col - self.num_padding_rows
+    }
+
+    pub fn iter_rows(&self) -> Chunks<MaybeUninit<T>> {
+        self.values.chunks(self.num_col)
     }
 
     pub fn iter_mut(&mut self) -> ChunksMut<MaybeUninit<T>> {
@@ -96,50 +103,26 @@ impl LkMultiplicity {
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
         match C {
-            16 => self.assert_u16(v),
-            8 => self.assert_byte(v),
-            5 => self.assert_u5(v),
+            16 => self.increment(ROMType::U16, v),
+            8 => self.increment(ROMType::U8, v),
+            5 => self.increment(ROMType::U5, v),
             _ => panic!("Unsupported bit range"),
         }
     }
 
-    fn assert_u5(&mut self, v: u64) {
-        let multiplicity = self
-            .multiplicity
-            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
-        (*multiplicity.borrow_mut()[ROMType::U5 as usize]
-            .entry(v)
-            .or_default()) += 1;
-    }
-
-    fn assert_u16(&mut self, v: u64) {
-        let multiplicity = self
-            .multiplicity
-            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
-        (*multiplicity.borrow_mut()[ROMType::U16 as usize]
-            .entry(v)
-            .or_default()) += 1;
-    }
-
-    fn assert_byte(&mut self, v: u64) {
-        let v = v * (1 << u8::BITS);
-        let multiplicity = self
-            .multiplicity
-            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
-        (*multiplicity.borrow_mut()[ROMType::U16 as usize]
-            .entry(v)
-            .or_default()) += 1;
+    /// lookup a AND b
+    pub fn lookup_and_byte(&mut self, a: u64, b: u64) {
+        self.increment(ROMType::And, AndTable::pack(a, b));
     }
 
     /// lookup a < b as unsigned byte
     pub fn lookup_ltu_limb8(&mut self, a: u64, b: u64) {
-        let key = a.wrapping_mul(256) + b;
-        let multiplicity = self
-            .multiplicity
-            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
-        (*multiplicity.borrow_mut()[ROMType::Ltu as usize]
-            .entry(key)
-            .or_default()) += 1;
+        self.increment(ROMType::Ltu, LtuTable::pack(a, b));
+    }
+
+    /// Fetch instruction at pc
+    pub fn fetch(&mut self, pc: u32) {
+        self.increment(ROMType::Instruction, pc as u64);
     }
 
     /// merge result from multiple thread local to single result
@@ -155,6 +138,15 @@ impl LkMultiplicity {
                 });
                 x
             })
+    }
+
+    fn increment(&mut self, rom_type: ROMType, key: u64) {
+        let multiplicity = self
+            .multiplicity
+            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
+        (*multiplicity.borrow_mut()[rom_type as usize]
+            .entry(key)
+            .or_default()) += 1;
     }
 }
 
@@ -172,10 +164,12 @@ mod tests {
         // each thread calling assert_byte once
         for _ in 0..thread_count {
             let mut lkm = lkm.clone();
-            thread::spawn(move || lkm.assert_byte(8u64)).join().unwrap();
+            thread::spawn(move || lkm.assert_ux::<8>(8u64))
+                .join()
+                .unwrap();
         }
         let res = lkm.into_finalize_result();
         // check multiplicity counts of assert_byte
-        assert_eq!(res[ROMType::U16 as usize][&(8 << 8)], thread_count);
+        assert_eq!(res[ROMType::U8 as usize][&8], thread_count);
     }
 }

@@ -1,3 +1,4 @@
+use ceno_emul::InsnKind;
 use goldilocks::SmallField;
 use std::mem::MaybeUninit;
 
@@ -10,17 +11,17 @@ use crate::{
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
-        riscv::config::{UIntLtConfig, UIntLtInput},
+        riscv::config::{ExprLtInput, UIntLtConfig, UIntLtInput},
         Instruction,
     },
     set_val,
-    utils::{i64_to_base, limb_u8_to_u16},
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 
 use super::{
     config::ExprLtConfig,
-    constants::{OPType, OpcodeType, RegUInt, RegUInt8, PC_STEP_SIZE},
+    constants::{UInt, UInt8, PC_STEP_SIZE},
     RIVInstruction,
 };
 
@@ -31,10 +32,8 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub next_pc: WitIn,
     pub ts: WitIn,
     pub imm: WitIn,
-    pub lhs: RegUInt<E>,
-    pub rhs: RegUInt<E>,
-    pub lhs_limb8: RegUInt8<E>,
-    pub rhs_limb8: RegUInt8<E>,
+    pub lhs_limb8: UInt8<E>,
+    pub rhs_limb8: UInt8<E>,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub prev_rs1_ts: WitIn,
@@ -62,6 +61,7 @@ impl BltInput {
         &self,
         config: &InstructionConfig<E>,
         instance: &mut [MaybeUninit<F>],
+        lk_multiplicity: &mut LkMultiplicity,
     ) {
         assert!(!self.lhs_limb8.is_empty() && (self.lhs_limb8.len() == self.rhs_limb8.len()));
         // TODO: add boundary check for witin
@@ -106,23 +106,21 @@ impl BltInput {
                 .map(|&limb| i64_to_base::<F>(limb as i64))
                 .collect()
         });
-        let lhs = limb_u8_to_u16(&self.lhs_limb8);
-        let rhs = limb_u8_to_u16(&self.rhs_limb8);
-        config.lhs.assign_limbs(instance, {
-            lhs.iter()
-                .map(|&limb| i64_to_base::<F>(limb as i64))
-                .collect()
-        });
-        config.rhs.assign_limbs(instance, {
-            rhs.iter()
-                .map(|&limb| i64_to_base::<F>(limb as i64))
-                .collect()
-        });
+        ExprLtInput {
+            lhs: self.prev_rs1_ts as u64,
+            rhs: self.ts as u64,
+        }
+        .assign(instance, &config.lt_rs1_cfg, lk_multiplicity);
+        ExprLtInput {
+            lhs: self.prev_rs2_ts as u64,
+            rhs: (self.ts + 1) as u64,
+        }
+        .assign(instance, &config.lt_rs2_cfg, lk_multiplicity);
     }
 
     pub fn random() -> Self {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
+        use ark_std::{rand::Rng, test_rng};
+        let mut rng = test_rng();
 
         // hack to generate valid inputs
         let ts_bound: u16 = rng.gen_range(100..1000);
@@ -143,8 +141,8 @@ impl BltInput {
     }
 }
 
-impl<E: ExtensionField> RIVInstruction<E> for BltInstruction {
-    const OPCODE_TYPE: OpcodeType = OpcodeType::BType(OPType::Branch, 0x004);
+impl RIVInstruction for BltInstruction {
+    const INST_KIND: InsnKind = InsnKind::BLT;
 }
 
 /// if (rs1 < rs2) PC += sext(imm)
@@ -161,8 +159,8 @@ fn blt_gadget<E: ExtensionField>(
     let rs1_id = circuit_builder.create_witin(|| "rs1_id")?;
     let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
 
-    let lhs_limb8 = RegUInt8::new(|| "lhs_limb8", circuit_builder)?;
-    let rhs_limb8 = RegUInt8::new(|| "rhs_limb8", circuit_builder)?;
+    let lhs_limb8 = UInt8::new(|| "lhs_limb8", circuit_builder)?;
+    let rhs_limb8 = UInt8::new(|| "rhs_limb8", circuit_builder)?;
 
     let is_lt = lhs_limb8.lt_limb8(circuit_builder, &rhs_limb8)?;
 
@@ -173,27 +171,25 @@ fn blt_gadget<E: ExtensionField>(
     // update ts
     let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
     let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
-    // TODO: replace it with `new_from_exprs_unchecked` after PR 181
-    // so we can remove lhs/rhs from config
-    let lhs = RegUInt::from_u8_limbs(circuit_builder, &lhs_limb8);
-    let rhs = RegUInt::from_u8_limbs(circuit_builder, &rhs_limb8);
+    let lhs = UInt::from_u8_limbs(&lhs_limb8)?;
+    let rhs = UInt::from_u8_limbs(&rhs_limb8)?;
 
     let (ts, lt_rs1_cfg) = circuit_builder.register_read(
-        || "read ts for lhs",
+        || "read ts for rs1",
         &rs1_id,
         prev_rs1_ts.expr(),
         cur_ts.expr(),
         &lhs,
     )?;
     let (ts, lt_rs2_cfg) = circuit_builder.register_read(
-        || "read ts for rhs",
+        || "read ts for rs2",
         &rs2_id,
         prev_rs2_ts.expr(),
         ts,
         &rhs,
     )?;
 
-    let next_pc = create_witin_from_expr!(circuit_builder, false, next_pc)?;
+    let next_pc = create_witin_from_expr!(|| "next_pc", circuit_builder, false, next_pc)?;
     let next_ts = ts + 1.into();
     circuit_builder.state_out(next_pc.expr(), next_ts)?;
 
@@ -201,8 +197,6 @@ fn blt_gadget<E: ExtensionField>(
         pc,
         next_pc,
         ts: cur_ts,
-        lhs,
-        rhs,
         lhs_limb8,
         rhs_limb8,
         imm,
@@ -231,12 +225,12 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [std::mem::MaybeUninit<E::BaseField>],
-        _lk_multiplicity: &mut LkMultiplicity,
+        lk_multiplicity: &mut LkMultiplicity,
         _step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         // take input from _step
         let input = BltInput::random();
-        input.assign(config, instance);
+        input.assign(config, instance, lk_multiplicity);
         Ok(())
     }
 }
@@ -267,7 +261,7 @@ mod test {
         )
         .unwrap();
 
-        MockProver::run(
+        MockProver::assert_satisfied(
             &mut circuit_builder,
             &raw_witin
                 .de_interleaving()
@@ -275,9 +269,8 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            Some([1.into(), 1000.into()]),
-        )
-        .expect_err("lookup will fail");
+            None,
+        );
         Ok(())
     }
 

@@ -17,6 +17,7 @@
 use std::{fmt, ops};
 
 pub const WORD_SIZE: usize = 4;
+pub const PC_STEP_SIZE: usize = 4;
 
 // Type aliases to clarify the code without wrapper types.
 pub type Word = u32;
@@ -63,6 +64,12 @@ impl From<ByteAddr> for u32 {
 impl From<WordAddr> for u32 {
     fn from(addr: WordAddr) -> Self {
         addr.baddr().0
+    }
+}
+
+impl From<WordAddr> for u64 {
+    fn from(addr: WordAddr) -> Self {
+        addr.baddr().0 as u64
     }
 }
 
