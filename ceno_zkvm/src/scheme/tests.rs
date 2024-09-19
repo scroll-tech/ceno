@@ -75,16 +75,22 @@ fn test_rw_lk_expression_combination() {
     fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
         type E = GoldilocksExt2;
         type Pcs = BasefoldDefault<E>;
+
+        // pcs setup
         let rng = ChaCha8Rng::from_seed([0u8; 32]);
-        let param = Pcs::setup(1 << 10, &rng).unwrap();
-        let (pp, vp) = Pcs::trim(&param, 1 << 10).unwrap();
+        let param = Pcs::setup(1 << 13, &rng).unwrap();
+        let (pp, vp) = Pcs::trim(&param, 1 << 13).unwrap();
+
+        // configure
         let name = TestCircuit::<E, RW, L>::name();
         let mut zkvm_cs = ZKVMConstraintSystem::default();
         let config = zkvm_cs.register_opcode_circuit::<TestCircuit<E, RW, L>>();
 
+        // generate fixed traces
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
         zkvm_fixed_traces.register_opcode_circuit::<TestCircuit<E, RW, L>>(&zkvm_cs);
 
+        // keygen
         let pk = zkvm_cs
             .clone()
             .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
@@ -92,7 +98,7 @@ fn test_rw_lk_expression_combination() {
         let vk = pk.get_vk();
 
         // generate mock witness
-        let num_instances = 1 << 2;
+        let num_instances = 1 << 8;
         let mut zkvm_witness = ZKVMWitnesses::default();
         zkvm_witness
             .assign_opcode_circuit::<TestCircuit<E, RW, L>>(
@@ -109,7 +115,7 @@ fn test_rw_lk_expression_combination() {
         // commit to main traces
         let commit = Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript).unwrap();
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
-        let challenges = [
+        let prover_challenges = [
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
@@ -124,19 +130,21 @@ fn test_rw_lk_expression_combination() {
                 num_instances,
                 1,
                 &mut transcript,
-                &challenges,
+                &prover_challenges,
             )
             .expect("create_proof failed");
 
+        // verify proof
         let verifier = ZKVMVerifier::new(vk.clone());
         let mut v_transcript = Transcript::new(b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
-        let challenges = [
-            transcript.read_challenge().elements,
-            transcript.read_challenge().elements,
+        let verifier_challenges = [
+            v_transcript.read_challenge().elements,
+            v_transcript.read_challenge().elements,
         ];
 
+        assert_eq!(prover_challenges, verifier_challenges);
         let _rt_input = verifier
             .verify_opcode_proof(
                 name.as_str(),
@@ -146,7 +154,7 @@ fn test_rw_lk_expression_combination() {
                 &mut v_transcript,
                 NUM_FANIN,
                 &PointAndEval::default(),
-                &challenges,
+                &verifier_challenges,
             )
             .expect("verifier failed");
     }
