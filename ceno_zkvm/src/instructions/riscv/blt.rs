@@ -21,7 +21,7 @@ use crate::{
 
 use super::{
     config::ExprLtConfig,
-    constants::{RegUInt, RegUInt8, PC_STEP_SIZE},
+    constants::{UInt, UInt8, PC_STEP_SIZE},
     RIVInstruction,
 };
 
@@ -32,8 +32,8 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub next_pc: WitIn,
     pub ts: WitIn,
     pub imm: WitIn,
-    pub lhs_limb8: RegUInt8<E>,
-    pub rhs_limb8: RegUInt8<E>,
+    pub lhs_limb8: UInt8<E>,
+    pub rhs_limb8: UInt8<E>,
     pub rs1_id: WitIn,
     pub rs2_id: WitIn,
     pub prev_rs1_ts: WitIn,
@@ -159,8 +159,8 @@ fn blt_gadget<E: ExtensionField>(
     let rs1_id = circuit_builder.create_witin(|| "rs1_id")?;
     let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
 
-    let lhs_limb8 = RegUInt8::new(|| "lhs_limb8", circuit_builder)?;
-    let rhs_limb8 = RegUInt8::new(|| "rhs_limb8", circuit_builder)?;
+    let lhs_limb8 = UInt8::new(|| "lhs_limb8", circuit_builder)?;
+    let rhs_limb8 = UInt8::new(|| "rhs_limb8", circuit_builder)?;
 
     let is_lt = lhs_limb8.lt_limb8(circuit_builder, &rhs_limb8)?;
 
@@ -171,8 +171,8 @@ fn blt_gadget<E: ExtensionField>(
     // update ts
     let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
     let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
-    let lhs = RegUInt::from_u8_limbs(&lhs_limb8)?;
-    let rhs = RegUInt::from_u8_limbs(&rhs_limb8)?;
+    let lhs = UInt::from_u8_limbs(&lhs_limb8)?;
+    let rhs = UInt::from_u8_limbs(&rhs_limb8)?;
 
     let (ts, lt_rs1_cfg) = circuit_builder.register_read(
         || "read ts for rs1",

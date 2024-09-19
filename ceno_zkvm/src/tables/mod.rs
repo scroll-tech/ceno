@@ -3,7 +3,10 @@ use ff_ext::ExtensionField;
 use std::collections::HashMap;
 
 mod range;
-pub use range::RangeTableCircuit;
+pub use range::*;
+
+mod ops;
+pub use ops::*;
 
 mod program;
 pub use program::{InsnRecord, ProgramTableCircuit};

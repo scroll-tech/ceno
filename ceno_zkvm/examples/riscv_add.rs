@@ -1,7 +1,7 @@
 use std::{iter, time::Instant};
 
 use ceno_zkvm::{
-    instructions::riscv::addsub::AddInstruction, scheme::prover::ZKVMProver,
+    instructions::riscv::arith::AddInstruction, scheme::prover::ZKVMProver,
     tables::ProgramTableCircuit,
 };
 use clap::Parser;
@@ -11,7 +11,7 @@ use ceno_emul::{ByteAddr, InsnKind::ADD, StepRecord, VMState, CENO_PLATFORM};
 use ceno_zkvm::{
     scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::RangeTableCircuit,
+    tables::U16TableCircuit,
 };
 use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
@@ -98,7 +98,7 @@ fn main() {
     let pp = Pcs::setup(1 << MAX_NUM_VARIABLES, &rng).expect("basefold setup");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
-    let range_config = zkvm_cs.register_table_circuit::<RangeTableCircuit<E>>();
+    let range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
     let program_add_loop: Vec<u32> = PROGRAM_ADD_LOOP
@@ -109,7 +109,7 @@ fn main() {
         .collect();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces.register_table_circuit::<RangeTableCircuit<E>>(
+    zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
         range_config.clone(),
         &(),
@@ -160,7 +160,7 @@ fn main() {
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
         zkvm_witness
-            .assign_table_circuit::<RangeTableCircuit<E>>(&zkvm_cs, &range_config, &())
+            .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &range_config, &())
             .unwrap();
         zkvm_witness
             .assign_table_circuit::<ProgramTableCircuit<E>>(

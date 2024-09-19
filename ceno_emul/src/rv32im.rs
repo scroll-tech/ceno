@@ -204,6 +204,28 @@ impl DecodedInstruction {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn from_raw(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> Self {
+        // limit the range of inputs
+        let rs2 = rs2 & 0x1f; // 5bits mask
+        let rs1 = rs1 & 0x1f;
+        let rd = rd & 0x1f;
+        let func7 = kind.codes().func7;
+        let func3 = kind.codes().func3;
+        let opcode = kind.codes().opcode;
+        let insn = func7 << 25 | rs2 << 20 | rs1 << 15 | func3 << 12 | rd << 7 | opcode;
+        Self {
+            insn,
+            top_bit: func7 | 0x80,
+            func7,
+            rs2,
+            rs1,
+            func3,
+            rd,
+            opcode,
+        }
+    }
+
     pub fn encoded(&self) -> u32 {
         self.insn
     }

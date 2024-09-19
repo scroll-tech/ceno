@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 
 use super::{
     config::ExprLtConfig,
-    constants::{RegUInt, PC_STEP_SIZE},
+    constants::{UInt, PC_STEP_SIZE},
 };
 use crate::{
     chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
@@ -13,7 +13,7 @@ use crate::{
     instructions::riscv::config::ExprLtInput,
     set_val,
     tables::InsnRecord,
-    uint::UIntValue,
+    uint::Value,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -30,7 +30,7 @@ pub struct RInstructionConfig<E: ExtensionField> {
     rs1_id: WitIn,
     rs2_id: WitIn,
     rd_id: WitIn,
-    prev_rd_value: RegUInt<E>,
+    prev_rd_value: UInt<E>,
     prev_rs1_ts: WitIn,
     prev_rs2_ts: WitIn,
     prev_rd_ts: WitIn,
@@ -72,7 +72,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
         let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
         let prev_rd_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
-        let prev_rd_value = RegUInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
+        let prev_rd_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
 
         // Register read and write.
         let (ts, lt_rs1_cfg) = circuit_builder.register_read(
@@ -151,7 +151,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         set_val!(instance, self.prev_rd_ts, step.rd().unwrap().previous_cycle);
         self.prev_rd_value.assign_limbs(
             instance,
-            UIntValue::new_unchecked(step.rd().unwrap().value.before).u16_fields(),
+            Value::new_unchecked(step.rd().unwrap().value.before).u16_fields(),
         );
 
         // Register read and write.

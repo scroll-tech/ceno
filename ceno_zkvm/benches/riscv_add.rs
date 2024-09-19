@@ -2,7 +2,8 @@ use std::time::{Duration, Instant};
 
 use ark_std::test_rng;
 use ceno_zkvm::{
-    instructions::{riscv::addsub::AddInstruction, Instruction},
+    self,
+    instructions::{riscv::arith::AddInstruction, Instruction},
     scheme::prover::ZKVMProver,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };

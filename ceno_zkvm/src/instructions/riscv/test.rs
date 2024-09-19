@@ -8,7 +8,7 @@ use crate::{
     instructions::Instruction,
 };
 
-use super::addsub::{AddInstruction, SubInstruction};
+use super::arith::{AddInstruction, SubInstruction};
 
 #[test]
 fn test_multiple_opcode() {
