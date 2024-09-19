@@ -107,7 +107,8 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     /// Add a product of list of multilinear extensions to self
     /// Returns an error if the list is empty.
     ///
-    /// mle in mle_list must be in same num_vars(), but it can be different with others
+    /// mle in mle_list must be in same num_vars() in same product,
+    /// while different product can have different num_vars()
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
     /// `coefficient`.
@@ -116,7 +117,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
         let mut indexed_product = Vec::with_capacity(mle_list.len());
 
         assert!(!mle_list.is_empty(), "input mle_list is empty");
-        // we support
+        // sanity check: all mle in mle_list must have same num_vars()
         assert!(
             mle_list
                 .iter()

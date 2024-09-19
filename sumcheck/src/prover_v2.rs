@@ -428,6 +428,16 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         // Step 2: generate sum for the partial evaluated polynomial:
         // f(r_1, ... r_m,, x_{m+1}... x_n)
+        //
+        // To deal with different num_vars, we exploit a fact that for each product which num_vars < max_num_vars,
+        // for it evaluation value we need to times 2^(max_num_vars - num_vars)
+        // E.g. Giving multivariate poly f(X) = f_1(X1) + f_2(X), X1 \in {F}^{n'}, X \in {F}^{n}, |X1| := n', |X| = n, n' <= n
+        // For i round univariate poly, f^i(x)
+        // f^i[0] = \sum_b f(r, 0, b), b \in {0, 1}^{n-i-1}, r \in {F}^{n-i-1} chanllenge get from prev rounds
+        //        = \sum_b f_1(r, 0, b1) + f_2(r, 0, b), |b| >= |b1|, |b| - |b1| = n - n'
+        //        = 2^(|b| - |b1|) * \sum_b1 f_1(r, 0, b1)  + \sum_b f_2(r, 0, b)
+        // same applied on f^i[1]
+        // It imply that, for every evals in f_1, to compute univariate poly, we just need to times a factor 2^(|b| - |b1|) for it evaluation value
         let span = entered_span!("products_sum");
         let AdditiveVec(products_sum) = self.poly.products.iter().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
