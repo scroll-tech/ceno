@@ -75,11 +75,11 @@ fn bench_add(c: &mut Criterion) {
 
     let rng = ChaCha8Rng::from_seed([0u8; 32]);
     let param = Pcs::setup(1 << MAX_NUM_VARIABLES, &rng).unwrap();
-    let (pp, _) = Pcs::trim(&param, 1 << MAX_NUM_VARIABLES).unwrap();
+    let (pp, vp) = Pcs::trim(&param, 1 << MAX_NUM_VARIABLES).unwrap();
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(param, zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
 
     let circuit_pk = pk
@@ -128,7 +128,7 @@ fn bench_add(c: &mut Criterion) {
                         let _ = prover
                             .create_opcode_proof(
                                 "ADD",
-                                &pp,
+                                &pk.pp,
                                 &circuit_pk,
                                 wits_in.into_iter().map(|mle| mle.into()).collect_vec(),
                                 commit,

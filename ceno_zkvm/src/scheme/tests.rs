@@ -76,8 +76,8 @@ fn test_rw_lk_expression_combination() {
         type E = GoldilocksExt2;
         type Pcs = BasefoldDefault<E>;
         let rng = ChaCha8Rng::from_seed([0u8; 32]);
-        let param = Pcs::setup(1 << 20, &rng).unwrap();
-        let (pp, vp) = Pcs::trim(&param, 1 << 20).unwrap();
+        let param = Pcs::setup(1 << 10, &rng).unwrap();
+        let (pp, vp) = Pcs::trim(&param, 1 << 10).unwrap();
         let name = TestCircuit::<E, RW, L>::name();
         let mut zkvm_cs = ZKVMConstraintSystem::default();
         let config = zkvm_cs.register_opcode_circuit::<TestCircuit<E, RW, L>>();
@@ -87,7 +87,7 @@ fn test_rw_lk_expression_combination() {
 
         let pk = zkvm_cs
             .clone()
-            .key_gen::<Pcs>(param, zkvm_fixed_traces)
+            .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
             .unwrap();
         let vk = pk.get_vk();
 
@@ -107,7 +107,7 @@ fn test_rw_lk_expression_combination() {
         let mut transcript = Transcript::new(b"test");
         let wits_in = zkvm_witness.witnesses.remove(&name).unwrap().into_mles();
         // commit to main traces
-        let commit = Pcs::batch_commit_and_write(&pp, &wits_in, &mut transcript).unwrap();
+        let commit = Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript).unwrap();
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
         let challenges = [
             transcript.read_challenge().elements,
@@ -117,7 +117,7 @@ fn test_rw_lk_expression_combination() {
         let proof = prover
             .create_opcode_proof(
                 name.as_str(),
-                &pp,
+                &prover.pk.pp,
                 prover.pk.circuit_pks.get(&name).unwrap(),
                 wits_in,
                 commit,
@@ -140,7 +140,7 @@ fn test_rw_lk_expression_combination() {
         let _rt_input = verifier
             .verify_opcode_proof(
                 name.as_str(),
-                &vp,
+                &vk.vp,
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
                 &mut v_transcript,

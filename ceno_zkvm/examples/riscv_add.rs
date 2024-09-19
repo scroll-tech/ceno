@@ -95,7 +95,8 @@ fn main() {
 
     // keygen
     let rng = ChaCha8Rng::from_seed([0u8; 32]);
-    let pp = Pcs::setup(1 << MAX_NUM_VARIABLES, &rng).expect("basefold setup");
+    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES, &rng).expect("Basefold PCS setup");
+    let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
@@ -122,7 +123,7 @@ fn main() {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp, zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
     let vk = pk.get_vk();
 

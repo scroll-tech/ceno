@@ -116,7 +116,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .circuit_vks
                 .get(&name)
                 .ok_or(ZKVMError::VKNotFound(name.clone()))?;
-            tracing::info!("to verify proof for table {}", name);
             let _rand_point = self.verify_table_proof(
                 &name,
                 &self.vk.vp,
