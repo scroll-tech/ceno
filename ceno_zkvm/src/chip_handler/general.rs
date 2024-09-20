@@ -235,40 +235,57 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.assert_u16(name_fn, expr * Expression::from(1 << 15))
     }
 
-    /// Assert `a & b = res` and that `a, b, res` are all bytes.
-    pub(crate) fn lookup_and_byte(
+    /// Assert `rom_type(a, b) = c` and that `a, b, c` are all bytes.
+    pub fn logic_u8(
         &mut self,
+        rom_type: ROMType,
         a: Expression<E>,
         b: Expression<E>,
-        res: Expression<E>,
+        c: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        let items: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from(ROMType::And as u64)),
-            a,
-            b,
-            res,
-        ];
+        let items: Vec<Expression<E>> = vec![(rom_type as usize).into(), a, b, c];
         let rlc_record = self.rlc_chip_record(items);
-        self.lk_record(|| "and lookup record", rlc_record)?;
-        Ok(())
+        self.lk_record(|| format!("lookup_{:?}", rom_type), rlc_record)
     }
 
-    /// Assert that `(a < b) == res as bool`, that `a, b` are unsigned bytes, and that `res` is 0 or 1.
-    pub(crate) fn lookup_ltu_limb8(
+    /// Assert `a & b = c` and that `a, b, c` are all bytes.
+    pub fn lookup_and_byte(
         &mut self,
         a: Expression<E>,
         b: Expression<E>,
-        res: Expression<E>,
+        c: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        let items: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from(ROMType::Ltu as u64)),
-            a,
-            b,
-            res,
-        ];
-        let rlc_record = self.rlc_chip_record(items);
-        self.lk_record(|| "ltu lookup record", rlc_record)?;
-        Ok(())
+        self.logic_u8(ROMType::And, a, b, c)
+    }
+
+    /// Assert `a | b = c` and that `a, b, c` are all bytes.
+    pub fn lookup_or_byte(
+        &mut self,
+        a: Expression<E>,
+        b: Expression<E>,
+        c: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        self.logic_u8(ROMType::Or, a, b, c)
+    }
+
+    /// Assert `a ^ b = c` and that `a, b, c` are all bytes.
+    pub fn lookup_xor_byte(
+        &mut self,
+        a: Expression<E>,
+        b: Expression<E>,
+        c: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        self.logic_u8(ROMType::Xor, a, b, c)
+    }
+
+    /// Assert that `(a < b) == c as bool`, that `a, b` are unsigned bytes, and that `c` is 0 or 1.
+    pub fn lookup_ltu_byte(
+        &mut self,
+        a: Expression<E>,
+        b: Expression<E>,
+        c: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        self.logic_u8(ROMType::Ltu, a, b, c)
     }
 
     /// less_than

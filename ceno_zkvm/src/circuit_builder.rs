@@ -2,6 +2,7 @@ use itertools::Itertools;
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
@@ -137,16 +138,29 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
-    pub fn key_gen(self, fixed_traces: Option<RowMajorMatrix<E::BaseField>>) -> ProvingKey<E> {
-        // TODO: commit to fixed_traces
-
+    pub fn key_gen<PCS: PolynomialCommitmentScheme<E>>(
+        self,
+        pp: &PCS::ProverParam,
+        fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
+    ) -> ProvingKey<E, PCS> {
         // transpose from row-major to column-major
         let fixed_traces =
             fixed_traces.map(|t| t.de_interleaving().into_mles().into_iter().collect_vec());
 
+        let fixed_commit_wd = fixed_traces
+            .as_ref()
+            .map(|traces| PCS::batch_commit(pp, traces).unwrap());
+        let fixed_commit = fixed_commit_wd
+            .as_ref()
+            .map(|commit_wd| PCS::get_pure_commitment(commit_wd));
+
         ProvingKey {
             fixed_traces,
-            vk: VerifyingKey { cs: self },
+            fixed_commit_wd,
+            vk: VerifyingKey {
+                cs: self,
+                fixed_commit,
+            },
         }
     }
 

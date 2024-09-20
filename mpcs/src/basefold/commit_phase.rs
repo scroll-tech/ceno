@@ -167,6 +167,7 @@ where
         end_timer!(sumcheck_timer);
     }
     end_timer!(timer);
+
     (
         trees,
         BasefoldCommitPhaseProof {

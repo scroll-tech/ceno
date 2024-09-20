@@ -633,19 +633,6 @@ where
             CodewordPointPair::Base(_, y) => E::from(*y),
         }
     }
-
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        match self.codepoints {
-            CodewordPointPair::Ext(x, y) => {
-                transcript.append_field_element_ext(&x);
-                transcript.append_field_element_ext(&y);
-            }
-            CodewordPointPair::Base(x, y) => {
-                transcript.append_field_element(&x);
-                transcript.append_field_element(&y);
-            }
-        };
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -661,11 +648,6 @@ impl<E: ExtensionField> CodewordSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.query.write_transcript(transcript);
-        self.merkle_path.write_transcript(transcript);
-    }
-
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>, hasher: &Hasher<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
         match self.query.codepoints {
@@ -825,12 +807,6 @@ where
         )
     }
 
-    fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.get_inner()
-            .iter()
-            .for_each(|q| q.write_transcript(transcript));
-    }
-
     fn check_merkle_paths(&self, roots: &[Digest<E::BaseField>], hasher: &Hasher<E::BaseField>) {
         // let timer = start_timer!(|| "ListQuery::Check Merkle Path");
         self.get_inner()
@@ -887,11 +863,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.oracle_query.write_transcript(transcript);
-        self.commitment_query.write_transcript(transcript);
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -915,16 +886,14 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..num_rounds {
+        for (i, fold_challenge) in fold_challenges.iter().enumerate().take(num_rounds) {
             let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
                 vp,
                 num_vars + Spec::get_rate_log() - i - 1,
                 left_index >> 1,
             );
 
-            let res =
-                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
+            let res = interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, *fold_challenge);
 
             let next_index = right_index >> 1;
             let next_oracle_value = if i < num_rounds - 1 {
@@ -993,12 +962,6 @@ where
                 })
                 .collect(),
         }
-    }
-
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.inner.iter().for_each(|(_, q)| {
-            q.write_transcript(transcript);
-        });
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1076,11 +1039,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.oracle_query.write_transcript(transcript);
-        self.commitments_query.write_transcript(transcript);
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1112,8 +1070,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..num_rounds {
+        for (i, fold_challenge) in fold_challenges.iter().enumerate().take(num_rounds) {
             // let round_timer = start_timer!(|| format!("BatchedSingleQueryResult::round {}", i));
             let matching_comms = comms
                 .iter()
@@ -1136,7 +1093,7 @@ where
             );
 
             let mut res =
-                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
+                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, *fold_challenge);
 
             let next_index = right_index >> 1;
 
@@ -1231,12 +1188,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.inner
-            .iter()
-            .for_each(|(_, q)| q.write_transcript(transcript));
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1315,23 +1266,6 @@ where
             SimpleBatchLeavesPair::Base(x) => x.iter().map(|(_, x)| E::from(*x)).collect(),
         }
     }
-
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        match &self.leaves {
-            SimpleBatchLeavesPair::Ext(x) => {
-                x.iter().for_each(|(x, y)| {
-                    transcript.append_field_element_ext(x);
-                    transcript.append_field_element_ext(y);
-                });
-            }
-            SimpleBatchLeavesPair::Base(x) => {
-                x.iter().for_each(|(x, y)| {
-                    transcript.append_field_element(x);
-                    transcript.append_field_element(y);
-                });
-            }
-        };
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1347,11 +1281,6 @@ impl<E: ExtensionField> SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.query.write_transcript(transcript);
-        self.merkle_path.write_transcript(transcript);
-    }
-
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>, hasher: &Hasher<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
         match &self.query.leaves {
@@ -1421,11 +1350,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.oracle_query.write_transcript(transcript);
-        self.commitment_query.write_transcript(transcript);
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1450,8 +1374,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..num_rounds {
+        for (i, fold_challenge) in fold_challenges.iter().enumerate().take(num_rounds) {
             // let round_timer = start_timer!(|| format!("SingleQueryResult::round {}", i));
 
             let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
@@ -1460,8 +1383,7 @@ where
                 left_index >> 1,
             );
 
-            let res =
-                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
+            let res = interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, *fold_challenge);
 
             let next_index = right_index >> 1;
             let next_oracle_value = if i < num_rounds - 1 {
@@ -1525,12 +1447,6 @@ where
                 })
                 .collect(),
         }
-    }
-
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.inner
-            .iter()
-            .for_each(|(_, q)| q.write_transcript(transcript));
     }
 
     #[allow(clippy::too_many_arguments)]
