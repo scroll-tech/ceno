@@ -529,12 +529,6 @@ where
             QueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
         end_timer!(query_timer);
 
-        // 2.3 Write the entire thing to the transcript. Note that these
-        //     are the dominant factor of the BaseFold proof size.
-        let query_timer = start_timer!(|| "Basefold::open::write_queries");
-        queries_with_merkle_path.write_transcript(transcript);
-        end_timer!(query_timer);
-
         end_timer!(timer);
 
         // End of query phase.----------------------------------
@@ -761,10 +755,6 @@ where
                 comms,
             );
         end_timer!(query_timer);
-
-        let query_timer = start_timer!(|| "Basefold::batch_open write query result");
-        query_result_with_merkle_path.write_transcript(transcript);
-        end_timer!(query_timer);
         end_timer!(timer);
 
         Ok(Self::Proof {
@@ -858,10 +848,6 @@ where
             SimpleBatchQueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
         end_timer!(query_timer);
 
-        let query_timer = start_timer!(|| "Basefold::open::write_queries");
-        queries_with_merkle_path.write_transcript(transcript);
-        end_timer!(query_timer);
-
         end_timer!(timer);
 
         Ok(Self::Proof {
@@ -932,10 +918,6 @@ where
             })
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_single();
-
-        // Write the query results to transcript to keep the transcript
-        // the same as the prover after the verification.
-        query_result_with_merkle_path.write_transcript(transcript);
 
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
@@ -1064,10 +1046,6 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_batched();
 
-        // Write the query results to transcript to keep the transcript
-        // the same as the prover after the verification.
-        query_result_with_merkle_path.write_transcript(transcript);
-
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
         let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
@@ -1171,10 +1149,6 @@ where
             })
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();
-
-        // Write the query results to transcript to keep the transcript
-        // the same as the prover after the verification.
-        query_result_with_merkle_path.write_transcript(transcript);
 
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
