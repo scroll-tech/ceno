@@ -931,6 +931,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_single();
 
+        // Write the query results to transcript to keep the transcript
+        // the same as the prover after the verification.
+        query_result_with_merkle_path.write_transcript(transcript);
+
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
         let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
@@ -1058,6 +1062,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_batched();
 
+        // Write the query results to transcript to keep the transcript
+        // the same as the prover after the verification.
+        query_result_with_merkle_path.write_transcript(transcript);
+
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
         let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
@@ -1161,6 +1169,10 @@ where
             })
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();
+
+        // Write the query results to transcript to keep the transcript
+        // the same as the prover after the verification.
+        query_result_with_merkle_path.write_transcript(transcript);
 
         // coeff is the eq polynomial evaluated at the last challenge.len() variables
         // in reverse order.
