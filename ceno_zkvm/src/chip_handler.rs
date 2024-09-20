@@ -17,6 +17,10 @@ pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
 }
 
+pub trait RegisterExpr<E: ExtensionField> {
+    fn register_expr(&self) -> Vec<Expression<E>>;
+}
+
 pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
     fn register_read(
         &mut self,
@@ -24,7 +28,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        value: &impl RegisterExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
@@ -35,6 +39,6 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
-        values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        value: &impl RegisterExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 }

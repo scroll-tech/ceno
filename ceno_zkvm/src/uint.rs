@@ -4,6 +4,7 @@ mod logic;
 pub mod util;
 
 use crate::{
+    chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
@@ -461,6 +462,12 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<
                 .collect::<Vec<Expression<E>>>(),
             UintLimb::Expression(e) => e.clone(),
         }
+    }
+}
+
+impl<E: ExtensionField, const M: usize, const C: usize> RegisterExpr<E> for UIntLimbs<M, C, E> {
+    fn register_expr(&self) -> Vec<Expression<E>> {
+        self.expr()
     }
 }
 
