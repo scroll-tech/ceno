@@ -465,9 +465,22 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<
     }
 }
 
-impl<E: ExtensionField, const M: usize, const C: usize> RegisterExpr<E> for UIntLimbs<M, C, E> {
+impl<E: ExtensionField, const M: usize> RegisterExpr<E> for UIntLimbs<M, 16, E> {
     fn register_expr(&self) -> Vec<Expression<E>> {
         self.expr()
+    }
+}
+
+impl<E: ExtensionField, const M: usize> RegisterExpr<E> for UIntLimbs<M, 8, E> {
+    fn register_expr(&self) -> Vec<Expression<E>> {
+        let u8_limbs = self.expr();
+        u8_limbs
+            .chunks(2)
+            .map(|chunk| {
+                let (a, b) = (chunk[0].clone(), chunk[1].clone());
+                a + (b * 256.into())
+            })
+            .collect_vec()
     }
 }
 

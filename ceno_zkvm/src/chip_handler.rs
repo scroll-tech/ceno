@@ -17,6 +17,8 @@ pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
 }
 
+/// Return a common representation of a register value.
+/// Format: `2 * u16`, least-significant first.
 pub trait RegisterExpr<E: ExtensionField> {
     fn register_expr(&self) -> Vec<Expression<E>>;
 }
