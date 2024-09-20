@@ -31,26 +31,34 @@ use std::{
 pub const MOCK_RS1: u32 = 2;
 pub const MOCK_RS2: u32 = 3;
 pub const MOCK_RD: u32 = 4;
+
+const MOCK_PROGRAM_SIZE: usize = 8;
 /// The program baked in the MockProver.
 /// TODO: Make this a parameter?
 #[allow(clippy::identity_op)]
-pub const MOCK_PROGRAM: &[u32] = &[
-    // R-Type
-    // funct7 | rs2 | rs1 | funct3 | rd | opcode
-    // -----------------------------------------
-    // add x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-    // sub  x4, x2, x3
-    0x20 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-    // mul (0x01, 0x00, 0x33)
-    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-    // and x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b111 << 12 | MOCK_RD << 7 | 0x33,
-    // or x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
-    // xor x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
-];
+pub const MOCK_PROGRAM: [u32; MOCK_PROGRAM_SIZE] = {
+    let mut program: [u32; MOCK_PROGRAM_SIZE] = [0; MOCK_PROGRAM_SIZE];
+    (
+        program[0], program[1], program[2], program[3], program[4], program[5],
+    ) = (
+        // R-Type
+        // funct7 | rs2 | rs1 | funct3 | rd | opcode
+        // -----------------------------------------
+        // add x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+        // sub  x4, x2, x3
+        0x20 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+        // mul (0x01, 0x00, 0x33)
+        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+        // and x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b111 << 12 | MOCK_RD << 7 | 0x33,
+        // or x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
+        // xor x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
+    );
+    program
+};
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
 pub const MOCK_PC_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 4);
@@ -314,9 +322,13 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     ) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = ProgramTableCircuit::construct_circuit(&mut cb).unwrap();
-        let fixed =
-            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, MOCK_PROGRAM);
+        let config =
+            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
+        let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
+            &config,
+            cs.num_fixed,
+            &MOCK_PROGRAM,
+        );
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.

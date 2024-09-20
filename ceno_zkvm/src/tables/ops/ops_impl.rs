@@ -25,6 +25,7 @@ impl OpTableConfig {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         rom_type: ROMType,
+        table_len: usize,
     ) -> Result<Self, ZKVMError> {
         let abc = [
             cb.create_fixed(|| "a")?,
@@ -40,7 +41,7 @@ impl OpTableConfig {
             Expression::Fixed(abc[2].clone()),
         ]);
 
-        cb.lk_table_record(|| "record", rlc_record, mlt.expr())?;
+        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr())?;
 
         Ok(Self { abc, mlt })
     }
@@ -49,15 +50,9 @@ impl OpTableConfig {
         &self,
         num_fixed: usize,
         content: Vec<[u64; 3]>,
-    ) -> RowMajorMatrix<F> {
+    ) -> (usize, RowMajorMatrix<F>) {
         let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
-
-        // Fill the padding with zeros, if any.
-        fixed.par_iter_mut().skip(content.len()).for_each(|row| {
-            for col in &self.abc {
-                set_fixed_val!(row, *col, F::ZERO);
-            }
-        });
+        let length = content.len();
 
         fixed
             .par_iter_mut()
@@ -69,7 +64,7 @@ impl OpTableConfig {
                 }
             });
 
-        fixed
+        (length, fixed)
     }
 
     pub fn assign_instances<F: SmallField>(
@@ -77,18 +72,13 @@ impl OpTableConfig {
         num_witin: usize,
         multiplicity: &HashMap<u64, usize>,
         length: usize,
-    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
+    ) -> Result<(usize, RowMajorMatrix<F>), ZKVMError> {
         let mut witness = RowMajorMatrix::<F>::new(length, num_witin);
 
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {
             mlts[*idx as usize] = *mlt;
         }
-
-        // Fill the padding with zeros, if any.
-        witness.par_iter_mut().skip(length).for_each(|row| {
-            set_val!(row, self.mlt, F::ZERO);
-        });
 
         witness
             .par_iter_mut()
@@ -98,6 +88,6 @@ impl OpTableConfig {
                 set_val!(row, self.mlt, F::from(mlt as u64));
             });
 
-        Ok(witness)
+        Ok((length, witness))
     }
 }

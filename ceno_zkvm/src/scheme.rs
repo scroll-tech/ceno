@@ -1,5 +1,6 @@
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use sumcheck::structs::IOPProverMessage;
 
@@ -43,21 +44,18 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     pub wits_in_evals: Vec<E>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub num_instances: usize,
-    // logup sum at layer 1
-    pub lk_p1_out_eval: E,
-    pub lk_p2_out_eval: E,
-    pub lk_q1_out_eval: E,
-    pub lk_q2_out_eval: E,
+    // tower evaluation at layer 1
+    pub r_out_evals: Vec<[E; 2]>,
+    pub w_out_evals: Vec<[E; 2]>,
+    pub lk_out_evals: Vec<[E; 4]>,
+
+    pub same_r_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
+    pub rw_in_evals: Vec<E>,
+    pub lk_in_evals: Vec<E>,
 
     pub tower_proof: TowerProofs<E>,
-
-    // select layer sumcheck proof
-    pub sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
-    pub lk_d_in_evals: Vec<E>,
-    pub lk_n_in_evals: Vec<E>,
 
     pub fixed_in_evals: Vec<E>,
     pub fixed_opening_proof: PCS::Proof,

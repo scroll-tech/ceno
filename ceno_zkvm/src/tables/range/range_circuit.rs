@@ -35,24 +35,24 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<RangeTableConfig, ZKVMError> {
         cb.namespace(
             || Self::name(),
-            |cb| RangeTableConfig::construct_circuit(cb, RANGE::ROM_TYPE),
+            |cb| RangeTableConfig::construct_circuit(cb, RANGE::ROM_TYPE, RANGE::len()),
         )
     }
 
-    fn generate_fixed_traces(
+    fn generate_fixed_traces_inner(
         config: &RangeTableConfig,
         num_fixed: usize,
         _input: &(),
-    ) -> RowMajorMatrix<E::BaseField> {
+    ) -> (usize, RowMajorMatrix<E::BaseField>) {
         config.generate_fixed_traces(num_fixed, RANGE::content())
     }
 
-    fn assign_instances(
+    fn assign_instances_inner(
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> Result<(usize, RowMajorMatrix<E::BaseField>), ZKVMError> {
         let multiplicity = &multiplicity[RANGE::ROM_TYPE as usize];
         config.assign_instances(num_witin, multiplicity, RANGE::len())
     }

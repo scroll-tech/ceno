@@ -42,24 +42,24 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<OpTableConfig, ZKVMError> {
         cb.namespace(
             || Self::name(),
-            |cb| OpTableConfig::construct_circuit(cb, OP::ROM_TYPE),
+            |cb| OpTableConfig::construct_circuit(cb, OP::ROM_TYPE, OP::len()),
         )
     }
 
-    fn generate_fixed_traces(
+    fn generate_fixed_traces_inner(
         config: &OpTableConfig,
         num_fixed: usize,
         _input: &(),
-    ) -> RowMajorMatrix<E::BaseField> {
+    ) -> (usize, RowMajorMatrix<E::BaseField>) {
         config.generate_fixed_traces(num_fixed, OP::content())
     }
 
-    fn assign_instances(
+    fn assign_instances_inner(
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> Result<(usize, RowMajorMatrix<E::BaseField>), ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
         config.assign_instances(num_witin, multiplicity, OP::len())
     }

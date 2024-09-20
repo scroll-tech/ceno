@@ -10,7 +10,7 @@ use crate::{
     tables::TableCircuit,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{DecodedInstruction, Word, CENO_PLATFORM, WORD_SIZE};
+use ceno_emul::{DecodedInstruction, CENO_PLATFORM, WORD_SIZE};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -81,11 +81,13 @@ pub struct ProgramTableConfig {
     mlt: WitIn,
 }
 
-pub struct ProgramTableCircuit<E>(PhantomData<E>);
+pub struct ProgramTableCircuit<E, const PROGRAM_SIZE: usize>(PhantomData<E>);
 
-impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
+impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
+    for ProgramTableCircuit<E, PROGRAM_SIZE>
+{
     type TableConfig = ProgramTableConfig;
-    type FixedInput = [u32];
+    type FixedInput = [u32; PROGRAM_SIZE];
     type WitnessInput = usize;
 
     fn name() -> String {
@@ -116,16 +118,16 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             cb.rlc_chip_record(fields)
         };
 
-        cb.lk_table_record(|| "prog table", record_exprs, mlt.expr())?;
+        cb.lk_table_record(|| "prog table", PROGRAM_SIZE, record_exprs, mlt.expr())?;
 
         Ok(ProgramTableConfig { record, mlt })
     }
 
-    fn generate_fixed_traces(
+    fn generate_fixed_traces_inner(
         config: &ProgramTableConfig,
         num_fixed: usize,
-        program: &[Word],
-    ) -> RowMajorMatrix<E::BaseField> {
+        program: &Self::FixedInput,
+    ) -> (usize, RowMajorMatrix<E::BaseField>) {
         // TODO: get bytecode of the program.
         let num_instructions = program.len();
         let pc_start = CENO_PLATFORM.pc_start();
@@ -146,15 +148,15 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
                 }
             });
 
-        fixed
+        (num_instructions, fixed)
     }
 
-    fn assign_instances(
+    fn assign_instances_inner(
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         num_instructions: &usize,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> Result<(usize, RowMajorMatrix<E::BaseField>), ZKVMError> {
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
         let mut prog_mlt = vec![0_usize; *num_instructions];
@@ -172,6 +174,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
-        Ok(witness)
+        Ok((*num_instructions, witness))
     }
 }
