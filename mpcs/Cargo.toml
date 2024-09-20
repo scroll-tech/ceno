@@ -27,7 +27,7 @@ sha3 = "0.10.6"
 rayon = { version = "1.5.3", optional = true }
 blake2 = { version = "0.10.6" }
 poseidon.workspace = true
-rand_chacha = { version = "0.3.1", features = ["serde1"] }
+rand_chacha.workspace = true
 generic-array = { version = "0.14.7", features = ["serde"] }
 multilinear_extensions = { path = "../multilinear_extensions" }
 transcript = { path = "../transcript" }

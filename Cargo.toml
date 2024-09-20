@@ -34,6 +34,7 @@ subtle = "2.2.1"
 rand_core = "0.6.0"
 rand_xorshift = "0.3"
 rayon = "1.8"
+rand_chacha = { version = "0.3.1", features = ["serde1"] }
 
 [patch."https://github.com/zhenfeizhang/Goldilocks"]
 goldilocks = { git = "https://github.com/hero78119/Goldilocks" }

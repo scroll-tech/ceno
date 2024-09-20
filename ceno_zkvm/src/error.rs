@@ -1,3 +1,5 @@
+use mpcs::Error;
+
 #[derive(Debug)]
 pub enum UtilError {
     UIntError(String),
@@ -11,6 +13,7 @@ pub enum ZKVMError {
     VKNotFound(String),
     FixedTraceNotFound(String),
     VerifyError(String),
+    PCSError(Error),
 }
 
 impl From<UtilError> for ZKVMError {
