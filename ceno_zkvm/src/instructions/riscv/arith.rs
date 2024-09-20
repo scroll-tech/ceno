@@ -89,9 +89,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &rs1_read,
-            &rs2_read,
-            &rd_written,
+            rs1_read.register_expr(),
+            rs2_read.register_expr(),
+            rd_written.register_expr(),
         )?;
 
         Ok(ArithConfig {

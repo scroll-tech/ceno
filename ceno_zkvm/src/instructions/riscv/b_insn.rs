@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TODO: remove after BLT, BEQ, …
+
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
@@ -50,8 +52,8 @@ impl BInstructionConfig {
     pub fn construct_circuit<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        rs1_read: &impl RegisterExpr<E>,
-        rs2_read: &impl RegisterExpr<E>,
+        rs1_read: RegisterExpr<E>,
+        rs2_read: RegisterExpr<E>,
         branch_taken_bit: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         // State in.

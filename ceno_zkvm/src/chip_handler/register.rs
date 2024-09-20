@@ -19,7 +19,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        value: &impl RegisterExpr<E>,
+        value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
@@ -29,7 +29,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    value.register_expr(),
+                    value.0.to_vec(),
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -41,7 +41,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    value.register_expr(),
+                    value.0.to_vec(),
                     vec![ts.clone()],
                 ]
                 .concat(),
@@ -64,8 +64,8 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
-        value: &impl RegisterExpr<E>,
+        prev_values: RegisterExpr<E>,
+        value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
@@ -75,7 +75,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    prev_values.expr(),
+                    prev_values.0.to_vec(),
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -87,7 +87,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    value.register_expr(),
+                    value.0.to_vec(),
                     vec![ts.clone()],
                 ]
                 .concat(),

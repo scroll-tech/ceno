@@ -465,22 +465,26 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<
     }
 }
 
-impl<E: ExtensionField, const M: usize> RegisterExpr<E> for UIntLimbs<M, 16, E> {
-    fn register_expr(&self) -> Vec<Expression<E>> {
-        self.expr()
+impl<E: ExtensionField> UIntLimbs<32, 16, E> {
+    /// Return a value suitable for register read/write. From [u16; 2] limbs.
+    pub fn register_expr(&self) -> RegisterExpr<E> {
+        let u16_limbs = self.expr();
+        RegisterExpr(u16_limbs.try_into().expect("two limbs with M=32 and C=16"))
     }
 }
 
-impl<E: ExtensionField, const M: usize> RegisterExpr<E> for UIntLimbs<M, 8, E> {
-    fn register_expr(&self) -> Vec<Expression<E>> {
+impl<E: ExtensionField> UIntLimbs<32, 8, E> {
+    /// Return a value suitable for register read/write. From [u8; 4] limbs.
+    pub fn register_expr(&self) -> RegisterExpr<E> {
         let u8_limbs = self.expr();
-        u8_limbs
+        let u16_limbs = u8_limbs
             .chunks(2)
             .map(|chunk| {
                 let (a, b) = (chunk[0].clone(), chunk[1].clone());
-                a + (b * 256.into())
+                a + b * 256.into()
             })
-            .collect_vec()
+            .collect_vec();
+        RegisterExpr(u16_limbs.try_into().expect("four limbs with M=32 and C=8"))
     }
 }
 

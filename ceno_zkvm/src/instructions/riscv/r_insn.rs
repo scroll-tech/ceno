@@ -45,9 +45,9 @@ impl<E: ExtensionField> RInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        rs1_read: &impl RegisterExpr<E>,
-        rs2_read: &impl RegisterExpr<E>,
-        rd_written: &impl RegisterExpr<E>,
+        rs1_read: RegisterExpr<E>,
+        rs2_read: RegisterExpr<E>,
+        rd_written: RegisterExpr<E>,
     ) -> Result<Self, ZKVMError> {
         // State in.
         let pc = circuit_builder.create_witin(|| "pc")?;
@@ -96,7 +96,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
             &rd_id,
             prev_rd_ts.expr(),
             ts,
-            &prev_rd_value,
+            prev_rd_value.register_expr(),
             rd_written,
         )?;
 
