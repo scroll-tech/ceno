@@ -9,11 +9,13 @@ use crate::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
+    create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::riscv::config::ExprLtInput,
     set_val,
     tables::InsnRecord,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;

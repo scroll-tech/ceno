@@ -16,7 +16,7 @@ use ceno_emul::{
 use ceno_zkvm::{
     scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
+    tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit, U1TableCircuit},
 };
 use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
@@ -105,7 +105,8 @@ fn main() {
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let blt_config = zkvm_cs.register_opcode_circuit::<BltInstruction>();
     // tables
-    let range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
+    let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
+    // let u1_range_config = zkvm_cs.register_table_circuit::<U1TableCircuit<E>>();
     let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
     let ltu_config = zkvm_cs.register_table_circuit::<LtuTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
@@ -121,9 +122,14 @@ fn main() {
     zkvm_fixed_traces.register_opcode_circuit::<BltInstruction>(&zkvm_cs);
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
-        range_config.clone(),
+        u16_range_config.clone(),
         &(),
     );
+    //    zkvm_fixed_traces.register_table_circuit::<U1TableCircuit<E>>(
+    //        &zkvm_cs,
+    //        u1_range_config.clone(),
+    //        &(),
+    //    );
     zkvm_fixed_traces.register_table_circuit::<AndTableCircuit<E>>(
         &zkvm_cs,
         and_config.clone(),
@@ -198,8 +204,11 @@ fn main() {
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
         zkvm_witness
-            .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &range_config, &())
+            .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
             .unwrap();
+        //        zkvm_witness
+        //            .assign_table_circuit::<U1TableCircuit<E>>(&zkvm_cs, &u1_range_config, &())
+        //            .unwrap();
         zkvm_witness
             .assign_table_circuit::<AndTableCircuit<E>>(&zkvm_cs, &and_config, &())
             .unwrap();

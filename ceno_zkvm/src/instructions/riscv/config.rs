@@ -27,6 +27,7 @@ impl MsbInput<'_> {
         &self,
         instance: &mut [MaybeUninit<F>],
         config: &MsbConfig,
+        lk_multiplicity: &mut LkMultiplicity,
     ) -> (u8, u8) {
         let n_limbs = self.limbs.len();
         assert!(n_limbs > 0);
@@ -37,6 +38,7 @@ impl MsbInput<'_> {
         set_val!(instance, config.high_limb_no_msb, {
             i64_to_base::<F>(high_limb as i64)
         });
+        lk_multiplicity.lookup_and_byte(high_limb as u64, 0b0111_1111);
         (msb, high_limb)
     }
 }
@@ -61,6 +63,7 @@ impl UIntLtuInput<'_> {
         &self,
         instance: &mut [MaybeUninit<F>],
         config: &UIntLtuConfig,
+        lk_multiplicity: &mut LkMultiplicity,
     ) -> bool {
         let mut idx = 0;
         let mut flag: bool = false;
@@ -83,6 +86,15 @@ impl UIntLtuInput<'_> {
         set_val!(instance, config.indexes[idx], {
             i64_to_base::<F>(flag as i64)
         });
+        //        (0..config.indexes.len()).for_each(|i| {
+        //            if i == idx {
+        //                lk_multiplicity.assert_ux::<1>(0);
+        //            } else {
+        //                lk_multiplicity.assert_ux::<1>(flag as u64);
+        //            }
+        //        });
+        // this corresponds to assert_bit of index_sum
+        // lk_multiplicity.assert_ux::<1>(flag as u64);
         config.acc_indexes.iter().enumerate().for_each(|(id, wit)| {
             if id <= idx {
                 set_val!(instance, wit, { i64_to_base::<F>(flag as i64) });
@@ -102,6 +114,7 @@ impl UIntLtuInput<'_> {
             }
         });
         let is_ltu = self.lhs_limbs[idx] < self.rhs_limbs[idx];
+        lk_multiplicity.lookup_ltu_byte(self.lhs_limbs[idx] as u64, self.rhs_limbs[idx] as u64);
         set_val!(instance, config.is_ltu, { i64_to_base::<F>(is_ltu as i64) });
         is_ltu
     }
@@ -127,16 +140,19 @@ impl UIntLtInput<'_> {
         &self,
         instance: &mut [MaybeUninit<F>],
         config: &UIntLtConfig,
+        lk_multiplicity: &mut LkMultiplicity,
     ) -> bool {
         let n_limbs = self.lhs_limbs.len();
         let lhs_msb_input = MsbInput {
             limbs: self.lhs_limbs,
         };
-        let (lhs_msb, lhs_high_limb_no_msb) = lhs_msb_input.assign(instance, &config.lhs_msb);
+        let (lhs_msb, lhs_high_limb_no_msb) =
+            lhs_msb_input.assign(instance, &config.lhs_msb, lk_multiplicity);
         let rhs_msb_input = MsbInput {
             limbs: self.rhs_limbs,
         };
-        let (rhs_msb, rhs_high_limb_no_msb) = rhs_msb_input.assign(instance, &config.rhs_msb);
+        let (rhs_msb, rhs_high_limb_no_msb) =
+            rhs_msb_input.assign(instance, &config.rhs_msb, lk_multiplicity);
 
         let mut lhs_limbs_no_msb = self.lhs_limbs.iter().copied().collect_vec();
         lhs_limbs_no_msb[n_limbs - 1] = lhs_high_limb_no_msb;
@@ -148,7 +164,7 @@ impl UIntLtInput<'_> {
             lhs_limbs: &lhs_limbs_no_msb,
             rhs_limbs: &rhs_limbs_no_msb,
         };
-        let is_ltu = ltu_input.assign::<F>(instance, &config.is_ltu);
+        let is_ltu = ltu_input.assign::<F>(instance, &config.is_ltu, lk_multiplicity);
 
         let msb_is_equal = lhs_msb == rhs_msb;
         let msb_diff_inv = if msb_is_equal {
@@ -166,6 +182,7 @@ impl UIntLtInput<'_> {
         // is_lt = a_s\cdot (1-b_s)+eq(a_s,b_s)\cdot ltu(a_{<s},b_{<s})$
         let is_lt = lhs_msb * (1 - rhs_msb) + msb_is_equal as u8 * is_ltu as u8;
         set_val!(instance, config.is_lt, { i64_to_base::<F>(is_lt as i64) });
+        // lk_multiplicity.assert_ux::<1>(is_lt as u64);
 
         assert!(is_lt == 0 || is_lt == 1);
         is_lt > 0
