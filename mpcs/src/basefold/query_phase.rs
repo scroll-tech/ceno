@@ -147,7 +147,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     num_rounds: usize,
     num_vars: usize,
     final_message: &[E],
-    roots: &Vec<Digest<E::BaseField>>,
+    roots: &[Digest<E::BaseField>],
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
     eval: &E,
@@ -915,7 +915,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
-        for i in 0..num_rounds {
+        for (i, fold_challenge) in fold_challenges.iter().enumerate().take(num_rounds) {
             let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
                 vp,
                 num_vars + Spec::get_rate_log() - i - 1,
@@ -923,7 +923,7 @@ where
             );
 
             let res =
-                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
+                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, *fold_challenge);
 
             let next_index = right_index >> 1;
             let next_oracle_value = if i < num_rounds - 1 {
@@ -1111,7 +1111,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
-        for i in 0..num_rounds {
+        for (i, fold_challenge) in fold_challenges.iter().enumerate().take(num_rounds) {
             // let round_timer = start_timer!(|| format!("BatchedSingleQueryResult::round {}", i));
             let matching_comms = comms
                 .iter()
@@ -1134,7 +1134,7 @@ where
             );
 
             let mut res =
-                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
+                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, *fold_challenge);
 
             let next_index = right_index >> 1;
 
@@ -1448,7 +1448,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
-        for i in 0..num_rounds {
+        for (i, fold_challenge) in fold_challenges.iter().enumerate().take(num_rounds) {
             // let round_timer = start_timer!(|| format!("SingleQueryResult::round {}", i));
 
             let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
@@ -1458,7 +1458,7 @@ where
             );
 
             let res =
-                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
+                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, *fold_challenge);
 
             let next_index = right_index >> 1;
             let next_oracle_value = if i < num_rounds - 1 {

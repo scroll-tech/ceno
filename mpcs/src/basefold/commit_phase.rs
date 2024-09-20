@@ -167,14 +167,15 @@ where
         end_timer!(sumcheck_timer);
     }
     end_timer!(timer);
-    return (
+
+    (
         trees,
         BasefoldCommitPhaseProof {
             sumcheck_messages,
             roots,
             final_message,
         },
-    );
+    )
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
@@ -341,14 +342,14 @@ where
         end_timer!(sumcheck_timer);
     }
     end_timer!(timer);
-    return (
+    (
         trees,
         BasefoldCommitPhaseProof {
             sumcheck_messages,
             roots,
             final_message,
         },
-    );
+    )
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
@@ -484,14 +485,14 @@ where
         end_timer!(sumcheck_timer);
     }
     end_timer!(timer);
-    return (
+    (
         trees,
         BasefoldCommitPhaseProof {
             sumcheck_messages,
             roots,
             final_message,
         },
-    );
+    )
 }
 
 fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: BasefoldSpec<E>>(

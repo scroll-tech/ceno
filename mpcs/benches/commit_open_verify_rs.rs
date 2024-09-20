@@ -14,6 +14,7 @@ use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtensio
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use transcript::Transcript;
 
 type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
@@ -291,6 +292,10 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
                     })
                 },
             );
+
+            let polys: Vec<ArcMultilinearExtension<GoldilocksExt2>> = polys.into_iter()
+                .map(|poly| poly.into())
+                .collect_vec();
 
             let point = (0..num_vars)
                 .map(|_| transcript.get_and_append_challenge(b"Point").elements)

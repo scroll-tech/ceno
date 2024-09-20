@@ -104,8 +104,12 @@ impl<E: ExtensionField> Transcript<E> {
         unimplemented!()
     }
 
-    pub fn read_challenge(&self, _challenge: Challenge<E>) {
-        unimplemented!()
+    pub fn read_challenge(&mut self) -> Challenge<E> {
+        let r = E::from_bases(&self.sponge_hasher.squeeze_vec()[..2]);
+
+        Challenge {
+            elements: r,
+        }
     }
 
     pub fn send_challenge(&self, _challenge: E) {

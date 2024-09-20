@@ -1,3 +1,4 @@
+use ff::Field;
 use std::{
     array,
     cell::RefCell,
@@ -7,7 +8,10 @@ use std::{
     sync::Arc,
 };
 
-use multilinear_extensions::util::create_uninit_vec;
+use multilinear_extensions::{
+    mle::{DenseMultilinearExtension, IntoMLEs},
+    util::create_uninit_vec,
+};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -85,6 +89,14 @@ impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
                     .collect::<Vec<T>>()
             })
             .collect()
+    }
+}
+
+impl<F: Field> RowMajorMatrix<F> {
+    pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
+        self,
+    ) -> Vec<DenseMultilinearExtension<E>> {
+        self.de_interleaving().into_mles()
     }
 }
 

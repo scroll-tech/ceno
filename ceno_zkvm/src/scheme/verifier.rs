@@ -4,6 +4,7 @@ use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 
 use itertools::{izip, Itertools};
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
@@ -27,27 +28,46 @@ use super::{
     ZKVMTableProof,
 };
 
-pub struct ZKVMVerifier<E: ExtensionField> {
-    pub(crate) vk: ZKVMVerifyingKey<E>,
+pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    pub(crate) vk: ZKVMVerifyingKey<E, PCS>,
 }
 
-impl<E: ExtensionField> ZKVMVerifier<E> {
-    pub fn new(vk: ZKVMVerifyingKey<E>) -> Self {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
+    pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
         ZKVMVerifier { vk }
     }
 
     pub fn verify_proof(
         &self,
-        vm_proof: ZKVMProof<E>,
-        transcript: Transcript<E>,
-        challenges: &[E; 2],
+        vm_proof: ZKVMProof<E, PCS>,
+        mut transcript: Transcript<E>,
     ) -> Result<bool, ZKVMError> {
+        // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
+
+        // TODO: write fixed commitment to transcript
+
+        for (_, (_, proof)) in vm_proof.opcode_proofs.iter() {
+            PCS::write_commitment(&proof.wits_commit, &mut transcript)
+                .map_err(ZKVMError::PCSError)?;
+        }
+        for (_, (_, proof)) in vm_proof.table_proofs.iter() {
+            PCS::write_commitment(&proof.wits_commit, &mut transcript)
+                .map_err(ZKVMError::PCSError)?;
+        }
+
+        // alpha, beta
+        let challenges = [
+            transcript.read_challenge().elements,
+            transcript.read_challenge().elements,
+        ];
+        tracing::debug!("challenges: {:?}", challenges);
+
         let dummy_table_item = challenges[0];
-        let point_eval = PointAndEval::default();
         let mut dummy_table_item_multiplicity = 0;
+        let point_eval = PointAndEval::default();
         let mut transcripts = transcript.fork(vm_proof.num_circuits());
 
         for (name, (i, opcode_proof)) in vm_proof.opcode_proofs {
@@ -59,12 +79,14 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 .get(&name)
                 .ok_or(ZKVMError::VKNotFound(name.clone()))?;
             let _rand_point = self.verify_opcode_proof(
+                &name,
+                &self.vk.vp,
                 circuit_vk,
                 &opcode_proof,
                 transcript,
                 NUM_FANIN,
                 &point_eval,
-                challenges,
+                &challenges,
             )?;
             tracing::info!("verified proof for opcode {}", name);
 
@@ -95,12 +117,14 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 .get(&name)
                 .ok_or(ZKVMError::VKNotFound(name.clone()))?;
             let _rand_point = self.verify_table_proof(
+                &name,
+                &self.vk.vp,
                 circuit_vk,
                 &table_proof,
                 transcript,
                 NUM_FANIN_LOGUP,
                 &point_eval,
-                challenges,
+                &challenges,
             )?;
             tracing::info!("verified proof for table {}", name);
 
@@ -128,10 +152,13 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
     }
 
     /// verify proof and return input opening point
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_opcode_proof(
         &self,
-        circuit_vk: &VerifyingKey<E>,
-        proof: &ZKVMOpcodeProof<E>,
+        name: &str,
+        vp: &PCS::VerifierParam,
+        circuit_vk: &VerifyingKey<E, PCS>,
+        proof: &ZKVMOpcodeProof<E, PCS>,
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -338,17 +365,36 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
             // return Err(ZKVMError::VerifyError("zero expression != 0"));
         }
 
+        tracing::debug!(
+            "[opcode {}] verify opening proof for {} polys at {:?}",
+            name,
+            proof.wits_in_evals.len(),
+            input_opening_point
+        );
+        PCS::simple_batch_verify(
+            vp,
+            &proof.wits_commit,
+            &input_opening_point,
+            &proof.wits_in_evals,
+            &proof.wits_opening_proof,
+            transcript,
+        )
+        .map_err(ZKVMError::PCSError)?;
+
         Ok(input_opening_point)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_table_proof(
         &self,
-        circuit_vk: &VerifyingKey<E>,
-        proof: &ZKVMTableProof<E>,
+        name: &str,
+        vp: &PCS::VerifierParam,
+        circuit_vk: &VerifyingKey<E, PCS>,
+        proof: &ZKVMTableProof<E, PCS>,
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
-        challenges: &[E; 2], // TODO: derive challenge from PCS
+        challenges: &[E; 2],
     ) -> Result<Point<E>, ZKVMError> {
         let cs = circuit_vk.get_cs();
         let lk_counts_per_instance = cs.lk_table_expressions.len();
@@ -458,6 +504,26 @@ impl<E: ExtensionField> ZKVMVerifier<E> {
                 "record evaluate != expected_evals".into(),
             ));
         }
+
+        tracing::debug!(
+            "[table {}] verify opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+            name,
+            proof.wits_in_evals.len(),
+            input_opening_point,
+            proof.wits_in_evals,
+            proof.wits_commit
+        );
+        PCS::simple_batch_verify(
+            vp,
+            &proof.wits_commit,
+            &input_opening_point,
+            &proof.wits_in_evals,
+            &proof.wits_opening_proof,
+            transcript,
+        )
+        .map_err(ZKVMError::PCSError)?;
+
+        // TODO: verify fixed opening proof
 
         Ok(input_opening_point)
     }
