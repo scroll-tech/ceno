@@ -31,7 +31,7 @@ use super::{
 pub fn prover_query_phase<E: ExtensionField>(
     transcript: &mut Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
 ) -> QueriesResult<E>
 where
@@ -57,7 +57,7 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    basefold_get_query::<E>(&comm.get_codewords()[0], oracles, *x_index),
+                    basefold_get_query::<E>(&comm.get_codewords()[0], trees, *x_index),
                 )
             })
             .collect(),
@@ -68,7 +68,7 @@ pub fn batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut Transcript<E>,
     codeword_size: usize,
     comms: &[BasefoldCommitmentWithData<E>],
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
 ) -> BatchedQueriesResult<E>
 where
@@ -94,7 +94,7 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    batch_basefold_get_query::<E>(comms, oracles, codeword_size, *x_index),
+                    batch_basefold_get_query::<E>(comms, trees, codeword_size, *x_index),
                 )
             })
             .collect(),
@@ -104,7 +104,7 @@ where
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
 ) -> SimpleBatchQueriesResult<E>
 where
@@ -130,7 +130,7 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    simple_batch_basefold_get_query::<E>(comm.get_codewords(), oracles, *x_index),
+                    simple_batch_basefold_get_query::<E>(comm.get_codewords(), trees, *x_index),
                 )
             })
             .collect(),
@@ -172,6 +172,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     reverse_index_bits_in_place(&mut final_codeword);
     end_timer!(encode_timer);
 
+    let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
     queries.check::<Spec>(
         indices,
         vp,
@@ -183,6 +184,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         comm,
         hasher,
     );
+    end_timer!(queries_timer);
 
     let final_timer = start_timer!(|| "Final checks");
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
@@ -247,6 +249,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
 
+    let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
     queries.check::<Spec>(
         indices,
         vp,
@@ -259,6 +262,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         coeffs,
         hasher,
     );
+    end_timer!(queries_timer);
 
     #[allow(unused)]
     let final_timer = start_timer!(|| "Final checks");
@@ -323,6 +327,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
     // For computing the weights on the fly, because the verifier is incapable of storing
     // the weights.
+    let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
     queries.check::<Spec>(
         indices,
         vp,
@@ -335,6 +340,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
         comm,
         hasher,
     );
+    end_timer!(queries_timer);
 
     let final_timer = start_timer!(|| "Final checks");
     assert_eq!(
@@ -366,7 +372,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
 fn basefold_get_query<E: ExtensionField>(
     poly_codeword: &FieldType<E>,
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     x_index: usize,
 ) -> SingleQueryResult<E>
 where
@@ -387,13 +393,15 @@ where
     };
     index >>= 1;
 
-    let mut oracle_queries = Vec::with_capacity(oracles.len() + 1);
-    for oracle in oracles {
+    let mut oracle_queries = Vec::with_capacity(trees.len() + 1);
+    for tree in trees {
         let p1 = index | 1;
         let p0 = p1 - 1;
 
         oracle_queries.push(CodewordSingleQueryResult::new_ext(
-            oracle[p0], oracle[p1], p0,
+            tree.get_leaf_as_extension(p0)[0],
+            tree.get_leaf_as_extension(p1)[0],
+            p0,
         ));
         index >>= 1;
     }
@@ -410,22 +418,24 @@ where
 
 fn batch_basefold_get_query<E: ExtensionField>(
     comms: &[BasefoldCommitmentWithData<E>],
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     codeword_size: usize,
     x_index: usize,
 ) -> BatchedSingleQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let mut oracle_list_queries = Vec::with_capacity(oracles.len());
+    let mut oracle_list_queries = Vec::with_capacity(trees.len());
 
     let mut index = x_index;
     index >>= 1;
-    for oracle in oracles {
+    for tree in trees {
         let p1 = index | 1;
         let p0 = p1 - 1;
         oracle_list_queries.push(CodewordSingleQueryResult::<E>::new_ext(
-            oracle[p0], oracle[p1], p0,
+            tree.get_leaf_as_extension(p0)[0],
+            tree.get_leaf_as_extension(p1)[0],
+            p0,
         ));
         index >>= 1;
     }
@@ -463,7 +473,7 @@ where
 
 fn simple_batch_basefold_get_query<E: ExtensionField>(
     poly_codewords: &[FieldType<E>],
-    oracles: &[Vec<E>],
+    trees: &[MerkleTree<E>],
     x_index: usize,
 ) -> SimpleBatchSingleQueryResult<E>
 where
@@ -500,13 +510,15 @@ where
     };
     index >>= 1;
 
-    let mut oracle_queries = Vec::with_capacity(oracles.len() + 1);
-    for oracle in oracles {
+    let mut oracle_queries = Vec::with_capacity(trees.len() + 1);
+    for tree in trees {
         let p1 = index | 1;
         let p0 = p1 - 1;
 
         oracle_queries.push(CodewordSingleQueryResult::new_ext(
-            oracle[p0], oracle[p1], p0,
+            tree.get_leaf_as_extension(p0)[0],
+            tree.get_leaf_as_extension(p1)[0],
+            p0,
         ));
         index >>= 1;
     }
@@ -955,6 +967,10 @@ impl<E: ExtensionField> QueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    pub fn empty() -> Self {
+        Self { inner: vec![] }
+    }
+
     pub fn from_query_result(
         query_result: QueriesResult<E>,
         oracle_trees: &[MerkleTree<E>],
@@ -997,7 +1013,6 @@ where
         comm: &BasefoldCommitment<E>,
         hasher: &Hasher<E::BaseField>,
     ) {
-        let timer = start_timer!(|| "QueriesResult::check");
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
                 assert_eq!(index_in_proof, index);
@@ -1014,7 +1029,6 @@ where
                 );
             },
         );
-        end_timer!(timer);
     }
 }
 
@@ -1424,7 +1438,6 @@ where
         index: usize,
         hasher: &Hasher<E::BaseField>,
     ) {
-        let timer = start_timer!(|| "Checking codeword single query");
         self.oracle_query.check_merkle_paths(roots, hasher);
         self.commitment_query
             .check_merkle_path(&Digest(comm.root().0), hasher);
@@ -1466,7 +1479,6 @@ where
             assert_eq!(res, next_oracle_value, "Failed at round {}", i);
             // end_timer!(round_timer);
         }
-        end_timer!(timer);
     }
 }
 
@@ -1532,7 +1544,6 @@ where
         comm: &BasefoldCommitment<E>,
         hasher: &Hasher<E::BaseField>,
     ) {
-        let timer = start_timer!(|| "QueriesResult::check");
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
                 assert_eq!(index, index_in_proof);
@@ -1550,6 +1561,5 @@ where
                 );
             },
         );
-        end_timer!(timer);
     }
 }
