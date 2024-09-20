@@ -16,7 +16,7 @@ use thread_local::ThreadLocal;
 
 use crate::{
     structs::ROMType,
-    tables::{AndTable, LtuTable, OpsTable},
+    tables::{AndTable, LtuTable, OpsTable, OrTable, XorTable},
 };
 
 #[macro_export]
@@ -110,14 +110,29 @@ impl LkMultiplicity {
         }
     }
 
+    /// Track a lookup into a logic table (AndTable, etc).
+    pub fn logic_u8<OP: OpsTable>(&mut self, a: u64, b: u64) {
+        self.increment(OP::ROM_TYPE, OP::pack(a, b));
+    }
+
     /// lookup a AND b
     pub fn lookup_and_byte(&mut self, a: u64, b: u64) {
-        self.increment(ROMType::And, AndTable::pack(a, b));
+        self.logic_u8::<AndTable>(a, b)
+    }
+
+    /// lookup a OR b
+    pub fn lookup_or_byte(&mut self, a: u64, b: u64) {
+        self.logic_u8::<OrTable>(a, b)
+    }
+
+    /// lookup a XOR b
+    pub fn lookup_xor_byte(&mut self, a: u64, b: u64) {
+        self.logic_u8::<XorTable>(a, b)
     }
 
     /// lookup a < b as unsigned byte
-    pub fn lookup_ltu_limb8(&mut self, a: u64, b: u64) {
-        self.increment(ROMType::Ltu, LtuTable::pack(a, b));
+    pub fn lookup_ltu_byte(&mut self, a: u64, b: u64) {
+        self.logic_u8::<LtuTable>(a, b)
     }
 
     /// Fetch instruction at pc
