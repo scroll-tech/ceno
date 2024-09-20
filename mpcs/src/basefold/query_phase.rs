@@ -147,7 +147,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     num_rounds: usize,
     num_vars: usize,
     final_message: &[E],
-    roots: &Vec<Digest<E::BaseField>>,
+    roots: &[Digest<E::BaseField>],
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
     eval: &E,
@@ -915,6 +915,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..num_rounds {
             let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
                 vp,
@@ -1111,6 +1112,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..num_rounds {
             // let round_timer = start_timer!(|| format!("BatchedSingleQueryResult::round {}", i));
             let matching_comms = comms
@@ -1448,6 +1450,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..num_rounds {
             // let round_timer = start_timer!(|| format!("SingleQueryResult::round {}", i));
 

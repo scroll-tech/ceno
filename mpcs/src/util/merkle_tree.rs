@@ -40,24 +40,24 @@ where
         leaves: &FieldType<E>,
         hasher: &Hasher<E::BaseField>,
     ) -> Vec<Vec<Digest<E::BaseField>>> {
-        merkelize::<E>(&[&leaves], hasher)
+        merkelize::<E>(&[leaves], hasher)
     }
 
     pub fn compute_inner_base(
         leaves: &Vec<E::BaseField>,
         hasher: &Hasher<E::BaseField>,
     ) -> Vec<Vec<Digest<E::BaseField>>> {
-        merkelize_base::<E>(&[&leaves], hasher)
+        merkelize_base::<E>(&[leaves], hasher)
     }
 
     pub fn compute_inner_ext(
         leaves: &Vec<E>,
         hasher: &Hasher<E::BaseField>,
     ) -> Vec<Vec<Digest<E::BaseField>>> {
-        merkelize_ext::<E>(&[&leaves], hasher)
+        merkelize_ext::<E>(&[leaves], hasher)
     }
 
-    pub fn root_from_inner(inner: &Vec<Vec<Digest<E::BaseField>>>) -> Digest<E::BaseField> {
+    pub fn root_from_inner(inner: &[Vec<Digest<E::BaseField>>]) -> Digest<E::BaseField> {
         inner.last().unwrap()[0].clone()
     }
 
@@ -299,12 +299,12 @@ fn merkelize<E: ExtensionField>(
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
             *hash = match &values[0] {
                 FieldType::Base(_) => hash_two_leaves_batch_base::<E>(
-                    &values
+                    values
                         .iter()
                         .map(|values| field_type_index_base(values, i << 1))
                         .collect_vec()
                         .as_slice(),
-                    &values
+                    values
                         .iter()
                         .map(|values| field_type_index_base(values, (i << 1) + 1))
                         .collect_vec()
@@ -363,12 +363,12 @@ fn merkelize_base<E: ExtensionField>(
     } else {
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
             *hash = hash_two_leaves_batch_base::<E>(
-                &values
+                values
                     .iter()
                     .map(|values| values[i << 1])
                     .collect_vec()
                     .as_slice(),
-                &values
+                values
                     .iter()
                     .map(|values| values[(i << 1) + 1])
                     .collect_vec()
@@ -412,12 +412,12 @@ fn merkelize_ext<E: ExtensionField>(
     } else {
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
             *hash = hash_two_leaves_batch_ext::<E>(
-                &values
+                values
                     .iter()
                     .map(|values| values[i << 1])
                     .collect_vec()
                     .as_slice(),
-                &values
+                values
                     .iter()
                     .map(|values| values[(i << 1) + 1])
                     .collect_vec()
