@@ -61,7 +61,7 @@ pub fn one_level_eval_hc<F: Field>(evals: &mut Vec<F>, challenge: F) {
     let mut index = 0;
     evals.retain(|_| {
         index += 1;
-        (index - 1) % 2 == 1
+        index % 2 == 0
     });
 }
 

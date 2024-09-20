@@ -104,14 +104,14 @@ where
 
     type VerifierParameters = BasecodeVerifierParameters;
 
-    fn setup(max_msg_size_log: usize, rng_seed: [u8; 32]) -> Self::PublicParameters {
-        let rng = ChaCha8Rng::from_seed(rng_seed);
+    fn setup(max_msg_size_log: usize) -> Self::PublicParameters {
+        let rng = ChaCha8Rng::from_seed([0u8; 32]);
         let (table_w_weights, table) =
             get_table_aes::<E, _>(max_msg_size_log, Spec::get_rate_log(), &mut rng.clone());
         BasecodeParameters {
             table,
             table_w_weights,
-            rng_seed,
+            rng_seed: [0u8; 32],
         }
     }
 
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn prover_verifier_consistency() {
         type Code = Basecode<BasecodeDefaultSpec>;
-        let pp: BasecodeParameters<GoldilocksExt2> = Code::setup(10, [0; 32]);
+        let pp: BasecodeParameters<GoldilocksExt2> = Code::setup(10);
         let (pp, vp) = Code::trim(&pp, 10).unwrap();
         for level in 0..(10 + <Code as EncodingScheme<GoldilocksExt2>>::get_rate_log()) {
             for index in 0..(1 << level) {

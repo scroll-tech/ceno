@@ -32,7 +32,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         + Sync;
     type VerifierParameters: Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync;
 
-    fn setup(max_msg_size_log: usize, rng_seed: [u8; 32]) -> Self::PublicParameters;
+    fn setup(max_msg_size_log: usize) -> Self::PublicParameters;
 
     fn trim(
         pp: &Self::PublicParameters,
@@ -176,8 +176,7 @@ pub(crate) mod test_util {
         let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from(i)).collect();
         let mut poly = FieldType::Ext(poly);
 
-        let rng_seed = [0; 32];
-        let pp: Code::PublicParameters = Code::setup(num_vars, rng_seed);
+        let pp: Code::PublicParameters = Code::setup(num_vars);
         let (pp, _) = Code::trim(&pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         reverse_index_bits_in_place_field_type(&mut codeword);

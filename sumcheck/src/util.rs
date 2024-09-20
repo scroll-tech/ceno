@@ -235,7 +235,7 @@ pub(crate) fn merge_sumcheck_polys_v2<'a, E: ExtensionField>(
 ) -> VirtualPolynomialV2<'a, E> {
     let log2_max_thread_id = ceil_log2(max_thread_id);
     let mut poly = prover_states[0].poly.clone(); // giving only one evaluation left, this clone is low cost.
-    poly.aux_info.num_variables = log2_max_thread_id; // size_log2 variates sumcheck
+    poly.aux_info.max_num_variables = log2_max_thread_id; // size_log2 variates sumcheck
     for i in 0..poly.flattened_ml_extensions.len() {
         let ml_ext = DenseMultilinearExtension::from_evaluations_ext_vec(
             log2_max_thread_id,

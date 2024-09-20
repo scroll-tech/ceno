@@ -1,5 +1,6 @@
 use std::{
     cmp::max,
+    mem::MaybeUninit,
     ops::{Add, Deref, Mul, Neg, Sub},
 };
 
@@ -425,6 +426,14 @@ impl WitIn {
                 Ok(wit)
             },
         )
+    }
+
+    pub fn assign<E: ExtensionField>(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        value: E::BaseField,
+    ) {
+        instance[self.id as usize] = MaybeUninit::new(value);
     }
 }
 

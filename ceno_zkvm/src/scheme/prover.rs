@@ -1,9 +1,13 @@
 use ff_ext::ExtensionField;
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use itertools::Itertools;
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    mle::{IntoMLE, IntoMLEs, MultilinearExtension},
+    mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
@@ -33,41 +37,69 @@ use crate::{
 
 use super::{ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
-pub struct ZKVMProver<E: ExtensionField> {
-    pub(crate) pk: ZKVMProvingKey<E>,
+pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    pub pk: ZKVMProvingKey<E, PCS>,
 }
 
-impl<E: ExtensionField> ZKVMProver<E> {
-    pub fn new(pk: ZKVMProvingKey<E>) -> Self {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
+    pub fn new(pk: ZKVMProvingKey<E, PCS>) -> Self {
         ZKVMProver { pk }
     }
 
     /// create proof for zkvm execution
     pub fn create_proof(
         &self,
-        mut witnesses: ZKVMWitnesses<E>,
+        witnesses: ZKVMWitnesses<E>,
         max_threads: usize,
-        transcript: Transcript<E>,
-        challenges: &[E; 2],
-    ) -> Result<ZKVMProof<E>, ZKVMError> {
-        let mut vm_proof = ZKVMProof::default();
-        let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
+        mut transcript: Transcript<E>,
+    ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
+        let mut vm_proof = ZKVMProof::empty();
 
+        // TODO: commit to fixed commitment
+
+        // commit to main traces
+        let mut commitments = BTreeMap::new();
+        let mut wits = BTreeMap::new();
+        // sort by circuit name, and we rely on an assumption that
+        // table circuit witnesses come after opcode circuit witnesses
+        for (circuit_name, witness) in witnesses.witnesses {
+            let commit_dur = std::time::Instant::now();
+            let num_instances = witness.num_instances();
+            let witness = witness.into_mles();
+            commitments.insert(
+                circuit_name.clone(),
+                PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
+                    .map_err(ZKVMError::PCSError)?,
+            );
+            tracing::info!(
+                "commit to {} traces took {:?}",
+                circuit_name,
+                commit_dur.elapsed()
+            );
+            wits.insert(circuit_name, (witness, num_instances));
+        }
+
+        // squeeze two challenges from transcript
+        let challenges = [
+            transcript.read_challenge().elements,
+            transcript.read_challenge().elements,
+        ];
+        tracing::debug!("challenges in prover: {:?}", challenges);
+
+        let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
         for ((circuit_name, pk), (i, transcript)) in self
             .pk
             .circuit_pks
             .iter() // Sorted by key.
             .zip_eq(transcripts.iter_mut().enumerate())
         {
-            let witness = witnesses
-                .witnesses
+            let (witness, num_instances) = wits
                 .remove(circuit_name)
                 .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
-
+            let wits_commit = commitments.remove(circuit_name).unwrap();
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
             let is_opcode_circuit = cs.lk_table_expressions.is_empty();
-            let num_instances = witness.num_instances();
 
             if is_opcode_circuit {
                 tracing::debug!(
@@ -82,17 +114,15 @@ impl<E: ExtensionField> ZKVMProver<E> {
                     tracing::debug!("opcode circuit {}: {}", circuit_name, lk_s);
                 }
                 let opcode_proof = self.create_opcode_proof(
+                    circuit_name,
+                    &self.pk.pp,
                     pk,
-                    witness
-                        .de_interleaving()
-                        .into_mles()
-                        .into_iter()
-                        .map(|v| v.into())
-                        .collect_vec(),
+                    witness.into_iter().map(|w| w.into()).collect_vec(),
+                    wits_commit,
                     num_instances,
                     max_threads,
                     transcript,
-                    challenges,
+                    &challenges,
                 )?;
                 tracing::info!(
                     "generated proof for opcode {} with num_instances={}",
@@ -104,17 +134,15 @@ impl<E: ExtensionField> ZKVMProver<E> {
                     .insert(circuit_name.clone(), (i, opcode_proof));
             } else {
                 let table_proof = self.create_table_proof(
+                    circuit_name,
+                    &self.pk.pp,
                     pk,
-                    witness
-                        .de_interleaving()
-                        .into_mles()
-                        .into_iter()
-                        .map(|v| v.into())
-                        .collect_vec(),
+                    witness.into_iter().map(|v| v.into()).collect_vec(),
+                    wits_commit,
                     num_instances,
                     max_threads,
                     transcript,
-                    challenges,
+                    &challenges,
                 )?;
                 tracing::info!(
                     "generated proof for table {} with num_instances={}",
@@ -133,15 +161,19 @@ impl<E: ExtensionField> ZKVMProver<E> {
     /// major flow break down into
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
+    #[allow(clippy::too_many_arguments)]
     pub fn create_opcode_proof(
         &self,
-        circuit_pk: &ProvingKey<E>,
+        name: &str,
+        pp: &PCS::ProverParam,
+        circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
+        wits_commit: PCS::CommitmentWithData,
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<ZKVMOpcodeProof<E>, ZKVMError> {
+    ) -> Result<ZKVMOpcodeProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
         let log2_num_instances = ceil_log2(num_instances);
         let next_pow2_instances = 1 << log2_num_instances;
@@ -496,11 +528,36 @@ impl<E: ExtensionField> ZKVMProver<E> {
         exit_span!(span);
 
         let span = entered_span!("witin::evals");
-        let wits_in_evals = witnesses
+        let wits_in_evals: Vec<E> = witnesses
             .par_iter()
             .map(|poly| poly.evaluate(&input_open_point))
             .collect();
         exit_span!(span);
+
+        let span = entered_span!("pcs_open");
+        let opening_dur = std::time::Instant::now();
+        tracing::debug!(
+            "[opcode {}]: build opening proof for {} polys at {:?}",
+            name,
+            witnesses.len(),
+            input_open_point
+        );
+        let wits_opening_proof = PCS::simple_batch_open(
+            pp,
+            &witnesses,
+            &wits_commit,
+            &input_open_point,
+            wits_in_evals.as_slice(),
+            transcript,
+        )
+        .map_err(ZKVMError::PCSError)?;
+        tracing::info!(
+            "[opcode {}] build opening proof took {:?}",
+            name,
+            opening_dur.elapsed(),
+        );
+        exit_span!(span);
+        let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
         Ok(ZKVMOpcodeProof {
             num_instances,
@@ -515,19 +572,25 @@ impl<E: ExtensionField> ZKVMProver<E> {
             r_records_in_evals,
             w_records_in_evals,
             lk_records_in_evals,
+            wits_commit,
+            wits_opening_proof,
             wits_in_evals,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_table_proof(
         &self,
-        circuit_pk: &ProvingKey<E>,
+        name: &str,
+        pp: &PCS::ProverParam,
+        circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
+        wits_commit: PCS::CommitmentWithData,
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<ZKVMTableProof<E>, ZKVMError> {
+    ) -> Result<ZKVMTableProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
         let fixed = circuit_pk
             .fixed_traces
@@ -698,6 +761,27 @@ impl<E: ExtensionField> ZKVMProver<E> {
         let wits_in_evals = evals;
         exit_span!(span);
 
+        let span = entered_span!("pcs_opening");
+        let wits_opening_proof = PCS::simple_batch_open(
+            pp,
+            &witnesses,
+            &wits_commit,
+            &input_open_point,
+            wits_in_evals.as_slice(),
+            transcript,
+        )
+        .map_err(ZKVMError::PCSError)?;
+        exit_span!(span);
+        let wits_commit = PCS::get_pure_commitment(&wits_commit);
+        tracing::debug!(
+            "[table {}] build opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+            name,
+            witnesses.len(),
+            input_open_point,
+            wits_in_evals,
+            wits_commit,
+        );
+
         Ok(ZKVMTableProof {
             num_instances,
             lk_p1_out_eval,
@@ -710,6 +794,8 @@ impl<E: ExtensionField> ZKVMProver<E> {
             lk_n_in_evals,
             fixed_in_evals,
             wits_in_evals,
+            wits_commit,
+            wits_opening_proof,
         })
     }
 }
