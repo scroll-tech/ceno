@@ -222,6 +222,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn assert_bit<NR, N>(
         &mut self,
         name_fn: N,
@@ -234,7 +235,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         // TODO: Replace with `x * (1 - x)` or a multi-bit lookup similar to assert_u8_pair.
         let items: Vec<Expression<E>> = vec![(ROMType::U1 as usize).into(), expr];
         let rlc_record = self.rlc_chip_record(items);
-        // self.lk_record(name_fn, rlc_record)?;
+        self.lk_record(name_fn, rlc_record)?;
         Ok(())
     }
 

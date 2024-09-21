@@ -16,7 +16,7 @@ use ceno_emul::{
 use ceno_zkvm::{
     scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit, U1TableCircuit},
+    tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
 use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
@@ -38,7 +38,7 @@ const RAYON_NUM_THREADS: usize = 8;
 #[allow(clippy::unusual_byte_groupings)]
 const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
 #[allow(clippy::unusual_byte_groupings)]
-const PROGRAM_ADD_LOOP: [u32; 4] = [
+const PROGRAM_CODE: [u32; 4] = [
     // func7   rs2   rs1   f3  rd    opcode
     0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
     0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
@@ -111,7 +111,7 @@ fn main() {
     let ltu_config = zkvm_cs.register_table_circuit::<LtuTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
-    let program_add_loop: Vec<u32> = PROGRAM_ADD_LOOP
+    let program_code: Vec<u32> = PROGRAM_CODE
         .iter()
         .cloned()
         .chain(iter::repeat(ECALL_HALT))
@@ -120,6 +120,7 @@ fn main() {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<BltInstruction>(&zkvm_cs);
+
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
         u16_range_config.clone(),
@@ -143,7 +144,7 @@ fn main() {
     zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
         &zkvm_cs,
         prog_config.clone(),
-        &program_add_loop,
+        &program_code,
     );
 
     let pk = zkvm_cs
@@ -166,7 +167,7 @@ fn main() {
         vm.init_register_unsafe(1usize, 1);
         vm.init_register_unsafe(2usize, u32::MAX); // -1 in two's complement
         vm.init_register_unsafe(3usize, step_loop as u32);
-        for (i, inst) in program_add_loop.iter().enumerate() {
+        for (i, inst) in program_code.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
 
@@ -219,7 +220,7 @@ fn main() {
             .assign_table_circuit::<ProgramTableCircuit<E>>(
                 &zkvm_cs,
                 &prog_config,
-                &program_add_loop.len(),
+                &program_code.len(),
             )
             .unwrap();
 
@@ -231,7 +232,7 @@ fn main() {
             .expect("create_proof failed");
 
         println!(
-            "AddInstruction::create_proof, instance_num_vars = {}, time = {}",
+            "riscv_opcodes::create_proof, instance_num_vars = {}, time = {}",
             instance_num_vars,
             timer.elapsed().as_secs_f64()
         );

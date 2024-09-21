@@ -38,8 +38,8 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<InstructionConfig<E>, ZKVMError> {
-        let read_rs1 = UInt8::new(|| "rs1_limbs", circuit_builder)?;
-        let read_rs2 = UInt8::new(|| "rs2_limbs", circuit_builder)?;
+        let read_rs1 = UInt8::new_unchecked(|| "rs1_limbs", circuit_builder)?;
+        let read_rs2 = UInt8::new_unchecked(|| "rs2_limbs", circuit_builder)?;
         let is_lt = read_rs1.lt_limb8(circuit_builder, &read_rs2)?;
 
         let b_insn = BInstructionConfig::construct_circuit(

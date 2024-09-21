@@ -274,13 +274,13 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
 
         // indicate the first non-zero byte index i_0 of a[i] - b[i]
         // from high to low
-        indexes
-            .iter()
-            .try_for_each(|idx| circuit_builder.assert_bit(|| "bit assert", idx.expr()))?;
-        let index_sum = indexes
-            .iter()
-            .fold(Expression::from(0), |acc, idx| acc + idx.expr());
-        circuit_builder.assert_bit(|| "bit assert", index_sum)?;
+        //        indexes
+        //            .iter()
+        //            .try_for_each(|idx| circuit_builder.assert_bit(|| "bit assert", idx.expr()))?;
+        //        let index_sum = indexes
+        //            .iter()
+        //            .fold(Expression::from(0), |acc, idx| acc + idx.expr());
+        // circuit_builder.assert_bit(|| "bit assert", index_sum)?;
 
         // equal zero if a==b, otherwise equal (a[i_0]-b[i_0])^{-1}
         let byte_diff_inv = circuit_builder.create_witin(|| "byte_diff_inverse")?;
@@ -346,7 +346,6 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         )?;
 
         let is_ltu = circuit_builder.create_witin(|| "is_ltu")?;
-        // circuit_builder.assert_bit(is_ltu.expr())?; // lookup ensure it is bit
         // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
         circuit_builder.lookup_ltu_byte(lhs_ne_byte.expr(), rhs_ne_byte.expr(), is_ltu.expr())?;
         Ok(UIntLtuConfig {
@@ -365,7 +364,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         rhs: &UIntLimbs<M, 8, E>,
     ) -> Result<UIntLtConfig, ZKVMError> {
         let is_lt = circuit_builder.create_witin(|| "is_lt")?;
-        circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
+        // circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
 
         let lhs_msb = self.msb_decompose(circuit_builder)?;
         let rhs_msb = rhs.msb_decompose(circuit_builder)?;
