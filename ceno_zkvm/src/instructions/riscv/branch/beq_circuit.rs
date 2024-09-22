@@ -53,8 +53,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
         let b_insn = BInstructionConfig::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &rs1_read,
-            &rs2_read,
+            rs1_read.register_expr(),
+            rs2_read.register_expr(),
             branch_taken_bit,
         )?;
 
