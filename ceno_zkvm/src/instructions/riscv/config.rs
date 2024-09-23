@@ -18,6 +18,7 @@ pub struct IsEqualConfig {
 #[derive(Clone, Debug)]
 pub struct IsZeroConfig {
     pub inverse_limbs: Vec<WitIn>,
+    pub is_zero_limbs: Vec<WitIn>,
     pub is_zero: WitIn,
 }
 
@@ -27,7 +28,8 @@ impl IsZeroConfig {
         instance: &mut [MaybeUninit<E::BaseField>],
         values: Vec<E::BaseField>,
     ) {
-        let mut is_zero = 0u64;
+        let len = self.inverse_limbs.len();
+        let mut num_nonzero = 0u64;
         self.inverse_limbs
             .iter()
             .zip(values.iter())
@@ -35,12 +37,16 @@ impl IsZeroConfig {
                 let inverse = v.invert().unwrap_or(E::BaseField::ZERO);
                 instance[wit.id as usize] = MaybeUninit::new(inverse);
 
-                if (!v.is_zero()).into() {
-                    is_zero += 1;
+                let is_zero: bool = v.is_zero().into();
+                instance[wit.id as usize + len] =
+                    MaybeUninit::new(E::BaseField::from(is_zero as u64));
+
+                if !is_zero {
+                    num_nonzero += 1;
                 }
             });
 
-        instance[self.is_zero.id as usize] = if is_zero.is_zero() {
+        instance[self.is_zero.id as usize] = if num_nonzero.is_zero() {
             MaybeUninit::new(E::BaseField::ONE)
         } else {
             MaybeUninit::new(E::BaseField::ZERO)

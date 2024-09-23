@@ -256,7 +256,6 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<IsZeroConfig, ZKVMError> {
-        // FIXME should be new() ?
         let value_inverse = Self::new_unchecked(|| "inverse", circuit_builder).unwrap();
         let is_zeros = self
             .limbs
@@ -279,20 +278,29 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     )
                     .unwrap();
 
-                Expression::from(1) - value.expr() * inverse.expr()
+                let is_zero_wit = circuit_builder.create_witin(|| "is_zero").unwrap();
+                circuit_builder
+                    .require_equal(
+                        || "is_zero limbs",
+                        Expression::from(1) - value.expr() * inverse.expr(),
+                        is_zero_wit.expr(),
+                    )
+                    .unwrap();
+                is_zero_wit
             })
-            .collect::<Vec<Expression<E>>>();
+            .collect::<Vec<WitIn>>();
 
-        // FIXME is_zero_flag == 1
-        let is_zero_wit = circuit_builder.create_witin(|| "is_zero")?;
-        // let is_zero_expr = is_zeros
-        //     .iter()
-        //     .fold(Expression::from(0), |acc, v| acc.clone() + v.clone());
-        // circuit_builder.require_equal(|| "is_zero_flag", is_zero_wit.expr(), is_zero_expr)?;
+        // To get a single `is_zero`` flag, `and` all the elements
+        let is_zero_expr = is_zeros
+            .iter()
+            .fold(Expression::from(1), |acc, v| acc * v.expr());
+        let is_zero_flag = circuit_builder.create_witin(|| "is_zero flag")?;
+        circuit_builder.require_equal(|| "is_zero_flag", is_zero_expr, is_zero_flag.expr())?;
 
         Ok(IsZeroConfig {
             inverse_limbs: value_inverse.limbs.iter().map(|&v| v).collect_vec(),
-            is_zero: is_zero_wit,
+            is_zero_limbs: is_zeros,
+            is_zero: is_zero_flag,
         })
     }
 }
