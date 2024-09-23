@@ -174,8 +174,8 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                 .collect::<Vec<E>>();
             transcript.append_field_element_exts(values.as_slice());
             let transcript_for_bench = transcript.clone();
-            let proof =
-                Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
+            let proof = Pcs::batch_open_vlmp(&pp, &polys, &comms, &points, &evals, &mut transcript)
+                .unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
@@ -183,8 +183,15 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                     b.iter_batched(
                         || transcript_for_bench.clone(),
                         |mut transcript| {
-                            Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript)
-                                .unwrap();
+                            Pcs::batch_open_vlmp(
+                                &pp,
+                                &polys,
+                                &comms,
+                                &points,
+                                &evals,
+                                &mut transcript,
+                            )
+                            .unwrap();
                         },
                         BatchSize::SmallInput,
                     );
@@ -218,7 +225,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
 
             let backup_transcript = transcript.clone();
 
-            Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
+            Pcs::batch_verify_vlmp(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_verify", format!("{}-{}", num_vars, batch_size)),
@@ -226,7 +233,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                     b.iter_batched(
                         || backup_transcript.clone(),
                         |mut transcript| {
-                            Pcs::batch_verify(
+                            Pcs::batch_verify_vlmp(
                                 &vp,
                                 &comms,
                                 &points,

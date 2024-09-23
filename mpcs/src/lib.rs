@@ -80,7 +80,7 @@ pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     evals: &[Evaluation<E>],
     transcript: &mut Transcript<E>,
 ) -> Result<Pcs::Proof, Error> {
-    Pcs::batch_open(pp, polys, comms, points, evals, transcript)
+    Pcs::batch_open_vlmp(pp, polys, comms, points, evals, transcript)
 }
 
 pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -105,7 +105,7 @@ pub fn pcs_batch_verify<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
 where
     Pcs::Commitment: 'a,
 {
-    Pcs::batch_verify(vp, comms, points, evals, proof, transcript)
+    Pcs::batch_verify_vlmp(vp, comms, points, evals, proof, transcript)
 }
 
 pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
@@ -171,7 +171,9 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
-    fn batch_open(
+    /// Batch version of open that supports variable length opening at multiple
+    /// points (VLMP).
+    fn batch_open_vlmp(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
         comms: &[Self::CommitmentWithData],
@@ -193,6 +195,26 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
+    /// Another version of batch open (Variable Length One Point, VLOP):
+    /// Open polynomials of different number of variables, but still
+    /// at just one point. The size of this point is at least the same
+    /// as the number of variables of the largest polynomials.
+    /// Polynomials of different sizes must be committed separately.
+    /// However, this method does not assume polynomials of the same
+    /// size are committed together. In another word, different commitments
+    /// may be committing polynomials of the same size.
+    /// The length of comms should be the same as polys, and the same as
+    /// evals. Each entry in these arrays corresponds to one group of
+    /// polynomials committed together.
+    fn batch_open_vlop(
+        pp: &Self::ProverParam,
+        polys: &[&[ArcMultilinearExtension<E>]],
+        comms: &[Self::CommitmentWithData],
+        point: &[E],
+        evals: &[&[E]],
+        transcript: &mut Transcript<E>,
+    ) -> Result<Self::Proof, Error>;
+
     fn verify(
         vp: &Self::VerifierParam,
         comm: &Self::Commitment,
@@ -202,7 +224,8 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
 
-    fn batch_verify(
+    /// The corresponding verification method for VLMP.
+    fn batch_verify_vlmp(
         vp: &Self::VerifierParam,
         comms: &[Self::Commitment],
         points: &[Vec<E>],
@@ -211,11 +234,22 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
 
+    /// The corresponding verification method for simple batch open.
     fn simple_batch_verify(
         vp: &Self::VerifierParam,
         comm: &Self::Commitment,
         point: &[E],
         evals: &[E],
+        proof: &Self::Proof,
+        transcript: &mut Transcript<E>,
+    ) -> Result<(), Error>;
+
+    /// The corresponding verification method for VLOP.
+    fn batch_verify_vlop(
+        vp: &Self::VerifierParam,
+        comms: &[Self::Commitment],
+        point: &[E],
+        evals: &[&[E]],
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
@@ -245,7 +279,7 @@ where
         evals: &[Evaluation<E>],
     ) -> Result<Self::Proof, Error> {
         let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::batch_open(pp, polys, comms, points, evals, &mut transcript)
+        Self::batch_open_vlmp(pp, polys, comms, points, evals, &mut transcript)
     }
 
     fn ni_verify(
@@ -270,7 +304,7 @@ where
         Self::Commitment: 'a,
     {
         let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::batch_verify(vp, comms, points, evals, proof, &mut transcript)
+        Self::batch_verify_vlmp(vp, comms, points, evals, proof, &mut transcript)
     }
 }
 
@@ -500,7 +534,8 @@ pub mod test_util {
                 transcript.append_field_element_exts(values.as_slice());
 
                 let proof =
-                    Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
+                    Pcs::batch_open_vlmp(&pp, &polys, &comms, &points, &evals, &mut transcript)
+                        .unwrap();
                 (comms, points, evals, proof, transcript.read_challenge())
             };
             // Batch verify
@@ -533,7 +568,7 @@ pub mod test_util {
                 transcript.append_field_element_exts(values.as_slice());
 
                 let result =
-                    Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript);
+                    Pcs::batch_verify_vlmp(&vp, &comms, &points, &evals, &proof, &mut transcript);
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
                 result

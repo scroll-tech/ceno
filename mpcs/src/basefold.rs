@@ -550,7 +550,7 @@ where
     /// Because otherwise it is complex to match the polynomials and
     /// the commitments, and because currently this high flexibility is
     /// not very useful in ceno.
-    fn batch_open(
+    fn batch_open_vlmp(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
         comms: &[Self::CommitmentWithData],
@@ -862,6 +862,17 @@ where
         })
     }
 
+    fn batch_open_vlop(
+        pp: &Self::ProverParam,
+        polys: &[&[ArcMultilinearExtension<E>]],
+        comms: &[Self::CommitmentWithData],
+        point: &[E],
+        evals: &[&[E]],
+        transcript: &mut Transcript<E>,
+    ) -> Result<Self::Proof, Error> {
+        unimplemented!();
+    }
+
     fn verify(
         vp: &Self::VerifierParam,
         comm: &Self::Commitment,
@@ -950,7 +961,7 @@ where
         Ok(())
     }
 
-    fn batch_verify(
+    fn batch_verify_vlmp(
         vp: &Self::VerifierParam,
         comms: &[Self::Commitment],
         points: &[Vec<E>],
@@ -1180,6 +1191,17 @@ where
         end_timer!(timer);
 
         Ok(())
+    }
+
+    fn batch_verify_vlop(
+        vp: &Self::VerifierParam,
+        comms: &[Self::Commitment],
+        point: &[E],
+        evals: &[&[E]],
+        proof: &Self::Proof,
+        transcript: &mut Transcript<E>,
+    ) -> Result<(), Error> {
+        unimplemented!();
     }
 }
 
