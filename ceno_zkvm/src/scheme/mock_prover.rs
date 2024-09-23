@@ -149,6 +149,11 @@ impl<E: ExtensionField> MockProverError<E> {
     }
 }
 
+pub(crate) fn fmt_expr_2<E: ExtensionField>(expression: &Expression<E>) -> String {
+    let mut wtns = vec![];
+    fmt_expr(expression, &mut wtns, false)
+}
+
 fn fmt_expr<E: ExtensionField>(
     expression: &Expression<E>,
     wtns: &mut Vec<WitnessId>,

@@ -140,6 +140,58 @@ impl<E: ExtensionField> Expression<E> {
             (Expression::ScaledSum(_, _, b), MonomialState::ProductTerm) => Self::is_zero_expr(b),
         }
     }
+
+    #[allow(dead_code)]
+    fn to_monomial_form(&self) -> Expression<E> {
+        fn expand<E: ExtensionField>(expr: Expression<E>) -> Vec<Vec<Expression<E>>> {
+            match expr {
+                Expression::Sum(a, b) => {
+                    let mut expansion = expand(*a);
+                    expansion.extend(expand(*b));
+                    expansion
+                }
+                Expression::Product(a, b) => product_expand(*a, *b),
+                Expression::ScaledSum(a, x, b) => {
+                    let mut expansion = product_expand(*a, *x);
+
+                    let expand_b = expand(*b);
+                    expansion.extend(expand_b);
+
+                    expansion
+                }
+                _ => vec![vec![expr]],
+            }
+        }
+
+        fn product_expand<E: ExtensionField>(
+            a: Expression<E>,
+            b: Expression<E>,
+        ) -> Vec<Vec<Expression<E>>> {
+            let expand_a = expand(a);
+            let expand_b = expand(b);
+
+            let mut expansion = Vec::new();
+
+            for a_element_prod in expand_a {
+                for b_element_prod in expand_b.clone() {
+                    let mut prod = a_element_prod.clone();
+                    prod.extend(b_element_prod.clone());
+                    expansion.push(prod);
+                }
+            }
+            expansion
+        }
+
+        let sum = expand(self.clone());
+
+        // TODO combine duplicate terms in the sum
+
+        sum.into_iter()
+            .fold(Expression::Constant(0.into()), |acc, prod| {
+                let prod_expr = prod.into_iter().reduce(|acc, x| acc * x).unwrap();
+                acc + prod_expr
+            })
+    }
 }
 
 impl<E: ExtensionField> Neg for Expression<E> {
@@ -493,7 +545,10 @@ impl<F: SmallField, E: ExtensionField<BaseField = F>> From<usize> for Expression
 mod tests {
     use goldilocks::GoldilocksExt2;
 
-    use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
+    use crate::{
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
+        scheme::{mock_prover::fmt_expr_2 as fmt_expr, utils::eval_by_expr},
+    };
 
     use super::{Expression, ToExpr};
     use ff::Field;
@@ -618,5 +673,63 @@ mod tests {
         let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr())
             * (Into::<Expression<E>>::into(2usize) + y.expr());
         assert!(!expr.is_monomial_form());
+    }
+
+    #[test]
+    fn test_to_monomial_form_1() {
+        let w_0 = Expression::<GoldilocksExt2>::WitIn(0);
+        let w_1 = Expression::<GoldilocksExt2>::WitIn(1);
+
+        let expr = (w_0.clone() + w_1.clone()) * (w_0 + w_1);
+
+        assert!(!expr.is_monomial_form(), "expr is not in monomial form");
+        assert_eq!(
+            fmt_expr(&expr),
+            "(WitIn(0) + WitIn(1)) * (WitIn(0) + WitIn(1))"
+        );
+        let result_1 = eval_by_expr(&[1.into(), 10000.into()], &[], &expr);
+
+        let expr = expr.to_monomial_form();
+        assert!(expr.is_monomial_form(), "expr must now be monomial form");
+        assert_eq!(
+            fmt_expr(&expr),
+            "0 + WitIn(0) * WitIn(0) + WitIn(0) * WitIn(1) + WitIn(1) * WitIn(0) + WitIn(1) * WitIn(1)"
+        );
+
+        let result_2 = eval_by_expr(&[1.into(), 10000.into()], &[], &expr);
+        assert_eq!(
+            result_1, result_2,
+            "evaluation before and after must be equal"
+        );
+    }
+
+    #[test]
+    fn test_to_monomial_form_2() {
+        let w_0 = Expression::<GoldilocksExt2>::WitIn(0);
+        let w_1 = Expression::<GoldilocksExt2>::WitIn(1);
+        let c_4 = Expression::<GoldilocksExt2>::Constant(4.into());
+        let c_7 = Expression::<GoldilocksExt2>::Constant(7.into());
+
+        let expr = (w_0.clone() + w_1.clone() + c_4) * (w_0 + w_1 + c_7);
+
+        assert!(!expr.is_monomial_form(), "expr is not in monomial form");
+        assert_eq!(
+            fmt_expr(&expr),
+            "(WitIn(0) + WitIn(1) + 4) * (WitIn(0) + WitIn(1) + 7)"
+        );
+        let result_1 = eval_by_expr(&[1.into(), 10000.into()], &[], &expr);
+
+        let expr = expr.to_monomial_form();
+        assert!(expr.is_monomial_form(), "expr must now be monomial form");
+        assert_eq!(
+            fmt_expr(&expr),
+            "0 + WitIn(0) * WitIn(0) + WitIn(0) * WitIn(1) + 7 * WitIn(0) + 0 + WitIn(1) * WitIn(0) + WitIn(1) * WitIn(1) + 7 * WitIn(1) + 0 + 4 * WitIn(0) + 0 + 4 * WitIn(1) + 0 + 28"
+        );
+
+        let result_2 = eval_by_expr(&[1.into(), 10000.into()], &[], &expr);
+        assert_eq!(
+            result_1, result_2,
+            "evaluation before and after must be equal"
+        );
     }
 }
