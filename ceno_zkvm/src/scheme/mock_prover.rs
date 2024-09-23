@@ -19,6 +19,7 @@ use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{
     collections::HashSet,
+    fmt::Write,
     fs::{self, File},
     hash::Hash,
     io::{BufReader, ErrorKind},
@@ -158,7 +159,24 @@ fn fmt_expr<E: ExtensionField>(
             wtns.push(*wit_in);
             format!("WitIn({})", wit_in)
         }
-        Expression::Challenge(id, _, _, _) => format!("Challenge({})", id),
+        Expression::Challenge(id, pow, scaler, offset) => {
+            if *pow == 1 && *scaler == 1.into() && *offset == 0.into() {
+                format!("Challenge({})", id)
+            } else {
+                let mut s = String::new();
+                if *scaler != 1.into() {
+                    write!(s, "{}*", fmt_field(scaler)).unwrap();
+                }
+                write!(s, "Challenge({})", id,).unwrap();
+                if *pow > 1 {
+                    write!(s, "^{}", pow).unwrap();
+                }
+                if *offset != 0.into() {
+                    write!(s, "+{}", fmt_field(offset)).unwrap();
+                }
+                s
+            }
+        }
         Expression::Constant(constant) => fmt_base_field::<E>(constant, true).to_string(),
         Expression::Fixed(fixed) => format!("{:?}", fixed),
         Expression::Sum(left, right) => {
@@ -191,15 +209,19 @@ fn fmt_expr<E: ExtensionField>(
 fn fmt_field<E: ExtensionField>(field: &E) -> String {
     let name = format!("{:?}", field);
     let name = name.split('(').next().unwrap_or("ExtensionField");
-    format!(
-        "{name}[{}]",
-        field
-            .as_bases()
-            .iter()
-            .map(|b| fmt_base_field::<E>(b, false))
-            .collect::<Vec<String>>()
-            .join(",")
-    )
+
+    let data = field
+        .as_bases()
+        .iter()
+        .map(|b| fmt_base_field::<E>(b, false))
+        .collect::<Vec<String>>();
+    let only_one_limb = field.as_bases()[1..].iter().all(|&x| x == 0.into());
+
+    if only_one_limb {
+        data[0].to_string()
+    } else {
+        format!("{name}[{}]", data.join(","))
+    }
 }
 
 fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField, add_prn: bool) -> String {
@@ -532,7 +554,10 @@ mod tests {
         let mut wtns_acc = vec![];
         let s = fmt_expr(&(a * b), &mut wtns_acc, false);
 
-        assert_eq!(s, "Challenge(0) + Challenge(0) + Challenge(0)");
+        assert_eq!(
+            s,
+            "18*Challenge(0)^7+28 + 21*Challenge(0)^2 + 24*Challenge(0)^5"
+        );
     }
 
     #[test]
@@ -543,7 +568,7 @@ mod tests {
         let mut wtns_acc = vec![];
         let s = fmt_expr(&(a * b), &mut wtns_acc, false);
 
-        assert_eq!(s, "Challenge(0) + Challenge(0) + Challenge(0)");
+        assert_eq!(s, "Challenge(0)^2");
     }
 
     #[test]
