@@ -588,7 +588,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.lk_table_expressions
                 .iter()
                 .flat_map(|lk| vec![&lk.multiplicity, &lk.values]), // p, q
-        ) // p
+        )
         .zip_eq(in_evals)
         .any(|(expr, expected_evals)| {
             eval_by_expr_with_fixed(
