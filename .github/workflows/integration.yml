@@ -1,0 +1,62 @@
+name: Integrations
+
+on:
+  merge_group:
+  pull_request:
+    types: [synchronize, opened, reopened, ready_for_review]
+  push:
+    branches:
+      - master
+
+jobs:
+  skip_check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
+        with:
+          cancel_others: 'true'
+          concurrent_skipping: 'same_content_newer'
+          paths_ignore: '["**/README.md"]'
+          do_not_skip: '["pull_request", "workflow_dispatch", "schedule", "merge_group"]'
+
+  lints:
+    needs: [skip_check]
+    if: |
+      github.event.pull_request.draft == false &&
+      (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
+
+    name: Various lints
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, riscv32im-unknown-none-elf]
+        # Exclude the riscv32im-unknown-none-elf target
+        exclude:
+          - target: riscv32im-unknown-none-elf
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Cargo cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run example
+        uses: actions-rs/cargo@v1
+        env:
+          RAYON_NUM_THREADS: 2
+        with:
+          command: run
+          args: --package ceno_zkvm --example riscv_add --target ${{ matrix.target }} -- --start 10 --end 11
+

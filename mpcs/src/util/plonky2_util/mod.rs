@@ -5,7 +5,6 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use core::{
     hint::unreachable_unchecked,
     mem::size_of,

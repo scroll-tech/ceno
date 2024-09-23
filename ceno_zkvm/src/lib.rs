@@ -18,4 +18,4 @@ mod virtual_polys;
 mod witness;
 
 pub use structs::ROMType;
-pub use uint::UIntValue;
+pub use uint::Value;

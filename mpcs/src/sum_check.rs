@@ -50,6 +50,7 @@ where
     type VerifierParam: Clone + Debug;
     type RoundMessage: ClassicSumCheckRoundMessage<E> + Clone + Debug;
 
+    #[allow(clippy::type_complexity)]
     fn prove(
         pp: &Self::ProverParam,
         num_vars: usize,

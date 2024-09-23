@@ -12,12 +12,14 @@ ff.workspace = true
 goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
+rand_chacha.workspace = true
 
 transcript = { path = "../transcript" }
 sumcheck = { version = "0.1.0", path = "../sumcheck" }
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
 ff_ext = { path = "../ff_ext" }
 ceno_emul = { path = "../ceno_emul" }
+mpcs = { path = "../mpcs" }
 
 itertools = "0.12.0"
 strum = "0.25.0"
@@ -29,12 +31,19 @@ tracing = "0.1.40"
 
 rand = "0.8"
 thread_local = "1.1.8"
+generic_static = "0.2.0"
+clap = { version = "4.5.17", features = ["derive"] }
 
 [dev-dependencies]
 pprof = { version = "0.13", features = ["flamegraph"]}
 criterion = { version = "0.5", features = ["html_reports"] }
 cfg-if = "1.0.0"
 const_env = "0.1.2"
+serde_json = "1.0.108"
+base64 = "0.22.1"
+
+[build-dependencies]
+glob = "0.3"
 
 [features]
 default = ["riv32"]

@@ -3,3 +3,4 @@
 *.log
 log.txt
 logs/
+table_cache_dev_*

@@ -125,6 +125,14 @@ where
     pub fn is_base(&self) -> bool {
         self.is_base
     }
+
+    pub fn trivial_num_vars<Spec: BasefoldSpec<E>>(num_vars: usize) -> bool {
+        num_vars <= Spec::get_basecode_msg_size_log()
+    }
+
+    pub fn is_trivial<Spec: BasefoldSpec<E>>(&self) -> bool {
+        Self::trivial_num_vars::<Spec>(self.num_vars)
+    }
 }
 
 impl<E: ExtensionField> From<BasefoldCommitmentWithData<E>> for Digest<E::BaseField>
@@ -286,21 +294,21 @@ impl<E: ExtensionField> ProofQueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn as_single<'a>(&'a self) -> &'a QueriesResultWithMerklePath<E> {
+    pub fn as_single(&self) -> &QueriesResultWithMerklePath<E> {
         match self {
             Self::Single(x) => x,
             _ => panic!("Not a single query result"),
         }
     }
 
-    pub fn as_batched<'a>(&'a self) -> &'a BatchedQueriesResultWithMerklePath<E> {
+    pub fn as_batched(&self) -> &BatchedQueriesResultWithMerklePath<E> {
         match self {
             Self::Batched(x) => x,
             _ => panic!("Not a batched query result"),
         }
     }
 
-    pub fn as_simple_batched<'a>(&'a self) -> &'a SimpleBatchQueriesResultWithMerklePath<E> {
+    pub fn as_simple_batched(&self) -> &SimpleBatchQueriesResultWithMerklePath<E> {
         match self {
             Self::SimpleBatched(x) => x,
             _ => panic!("Not a simple batched query result"),
@@ -318,6 +326,29 @@ where
     pub(crate) final_message: Vec<E>,
     pub(crate) query_result_with_merkle_path: ProofQueriesResultWithMerklePath<E>,
     pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
+    pub(crate) trivial_proof: Vec<FieldType<E>>,
+}
+
+impl<E: ExtensionField> BasefoldProof<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn trivial(evals: Vec<FieldType<E>>) -> Self {
+        Self {
+            sumcheck_messages: vec![],
+            roots: vec![],
+            final_message: vec![],
+            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Single(
+                QueriesResultWithMerklePath::empty(),
+            ),
+            sumcheck_proof: None,
+            trivial_proof: evals,
+        }
+    }
+
+    pub fn is_trivial(&self) -> bool {
+        !self.trivial_proof.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
