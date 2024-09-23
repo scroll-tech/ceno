@@ -10,6 +10,8 @@ pub mod general;
 pub mod global_state;
 pub mod register;
 pub mod utils;
+mod memory;
+mod read_write;
 
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
@@ -40,5 +42,31 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
+}
+
+/// The common representation of a memory value.
+/// Format: `[u16; 2]`, least-significant-first.
+pub type MemoryExpr<E> = [Expression<E>; 2];
+
+pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
+    fn memory_read(
+        &mut self,
+        name_fn: N,
+        memory_id: &WitIn,
+        prev_ts: Expression<E>,
+        ts: Expression<E>,
+        value: crate::chip_handler::MemoryExpr<E>,
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn memory_write(
+        &mut self,
+        name_fn: N,
+        memory_id: &WitIn,
+        prev_ts: Expression<E>,
+        ts: Expression<E>,
+        prev_values: crate::chip_handler::MemoryExpr<E>,
+        value: crate::chip_handler::MemoryExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 }
