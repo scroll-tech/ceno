@@ -548,6 +548,15 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 println!("======================================================");
                 println!("Error: {} constraints not satisfied", errors.len());
 
+                println!(
+                    r"Hints:
+                        - If you encounter a constraint error that sporadically occurs in different environments
+                          (e.g., passes locally but fails in CI),
+                          this often points to unassigned witnesses during the assignment phase.
+                          Accessing these cells before they are properly written leads to undefined behavior.
+                    "
+                );
+
                 for error in errors {
                     error.print(wits_in, &cb.cs.witin_namespace_map);
                 }
