@@ -1180,7 +1180,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "plonky2",
- "poseidon",
+ "poseidon 0.2.0",
  "rand",
  "rand_chacha",
  "rayon",
@@ -1475,6 +1475,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38f6d39893cca0701371e3c27294f09797214b86f1fb951b89ade8ec04e2abab"
 dependencies = [
  "plotters-backend",
+]
+
+[[package]]
+name = "poseidon"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "criterion",
+ "ff",
+ "goldilocks",
+ "plonky2",
+ "rand",
+ "serde",
+ "unroll",
 ]
 
 [[package]]
@@ -2205,7 +2219,7 @@ dependencies = [
  "ff_ext",
  "goldilocks",
  "halo2curves 0.1.0",
- "poseidon",
+ "poseidon 0.2.0",
  "rayon",
  "serde",
 ]

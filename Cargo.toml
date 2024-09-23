@@ -12,7 +12,8 @@ members = [
     "singer-utils",
     "sumcheck",
     "transcript",
-    "ceno_zkvm"
+    "ceno_zkvm",
+    "poseidon"
 ]
 
 [workspace.package]

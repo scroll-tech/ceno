@@ -16,8 +16,6 @@ pub struct IOPProof<E: ExtensionField> {
 impl<E: ExtensionField> IOPProof<E> {
     #[allow(dead_code)]
     pub fn extract_sum(&self) -> E {
-        
-
         self.proofs[0].evaluations[0] + self.proofs[0].evaluations[1]
     }
 }

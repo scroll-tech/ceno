@@ -14,11 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
-use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
+use super::addr::{ByteAddr, RegIdx, Word, WordAddr, WORD_SIZE};
 
 pub trait EmuContext {
     // Handle environment call
@@ -122,6 +122,18 @@ pub enum InsnCategory {
     Invalid,
 }
 use InsnCategory::*;
+
+#[derive(Clone, Copy, Debug)]
+pub enum InsnFormat {
+    R,
+    I,
+    S,
+    B,
+    U,
+    J,
+}
+use InsnCategory::*;
+use InsnFormat::*;
 
 #[derive(Clone, Copy, Debug)]
 pub enum InsnFormat {
