@@ -7,7 +7,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::Expression,
-    gadgets::IsZeroConfig,
+    gadgets::IsEqualConfig,
     instructions::{
         riscv::{b_insn::BInstructionConfig, constants::UInt, RIVInstruction},
         Instruction,
@@ -23,7 +23,7 @@ pub struct BeqConfig<E: ExtensionField> {
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
 
-    equal: IsZeroConfig,
+    equal: IsEqualConfig,
 }
 
 pub struct BeqCircuit<E, I>(PhantomData<(E, I)>);
@@ -42,7 +42,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
 
         let equal =
-            IsZeroConfig::construct_circuit(circuit_builder, rs2_read.value() - rs1_read.value())?;
+            IsEqualConfig::construct_circuit(circuit_builder, rs2_read.value(), rs1_read.value())?;
 
         let branch_taken_bit = match I::INST_KIND {
             InsnKind::BEQ => equal.expr(),
@@ -86,10 +86,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
             .rs2_read
             .assign_limbs(instance, Value::new_unchecked(rs2_read).u16_fields());
 
-        let diff = E::BaseField::from(rs2_read as u64) - E::BaseField::from(rs1_read as u64);
-        config
-            .equal
-            .assign_instance::<E>(instance, lk_multiplicity, &diff)?;
+        config.equal.assign_instance(
+            instance,
+            E::BaseField::from(rs2_read as u64),
+            E::BaseField::from(rs1_read as u64),
+        )?;
 
         Ok(())
     }
