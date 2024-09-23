@@ -419,6 +419,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         res
     }
+
+    pub fn value(&self) -> Expression<E> {
+        let base = Expression::from(1 << C);
+        self.expr()
+            .into_iter()
+            .rev()
+            .reduce(|sum, limb| sum * base.clone() + limb)
+            .unwrap()
+    }
 }
 
 /// Construct `UIntLimbs` from `Vec<CellId>`
