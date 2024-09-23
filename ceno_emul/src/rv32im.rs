@@ -14,11 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
-use super::addr::{ByteAddr, RegIdx, Word, WordAddr, WORD_SIZE};
+use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
 
 pub trait EmuContext {
     // Handle environment call
@@ -307,13 +307,20 @@ impl DecodedInstruction {
 
     /// Get the decoded immediate, or the funct7 field depending on the instruction format.
     pub fn imm_or_funct7(&self) -> u32 {
-        match self.codes().format {
-            R => self.func7,
-            I => self.imm_i(),
-            S => self.imm_s(),
-            B => self.imm_b(),
-            U => self.imm_u(),
-            J => self.imm_j(),
+        match self.codes() {
+            InsnCodes { format: R, .. } => self.func7,
+            InsnCodes {
+                format: I,
+                opcode: 0x13,
+                func3: 0x05 | 0x01, // SRLI, SLLI
+                func7: 0x00 | 0x2,  // SRAI
+                ..
+            } => 2u32.pow(self.rs2()), // decode to 2.pow(rs2)
+            InsnCodes { format: I, .. } => self.imm_i(),
+            InsnCodes { format: S, .. } => self.imm_s(),
+            InsnCodes { format: B, .. } => self.imm_b(),
+            InsnCodes { format: U, .. } => self.imm_u(),
+            InsnCodes { format: J, .. } => self.imm_j(),
         }
     }
 
