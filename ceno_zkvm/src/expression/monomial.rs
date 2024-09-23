@@ -189,7 +189,7 @@ mod tests {
         let z = || WitIn(2);
         let n = || Constant(104.into());
         let m = || Constant(-F::from(599));
-        let r = || Challenge(0, 1, E::from(1), E::from(1));
+        let r = || Challenge(0, 1, E::from(1), E::from(0));
 
         let test_exprs: &[Expression<E>] = &[
             a() * x() * x(),
@@ -203,15 +203,11 @@ mod tests {
             (x() + y() + a()) * b() * (y() + z()) + c(),
             (r() * x() + n() + z()) * m() * y(),
             (b() + y() + m() * z()) * (x() + y() + c()),
-            // TODO: not working.
             a() * r() * x(),
         ];
 
         for factored in test_exprs {
             let monomials = factored.to_monomial_form_inner();
-            println!();
-            println!("Factored: \n{:?}\n", factored);
-            println!("Monomials: \n{:?}\n", monomials);
             assert!(monomials.is_monomial_form());
 
             // Check that the two forms are equivalent (Schwartz-Zippel test).
