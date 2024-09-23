@@ -8,9 +8,9 @@ use crate::{
 
 pub mod general;
 pub mod global_state;
+pub mod memory;
 pub mod register;
 pub mod utils;
-pub mod memory;
 
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;

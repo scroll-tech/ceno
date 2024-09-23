@@ -1,13 +1,24 @@
+use crate::{
+    chip_handler::{MemoryChipOperations, MemoryExpr},
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{Expression, ToExpr, WitIn},
+    instructions::riscv::config::ExprLtConfig,
+    structs::RAMType,
+};
 use ff_ext::ExtensionField;
-use crate::chip_handler::{MemoryChipOperations, MemoryExpr};
-use crate::circuit_builder::CircuitBuilder;
-use crate::error::ZKVMError;
-use crate::expression::{Expression, WitIn, ToExpr};
-use crate::instructions::riscv::config::ExprLtConfig;
-use crate::structs::RAMType;
 
-impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperations<E, NR, N> for CircuitBuilder<'a, E> {
-    fn memory_read(&mut self, name_fn: N, memory_id: &WitIn, prev_ts: Expression<E>, ts: Expression<E>, value: MemoryExpr<E>) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
+impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperations<E, NR, N>
+    for CircuitBuilder<'a, E>
+{
+    fn memory_read(
+        &mut self,
+        name_fn: N,
+        memory_id: &WitIn,
+        prev_ts: Expression<E>,
+        ts: Expression<E>,
+        value: MemoryExpr<E>,
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -19,7 +30,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                     value.to_vec(),
                     vec![prev_ts.clone()],
                 ]
-                    .concat(),
+                .concat(),
             );
             // Write (a, v, t)
             let write_record = cb.rlc_chip_record(
@@ -31,7 +42,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                     value.to_vec(),
                     vec![ts.clone()],
                 ]
-                    .concat(),
+                .concat(),
             );
             cb.read_record(|| "read_record", read_record)?;
             cb.write_record(|| "write_record", write_record)?;
@@ -45,7 +56,15 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         })
     }
 
-    fn memory_write(&mut self, name_fn: N, memory_id: &WitIn, prev_ts: Expression<E>, ts: Expression<E>, prev_values: MemoryExpr<E>, value: MemoryExpr<E>) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
+    fn memory_write(
+        &mut self,
+        name_fn: N,
+        memory_id: &WitIn,
+        prev_ts: Expression<E>,
+        ts: Expression<E>,
+        prev_values: MemoryExpr<E>,
+        value: MemoryExpr<E>,
+    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -57,7 +76,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                     prev_values.to_vec(),
                     vec![prev_ts.clone()],
                 ]
-                    .concat(),
+                .concat(),
             );
             // Write (a, v, t)
             let write_record = cb.rlc_chip_record(
@@ -69,7 +88,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                     value.to_vec(),
                     vec![ts.clone()],
                 ]
-                    .concat(),
+                .concat(),
             );
             cb.read_record(|| "read_record", read_record)?;
             cb.write_record(|| "write_record", write_record)?;
