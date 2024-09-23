@@ -512,20 +512,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .zip(alpha_pow.iter())
                 .map(|(point_and_eval, alpha)| *alpha * point_and_eval.eval)
                 .sum::<E>()
-                + logup_p_point_and_eval
-                    .iter()
-                    .zip_eq(logup_q_point_and_eval.iter())
-                    .zip_eq(
-                        alpha_pow
-                            .iter()
-                            .skip(prod_point_and_eval.len())
-                            .chunks(2)
-                            .into_iter(),
-                    )
-                    .map(|((p_point_and_eval, q_point_and_eval), mut alpha)| {
-                        let (alpha_p, alpha_q) = (alpha.next().unwrap(), alpha.next().unwrap());
-                        *alpha_p * p_point_and_eval.eval + *alpha_q * q_point_and_eval.eval
-                    })
+                + interleave(&logup_p_point_and_eval, &logup_q_point_and_eval)
+                    .zip_eq(alpha_pow.iter().skip(prod_point_and_eval.len()))
+                    .map(|(point_n_eval, alpha)| *alpha * point_n_eval.eval)
                     .sum::<E>();
             let sel_subclaim = IOPVerifierState::verify(
                 claim_sum,
@@ -586,7 +575,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
             (
                 input_opening_point,
-                vec![proof.rw_in_evals.to_vec(), proof.lk_in_evals.to_vec()].concat(),
+                [proof.rw_in_evals.to_vec(), proof.lk_in_evals.to_vec()].concat(),
             )
         };
         // verify records (degree = 1) statement, thus no sumcheck
@@ -598,8 +587,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         .chain(
             cs.lk_table_expressions
                 .iter()
-                .flat_map(|lk| vec![&lk.multiplicity, &lk.values])
-                .into_iter(), // p, q
+                .flat_map(|lk| vec![&lk.multiplicity, &lk.values]), // p, q
         ) // p
         .zip_eq(in_evals)
         .any(|(expr, expected_evals)| {

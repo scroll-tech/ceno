@@ -705,7 +705,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             })
             .collect::<Vec<_>>();
         let lk_denominator_last_layer = lk_d_wit
-            .into_iter()
+            .iter_mut()
             .map(|wit| {
                 let (first, second) = wit
                     .get_ext_field_vec()
@@ -737,7 +737,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect_vec();
         let lk_wit_layers = lk_numerator_last_layer
             .into_iter()
-            .zip(lk_denominator_last_layer.into_iter())
+            .zip(lk_denominator_last_layer)
             .map(|(lk_n, lk_d)| infer_tower_logup_witness(Some(lk_n), lk_d))
             .collect_vec();
         exit_span!(span);
@@ -832,7 +832,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             // pattern [r1, w1, r2, w2, ...] same pair are chain together
             r_wit_layers
                 .into_iter()
-                .zip(w_wit_layers.into_iter())
+                .zip(w_wit_layers)
                 .flat_map(|(r, w)| {
                     vec![
                         TowerProverSpec { witness: r },
