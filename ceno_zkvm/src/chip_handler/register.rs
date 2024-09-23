@@ -29,7 +29,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    value.0.to_vec(),
+                    value.to_vec(),
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -41,7 +41,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    value.0.to_vec(),
+                    value.to_vec(),
                     vec![ts.clone()],
                 ]
                 .concat(),
@@ -75,7 +75,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    prev_values.0.to_vec(),
+                    prev_values.to_vec(),
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -87,7 +87,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    value.0.to_vec(),
+                    value.to_vec(),
                     vec![ts.clone()],
                 ]
                 .concat(),

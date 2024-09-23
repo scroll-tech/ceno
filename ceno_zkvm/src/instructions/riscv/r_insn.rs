@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 
 use super::{
     config::ExprLtConfig,
-    constants::{UInt, PC_STEP_SIZE},
+    constants::{PC_STEP_SIZE, UInt},
 };
 use crate::{
     chip_handler::{
@@ -96,7 +96,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
             &rd_id,
             prev_rd_ts.expr(),
             ts,
-            prev_rd_value.register_expr(),
+            prev_rd_value.as_expr(),
             rd_written,
         )?;
 

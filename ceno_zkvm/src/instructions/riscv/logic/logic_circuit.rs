@@ -86,9 +86,9 @@ impl<E: ExtensionField> LogicConfig<E> {
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
             insn_kind,
-            rs1_read.register_expr(),
-            rs2_read.register_expr(),
-            rd_written.register_expr(),
+            rs1_read.as_expr(),
+            rs2_read.as_expr(),
+            rd_written.as_expr(),
         )?;
 
         Ok(Self {

@@ -5,9 +5,7 @@ use ff_ext::ExtensionField;
 
 use super::{config::ExprLtConfig, constants::PC_STEP_SIZE};
 use crate::{
-    chip_handler::{
-        GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
-    },
+    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterExpr, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
