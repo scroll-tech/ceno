@@ -115,7 +115,9 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Constant(c) => *c == E::BaseField::ZERO,
             Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
             Expression::Product(a, b) => Self::is_zero_expr(a) || Self::is_zero_expr(b),
-            Expression::ScaledSum(_, _, _) => false,
+            Expression::ScaledSum(x, a, b) => {
+                (Self::is_zero_expr(x) || Self::is_zero_expr(a)) && Self::is_zero_expr(b)
+            }
             Expression::Challenge(_, _, _, _) => false,
         }
     }
@@ -318,18 +320,14 @@ impl<E: ExtensionField> Mul for Expression<E> {
         match (&self, &rhs) {
             // constant * witin
             (c @ Expression::Constant(_), w @ Expression::WitIn(..))
-            | (w @ Expression::WitIn(..), c @ Expression::Constant(_)) => Expression::ScaledSum(
-                Box::new(w.clone()),
-                Box::new(c.clone()),
-                Box::new(Expression::Constant(E::BaseField::ZERO)),
-            ),
+            | (w @ Expression::WitIn(..), c @ Expression::Constant(_)) => {
+                Expression::Product(Box::new(w.clone()), Box::new(c.clone()))
+            }
             // challenge * witin
             (c @ Expression::Challenge(..), w @ Expression::WitIn(..))
-            | (w @ Expression::WitIn(..), c @ Expression::Challenge(..)) => Expression::ScaledSum(
-                Box::new(w.clone()),
-                Box::new(c.clone()),
-                Box::new(Expression::Constant(E::BaseField::ZERO)),
-            ),
+            | (w @ Expression::WitIn(..), c @ Expression::Challenge(..)) => {
+                Expression::Product(Box::new(w.clone()), Box::new(c.clone()))
+            }
             // constant * challenge
             (
                 Expression::Constant(c1),
