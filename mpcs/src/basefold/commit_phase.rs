@@ -23,8 +23,7 @@ use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
 use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-    ParallelSlice,
+    IndexedParallelIterator, IntoParallelIterator, ParallelIterator, ParallelSlice,
 };
 
 use super::structure::BasefoldCommitmentWithData;
@@ -180,180 +179,6 @@ where
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 #[allow(clippy::too_many_arguments)]
-pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
-    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-    point: &[E],
-    comms: &[BasefoldCommitmentWithData<E>],
-    transcript: &mut Transcript<E>,
-    num_vars: usize,
-    num_rounds: usize,
-    coeffs: &[E],
-    hasher: &Hasher<E::BaseField>,
-) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let timer = start_timer!(|| "Batch Commit phase");
-    assert_eq!(point.len(), num_vars);
-    let mut trees = Vec::with_capacity(num_vars);
-    let mut running_oracle = vec![E::ZERO; 1 << (num_vars + Spec::get_rate_log())];
-
-    let build_oracle_timer = start_timer!(|| "Basefold build initial oracle");
-    // Before the interaction, collect all the polynomials whose num variables match the
-    // max num variables
-    let running_oracle_len = running_oracle.len();
-    comms
-        .iter()
-        .enumerate()
-        .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
-        .for_each(|(index, comm)| {
-            running_oracle
-                .iter_mut()
-                .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
-                .for_each(|(r, a)| *r += a * coeffs[index]);
-        });
-    end_timer!(build_oracle_timer);
-
-    let build_oracle_timer = start_timer!(|| "Basefold build initial sumcheck evals");
-    // Unlike the FRI part, the sum-check part still follows the original procedure,
-    // and linearly combine all the polynomials once for all
-    let mut sum_of_all_evals_for_sumcheck = vec![E::ZERO; 1 << num_vars];
-    comms.iter().enumerate().for_each(|(index, comm)| {
-        sum_of_all_evals_for_sumcheck
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(pos, r)| {
-                // Evaluating the multilinear polynomial outside of its interpolation hypercube
-                // is equivalent to repeating each element in place.
-                // Here is the tricky part: the bh_evals are stored in big endian, but we want
-                // to align the polynomials to the variable with index 0 before adding them
-                // together. So each element is repeated by
-                // sum_of_all_evals_for_sumcheck.len() / bh_evals.len() times
-                *r += field_type_index_ext(
-                    &comm.polynomials_bh_evals[0],
-                    pos >> (num_vars - log2_strict(comm.polynomials_bh_evals[0].len())),
-                ) * coeffs[index]
-            });
-    });
-    end_timer!(build_oracle_timer);
-
-    // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let mut eq = build_eq_x_r_vec(point);
-    reverse_index_bits_in_place(&mut eq);
-
-    let sumcheck_timer = start_timer!(|| "Basefold first round");
-    let mut sumcheck_messages = Vec::with_capacity(num_rounds + 1);
-    let mut last_sumcheck_message =
-        sum_check_first_round(&mut eq, &mut sum_of_all_evals_for_sumcheck);
-    sumcheck_messages.push(last_sumcheck_message.clone());
-    end_timer!(sumcheck_timer);
-
-    let mut roots = Vec::with_capacity(num_rounds - 1);
-    let mut final_message = Vec::new();
-    let mut running_tree_inner = Vec::new();
-    for i in 0..num_rounds {
-        let sumcheck_timer = start_timer!(|| format!("Batch basefold round {}", i));
-        // For the first round, no need to send the running root, because this root is
-        // committing to a vector that can be recovered from linearly combining other
-        // already-committed vectors.
-        transcript.append_field_element_exts(&last_sumcheck_message);
-
-        let challenge = transcript
-            .get_and_append_challenge(b"commit round")
-            .elements;
-
-        // Fold the current oracle for FRI
-        let mut new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
-            pp,
-            log2_strict(running_oracle.len()) - 1,
-            &running_oracle,
-            challenge,
-        );
-
-        if i > 0 {
-            let running_tree = MerkleTree::<E>::from_inner_leaves(
-                running_tree_inner,
-                FieldType::Ext(running_oracle),
-            );
-            trees.push(running_tree);
-        }
-
-        if i < num_rounds - 1 {
-            last_sumcheck_message =
-                sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
-            sumcheck_messages.push(last_sumcheck_message.clone());
-            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle, hasher);
-            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
-            write_digest_to_transcript(&running_root, transcript);
-            roots.push(running_root);
-
-            // Then merge the rest polynomials whose sizes match the current running oracle
-            let running_oracle_len = new_running_oracle.len();
-            comms
-                .iter()
-                .enumerate()
-                .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
-                .for_each(|(index, comm)| {
-                    new_running_oracle
-                        .iter_mut()
-                        .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
-                        .for_each(|(r, a)| *r += a * coeffs[index]);
-                });
-            running_oracle = new_running_oracle;
-        } else {
-            // Clear the value so the compiler does not think they are moved
-            running_oracle = Vec::new();
-            running_tree_inner = Vec::new();
-            // The difference of the last round is that we don't need to compute the message,
-            // and we don't interpolate the small polynomials. So after the last round,
-            // sum_of_all_evals_for_sumcheck is exactly the evaluation representation of the
-            // folded polynomial so far.
-            sum_check_last_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
-            // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
-            reverse_index_bits_in_place(&mut sum_of_all_evals_for_sumcheck);
-            transcript.append_field_element_exts(&sum_of_all_evals_for_sumcheck);
-            final_message = sum_of_all_evals_for_sumcheck;
-            // To prevent the compiler from complaining that the value is moved
-            sum_of_all_evals_for_sumcheck = Vec::new();
-
-            if cfg!(feature = "sanity-check") {
-                // If the prover is honest, in the last round, the running oracle
-                // on the prover side should be exactly the encoding of the folded polynomial.
-
-                let mut coeffs = final_message.clone();
-                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
-                    reverse_index_bits_in_place(&mut coeffs);
-                }
-                interpolate_over_boolean_hypercube(&mut coeffs);
-                let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
-                    pp,
-                    &FieldType::Ext(coeffs),
-                );
-                let basecode = match basecode {
-                    FieldType::Ext(x) => x,
-                    _ => panic!("Expected ext field"),
-                };
-
-                reverse_index_bits_in_place(&mut new_running_oracle);
-                assert_eq!(basecode, new_running_oracle);
-            }
-        }
-        end_timer!(sumcheck_timer);
-    }
-    end_timer!(timer);
-    (
-        trees,
-        BasefoldCommitPhaseProof {
-            sumcheck_messages,
-            roots,
-            final_message,
-        },
-    )
-}
-
-// outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-#[allow(clippy::too_many_arguments)]
 pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
@@ -495,7 +320,10 @@ where
     )
 }
 
-fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: BasefoldSpec<E>>(
+pub(crate) fn basefold_one_round_by_interpolation_weights<
+    E: ExtensionField,
+    Spec: BasefoldSpec<E>,
+>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     level: usize,
     values: &Vec<E>,

@@ -15,10 +15,8 @@ use std::{marker::PhantomData, slice};
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
 use super::{
-    query_phase::{
-        BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
-        SimpleBatchQueriesResultWithMerklePath,
-    },
+    batch_vlmp::BatchedQueriesResultWithMerklePath,
+    query_phase::{QueriesResultWithMerklePath, SimpleBatchQueriesResultWithMerklePath},
     Basecode, BasecodeDefaultSpec,
 };
 
