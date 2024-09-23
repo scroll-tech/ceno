@@ -354,7 +354,7 @@ impl<E: ExtensionField> Mul for Expression<E> {
                             Box::new(Expression::Challenge(
                                 *challenge_id1,
                                 *pow1,
-                                *offset2,
+                                *offset2 * *s1,
                                 E::ZERO,
                             )),
                         )),
@@ -362,7 +362,7 @@ impl<E: ExtensionField> Mul for Expression<E> {
                         Box::new(Expression::Challenge(
                             *challenge_id1,
                             *pow2,
-                            *offset1,
+                            *offset1 * *s2,
                             E::ZERO,
                         )),
                     )
@@ -545,10 +545,10 @@ mod tests {
                         E::ONE * E::ONE,
                     )),
                     // offset2 * s1 * c1^(pow1)
-                    Box::new(Expression::Challenge(0, 3, E::ONE, E::ZERO,)),
+                    Box::new(Expression::Challenge(0, 3, 2.into(), E::ZERO)),
                 )),
                 // offset1 * s2 * c2^(pow2))
-                Box::new(Expression::Challenge(0, 2, E::ONE, E::ZERO,)),
+                Box::new(Expression::Challenge(0, 2, 2.into(), E::ZERO)),
             )
         );
     }
