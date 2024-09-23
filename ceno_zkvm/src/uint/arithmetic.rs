@@ -8,7 +8,9 @@ use crate::{
     create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
+    instructions::riscv::config::{
+        IsEqualConfig, IsZeroConfig, MsbConfig, UIntLtConfig, UIntLtuConfig,
+    },
 };
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
@@ -181,6 +183,24 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         })
     }
 
+    pub fn mul_add<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+        multiplier: &mut UIntLimbs<M, C, E>,
+        addend: &mut UIntLimbs<M, C, E>,
+        with_overflow: bool,
+    ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M, C, E>), ZKVMError> {
+        circuit_builder.namespace(name_fn, |cb| {
+            let c = self.internal_mul(cb, multiplier, with_overflow)?;
+            Ok((
+                c.clone(),
+                c.internal_add(cb, &c.expr(), &addend.expr(), with_overflow)
+                    .unwrap(),
+            ))
+        })
+    }
+
     /// Check two UIntLimbs are equal
     pub fn eq<NR: Into<String>, N: FnOnce() -> NR>(
         &self,
@@ -229,6 +249,50 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             diff_inv_per_limb,
             is_equal,
             diff_inv,
+        })
+    }
+
+    pub fn is_zero(
+        &self,
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<IsZeroConfig, ZKVMError> {
+        // FIXME should be new() ?
+        let value_inverse = Self::new_unchecked(|| "inverse", circuit_builder).unwrap();
+        let is_zeros = self
+            .limbs
+            .iter()
+            .zip(value_inverse.limbs.iter())
+            .map(|(value, inverse)| {
+                // is_zero = (1 - value * inverse)
+                // when `value != 0` check `inverse = a.invert()` => value * is_zero
+                // when `value == 0` check `inverse = 0` => `inverse * is_zero
+                circuit_builder
+                    .require_zero(
+                        || "value ⋅ (1 - value ⋅ value_inv)",
+                        value.expr() - value.expr() * value.expr() * inverse.expr(),
+                    )
+                    .unwrap();
+                circuit_builder
+                    .require_zero(
+                        || "value_inv ⋅ (1 - value ⋅ value_inv)",
+                        inverse.expr() - inverse.expr() * value.expr() * inverse.expr(),
+                    )
+                    .unwrap();
+
+                Expression::from(1) - value.expr() * inverse.expr()
+            })
+            .collect::<Vec<Expression<E>>>();
+
+        // FIXME is_zero_flag == 1
+        let is_zero_wit = circuit_builder.create_witin(|| "is_zero")?;
+        // let is_zero_expr = is_zeros
+        //     .iter()
+        //     .fold(Expression::from(0), |acc, v| acc.clone() + v.clone());
+        // circuit_builder.require_equal(|| "is_zero_flag", is_zero_wit.expr(), is_zero_expr)?;
+
+        Ok(IsZeroConfig {
+            inverse_limbs: value_inverse.limbs.iter().map(|&v| v).collect_vec(),
+            is_zero: is_zero_wit,
         })
     }
 }
@@ -960,6 +1024,52 @@ mod tests {
                 .unwrap();
             let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
             let uint_e = uint_c.add(|| "uint_e", &mut cb, &uint_d, false).unwrap();
+
+            uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
+                // limbs check
+                println!("{:?}", ret);
+                assert_eq!(
+                    eval_by_expr(&witness_values, &challenges, ret),
+                    E::from(e.clone()[i])
+                );
+            });
+        }
+
+        #[test]
+        fn test_mul_add2() {
+            // c = a * b
+            // e = c + d
+
+            // a = 1 + 1 * 2^16
+            // b = 2 + 1 * 2^16
+            // ==> c = 2 + 3 * 2^16 + 1 * 2^32
+            // d = 1 + 1 * 2^16
+            // ==> e = 3 + 4 * 2^16 + 1 * 2^32
+            let a = vec![1, 1, 0, 0];
+            let b = vec![2, 1, 0, 0];
+            let c = vec![2, 3, 1, 0];
+            let c_carries = vec![0; 3];
+            // e = c + d
+            let d = vec![1, 1, 0, 0];
+            let e = vec![3, 4, 1, 0];
+            let e_carries = vec![0; 3];
+
+            let witness_values: Vec<E> = [a, b, d, c, c_carries, e_carries]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
+
+            let mut cs = ConstraintSystem::new(|| "test_mul_add");
+            let mut cb = CircuitBuilder::<E>::new(&mut cs);
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+
+            let mut uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
+            let mut uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
+            let mut uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
+            let (_, uint_e) = uint_a
+                .mul_add(|| "uint_c", &mut cb, &mut uint_b, &mut uint_d, false)
+                .unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
                 // limbs check

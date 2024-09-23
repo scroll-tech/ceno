@@ -77,32 +77,31 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         let prev_rd_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
 
         // Register read and write.
-        let (ts, lt_rs1_cfg) = circuit_builder.register_read(
+        let (next_ts, lt_rs1_cfg) = circuit_builder.register_read(
             || "read_rs1",
             &rs1_id,
             prev_rs1_ts.expr(),
             cur_ts.expr(),
             rs1_read,
         )?;
-        let (ts, lt_rs2_cfg) = circuit_builder.register_read(
+        let (next_ts, lt_rs2_cfg) = circuit_builder.register_read(
             || "read_rs2",
             &rs2_id,
             prev_rs2_ts.expr(),
-            ts,
+            next_ts,
             rs2_read,
         )?;
-        let (ts, lt_prev_ts_cfg) = circuit_builder.register_write(
+        let (next_ts, lt_prev_ts_cfg) = circuit_builder.register_write(
             || "write_rd",
             &rd_id,
             prev_rd_ts.expr(),
-            ts,
+            next_ts,
             prev_rd_value.register_expr(),
             rd_written,
         )?;
 
         // State out.
         let next_pc = pc.expr() + PC_STEP_SIZE.into();
-        let next_ts = ts + 1.into();
         circuit_builder.state_out(next_pc, next_ts)?;
 
         Ok(RInstructionConfig {

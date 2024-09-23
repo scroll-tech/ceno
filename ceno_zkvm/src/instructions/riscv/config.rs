@@ -1,6 +1,9 @@
 use std::mem::MaybeUninit;
 
 use crate::{expression::WitIn, set_val, utils::i64_to_base, witness::LkMultiplicity};
+use ark_std::Zero;
+use ff::Field;
+use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 
@@ -10,6 +13,39 @@ pub struct IsEqualConfig {
     pub diff_inv_per_limb: Vec<WitIn>,
     pub diff_inv: WitIn,
     pub is_equal: WitIn,
+}
+
+#[derive(Clone, Debug)]
+pub struct IsZeroConfig {
+    pub inverse_limbs: Vec<WitIn>,
+    pub is_zero: WitIn,
+}
+
+impl IsZeroConfig {
+    pub fn assign<E: ExtensionField>(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        values: Vec<E::BaseField>,
+    ) {
+        let mut is_zero = 0u64;
+        self.inverse_limbs
+            .iter()
+            .zip(values.iter())
+            .for_each(|(wit, v)| {
+                let inverse = v.invert().unwrap_or(E::BaseField::ZERO);
+                instance[wit.id as usize] = MaybeUninit::new(inverse);
+
+                if (!v.is_zero()).into() {
+                    is_zero += 1;
+                }
+            });
+
+        instance[self.is_zero.id as usize] = if is_zero.is_zero() {
+            MaybeUninit::new(E::BaseField::ONE)
+        } else {
+            MaybeUninit::new(E::BaseField::ZERO)
+        };
+    }
 }
 
 #[derive(Clone)]
