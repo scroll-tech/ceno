@@ -11,7 +11,10 @@ use crate::{
     instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
 };
 
-impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E>
+where
+    [(); M / C]: Sized,
+{
     const POW_OF_C: usize = 2_usize.pow(C as u32);
     const LIMB_BIT_MASK: u64 = (1 << C) - 1;
 
@@ -233,7 +236,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 }
 
-impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
+impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E>
+where
+    [(); M / 8]: Sized,
+{
     /// decompose x = (x_s, x_{<s})
     /// where x_s is highest bit, x_{<s} is the rest
     pub fn msb_decompose<F: SmallField>(
@@ -535,7 +541,9 @@ mod tests {
             witness_values: Vec<u64>,
             const_b: Option<u64>,
             overflow: bool,
-        ) {
+        ) where
+            [(); M / C]: Sized,
+        {
             let mut cs = ConstraintSystem::new(|| "test_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
@@ -721,7 +729,9 @@ mod tests {
         fn verify<const M: usize, const C: usize, E: ExtensionField>(
             witness_values: Vec<u64>,
             overflow: bool,
-        ) {
+        ) where
+            [(); M / C]: Sized,
+        {
             let pow_of_c: u64 = 2_usize.pow(UIntLimbs::<M, C, E>::MAX_CELL_BIT_WIDTH as u32) as u64;
             let single_wit_size = UIntLimbs::<M, C, E>::NUM_CELLS;
             if overflow {

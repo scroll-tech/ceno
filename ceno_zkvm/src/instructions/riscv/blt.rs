@@ -171,22 +171,22 @@ fn blt_gadget<E: ExtensionField>(
     // update ts
     let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
     let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
-    let lhs = UInt::from_u8_limbs(&lhs_limb8)?;
-    let rhs = UInt::from_u8_limbs(&rhs_limb8)?;
+    let lhs = UInt::from_limbs(&lhs_limb8)?;
+    let rhs = UInt::from_limbs(&rhs_limb8)?;
 
     let (ts, lt_rs1_cfg) = circuit_builder.register_read(
         || "read ts for rs1",
         &rs1_id,
         prev_rs1_ts.expr(),
         cur_ts.expr(),
-        lhs.register_expr(),
+        lhs.as_expr(),
     )?;
     let (ts, lt_rs2_cfg) = circuit_builder.register_read(
         || "read ts for rs2",
         &rs2_id,
         prev_rs2_ts.expr(),
         ts,
-        rhs.register_expr(),
+        rhs.as_expr(),
     )?;
 
     let next_pc = create_witin_from_expr!(|| "next_pc", circuit_builder, false, next_pc)?;

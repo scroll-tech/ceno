@@ -7,7 +7,10 @@ pub const BYTE_BIT_WIDTH: usize = 8;
 
 use ff_ext::ExtensionField;
 
-impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E>
+where
+    [(); M / C]: Sized,
+{
     pub const M: usize = M;
     pub const C: usize = C;
 

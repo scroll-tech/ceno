@@ -8,7 +8,10 @@ use crate::{
 };
 
 // Only implemented for u8 limbs.
-impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
+impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E>
+where
+    [(); M / 8]: Sized,
+{
     /// Assert `rom_type(a, b) = c` and range-check `a, b, c`.
     /// This works with a lookup for each u8 limb.
     pub fn logic(

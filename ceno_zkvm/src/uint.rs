@@ -4,7 +4,6 @@ mod logic;
 pub mod util;
 
 use crate::{
-    chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
@@ -54,13 +53,19 @@ impl<E: ExtensionField> Index<usize> for UintLimb<E> {
 #[derive(Clone, Debug)]
 /// Unsigned integer with `M` total bits. `C` denotes the cell bit width.
 /// Represented in little endian form.
-pub struct UIntLimbs<const M: usize, const C: usize, E: ExtensionField> {
+pub struct UIntLimbs<const M: usize, const C: usize, E: ExtensionField>
+where
+    [(); M / C]: Sized,
+{
     pub limbs: UintLimb<E>,
     // We don't need `overflow` witness since the last element of `carries` represents it.
     pub carries: Option<Vec<WitIn>>,
 }
 
-impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E>
+where
+    [(); M / C]: Sized,
+{
     pub fn new<NR: Into<String>, N: FnOnce() -> NR>(
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
@@ -195,76 +200,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 
     /// conversion is needed for lt/ltu
-    /// TODO: add general conversion between any two limb sizes C1 <-> C2
-    pub fn from_u8_limbs(x: &UIntLimbs<M, 8, E>) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
-        assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
+    pub fn from_limbs<const C2: usize>(
+        x: &UIntLimbs<M, C2, E>,
+    ) -> Result<UIntLimbs<M, C, E>, ZKVMError>
+    where
+        [(); M / C]: Sized,
+        [(); M / C2]: Sized,
+    {
         assert!(x.carries.is_none());
-        let k = C / 8;
-        let shift_pows = {
-            let mut shift_pows = Vec::with_capacity(k);
-            shift_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..k - 1).for_each(|_| {
-                shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8).into())
-            });
-            shift_pows
-        };
-        let combined_limbs = x
-            .limbs
-            .iter()
-            .collect_vec()
-            .chunks(k)
-            .map(|chunk| {
-                chunk
-                    .iter()
-                    .zip(shift_pows.iter())
-                    .map(|(limb, shift)| shift.clone() * limb.expr())
-                    .reduce(|a, b| a + b)
-                    .unwrap()
-            })
-            .collect_vec();
-        UIntLimbs::<M, C, E>::new_from_exprs_unchecked(combined_limbs)
-    }
-
-    pub fn to_u8_limbs(
-        circuit_builder: &mut CircuitBuilder<E>,
-        x: UIntLimbs<M, C, E>,
-    ) -> UIntLimbs<M, 8, E> {
-        assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
-        assert!(x.carries.is_none());
-        let k = C / 8;
-        let shift_pows = {
-            let mut shift_pows = Vec::with_capacity(k);
-            shift_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..k - 1).for_each(|_| {
-                shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8).into())
-            });
-            shift_pows
-        };
-        let split_limbs = x
-            .limbs
-            .iter()
-            .flat_map(|large_limb| {
-                let limbs = (0..k)
-                    .map(|_| {
-                        let w = circuit_builder.create_witin(|| "").unwrap();
-                        circuit_builder.assert_byte(|| "", w.expr()).unwrap();
-                        w.expr()
-                    })
-                    .collect_vec();
-                let combined_limb = limbs
-                    .iter()
-                    .zip(shift_pows.iter())
-                    .map(|(limb, shift)| shift.clone() * limb.clone())
-                    .reduce(|a, b| a + b)
-                    .unwrap();
-
-                circuit_builder
-                    .require_zero(|| "zero check", large_limb.expr() - combined_limb)
-                    .unwrap();
-                limbs
-            })
-            .collect_vec();
-        UIntLimbs::<M, 8, E>::create_witin_from_exprs(circuit_builder, split_limbs)
+        UIntLimbs::<M, C, E>::new_from_exprs_unchecked(x.as_expr::<{ M / C }>().to_vec())
     }
 
     pub fn new_from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Result<Self, ZKVMError> {
@@ -419,10 +363,38 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         res
     }
+
+    /// convert UIntLimbs<M, C, E> -> UIntLimbs<M, M/LIMBS, E>
+    /// e.g. from UIntLimbs<32, 8, E> -> UIntLimbs<32, 16, E>
+    pub fn as_expr<const LIMBS: usize>(&self) -> [Expression<E>; LIMBS] {
+        let cur_limbs = self.expr();
+        assert!(cur_limbs.len() >= LIMBS, "{} > {} ", cur_limbs.len(), LIMBS);
+        assert!(
+            cur_limbs.len() % LIMBS == 0,
+            "{} % {} != 0 ",
+            cur_limbs.len(),
+            LIMBS
+        );
+        cur_limbs
+            .chunks(cur_limbs.len() / LIMBS)
+            .map(|chunk| {
+                let mut chunk_iter = chunk.iter().enumerate();
+                let (_, first) = chunk_iter.next().unwrap();
+                chunk_iter.fold(first.clone(), |acc, (i, item)| {
+                    acc + item.clone() * (1 << (C * i)).into()
+                })
+            })
+            .collect_vec()
+            .try_into()
+            .unwrap()
+    }
 }
 
 /// Construct `UIntLimbs` from `Vec<CellId>`
-impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for UIntLimbs<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for UIntLimbs<M, C, E>
+where
+    [(); M / C]: Sized,
+{
     type Error = UtilError;
 
     fn try_from(limbs: Vec<WitIn>) -> Result<Self, Self::Error> {
@@ -444,7 +416,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for 
 }
 
 /// Construct `UIntLimbs` from `$[CellId]`
-impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UIntLimbs<M, C, E> {
+impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UIntLimbs<M, C, E>
+where
+    [(); M / C]: Sized,
+{
     type Error = UtilError;
 
     fn try_from(values: &[WitIn]) -> Result<Self, Self::Error> {
@@ -452,7 +427,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UI
     }
 }
 
-impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<M, C, E> {
+impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<M, C, E>
+where
+    [(); M / C]: Sized,
+{
     type Output = Vec<Expression<E>>;
     fn expr(&self) -> Vec<Expression<E>> {
         match &self.limbs {
@@ -462,29 +440,6 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<
                 .collect::<Vec<Expression<E>>>(),
             UintLimb::Expression(e) => e.clone(),
         }
-    }
-}
-
-impl<E: ExtensionField> UIntLimbs<32, 16, E> {
-    /// Return a value suitable for register read/write. From [u16; 2] limbs.
-    pub fn register_expr(&self) -> RegisterExpr<E> {
-        let u16_limbs = self.expr();
-        RegisterExpr(u16_limbs.try_into().expect("two limbs with M=32 and C=16"))
-    }
-}
-
-impl<E: ExtensionField> UIntLimbs<32, 8, E> {
-    /// Return a value suitable for register read/write. From [u8; 4] limbs.
-    pub fn register_expr(&self) -> RegisterExpr<E> {
-        let u8_limbs = self.expr();
-        let u16_limbs = u8_limbs
-            .chunks(2)
-            .map(|chunk| {
-                let (a, b) = (chunk[0].clone(), chunk[1].clone());
-                a + b * 256.into()
-            })
-            .collect_vec();
-        RegisterExpr(u16_limbs.try_into().expect("four limbs with M=32 and C=8"))
     }
 }
 
