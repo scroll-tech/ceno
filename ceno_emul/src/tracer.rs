@@ -114,6 +114,34 @@ impl StepRecord {
         }
     }
 
+    pub fn new_i_instruction(
+        cycle: Cycle,
+        pc: ByteAddr,
+        insn_code: Word,
+        rs1_read: Word,
+        rd: Change<Word>,
+        previous_cycle: Cycle,
+    ) -> StepRecord {
+        let insn = DecodedInstruction::new(insn_code);
+        StepRecord {
+            cycle,
+            pc: Change::new(pc, pc + PC_STEP_SIZE),
+            insn_code,
+            rs1: Some(ReadOp {
+                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
+                value: rs1_read,
+                previous_cycle,
+            }),
+            rs2: None,
+            rd: Some(WriteOp {
+                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
+                value: rd,
+                previous_cycle,
+            }),
+            memory_op: None,
+        }
+    }
+
     pub fn cycle(&self) -> Cycle {
         self.cycle
     }

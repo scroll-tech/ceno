@@ -147,6 +147,53 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         }
     }
 
+    /// Break an expression into Uint with C limbs
+    pub fn new_from_expr<NR: Into<String>, N: FnOnce() -> NR + Clone>(
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+        expr: Expression<E>,
+    ) -> Result<Self, ZKVMError> {
+        let uint = Self::new(name_fn.clone(), circuit_builder)?;
+        circuit_builder.require_equal(name_fn, uint.expr_unchecked(), expr)?;
+        Ok(uint)
+    }
+
+    /// Get an Expression<E> from the limbs, unsafe if Uint value exceeds field limit
+    pub fn expr_unchecked(&self) -> Expression<E> {
+        let exprs = self.expr();
+        exprs
+            .iter()
+            .enumerate()
+            .fold(Expression::Constant(E::BaseField::ZERO), |acc, (i, e)| {
+                acc + e.clone() * (1 << (i * C)).into()
+            })
+    }
+
+    pub fn assign_integer<T: Into<u64> + Copy>(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        value: T,
+    ) {
+        self.assign_limbs(instance, Value::new_unchecked(value).u16_fields())
+    }
+
+    pub fn assign_value<T: Into<u64> + Copy>(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        value: Value<T>,
+    ) {
+        self.assign_limbs(instance, value.u16_fields())
+    }
+
+    pub fn assign_value_with_carry(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        (limbs, carry): (Vec<u16>, Vec<u16>),
+    ) {
+        self.assign_limbs(instance, limbs.iter().map(|v| (*v as u64).into()).collect());
+        self.assign_carries(instance, carry.iter().map(|v| (*v as u64).into()).collect());
+    }
+
     pub fn assign_limbs(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
@@ -503,6 +550,18 @@ pub struct Value<T: Into<u64> + Copy> {
     pub limbs: Vec<u16>,
 }
 
+impl Value<u32> {
+    pub fn from_limbs(limbs: &[u16]) -> Self {
+        assert_eq!(limbs.len(), 2);
+        let mut value = Value::<u32> {
+            val: 0,
+            limbs: limbs.to_vec(),
+        };
+        value.val = value.as_u64() as u32;
+        value
+    }
+}
+
 // TODO generalize to support non 16 bit limbs
 // TODO optimize api with fixed size array
 impl<T: Into<u64> + Copy> Value<T> {
@@ -548,6 +607,14 @@ impl<T: Into<u64> + Copy> Value<T> {
         &self.limbs
     }
 
+    /// Convert the limbs to a u64 value
+    pub fn as_u64(&self) -> u64 {
+        self.limbs
+            .iter()
+            .rev()
+            .fold(0, |acc, &v| (acc << 16) | v as u64)
+    }
+
     pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {
         self.limbs.iter().map(|v| F::from(*v as u64)).collect_vec()
     }
@@ -557,16 +624,16 @@ impl<T: Into<u64> + Copy> Value<T> {
         rhs: &Self,
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
-    ) -> (Vec<u16>, Vec<bool>) {
+    ) -> (Vec<u16>, Vec<u16>) {
         let res = self.as_u16_limbs().iter().zip(rhs.as_u16_limbs()).fold(
             vec![],
             |mut acc, (a_limb, b_limb)| {
                 let (a, b) = a_limb.overflowing_add(*b_limb);
                 if let Some((_, prev_carry)) = acc.last() {
-                    let (e, d) = a.overflowing_add(*prev_carry as u16);
-                    acc.push((e, b || d));
+                    let (e, d) = a.overflowing_add(*prev_carry);
+                    acc.push((e, (b || d) as u16));
                 } else {
-                    acc.push((a, b));
+                    acc.push((a, b as u16));
                 }
                 // range check
                 if let Some((limb, _)) = acc.last() {
@@ -575,9 +642,9 @@ impl<T: Into<u64> + Copy> Value<T> {
                 acc
             },
         );
-        let (limbs, mut carries): (Vec<u16>, Vec<bool>) = res.into_iter().unzip();
+        let (limbs, mut carries): (Vec<u16>, Vec<u16>) = res.into_iter().unzip();
         if !with_overflow {
-            carries.resize(carries.len() - 1, false);
+            carries.resize(carries.len() - 1, 0);
         }
         carries.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
         (limbs, carries)
@@ -645,8 +712,8 @@ mod tests {
         let (c, carries) = a.add(&b, &mut lkm, true);
         assert_eq!(c[0], 3);
         assert_eq!(c[1], 0);
-        assert_eq!(carries[0], false);
-        assert_eq!(carries[1], false);
+        assert_eq!(carries[0], 0);
+        assert_eq!(carries[1], 0);
     }
 
     #[test]
@@ -658,8 +725,8 @@ mod tests {
         let (c, carries) = a.add(&b, &mut lkm, true);
         assert_eq!(c[0], 1);
         assert_eq!(c[1], 1);
-        assert_eq!(carries[0], true);
-        assert_eq!(carries[1], false);
+        assert_eq!(carries[0], 1);
+        assert_eq!(carries[1], 0);
     }
 
     #[test]
