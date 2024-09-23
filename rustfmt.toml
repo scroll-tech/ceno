@@ -1,4 +1,5 @@
 edition = "2021"
+style_edition = "2021"
 version = "Two"
 wrap_comments = false
 comment_width = 300

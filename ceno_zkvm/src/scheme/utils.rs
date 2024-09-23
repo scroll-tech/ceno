@@ -137,18 +137,20 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
                     };
                 } else {
                     match (q1.evaluations(), q2.evaluations()) {
-                        (FieldType::Ext(q1), FieldType::Ext(q2)) => q1[start_index..][..cur_len]
-                            .par_iter()
-                            .zip(q2[start_index..][..cur_len].par_iter())
-                            .zip(p_evals.par_iter_mut())
-                            .zip(q_evals.par_iter_mut())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .for_each(|(((q1, q2), p_res), q_res)| {
-                                // 1 / q1 + 1 / q2 = (q1+q2) / q1*q2
-                                // p is numerator and q is denominator
-                                *p_res = *q1 + q2;
-                                *q_res = *q1 * q2;
-                            }),
+                        (FieldType::Ext(q1), FieldType::Ext(q2)) => {
+                            q1[start_index..][..cur_len]
+                                .par_iter()
+                                .zip(q2[start_index..][..cur_len].par_iter())
+                                .zip(p_evals.par_iter_mut())
+                                .zip(q_evals.par_iter_mut())
+                                .with_min_len(MIN_PAR_SIZE)
+                                .for_each(|(((q1, q2), p_res), q_res)| {
+                                    // 1 / q1 + 1 / q2 = (q1+q2) / q1*q2
+                                    // p is numerator and q is denominator
+                                    *p_res = *q1 + q2;
+                                    *q_res = *q1 * q2;
+                                })
+                        }
                         _ => unreachable!(),
                     };
                 }
