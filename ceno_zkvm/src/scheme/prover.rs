@@ -55,7 +55,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let mut vm_proof = ZKVMProof::empty();
 
-        // TODO: commit to fixed commitment
+        // commit to fixed commitment
+        for (_, pk) in self.pk.circuit_pks.iter() {
+            if let Some(fixed_commit) = &pk.vk.fixed_commit {
+                PCS::write_commitment(fixed_commit, &mut transcript)
+                    .map_err(ZKVMError::PCSError)?;
+            }
+        }
 
         // commit to main traces
         let mut commitments = BTreeMap::new();
@@ -762,6 +768,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         let span = entered_span!("pcs_opening");
+        let fixed_opening_proof = PCS::simple_batch_open(
+            pp,
+            &fixed,
+            circuit_pk.fixed_commit_wd.as_ref().unwrap(),
+            &input_open_point,
+            fixed_in_evals.as_slice(),
+            transcript,
+        )
+        .map_err(ZKVMError::PCSError)?;
+        let fixed_commit = PCS::get_pure_commitment(circuit_pk.fixed_commit_wd.as_ref().unwrap());
+        tracing::debug!(
+            "[table {}] build opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
+            name,
+            fixed.len(),
+            input_open_point,
+            fixed_in_evals,
+            fixed_commit,
+        );
         let wits_opening_proof = PCS::simple_batch_open(
             pp,
             &witnesses,
@@ -793,6 +817,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             lk_d_in_evals,
             lk_n_in_evals,
             fixed_in_evals,
+            fixed_opening_proof,
             wits_in_evals,
             wits_commit,
             wits_opening_proof,

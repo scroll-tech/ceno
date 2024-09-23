@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{Expression, WitIn},
     instructions::riscv::config::ExprLtConfig,
 };
 
@@ -17,6 +17,10 @@ pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
 }
 
+/// The common representation of a register value.
+/// Format: `[u16; 2]`, least-significant-first.
+pub type RegisterExpr<E> = [Expression<E>; 2];
+
 pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
     fn register_read(
         &mut self,
@@ -24,7 +28,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
@@ -34,7 +38,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
-        values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        prev_values: RegisterExpr<E>,
+        value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 }

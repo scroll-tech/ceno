@@ -6,10 +6,12 @@ use super::{
     constants::{UInt, PC_STEP_SIZE},
 };
 use crate::{
-    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
+    chip_handler::{
+        GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
+    },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{ToExpr, WitIn},
     instructions::riscv::config::ExprLtInput,
     set_val,
     tables::InsnRecord,
@@ -43,9 +45,9 @@ impl<E: ExtensionField> RInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        rs1_read: &impl ToExpr<E, Output = Vec<Expression<E>>>,
-        rs2_read: &impl ToExpr<E, Output = Vec<Expression<E>>>,
-        rd_written: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        rs1_read: RegisterExpr<E>,
+        rs2_read: RegisterExpr<E>,
+        rd_written: RegisterExpr<E>,
     ) -> Result<Self, ZKVMError> {
         // State in.
         let pc = circuit_builder.create_witin(|| "pc")?;
@@ -94,7 +96,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
             &rd_id,
             prev_rd_ts.expr(),
             ts,
-            &prev_rd_value,
+            prev_rd_value.register_expr(),
             rd_written,
         )?;
 

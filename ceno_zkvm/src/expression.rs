@@ -341,31 +341,42 @@ impl<E: ExtensionField> Mul for Expression<E> {
                 if challenge_id1 == challenge_id2 {
                     // (s1 * s2 * c1^(pow1 + pow2) + offset2 * s1 * c1^(pow1) + offset1 * s2 * c2^(pow2))
                     // + offset1 * offset2
-                    Expression::Sum(
-                        Box::new(Expression::Sum(
-                            // (s1 * s2 * c1^(pow1 + pow2) + offset1 * offset2
-                            Box::new(Expression::Challenge(
-                                *challenge_id1,
-                                pow1 + pow2,
-                                *s1 * s2,
-                                *offset1 * offset2,
-                            )),
-                            // offset2 * s1 * c1^(pow1)
+
+                    // (s1 * s2 * c1^(pow1 + pow2) + offset1 * offset2
+                    let mut result = Expression::Challenge(
+                        *challenge_id1,
+                        pow1 + pow2,
+                        *s1 * s2,
+                        *offset1 * offset2,
+                    );
+
+                    // offset2 * s1 * c1^(pow1)
+                    if *s1 != E::ZERO && *offset2 != E::ZERO {
+                        result = Expression::Sum(
+                            Box::new(result),
                             Box::new(Expression::Challenge(
                                 *challenge_id1,
                                 *pow1,
-                                *offset2,
+                                *offset2 * *s1,
                                 E::ZERO,
                             )),
-                        )),
-                        // offset1 * s2 * c2^(pow2))
-                        Box::new(Expression::Challenge(
-                            *challenge_id1,
-                            *pow2,
-                            *offset1,
-                            E::ZERO,
-                        )),
-                    )
+                        );
+                    }
+
+                    // offset1 * s2 * c2^(pow2))
+                    if *s2 != E::ZERO && *offset1 != E::ZERO {
+                        result = Expression::Sum(
+                            Box::new(result),
+                            Box::new(Expression::Challenge(
+                                *challenge_id1,
+                                *pow2,
+                                *offset1 * *s2,
+                                E::ZERO,
+                            )),
+                        );
+                    }
+
+                    result
                 } else {
                     Expression::Product(Box::new(self), Box::new(rhs))
                 }
@@ -545,10 +556,10 @@ mod tests {
                         E::ONE * E::ONE,
                     )),
                     // offset2 * s1 * c1^(pow1)
-                    Box::new(Expression::Challenge(0, 3, E::ONE, E::ZERO,)),
+                    Box::new(Expression::Challenge(0, 3, 2.into(), E::ZERO)),
                 )),
                 // offset1 * s2 * c2^(pow2))
-                Box::new(Expression::Challenge(0, 2, E::ONE, E::ZERO,)),
+                Box::new(Expression::Challenge(0, 2, 2.into(), E::ZERO)),
             )
         );
     }
