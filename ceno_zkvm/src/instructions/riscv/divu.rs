@@ -57,7 +57,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let is_zero = divisor.is_zero(circuit_builder)?;
         outcome.limbs.iter().for_each(|&limb| {
             // conditional_outcome is -1 if divisor is zero
-            // => is_zero * (-1) + (1 - is_zero) * outcome = outcome - is_zero*outcome - is_zero*(-1)
+            // => is_zero * (-1) + (1 - is_zero) * outcome = outcome - is_zero * outcome - is_zero * (-1)
             let conditional_outcome = limb.expr()
                 + is_zero.is_zero.expr() * Expression::from(u16::MAX as usize)
                 - is_zero.is_zero.expr() * limb.expr();
@@ -149,10 +149,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 mod test {
 
     mod divu {
-        use ceno_emul::{Change, StepRecord};
+        use std::u32;
+
+        use ceno_emul::{Change, StepRecord, Word};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
+        use rand::Rng;
 
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -160,115 +163,59 @@ mod test {
             scheme::mock_prover::{MockProver, MOCK_PC_DIVU, MOCK_PROGRAM},
         };
 
+        fn verify(name: &'static str, dividend: Word, divisor: Word, outcome: Word) {
+            let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+            let mut cb = CircuitBuilder::new(&mut cs);
+            let config = cb
+                .namespace(
+                    || format!("divu_{name}"),
+                    |cb| Ok(DivUInstruction::construct_circuit(cb)),
+                )
+                .unwrap()
+                .unwrap();
+
+            // values assignment
+            let (raw_witin, _) = DivUInstruction::assign_instances(
+                &config,
+                cb.cs.num_witin as usize,
+                vec![StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_DIVU,
+                    MOCK_PROGRAM[6],
+                    dividend,
+                    divisor,
+                    Change::new(0, outcome),
+                    0,
+                )],
+            )
+            .unwrap();
+
+            MockProver::assert_satisfied(
+                &mut cb,
+                &raw_witin
+                    .de_interleaving()
+                    .into_mles()
+                    .into_iter()
+                    .map(|v| v.into())
+                    .collect_vec(),
+                None,
+            );
+        }
         #[test]
         fn test_opcode_divu() {
-            let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-            let mut cb = CircuitBuilder::new(&mut cs);
-            let config = cb
-                .namespace(|| "divu", |cb| Ok(DivUInstruction::construct_circuit(cb)))
-                .unwrap()
-                .unwrap();
-
-            // values assignment
-            let (raw_witin, _) = DivUInstruction::assign_instances(
-                &config,
-                cb.cs.num_witin as usize,
-                vec![StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_DIVU,
-                    MOCK_PROGRAM[3],
-                    10,
-                    2,
-                    Change::new(0, 5),
-                    0,
-                )],
-            )
-            .unwrap();
-
-            MockProver::assert_satisfied(
-                &mut cb,
-                &raw_witin
-                    .de_interleaving()
-                    .into_mles()
-                    .into_iter()
-                    .map(|v| v.into())
-                    .collect_vec(),
-                None,
-            );
+            verify("basic", 10, 2, 5);
+            verify("dividend > divisor", 10, 11, 0);
+            verify("remainder", 11, 2, 5);
+            verify("u32::MAX", u32::MAX, u32::MAX, 1);
+            verify("div by zero", 10, 0, u32::MAX);
         }
 
         #[test]
-        fn test_opcode_divu_remainder() {
-            let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-            let mut cb = CircuitBuilder::new(&mut cs);
-            let config = cb
-                .namespace(|| "divu", |cb| Ok(DivUInstruction::construct_circuit(cb)))
-                .unwrap()
-                .unwrap();
-
-            // values assignment
-            let (raw_witin, _) = DivUInstruction::assign_instances(
-                &config,
-                cb.cs.num_witin as usize,
-                vec![StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_DIVU,
-                    MOCK_PROGRAM[3],
-                    11,
-                    2,
-                    Change::new(0, 5),
-                    0,
-                )],
-            )
-            .unwrap();
-
-            MockProver::assert_satisfied(
-                &mut cb,
-                &raw_witin
-                    .de_interleaving()
-                    .into_mles()
-                    .into_iter()
-                    .map(|v| v.into())
-                    .collect_vec(),
-                None,
-            );
-        }
-
-        #[test]
-        fn test_opcode_divu_by_zero() {
-            let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-            let mut cb = CircuitBuilder::new(&mut cs);
-            let config = cb
-                .namespace(|| "divu", |cb| Ok(DivUInstruction::construct_circuit(cb)))
-                .unwrap()
-                .unwrap();
-
-            // values assignment
-            let (raw_witin, _) = DivUInstruction::assign_instances(
-                &config,
-                cb.cs.num_witin as usize,
-                vec![StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_DIVU,
-                    MOCK_PROGRAM[3],
-                    11,
-                    0,
-                    Change::new(0, u32::MAX),
-                    0,
-                )],
-            )
-            .unwrap();
-
-            MockProver::assert_satisfied(
-                &mut cb,
-                &raw_witin
-                    .de_interleaving()
-                    .into_mles()
-                    .into_iter()
-                    .map(|v| v.into())
-                    .collect_vec(),
-                None,
-            );
+        fn test_opcode_divu_random() {
+            let mut rng = rand::thread_rng();
+            let a: u32 = rng.gen();
+            let b: u32 = rng.gen_range(1..u32::MAX);
+            verify("random", a, b, a / b);
         }
     }
 }
