@@ -305,17 +305,14 @@ impl DecodedInstruction {
         self.func7
     }
 
-    /// Get the decoded immediate, or the funct7 field depending on the instruction format.
+    /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
     pub fn imm_or_funct7(&self) -> u32 {
         match self.codes() {
             InsnCodes { format: R, .. } => self.func7,
             InsnCodes {
-                format: I,
-                opcode: 0x13,
-                func3: 0x05 | 0x01, // SRLI, SLLI
-                func7: 0x00 | 0x2,  // SRAI
+                kind: SLLI | SRLI | SRAI,
                 ..
-            } => 2u32.pow(self.rs2()), // decode to 2.pow(rs2)
+            } => 1 << self.rs2(), // decode the shift as a multiplication by 2.pow(rs2)
             InsnCodes { format: I, .. } => self.imm_i(),
             InsnCodes { format: S, .. } => self.imm_s(),
             InsnCodes { format: B, .. } => self.imm_b(),
@@ -363,6 +360,32 @@ impl DecodedInstruction {
 
     pub fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_decode_imm() {
+    for (i, expected) in [
+        // Example of I-type: ADDI.
+        // imm    | rs1     | funct3      | rd     | opcode
+        (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
+        // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
+        (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
+        (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
+        (
+            1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
+            1 << 31,
+        ),
+        // Example of R-type with funct7: SUB.
+        // funct7     | rs2    | rs1     | funct3      | rd     | opcode
+        (
+            0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33,
+            0x20,
+        ),
+    ] {
+        let imm = DecodedInstruction::new(i).imm_or_funct7();
+        assert_eq!(imm, expected);
     }
 }
 
