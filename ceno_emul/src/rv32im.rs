@@ -132,18 +132,6 @@ pub enum InsnFormat {
     U,
     J,
 }
-use InsnCategory::*;
-use InsnFormat::*;
-
-#[derive(Clone, Copy, Debug)]
-pub enum InsnFormat {
-    R,
-    I,
-    S,
-    B,
-    U,
-    J,
-}
 use InsnFormat::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, EnumIter)]
