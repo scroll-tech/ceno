@@ -269,6 +269,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             let path = self.ns.compute_path(name_fn().into());
             self.assert_zero_expressions_namespace_map.push(path);
         } else {
+            let assert_zero_expr = assert_zero_expr.to_monomial_form();
             assert!(
                 assert_zero_expr.is_monomial_form(),
                 "only support sumcheck in monomial form"
