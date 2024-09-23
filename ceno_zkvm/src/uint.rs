@@ -469,7 +469,7 @@ impl<E: ExtensionField> UIntLimbs<32, 16, E> {
     /// Return a value suitable for register read/write. From [u16; 2] limbs.
     pub fn register_expr(&self) -> RegisterExpr<E> {
         let u16_limbs = self.expr();
-        RegisterExpr(u16_limbs.try_into().expect("two limbs with M=32 and C=16"))
+        u16_limbs.try_into().expect("two limbs with M=32 and C=16")
     }
 }
 
@@ -484,7 +484,7 @@ impl<E: ExtensionField> UIntLimbs<32, 8, E> {
                 a + b * 256.into()
             })
             .collect_vec();
-        RegisterExpr(u16_limbs.try_into().expect("four limbs with M=32 and C=8"))
+        u16_limbs.try_into().expect("four limbs with M=32 and C=8")
     }
 }
 
