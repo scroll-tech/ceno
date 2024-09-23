@@ -298,7 +298,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder.require_equal(|| "is_zero_flag", is_zero_expr, is_zero_flag.expr())?;
 
         Ok(IsZeroConfig {
-            inverse_limbs: value_inverse.limbs.iter().map(|&v| v).collect_vec(),
+            inverse_limbs: value_inverse.limbs.iter().copied().collect_vec(),
             is_zero_limbs: is_zeros,
             is_zero: is_zero_flag,
         })
