@@ -203,15 +203,11 @@ mod tests {
             (x() + y() + a()) * b() * (y() + z()) + c(),
             (r() * x() + n() + z()) * m() * y(),
             (b() + y() + m() * z()) * (x() + y() + c()),
-            // TODO: not working.
             a() * r() * x(),
         ];
 
         for factored in test_exprs {
             let monomials = factored.to_monomial_form_inner();
-            println!();
-            println!("Factored: \n{:?}\n", factored);
-            println!("Monomials: \n{:?}\n", monomials);
             assert!(monomials.is_monomial_form());
 
             // Check that the two forms are equivalent (Schwartz-Zippel test).
