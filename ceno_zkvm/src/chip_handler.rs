@@ -11,7 +11,6 @@ pub mod global_state;
 pub mod register;
 pub mod utils;
 mod memory;
-mod read_write;
 
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
