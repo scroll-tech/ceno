@@ -62,8 +62,8 @@ impl<E: ExtensionField> IInstructionConfig<E> {
             rd_id.expr(),
             (insn_kind.codes().func3 as usize).into(),
             rs1_id.expr(),
+            0.into(),
             imm.clone(),
-            (insn_kind.codes().func7 as usize).into(),
         ))?;
 
         // Register state.

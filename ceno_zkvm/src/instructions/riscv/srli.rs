@@ -74,7 +74,7 @@ impl<E: ExtensionField> Instruction<E> for SrliInstruction<E> {
         // We need to calculate result and remainder.
         let rs1_read = step.rs1().unwrap().value;
         let rd_written = step.rd().unwrap().value.after;
-        let imm = step.insn().rs2();
+        let imm = step.insn().imm_or_funct7();
         let result = rs1_read.wrapping_div(imm);
         let remainder = rs1_read - (result * imm);
         assert_eq!(result, rd_written, "SRLI: result mismatch");
