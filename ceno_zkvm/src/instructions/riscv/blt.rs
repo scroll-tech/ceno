@@ -179,14 +179,14 @@ fn blt_gadget<E: ExtensionField>(
         &rs1_id,
         prev_rs1_ts.expr(),
         cur_ts.expr(),
-        &lhs,
+        lhs.register_expr(),
     )?;
     let (ts, lt_rs2_cfg) = circuit_builder.register_read(
         || "read ts for rs2",
         &rs2_id,
         prev_rs2_ts.expr(),
         ts,
-        &rhs,
+        rhs.register_expr(),
     )?;
 
     let next_pc = create_witin_from_expr!(|| "next_pc", circuit_builder, false, next_pc)?;

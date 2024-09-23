@@ -1,9 +1,13 @@
+#![allow(dead_code)] // TODO: remove after BLT, BEQ, …
+
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{config::ExprLtConfig, constants::PC_STEP_SIZE};
 use crate::{
-    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
+    chip_handler::{
+        GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
+    },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
@@ -48,8 +52,8 @@ impl BInstructionConfig {
     pub fn construct_circuit<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        rs1_read: &impl ToExpr<E, Output = Vec<Expression<E>>>,
-        rs2_read: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        rs1_read: RegisterExpr<E>,
+        rs2_read: RegisterExpr<E>,
         branch_taken_bit: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         // State in.

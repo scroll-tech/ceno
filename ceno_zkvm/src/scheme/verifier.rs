@@ -47,7 +47,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
 
-        // TODO: write fixed commitment to transcript
+        // write fixed commitment to transcript
+        for (_, vk) in self.vk.circuit_vks.iter() {
+            if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
+                PCS::write_commitment(fixed_commit, &mut transcript)
+                    .map_err(ZKVMError::PCSError)?;
+            }
+        }
 
         for (_, (_, proof)) in vm_proof.opcode_proofs.iter() {
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
@@ -505,14 +511,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
 
+        PCS::simple_batch_verify(
+            vp,
+            circuit_vk.fixed_commit.as_ref().unwrap(),
+            &input_opening_point,
+            &proof.fixed_in_evals,
+            &proof.fixed_opening_proof,
+            transcript,
+        )
+        .map_err(ZKVMError::PCSError)?;
         tracing::debug!(
-            "[table {}] verify opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+            "[table {}] verified opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
             name,
-            proof.wits_in_evals.len(),
+            proof.fixed_in_evals.len(),
             input_opening_point,
-            proof.wits_in_evals,
-            proof.wits_commit
+            proof.fixed_in_evals,
+            circuit_vk.fixed_commit.as_ref().unwrap(),
         );
+
         PCS::simple_batch_verify(
             vp,
             &proof.wits_commit,
@@ -522,8 +538,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript,
         )
         .map_err(ZKVMError::PCSError)?;
-
-        // TODO: verify fixed opening proof
+        tracing::debug!(
+            "[table {}] verified opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+            name,
+            proof.wits_in_evals.len(),
+            input_opening_point,
+            proof.wits_in_evals,
+            proof.wits_commit
+        );
 
         Ok(input_opening_point)
     }
