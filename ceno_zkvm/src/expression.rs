@@ -145,7 +145,9 @@ impl<E: ExtensionField> Expression<E> {
                     && Self::is_monomial_form_inner(MonomialState::ProductTerm, b)
             }
             (Expression::ScaledSum(_, _, _), MonomialState::SumTerm) => true,
-            (Expression::ScaledSum(_, _, b), MonomialState::ProductTerm) => Self::is_zero_expr(b),
+            (Expression::ScaledSum(x, a, b), MonomialState::ProductTerm) => {
+                Self::is_zero_expr(x) || Self::is_zero_expr(a) || Self::is_zero_expr(b)
+            }
         }
     }
 }
@@ -320,14 +322,18 @@ impl<E: ExtensionField> Mul for Expression<E> {
         match (&self, &rhs) {
             // constant * witin
             (c @ Expression::Constant(_), w @ Expression::WitIn(..))
-            | (w @ Expression::WitIn(..), c @ Expression::Constant(_)) => {
-                Expression::Product(Box::new(w.clone()), Box::new(c.clone()))
-            }
+            | (w @ Expression::WitIn(..), c @ Expression::Constant(_)) => Expression::ScaledSum(
+                Box::new(w.clone()),
+                Box::new(c.clone()),
+                Box::new(Expression::Constant(E::BaseField::ZERO)),
+            ),
             // challenge * witin
             (c @ Expression::Challenge(..), w @ Expression::WitIn(..))
-            | (w @ Expression::WitIn(..), c @ Expression::Challenge(..)) => {
-                Expression::Product(Box::new(w.clone()), Box::new(c.clone()))
-            }
+            | (w @ Expression::WitIn(..), c @ Expression::Challenge(..)) => Expression::ScaledSum(
+                Box::new(w.clone()),
+                Box::new(c.clone()),
+                Box::new(Expression::Constant(E::BaseField::ZERO)),
+            ),
             // constant * challenge
             (
                 Expression::Constant(c1),
