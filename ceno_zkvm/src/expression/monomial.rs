@@ -189,7 +189,7 @@ mod tests {
         let z = || WitIn(2);
         let n = || Constant(104.into());
         let m = || Constant(-F::from(599));
-        let r = || Challenge(0, 1, E::from(1), E::from(1));
+        let r = || Challenge(0, 1, E::from(1), E::from(0));
 
         let test_exprs: &[Expression<E>] = &[
             a() * x() * x(),
