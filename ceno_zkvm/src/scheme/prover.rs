@@ -660,45 +660,46 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // infer all tower witness after last layer
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
-        // TODO optimize last layer to avoid alloc new vector to save memory
-        // TODO remove these interleaving because we just work on single vector
-        // assume all wit_length are in pow 2, then we also dont need for padding
-        // the only functionaly here is split into 2 vector.
-        let r_set_last_layer = r_set_wit
+        let mut r_set_last_layer = r_set_wit
             .iter()
+            .chain(w_set_wit.iter())
             .map(|wit| {
-                let res = interleaving_mles_to_mles(
-                    &[wit.clone()],
-                    wit.num_vars(),
-                    NUM_FANIN_LOGUP,
-                    E::ONE,
-                );
+                let (first, second) = wit
+                    .get_ext_field_vec()
+                    .split_at(wit.evaluations().len() / 2);
+                let res = vec![
+                    first.to_vec().into_mle().into(),
+                    second.to_vec().into_mle().into(),
+                ];
                 assert_eq!(res.len(), NUM_FANIN_LOGUP);
                 res
             })
             .collect::<Vec<_>>();
-        let w_set_last_layer = w_set_wit
-            .iter()
-            .map(|wit| {
-                let res = interleaving_mles_to_mles(
-                    &[wit.clone()],
-                    wit.num_vars(),
-                    NUM_FANIN_LOGUP,
-                    E::ONE,
-                );
-                assert_eq!(res.len(), NUM_FANIN_LOGUP);
-                res
-            })
-            .collect::<Vec<_>>();
+        let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
+
         let lk_numerator_last_layer = lk_n_wit
             .iter()
             .map(|wit| {
-                let res = interleaving_mles_to_mles(
-                    &[wit.clone()],
-                    wit.num_vars(),
-                    NUM_FANIN_LOGUP,
-                    E::ZERO,
-                );
+                let (first, second) = wit
+                    .get_base_field_vec()
+                    .split_at(wit.evaluations().len() / 2);
+                // TODO keep in base field and convert to Ext as late as possible
+                let res = vec![
+                    first
+                        .iter()
+                        .cloned()
+                        .map(E::from)
+                        .collect_vec()
+                        .into_mle()
+                        .into(),
+                    second
+                        .iter()
+                        .cloned()
+                        .map(E::from)
+                        .collect_vec()
+                        .into_mle()
+                        .into(),
+                ];
                 assert_eq!(res.len(), NUM_FANIN_LOGUP);
                 res
             })
@@ -706,12 +707,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let lk_denominator_last_layer = lk_d_wit
             .into_iter()
             .map(|wit| {
-                let res = interleaving_mles_to_mles(
-                    &[wit.clone()],
-                    wit.num_vars(),
-                    NUM_FANIN_LOGUP,
-                    E::ONE,
-                );
+                let (first, second) = wit
+                    .get_ext_field_vec()
+                    .split_at(wit.evaluations().len() / 2);
+                let res = vec![
+                    first.to_vec().into_mle().into(),
+                    second.to_vec().into_mle().into(),
+                ];
                 assert_eq!(res.len(), NUM_FANIN_LOGUP);
                 res
             })
@@ -853,9 +855,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(span);
 
-        // TODO skip main sumcheck if all are same depth
-        // if all poly are same number variables
-        // it means
+        // same point sumcheck is optional when all witin + fixed are in same num_vars
         let is_skip_same_point_sumcheck = witnesses
             .iter()
             .chain(fixed.iter())

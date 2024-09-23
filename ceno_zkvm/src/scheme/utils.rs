@@ -82,6 +82,22 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
         .collect::<Vec<ArcMultilinearExtension<E>>>()
 }
 
+macro_rules! mle_4 {
+    ($p1:ident, $p2:ident, $q1:ident, $q2:ident, $acc_p:ident, $acc_q:ident, $start_index:ident, $cur_len:ident) => {
+        $q1[$start_index..][..$cur_len]
+            .par_iter()
+            .zip($q2[$start_index..][..$cur_len].par_iter())
+            .zip($p1[$start_index..][..$cur_len].par_iter())
+            .zip($p2[$start_index..][..$cur_len].par_iter())
+            .zip($acc_p.par_iter_mut())
+            .zip($acc_q.par_iter_mut())
+            .with_min_len(MIN_PAR_SIZE)
+            .for_each(|(((((q1, q2), p1), p2), p_eval), q_eval)| {
+                *p_eval = *q1 * p2 + *q2 * p1;
+                *q_eval = *q1 * q2;
+            })
+    };
+}
 /// infer logup witness from last layer
 /// return is the ([p1,p2], [q1,q2]) for each layer
 pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
@@ -121,18 +137,13 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
                             FieldType::Ext(p2),
                             FieldType::Ext(q1),
                             FieldType::Ext(q2),
-                        ) => q1[start_index..][..cur_len]
-                            .par_iter()
-                            .zip(q2[start_index..][..cur_len].par_iter())
-                            .zip(p1[start_index..][..cur_len].par_iter())
-                            .zip(p2[start_index..][..cur_len].par_iter())
-                            .zip(p_evals.par_iter_mut())
-                            .zip(q_evals.par_iter_mut())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .for_each(|(((((q1, q2), p1), p2), p_eval), q_eval)| {
-                                *p_eval = *p2 * q1 + *p1 * q2;
-                                *q_eval = *q1 * q2;
-                            }),
+                        ) => mle_4!(p1, p2, q1, q2, p_evals, q_evals, start_index, cur_len),
+                        (
+                            FieldType::Base(p1),
+                            FieldType::Base(p2),
+                            FieldType::Ext(q1),
+                            FieldType::Ext(q2),
+                        ) => mle_4!(p1, p2, q1, q2, p_evals, q_evals, start_index, cur_len),
                         _ => unreachable!(),
                     };
                 } else {
