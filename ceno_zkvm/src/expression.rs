@@ -1,3 +1,5 @@
+mod monomial;
+
 use std::{
     cmp::max,
     mem::MaybeUninit,
@@ -14,7 +16,7 @@ use crate::{
     structs::{ChallengeId, WitnessId},
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
@@ -93,6 +95,10 @@ impl<E: ExtensionField> Expression<E> {
 
     pub fn is_monomial_form(&self) -> bool {
         Self::is_monomial_form_inner(MonomialState::SumTerm, self)
+    }
+
+    pub fn to_monomial_form(&self) -> Self {
+        self.to_monomial_form_inner()
     }
 
     pub fn unpack_sum(&self) -> Option<(Expression<E>, Expression<E>)> {
