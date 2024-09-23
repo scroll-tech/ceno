@@ -8,7 +8,7 @@ use crate::{
     structs::RAMType,
 };
 
-use super::RegisterChipOperations;
+use super::{RegisterChipOperations, RegisterExpr};
 
 impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperations<E, NR, N>
     for CircuitBuilder<'a, E>
@@ -19,7 +19,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
@@ -29,7 +29,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    values.expr(),
+                    value.0.to_vec(),
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -41,7 +41,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    values.expr(),
+                    value.0.to_vec(),
                     vec![ts.clone()],
                 ]
                 .concat(),
@@ -64,8 +64,8 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         register_id: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
-        values: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        prev_values: RegisterExpr<E>,
+        value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
@@ -75,7 +75,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    prev_values.expr(),
+                    prev_values.0.to_vec(),
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -87,7 +87,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                         RAMType::Register as u64,
                     ))],
                     vec![register_id.expr()],
-                    values.expr(),
+                    value.0.to_vec(),
                     vec![ts.clone()],
                 ]
                 .concat(),
