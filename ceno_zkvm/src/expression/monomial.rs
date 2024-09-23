@@ -3,6 +3,7 @@ use goldilocks::SmallField;
 use std::cmp::Ordering;
 
 use super::Expression;
+use Expression::*;
 
 impl<E: ExtensionField> Expression<E> {
     pub(super) fn to_monomial_form_inner(&self) -> Self {
@@ -10,7 +11,6 @@ impl<E: ExtensionField> Expression<E> {
     }
 
     fn distribute(&self) -> Vec<Term<E>> {
-        use Expression::*;
         match self {
             Constant(_) => {
                 vec![Term {
@@ -87,9 +87,13 @@ impl<E: ExtensionField> Expression<E> {
     fn sum(terms: Vec<Term<E>>) -> Self {
         terms
             .into_iter()
-            .map(|term| term.vars.into_iter().fold(term.coeff, |acc, var| acc * var))
+            .map(|term| term.vars.into_iter().fold(term.coeff, Self::product))
             .reduce(|acc, term| acc + term)
             .unwrap_or(Expression::ZERO)
+    }
+
+    fn product(a: Self, b: Self) -> Self {
+        Product(Box::new(a), Box::new(b))
     }
 }
 
@@ -101,7 +105,6 @@ struct Term<E: ExtensionField> {
 
 impl<E: ExtensionField> Ord for Expression<E> {
     fn cmp(&self, other: &Self) -> Ordering {
-        use Expression::*;
         use Ordering::*;
 
         match (self, other) {
