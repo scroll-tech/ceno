@@ -48,7 +48,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // outcome = dividend / divisor + remainder => dividend = divisor * outcome + r
         let mut divisor = UInt::new_unchecked(|| "divisor", circuit_builder)?;
         let mut outcome = UInt::new(|| "outcome", circuit_builder)?;
-        let mut r = UInt::new_unchecked(|| "remainder", circuit_builder)?;
+        let mut r = UInt::new(|| "remainder", circuit_builder)?;
 
         let (inter_mul_value, dividend) =
             divisor.mul_add(|| "dividend", circuit_builder, &mut outcome, &mut r, true)?;
@@ -206,6 +206,7 @@ mod test {
             verify("dividend > divisor", 10, 11, 0);
             verify("remainder", 11, 2, 5);
             verify("u32::MAX", u32::MAX, u32::MAX, 1);
+            verify("u32::MAX div by 2", u32::MAX, 2, u32::MAX / 2);
             verify("div by zero", 10, 0, u32::MAX);
             verify("mul carry", 1202729773, 171818539, 7);
         }
