@@ -101,6 +101,10 @@ impl<E: ExtensionField> Expression<E> {
         self.to_monomial_form_inner()
     }
 
+    pub fn to_canonical(&self) -> Self {
+        self.to_canonical_inner()
+    }
+
     pub fn unpack_sum(&self) -> Option<(Expression<E>, Expression<E>)> {
         match self {
             Expression::Sum(a, b) => Some((a.deref().clone(), b.deref().clone())),

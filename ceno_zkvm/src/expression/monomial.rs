@@ -67,8 +67,10 @@ impl<E: ExtensionField> Expression<E> {
     fn combine(terms: Vec<Term<E>>) -> Vec<Term<E>> {
         let mut res: Vec<Term<E>> = vec![];
         for mut term in terms {
+            // Put the variables in a common order before comparing them.
             term.vars.sort();
 
+            // Combine terms with the same variables.
             if let Some(res_term) = res.iter_mut().find(|res_term| res_term.vars == term.vars) {
                 res_term.coeff = res_term.coeff.clone() + term.coeff.clone();
             } else {
@@ -92,6 +94,32 @@ impl<E: ExtensionField> Expression<E> {
 
     fn sum(a: Self, b: Self) -> Self {
         Sum(Box::new(a), Box::new(b))
+    }
+
+    pub(super) fn to_canonical_inner(&self) -> Self {
+        match self {
+            Constant(_) | Fixed(_) | WitIn(_) | Challenge(..) => self.clone(),
+            Sum(a, b) => {
+                let (a, b) = Self::canonical_pair(a, b);
+                Sum(Box::new(a), Box::new(b))
+            }
+            Product(a, b) => {
+                let (a, b) = Self::canonical_pair(a, b);
+                Product(Box::new(a), Box::new(b))
+            }
+            ScaledSum(x, a, b) => ScaledSum(
+                // Do not swap x and a.
+                Box::new(x.to_canonical_inner()),
+                Box::new(a.to_canonical_inner()),
+                Box::new(b.to_canonical_inner()),
+            ),
+        }
+    }
+
+    fn canonical_pair(a: &Self, b: &Self) -> (Self, Self) {
+        let a = a.to_canonical_inner();
+        let b = b.to_canonical_inner();
+        if a <= b { (a, b) } else { (b, a) }
     }
 }
 
