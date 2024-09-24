@@ -154,19 +154,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         let uint = Self::new(name_fn.clone(), circuit_builder)?;
-        circuit_builder.require_equal(name_fn, uint.expr_unchecked(), expr)?;
+        circuit_builder.require_equal(name_fn, uint.value(), expr)?;
         Ok(uint)
-    }
-
-    /// Get an Expression<E> from the limbs, unsafe if Uint value exceeds field limit
-    pub fn expr_unchecked(&self) -> Expression<E> {
-        let exprs = self.expr();
-        exprs
-            .iter()
-            .enumerate()
-            .fold(Expression::Constant(E::BaseField::ZERO), |acc, (i, e)| {
-                acc + e.clone() * (1 << (i * C)).into()
-            })
     }
 
     pub fn assign_integer<T: Into<u64> + Copy>(
@@ -467,6 +456,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         res
     }
 
+    /// Get an Expression<E> from the limbs, unsafe if Uint value exceeds field limit
     pub fn value(&self) -> Expression<E> {
         let base = Expression::from(1 << C);
         self.expr()

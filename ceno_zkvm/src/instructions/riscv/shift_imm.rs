@@ -52,7 +52,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &imm.expr_unchecked(),
+            &imm.value(),
             rd_imm_rem_add.register_expr(),
             rd_written.register_expr(),
         )?;
