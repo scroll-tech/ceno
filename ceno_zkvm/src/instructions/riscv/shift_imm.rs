@@ -152,7 +152,7 @@ mod test {
             vec![StepRecord::new_i_instruction(
                 3,
                 MOCK_PC_SRLI,
-                MOCK_PROGRAM[6],
+                MOCK_PROGRAM[8],
                 32,
                 Change::new(0, 32 >> 3),
                 0,
