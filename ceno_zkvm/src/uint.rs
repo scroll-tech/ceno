@@ -488,7 +488,7 @@ impl<E: ExtensionField> UIntLimbs<32, 8, E> {
     }
 }
 
-pub struct Value<T: Into<u64> + Copy + Default> {
+pub struct Value<T: Into<u64> + From<u32> + Copy + Default> {
     #[allow(dead_code)]
     val: T,
     pub limbs: Vec<u16>,
@@ -496,7 +496,7 @@ pub struct Value<T: Into<u64> + Copy + Default> {
 
 // TODO generalize to support non 16 bit limbs
 // TODO optimize api with fixed size array
-impl<T: Into<u64> + Copy + Default> Value<T> {
+impl<T: Into<u64> + From<u32> + Copy + Default> Value<T> {
     const LIMBS: usize = {
         let u16_bytes = (u16::BITS / 8) as usize;
         mem::size_of::<T>() / u16_bytes
@@ -518,10 +518,24 @@ impl<T: Into<u64> + Copy + Default> Value<T> {
         }
     }
 
+    fn from(limbs: Vec<u16>) -> Self {
+        Value::<T> {
+            val: Self::merge_from_u16(limbs.clone()),
+            limbs,
+        }
+    }
+
     fn assert_u16(v: &[u16], lkm: &mut LkMultiplicity) {
         v.iter().for_each(|v| {
             lkm.assert_ux::<16>(*v as u64);
         })
+    }
+
+    fn merge_from_u16(limbs: Vec<u16>) -> T {
+        limbs
+            .iter()
+            .fold(0u32, |acc, &v| acc * (1 << 16) + v as u32)
+            .into()
     }
 
     fn split_to_u16(value: T) -> Vec<u16> {
@@ -580,7 +594,7 @@ impl<T: Into<u64> + Copy + Default> Value<T> {
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
     ) -> (Vec<u16>, Vec<u16>) {
-        self.internal_mul_add(rhs, &Self::new_unchecked(T::default()), lkm, with_overflow)
+        self.internal_mul(rhs, lkm, with_overflow)
     }
 
     pub fn mul_add(
@@ -589,48 +603,46 @@ impl<T: Into<u64> + Copy + Default> Value<T> {
         addend: &Self,
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
-    ) -> (Vec<u16>, Vec<u16>) {
-        self.internal_mul_add(mul, addend, lkm, with_overflow)
+    ) -> (Vec<u16>, Vec<u16>, Vec<bool>) {
+        let (ret, mul_carries) = self.internal_mul(mul, lkm, with_overflow);
+        let (ret, add_carries) = addend.add(&Self::from(ret), lkm, with_overflow);
+        (ret, mul_carries, add_carries)
     }
 
-    fn internal_mul_add(
+    fn internal_mul(
         &self,
         mul: &Self,
-        addend: &Self,
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
     ) -> (Vec<u16>, Vec<u16>) {
-        // perform a * b + d = c
         let a_limbs = self.as_u16_limbs();
         let b_limbs = mul.as_u16_limbs();
-        let d_limbs = addend.as_u16_limbs();
 
         let num_limbs = a_limbs.len();
         let mut c_limbs = vec![0u16; num_limbs];
         let mut carries = vec![0u16; num_limbs];
-        a_limbs.iter().enumerate().for_each(|(i, a_limb)| {
-            b_limbs.iter().enumerate().for_each(|(j, b_limb)| {
+        a_limbs.iter().enumerate().for_each(|(i, &a_limb)| {
+            b_limbs.iter().enumerate().for_each(|(j, &b_limb)| {
                 let idx = i + j;
                 if idx < num_limbs {
-                    let (c, overflow_mul) = a_limb.overflowing_mul(*b_limb);
+                    let (c, overflow_mul) = a_limb.overflowing_mul(b_limb);
                     let (ret, overflow_add) = c_limbs[idx].overflowing_add(c);
 
                     c_limbs[idx] = ret;
-                    carries[idx] += (overflow_add as u16) + (overflow_mul as u16);
+                    carries[idx] += overflow_add as u16;
+                    if overflow_mul {
+                        carries[idx] += ((a_limb as u32 * b_limb as u32) / (1 << 16)) as u16;
+                    }
                 }
             })
         });
-
-        // complete the computation by adding prev_carry and input addend
-        (0..num_limbs).for_each(|i| {
-            let mut overflow_carry = false;
-            let (mut ret, overflow_add) = c_limbs[i].overflowing_add(d_limbs[i]);
-
-            if i > 0 && carries[i - 1] > 0 {
-                (ret, overflow_carry) = ret.overflowing_add(carries[i - 1]);
+        // complete the computation by adding prev_carry
+        (1..num_limbs).for_each(|i| {
+            if carries[i - 1] > 0 {
+                let (ret, overflow) = c_limbs[i].overflowing_add(carries[i - 1]);
+                c_limbs[i] = ret;
+                carries[i] += overflow as u16;
             }
-            c_limbs[i] = ret;
-            carries[i] += (overflow_carry as u16) + (overflow_add as u16);
         });
 
         if !with_overflow {

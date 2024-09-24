@@ -766,13 +766,10 @@ mod tests {
 
         #[test]
         fn test_mul32_16_w_carries() {
-            // a = 256
-            // b = 257
-            // c = 256 + 1 * 2^16 = 65,792
-            let wit_a = vec![256, 0];
-            let wit_b = vec![257, 0];
-            let wit_c = vec![256, 1];
-            let wit_carries = vec![1, 0];
+            let wit_a = vec![48683, 2621];
+            let wit_b = vec![7, 0];
+            let wit_c = vec![13101, 18352];
+            let wit_carries = vec![5, 0];
             let witness_values = [wit_a, wit_b, wit_c, wit_carries].concat();
             verify::<32, 16, E>(witness_values, false);
         }

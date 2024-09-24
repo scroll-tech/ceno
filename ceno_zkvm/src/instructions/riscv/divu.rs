@@ -114,26 +114,25 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         config.divisor.assign_limbs(instance, divisor.u16_fields());
         config.outcome.assign_limbs(instance, outcome.u16_fields());
 
-        let (_, inter_carries) = divisor.mul(&outcome, lkm, true);
+        let (_, mul_carries, add_carries) = divisor.mul_add(&outcome, &r, lkm, true);
         config
             .inter_mul_value
             .assign_limbs(instance, inter_mul_value.u16_fields());
         config.inter_mul_value.assign_carries(
             instance,
-            inter_carries
+            mul_carries
                 .into_iter()
                 .map(|carry| E::BaseField::from(carry as u64))
                 .collect_vec(),
         );
         config.remainder.assign_limbs(instance, r.u16_fields());
 
-        let (_, carries) = divisor.mul_add(&outcome, &r, lkm, true);
         config
             .dividend
             .assign_limbs(instance, dividend.u16_fields());
         config.dividend.assign_carries(
             instance,
-            carries
+            add_carries
                 .into_iter()
                 .map(|carry| E::BaseField::from(carry as u64))
                 .collect_vec(),
@@ -208,6 +207,7 @@ mod test {
             verify("remainder", 11, 2, 5);
             verify("u32::MAX", u32::MAX, u32::MAX, 1);
             verify("div by zero", 10, 0, u32::MAX);
+            verify("mul carry", 1202729773, 171818539, 7);
         }
 
         #[test]
@@ -215,6 +215,7 @@ mod test {
             let mut rng = rand::thread_rng();
             let a: u32 = rng.gen();
             let b: u32 = rng.gen_range(1..u32::MAX);
+            println!("random: {} / {} = {}", a, b, a / b);
             verify("random", a, b, a / b);
         }
     }
