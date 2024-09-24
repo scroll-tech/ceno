@@ -1,8 +1,8 @@
 use ark_std::test_rng;
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use ff::Field;
 use goldilocks::Goldilocks;
-use mpcs::util::hash::{Digest, DIGEST_WIDTH, hash_two_digests, new_hasher};
+use mpcs::util::hash::{hash_two_digests, new_hasher, Digest, DIGEST_WIDTH};
 
 fn random_ceno_goldy() -> Goldilocks {
     Goldilocks::random(&mut test_rng())
