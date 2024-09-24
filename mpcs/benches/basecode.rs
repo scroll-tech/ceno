@@ -9,7 +9,8 @@ use mpcs::{
     util::{
         arithmetic::interpolate_field_type_over_boolean_hypercube,
         plonky2_util::reverse_index_bits_in_place_field_type,
-    }, Basefold, BasefoldBasecodeParams, BasefoldSpec, EncodingScheme, PolynomialCommitmentScheme
+    },
+    Basefold, BasefoldBasecodeParams, BasefoldSpec, EncodingScheme, PolynomialCommitmentScheme,
 };
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
@@ -54,7 +55,6 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
                     }
                 })
                 .collect_vec();
-
 
             group.bench_function(
                 BenchmarkId::new("batch_encode", format!("{}-{}", num_vars, batch_size)),
