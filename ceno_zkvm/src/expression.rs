@@ -1,3 +1,5 @@
+mod monomial;
+
 use std::{
     cmp::max,
     mem::MaybeUninit,
@@ -14,7 +16,7 @@ use crate::{
     structs::{ChallengeId, WitnessId},
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
@@ -95,6 +97,10 @@ impl<E: ExtensionField> Expression<E> {
         Self::is_monomial_form_inner(MonomialState::SumTerm, self)
     }
 
+    pub fn to_monomial_form(&self) -> Self {
+        self.to_monomial_form_inner()
+    }
+
     pub fn unpack_sum(&self) -> Option<(Expression<E>, Expression<E>)> {
         match self {
             Expression::Sum(a, b) => Some((a.deref().clone(), b.deref().clone())),
@@ -109,8 +115,10 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Constant(c) => *c == E::BaseField::ZERO,
             Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
             Expression::Product(a, b) => Self::is_zero_expr(a) || Self::is_zero_expr(b),
-            Expression::ScaledSum(_, _, _) => false,
-            Expression::Challenge(_, _, _, _) => false,
+            Expression::ScaledSum(x, a, b) => {
+                (Self::is_zero_expr(x) || Self::is_zero_expr(a)) && Self::is_zero_expr(b)
+            }
+            Expression::Challenge(_, _, scalar, offset) => *scalar == E::ZERO && *offset == E::ZERO,
         }
     }
 
@@ -137,7 +145,9 @@ impl<E: ExtensionField> Expression<E> {
                     && Self::is_monomial_form_inner(MonomialState::ProductTerm, b)
             }
             (Expression::ScaledSum(_, _, _), MonomialState::SumTerm) => true,
-            (Expression::ScaledSum(_, _, b), MonomialState::ProductTerm) => Self::is_zero_expr(b),
+            (Expression::ScaledSum(x, a, b), MonomialState::ProductTerm) => {
+                Self::is_zero_expr(x) || Self::is_zero_expr(a) || Self::is_zero_expr(b)
+            }
         }
     }
 }
@@ -341,31 +351,42 @@ impl<E: ExtensionField> Mul for Expression<E> {
                 if challenge_id1 == challenge_id2 {
                     // (s1 * s2 * c1^(pow1 + pow2) + offset2 * s1 * c1^(pow1) + offset1 * s2 * c2^(pow2))
                     // + offset1 * offset2
-                    Expression::Sum(
-                        Box::new(Expression::Sum(
-                            // (s1 * s2 * c1^(pow1 + pow2) + offset1 * offset2
-                            Box::new(Expression::Challenge(
-                                *challenge_id1,
-                                pow1 + pow2,
-                                *s1 * s2,
-                                *offset1 * offset2,
-                            )),
-                            // offset2 * s1 * c1^(pow1)
+
+                    // (s1 * s2 * c1^(pow1 + pow2) + offset1 * offset2
+                    let mut result = Expression::Challenge(
+                        *challenge_id1,
+                        pow1 + pow2,
+                        *s1 * s2,
+                        *offset1 * offset2,
+                    );
+
+                    // offset2 * s1 * c1^(pow1)
+                    if *s1 != E::ZERO && *offset2 != E::ZERO {
+                        result = Expression::Sum(
+                            Box::new(result),
                             Box::new(Expression::Challenge(
                                 *challenge_id1,
                                 *pow1,
-                                *offset2,
+                                *offset2 * *s1,
                                 E::ZERO,
                             )),
-                        )),
-                        // offset1 * s2 * c2^(pow2))
-                        Box::new(Expression::Challenge(
-                            *challenge_id1,
-                            *pow2,
-                            *offset1,
-                            E::ZERO,
-                        )),
-                    )
+                        );
+                    }
+
+                    // offset1 * s2 * c2^(pow2))
+                    if *s2 != E::ZERO && *offset1 != E::ZERO {
+                        result = Expression::Sum(
+                            Box::new(result),
+                            Box::new(Expression::Challenge(
+                                *challenge_id1,
+                                *pow2,
+                                *offset1 * *s2,
+                                E::ZERO,
+                            )),
+                        );
+                    }
+
+                    result
                 } else {
                     Expression::Product(Box::new(self), Box::new(rhs))
                 }
@@ -552,10 +573,10 @@ mod tests {
                         E::ONE * E::ONE,
                     )),
                     // offset2 * s1 * c1^(pow1)
-                    Box::new(Expression::Challenge(0, 3, E::ONE, E::ZERO,)),
+                    Box::new(Expression::Challenge(0, 3, 2.into(), E::ZERO)),
                 )),
                 // offset1 * s2 * c2^(pow2))
-                Box::new(Expression::Challenge(0, 2, E::ONE, E::ZERO,)),
+                Box::new(Expression::Challenge(0, 2, 2.into(), E::ZERO)),
             )
         );
     }

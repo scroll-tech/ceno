@@ -1,34 +1,33 @@
-use ff_ext::ExtensionField;
-
 use crate::{
+    chip_handler::{MemoryChipOperations, MemoryExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::riscv::config::ExprLtConfig,
     structs::RAMType,
 };
+use ff_ext::ExtensionField;
 
-use super::{RegisterChipOperations, RegisterExpr};
-
-impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperations<E, NR, N>
+impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperations<E, NR, N>
     for CircuitBuilder<'a, E>
 {
-    fn register_read(
+    #[allow(dead_code)]
+    fn memory_read(
         &mut self,
         name_fn: N,
-        register_id: impl ToExpr<E, Output = Expression<E>>,
+        memory_addr: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        value: RegisterExpr<E>,
+        value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
                 [
                     vec![Expression::<E>::Constant(E::BaseField::from(
-                        RAMType::Register as u64,
+                        RAMType::Memory as u64,
                     ))],
-                    vec![register_id.expr()],
+                    vec![memory_addr.expr()],
                     value.to_vec(),
                     vec![prev_ts.clone()],
                 ]
@@ -38,9 +37,9 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             let write_record = cb.rlc_chip_record(
                 [
                     vec![Expression::<E>::Constant(E::BaseField::from(
-                        RAMType::Register as u64,
+                        RAMType::Memory as u64,
                     ))],
-                    vec![register_id.expr()],
+                    vec![memory_addr.expr()],
                     value.to_vec(),
                     vec![ts.clone()],
                 ]
@@ -58,23 +57,24 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         })
     }
 
-    fn register_write(
+    #[allow(dead_code)]
+    fn memory_write(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        memory_addr: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: RegisterExpr<E>,
-        value: RegisterExpr<E>,
+        prev_values: MemoryExpr<E>,
+        value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
                 [
                     vec![Expression::<E>::Constant(E::BaseField::from(
-                        RAMType::Register as u64,
+                        RAMType::Memory as u64,
                     ))],
-                    vec![register_id.expr()],
+                    vec![memory_addr.expr()],
                     prev_values.to_vec(),
                     vec![prev_ts.clone()],
                 ]
@@ -84,9 +84,9 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             let write_record = cb.rlc_chip_record(
                 [
                     vec![Expression::<E>::Constant(E::BaseField::from(
-                        RAMType::Register as u64,
+                        RAMType::Memory as u64,
                     ))],
-                    vec![register_id.expr()],
+                    vec![memory_addr.expr()],
                     value.to_vec(),
                     vec![ts.clone()],
                 ]

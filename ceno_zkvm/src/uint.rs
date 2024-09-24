@@ -4,6 +4,7 @@ mod logic;
 pub mod util;
 
 use crate::{
+    chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
@@ -418,6 +419,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         res
     }
+
+    pub fn value(&self) -> Expression<E> {
+        let base = Expression::from(1 << C);
+        self.expr()
+            .into_iter()
+            .rev()
+            .reduce(|sum, limb| sum * base.clone() + limb)
+            .unwrap()
+    }
 }
 
 /// Construct `UIntLimbs` from `Vec<CellId>`
@@ -461,6 +471,29 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<
                 .collect::<Vec<Expression<E>>>(),
             UintLimb::Expression(e) => e.clone(),
         }
+    }
+}
+
+impl<E: ExtensionField> UIntLimbs<32, 16, E> {
+    /// Return a value suitable for register read/write. From [u16; 2] limbs.
+    pub fn register_expr(&self) -> RegisterExpr<E> {
+        let u16_limbs = self.expr();
+        u16_limbs.try_into().expect("two limbs with M=32 and C=16")
+    }
+}
+
+impl<E: ExtensionField> UIntLimbs<32, 8, E> {
+    /// Return a value suitable for register read/write. From [u8; 4] limbs.
+    pub fn register_expr(&self) -> RegisterExpr<E> {
+        let u8_limbs = self.expr();
+        let u16_limbs = u8_limbs
+            .chunks(2)
+            .map(|chunk| {
+                let (a, b) = (chunk[0].clone(), chunk[1].clone());
+                a + b * 256.into()
+            })
+            .collect_vec();
+        u16_limbs.try_into().expect("four limbs with M=32 and C=8")
     }
 }
 

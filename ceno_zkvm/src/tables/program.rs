@@ -35,19 +35,19 @@ impl<T> InsnRecord<T> {
         &self.0[1]
     }
 
-    pub fn rd(&self) -> &T {
+    pub fn rd_or_zero(&self) -> &T {
         &self.0[2]
     }
 
-    pub fn funct3(&self) -> &T {
+    pub fn funct3_or_zero(&self) -> &T {
         &self.0[3]
     }
 
-    pub fn rs1(&self) -> &T {
+    pub fn rs1_or_zero(&self) -> &T {
         &self.0[4]
     }
 
-    pub fn rs2(&self) -> &T {
+    pub fn rs2_or_zero(&self) -> &T {
         &self.0[5]
     }
 
@@ -63,11 +63,11 @@ impl InsnRecord<u32> {
         InsnRecord::new(
             pc,
             insn.opcode(),
-            insn.rd(),
-            insn.funct3(),
-            insn.rs1(),
-            insn.rs2(),
-            insn.funct7(), // TODO: get immediate for all types.
+            insn.rd_or_zero(),
+            insn.funct3_or_zero(),
+            insn.rs1_or_zero(),
+            insn.rs2_or_zero(),
+            insn.imm_or_funct7(),
         )
     }
 }

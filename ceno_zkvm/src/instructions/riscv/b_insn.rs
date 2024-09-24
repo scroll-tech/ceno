@@ -1,9 +1,13 @@
+#![allow(dead_code)] // TODO: remove after BLT, BEQ, …
+
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{config::ExprLtConfig, constants::PC_STEP_SIZE};
 use crate::{
-    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
+    chip_handler::{
+        GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
+    },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
@@ -34,6 +38,7 @@ use core::mem::MaybeUninit;
 #[derive(Debug)]
 pub struct BInstructionConfig {
     pc: WitIn,
+    next_pc: WitIn,
     ts: WitIn,
     rs1_id: WitIn,
     rs2_id: WitIn,
@@ -48,8 +53,8 @@ impl BInstructionConfig {
     pub fn construct_circuit<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        rs1_read: &impl ToExpr<E, Output = Vec<Expression<E>>>,
-        rs2_read: &impl ToExpr<E, Output = Vec<Expression<E>>>,
+        rs1_read: RegisterExpr<E>,
+        rs2_read: RegisterExpr<E>,
         branch_taken_bit: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         // State in.
@@ -94,13 +99,20 @@ impl BInstructionConfig {
         )?;
 
         // State out.
-        let pc_offset = branch_taken_bit * (imm.expr() - PC_STEP_SIZE.into()) + PC_STEP_SIZE.into();
-        let next_pc = pc.expr() + pc_offset;
+        let next_pc = {
+            let pc_offset = branch_taken_bit.clone() * imm.expr()
+                - branch_taken_bit * PC_STEP_SIZE.into()
+                + PC_STEP_SIZE.into();
+            let next_pc = circuit_builder.create_witin(|| "next_pc")?;
+            circuit_builder.require_equal(|| "pc_branch", next_pc.expr(), pc.expr() + pc_offset)?;
+            next_pc
+        };
         let next_ts = cur_ts.expr() + 4.into();
-        circuit_builder.state_out(next_pc, next_ts)?;
+        circuit_builder.state_out(next_pc.expr(), next_ts)?;
 
         Ok(BInstructionConfig {
             pc,
+            next_pc,
             ts: cur_ts,
             rs1_id,
             rs2_id,
@@ -118,8 +130,9 @@ impl BInstructionConfig {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        // State in.
+        // State.
         set_val!(instance, self.pc, step.pc().before.0 as u64);
+        set_val!(instance, self.next_pc, step.pc().after.0 as u64);
         set_val!(instance, self.ts, step.cycle());
 
         // Register indexes and immediate.
