@@ -198,7 +198,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         name_fn: N,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        assert_eq!(rlc_record.degree(), 1, "rlc lk_record degree",);
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc lk_record degree ({})",
+            name_fn().into()
+        );
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
@@ -215,7 +220,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        assert_eq!(rlc_record.degree(), 1, "rlc lk_table_record degree",);
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc lk_table_record degree ({})",
+            name_fn().into()
+        );
         self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
             multiplicity,
@@ -231,7 +241,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         name_fn: N,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        assert_eq!(rlc_record.degree(), 1, "rlc read_record degree",);
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc read_record degree ({})",
+            name_fn().into()
+        );
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.r_expressions_namespace_map.push(path);
@@ -246,7 +261,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc write_record degree {}",
+            "rlc write_record degree ({})",
             name_fn().into()
         );
         self.w_expressions.push(rlc_record);
