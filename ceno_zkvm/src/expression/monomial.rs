@@ -81,17 +81,9 @@ impl<E: ExtensionField> Expression<E> {
     fn sum_terms(terms: Vec<Term<E>>) -> Self {
         terms
             .into_iter()
-            .map(|term| term.vars.into_iter().fold(term.coeff, Self::product))
-            .reduce(Self::sum)
+            .map(|term| term.vars.into_iter().fold(term.coeff, |a, b| a * b))
+            .reduce(|a, b| a + b)
             .unwrap_or(Expression::ZERO)
-    }
-
-    fn product(a: Self, b: Self) -> Self {
-        Product(Box::new(a), Box::new(b))
-    }
-
-    fn sum(a: Self, b: Self) -> Self {
-        Sum(Box::new(a), Box::new(b))
     }
 }
 
