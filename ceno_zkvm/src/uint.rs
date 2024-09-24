@@ -518,7 +518,7 @@ impl<T: Into<u64> + From<u32> + Copy + Default> Value<T> {
         }
     }
 
-    fn from(limbs: Vec<u16>) -> Self {
+    fn new_from_slices_uncheck(limbs: Vec<u16>) -> Self {
         Value::<T> {
             val: Self::merge_from_u16(limbs.clone()),
             limbs,
@@ -605,7 +605,8 @@ impl<T: Into<u64> + From<u32> + Copy + Default> Value<T> {
         with_overflow: bool,
     ) -> (Vec<u16>, Vec<u16>, Vec<bool>) {
         let (ret, mul_carries) = self.internal_mul(mul, lkm, with_overflow);
-        let (ret, add_carries) = addend.add(&Self::from(ret), lkm, with_overflow);
+        let (ret, add_carries) =
+            addend.add(&Self::new_from_slices_uncheck(ret), lkm, with_overflow);
         (ret, mul_carries, add_carries)
     }
 

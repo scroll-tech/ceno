@@ -47,7 +47,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         // outcome = dividend / divisor + remainder => dividend = divisor * outcome + r
         let mut divisor = UInt::new_unchecked(|| "divisor", circuit_builder)?;
-        let mut outcome = UInt::new_unchecked(|| "outcome", circuit_builder)?;
+        let mut outcome = UInt::new(|| "outcome", circuit_builder)?;
         let mut r = UInt::new_unchecked(|| "remainder", circuit_builder)?;
 
         let (inter_mul_value, dividend) =
@@ -99,14 +99,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // dividend = divisor * outcome + r
         let dividend = Value::new_unchecked(rs1);
         let divisor = Value::new_unchecked(rs2);
-        let outcome = Value::new_unchecked(rd);
+        let outcome = Value::new(rd, lkm);
 
         // divisor * outcome
-        let inter_mul_value = Value::new_unchecked(rs2 * rd);
+        let inter_mul_value = Value::new(rs2 * rd, lkm);
         let r = if rs2 == 0 {
             Value::new_unchecked(0)
         } else {
-            Value::new_unchecked(rs1 % rs2)
+            Value::new(rs1 % rs2, lkm)
         };
 
         // assignment
