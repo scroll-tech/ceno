@@ -11,6 +11,7 @@ use ff_ext::ExtensionField;
 impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperations<E, NR, N>
     for CircuitBuilder<'a, E>
 {
+    #[allow(dead_code)]
     fn memory_read(
         &mut self,
         name_fn: N,
@@ -56,6 +57,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         })
     }
 
+    #[allow(dead_code)]
     fn memory_write(
         &mut self,
         name_fn: N,
