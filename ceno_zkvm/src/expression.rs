@@ -465,6 +465,13 @@ impl<E: ExtensionField> ToExpr<E> for WitIn {
     }
 }
 
+impl<E: ExtensionField> ToExpr<E> for &WitIn {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::WitIn(self.id)
+    }
+}
+
 impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
