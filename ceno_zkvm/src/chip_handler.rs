@@ -49,6 +49,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
 pub type MemoryExpr<E> = [Expression<E>; 2];
 
 pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
+    #[allow(dead_code)]
     fn memory_read(
         &mut self,
         name_fn: N,
@@ -59,6 +60,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     fn memory_write(
         &mut self,
         name_fn: N,
