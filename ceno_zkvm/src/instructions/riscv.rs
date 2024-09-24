@@ -9,7 +9,7 @@ pub mod constants;
 mod i_insn;
 pub mod logic;
 mod r_insn;
-pub mod srli;
+pub mod shift_imm;
 
 #[cfg(test)]
 mod test;

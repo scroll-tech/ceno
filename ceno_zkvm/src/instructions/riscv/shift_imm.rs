@@ -10,9 +10,11 @@ use crate::{
 
 use super::{constants::UInt, i_insn::IInstructionConfig, RIVInstruction};
 
-pub struct SrliInstruction<E>(PhantomData<E>);
+pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 
-impl<E> RIVInstruction for SrliInstruction<E> {
+pub struct SrliOp;
+
+impl RIVInstruction for SrliOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SRLI;
 }
 
@@ -26,11 +28,11 @@ pub struct InstructionConfig<E: ExtensionField> {
     rd_imm_rem_add: UInt<E>,
 }
 
-impl<E: ExtensionField> Instruction<E> for SrliInstruction<E> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = InstructionConfig<E>;
 
     fn name() -> String {
-        format!("{:?}", SrliInstruction::<E>::INST_KIND)
+        format!("{:?}", I::INST_KIND)
     }
 
     fn construct_circuit(
@@ -49,7 +51,7 @@ impl<E: ExtensionField> Instruction<E> for SrliInstruction<E> {
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             circuit_builder,
-            SrliInstruction::<E>::INST_KIND,
+            I::INST_KIND,
             &imm.expr_unchecked(),
             rd_imm_rem_add.register_expr(),
             rd_written.register_expr(),
@@ -126,7 +128,7 @@ mod test {
         scheme::mock_prover::{MockProver, MOCK_PC_SRLI, MOCK_PROGRAM},
     };
 
-    use super::SrliInstruction;
+    use super::{ShiftImmInstruction, SrliOp};
 
     #[test]
     fn test_opcode_srli() {
@@ -136,14 +138,15 @@ mod test {
             .namespace(
                 || "srli",
                 |cb| {
-                    let config = SrliInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                    let config =
+                        ShiftImmInstruction::<GoldilocksExt2, SrliOp>::construct_circuit(cb);
                     Ok(config)
                 },
             )
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = SrliInstruction::<GoldilocksExt2>::assign_instances(
+        let (raw_witin, _) = ShiftImmInstruction::<GoldilocksExt2, SrliOp>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
