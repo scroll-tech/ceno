@@ -20,8 +20,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     fn internal_add(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
-        addend1: &Vec<Expression<E>>,
-        addend2: &Vec<Expression<E>>,
+        addend: &Vec<Expression<E>>,
         with_overflow: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         let mut c = UIntLimbs::<M, C, E>::new_as_empty();
@@ -32,9 +31,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         // perform add operation
         // c[i] = a[i] + b[i] + carry[i-1] - carry[i] * 2 ^ C
         c.limbs = UintLimb::Expression(
-            (*addend1)
+            (self.expr())
                 .iter()
-                .zip((*addend2).iter())
+                .zip((*addend).iter())
                 .enumerate()
                 .map(|(i, (a, b))| {
                     let carries = c.carries.as_ref().unwrap();
@@ -80,7 +79,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 })
                 .collect_vec();
 
-            self.internal_add(cb, &self.expr(), &b_limbs, with_overflow)
+            self.internal_add(cb, &b_limbs, with_overflow)
         })
     }
 
@@ -93,7 +92,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         with_overflow: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            self.internal_add(cb, &self.expr(), &addend.expr(), with_overflow)
+            self.internal_add(cb, &addend.expr(), with_overflow)
         })
     }
 
@@ -195,8 +194,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             let c = self.internal_mul(cb, multiplier, with_overflow)?;
             Ok((
                 c.clone(),
-                c.internal_add(cb, &c.expr(), &addend.expr(), with_overflow)
-                    .unwrap(),
+                c.internal_add(cb, &addend.expr(), with_overflow).unwrap(),
             ))
         })
     }
