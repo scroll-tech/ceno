@@ -551,14 +551,19 @@ pub struct Value<T: Into<u64> + Copy> {
 }
 
 impl Value<u32> {
-    pub fn from_limbs(limbs: &[u16]) -> Self {
-        assert_eq!(limbs.len(), 2);
-        let mut value = Value::<u32> {
-            val: 0,
-            limbs: limbs.to_vec(),
-        };
-        value.val = value.as_u64() as u32;
-        value
+    pub fn new_from_slice_unchecked(raw_limbs: &[u16]) -> Self {
+        assert_eq!(raw_limbs.len(), 2);
+        let (u16_limbs, value) = raw_limbs.iter().rev().enumerate().fold(
+            (vec![0u16; raw_limbs.len()], 0u64),
+            |(mut limb, acc), (i, raw_limb)| {
+                limb[raw_limbs.len() - 1 - i] = *raw_limb;
+                (limb, (acc << 16) | *raw_limb as u64)
+            },
+        );
+        Value::<u32> {
+            val: value as u32,
+            limbs: u16_limbs,
+        }
     }
 }
 
@@ -609,10 +614,7 @@ impl<T: Into<u64> + Copy> Value<T> {
 
     /// Convert the limbs to a u64 value
     pub fn as_u64(&self) -> u64 {
-        self.limbs
-            .iter()
-            .rev()
-            .fold(0, |acc, &v| (acc << 16) | v as u64)
+        self.val.into()
     }
 
     pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {

@@ -36,13 +36,13 @@ impl<E: ExtensionField> Instruction<E> for SrliInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let mut imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
+        let mut imm = UInt::new(|| "imm", circuit_builder)?;
         let mut rd_written = UInt::new_unchecked(|| "rd_written", circuit_builder)?;
 
         // Note: `imm` is set to 2**imm (upto 32 bit) just for SRLI for efficient verification
         // Goal is to constrain:
         // rs1_read == rd_written * imm + remainder
-        let remainder = UInt::new_unchecked(|| "remainder", circuit_builder)?;
+        let remainder = UInt::new(|| "remainder", circuit_builder)?;
         let rd_imm_mul = rd_written.mul(|| "rd_written * imm", circuit_builder, &mut imm, true)?;
         let rd_imm_rem_add =
             rd_imm_mul.add(|| "rm_imm + remainder", circuit_builder, &remainder, true)?;
@@ -76,20 +76,20 @@ impl<E: ExtensionField> Instruction<E> for SrliInstruction<E> {
         let rd_written = step.rd().unwrap().value.after;
         let imm = step.insn().imm_or_funct7();
         let result = rs1_read.wrapping_div(imm);
-        let remainder = rs1_read - (result * imm);
+        let remainder = rs1_read.wrapping_sub(result * imm);
         assert_eq!(result, rd_written, "SRLI: result mismatch");
 
         // Assignment.
         let rd_written = Value::new_unchecked(rd_written);
-        let imm = Value::new_unchecked(imm);
-        let remainder = Value::new_unchecked(remainder);
+        let imm = Value::new(imm, lk_multiplicity);
+        let remainder = Value::new(remainder, lk_multiplicity);
 
         let rd_imm_mul = rd_written.mul(&imm, lk_multiplicity, true);
-        let rd_imm = Value::from_limbs(rd_imm_mul.0.as_slice());
+        let rd_imm = Value::new_from_slice_unchecked(rd_imm_mul.0.as_slice());
 
         let rd_imm_rem_add = rd_imm.add(&remainder, lk_multiplicity, true);
         assert_eq!(
-            Value::from_limbs(&rd_imm_rem_add.0).as_u64(),
+            Value::new_from_slice_unchecked(&rd_imm_rem_add.0).as_u64(),
             rs1_read as u64,
             "SRLI: rd_imm_rem_add mismatch"
         );
@@ -152,6 +152,7 @@ mod test {
                 MOCK_PROGRAM[6],
                 32,
                 Change::new(0, 32 >> 3),
+                0,
             )],
         )
         .unwrap();
