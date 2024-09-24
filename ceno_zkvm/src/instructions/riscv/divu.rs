@@ -56,14 +56,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // div by zero check
         let is_zero = divisor.is_zero(circuit_builder)?;
         outcome.limbs.iter().for_each(|&limb| {
-            // conditional_outcome is -1 if divisor is zero
-            // => is_zero * (-1) + (1 - is_zero) * outcome = outcome - is_zero * outcome - is_zero * (-1)
-            let conditional_outcome = limb.expr()
-                + is_zero.is_zero.expr() * Expression::from(u16::MAX as usize)
-                - is_zero.is_zero.expr() * limb.expr();
-
             circuit_builder
-                .require_equal(|| "outcome_check", limb.expr(), conditional_outcome)
+                .condition_require_equal(
+                    || "outcome_is_zero",
+                    is_zero.is_zero.expr(),
+                    limb.expr(),
+                    Expression::from(u16::MAX as usize),
+                    limb.expr(),
+                )
                 .unwrap();
         });
 
