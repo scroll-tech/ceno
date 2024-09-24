@@ -7,7 +7,7 @@ use Expression::*;
 
 impl<E: ExtensionField> Expression<E> {
     pub(super) fn to_monomial_form_inner(&self) -> Self {
-        Self::sum(Self::dedup(self.distribute()))
+        Self::sum_terms(Self::combine(self.distribute()))
     }
 
     fn distribute(&self) -> Vec<Term<E>> {
@@ -64,36 +64,34 @@ impl<E: ExtensionField> Expression<E> {
         }
     }
 
-    fn dedup(terms: Vec<Term<E>>) -> Vec<Term<E>> {
+    fn combine(terms: Vec<Term<E>>) -> Vec<Term<E>> {
         let mut res: Vec<Term<E>> = vec![];
         for mut term in terms {
             term.vars.sort();
 
-            let mut found = false;
-            for res_term in res.iter_mut() {
-                if res_term.vars == term.vars {
-                    res_term.coeff = res_term.coeff.clone() + term.coeff.clone();
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
+            if let Some(res_term) = res.iter_mut().find(|res_term| res_term.vars == term.vars) {
+                res_term.coeff = res_term.coeff.clone() + term.coeff.clone();
+            } else {
                 res.push(term);
             }
         }
         res
     }
 
-    fn sum(terms: Vec<Term<E>>) -> Self {
+    fn sum_terms(terms: Vec<Term<E>>) -> Self {
         terms
             .into_iter()
             .map(|term| term.vars.into_iter().fold(term.coeff, Self::product))
-            .reduce(|acc, term| acc + term)
+            .reduce(Self::sum)
             .unwrap_or(Expression::ZERO)
     }
 
     fn product(a: Self, b: Self) -> Self {
         Product(Box::new(a), Box::new(b))
+    }
+
+    fn sum(a: Self, b: Self) -> Self {
+        Sum(Box::new(a), Box::new(b))
     }
 }
 
@@ -103,6 +101,7 @@ struct Term<E: ExtensionField> {
     vars: Vec<Expression<E>>,
 }
 
+// Define a lexicographic order for expressions. It compares the types first, then the arguments left-to-right.
 impl<E: ExtensionField> Ord for Expression<E> {
     fn cmp(&self, other: &Self) -> Ordering {
         use Ordering::*;
