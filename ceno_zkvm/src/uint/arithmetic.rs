@@ -1030,7 +1030,6 @@ mod tests {
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
                 // limbs check
-                println!("{:?}", ret);
                 assert_eq!(
                     eval_by_expr(&witness_values, &challenges, ret),
                     E::from(e.clone()[i])

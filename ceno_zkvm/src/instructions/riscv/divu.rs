@@ -55,17 +55,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         // div by zero check
         let is_zero = divisor.is_zero(circuit_builder)?;
-        outcome.limbs.iter().for_each(|&limb| {
-            circuit_builder
-                .condition_require_equal(
-                    || "outcome_is_zero",
-                    is_zero.is_zero.expr(),
-                    limb.expr(),
-                    Expression::from(u16::MAX as usize),
-                    limb.expr(),
-                )
-                .unwrap();
-        });
+
+        let sum_of_outcome = outcome.expr_sum();
+        circuit_builder
+            .condition_require_equal(
+                || "outcome_is_zero",
+                is_zero.is_zero.expr(),
+                sum_of_outcome.clone(),
+                Expression::from(u16::MAX as usize),
+                sum_of_outcome,
+            )
+            .unwrap();
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
