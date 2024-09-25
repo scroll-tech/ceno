@@ -1,8 +1,20 @@
-use std::mem::MaybeUninit;
+use std::{fmt::Display, mem::MaybeUninit};
 
-use crate::{expression::WitIn, set_val, utils::i64_to_base, witness::LkMultiplicity};
+use crate::{
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{Expression, ToExpr, WitIn},
+    gadgets::IsLtConfig,
+    set_val,
+    utils::i64_to_base,
+    witness::LkMultiplicity,
+    Value,
+};
+use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
+
+use super::constants::{UInt, UINT_LIMBS};
 
 #[derive(Clone)]
 pub struct IsEqualConfig {
@@ -186,5 +198,132 @@ impl UIntLtInput<'_> {
 
         assert!(is_lt == 0 || is_lt == 1);
         is_lt > 0
+    }
+}
+
+#[derive(Debug)]
+pub struct UIntLtSignedConfig {
+    pub is_lt: Option<WitIn>,
+    pub is_lhs_pos: IsLtConfig<1>,
+    pub is_rhs_pos: IsLtConfig<1>,
+    pub is_both_pos_lt: IsLtConfig<UINT_LIMBS>,
+    pub is_both_neg_lt: IsLtConfig<UINT_LIMBS>,
+}
+
+impl UIntLtSignedConfig {
+    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+        self.is_lt.unwrap().expr()
+    }
+
+    pub fn construct_circuit<
+        E: ExtensionField,
+        NR: Into<String> + Display + Clone,
+        N: FnOnce() -> NR,
+    >(
+        cb: &mut CircuitBuilder<E>,
+        name_fn: N,
+        lhs: &UInt<E>,
+        rhs: &UInt<E>,
+        assert_less_than: Option<bool>,
+    ) -> Result<Self, ZKVMError> {
+        cb.namespace(
+            || "uint_signed_less_than",
+            |cb| {
+                let name = name_fn();
+                assert!(UInt::<E>::C == 16, "do not support != 16 limb");
+                let (is_lt, is_lt_expr) = if let Some(lt) = assert_less_than {
+                    (
+                        None,
+                        if lt {
+                            Expression::ONE
+                        } else {
+                            Expression::ZERO
+                        },
+                    )
+                } else {
+                    let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
+                    cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
+                    (Some(is_lt), is_lt.expr())
+                };
+
+                // detect lhs signed
+                let is_lhs_pos = IsLtConfig::<1>::construct_circuit(
+                    cb,
+                    || "lhs_msb",
+                    lhs.limbs.iter().last().unwrap().expr(), // msb limb
+                    (1 << UInt::<E>::C).into(),
+                    None,
+                )?;
+                // detect rhs signed
+                let is_rhs_pos = IsLtConfig::<1>::construct_circuit(
+                    cb,
+                    || "rhs_msb",
+                    rhs.limbs.iter().last().unwrap().expr(), // msb limb
+                    (1 << UInt::<E>::C).into(),
+                    None,
+                )?;
+                let lhs_value = lhs.value();
+                let rhs_value = rhs.value();
+                let is_both_pos_lt = IsLtConfig::construct_circuit(
+                    cb,
+                    || "lhs < rhs",
+                    lhs_value.clone(),
+                    rhs_value.clone(),
+                    None,
+                )?;
+                let is_both_neg_lt =
+                    IsLtConfig::construct_circuit(cb, || "rhs < lhs", rhs_value, lhs_value, None)?;
+                cb.require_equal(
+                    || "is_lt_expr",
+                    is_lt_expr,
+                    // is_left_neg && is_right_pos && 1
+                    // (is_left_neg && is_right_neg) || (is_left_pos && is_right_pos) * is_cond_lt
+                    (Expression::ONE - is_lhs_pos.expr()) * (is_rhs_pos.expr()) * Expression::ONE
+                        + ((Expression::ONE - is_lhs_pos.expr())
+                            * (Expression::ONE - is_rhs_pos.expr())
+                            * is_both_neg_lt.expr())
+                        + (is_lhs_pos.expr() * is_rhs_pos.expr()) * is_both_pos_lt.expr(),
+                )?;
+                Ok(UIntLtSignedConfig {
+                    is_lt,
+                    is_lhs_pos,
+                    is_rhs_pos,
+                    is_both_pos_lt,
+                    is_both_neg_lt,
+                })
+            },
+        )
+    }
+    pub fn assign_instance<E: ExtensionField>(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        lkm: &mut LkMultiplicity,
+        lhs: u64,
+        rhs: u64,
+    ) -> Result<(), ZKVMError> {
+        let lhs_value = Value::new_unchecked(lhs);
+        let rhs_value = Value::new_unchecked(rhs);
+        let is_lhs_pos = lhs as i32 >= 0;
+        let is_rhs_pos = rhs as i32 >= 0;
+        self.is_lhs_pos.assign_instance(
+            instance,
+            lkm,
+            *lhs_value.limbs.last().unwrap() as u64,
+            (1 << UInt::<E>::C) as u64,
+        )?;
+        self.is_rhs_pos.assign_instance(
+            instance,
+            lkm,
+            *rhs_value.limbs.last().unwrap() as u64,
+            (1 << UInt::<E>::C) as u64,
+        )?;
+        self.is_both_pos_lt
+            .assign_instance(instance, lkm, lhs, rhs)?;
+        self.is_both_neg_lt
+            .assign_instance(instance, lkm, rhs, lhs)?;
+        if let Some(is_lt) = self.is_lt {
+            set_val!(instance, is_lt, ((lhs as i32) < (rhs as i32)) as u64);
+        }
+        Ok(())
     }
 }

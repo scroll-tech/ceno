@@ -20,7 +20,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(

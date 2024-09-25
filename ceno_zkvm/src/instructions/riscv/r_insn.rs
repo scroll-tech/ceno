@@ -1,7 +1,7 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::constants::{UInt, PC_STEP_SIZE};
+use super::constants::{UInt, PC_STEP_SIZE, UINT_LIMBS};
 use crate::{
     chip_handler::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
@@ -33,9 +33,9 @@ pub struct RInstructionConfig<E: ExtensionField> {
     prev_rs1_ts: WitIn,
     prev_rs2_ts: WitIn,
     prev_rd_ts: WitIn,
-    lt_rs1_cfg: IsLtConfig,
-    lt_rs2_cfg: IsLtConfig,
-    lt_prev_ts_cfg: IsLtConfig,
+    lt_rs1_cfg: IsLtConfig<UINT_LIMBS>,
+    lt_rs2_cfg: IsLtConfig<UINT_LIMBS>,
+    lt_prev_ts_cfg: IsLtConfig<UINT_LIMBS>,
 }
 
 impl<E: ExtensionField> RInstructionConfig<E> {

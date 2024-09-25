@@ -35,7 +35,7 @@ impl<const N_U16: usize> IsLtConfig<N_U16> {
         rhs: Expression<E>,
         assert_less_than: Option<bool>,
     ) -> Result<Self, ZKVMError> {
-        assert!(N_U16 >= 2);
+        assert!(N_U16 >= 1);
         cb.namespace(
             || "less_than",
             |cb| {
@@ -51,6 +51,7 @@ impl<const N_U16: usize> IsLtConfig<N_U16> {
                     )
                 } else {
                     let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
+                    cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
                     (Some(is_lt), is_lt.expr())
                 };
 

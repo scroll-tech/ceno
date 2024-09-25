@@ -7,7 +7,6 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     gadgets::IsLtConfig,
-    instructions::riscv::constants::UINT_LIMBS,
     structs::ROMType,
     tables::InsnRecord,
 };
@@ -254,11 +253,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        // TODO: Replace with `x * (1 - x)` or a multi-bit lookup similar to assert_u8_pair.
-        let items: Vec<Expression<E>> = vec![(ROMType::U1 as usize).into(), expr];
-        let rlc_record = self.rlc_chip_record(items);
-        self.lk_record(name_fn, rlc_record)?;
-        Ok(())
+        self.require_zero(name_fn, expr.clone() * (Expression::ONE - expr))
     }
 
     /// Assert `rom_type(a, b) = c` and that `a, b, c` are all bytes.
