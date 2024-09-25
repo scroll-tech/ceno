@@ -65,7 +65,7 @@ where
         transcript: &mut Transcript<E>,
     ) -> Result<BasefoldProof<E>, Error> {
         let hasher = new_hasher::<E::BaseField>();
-        let timer = start_timer!(|| "Basefold::batch_open");
+        let timer = start_timer!(|| "Basefold::batch_open_vlmp");
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
         let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
         assert!(min_num_vars >= Spec::get_basecode_msg_size_log());

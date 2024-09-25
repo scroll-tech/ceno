@@ -6,6 +6,9 @@ use core::fmt::Debug;
 use ff_ext::ExtensionField;
 
 use rand::RngCore;
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use multilinear_extensions::mle::FieldType;
@@ -98,6 +101,29 @@ where
 
     pub fn batch_codewords(&self, coeffs: &[E]) -> Vec<E> {
         self.codeword_tree.batch_leaves(coeffs)
+    }
+
+    pub fn iter_batch_codewords<'a>(&'a self, coeffs: &'a [E]) -> impl Iterator<Item = E> + 'a {
+        (0..self.codeword_size()).map(|i| {
+            self.get_codeword_entry_ext(i)
+                .iter()
+                .zip(coeffs.iter())
+                .map(|(a, b)| *a * b)
+                .sum()
+        })
+    }
+
+    pub fn par_iter_batch_codewords<'a>(
+        &'a self,
+        coeffs: &'a [E],
+    ) -> impl ParallelIterator<Item = E> + IndexedParallelIterator + 'a {
+        (0..self.codeword_size()).into_par_iter().map(|i| {
+            self.get_codeword_entry_ext(i)
+                .par_iter()
+                .zip(coeffs.par_iter())
+                .map(|(a, b)| *a * b)
+                .sum()
+        })
     }
 
     pub fn codeword_size(&self) -> usize {
