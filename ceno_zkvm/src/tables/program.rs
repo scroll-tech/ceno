@@ -10,8 +10,9 @@ use crate::{
     tables::TableCircuit,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{DecodedInstruction, Word, CENO_PLATFORM, WORD_SIZE};
+use ceno_emul::{DecodedInstruction, Word, CENO_PLATFORM, PC_STEP_SIZE, WORD_SIZE};
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -51,6 +52,11 @@ impl<T> InsnRecord<T> {
         &self.0[5]
     }
 
+    /// Iterate through the fields, except immediate because it is complicated.
+    fn without_imm(&self) -> &[T] {
+        &self.0[0..6]
+    }
+
     /// The complete immediate value, for instruction types I/S/B/U/J.
     /// Otherwise, the field funct7 of R-Type instructions.
     pub fn imm_or_funct7(&self) -> &T {
@@ -69,6 +75,16 @@ impl InsnRecord<u32> {
             insn.rs2_or_zero(),
             insn.imm_or_funct7(),
         )
+    }
+
+    /// Interpret the immediate or funct7 as unsigned or signed depending on the instruction.
+    /// Convert negative values from two's complement to field.
+    pub fn imm_or_funct7_field<F: SmallField>(insn: &DecodedInstruction) -> F {
+        if insn.imm_is_negative() {
+            -F::from(-(insn.imm_or_funct7() as i32) as u64)
+        } else {
+            F::from(insn.imm_or_funct7() as u64)
+        }
     }
 }
 
@@ -137,13 +153,25 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .with_min_len(MIN_PAR_SIZE)
             .zip((0..num_instructions).into_par_iter())
             .for_each(|(row, i)| {
-                let pc = pc_start + (i * WORD_SIZE) as u32;
+                let pc = pc_start + (i * PC_STEP_SIZE) as u32;
                 let insn = DecodedInstruction::new(program[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);
 
-                for (col, val) in config.record.as_slice().iter().zip_eq(values.as_slice()) {
+                // Copy all the fields except immediate.
+                for (col, val) in config
+                    .record
+                    .without_imm()
+                    .iter()
+                    .zip_eq(values.without_imm())
+                {
                     set_fixed_val!(row, *col, E::BaseField::from(*val as u64));
                 }
+
+                set_fixed_val!(
+                    row,
+                    config.record.imm_or_funct7(),
+                    InsnRecord::imm_or_funct7_field(&insn)
+                );
             });
 
         fixed

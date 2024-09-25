@@ -6,6 +6,7 @@ pub mod blt;
 pub mod branch;
 pub mod config;
 pub mod constants;
+pub mod divu;
 mod i_insn;
 pub mod logic;
 mod r_insn;

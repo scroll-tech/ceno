@@ -11,7 +11,7 @@ use crate::{
 };
 use ark_std::test_rng;
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
-use ceno_emul::{ByteAddr, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, Change, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
@@ -35,6 +35,7 @@ pub const MOCK_IMM: u32 = 3;
 /// The program baked in the MockProver.
 /// TODO: Make this a parameter?
 #[allow(clippy::identity_op)]
+#[allow(clippy::unusual_byte_groupings)]
 pub const MOCK_PROGRAM: &[u32] = &[
     // R-Type
     // funct7 | rs2 | rs1 | funct3 | rd | opcode
@@ -51,10 +52,15 @@ pub const MOCK_PROGRAM: &[u32] = &[
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
     // xor x4, x2, x3
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
+    // B-Type
     // beq x2, x3, 8
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b000 << 12 | 0x08 << 7 | 0x63,
     // bne x2, x3, 8
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | 0x08 << 7 | 0x63,
+    // blt x2, x3, -8
+    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
+    // divu (0x01, 0x05, 0x33)
+    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x33,
     // srli x4, x2, 3
     0x00 << 25 | MOCK_IMM << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
 ];
@@ -67,7 +73,12 @@ pub const MOCK_PC_OR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 16);
 pub const MOCK_PC_XOR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 20);
 pub const MOCK_PC_BEQ: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 24);
 pub const MOCK_PC_BNE: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 28);
-pub const MOCK_PC_SRLI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 32);
+pub const MOCK_PC_BLT: Change<ByteAddr> = Change {
+    before: ByteAddr(CENO_PLATFORM.pc_start() + 32),
+    after: ByteAddr(CENO_PLATFORM.pc_start() + 24),
+};
+pub const MOCK_PC_DIVU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 36);
+pub const MOCK_PC_SRLI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 40);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]

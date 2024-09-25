@@ -1,17 +1,22 @@
 use std::{iter, time::Instant};
 
 use ceno_zkvm::{
-    instructions::riscv::arith::AddInstruction, scheme::prover::ZKVMProver,
+    instructions::riscv::{arith::AddInstruction, blt::BltInstruction},
+    scheme::prover::ZKVMProver,
     tables::ProgramTableCircuit,
 };
 use clap::Parser;
 use const_env::from_env;
 
-use ceno_emul::{ByteAddr, InsnKind::ADD, StepRecord, VMState, CENO_PLATFORM};
+use ceno_emul::{
+    ByteAddr,
+    InsnKind::{ADD, BLT},
+    StepRecord, VMState, CENO_PLATFORM,
+};
 use ceno_zkvm::{
     scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::U16TableCircuit,
+    tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
 use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
@@ -33,11 +38,11 @@ const RAYON_NUM_THREADS: usize = 8;
 #[allow(clippy::unusual_byte_groupings)]
 const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
 #[allow(clippy::unusual_byte_groupings)]
-const PROGRAM_ADD_LOOP: [u32; 4] = [
+const PROGRAM_CODE: [u32; 4] = [
     // func7   rs2   rs1   f3  rd    opcode
     0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
     0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
-    0b_1_111111_00000_00011_001_1100_1_1100011, // bne x3, x0, -8
+    0b_1_111111_00011_00000_100_1100_1_1100011, // blt x0, x3, -8
     ECALL_HALT,                               // ecall halt
 ];
 
@@ -50,7 +55,7 @@ struct Args {
     start: u8,
 
     /// end round
-    #[arg(short, long, default_value_t = 22)]
+    #[arg(short, long, default_value_t = 9)]
     end: u8,
 }
 
@@ -96,11 +101,17 @@ fn main() {
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
+    // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
-    let range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
+    let blt_config = zkvm_cs.register_opcode_circuit::<BltInstruction>();
+    // tables
+    let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
+    // let u1_range_config = zkvm_cs.register_table_circuit::<U1TableCircuit<E>>();
+    let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
+    let ltu_config = zkvm_cs.register_table_circuit::<LtuTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
-    let program_add_loop: Vec<u32> = PROGRAM_ADD_LOOP
+    let program_code: Vec<u32> = PROGRAM_CODE
         .iter()
         .cloned()
         .chain(iter::repeat(ECALL_HALT))
@@ -108,15 +119,32 @@ fn main() {
         .collect();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<BltInstruction>(&zkvm_cs);
+
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
-        range_config.clone(),
+        u16_range_config.clone(),
+        &(),
+    );
+    //    zkvm_fixed_traces.register_table_circuit::<U1TableCircuit<E>>(
+    //        &zkvm_cs,
+    //        u1_range_config.clone(),
+    //        &(),
+    //    );
+    zkvm_fixed_traces.register_table_circuit::<AndTableCircuit<E>>(
+        &zkvm_cs,
+        and_config.clone(),
+        &(),
+    );
+    zkvm_fixed_traces.register_table_circuit::<LtuTableCircuit<E>>(
+        &zkvm_cs,
+        ltu_config.clone(),
         &(),
     );
     zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
         &zkvm_cs,
         prog_config.clone(),
-        &program_add_loop,
+        &program_code,
     );
 
     let pk = zkvm_cs
@@ -139,33 +167,60 @@ fn main() {
         vm.init_register_unsafe(1usize, 1);
         vm.init_register_unsafe(2usize, u32::MAX); // -1 in two's complement
         vm.init_register_unsafe(3usize, step_loop as u32);
-        for (i, inst) in program_add_loop.iter().enumerate() {
+        for (i, inst) in program_code.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
-        let records = vm
+
+        let all_records = vm
             .iter_until_success()
             .collect::<Result<Vec<StepRecord>, _>>()
             .expect("vm exec failed")
             .into_iter()
-            .filter(|record| record.insn().kind().1 == ADD)
             .collect::<Vec<_>>();
-        tracing::info!("tracer generated {} ADD records", records.len());
+        let mut add_records = Vec::new();
+        let mut blt_records = Vec::new();
+        all_records.iter().for_each(|record| {
+            let kind = record.insn().kind().1;
+            if kind == ADD {
+                add_records.push(record.clone());
+            } else if kind == BLT {
+                blt_records.push(record.clone());
+            }
+        });
+
+        tracing::info!(
+            "tracer generated {} ADD records, {} BLT records",
+            add_records.len(),
+            blt_records.len()
+        );
 
         let mut zkvm_witness = ZKVMWitnesses::default();
         // assign opcode circuits
         zkvm_witness
-            .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, records)
+            .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
+            .unwrap();
+        zkvm_witness
+            .assign_opcode_circuit::<BltInstruction>(&zkvm_cs, &blt_config, blt_records)
             .unwrap();
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
         zkvm_witness
-            .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &range_config, &())
+            .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
+            .unwrap();
+        //        zkvm_witness
+        //            .assign_table_circuit::<U1TableCircuit<E>>(&zkvm_cs, &u1_range_config, &())
+        //            .unwrap();
+        zkvm_witness
+            .assign_table_circuit::<AndTableCircuit<E>>(&zkvm_cs, &and_config, &())
+            .unwrap();
+        zkvm_witness
+            .assign_table_circuit::<LtuTableCircuit<E>>(&zkvm_cs, &ltu_config, &())
             .unwrap();
         zkvm_witness
             .assign_table_circuit::<ProgramTableCircuit<E>>(
                 &zkvm_cs,
                 &prog_config,
-                &program_add_loop.len(),
+                &program_code.len(),
             )
             .unwrap();
 
@@ -177,7 +232,7 @@ fn main() {
             .expect("create_proof failed");
 
         println!(
-            "AddInstruction::create_proof, instance_num_vars = {}, time = {}",
+            "riscv_opcodes::create_proof, instance_num_vars = {}, time = {}",
             instance_num_vars,
             timer.elapsed().as_secs_f64()
         );

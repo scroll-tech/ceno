@@ -18,6 +18,7 @@ use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use std::{
+    borrow::Cow,
     mem::{self, MaybeUninit},
     ops::Index,
 };
@@ -147,26 +148,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         }
     }
 
-    /// Break an expression into Uint with C limbs
-    pub fn new_from_expr<NR: Into<String>, N: FnOnce() -> NR + Clone>(
-        name_fn: N,
-        circuit_builder: &mut CircuitBuilder<E>,
-        expr: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
-        let uint = Self::new(name_fn.clone(), circuit_builder)?;
-        circuit_builder.require_equal(name_fn, uint.value(), expr)?;
-        Ok(uint)
-    }
-
-    pub fn assign_integer<T: Into<u64> + Copy>(
-        &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
-        value: T,
-    ) {
-        self.assign_limbs(instance, Value::new_unchecked(value).u16_fields())
-    }
-
-    pub fn assign_value<T: Into<u64> + Copy>(
+    pub fn assign_value<T: Into<u64> + Default + From<u32> + Copy>(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         value: Value<T>,
@@ -174,10 +156,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         self.assign_limbs(instance, value.u16_fields())
     }
 
-    pub fn assign_value_with_carry(
+    pub fn assign_limb_with_carry(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
-        (limbs, carry): (Vec<u16>, Vec<u16>),
+        (limbs, carry): &(Vec<u16>, Vec<u16>),
     ) {
         self.assign_limbs(instance, limbs.iter().map(|v| (*v as u64).into()).collect());
         self.assign_carries(instance, carry.iter().map(|v| (*v as u64).into()).collect());
@@ -534,32 +516,15 @@ impl<E: ExtensionField> UIntLimbs<32, 8, E> {
     }
 }
 
-pub struct Value<T: Into<u64> + Copy> {
+pub struct Value<'a, T: Into<u64> + From<u32> + Copy + Default> {
     #[allow(dead_code)]
     val: T,
-    pub limbs: Vec<u16>,
-}
-
-impl Value<u32> {
-    pub fn new_from_slice_unchecked(raw_limbs: &[u16]) -> Self {
-        assert_eq!(raw_limbs.len(), 2);
-        let (u16_limbs, value) = raw_limbs.iter().rev().enumerate().fold(
-            (vec![0u16; raw_limbs.len()], 0u64),
-            |(mut limb, acc), (i, raw_limb)| {
-                limb[raw_limbs.len() - 1 - i] = *raw_limb;
-                (limb, (acc << 16) | *raw_limb as u64)
-            },
-        );
-        Value::<u32> {
-            val: value as u32,
-            limbs: u16_limbs,
-        }
-    }
+    pub limbs: Cow<'a, [u16]>,
 }
 
 // TODO generalize to support non 16 bit limbs
 // TODO optimize api with fixed size array
-impl<T: Into<u64> + Copy> Value<T> {
+impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
     const LIMBS: usize = {
         let u16_bytes = (u16::BITS / 8) as usize;
         mem::size_of::<T>() / u16_bytes
@@ -568,7 +533,7 @@ impl<T: Into<u64> + Copy> Value<T> {
     pub fn new(val: T, lkm: &mut LkMultiplicity) -> Self {
         let uint = Value::<T> {
             val,
-            limbs: Self::split_to_u16(val),
+            limbs: Cow::Owned(Self::split_to_u16(val)),
         };
         Self::assert_u16(&uint.limbs, lkm);
         uint
@@ -577,7 +542,27 @@ impl<T: Into<u64> + Copy> Value<T> {
     pub fn new_unchecked(val: T) -> Self {
         Value::<T> {
             val,
-            limbs: Self::split_to_u16(val),
+            limbs: Cow::Owned(Self::split_to_u16(val)),
+        }
+    }
+
+    pub fn from_limb_unchecked(limbs: Vec<u16>) -> Self {
+        Value::<T> {
+            val: limbs
+                .iter()
+                .fold(0u32, |acc, &v| acc * (1 << 16) + v as u32)
+                .into(),
+            limbs: Cow::Owned(limbs),
+        }
+    }
+
+    pub fn from_limb_slice_unchecked(limbs: &'a [u16]) -> Self {
+        Value::<T> {
+            val: limbs
+                .iter()
+                .fold(0u32, |acc, &v| acc * (1 << 16) + v as u32)
+                .into(),
+            limbs: Cow::Borrowed(limbs),
         }
     }
 
@@ -648,21 +633,45 @@ impl<T: Into<u64> + Copy> Value<T> {
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
     ) -> (Vec<u16>, Vec<u16>) {
+        self.internal_mul(rhs, lkm, with_overflow)
+    }
+
+    pub fn mul_add(
+        &self,
+        mul: &Self,
+        addend: &Self,
+        lkm: &mut LkMultiplicity,
+        with_overflow: bool,
+    ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
+        let (ret, mul_carries) = self.internal_mul(mul, lkm, with_overflow);
+        let (ret, add_carries) = addend.add(&Self::from_limb_unchecked(ret), lkm, with_overflow);
+        (ret, mul_carries, add_carries)
+    }
+
+    fn internal_mul(
+        &self,
+        mul: &Self,
+        lkm: &mut LkMultiplicity,
+        with_overflow: bool,
+    ) -> (Vec<u16>, Vec<u16>) {
         let a_limbs = self.as_u16_limbs();
-        let b_limbs = rhs.as_u16_limbs();
+        let b_limbs = mul.as_u16_limbs();
 
         let num_limbs = a_limbs.len();
         let mut c_limbs = vec![0u16; num_limbs];
         let mut carries = vec![0u16; num_limbs];
-        a_limbs.iter().enumerate().for_each(|(i, a_limb)| {
-            b_limbs.iter().enumerate().for_each(|(j, b_limb)| {
+        a_limbs.iter().enumerate().for_each(|(i, &a_limb)| {
+            b_limbs.iter().enumerate().for_each(|(j, &b_limb)| {
                 let idx = i + j;
                 if idx < num_limbs {
-                    let (c, overflow_mul) = a_limb.overflowing_mul(*b_limb);
+                    let (c, overflow_mul) = a_limb.overflowing_mul(b_limb);
                     let (ret, overflow_add) = c_limbs[idx].overflowing_add(c);
 
                     c_limbs[idx] = ret;
-                    carries[idx] += (overflow_add as u16) + (overflow_mul as u16);
+                    carries[idx] += overflow_add as u16;
+                    if overflow_mul {
+                        carries[idx] += ((a_limb as u32 * b_limb as u32) / (1 << 16)) as u16;
+                    }
                 }
             })
         });
@@ -691,73 +700,73 @@ impl<T: Into<u64> + Copy> Value<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::witness::LkMultiplicity;
 
-    use super::Value;
+    mod value {
+        use crate::{witness::LkMultiplicity, Value};
+        #[test]
+        fn test_add() {
+            let a = Value::new_unchecked(1u32);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    #[test]
-    fn test_add() {
-        let a = Value::new_unchecked(1u32);
-        let b = Value::new_unchecked(2u32);
-        let mut lkm = LkMultiplicity::default();
+            let (c, carries) = a.add(&b, &mut lkm, true);
+            assert_eq!(c[0], 3);
+            assert_eq!(c[1], 0);
+            assert_eq!(carries[0], 0);
+            assert_eq!(carries[1], 0);
+        }
 
-        let (c, carries) = a.add(&b, &mut lkm, true);
-        assert_eq!(c[0], 3);
-        assert_eq!(c[1], 0);
-        assert_eq!(carries[0], 0);
-        assert_eq!(carries[1], 0);
-    }
+        #[test]
+        fn test_add_carry() {
+            let a = Value::new_unchecked(u16::MAX as u32);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    #[test]
-    fn test_add_carry() {
-        let a = Value::new_unchecked(u16::MAX as u32);
-        let b = Value::new_unchecked(2u32);
-        let mut lkm = LkMultiplicity::default();
+            let (c, carries) = a.add(&b, &mut lkm, true);
+            assert_eq!(c[0], 1);
+            assert_eq!(c[1], 1);
+            assert_eq!(carries[0], 1);
+            assert_eq!(carries[1], 0);
+        }
 
-        let (c, carries) = a.add(&b, &mut lkm, true);
-        assert_eq!(c[0], 1);
-        assert_eq!(c[1], 1);
-        assert_eq!(carries[0], 1);
-        assert_eq!(carries[1], 0);
-    }
+        #[test]
+        fn test_mul() {
+            let a = Value::new_unchecked(1u32);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    #[test]
-    fn test_mul() {
-        let a = Value::new_unchecked(1u32);
-        let b = Value::new_unchecked(2u32);
-        let mut lkm = LkMultiplicity::default();
+            let (c, carries) = a.mul(&b, &mut lkm, true);
+            assert_eq!(c[0], 2);
+            assert_eq!(c[1], 0);
+            assert_eq!(carries[0], 0);
+            assert_eq!(carries[1], 0);
+        }
 
-        let (c, carries) = a.mul(&b, &mut lkm, true);
-        assert_eq!(c[0], 2);
-        assert_eq!(c[1], 0);
-        assert_eq!(carries[0], 0);
-        assert_eq!(carries[1], 0);
-    }
+        #[test]
+        fn test_mul_carry() {
+            let a = Value::new_unchecked(u16::MAX as u32);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    #[test]
-    fn test_mul_carry() {
-        let a = Value::new_unchecked(u16::MAX as u32);
-        let b = Value::new_unchecked(2u32);
-        let mut lkm = LkMultiplicity::default();
+            let (c, carries) = a.mul(&b, &mut lkm, true);
+            assert_eq!(c[0], u16::MAX - 1);
+            assert_eq!(c[1], 1);
+            assert_eq!(carries[0], 1);
+            assert_eq!(carries[1], 0);
+        }
 
-        let (c, carries) = a.mul(&b, &mut lkm, true);
-        assert_eq!(c[0], u16::MAX - 1);
-        assert_eq!(c[1], 1);
-        assert_eq!(carries[0], 1);
-        assert_eq!(carries[1], 0);
-    }
+        #[test]
+        fn test_mul_overflow() {
+            let a = Value::new_unchecked(u32::MAX / 2 + 1);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    #[test]
-    fn test_mul_overflow() {
-        let a = Value::new_unchecked(u32::MAX / 2 + 1);
-        let b = Value::new_unchecked(2u32);
-        let mut lkm = LkMultiplicity::default();
-
-        let (c, carries) = a.mul(&b, &mut lkm, true);
-        assert_eq!(c[0], 0);
-        assert_eq!(c[1], 0);
-        assert_eq!(carries[0], 0);
-        assert_eq!(carries[1], 1);
+            let (c, carries) = a.mul(&b, &mut lkm, true);
+            assert_eq!(c[0], 0);
+            assert_eq!(c[1], 0);
+            assert_eq!(carries[0], 0);
+            assert_eq!(carries[1], 1);
+        }
     }
     // #[test]
     // fn test_uint_from_cell_ids() {
