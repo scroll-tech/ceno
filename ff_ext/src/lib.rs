@@ -31,6 +31,14 @@ pub trait ExtensionField:
 
     /// Convert limbs into self
     fn from_limbs(limbs: &[Self::BaseField]) -> Self;
+
+    /// Convert a field elements to a u64 vector
+    fn to_canonical_u64_vec(&self) -> Vec<u64> {
+        self.as_bases()
+            .iter()
+            .map(|a| a.to_canonical_u64())
+            .collect::<Vec<u64>>()
+    }
 }
 
 mod impl_goldilocks {
