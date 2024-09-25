@@ -1,13 +1,15 @@
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    instructions::{riscv::ecall_insn::EcallInstructionConfig, Instruction},
+    instructions::{
+        riscv::{constants::ECALL_HALT, ecall_insn::EcallInstructionConfig},
+        Instruction,
+    },
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
-use crate::chip_handler::GlobalStateRegisterMachineChipOperations;
 
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
@@ -23,10 +25,14 @@ impl<E: ExtensionField> Instruction<E> for HaltCircuit<E> {
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
-        let ecall_cfg = EcallInstructionConfig::construct_circuit(cb)?;
+        let ecall_cfg = EcallInstructionConfig::construct_circuit(
+            cb,
+            [ECALL_HALT[0].into(), ECALL_HALT[1].into()],
+            None,
+            Some(0.into()),
+        )?;
 
-        // next pc is zero
-        cb.state_out(0.into(), ecall_cfg.ts.into())?;
+        // TODO: read exit_code from arg1 and write it to global state
 
         Ok(HaltConfig { ecall_cfg })
     }
@@ -37,6 +43,16 @@ impl<E: ExtensionField> Instruction<E> for HaltCircuit<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        todo!()
+        assert_eq!(
+            step.rs1().unwrap().value,
+            (ECALL_HALT[0] + (ECALL_HALT[1] << 16)) as u32
+        );
+        assert_eq!(step.pc().after.0, 0);
+
+        config
+            .ecall_cfg
+            .assign_instance::<E>(instance, lk_multiplicity, step)?;
+
+        Ok(())
     }
 }

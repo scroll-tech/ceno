@@ -1,6 +1,7 @@
 use crate::uint::UIntLimbs;
 pub use ceno_emul::PC_STEP_SIZE;
 
+pub const ECALL_HALT: [usize; 2] = [0x00_00, 0x00_00];
 pub const VALUE_BIT_WIDTH: usize = 16;
 
 #[cfg(feature = "riv32")]

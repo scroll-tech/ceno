@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, WitIn},
+    expression::{Expression, ToExpr, WitIn},
     instructions::riscv::config::ExprLtConfig,
 };
 
@@ -36,7 +36,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
     fn register_write(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
