@@ -413,11 +413,12 @@ where
         vp: &Self::VerifierParam,
         comms: &[Self::Commitment],
         point: &[E],
+        num_vars: usize,
         evals: &[&[E]],
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
-        Self::batch_verify_vlop_inner(vp, comms, point, evals, proof, transcript)
+        Self::batch_verify_vlop_inner(vp, comms, point, num_vars, evals, proof, transcript)
     }
 }
 

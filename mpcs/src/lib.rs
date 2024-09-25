@@ -244,11 +244,15 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
 
-    /// The corresponding verification method for VLOP.
+    /// The corresponding verification method for VLOP. Note that it is
+    /// not guaranteed that the commitments contain the num vars info, and
+    /// that the point is not necessarily the max num vars of the polys, so
+    /// the num vars should be passed in as a parameter.
     fn batch_verify_vlop(
         vp: &Self::VerifierParam,
         comms: &[Self::Commitment],
         point: &[E],
+        num_vars: usize,
         evals: &[&[E]],
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,

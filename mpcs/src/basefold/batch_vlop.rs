@@ -1,6 +1,5 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 use multilinear_extensions::{
     mle::FieldType, virtual_poly::build_eq_x_r_vec, virtual_poly_v2::ArcMultilinearExtension,
 };
@@ -16,7 +15,7 @@ use crate::{
     },
     util::{
         arithmetic::{inner_product, interpolate_over_boolean_hypercube},
-        field_type_index_ext, field_type_iter_ext,
+        field_type_index_ext,
         hash::{new_hasher, write_digest_to_transcript, Hasher},
         log2_strict,
         merkle_tree::MerkleTree,
@@ -119,18 +118,20 @@ where
         vp: &BasefoldVerifierParams<E, Spec>,
         comms: &[BasefoldCommitment<E>],
         point: &[E],
+        num_vars: usize,
         evals: &[&[E]],
         proof: &BasefoldProof<E>,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         // Make some basic checks on the inputs
+        assert!(num_vars <= point.len());
         assert_eq!(evals.len(), comms.len());
         comms.iter().zip(evals).for_each(|(comm, evals)| {
             if let Some(num_polys) = comm.num_polys.as_ref() {
                 assert_eq!(num_polys, &evals.len());
             }
-            if let Some(num_vars) = comm.num_vars.as_ref() {
-                assert!(&point.len() >= num_vars);
+            if let Some(comm_num_vars) = comm.num_vars.as_ref() {
+                assert!(&num_vars >= comm_num_vars);
             }
         });
 
@@ -160,6 +161,26 @@ where
         // to open.
         let eq_xt_outer = build_eq_x_r_vec(&t_outer)[..evals.len()].to_vec();
         let eq_xt_inner = build_eq_x_r_vec(&t_inner)[..max_group_size].to_vec();
+
+        let point = &point[..num_vars];
+        let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
+        let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
+        let roots = &proof.roots;
+        let sumcheck_messages = &proof.sumcheck_messages;
+        for i in 0..num_rounds {
+            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
+            fold_challenges.push(
+                transcript
+                    .get_and_append_challenge(b"commit round")
+                    .elements,
+            );
+            if i < num_rounds - 1 {
+                write_digest_to_transcript(&roots[i], transcript);
+            }
+        }
+        let final_message = &proof.final_message;
+        transcript.append_field_element_exts(final_message.as_slice());
+
         unimplemented!();
     }
 }
