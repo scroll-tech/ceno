@@ -79,21 +79,21 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         // Register read and write.
         let (next_ts, lt_rs1_cfg) = circuit_builder.register_read(
             || "read_rs1",
-            &rs1_id,
+            rs1_id,
             prev_rs1_ts.expr(),
             cur_ts.expr(),
             rs1_read,
         )?;
         let (next_ts, lt_rs2_cfg) = circuit_builder.register_read(
             || "read_rs2",
-            &rs2_id,
+            rs2_id,
             prev_rs2_ts.expr(),
             next_ts,
             rs2_read,
         )?;
         let (next_ts, lt_prev_ts_cfg) = circuit_builder.register_write(
             || "write_rd",
-            &rd_id,
+            rd_id,
             prev_rd_ts.expr(),
             next_ts,
             prev_rd_value.register_expr(),

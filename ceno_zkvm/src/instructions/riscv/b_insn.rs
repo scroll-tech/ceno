@@ -85,14 +85,14 @@ impl BInstructionConfig {
         // Register reads.
         let (ts, lt_rs1_cfg) = circuit_builder.register_read(
             || "read_rs1",
-            &rs1_id,
+            rs1_id,
             prev_rs1_ts.expr(),
             cur_ts.expr(),
             rs1_read,
         )?;
         let (_ts, lt_rs2_cfg) = circuit_builder.register_read(
             || "read_rs2",
-            &rs2_id,
+            rs2_id,
             prev_rs2_ts.expr(),
             ts,
             rs2_read,
