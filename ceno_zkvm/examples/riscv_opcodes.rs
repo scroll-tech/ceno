@@ -10,10 +10,11 @@ use const_env::from_env;
 
 use ceno_emul::{
     ByteAddr,
-    InsnKind::{ADD, BLT},
+    InsnKind::{ADD, BLT, EANY},
     StepRecord, VMState, CENO_PLATFORM,
 };
 use ceno_zkvm::{
+    instructions::riscv::ecall::HaltInstruction,
     scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
@@ -104,6 +105,7 @@ fn main() {
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let blt_config = zkvm_cs.register_opcode_circuit::<BltInstruction>();
+    let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     // tables
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
     // let u1_range_config = zkvm_cs.register_table_circuit::<U1TableCircuit<E>>();
@@ -120,6 +122,7 @@ fn main() {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<BltInstruction>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
@@ -179,12 +182,18 @@ fn main() {
             .collect::<Vec<_>>();
         let mut add_records = Vec::new();
         let mut blt_records = Vec::new();
-        all_records.iter().for_each(|record| {
+        let mut halt_records = Vec::new();
+        all_records.into_iter().for_each(|record| {
             let kind = record.insn().kind().1;
-            if kind == ADD {
-                add_records.push(record.clone());
-            } else if kind == BLT {
-                blt_records.push(record.clone());
+            match kind {
+                ADD => add_records.push(record),
+                BLT => blt_records.push(record),
+                EANY => {
+                    if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
+                        halt_records.push(record);
+                    }
+                }
+                _ => {}
             }
         });
 
@@ -202,6 +211,10 @@ fn main() {
         zkvm_witness
             .assign_opcode_circuit::<BltInstruction>(&zkvm_cs, &blt_config, blt_records)
             .unwrap();
+        zkvm_witness
+            .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
+            .unwrap();
+
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
         zkvm_witness

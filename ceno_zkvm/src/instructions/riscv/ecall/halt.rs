@@ -26,9 +26,9 @@ pub struct HaltConfig<E: ExtensionField> {
     lt_x10_cfg: ExprLtConfig,
 }
 
-pub struct HaltCircuit<E>(PhantomData<E>);
+pub struct HaltInstruction<E>(PhantomData<E>);
 
-impl<E: ExtensionField> Instruction<E> for HaltCircuit<E> {
+impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
     type InstructionConfig = HaltConfig<E>;
 
     fn name() -> String {
