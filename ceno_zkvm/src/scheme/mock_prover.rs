@@ -11,7 +11,7 @@ use crate::{
 };
 use ark_std::test_rng;
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
-use ceno_emul::{ByteAddr, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, Change, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
@@ -19,6 +19,7 @@ use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{
     collections::HashSet,
+    fmt::Write,
     fs::{self, File},
     hash::Hash,
     io::{BufReader, ErrorKind},
@@ -30,9 +31,12 @@ use std::{
 pub const MOCK_RS1: u32 = 2;
 pub const MOCK_RS2: u32 = 3;
 pub const MOCK_RD: u32 = 4;
+pub const MOCK_IMM_3: u32 = 3;
+pub const MOCK_IMM_31: u32 = 31;
 /// The program baked in the MockProver.
 /// TODO: Make this a parameter?
 #[allow(clippy::identity_op)]
+#[allow(clippy::unusual_byte_groupings)]
 pub const MOCK_PROGRAM: &[u32] = &[
     // R-Type
     // funct7 | rs2 | rs1 | funct3 | rd | opcode
@@ -49,6 +53,19 @@ pub const MOCK_PROGRAM: &[u32] = &[
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
     // xor x4, x2, x3
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
+    // B-Type
+    // beq x2, x3, 8
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b000 << 12 | 0x08 << 7 | 0x63,
+    // bne x2, x3, 8
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | 0x08 << 7 | 0x63,
+    // blt x2, x3, -8
+    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
+    // divu (0x01, 0x05, 0x33)
+    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x33,
+    // srli x4, x2, 3
+    0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
+    // srli x4, x2, 31
+    0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
@@ -57,6 +74,15 @@ pub const MOCK_PC_MUL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 8);
 pub const MOCK_PC_AND: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 12);
 pub const MOCK_PC_OR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 16);
 pub const MOCK_PC_XOR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 20);
+pub const MOCK_PC_BEQ: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 24);
+pub const MOCK_PC_BNE: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 28);
+pub const MOCK_PC_BLT: Change<ByteAddr> = Change {
+    before: ByteAddr(CENO_PLATFORM.pc_start() + 32),
+    after: ByteAddr(CENO_PLATFORM.pc_start() + 24),
+};
+pub const MOCK_PC_DIVU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 36);
+pub const MOCK_PC_SRLI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 40);
+pub const MOCK_PC_SRLI_31: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 44);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -104,7 +130,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
                     Expression: {expression_fmt}\n\
                     Evaluation: {eval_fmt} != 0\n\
-                    Inst[{inst_id}]: {wtns_fmt}\n",
+                    Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
             Self::AssertEqualError {
@@ -125,7 +151,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     Left: {left_eval_fmt} != Right: {right_eval_fmt}\n\
                     Left Expression: {left_expression_fmt}\n\
                     Right Expression: {right_expression_fmt}\n\
-                    Inst[{inst_id}]: {wtns_fmt}\n",
+                    Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
             Self::LookupError {
@@ -141,113 +167,134 @@ impl<E: ExtensionField> MockProverError<E> {
                     "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\n\
                     Expression: {expression_fmt}\n\
                     Evaluation: {eval_fmt}\n\
-                    Inst[{inst_id}]: {wtns_fmt}\n",
+                    Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
         }
+    }
+}
 
-        fn fmt_expr<E: ExtensionField>(
-            expression: &Expression<E>,
-            wtns: &mut Vec<WitnessId>,
-            add_prn_sum: bool,
-        ) -> String {
-            match expression {
-                Expression::WitIn(wit_in) => {
-                    wtns.push(*wit_in);
-                    format!("WitIn({})", wit_in)
+fn fmt_expr<E: ExtensionField>(
+    expression: &Expression<E>,
+    wtns: &mut Vec<WitnessId>,
+    add_prn_sum: bool,
+) -> String {
+    match expression {
+        Expression::WitIn(wit_in) => {
+            wtns.push(*wit_in);
+            format!("WitIn({})", wit_in)
+        }
+        Expression::Challenge(id, pow, scaler, offset) => {
+            if *pow == 1 && *scaler == 1.into() && *offset == 0.into() {
+                format!("Challenge({})", id)
+            } else {
+                let mut s = String::new();
+                if *scaler != 1.into() {
+                    write!(s, "{}*", fmt_field(scaler)).unwrap();
                 }
-                Expression::Challenge(id, _, _, _) => format!("Challenge({})", id),
-                Expression::Constant(constant) => fmt_base_field::<E>(constant, true).to_string(),
-                Expression::Fixed(fixed) => format!("{:?}", fixed),
-                Expression::Sum(left, right) => {
-                    let s = format!(
-                        "{} + {}",
-                        fmt_expr(left, wtns, false),
-                        fmt_expr(right, wtns, false)
-                    );
-                    if add_prn_sum { format!("({})", s) } else { s }
+                write!(s, "Challenge({})", id,).unwrap();
+                if *pow > 1 {
+                    write!(s, "^{}", pow).unwrap();
                 }
-                Expression::Product(left, right) => {
-                    format!(
-                        "{} * {}",
-                        fmt_expr(left, wtns, true),
-                        fmt_expr(right, wtns, true)
-                    )
+                if *offset != 0.into() {
+                    write!(s, "+{}", fmt_field(offset)).unwrap();
                 }
-                Expression::ScaledSum(x, a, b) => {
-                    let s = format!(
-                        "{} * {} + {}",
-                        fmt_expr(a, wtns, true),
-                        fmt_expr(x, wtns, true),
-                        fmt_expr(b, wtns, false)
-                    );
-                    if add_prn_sum { format!("({})", s) } else { s }
-                }
+                s
             }
         }
-
-        fn fmt_field<E: ExtensionField>(field: &E) -> String {
-            let name = format!("{:?}", field);
-            let name = name.split('(').next().unwrap_or("ExtensionField");
+        Expression::Constant(constant) => fmt_base_field::<E>(constant, true).to_string(),
+        Expression::Fixed(fixed) => format!("{:?}", fixed),
+        Expression::Sum(left, right) => {
+            let s = format!(
+                "{} + {}",
+                fmt_expr(left, wtns, false),
+                fmt_expr(right, wtns, false)
+            );
+            if add_prn_sum { format!("({})", s) } else { s }
+        }
+        Expression::Product(left, right) => {
             format!(
-                "{name}[{}]",
-                field
-                    .as_bases()
-                    .iter()
-                    .map(|b| fmt_base_field::<E>(b, false))
-                    .collect::<Vec<String>>()
-                    .join(",")
+                "{} * {}",
+                fmt_expr(left, wtns, true),
+                fmt_expr(right, wtns, true)
             )
         }
-
-        fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField, add_prn: bool) -> String {
-            let value = base_field.to_canonical_u64();
-
-            if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
-                // beautiful format for negative number > -65536
-                fmt_prn(format!("-{}", E::BaseField::MODULUS_U64 - value), add_prn)
-            } else if value < u16::MAX as u64 {
-                format!("{value}")
-            } else {
-                // hex
-                if value > E::BaseField::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
-                    fmt_prn(
-                        format!("-{:#x}", E::BaseField::MODULUS_U64 - value),
-                        add_prn,
-                    )
-                } else {
-                    format!("{value:#x}")
-                }
-            }
-        }
-
-        fn fmt_prn(s: String, add_prn: bool) -> String {
-            if add_prn { format!("({})", s) } else { s }
-        }
-
-        fn fmt_wtns<E: ExtensionField>(
-            wtns: &[WitnessId],
-            wits_in: &[ArcMultilinearExtension<E>],
-            inst_id: usize,
-            wits_in_name: &[String],
-        ) -> String {
-            wtns.iter()
-                .sorted()
-                .map(|wt_id| {
-                    let wit = &wits_in[*wt_id as usize];
-                    let name = &wits_in_name[*wt_id as usize];
-                    let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
-                        fmt_field(&e[inst_id])
-                    } else if let Some(bf) = wit.get_base_field_vec_optn() {
-                        fmt_base_field::<E>(&bf[inst_id], true)
-                    } else {
-                        "Unknown".to_string()
-                    };
-                    format!("\nWitIn({wt_id})\npath={name}\nvalue={value_fmt}\n")
-                })
-                .join("----\n")
+        Expression::ScaledSum(x, a, b) => {
+            let s = format!(
+                "{} * {} + {}",
+                fmt_expr(a, wtns, true),
+                fmt_expr(x, wtns, true),
+                fmt_expr(b, wtns, false)
+            );
+            if add_prn_sum { format!("({})", s) } else { s }
         }
     }
+}
+
+fn fmt_field<E: ExtensionField>(field: &E) -> String {
+    let name = format!("{:?}", field);
+    let name = name.split('(').next().unwrap_or("ExtensionField");
+
+    let data = field
+        .as_bases()
+        .iter()
+        .map(|b| fmt_base_field::<E>(b, false))
+        .collect::<Vec<String>>();
+    let only_one_limb = field.as_bases()[1..].iter().all(|&x| x == 0.into());
+
+    if only_one_limb {
+        data[0].to_string()
+    } else {
+        format!("{name}[{}]", data.join(","))
+    }
+}
+
+fn fmt_base_field<E: ExtensionField>(base_field: &E::BaseField, add_prn: bool) -> String {
+    let value = base_field.to_canonical_u64();
+
+    if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
+        // beautiful format for negative number > -65536
+        fmt_prn(format!("-{}", E::BaseField::MODULUS_U64 - value), add_prn)
+    } else if value < u16::MAX as u64 {
+        format!("{value}")
+    } else {
+        // hex
+        if value > E::BaseField::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
+            fmt_prn(
+                format!("-{:#x}", E::BaseField::MODULUS_U64 - value),
+                add_prn,
+            )
+        } else {
+            format!("{value:#x}")
+        }
+    }
+}
+
+fn fmt_prn(s: String, add_prn: bool) -> String {
+    if add_prn { format!("({})", s) } else { s }
+}
+
+fn fmt_wtns<E: ExtensionField>(
+    wtns: &[WitnessId],
+    wits_in: &[ArcMultilinearExtension<E>],
+    inst_id: usize,
+    wits_in_name: &[String],
+) -> String {
+    wtns.iter()
+        .sorted()
+        .map(|wt_id| {
+            let wit = &wits_in[*wt_id as usize];
+            let name = &wits_in_name[*wt_id as usize];
+            let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
+                fmt_field(&e[inst_id])
+            } else if let Some(bf) = wit.get_base_field_vec_optn() {
+                fmt_base_field::<E>(&bf[inst_id], true)
+            } else {
+                "Unknown".to_string()
+            };
+            format!("  WitIn({wt_id})={value_fmt} {name:?}")
+        })
+        .join("\n")
 }
 
 pub(crate) struct MockProver<E: ExtensionField> {
@@ -523,6 +570,40 @@ mod tests {
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use multilinear_extensions::mle::{IntoMLE, IntoMLEs};
+
+    #[test]
+    fn test_fmt_expr_challenge_1() {
+        let a = Expression::<GoldilocksExt2>::Challenge(0, 2, 3.into(), 4.into());
+        let b = Expression::<GoldilocksExt2>::Challenge(0, 5, 6.into(), 7.into());
+
+        let mut wtns_acc = vec![];
+        let s = fmt_expr(&(a * b), &mut wtns_acc, false);
+
+        assert_eq!(
+            s,
+            "18*Challenge(0)^7+28 + 21*Challenge(0)^2 + 24*Challenge(0)^5"
+        );
+    }
+
+    #[test]
+    fn test_fmt_expr_challenge_2() {
+        let a = Expression::<GoldilocksExt2>::Challenge(0, 1, 1.into(), 0.into());
+        let b = Expression::<GoldilocksExt2>::Challenge(0, 1, 1.into(), 0.into());
+
+        let mut wtns_acc = vec![];
+        let s = fmt_expr(&(a * b), &mut wtns_acc, false);
+
+        assert_eq!(s, "Challenge(0)^2");
+    }
+
+    #[test]
+    fn test_fmt_expr_wtns_acc_1() {
+        let expr = Expression::<GoldilocksExt2>::WitIn(0);
+        let mut wtns_acc = vec![];
+        let s = fmt_expr(&expr, &mut wtns_acc, false);
+        assert_eq!(s, "WitIn(0)");
+        assert_eq!(wtns_acc, vec![0]);
+    }
 
     #[derive(Debug)]
     #[allow(dead_code)]

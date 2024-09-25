@@ -10,6 +10,7 @@ pub enum ZKVMError {
     CircuitError,
     UtilError(UtilError),
     WitnessNotFound(String),
+    InvalidWitness(String),
     VKNotFound(String),
     FixedTraceNotFound(String),
     VerifyError(String),

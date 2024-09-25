@@ -1,213 +1,32 @@
 use ceno_emul::InsnKind;
-use goldilocks::SmallField;
-use std::mem::MaybeUninit;
 
 use ff_ext::ExtensionField;
 
 use crate::{
-    chip_handler::{GlobalStateRegisterMachineChipOperations, RegisterChipOperations},
     circuit_builder::CircuitBuilder,
-    create_witin_from_expr,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
+    expression::ToExpr,
     instructions::{
-        riscv::config::{ExprLtInput, UIntLtConfig, UIntLtInput},
+        riscv::config::{UIntLtConfig, UIntLtInput},
         Instruction,
     },
-    set_val,
-    utils::i64_to_base,
+    utils::{i64_to_base, split_to_u8},
     witness::LkMultiplicity,
 };
 
-use super::{
-    config::ExprLtConfig,
-    constants::{UInt, UInt8, PC_STEP_SIZE},
-    RIVInstruction,
-};
+use super::{b_insn::BInstructionConfig, constants::UInt8, RIVInstruction};
 
 pub struct BltInstruction;
 
 pub struct InstructionConfig<E: ExtensionField> {
-    pub pc: WitIn,
-    pub next_pc: WitIn,
-    pub ts: WitIn,
-    pub imm: WitIn,
-    pub lhs_limb8: UInt8<E>,
-    pub rhs_limb8: UInt8<E>,
-    pub rs1_id: WitIn,
-    pub rs2_id: WitIn,
-    pub prev_rs1_ts: WitIn,
-    pub prev_rs2_ts: WitIn,
+    pub b_insn: BInstructionConfig,
+    pub read_rs1: UInt8<E>,
+    pub read_rs2: UInt8<E>,
     pub is_lt: UIntLtConfig,
-    pub lt_rs1_cfg: ExprLtConfig,
-    pub lt_rs2_cfg: ExprLtConfig,
-}
-
-pub struct BltInput {
-    pub pc: u16,
-    pub ts: u16,
-    pub imm: i16, // rust don't have i12
-    pub lhs_limb8: Vec<u8>,
-    pub rhs_limb8: Vec<u8>,
-    pub rs1_id: u8,
-    pub rs2_id: u8,
-    pub prev_rs1_ts: u16,
-    pub prev_rs2_ts: u16,
-}
-
-impl BltInput {
-    /// TODO: refactor after formalize the interface of opcode inputs
-    pub fn assign<F: SmallField, E: ExtensionField<BaseField = F>>(
-        &self,
-        config: &InstructionConfig<E>,
-        instance: &mut [MaybeUninit<F>],
-        lk_multiplicity: &mut LkMultiplicity,
-    ) {
-        assert!(!self.lhs_limb8.is_empty() && (self.lhs_limb8.len() == self.rhs_limb8.len()));
-        // TODO: add boundary check for witin
-        let lt_input = UIntLtInput {
-            lhs_limbs: &self.lhs_limb8,
-            rhs_limbs: &self.rhs_limb8,
-        };
-        let is_lt = lt_input.assign(instance, &config.is_lt);
-
-        set_val!(instance, config.pc, { i64_to_base::<F>(self.pc as i64) });
-        set_val!(instance, config.next_pc, {
-            if is_lt {
-                i64_to_base::<F>(self.pc as i64 + self.imm as i64)
-            } else {
-                i64_to_base::<F>(self.pc as i64 + PC_STEP_SIZE as i64)
-            }
-        });
-        set_val!(instance, config.ts, { i64_to_base::<F>(self.ts as i64) });
-        set_val!(instance, config.imm, { i64_to_base::<F>(self.imm as i64) });
-        set_val!(instance, config.rs1_id, {
-            i64_to_base::<F>(self.rs1_id as i64)
-        });
-        set_val!(instance, config.rs2_id, {
-            i64_to_base::<F>(self.rs2_id as i64)
-        });
-        set_val!(instance, config.prev_rs1_ts, {
-            i64_to_base::<F>(self.prev_rs1_ts as i64)
-        });
-        set_val!(instance, config.prev_rs2_ts, {
-            i64_to_base::<F>(self.prev_rs2_ts as i64)
-        });
-
-        config.lhs_limb8.assign_limbs(instance, {
-            self.lhs_limb8
-                .iter()
-                .map(|&limb| i64_to_base::<F>(limb as i64))
-                .collect()
-        });
-        config.rhs_limb8.assign_limbs(instance, {
-            self.rhs_limb8
-                .iter()
-                .map(|&limb| i64_to_base::<F>(limb as i64))
-                .collect()
-        });
-        ExprLtInput {
-            lhs: self.prev_rs1_ts as u64,
-            rhs: self.ts as u64,
-        }
-        .assign(instance, &config.lt_rs1_cfg, lk_multiplicity);
-        ExprLtInput {
-            lhs: self.prev_rs2_ts as u64,
-            rhs: (self.ts + 1) as u64,
-        }
-        .assign(instance, &config.lt_rs2_cfg, lk_multiplicity);
-    }
-
-    pub fn random() -> Self {
-        use ark_std::{rand::Rng, test_rng};
-        let mut rng = test_rng();
-
-        // hack to generate valid inputs
-        let ts_bound: u16 = rng.gen_range(100..1000);
-        let pc_bound: u16 = rng.gen_range(100..1000);
-
-        Self {
-            pc: rng.gen_range(pc_bound..(1 << 15)),
-            ts: rng.gen_range(ts_bound..(1 << 15)),
-            imm: rng.gen_range(-(pc_bound as i16)..2047),
-            // this is for riscv32 inputs
-            lhs_limb8: (0..4).map(|_| rng.gen()).collect(),
-            rhs_limb8: (0..4).map(|_| rng.gen()).collect(),
-            rs1_id: rng.gen(),
-            rs2_id: rng.gen(),
-            prev_rs1_ts: rng.gen_range(0..ts_bound),
-            prev_rs2_ts: rng.gen_range(0..ts_bound),
-        }
-    }
 }
 
 impl RIVInstruction for BltInstruction {
     const INST_KIND: InsnKind = InsnKind::BLT;
-}
-
-/// if (rs1 < rs2) PC += sext(imm)
-fn blt_gadget<E: ExtensionField>(
-    circuit_builder: &mut CircuitBuilder<E>,
-) -> Result<InstructionConfig<E>, ZKVMError> {
-    let pc = circuit_builder.create_witin(|| "pc")?;
-    // imm is already sext(imm) from instruction
-    let imm = circuit_builder.create_witin(|| "imm")?;
-    let cur_ts = circuit_builder.create_witin(|| "ts")?;
-    circuit_builder.state_in(pc.expr(), cur_ts.expr())?;
-
-    // TODO: constraint rs1_id, rs2_id by bytecode lookup
-    let rs1_id = circuit_builder.create_witin(|| "rs1_id")?;
-    let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
-
-    let lhs_limb8 = UInt8::new(|| "lhs_limb8", circuit_builder)?;
-    let rhs_limb8 = UInt8::new(|| "rhs_limb8", circuit_builder)?;
-
-    let is_lt = lhs_limb8.lt_limb8(circuit_builder, &rhs_limb8)?;
-
-    // update pc
-    let next_pc = pc.expr() + is_lt.is_lt.expr() * imm.expr() + PC_STEP_SIZE.into()
-        - is_lt.is_lt.expr() * PC_STEP_SIZE.into();
-
-    // update ts
-    let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
-    let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
-    let lhs = UInt::from_u8_limbs(&lhs_limb8)?;
-    let rhs = UInt::from_u8_limbs(&rhs_limb8)?;
-
-    let (ts, lt_rs1_cfg) = circuit_builder.register_read(
-        || "read ts for rs1",
-        &rs1_id,
-        prev_rs1_ts.expr(),
-        cur_ts.expr(),
-        lhs.register_expr(),
-    )?;
-    let (ts, lt_rs2_cfg) = circuit_builder.register_read(
-        || "read ts for rs2",
-        &rs2_id,
-        prev_rs2_ts.expr(),
-        ts,
-        rhs.register_expr(),
-    )?;
-
-    let next_pc = create_witin_from_expr!(|| "next_pc", circuit_builder, false, next_pc)?;
-    let next_ts = ts + 1.into();
-    circuit_builder.state_out(next_pc.expr(), next_ts)?;
-
-    Ok(InstructionConfig {
-        pc,
-        next_pc,
-        ts: cur_ts,
-        lhs_limb8,
-        rhs_limb8,
-        imm,
-        rs1_id,
-        rs2_id,
-        prev_rs1_ts,
-        prev_rs2_ts,
-        is_lt,
-        lt_rs1_cfg,
-        lt_rs2_cfg,
-    })
 }
 
 impl<E: ExtensionField> Instruction<E> for BltInstruction {
@@ -219,18 +38,56 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<InstructionConfig<E>, ZKVMError> {
-        blt_gadget::<E>(circuit_builder)
+        let read_rs1 = UInt8::new_unchecked(|| "rs1_limbs", circuit_builder)?;
+        let read_rs2 = UInt8::new_unchecked(|| "rs2_limbs", circuit_builder)?;
+        let is_lt = read_rs1.lt_limb8(circuit_builder, &read_rs2)?;
+
+        let b_insn = BInstructionConfig::construct_circuit(
+            circuit_builder,
+            Self::INST_KIND,
+            read_rs1.register_expr(),
+            read_rs2.register_expr(),
+            is_lt.is_lt.expr(),
+        )?;
+
+        Ok(InstructionConfig {
+            b_insn,
+            read_rs1,
+            read_rs2,
+            is_lt,
+        })
     }
 
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [std::mem::MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
-        _step: &ceno_emul::StepRecord,
+        step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
-        // take input from _step
-        let input = BltInput::random();
-        input.assign(config, instance, lk_multiplicity);
+        let rs1_limbs = split_to_u8(step.rs1().unwrap().value);
+        let rs2_limbs = split_to_u8(step.rs2().unwrap().value);
+        config.read_rs1.assign_limbs(instance, {
+            rs1_limbs
+                .iter()
+                .map(|&limb| i64_to_base::<E::BaseField>(limb as i64))
+                .collect()
+        });
+        config.read_rs2.assign_limbs(instance, {
+            rs2_limbs
+                .iter()
+                .map(|&limb| i64_to_base::<E::BaseField>(limb as i64))
+                .collect()
+        });
+        let lt_input = UIntLtInput {
+            lhs_limbs: &rs1_limbs,
+            rhs_limbs: &rs2_limbs,
+        };
+        lt_input.assign(instance, &config.is_lt, lk_multiplicity);
+
+        config
+            .b_insn
+            .assign_instance::<E>(instance, lk_multiplicity, step)?;
+
         Ok(())
     }
 }
@@ -243,7 +100,11 @@ mod test {
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
 
-    use crate::{circuit_builder::ConstraintSystem, scheme::mock_prover::MockProver};
+    use crate::{
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
+        instructions::Instruction,
+        scheme::mock_prover::{MockProver, MOCK_PC_BLT, MOCK_PROGRAM},
+    };
 
     #[test]
     fn test_blt_circuit() -> Result<(), ZKVMError> {
@@ -253,11 +114,17 @@ mod test {
 
         let num_wits = circuit_builder.cs.num_witin as usize;
         // generate mock witness
-        let num_instances = 1 << 4;
         let (raw_witin, _) = BltInstruction::assign_instances(
             &config,
             num_wits,
-            vec![StepRecord::default(); num_instances],
+            vec![StepRecord::new_b_instruction(
+                3,
+                MOCK_PC_BLT,
+                MOCK_PROGRAM[8],
+                0x20,
+                0x21,
+                0,
+            )],
         )
         .unwrap();
 
@@ -272,12 +139,5 @@ mod test {
             None,
         );
         Ok(())
-    }
-
-    fn bench_blt_instruction_helper<E: ExtensionField>(_instance_num_vars: usize) {}
-
-    #[test]
-    fn bench_blt_instruction() {
-        bench_blt_instruction_helper::<GoldilocksExt2>(10);
     }
 }

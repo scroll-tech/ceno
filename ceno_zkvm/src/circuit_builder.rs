@@ -201,8 +201,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc lk_record degree ({})",
+            name_fn().into()
         );
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -223,8 +223,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc lk_table_record degree ({})",
+            name_fn().into()
         );
         self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
@@ -244,8 +244,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc read_record degree ({})",
+            name_fn().into()
         );
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -261,8 +261,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc write_record degree ({})",
+            name_fn().into()
         );
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -284,10 +284,13 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             let path = self.ns.compute_path(name_fn().into());
             self.assert_zero_expressions_namespace_map.push(path);
         } else {
-            assert!(
-                assert_zero_expr.is_monomial_form(),
-                "only support sumcheck in monomial form"
-            );
+            let assert_zero_expr = if assert_zero_expr.is_monomial_form() {
+                assert_zero_expr
+            } else {
+                let e = assert_zero_expr.to_monomial_form();
+                assert!(e.is_monomial_form(), "failed to put into monomial form");
+                e
+            };
             self.max_non_lc_degree = self.max_non_lc_degree.max(assert_zero_expr.degree());
             self.assert_zero_sumcheck_expressions.push(assert_zero_expr);
             let path = self.ns.compute_path(name_fn().into());
