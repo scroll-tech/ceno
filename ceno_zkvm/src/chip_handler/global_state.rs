@@ -12,6 +12,7 @@ impl<'a, E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for Circ
             Expression::Constant(E::BaseField::from(RAMType::GlobalState as u64)),
             pc,
             ts,
+            0.into(),
         ];
 
         let rlc_record = self.rlc_chip_record(items);
@@ -23,8 +24,25 @@ impl<'a, E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for Circ
             Expression::Constant(E::BaseField::from(RAMType::GlobalState as u64)),
             pc,
             ts,
+            0.into(),
         ];
         let rlc_record = self.rlc_chip_record(items);
         self.write_record(|| "state_out", rlc_record)
+    }
+
+    fn state_out_with_exit_code(
+        &mut self,
+        pc: Expression<E>,
+        ts: Expression<E>,
+        exit_code: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(RAMType::GlobalState as u64)),
+            pc,
+            ts,
+            exit_code,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.write_record(|| "state_out_with_exit_code", rlc_record)
     }
 }
