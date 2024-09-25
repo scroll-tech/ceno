@@ -62,7 +62,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 || "outcome_is_zero",
                 is_zero.is_zero.expr(),
                 sum_of_outcome.clone(),
-                Expression::from(u16::MAX as usize),
+                Expression::from(u32::MAX as usize),
                 sum_of_outcome,
             )
             .unwrap();
@@ -180,7 +180,7 @@ mod test {
                 vec![StepRecord::new_r_instruction(
                     3,
                     MOCK_PC_DIVU,
-                    MOCK_PROGRAM[6],
+                    MOCK_PROGRAM[9],
                     dividend,
                     divisor,
                     Change::new(0, outcome),
