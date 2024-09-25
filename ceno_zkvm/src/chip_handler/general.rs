@@ -7,6 +7,7 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     gadgets::IsLtConfig,
+    instructions::riscv::constants::UINT_LIMBS,
     structs::ROMType,
     tables::InsnRecord,
 };
@@ -314,13 +315,13 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     }
 
     /// less_than
-    pub(crate) fn less_than<N, NR>(
+    pub(crate) fn less_than<N, NR, const N_LIMBS: usize>(
         &mut self,
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
         assert_less_than: Option<bool>,
-    ) -> Result<IsLtConfig, ZKVMError>
+    ) -> Result<IsLtConfig<N_LIMBS>, ZKVMError>
     where
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,

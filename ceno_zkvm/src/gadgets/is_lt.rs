@@ -14,12 +14,12 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct IsLtConfig {
+pub struct IsLtConfig<const N_U16: usize> {
     pub is_lt: Option<WitIn>,
-    pub diff: Vec<WitIn>,
+    pub diff: [WitIn; N_U16],
 }
 
-impl IsLtConfig {
+impl<const N_U16: usize> IsLtConfig<N_U16> {
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
         self.is_lt.unwrap().expr()
     }
@@ -35,10 +35,7 @@ impl IsLtConfig {
         rhs: Expression<E>,
         assert_less_than: Option<bool>,
     ) -> Result<Self, ZKVMError> {
-        #[cfg(feature = "riv64")]
-        panic!("less_than is not supported for riv64 yet");
-
-        #[cfg(feature = "riv32")]
+        assert!(N_U16 >= 2);
         cb.namespace(
             || "less_than",
             |cb| {
@@ -68,7 +65,7 @@ impl IsLtConfig {
                     )
                 };
 
-                let diff = (0..2)
+                let diff = (0..N_U16)
                     .map(|i| witin_u16(format!("diff_{i}")))
                     .collect::<Result<Vec<WitIn>, _>>()?;
 
@@ -81,11 +78,14 @@ impl IsLtConfig {
                     .reduce(|a, b| a + b)
                     .expect("reduce error");
 
-                let range = (1 << u32::BITS).into();
+                let range = (1 << (N_U16 * u16::BITS as usize)).into();
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
-                Ok(IsLtConfig { is_lt, diff })
+                Ok(IsLtConfig {
+                    is_lt,
+                    diff: diff.try_into().unwrap(),
+                })
             },
         )
     }

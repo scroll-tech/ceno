@@ -740,7 +740,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: IsLtConfig,
+        pub lt_wtns: IsLtConfig<1>,
     }
 
     struct AssertLtCircuitInput {
@@ -860,7 +860,7 @@ mod tests {
     struct LtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: IsLtConfig,
+        pub lt_wtns: IsLtConfig<1>,
     }
 
     struct LtCircuitInput {

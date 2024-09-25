@@ -4,6 +4,7 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::IsLtConfig,
+    instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
 };
 use ff_ext::ExtensionField;
@@ -66,7 +67,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(

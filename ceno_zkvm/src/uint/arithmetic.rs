@@ -8,6 +8,7 @@ use crate::{
     create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
+    gadgets::IsLtConfig,
     instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
 };
 
@@ -213,12 +214,56 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         })
     }
 
-    pub fn lt(
+    pub fn lt_signed(
         &self,
-        _circuit_builder: &mut CircuitBuilder<E>,
-        _rhs: &UIntLimbs<M, C, E>,
-    ) -> Result<Expression<E>, ZKVMError> {
-        Ok(self.expr().remove(0) + 1.into())
+        circuit_builder: &mut CircuitBuilder<E>,
+        rhs: &UIntLimbs<M, C, E>,
+    ) -> Result<UIntLtConfig, ZKVMError> {
+        assert!(C == 16, "do not support != 16 limb");
+        let is_lt = circuit_builder.create_witin(|| "is_lt witin")?;
+
+        // detect lhs signed
+        let is_lhs_pos = IsLtConfig::<1>::construct_circuit(
+            circuit_builder,
+            || "lhs_msb",
+            self.limbs.iter().last().unwrap().expr(), // msb limb
+            (1 << C).into(),
+            None,
+        )?;
+        // detect rhs signed
+        let is_rhs_pos = IsLtConfig::<1>::construct_circuit(
+            circuit_builder,
+            || "rhs_msb",
+            rhs.limbs.iter().last().unwrap().expr(), // msb limb
+            (1 << C).into(),
+            None,
+        )?;
+        let lhs_value = self.value();
+        let rhs_value = rhs.value();
+        let is_cond_lt = IsLtConfig::construct_circuit(
+            circuit_builder,
+            || "lhs < rhs || -rhs < -left",
+            (Expression::ONE - is_lhs_pos.expr())
+                * (Expression::ONE - is_lhs_pos.expr())
+                * (-rhs_value)
+                + (is_lhs_pos.expr()) * (is_lhs_pos.expr()) * (lhs_value),
+            (Expression::ONE - is_lhs_pos.expr())
+                * (Expression::ONE - is_lhs_pos.expr())
+                * (-lhs_value)
+                + (is_lhs_pos.expr()) * (is_lhs_pos.expr()) * (rhs_value),
+            None,
+        )?;
+        circuit_builder.require_equal(
+            || "test",
+            is_lt.expr(),
+            // is_left_neg && is_right_pos && 1
+            // (is_left_neg && is_right_neg) || (is_left_pos && is_right_pos) * is_cond_lt
+            (Expression::ONE - is_lhs_pos.expr()) * (is_rhs_pos.expr()) * Expression::ONE
+                + ((Expression::ONE - is_lhs_pos.expr()) * (Expression::ONE - is_rhs_pos.expr())
+                    + (is_lhs_pos.expr() * is_rhs_pos.expr()))
+                    * is_cond_lt.expr(),
+        );
+        (is_lt, is_lhs_pos, is_rhs_pos, is_cond_lt)
     }
 
     pub fn is_equal(
@@ -238,7 +283,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         let sum_expr = is_equal_per_limb
             .iter()
-            .fold(Expression::from(0), |acc, flag| acc.clone() + flag.expr());
+            .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
 
         let sum_flag = create_witin_from_expr!(|| "sum_flag", circuit_builder, false, sum_expr)?;
         let (is_equal, diff_inv) =
