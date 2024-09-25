@@ -141,7 +141,7 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         self.lt_rd_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.rs2().unwrap().previous_cycle,
+            step.rd().unwrap().previous_cycle,
             step.cycle() + 1,
         )?;
 
