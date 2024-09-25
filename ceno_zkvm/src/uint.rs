@@ -120,16 +120,6 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         }
     }
 
-    /// Get an Expression<E> from the limbs
-    pub fn expr_sum(&self) -> Expression<E> {
-        self.expr()
-            .iter()
-            .enumerate()
-            .fold(Expression::Constant(E::BaseField::ZERO), |acc, (i, e)| {
-                acc + e.clone() * (1 << (i * C)).into()
-            })
-    }
-
     /// expr_limbs is little endian order
     pub fn create_witin_from_exprs(
         circuit_builder: &mut CircuitBuilder<E>,

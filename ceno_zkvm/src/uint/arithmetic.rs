@@ -8,9 +8,7 @@ use crate::{
     create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::config::{
-        IsEqualConfig, IsZeroConfig, MsbConfig, UIntLtConfig, UIntLtuConfig,
-    },
+    instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
 };
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
@@ -247,58 +245,6 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             diff_inv_per_limb,
             is_equal,
             diff_inv,
-        })
-    }
-
-    pub fn is_zero(
-        &self,
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<IsZeroConfig, ZKVMError> {
-        let value_inverse = Self::new_unchecked(|| "inverse", circuit_builder).unwrap();
-        let is_zeros = self
-            .limbs
-            .iter()
-            .zip(value_inverse.limbs.iter())
-            .map(|(value, inverse)| {
-                // is_zero = (1 - value * inverse)
-                // when `value != 0` check `inverse = a.invert()` => value * is_zero
-                // when `value == 0` check `inverse = 0` => `inverse * is_zero
-                circuit_builder
-                    .require_zero(
-                        || "value ⋅ (1 - value ⋅ value_inv)",
-                        value.expr() - value.expr() * value.expr() * inverse.expr(),
-                    )
-                    .unwrap();
-                circuit_builder
-                    .require_zero(
-                        || "value_inv ⋅ (1 - value ⋅ value_inv)",
-                        inverse.expr() - inverse.expr() * value.expr() * inverse.expr(),
-                    )
-                    .unwrap();
-
-                let is_zero_wit = circuit_builder.create_witin(|| "is_zero").unwrap();
-                circuit_builder
-                    .require_equal(
-                        || "is_zero limbs",
-                        Expression::from(1) - value.expr() * inverse.expr(),
-                        is_zero_wit.expr(),
-                    )
-                    .unwrap();
-                is_zero_wit
-            })
-            .collect::<Vec<WitIn>>();
-
-        // To get a single `is_zero`` flag, `and` all the elements
-        let is_zero_expr = is_zeros
-            .iter()
-            .fold(Expression::from(1), |acc, v| acc * v.expr());
-        let is_zero_flag = circuit_builder.create_witin(|| "is_zero flag")?;
-        circuit_builder.require_equal(|| "is_zero_flag", is_zero_expr, is_zero_flag.expr())?;
-
-        Ok(IsZeroConfig {
-            inverse_limbs: value_inverse.limbs.iter().copied().collect_vec(),
-            is_zero_limbs: is_zeros,
-            is_zero: is_zero_flag,
         })
     }
 }

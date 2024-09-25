@@ -2,19 +2,14 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
-use super::{config::IsZeroConfig, constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
+use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{Expression, ToExpr},
-    instructions::Instruction,
-    uint::Value,
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsZeroConfig,
+    instructions::Instruction, uint::Value, witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 use std::marker::PhantomData;
 
-#[derive(Debug)]
 pub struct ArithConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
 
@@ -54,16 +49,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             divisor.mul_add(|| "dividend", circuit_builder, &mut outcome, &mut r, true)?;
 
         // div by zero check
-        let is_zero = divisor.is_zero(circuit_builder)?;
+        let is_zero = IsZeroConfig::construct_circuit(circuit_builder, divisor.value())?;
 
-        let sum_of_outcome = outcome.expr_sum();
+        let outcome_value = outcome.value();
         circuit_builder
             .condition_require_equal(
                 || "outcome_is_zero",
-                is_zero.is_zero.expr(),
-                sum_of_outcome.clone(),
-                Expression::from(u32::MAX as usize),
-                sum_of_outcome,
+                is_zero.expr(),
+                outcome_value.clone(),
+                ((1 << UInt::<E>::M) - 1).into(),
+                outcome_value,
             )
             .unwrap();
 
@@ -138,7 +133,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 .collect_vec(),
         );
 
-        config.is_zero.assign::<E>(instance, divisor.u16_fields());
+        config
+            .is_zero
+            .assign_instance(instance, (rs2 as u64).into())?;
 
         Ok(())
     }
