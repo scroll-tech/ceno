@@ -95,6 +95,7 @@ impl EmuContext for VMState {
         let function = self.load_register(self.platform.reg_ecall())?;
         let argument = self.load_register(self.platform.reg_arg0())?;
         if function == self.platform.ecall_halt() && argument == self.platform.code_success() {
+            self.set_pc(ByteAddr(0));
             self.succeeded = true;
             Ok(true)
         } else {
