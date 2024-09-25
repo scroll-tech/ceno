@@ -201,8 +201,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc lk_record degree ({})",
+            name_fn().into()
         );
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -223,8 +223,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc lk_table_record degree ({})",
+            name_fn().into()
         );
         self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
@@ -244,8 +244,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc read_record degree ({})",
+            name_fn().into()
         );
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -261,8 +261,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc write_record degree ({})",
+            name_fn().into()
         );
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());

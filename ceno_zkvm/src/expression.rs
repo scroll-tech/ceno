@@ -115,8 +115,10 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Constant(c) => *c == E::BaseField::ZERO,
             Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
             Expression::Product(a, b) => Self::is_zero_expr(a) || Self::is_zero_expr(b),
-            Expression::ScaledSum(_, _, _) => false,
-            Expression::Challenge(_, _, _, _) => false,
+            Expression::ScaledSum(x, a, b) => {
+                (Self::is_zero_expr(x) || Self::is_zero_expr(a)) && Self::is_zero_expr(b)
+            }
+            Expression::Challenge(_, _, scalar, offset) => *scalar == E::ZERO && *offset == E::ZERO,
         }
     }
 
@@ -143,7 +145,9 @@ impl<E: ExtensionField> Expression<E> {
                     && Self::is_monomial_form_inner(MonomialState::ProductTerm, b)
             }
             (Expression::ScaledSum(_, _, _), MonomialState::SumTerm) => true,
-            (Expression::ScaledSum(_, _, b), MonomialState::ProductTerm) => Self::is_zero_expr(b),
+            (Expression::ScaledSum(x, a, b), MonomialState::ProductTerm) => {
+                Self::is_zero_expr(x) || Self::is_zero_expr(a) || Self::is_zero_expr(b)
+            }
         }
     }
 }

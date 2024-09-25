@@ -33,6 +33,16 @@ pub fn limb_u8_to_u16(input: &[u8]) -> Vec<u16> {
         .collect()
 }
 
+pub fn split_to_u8(value: u32) -> Vec<u8> {
+    (0..4)
+        .scan(value, |acc, _| {
+            let limb = (*acc & 0xFF) as u8;
+            *acc >>= 8;
+            Some(limb)
+        })
+        .collect_vec()
+}
+
 /// Compile time evaluated minimum function
 /// returns min(a, b)
 pub(crate) const fn const_min(a: usize, b: usize) -> usize {

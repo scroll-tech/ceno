@@ -11,7 +11,7 @@ use crate::{
 };
 use ark_std::test_rng;
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
-use ceno_emul::{ByteAddr, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, Change, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
@@ -31,9 +31,12 @@ use std::{
 pub const MOCK_RS1: u32 = 2;
 pub const MOCK_RS2: u32 = 3;
 pub const MOCK_RD: u32 = 4;
+pub const MOCK_IMM_3: u32 = 3;
+pub const MOCK_IMM_31: u32 = 31;
 /// The program baked in the MockProver.
 /// TODO: Make this a parameter?
 #[allow(clippy::identity_op)]
+#[allow(clippy::unusual_byte_groupings)]
 pub const MOCK_PROGRAM: &[u32] = &[
     // R-Type
     // funct7 | rs2 | rs1 | funct3 | rd | opcode
@@ -50,6 +53,19 @@ pub const MOCK_PROGRAM: &[u32] = &[
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
     // xor x4, x2, x3
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
+    // B-Type
+    // beq x2, x3, 8
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b000 << 12 | 0x08 << 7 | 0x63,
+    // bne x2, x3, 8
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | 0x08 << 7 | 0x63,
+    // blt x2, x3, -8
+    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
+    // divu (0x01, 0x05, 0x33)
+    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x33,
+    // srli x4, x2, 3
+    0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
+    // srli x4, x2, 31
+    0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
@@ -58,6 +74,15 @@ pub const MOCK_PC_MUL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 8);
 pub const MOCK_PC_AND: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 12);
 pub const MOCK_PC_OR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 16);
 pub const MOCK_PC_XOR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 20);
+pub const MOCK_PC_BEQ: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 24);
+pub const MOCK_PC_BNE: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 28);
+pub const MOCK_PC_BLT: Change<ByteAddr> = Change {
+    before: ByteAddr(CENO_PLATFORM.pc_start() + 32),
+    after: ByteAddr(CENO_PLATFORM.pc_start() + 24),
+};
+pub const MOCK_PC_DIVU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 36);
+pub const MOCK_PC_SRLI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 40);
+pub const MOCK_PC_SRLI_31: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 44);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -105,7 +130,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
                     Expression: {expression_fmt}\n\
                     Evaluation: {eval_fmt} != 0\n\
-                    Inst[{inst_id}]: {wtns_fmt}\n",
+                    Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
             Self::AssertEqualError {
@@ -126,7 +151,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     Left: {left_eval_fmt} != Right: {right_eval_fmt}\n\
                     Left Expression: {left_expression_fmt}\n\
                     Right Expression: {right_expression_fmt}\n\
-                    Inst[{inst_id}]: {wtns_fmt}\n",
+                    Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
             Self::LookupError {
@@ -142,7 +167,7 @@ impl<E: ExtensionField> MockProverError<E> {
                     "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\n\
                     Expression: {expression_fmt}\n\
                     Evaluation: {eval_fmt}\n\
-                    Inst[{inst_id}]: {wtns_fmt}\n",
+                    Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
         }
@@ -267,9 +292,9 @@ fn fmt_wtns<E: ExtensionField>(
             } else {
                 "Unknown".to_string()
             };
-            format!("\nWitIn({wt_id})\npath={name}\nvalue={value_fmt}\n")
+            format!("  WitIn({wt_id})={value_fmt} {name:?}")
         })
-        .join("----\n")
+        .join("\n")
 }
 
 pub(crate) struct MockProver<E: ExtensionField> {
