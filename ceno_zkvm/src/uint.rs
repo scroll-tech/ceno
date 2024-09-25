@@ -550,6 +550,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         Value::<T> {
             val: limbs
                 .iter()
+                .rev()
                 .fold(0u32, |acc, &v| acc * (1 << 16) + v as u32)
                 .into(),
             limbs: Cow::Owned(limbs),
@@ -560,6 +561,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         Value::<T> {
             val: limbs
                 .iter()
+                .rev()
                 .fold(0u32, |acc, &v| acc * (1 << 16) + v as u32)
                 .into(),
             limbs: Cow::Borrowed(limbs),

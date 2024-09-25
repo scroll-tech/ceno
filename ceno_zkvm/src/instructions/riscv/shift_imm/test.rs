@@ -32,7 +32,7 @@ fn test_opcode_srli() {
         vec![StepRecord::new_i_instruction(
             3,
             MOCK_PC_SRLI,
-            MOCK_PROGRAM[8],
+            MOCK_PROGRAM[10],
             32,
             Change::new(0, 32 >> 3),
             0,
