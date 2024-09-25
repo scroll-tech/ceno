@@ -1,3 +1,5 @@
+mod monomial;
+
 use std::{
     cmp::max,
     mem::MaybeUninit,
@@ -14,7 +16,7 @@ use crate::{
     structs::{ChallengeId, WitnessId},
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
@@ -95,6 +97,10 @@ impl<E: ExtensionField> Expression<E> {
         Self::is_monomial_form_inner(MonomialState::SumTerm, self)
     }
 
+    pub fn to_monomial_form(&self) -> Self {
+        self.to_monomial_form_inner()
+    }
+
     pub fn unpack_sum(&self) -> Option<(Expression<E>, Expression<E>)> {
         match self {
             Expression::Sum(a, b) => Some((a.deref().clone(), b.deref().clone())),
@@ -109,8 +115,10 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Constant(c) => *c == E::BaseField::ZERO,
             Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
             Expression::Product(a, b) => Self::is_zero_expr(a) || Self::is_zero_expr(b),
-            Expression::ScaledSum(_, _, _) => false,
-            Expression::Challenge(_, _, _, _) => false,
+            Expression::ScaledSum(x, a, b) => {
+                (Self::is_zero_expr(x) || Self::is_zero_expr(a)) && Self::is_zero_expr(b)
+            }
+            Expression::Challenge(_, _, scalar, offset) => *scalar == E::ZERO && *offset == E::ZERO,
         }
     }
 
@@ -137,7 +145,9 @@ impl<E: ExtensionField> Expression<E> {
                     && Self::is_monomial_form_inner(MonomialState::ProductTerm, b)
             }
             (Expression::ScaledSum(_, _, _), MonomialState::SumTerm) => true,
-            (Expression::ScaledSum(_, _, b), MonomialState::ProductTerm) => Self::is_zero_expr(b),
+            (Expression::ScaledSum(x, a, b), MonomialState::ProductTerm) => {
+                Self::is_zero_expr(x) || Self::is_zero_expr(a) || Self::is_zero_expr(b)
+            }
         }
     }
 }
