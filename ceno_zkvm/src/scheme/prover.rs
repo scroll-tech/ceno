@@ -473,11 +473,30 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             assert!(sel_non_lc_zero_sumcheck.is_some());
 
             // \sum_t (sel(rt, t) * (\sum_j alpha_{j} * all_monomial_terms(t) ))
-            for (expr, alpha) in cs
+            for ((expr, name), alpha) in cs
                 .assert_zero_sumcheck_expressions
                 .iter()
+                .zip_eq(cs.assert_zero_sumcheck_expressions_namespace_map.iter())
                 .zip_eq(alpha_pow_iter)
             {
+                // sanity check in debug build and output != instance index for zero check sumcheck poly
+                if cfg!(debug_assertions) {
+                    let expected_zero_poly = wit_infer_by_expr(&[], &witnesses, challenges, expr);
+                    let top_100_errors = expected_zero_poly
+                        .get_ext_field_vec()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, v)| **v != E::ZERO)
+                        .take(100)
+                        .collect_vec();
+                    if !top_100_errors.is_empty() {
+                        return Err(ZKVMError::InvalidWitness(format!(
+                            "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
+                            top_100_errors.into_iter().map(|(i, _)| i).join(",")
+                        )));
+                    }
+                }
+
                 distrinct_zerocheck_terms_set.extend(virtual_polys.add_mle_list_by_expr(
                     sel_non_lc_zero_sumcheck.as_ref(),
                     witnesses.iter().collect_vec(),

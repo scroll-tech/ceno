@@ -326,9 +326,10 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         si.iter()
             .zip(self.limbs.iter())
             .zip(rhs.limbs.iter())
-            .try_for_each(|((flag, a), b)| {
+            .enumerate()
+            .try_for_each(|(i, ((flag, a), b))| {
                 circuit_builder.require_zero(
-                    || "byte diff zero check",
+                    || format!("byte diff {i} zero check"),
                     a.expr() - b.expr() - flag.expr() * a.expr() + flag.expr() * b.expr(),
                 )
             })?;
