@@ -74,7 +74,12 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             step.rs1().unwrap().value,
             (ECALL_HALT[0] + (ECALL_HALT[1] << 16)) as u32
         );
-        assert_eq!(step.pc().after.0, 0, "pc after ecall/halt {:x}", step.pc().after.0);
+        assert_eq!(
+            step.pc().after.0,
+            0,
+            "pc after ecall/halt {:x}",
+            step.pc().after.0
+        );
 
         set_val!(
             instance,
