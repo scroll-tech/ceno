@@ -321,6 +321,18 @@ impl DecodedInstruction {
         }
     }
 
+    /// Indicate whether the immediate is interpreted as a signed integer, and it is negative.
+    pub fn imm_is_negative(&self) -> bool {
+        match self.codes() {
+            InsnCodes { format: R, .. } => false,
+            InsnCodes {
+                kind: SLLI | SRLI | SRAI,
+                ..
+            } => false,
+            _ => self.top_bit != 0,
+        }
+    }
+
     pub fn sign_bit(&self) -> u32 {
         self.top_bit
     }

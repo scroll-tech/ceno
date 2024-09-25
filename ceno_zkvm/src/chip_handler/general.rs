@@ -146,6 +146,29 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
+    pub fn condition_require_equal<NR, N>(
+        &mut self,
+        name_fn: N,
+        cond: Expression<E>,
+        target: Expression<E>,
+        true_expr: Expression<E>,
+        false_expr: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        // cond * (true_expr) + (1 - cond) * false_expr
+        // => false_expr + cond * true_expr - cond * false_expr
+        self.namespace(
+            || "cond_require_equal",
+            |cb| {
+                let cond_target = false_expr.clone() + cond.clone() * true_expr - cond * false_expr;
+                cb.cs.require_zero(name_fn, target - cond_target)
+            },
+        )
+    }
+
     pub(crate) fn assert_ux<NR, N, const C: usize>(
         &mut self,
         name_fn: N,
@@ -222,6 +245,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn assert_bit<NR, N>(
         &mut self,
         name_fn: N,
@@ -232,7 +256,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         // TODO: Replace with `x * (1 - x)` or a multi-bit lookup similar to assert_u8_pair.
-        self.assert_u16(name_fn, expr * Expression::from(1 << 15))
+        let items: Vec<Expression<E>> = vec![(ROMType::U1 as usize).into(), expr];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(name_fn, rlc_record)?;
+        Ok(())
     }
 
     /// Assert `rom_type(a, b) = c` and that `a, b, c` are all bytes.

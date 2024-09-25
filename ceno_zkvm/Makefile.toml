@@ -3,7 +3,7 @@ CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 CORE = { script = ["grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}'"] }
 RAYON_NUM_THREADS = "${CORE}"
 
-[tasks.riscv_add_flamegraph]
+[tasks.riscv_opcodes_flamegraph]
 env = { "RUST_LOG" = "debug", "RAYON_NUM_THREADS" = "8"}
 command = "cargo"
-args = ["run", "--package", "ceno_zkvm", "--release", "--example", "riscv_add"]
+args = ["run", "--package", "ceno_zkvm", "--release", "--example", "riscv_opcodes"]

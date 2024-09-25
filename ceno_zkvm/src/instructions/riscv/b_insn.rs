@@ -71,11 +71,11 @@ impl BInstructionConfig {
         circuit_builder.lk_fetch(&InsnRecord::new(
             pc.expr(),
             (insn_kind.codes().opcode as usize).into(),
-            0.into(), // TODO: Make sure the program table sets rd=0.
+            0.into(),
             (insn_kind.codes().func3 as usize).into(),
             rs1_id.expr(),
             rs2_id.expr(),
-            imm.expr(), // TODO: Make sure the program table sets the full immediate.
+            imm.expr(),
         ))?;
 
         // Register state.
@@ -138,7 +138,11 @@ impl BInstructionConfig {
         // Register indexes and immediate.
         set_val!(instance, self.rs1_id, step.insn().rs1() as u64);
         set_val!(instance, self.rs2_id, step.insn().rs2() as u64);
-        set_val!(instance, self.imm, step.insn().imm_b() as u64);
+        set_val!(
+            instance,
+            self.imm,
+            InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn())
+        );
 
         // Fetch the instruction.
         lk_multiplicity.fetch(step.pc().before.0);
