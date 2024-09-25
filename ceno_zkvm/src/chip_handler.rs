@@ -2,8 +2,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, WitIn},
-    instructions::riscv::config::ExprLtConfig,
+    expression::{Expression, WitIn}, gadgets::IsLtConfig,
 };
 
 pub mod general;
@@ -30,7 +29,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     fn register_write(
@@ -41,7 +40,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 }
 
 /// The common representation of a memory value.
@@ -57,7 +56,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: crate::chip_handler::MemoryExpr<E>,
-    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
@@ -69,5 +68,5 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         ts: Expression<E>,
         prev_values: crate::chip_handler::MemoryExpr<E>,
         value: crate::chip_handler::MemoryExpr<E>,
-    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 }

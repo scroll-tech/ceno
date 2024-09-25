@@ -563,7 +563,7 @@ mod tests {
     use crate::{
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        instructions::riscv::config::{ExprLtConfig, ExprLtInput},
+        gadgets::IsLtConfig,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -740,7 +740,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: ExprLtConfig,
+        pub lt_wtns: IsLtConfig,
     }
 
     struct AssertLtCircuitInput {
@@ -764,11 +764,8 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            ExprLtInput {
-                lhs: input.a,
-                rhs: input.b,
-            }
-            .assign(instance, &self.lt_wtns, lk_multiplicity);
+            self.lt_wtns
+                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
 
             Ok(())
         }
@@ -863,7 +860,7 @@ mod tests {
     struct LtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: ExprLtConfig,
+        pub lt_wtns: IsLtConfig,
     }
 
     struct LtCircuitInput {
@@ -887,11 +884,8 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            ExprLtInput {
-                lhs: input.a,
-                rhs: input.b,
-            }
-            .assign(instance, &self.lt_wtns, lk_multiplicity);
+            self.lt_wtns
+                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
 
             Ok(())
         }

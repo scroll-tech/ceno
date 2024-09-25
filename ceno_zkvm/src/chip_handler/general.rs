@@ -1,14 +1,12 @@
 use std::fmt::Display;
 
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 
 use crate::{
-    chip_handler::utils::pows_expr,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
-    instructions::riscv::config::ExprLtConfig,
+    gadgets::IsLtConfig,
     structs::ROMType,
     tables::InsnRecord,
 };
@@ -322,64 +320,12 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         lhs: Expression<E>,
         rhs: Expression<E>,
         assert_less_than: Option<bool>,
-    ) -> Result<ExprLtConfig, ZKVMError>
+    ) -> Result<IsLtConfig, ZKVMError>
     where
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
     {
-        #[cfg(feature = "riv64")]
-        panic!("less_than is not supported for riv64 yet");
-
-        #[cfg(feature = "riv32")]
-        self.namespace(
-            || "less_than",
-            |cb| {
-                let name = name_fn();
-                let (is_lt, is_lt_expr) = if let Some(lt) = assert_less_than {
-                    (
-                        None,
-                        if lt {
-                            Expression::ONE
-                        } else {
-                            Expression::ZERO
-                        },
-                    )
-                } else {
-                    let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
-                    (Some(is_lt), is_lt.expr())
-                };
-
-                let mut witin_u16 = |var_name: String| -> Result<WitIn, ZKVMError> {
-                    cb.namespace(
-                        || format!("var {var_name}"),
-                        |cb| {
-                            let witin = cb.create_witin(|| var_name.to_string())?;
-                            cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr())?;
-                            Ok(witin)
-                        },
-                    )
-                };
-
-                let diff = (0..2)
-                    .map(|i| witin_u16(format!("diff_{i}")))
-                    .collect::<Result<Vec<WitIn>, _>>()?;
-
-                let pows = pows_expr((1 << u16::BITS).into(), diff.len());
-
-                let diff_expr = diff
-                    .iter()
-                    .zip_eq(pows)
-                    .map(|(record, beta)| beta * record.expr())
-                    .reduce(|a, b| a + b)
-                    .expect("reduce error");
-
-                let range = (1 << u32::BITS).into();
-
-                cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
-
-                Ok(ExprLtConfig { is_lt, diff })
-            },
-        )
+        IsLtConfig::construct_circuit(self, name_fn, lhs, rhs, assert_less_than)
     }
 
     pub(crate) fn is_equal(
