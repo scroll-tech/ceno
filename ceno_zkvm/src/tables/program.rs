@@ -65,7 +65,7 @@ impl<T> InsnRecord<T> {
 }
 
 impl InsnRecord<u32> {
-    pub(crate) fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
+    fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
         InsnRecord::new(
             pc,
             insn.opcode(),
