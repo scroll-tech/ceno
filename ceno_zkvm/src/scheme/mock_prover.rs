@@ -304,9 +304,9 @@ pub(crate) struct MockProver<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 
-fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> HashSet<Vec<u8>> {
+fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> HashSet<Vec<u64>> {
     fn load_range_table<RANGE: RangeTable, E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
+        t_vec: &mut Vec<Vec<u64>>,
         cb: &CircuitBuilder<E>,
         challenge: [E; 2],
     ) {
@@ -314,12 +314,12 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
             let rlc_record =
                 cb.rlc_chip_record(vec![(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
             let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+            t_vec.push(rlc_record.to_canonical_u64_vec());
         }
     }
 
     fn load_op_table<OP: OpsTable, E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
+        t_vec: &mut Vec<Vec<u64>>,
         cb: &CircuitBuilder<E>,
         challenge: [E; 2],
     ) {
@@ -331,12 +331,12 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
                 (c as usize).into(),
             ]);
             let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+            t_vec.push(rlc_record.to_canonical_u64_vec());
         }
     }
 
     fn load_program_table<E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
+        t_vec: &mut Vec<Vec<u64>>,
         _cb: &CircuitBuilder<E>,
         challenge: [E; 2],
     ) {
@@ -353,7 +353,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
                     .map(|v| unsafe { (*v).assume_init() }.into())
                     .collect::<Vec<_>>();
                 let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
-                t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+                t_vec.push(rlc_record.to_canonical_u64_vec());
             }
         }
     }
@@ -375,8 +375,8 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
 #[allow(clippy::type_complexity)]
 fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     cb: &CircuitBuilder<E>,
-) -> ([E; 2], &'static HashSet<Vec<u8>>) {
-    static CACHE: OnceLock<StaticTypeMap<([Vec<u8>; 2], HashSet<Vec<u8>>)>> = OnceLock::new();
+) -> ([E; 2], &'static HashSet<Vec<u64>>) {
+    static CACHE: OnceLock<StaticTypeMap<([Vec<u64>; 2], HashSet<Vec<u64>>)>> = OnceLock::new();
     let cache = CACHE.get_or_init(StaticTypeMap::new);
 
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
@@ -403,7 +403,7 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
             Err(e) => panic!("{:?}", e),
         };
 
-        (challenge.map(|c| c.to_repr().as_ref().to_vec()), table)
+        (challenge.map(|c| c.to_canonical_u64_vec()), table)
     });
     // reinitialize per generic type E
     (
@@ -514,7 +514,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
             // Check each lookup expr exists in t vec
             for (inst_id, element) in expr_evaluated.iter().enumerate() {
-                if !table.contains(element.to_repr().as_ref()) {
+                if !table.contains(&element.to_canonical_u64_vec()) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
                         evaluated: *element,
