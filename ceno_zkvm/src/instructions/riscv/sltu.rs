@@ -3,9 +3,13 @@ use std::marker::PhantomData;
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
+use super::{
+    constants::{UInt, UINT_LIMBS},
+    r_insn::RInstructionConfig,
+    RIVInstruction,
+};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::lt::LtGadget,
+    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsLtConfig,
     instructions::Instruction, uint::Value, witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -19,7 +23,7 @@ pub struct ArithConfig<E: ExtensionField> {
     rs2_read: UInt<E>,
     rd_written: UInt<E>,
 
-    lt_gadget: LtGadget<E>,
+    is_lt: IsLtConfig<UINT_LIMBS>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -44,7 +48,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
 
-        let lt = LtGadget::construct_circuit(circuit_builder, rs1_read.value(), rs2_read.value())?;
+        let lt = IsLtConfig::construct_circuit(
+            circuit_builder,
+            || "rs1 < rs2",
+            rs1_read.value(),
+            rs2_read.value(),
+            None,
+        )?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
         circuit_builder.require_equal(|| "rd == lt", rd_written.value(), lt.expr())?;
 
@@ -61,7 +71,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rs1_read,
             rs2_read,
             rd_written,
-            lt_gadget: lt,
+            is_lt: lt,
         })
     }
 
@@ -84,12 +94,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         config
             .rs2_read
             .assign_limbs(instance, rs2_read.u16_fields());
-        config.lt_gadget.assign(
-            instance,
-            lkm,
-            E::BaseField::from(rs1.into()),
-            E::BaseField::from(rs2.into()),
-        )?;
+        config
+            .is_lt
+            .assign_instance(instance, lkm, rs1.into(), rs2.into())?;
 
         let lt = if rs1 < rs2 {
             Value::new_unchecked(1u32)
