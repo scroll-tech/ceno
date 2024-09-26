@@ -6,7 +6,8 @@ CUR_TARGET = { script = [
         # Command to check if the variable is not set, then assign output of the bash command
         '''
         if [ -z "${TARGET}" ]; then
-            echo "x86_64-unknown-linux-gnu"
+            TARGET=$(rustc -vV | grep "host" | awk '{print $2}')
+            echo "${TARGET}"
         else
             echo "${TARGET}"
         fi
