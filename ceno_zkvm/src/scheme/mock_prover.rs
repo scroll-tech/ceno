@@ -767,8 +767,12 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            self.lt_wtns
-                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
+            self.lt_wtns.assign_instance::<E>(
+                instance,
+                lk_multiplicity,
+                input.a.into(),
+                input.b.into(),
+            )?;
 
             Ok(())
         }
@@ -887,8 +891,12 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            self.lt_wtns
-                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
+            self.lt_wtns.assign_instance::<E>(
+                instance,
+                lk_multiplicity,
+                input.a.into(),
+                input.b.into(),
+            )?;
 
             Ok(())
         }

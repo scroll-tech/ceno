@@ -75,15 +75,22 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
-        let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
-        let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
-        config.read_rs1.assign_limbs(instance, rs1.u16_fields());
-        config.read_rs2.assign_limbs(instance, rs2.u16_fields());
-        config.is_lt.assign_instance(
+        let rs1 = step.rs1().unwrap().value;
+        let rs2 = step.rs2().unwrap().value;
+
+        let rs1_value = Value::new_unchecked(rs1);
+        let rs2_value = Value::new_unchecked(rs2);
+        config
+            .read_rs1
+            .assign_limbs(instance, rs1_value.u16_fields());
+        config
+            .read_rs2
+            .assign_limbs(instance, rs2_value.u16_fields());
+        config.is_lt.assign_instance::<E>(
             instance,
             lk_multiplicity,
-            step.rs1().unwrap().value as u64,
-            step.rs2().unwrap().value as u64,
+            (rs1 as u64).into(),
+            (rs2 as u64).into(),
         )?;
 
         config

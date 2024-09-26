@@ -153,23 +153,23 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         );
 
         // Register read and write.
-        self.lt_rs1_cfg.assign_instance(
+        self.lt_rs1_cfg.assign_instance::<E>(
             instance,
             lk_multiplicity,
-            step.rs1().unwrap().previous_cycle,
-            step.cycle(),
+            step.rs1().unwrap().previous_cycle.into(),
+            step.cycle().into(),
         )?;
-        self.lt_rs2_cfg.assign_instance(
+        self.lt_rs2_cfg.assign_instance::<E>(
             instance,
             lk_multiplicity,
-            step.rs2().unwrap().previous_cycle,
-            step.cycle() + 1,
+            step.rs2().unwrap().previous_cycle.into(),
+            (step.cycle() + 1).into(),
         )?;
-        self.lt_prev_ts_cfg.assign_instance(
+        self.lt_prev_ts_cfg.assign_instance::<E>(
             instance,
             lk_multiplicity,
-            step.rd().unwrap().previous_cycle,
-            step.cycle() + 2,
+            step.rd().unwrap().previous_cycle.into(),
+            (step.cycle() + 2).into(),
         )?;
 
         Ok(())

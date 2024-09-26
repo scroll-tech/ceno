@@ -132,17 +132,17 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         );
 
         // Register read and write.
-        self.lt_rs1_cfg.assign_instance(
+        self.lt_rs1_cfg.assign_instance::<E>(
             instance,
             lk_multiplicity,
-            step.rs1().unwrap().previous_cycle,
-            step.cycle(),
+            step.rs1().unwrap().previous_cycle.into(),
+            step.cycle().into(),
         )?;
-        self.lt_rd_cfg.assign_instance(
+        self.lt_rd_cfg.assign_instance::<E>(
             instance,
             lk_multiplicity,
-            step.rd().unwrap().previous_cycle,
-            step.cycle() + 1,
+            step.rd().unwrap().previous_cycle.into(),
+            (step.cycle() + 1).into(),
         )?;
 
         Ok(())
