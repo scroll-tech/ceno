@@ -3,7 +3,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::config::ExprLtConfig,
+    gadgets::IsLtConfig,
+    instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
 };
 use ff_ext::ExtensionField;
@@ -19,7 +20,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -66,7 +67,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(

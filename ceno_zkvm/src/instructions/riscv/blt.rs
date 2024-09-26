@@ -3,26 +3,23 @@ use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::ToExpr,
-    instructions::{
-        riscv::config::{UIntLtConfig, UIntLtInput},
-        Instruction,
-    },
-    utils::{i64_to_base, split_to_u8},
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsLtConfig,
+    instructions::Instruction, witness::LkMultiplicity, Value,
 };
 
-use super::{b_insn::BInstructionConfig, constants::UInt8, RIVInstruction};
+use super::{
+    b_insn::BInstructionConfig,
+    constants::{UInt, UINT_LIMBS},
+    RIVInstruction,
+};
 
 pub struct BltInstruction;
 
 pub struct InstructionConfig<E: ExtensionField> {
     pub b_insn: BInstructionConfig,
-    pub read_rs1: UInt8<E>,
-    pub read_rs2: UInt8<E>,
-    pub is_lt: UIntLtConfig,
+    pub read_rs1: UInt<E>,
+    pub read_rs2: UInt<E>,
+    pub is_lt: IsLtConfig<UINT_LIMBS>,
 }
 
 impl RIVInstruction for BltInstruction {
@@ -38,16 +35,30 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<InstructionConfig<E>, ZKVMError> {
-        let read_rs1 = UInt8::new_unchecked(|| "rs1_limbs", circuit_builder)?;
-        let read_rs2 = UInt8::new_unchecked(|| "rs2_limbs", circuit_builder)?;
-        let is_lt = read_rs1.lt_limb8(circuit_builder, &read_rs2)?;
+        let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
+        let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
+        // TODO this is for unsigned lt, FIXME to use signed version
+        let is_lt = IsLtConfig::construct_circuit(
+            circuit_builder,
+            || "rs1<rs2",
+            read_rs1.value(),
+            read_rs2.value(),
+            None,
+        )?;
+        // let is_lt = UIntLtSignedConfig::construct_circuit(
+        //     circuit_builder,
+        //     || "rs1<rs2",
+        //     &read_rs1,
+        //     &read_rs2,
+        //     None,
+        // )?;
 
         let b_insn = BInstructionConfig::construct_circuit(
             circuit_builder,
             Self::INST_KIND,
             read_rs1.register_expr(),
             read_rs2.register_expr(),
-            is_lt.is_lt.expr(),
+            is_lt.expr(),
         )?;
 
         Ok(InstructionConfig {
@@ -64,25 +75,16 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
-        let rs1_limbs = split_to_u8(step.rs1().unwrap().value);
-        let rs2_limbs = split_to_u8(step.rs2().unwrap().value);
-        config.read_rs1.assign_limbs(instance, {
-            rs1_limbs
-                .iter()
-                .map(|&limb| i64_to_base::<E::BaseField>(limb as i64))
-                .collect()
-        });
-        config.read_rs2.assign_limbs(instance, {
-            rs2_limbs
-                .iter()
-                .map(|&limb| i64_to_base::<E::BaseField>(limb as i64))
-                .collect()
-        });
-        let lt_input = UIntLtInput {
-            lhs_limbs: &rs1_limbs,
-            rhs_limbs: &rs2_limbs,
-        };
-        lt_input.assign(instance, &config.is_lt, lk_multiplicity);
+        let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
+        let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
+        config.read_rs1.assign_limbs(instance, rs1.u16_fields());
+        config.read_rs2.assign_limbs(instance, rs2.u16_fields());
+        config.is_lt.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.rs1().unwrap().value as u64,
+            step.rs2().unwrap().value as u64,
+        )?;
 
         config
             .b_insn
@@ -118,12 +120,12 @@ mod test {
             &config,
             num_wits,
             vec![StepRecord::new_b_instruction(
-                3,
+                12,
                 MOCK_PC_BLT,
                 MOCK_PROGRAM[8],
-                0x20,
-                0x21,
                 0,
+                7,
+                10,
             )],
         )
         .unwrap();

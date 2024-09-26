@@ -49,7 +49,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             divisor.mul_add(|| "dividend", circuit_builder, &mut outcome, &r, true)?;
 
         // div by zero check
-        let is_zero = IsZeroConfig::construct_circuit(circuit_builder, divisor.value())?;
+        let is_zero = IsZeroConfig::construct_circuit(
+            circuit_builder,
+            || "divisor_zero_check",
+            divisor.value(),
+        )?;
 
         let outcome_value = outcome.value();
         circuit_builder

@@ -61,11 +61,13 @@ pub const MOCK_PROGRAM: &[u32] = &[
     // blt x2, x3, -8
     0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
     // divu (0x01, 0x05, 0x33)
-    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x33,
+    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
     // srli x4, x2, 3
     0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
     // srli x4, x2, 31
     0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
+    // sltu (0x00, 0x03, 0x33)
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b011 << 12 | MOCK_RD << 7 | 0x33,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
@@ -83,6 +85,7 @@ pub const MOCK_PC_BLT: Change<ByteAddr> = Change {
 pub const MOCK_PC_DIVU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 36);
 pub const MOCK_PC_SRLI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 40);
 pub const MOCK_PC_SRLI_31: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 44);
+pub const MOCK_PC_SLTU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 48);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -563,7 +566,7 @@ mod tests {
     use crate::{
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        instructions::riscv::config::{ExprLtConfig, ExprLtInput},
+        gadgets::IsLtConfig,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -740,7 +743,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: ExprLtConfig,
+        pub lt_wtns: IsLtConfig<1>,
     }
 
     struct AssertLtCircuitInput {
@@ -764,11 +767,8 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            ExprLtInput {
-                lhs: input.a,
-                rhs: input.b,
-            }
-            .assign(instance, &self.lt_wtns, lk_multiplicity);
+            self.lt_wtns
+                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
 
             Ok(())
         }
@@ -863,7 +863,7 @@ mod tests {
     struct LtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: ExprLtConfig,
+        pub lt_wtns: IsLtConfig<1>,
     }
 
     struct LtCircuitInput {
@@ -887,11 +887,8 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            ExprLtInput {
-                lhs: input.a,
-                rhs: input.b,
-            }
-            .assign(instance, &self.lt_wtns, lk_multiplicity);
+            self.lt_wtns
+                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
 
             Ok(())
         }

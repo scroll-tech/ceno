@@ -1,10 +1,7 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{
-    config::ExprLtConfig,
-    constants::{UInt, PC_STEP_SIZE},
-};
+use super::constants::{UInt, PC_STEP_SIZE, UINT_LIMBS};
 use crate::{
     chip_handler::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
@@ -12,7 +9,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::config::ExprLtInput,
+    gadgets::IsLtConfig,
     set_val,
     tables::InsnRecord,
     uint::Value,
@@ -34,8 +31,8 @@ pub struct IInstructionConfig<E: ExtensionField> {
     pub prev_rd_value: UInt<E>,
     pub prev_rs1_ts: WitIn,
     pub prev_rd_ts: WitIn,
-    pub lt_rs1_cfg: ExprLtConfig,
-    pub lt_rd_cfg: ExprLtConfig,
+    pub lt_rs1_cfg: IsLtConfig<UINT_LIMBS>,
+    pub lt_rd_cfg: IsLtConfig<UINT_LIMBS>,
 }
 
 impl<E: ExtensionField> IInstructionConfig<E> {
@@ -135,16 +132,18 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         );
 
         // Register read and write.
-        ExprLtInput {
-            lhs: step.rs1().unwrap().previous_cycle,
-            rhs: step.cycle(),
-        }
-        .assign(instance, &self.lt_rs1_cfg, lk_multiplicity);
-        ExprLtInput {
-            lhs: step.rd().unwrap().previous_cycle,
-            rhs: step.cycle() + 1,
-        }
-        .assign(instance, &self.lt_rd_cfg, lk_multiplicity);
+        self.lt_rs1_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.rs1().unwrap().previous_cycle,
+            step.cycle(),
+        )?;
+        self.lt_rd_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.rd().unwrap().previous_cycle,
+            step.cycle() + 1,
+        )?;
 
         Ok(())
     }

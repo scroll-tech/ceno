@@ -19,7 +19,7 @@ pub struct VMState {
     memory: HashMap<WordAddr, Word>,
     registers: [Word; 32],
     // Termination.
-    succeeded: bool,
+    halted: bool,
     tracer: Tracer,
 }
 
@@ -31,7 +31,7 @@ impl VMState {
             pc,
             memory: HashMap::new(),
             registers: [0; 32],
-            succeeded: false,
+            halted: false,
             tracer: Tracer::new(),
         }
     }
@@ -49,8 +49,8 @@ impl VMState {
         Ok(state)
     }
 
-    pub fn succeeded(&self) -> bool {
-        self.succeeded
+    pub fn halted(&self) -> bool {
+        self.halted
     }
 
     pub fn tracer(&self) -> &Tracer {
@@ -62,10 +62,10 @@ impl VMState {
         self.memory.insert(addr, value);
     }
 
-    pub fn iter_until_success(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
+    pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
         let emu = Emulator::new();
         from_fn(move || {
-            if self.succeeded() {
+            if self.halted() {
                 None
             } else {
                 Some(self.step(&emu))
@@ -76,7 +76,7 @@ impl VMState {
     fn step(&mut self, emu: &Emulator) -> Result<StepRecord> {
         emu.step(self)?;
         let step = self.tracer.advance();
-        if step.is_busy_loop() && !self.succeeded() {
+        if step.is_busy_loop() && !self.halted() {
             Err(anyhow!("Stuck in loop {}", "{}"))
         } else {
             Ok(step)
@@ -89,13 +89,12 @@ impl VMState {
 }
 
 impl EmuContext for VMState {
-    // Expect an ecall to indicate a successful exit:
-    // function HALT with argument SUCCESS.
+    // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {
         let function = self.load_register(self.platform.reg_ecall())?;
-        let argument = self.load_register(self.platform.reg_arg0())?;
-        if function == self.platform.ecall_halt() && argument == self.platform.code_success() {
-            self.succeeded = true;
+        if function == self.platform.ecall_halt() {
+            let _exit_code = self.load_register(self.platform.reg_arg0())?;
+            self.halted = true;
             Ok(true)
         } else {
             self.trap(TrapCause::EcallError)

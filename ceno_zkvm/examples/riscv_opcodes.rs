@@ -172,7 +172,7 @@ fn main() {
         }
 
         let all_records = vm
-            .iter_until_success()
+            .iter_until_halt()
             .collect::<Result<Vec<StepRecord>, _>>()
             .expect("vm exec failed")
             .into_iter()
