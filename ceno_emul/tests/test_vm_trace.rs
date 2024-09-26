@@ -1,3 +1,4 @@
+#![allow(clippy::unusual_byte_groupings)]
 use anyhow::Result;
 use std::collections::HashMap;
 

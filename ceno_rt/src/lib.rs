@@ -21,6 +21,7 @@ mod panic_handler {
     }
 }
 
+#[allow(asm_sub_register)]
 pub fn halt(exit_code: u32) -> ! {
     unsafe {
         asm!(

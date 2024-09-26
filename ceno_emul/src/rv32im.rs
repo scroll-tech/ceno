@@ -377,6 +377,7 @@ impl DecodedInstruction {
 
 #[cfg(test)]
 #[test]
+#[allow(clippy::identity_op)]
 fn test_decode_imm() {
     for (i, expected) in [
         // Example of I-type: ADDI.
