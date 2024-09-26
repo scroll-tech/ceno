@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ceno_emul::{ByteAddr, EmuContext, StepRecord, VMState, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, EmuContext, InsnKind, StepRecord, VMState, CENO_PLATFORM};
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -13,9 +13,11 @@ fn test_ceno_rt_mini() -> Result<()> {
 fn test_ceno_rt_panic() -> Result<()> {
     let program_elf = include_bytes!("./data/ceno_rt_panic");
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
-    let res = run(&mut state);
-
-    assert!(matches!(res, Err(e) if e.to_string().contains("EcallError")));
+    let steps = run(&mut state)?;
+    let last = steps.last().unwrap();
+    assert_eq!(last.insn().codes().kind, InsnKind::EANY);
+    assert_eq!(last.rs1().unwrap().value, CENO_PLATFORM.ecall_halt());
+    assert_eq!(last.rs2().unwrap().value, 1); // panic / halt(1)
     Ok(())
 }
 
@@ -71,7 +73,7 @@ fn test_ceno_rt_io() -> Result<()> {
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
-    state.iter_until_success().collect()
+    state.iter_until_halt().collect()
 }
 
 const WORD_SIZE: usize = 4;

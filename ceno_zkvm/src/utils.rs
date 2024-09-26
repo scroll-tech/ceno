@@ -2,7 +2,6 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
-use std::mem;
 use transcript::Transcript;
 
 /// convert ext field element to u64, assume it is inside the range
@@ -34,13 +33,8 @@ pub fn limb_u8_to_u16(input: &[u8]) -> Vec<u16> {
         .collect()
 }
 
-pub fn split_to_u8<T: Into<u64>>(value: T) -> Vec<u8> {
-    let value: u64 = value.into(); // Convert to u64 for generality
-    let limbs: usize = {
-        let u8_bytes = (u16::BITS / 8) as usize;
-        mem::size_of::<T>() / u8_bytes
-    };
-    (0..limbs)
+pub fn split_to_u8(value: u32) -> Vec<u8> {
+    (0..4)
         .scan(value, |acc, _| {
             let limb = (*acc & 0xFF) as u8;
             *acc >>= 8;
