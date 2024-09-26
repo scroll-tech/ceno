@@ -1,4 +1,7 @@
-use std::mem::MaybeUninit;
+use std::{
+    mem::MaybeUninit,
+    ops::{Add, Sub},
+};
 
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -44,28 +47,34 @@ impl<E: ExtensionField> LtGadget<E> {
         Ok(LtGadget { lt, diff })
     }
 
-    pub(crate) fn expr(&self) -> Expression<E> {
+    pub fn expr(&self) -> Expression<E> {
         self.lt.expr()
     }
 
-    pub(crate) fn assign(
+    pub fn assign(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
         lhs: E::BaseField,
         rhs: E::BaseField,
     ) -> Result<(), ZKVMError> {
-        let lhs = lhs.to_canonical_u64();
-        let rhs = rhs.to_canonical_u64();
-
         // Set `lt`
-        let lt = lhs < rhs;
+        let lt = lhs.to_canonical_u64() < rhs.to_canonical_u64();
         set_val!(instance, self.lt, lt as u64);
 
         // Set `diff`
-        let diff = lhs - rhs + (if lt { 1 << UInt::<E>::M } else { 0 });
-        self.diff
-            .assign_limbs(instance, Value::new(diff, lkm).u16_fields());
+        let diff = lhs.sub(rhs).add(if lt {
+            E::BaseField::from(1 << UInt::<E>::M)
+        } else {
+            E::BaseField::from(0)
+        });
+        self.diff.assign_limbs(
+            instance,
+            #[cfg(feature = "riv32")]
+            Value::new(diff.to_canonical_u64() as u32, lkm).u16_fields(),
+            #[cfg(feature = "riv64")]
+            Value::new(diff.to_canonical_u64(), lkm).u16_fields(),
+        );
 
         Ok(())
     }

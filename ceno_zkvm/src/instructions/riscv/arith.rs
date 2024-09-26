@@ -6,8 +6,8 @@ use itertools::Itertools;
 
 use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::lt::LtGadget,
-    instructions::Instruction, uint::Value, witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
+    witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 
@@ -40,12 +40,6 @@ impl RIVInstruction for MulOp {
     const INST_KIND: InsnKind = InsnKind::MUL;
 }
 pub type MulInstruction<E> = ArithInstruction<E, MulOp>;
-
-pub struct SLTUOp;
-impl RIVInstruction for SLTUOp {
-    const INST_KIND: InsnKind = InsnKind::SLTU;
-}
-pub type SltuInstruction<E> = ArithInstruction<E, SLTUOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
@@ -86,21 +80,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let mut rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
                 let rd_written =
                     rs1_read.mul(|| "rd_written", circuit_builder, &mut rs2_read, true)?;
-                (rs1_read, rs2_read, rd_written)
-            }
-
-            InsnKind::SLTU => {
-                // If rs1_read < rs2_read, rd_written = 1. Otherwise rd_written = 0
-                let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-
-                let lt = LtGadget::construct_circuit(
-                    circuit_builder,
-                    rs1_read.value(),
-                    rs2_read.value(),
-                )?;
-                let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-                circuit_builder.require_equal(|| "rd == lt", rd_written.value(), lt.expr())?;
                 (rs1_read, rs2_read, rd_written)
             }
 
