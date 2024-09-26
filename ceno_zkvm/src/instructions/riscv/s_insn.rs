@@ -20,6 +20,7 @@ use crate::{
 use ceno_emul::{InsnKind, StepRecord, PC_STEP_SIZE};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
+use crate::tables::InsnRecord;
 
 pub struct SInstructionConfig<E: ExtensionField> {
     pc: WitIn,
@@ -41,6 +42,7 @@ pub struct SInstructionConfig<E: ExtensionField> {
 impl<E: ExtensionField> SInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        insn_kind: InsnKind,
         imm: &Expression<E>,
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
@@ -58,16 +60,16 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         let rs1_id = circuit_builder.create_witin(|| "rs1_id")?;
         let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
 
-        // TODO: deal with immediate
-        // what is there to do with the immediate, I assume the correct memory address is passed in from above
-        // hence this almost has no use for immediate
-        // but it does have some use, i.e it needs to use that to fetch the instruction
-
-        // Fetch Instruction
-        // when fetching the instruction, we need to split imm into two halves
-        // is the solution to get two imm values?
-        // imm[4:0] and imm[11:5]
-        // TODO:
+        // Fetch the instruction
+        circuit_builder.lk_fetch(&InsnRecord::new(
+            pc.expr(),
+            (insn_kind.codes().opcode as usize).into(),
+            0.into(),
+            (insn_kind.codes().func3 as usize).into(),
+            rs1_id.expr(),
+            rs2_id.expr(),
+            imm.clone()
+        ))?;
 
         // Register State.
         let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
@@ -86,7 +88,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             rs1_read,
         )?;
         let (next_ts, lt_rs2_cfg) = circuit_builder.register_read(
-            || "read_rs1",
+            || "read_rs2",
             &rs2_id,
             prev_rs2_ts.expr(),
             next_ts,
@@ -103,13 +105,9 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             memory_written,
         )?;
 
-        // TODO: check that memory_written == rs2_read (probably higher up)
-
         // State out.
         let next_pc = pc.expr() + PC_STEP_SIZE.into();
         circuit_builder.state_out(next_pc, next_ts)?;
-
-        // TODO: determine what must be in config
 
         Ok(SInstructionConfig {
             pc,

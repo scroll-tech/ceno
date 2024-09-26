@@ -45,6 +45,8 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
         // TODO: this should be the same as rs2_read (check for equality)
         let memory_written = UInt::new_unchecked(|| "memory_written", circuit_builder)?;
 
+        // TODO: no need for this equality check
+        //  use the code to enforce that they are equal
         let equal = IsEqualConfig::construct_circuit(
             circuit_builder,
             rs2_read.value(),
