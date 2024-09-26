@@ -304,22 +304,22 @@ impl UIntLtSignedConfig {
     ) -> Result<(), ZKVMError> {
         let lhs_value = Value::new_unchecked(lhs);
         let rhs_value = Value::new_unchecked(rhs);
-        self.is_lhs_pos.assign_instance::<E>(
+        self.is_lhs_pos.assign_instance(
             instance,
             lkm,
-            (*lhs_value.limbs.last().unwrap() as u64).into(),
-            ((1 << UInt::<E>::C) as u64).into(),
+            *lhs_value.limbs.last().unwrap() as u64,
+            (1 << UInt::<E>::C) as u64,
         )?;
-        self.is_rhs_pos.assign_instance::<E>(
+        self.is_rhs_pos.assign_instance(
             instance,
             lkm,
-            (*rhs_value.limbs.last().unwrap() as u64).into(),
-            ((1 << UInt::<E>::C) as u64).into(),
+            *rhs_value.limbs.last().unwrap() as u64,
+            (1 << UInt::<E>::C) as u64,
         )?;
         self.is_both_pos_lt
-            .assign_instance::<E>(instance, lkm, lhs.into(), rhs.into())?;
+            .assign_instance(instance, lkm, lhs, rhs)?;
         self.is_both_neg_lt
-            .assign_instance::<E>(instance, lkm, rhs.into(), lhs.into())?;
+            .assign_instance(instance, lkm, rhs, lhs)?;
         if let Some(is_lt) = self.is_lt {
             set_val!(instance, is_lt, ((lhs as i32) < (rhs as i32)) as u64);
         }

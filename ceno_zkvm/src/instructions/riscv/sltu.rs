@@ -94,12 +94,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         config
             .rs2_read
             .assign_limbs(instance, rs2_read.u16_fields());
-        config.is_lt.assign_instance::<E>(
-            instance,
-            lkm,
-            (rs1 as u64).into(),
-            (rs2 as u64).into(),
-        )?;
+        config
+            .is_lt
+            .assign_instance(instance, lkm, rs1.into(), rs2.into())?;
 
         let lt = if rs1 < rs2 {
             Value::new_unchecked(1u32)

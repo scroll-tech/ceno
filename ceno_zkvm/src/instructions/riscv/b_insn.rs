@@ -160,17 +160,17 @@ impl BInstructionConfig {
         );
 
         // Register read and write.
-        self.lt_rs1_cfg.assign_instance::<E>(
+        self.lt_rs1_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.rs1().unwrap().previous_cycle.into(),
-            step.cycle().into(),
+            step.rs1().unwrap().previous_cycle,
+            step.cycle(),
         )?;
-        self.lt_rs2_cfg.assign_instance::<E>(
+        self.lt_rs2_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            (step.rs2().unwrap().previous_cycle).into(),
-            (step.cycle() + 1).into(),
+            step.rs2().unwrap().previous_cycle,
+            step.cycle() + 1,
         )?;
 
         Ok(())

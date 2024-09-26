@@ -1,8 +1,4 @@
-use std::{
-    fmt::Display,
-    mem::MaybeUninit,
-    ops::{Add, Sub},
-};
+use std::{fmt::Display, mem::MaybeUninit};
 
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -13,7 +9,6 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::constants::UInt,
     set_val,
     witness::LkMultiplicity,
 };
@@ -96,15 +91,15 @@ impl<const N_U16: usize> IsLtConfig<N_U16> {
         )
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [MaybeUninit<F>],
         lkm: &mut LkMultiplicity,
-        lhs: E::BaseField,
-        rhs: E::BaseField,
+        lhs: u64,
+        rhs: u64,
     ) -> Result<(), ZKVMError> {
         let is_lt = if let Some(is_lt_wit) = self.is_lt {
-            let is_lt = lhs.to_canonical_u64() < rhs.to_canonical_u64();
+            let is_lt = lhs < rhs;
             set_val!(instance, is_lt_wit, is_lt as u64);
             is_lt
         } else {
@@ -112,14 +107,10 @@ impl<const N_U16: usize> IsLtConfig<N_U16> {
             true
         };
 
-        let diff = lhs.sub(rhs).add(if is_lt {
-            E::BaseField::from(1u64 << UInt::<E>::M)
-        } else {
-            E::BaseField::from(0)
-        });
+        let diff = if is_lt { 1u64 << u32::BITS } else { 0 } + lhs - rhs;
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
-            let val = (diff.to_canonical_u64() >> (i * u16::BITS as usize)) & 0xffff;
+            let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
             lkm.assert_ux::<16>(val);
             set_val!(instance, wit, val);
         });
