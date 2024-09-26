@@ -2,27 +2,37 @@
 CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 CORE = { script = ["grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}'"] }
 RAYON_NUM_THREADS = "${CORE}"
+CUR_TARGET = { script = [
+        # Command to check if the variable is not set, then assign output of the bash command
+        '''
+        if [ -z "${TARGET}" ]; then
+            echo "x86_64-unknown-linux-gnu"
+        else
+            echo "${TARGET}"
+        fi
+        '''
+]}
 
 [tasks.tests]
 command = "cargo"
-args = ["test", "--lib", "--release", "--target", "${TARGET}", "--workspace", "--exclude", "singer-pro", "--exclude", "ceno_rt"]
+args = ["test", "--lib", "--release", "--target", "${CUR_TARGET}", "--workspace", "--exclude", "singer-pro", "--exclude", "ceno_rt"]
 
 [tasks.fmt-check]
 command = "cargo"
 args = ["fmt", "--all", "--", "--check"]
 
-[tasks.fmt]
+[tasks.fmt-all]
 command = "cargo"
 args = ["fmt", "--all"]
 
-[tasks.clippy]
+[tasks.clippy-all]
 command = "cargo"
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
 
-[tasks.fmt-check-selected-packages]
+[tasks.fmt]
 command = "cargo"
 args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
 
-[tasks.clippy-check-selected-packages]
+[tasks.clippy]
 command = "cargo"
-args = ["clippy", "-p", "ceno_zkvm", "-p", "mpcs", "-p", "ceno_emul", "-p", "ceno_rt", "--target", "${TARGET}", "--", "-D", "warnings"]
+args = ["clippy", "-p", "ceno_zkvm", "-p", "mpcs", "-p", "ceno_emul", "-p", "ceno_rt", "--target", "${CUR_TARGET}", "--", "-D", "warnings"]
