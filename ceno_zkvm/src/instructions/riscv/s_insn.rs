@@ -14,13 +14,13 @@ use crate::{
         Instruction,
     },
     set_val,
+    tables::InsnRecord,
     witness::LkMultiplicity,
     Value,
 };
 use ceno_emul::{InsnKind, StepRecord, PC_STEP_SIZE};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
-use crate::tables::InsnRecord;
 
 pub struct SInstructionConfig<E: ExtensionField> {
     pc: WitIn,
@@ -48,9 +48,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         rs2_read: RegisterExpr<E>,
         memory_addr: MemoryExpr<E>,
         memory_written: MemoryExpr<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        // responsible for constructing the circuit and making all the validity checks
-
+    ) -> Result<Self, ZKVMError> {
         // State in
         let pc = circuit_builder.create_witin(|| "pc")?;
         let cur_ts = circuit_builder.create_witin(|| "cur_ts")?;
@@ -68,7 +66,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             (insn_kind.codes().func3 as usize).into(),
             rs1_id.expr(),
             rs2_id.expr(),
-            imm.clone()
+            imm.clone(),
         ))?;
 
         // Register State.
