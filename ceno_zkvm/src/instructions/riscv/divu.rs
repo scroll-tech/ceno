@@ -120,9 +120,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         config.inter_mul_value.assign_carries(
             instance,
             mul_carries
+                .low
                 .into_iter()
                 .map(|carry| E::BaseField::from(carry as u64))
                 .collect_vec(),
+            None,
         );
         config.remainder.assign_limbs(instance, r.u16_fields());
 
@@ -135,6 +137,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 .into_iter()
                 .map(|carry| E::BaseField::from(carry as u64))
                 .collect_vec(),
+            None,
         );
 
         config

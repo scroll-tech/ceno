@@ -131,6 +131,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                         .into_iter()
                         .map(|carry| E::BaseField::from(carry as u64))
                         .collect_vec(),
+                    None,
                 );
             }
 
@@ -147,6 +148,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                         .into_iter()
                         .map(|carry| E::BaseField::from(carry as u64))
                         .collect_vec(),
+                    None,
                 );
             }
 
@@ -159,7 +161,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     .rs1_read
                     .assign_limbs(instance, rs1_read.u16_fields());
 
-                let (_, carries) = rs1_read.mul(&rs2_read, lk_multiplicity, true);
+                let (_, carries, carries_of_carries) =
+                    rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
                 config
                     .rd_written
@@ -167,9 +170,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 config.rd_written.assign_carries(
                     instance,
                     carries
+                        .low
                         .into_iter()
                         .map(|carry| E::BaseField::from(carry as u64))
                         .collect_vec(),
+                    Some(
+                        carries_of_carries
+                            .unwrap()
+                            .iter()
+                            .map(|&c| E::BaseField::from(c as u64))
+                            .collect_vec(),
+                    ),
                 );
             }
 
@@ -191,7 +202,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_ADD, MOCK_PC_MUL, MOCK_PC_SUB, MOCK_PROGRAM},
+        scheme::mock_prover::{MockProver, MOCK_PC_ADD, MOCK_PC_SUB, MOCK_PROGRAM},
     };
 
     #[test]
@@ -366,114 +377,75 @@ mod test {
         );
     }
 
-    #[test]
-    fn test_opcode_mul() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
+    mod mul {
+        use std::{u16, u32};
+
+        use ceno_emul::{Change, StepRecord, Word};
+        use goldilocks::GoldilocksExt2;
+        use itertools::Itertools;
+        use multilinear_extensions::mle::IntoMLEs;
+
+        use super::*;
+        use crate::{
+            circuit_builder::{CircuitBuilder, ConstraintSystem},
+            instructions::Instruction,
+        };
+        use ceno_emul::{CENO_PLATFORM, PC_STEP_SIZE};
+
+        use crate::scheme::mock_prover::{MOCK_PC_MUL, MOCK_PROGRAM};
+
+        fn verify(name: &'static str, m1: Word, m2: Word, outcome: Word) {
+            let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+            let mut cb = CircuitBuilder::new(&mut cs);
+            let config = cb
+                .namespace(
+                    || format!("mul/{name}"),
+                    |cb| Ok(MulInstruction::construct_circuit(cb)),
+                )
+                .unwrap()
+                .unwrap();
+
+            let idx = ((MOCK_PC_MUL.0 - CENO_PLATFORM.pc_start()) as usize) / PC_STEP_SIZE;
+            // values assignment
+            let (raw_witin, _) = MulInstruction::assign_instances(
+                &config,
+                cb.cs.num_witin as usize,
+                vec![StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_MUL,
+                    MOCK_PROGRAM[idx],
+                    m1,
+                    m2,
+                    Change::new(0, outcome),
+                    0,
+                )],
+            )
             .unwrap();
 
-        // values assignment
-        let (raw_witin, _) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MUL,
-                MOCK_PROGRAM[2],
-                11,
-                2,
-                Change::new(0, 22),
-                0,
-            )],
-        )
-        .unwrap();
+            MockProver::assert_satisfied(
+                &mut cb,
+                &raw_witin
+                    .de_interleaving()
+                    .into_mles()
+                    .into_iter()
+                    .map(|v| v.into())
+                    .collect_vec(),
+                None,
+            );
+        }
 
-        MockProver::assert_satisfied(
-            &mut cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            None,
-        );
-    }
-
-    #[test]
-    fn test_opcode_mul_overflow() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
-            .unwrap();
-
-        // values assignment
-        let (raw_witin, _) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MUL,
-                MOCK_PROGRAM[2],
-                u32::MAX / 2 + 1,
-                2,
-                Change::new(0, 0),
-                0,
-            )],
-        )
-        .unwrap();
-
-        MockProver::assert_satisfied(
-            &mut cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            None,
-        );
-    }
-
-    #[test]
-    fn test_opcode_mul_overflow2() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
-            .unwrap();
-
-        // values assignment
-        let (raw_witin, _) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MUL,
-                MOCK_PROGRAM[2],
-                4294901760,
-                4294901760,
-                Change::new(0, 0),
-                0,
-            )],
-        )
-        .unwrap();
-
-        MockProver::assert_satisfied(
-            &mut cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            None,
-        );
+        #[test]
+        fn test_opcode_mul() {
+            let u16_max = u16::MAX as u32;
+            verify("basic", 11, 2, 22);
+            verify("mul 0", 11, 0, 0);
+            verify("overflow", u32::MAX / 2 + 1, 2, 0);
+            verify("overflow2", 4294901760, 4294901760, 0);
+            verify("< 2^32", u16_max, u16_max, 4_294_836_225);
+            verify("= 2^32", u16_max + 1, u16_max + 1, 0);
+            verify("> 2^32", u16_max + 1, u16_max + 2, 65536);
+            // [1, 0, 65,534, 65,535]
+            verify("~ 2^64", u32::MAX, u32::MAX, 1);
+        }
     }
 }

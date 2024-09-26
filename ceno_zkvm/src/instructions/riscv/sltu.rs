@@ -106,7 +106,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 mod test {
     use std::u32;
 
-    use ceno_emul::{Change, StepRecord, Word, CENO_PLATFORM};
+    use ceno_emul::{Change, StepRecord, Word, CENO_PLATFORM, PC_STEP_SIZE};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -133,7 +133,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let idx = (MOCK_PC_SLTU.0 - CENO_PLATFORM.pc_start()) / 4;
+        let idx = ((MOCK_PC_SLTU.0 - CENO_PLATFORM.pc_start()) as usize) / PC_STEP_SIZE;
         let (raw_witin, _) = SltuInstruction::assign_instances(
             &config,
             cb.cs.num_witin as usize,

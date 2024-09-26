@@ -88,11 +88,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let imm = Value::new(imm, lk_multiplicity);
         let remainder = Value::new(remainder, lk_multiplicity);
 
-        let rd_imm_mul = rd_written.mul(&imm, lk_multiplicity, true);
-        let rd_imm = Value::from_limb_slice_unchecked(&rd_imm_mul.0);
+        let (rd_imm_mul, rd_imm_mul_carries, _) = rd_written.mul(&imm, lk_multiplicity, true);
+        let rd_imm = rd_imm_mul.low.clone();
+        let rd_imm = Value::from_limb_slice_unchecked(&rd_imm);
         config
             .rd_imm_mul
-            .assign_limb_with_carry(instance, &rd_imm_mul);
+            .assign_limb_with_carry(instance, &(rd_imm_mul.low, rd_imm_mul_carries.low));
 
         let rd_imm_rem_add = rd_imm.add(&remainder, lk_multiplicity, true);
         debug_assert_eq!(

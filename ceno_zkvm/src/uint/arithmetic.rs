@@ -98,11 +98,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         &mut self,
         circuit_builder: &mut CircuitBuilder<E>,
         multiplier: &mut UIntLimbs<M, C, E>,
+        is_low_part: bool,
         with_overflow: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         let mut c = UIntLimbs::<M, C, E>::new(|| "c", circuit_builder)?;
         // allocate witness cells and do range checks for carries
         c.create_carry_witin(|| "mul_carry", circuit_builder, with_overflow)?;
+        c.create_carry_overflow_witin(|| "mul_carry_overflow", circuit_builder)?;
 
         // We only allow expressions are in monomial form
         // if any of a or b is in Expression term, it would cause error.
@@ -127,6 +129,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         // result check
         let c_expr = c.expr();
         let carries = c.carries.as_ref().unwrap();
+        let carries_overflow = if c.carries_overflow.is_some() {
+            c.carries_overflow.as_ref().unwrap()
+        } else {
+            &Vec::new()
+        };
 
         // compute the result
         let mut result_c: Vec<Expression<E>> = Vec::<Expression<E>>::with_capacity(Self::NUM_CELLS);
@@ -142,8 +149,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 }
             });
 
-            // take care carries
-            let carry = if i > 0 { carries.get(i - 1) } else { None };
+            // We have 3 different carries here,
+            // 1. a carry (carry) brought from previous limbs computation
+            // 2. a carry (next_carry) taken to next limb
+            // 3. special case, a carry (carry_of_carry) to record a carry's overflow
+            let (carry, carry_overflow) = if i > 0 {
+                (carries.get(i - 1), carries_overflow.get(i))
+            } else {
+                (None, None)
+            };
             let next_carry = carries.get(i);
             if carry.is_some() {
                 result_c[i] = result_c[i].clone() + carry.unwrap().expr();
@@ -151,6 +165,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             if next_carry.is_some() {
                 result_c[i] =
                     result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C.into();
+            }
+            // special case to take care if `carry` filed overflow
+            if carry_overflow.is_some() {
+                result_c[i] = result_c[i].clone()
+                    - carry_overflow.unwrap().expr() * Self::POW_OF_C.pow(2).into();
             }
         });
 
@@ -176,7 +195,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         with_overflow: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            self.internal_mul(cb, multiplier, with_overflow)
+            self.internal_mul(cb, multiplier, true, with_overflow)
         })
     }
 
@@ -189,7 +208,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         with_overflow: bool,
     ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M, C, E>), ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            let c = self.internal_mul(cb, multiplier, with_overflow)?;
+            let c = self.internal_mul(cb, multiplier, true, with_overflow)?;
             Ok((
                 c.clone(),
                 c.internal_add(cb, &addend.expr(), with_overflow).unwrap(),
