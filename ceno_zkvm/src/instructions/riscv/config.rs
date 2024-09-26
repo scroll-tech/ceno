@@ -232,7 +232,6 @@ impl UIntLtSignedConfig {
             || "uint_signed_less_than",
             |cb| {
                 let name = name_fn();
-                assert!(UInt::<E>::C == 16, "do not support != 16 limb");
                 let (is_lt, is_lt_expr) = if let Some(lt) = assert_less_than {
                     (
                         None,
@@ -305,8 +304,6 @@ impl UIntLtSignedConfig {
     ) -> Result<(), ZKVMError> {
         let lhs_value = Value::new_unchecked(lhs);
         let rhs_value = Value::new_unchecked(rhs);
-        let is_lhs_pos = lhs as i32 >= 0;
-        let is_rhs_pos = rhs as i32 >= 0;
         self.is_lhs_pos.assign_instance(
             instance,
             lkm,

@@ -33,6 +33,7 @@ pub fn limb_u8_to_u16(input: &[u8]) -> Vec<u16> {
         .collect()
 }
 
+#[allow(dead_code)]
 pub fn split_to_u8(value: u32) -> Vec<u8> {
     (0..(u32::BITS / 8))
         .scan(value, |acc, _| {
