@@ -21,6 +21,7 @@ pub struct ArithConfig<E: ExtensionField> {
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
+    #[allow(dead_code)]
     rd_written: UInt<E>,
 
     is_lt: IsLtConfig<UINT_LIMBS>,
@@ -55,8 +56,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rs2_read.value(),
             None,
         )?;
-        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-        circuit_builder.require_equal(|| "rd == lt", rd_written.value(), lt.expr())?;
+        let rd_written = UInt::new_from_exprs_unchecked([lt.expr()].to_vec())?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -97,13 +97,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         config
             .is_lt
             .assign_instance(instance, lkm, rs1.into(), rs2.into())?;
-
-        let lt = if rs1 < rs2 {
-            Value::new_unchecked(1u32)
-        } else {
-            Value::new_unchecked(0u32)
-        };
-        config.rd_written.assign_limbs(instance, lt.u16_fields());
 
         Ok(())
     }

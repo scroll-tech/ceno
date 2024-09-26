@@ -287,7 +287,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     pub fn new_from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Result<Self, ZKVMError> {
         let n = Self {
-            limbs: UintLimb::Expression(expr_limbs),
+            limbs: UintLimb::Expression(
+                expr_limbs
+                    .into_iter()
+                    .chain(std::iter::repeat(Expression::ZERO))
+                    .take(Self::NUM_CELLS)
+                    .collect_vec(),
+            ),
             carries: None,
         };
         Ok(n)
