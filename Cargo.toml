@@ -37,5 +37,8 @@ rand_xorshift = "0.3"
 rayon = "1.8"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 
+[workspace.dev-dependencies]
+cargo-all-features = "1.10.0"
+
 [patch."https://github.com/zhenfeizhang/Goldilocks"]
 goldilocks = { git = "https://github.com/hero78119/Goldilocks" }

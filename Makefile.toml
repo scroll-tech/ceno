@@ -16,9 +16,9 @@ CUR_TARGET = { script = [
 
 [tasks.tests]
 command = "cargo"
-args = ["test", "--lib", "--release", "--target", "${CUR_TARGET}", "--workspace", "--exclude", "singer-pro", "--exclude", "ceno_rt"]
+args = ["test-all-features", "--lib", "--release", "--target", "${CUR_TARGET}", "--workspace", "--exclude", "singer-pro", "--exclude", "ceno_rt"]
 
-[tasks.fmt-check]
+[tasks.fmt-all-check]
 command = "cargo"
 args = ["fmt", "--all", "--", "--check"]
 
