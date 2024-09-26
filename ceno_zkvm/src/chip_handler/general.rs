@@ -243,7 +243,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn assert_bit<NR, N>(
         &mut self,
         name_fn: N,
