@@ -201,6 +201,8 @@ impl UIntLtInput<'_> {
     }
 }
 
+// TODO fixed it to make constrain degree < 3
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct UIntLtSignedConfig {
     pub is_lt: Option<WitIn>,

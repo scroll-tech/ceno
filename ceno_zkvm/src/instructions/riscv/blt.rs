@@ -3,12 +3,14 @@ use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    witness::LkMultiplicity, Value,
+    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsLtConfig,
+    instructions::Instruction, witness::LkMultiplicity, Value,
 };
 
 use super::{
-    b_insn::BInstructionConfig, config::UIntLtSignedConfig, constants::UInt, RIVInstruction,
+    b_insn::BInstructionConfig,
+    constants::{UInt, UINT_LIMBS},
+    RIVInstruction,
 };
 
 pub struct BltInstruction;
@@ -17,7 +19,7 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub b_insn: BInstructionConfig,
     pub read_rs1: UInt<E>,
     pub read_rs2: UInt<E>,
-    pub is_lt: UIntLtSignedConfig,
+    pub is_lt: IsLtConfig<UINT_LIMBS>,
 }
 
 impl RIVInstruction for BltInstruction {
@@ -35,13 +37,21 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
     ) -> Result<InstructionConfig<E>, ZKVMError> {
         let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
         let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
-        let is_lt = UIntLtSignedConfig::construct_circuit(
+        // TODO this is for unsigned lt, FIXME to use signed version
+        let is_lt = IsLtConfig::construct_circuit(
             circuit_builder,
             || "rs1<rs2",
-            &read_rs1,
-            &read_rs2,
+            read_rs1.value(),
+            read_rs2.value(),
             None,
         )?;
+        // let is_lt = UIntLtSignedConfig::construct_circuit(
+        //     circuit_builder,
+        //     || "rs1<rs2",
+        //     &read_rs1,
+        //     &read_rs2,
+        //     None,
+        // )?;
 
         let b_insn = BInstructionConfig::construct_circuit(
             circuit_builder,
@@ -69,7 +79,7 @@ impl<E: ExtensionField> Instruction<E> for BltInstruction {
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         config.read_rs1.assign_limbs(instance, rs1.u16_fields());
         config.read_rs2.assign_limbs(instance, rs2.u16_fields());
-        config.is_lt.assign_instance::<E>(
+        config.is_lt.assign_instance(
             instance,
             lk_multiplicity,
             step.rs1().unwrap().value as u64,
