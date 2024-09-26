@@ -118,7 +118,6 @@ impl LkMultiplicity {
             16 => self.increment(ROMType::U16, v),
             8 => self.increment(ROMType::U8, v),
             5 => self.increment(ROMType::U5, v),
-            1 => self.increment(ROMType::U1, v),
             _ => panic!("Unsupported bit range"),
         }
     }

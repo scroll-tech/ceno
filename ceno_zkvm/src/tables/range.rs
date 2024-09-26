@@ -7,15 +7,6 @@ pub use range_circuit::{RangeTable, RangeTableCircuit};
 
 use crate::structs::ROMType;
 
-pub struct U1Table;
-impl RangeTable for U1Table {
-    const ROM_TYPE: ROMType = ROMType::U1;
-    fn len() -> usize {
-        1 << 1
-    }
-}
-pub type U1TableCircuit<E> = RangeTableCircuit<E, U1Table>;
-
 pub struct U5Table;
 impl RangeTable for U5Table {
     const ROM_TYPE: ROMType = ROMType::U5;
