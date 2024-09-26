@@ -1172,6 +1172,7 @@ dependencies = [
  "ff",
  "ff_ext",
  "generic-array",
+ "gkr",
  "goldilocks",
  "halo2curves 0.3.3",
  "itertools 0.12.1",
@@ -1185,6 +1186,7 @@ dependencies = [
  "rayon",
  "serde",
  "sha3",
+ "simple-frontend",
  "transcript",
 ]
 

@@ -42,13 +42,6 @@ const_env = "0.1.2"
 serde_json = "1.0.108"
 base64 = "0.22.1"
 
-
-[package.metadata.cargo-all-features]
-skip_feature_sets = [
-    ["riv64"],
-]
-
-
 [build-dependencies]
 glob = "0.3"
 
