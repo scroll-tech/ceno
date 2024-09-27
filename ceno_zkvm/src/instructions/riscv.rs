@@ -1,6 +1,7 @@
 use ceno_emul::InsnKind;
 
 pub mod arith;
+pub mod arith_imm;
 pub mod blt;
 pub mod branch;
 pub mod config;

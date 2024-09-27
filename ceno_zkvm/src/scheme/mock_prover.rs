@@ -33,6 +33,7 @@ pub const MOCK_RS2: u32 = 3;
 pub const MOCK_RD: u32 = 4;
 pub const MOCK_IMM_3: u32 = 3;
 pub const MOCK_IMM_31: u32 = 31;
+pub const MOCK_IMM_NEG3: u32 = 32 - 3;
 /// The program baked in the MockProver.
 /// TODO: Make this a parameter?
 #[allow(clippy::identity_op)]
@@ -68,6 +69,10 @@ pub const MOCK_PROGRAM: &[u32] = &[
     0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
     // sltu (0x00, 0x03, 0x33)
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b011 << 12 | MOCK_RD << 7 | 0x33,
+    // addi x4, x2, 3
+    0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
+    // addi x4, x2, -3, correc this below
+    0b_1_111111 << 25 | MOCK_IMM_NEG3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
@@ -86,6 +91,8 @@ pub const MOCK_PC_DIVU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 36);
 pub const MOCK_PC_SRLI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 40);
 pub const MOCK_PC_SRLI_31: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 44);
 pub const MOCK_PC_SLTU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 48);
+pub const MOCK_PC_ADDI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 52);
+pub const MOCK_PC_ADDI_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 56);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
