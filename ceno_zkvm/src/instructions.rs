@@ -48,7 +48,7 @@ pub trait Instruction<E: ExtensionField> {
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
         raw_witin_iter
-            .zip_eq(steps.par_chunks(num_instance_per_batch))
+            .zip(steps.par_chunks(num_instance_per_batch))
             .flat_map(|(instances, steps)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 instances

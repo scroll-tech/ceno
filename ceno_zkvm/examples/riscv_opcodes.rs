@@ -187,6 +187,8 @@ fn main() {
                 blt_records.push(record.clone());
             }
         });
+        // temporarily hack: just one record
+        add_records = add_records[0..1].to_vec();
 
         tracing::info!(
             "tracer generated {} ADD records, {} BLT records",
