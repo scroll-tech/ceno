@@ -78,7 +78,7 @@ where
                         }
                     })
                     .collect::<(Vec<_>, Vec<_>)>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, &hasher);
+                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, 2, &hasher);
                 BasefoldCommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
@@ -98,7 +98,8 @@ where
                         }
                     })
                     .collect::<Vec<_>>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone(), &hasher);
+                let codeword_tree =
+                    MerkleTree::<E>::from_batch_leaves(bh_evals.clone(), 2, &hasher);
                 BasefoldCommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,

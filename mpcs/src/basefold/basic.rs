@@ -1,97 +1,73 @@
-use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, FieldType},
-    virtual_poly::build_eq_x_r_vec,
-};
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
 use crate::{
-    sum_check::eq_xy_eval,
-    util::{ext_to_usize, hash::new_hasher, merkle_tree::MerkleTree},
+    util::{field_type_iter_ext, hash::new_hasher, merkle_tree::MerkleTree},
     Error,
 };
 
 use super::{
-    commit_phase::commit_phase,
-    query_phase::{prover_query_phase, verifier_query_phase, QueriesResultWithMerklePath},
-    structure::{BasefoldProof, ProofQueriesResultWithMerklePath},
-    write_digest_to_transcript, Basefold, BasefoldCommitment, BasefoldCommitmentWithData,
-    BasefoldProverParams, BasefoldSpec, BasefoldVerifierParams, PolyEvalsCodeword,
+    commit_phase::CommitPhaseStrategy, query_phase::QueryCheckStrategy, structure::BasefoldProof,
+    BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
+    BasefoldStrategy, BasefoldVerifierParams,
 };
-use rand_chacha::rand_core::RngCore;
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug>
-    Basefold<E, Spec, Rng>
+pub(crate) struct ProverInputs<'a, E: ExtensionField>
 where
-    E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) fn commit_inner(
-        pp: &BasefoldProverParams<E, Spec>,
-        poly: &DenseMultilinearExtension<E>,
-    ) -> Result<BasefoldCommitmentWithData<E>, Error>
-    where
-        E: Serialize + DeserializeOwned,
-        E::BaseField: Serialize + DeserializeOwned,
-    {
-        let is_base = match poly.evaluations {
-            FieldType::Ext(_) => false,
-            FieldType::Base(_) => true,
-            _ => unreachable!(),
-        };
+    pub(crate) poly: &'a ArcMultilinearExtension<'a, E>,
+    pub(crate) comm: &'a BasefoldCommitmentWithData<E>,
+    pub(crate) point: &'a [E],
+}
 
-        // 2. Compute and store all the layers of the Merkle tree
-        let hasher = new_hasher::<E::BaseField>();
+impl<'a, E: ExtensionField> super::ProverInputs<E> for ProverInputs<'a, E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    fn comms(&self) -> &[BasefoldCommitmentWithData<E>] {
+        std::slice::from_ref(self.comm)
+    }
+}
 
-        // 1. Encode the polynomials. Simultaneously get:
-        //  (1) The evaluations over the hypercube (just a clone of the input)
-        //  (2) The encoding of the coefficient vector (need an interpolation)
-        let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
-            PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(codeword, &hasher);
+pub(crate) struct VerifierInputs<'a, E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub(crate) comm: &'a BasefoldCommitment<E>,
+    pub(crate) point: &'a [E],
+    pub(crate) num_vars: usize,
+    pub(crate) eval: E,
+}
 
-                // All these values are stored in the `CommitmentWithData` because
-                // they are useful in opening, and we don't want to recompute them.
-                Ok(BasefoldCommitmentWithData {
-                    codeword_tree,
-                    polynomials_bh_evals: vec![bh_evals],
-                    num_vars: poly.num_vars,
-                    is_base,
-                    num_polys: 1,
-                })
-            }
-            PolyEvalsCodeword::TooSmall(evals) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone(), &hasher);
-
-                // All these values are stored in the `CommitmentWithData` because
-                // they are useful in opening, and we don't want to recompute them.
-                Ok(BasefoldCommitmentWithData {
-                    codeword_tree,
-                    polynomials_bh_evals: vec![evals],
-                    num_vars: poly.num_vars,
-                    is_base,
-                    num_polys: 1,
-                })
-            }
-            PolyEvalsCodeword::TooBig(num_vars) => Err(Error::PolynomialTooLarge(num_vars)),
-        };
-
-        ret
+impl<'a, E: ExtensionField> super::VerifierInputs<E> for VerifierInputs<'a, E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    fn comms(&self) -> &[BasefoldCommitment<E>] {
+        std::slice::from_ref(self.comm)
     }
 
-    pub(crate) fn open_inner(
-        pp: &BasefoldProverParams<E, Spec>,
-        poly: &DenseMultilinearExtension<E>,
-        comm: &BasefoldCommitmentWithData<E>,
-        point: &[E],
-        transcript: &mut Transcript<E>,
-    ) -> Result<BasefoldProof<E>, Error> {
-        let hasher = new_hasher::<E::BaseField>();
-        let timer = start_timer!(|| "Basefold::open");
+    fn num_vars(&self) -> usize {
+        self.num_vars
+    }
+}
+
+pub(crate) struct BasicBasefoldStrategy;
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldStrategy<E, Spec> for BasicBasefoldStrategy
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    type CommitPhaseStrategy = BasicCommitPhaseStrategy;
+    type QueryCheckStrategy = BasicQueryCheckStrategy;
+    type ProverInputs<'a> = ProverInputs<'a, E>;
+    type VerifierInputs<'a> = VerifierInputs<'a, E>;
+
+    fn trivial_proof(prover_inputs: &Self::ProverInputs<'_>) -> Option<BasefoldProof<E>> {
+        let comm = prover_inputs.comm;
+        let poly = prover_inputs.poly;
 
         // The encoded polynomial should at least have the number of
         // variables of the basecode, i.e., the size of the message
@@ -99,149 +75,134 @@ where
         // the protocol won't work, and saves no verifier work anyway.
         // In this case, simply return the evaluations as trivial proof.
         if comm.is_trivial::<Spec>() {
-            return Ok(BasefoldProof::trivial(vec![poly.evaluations.clone()]));
+            return Some(BasefoldProof::trivial(vec![poly.evaluations().clone()]));
         }
-
-        assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
-
-        assert!(comm.num_polys == 1);
-
-        // 1. Committing phase. This phase runs the sum-check and
-        //    the FRI protocols interleavingly. After this phase,
-        //    the sum-check protocol is finished, so nothing is
-        //    to return about the sum-check. However, for the FRI
-        //    part, the prover needs to prepare the answers to the
-        //    queries, so the prover needs the oracles and the Merkle
-        //    trees built over them.
-        let (trees, commit_phase_proof) = commit_phase::<E, Spec>(
-            &pp.encoding_params,
-            point,
-            comm,
-            transcript,
-            poly.num_vars,
-            poly.num_vars - Spec::get_basecode_msg_size_log(),
-            &hasher,
-        );
-
-        // 2. Query phase. ---------------------------------------
-        //    Compute the query indices by Fiat-Shamir.
-        //    For each index, prepare the answers and the Merkle paths.
-        //    Each entry in queried_els stores a list of triples
-        //    (F, F, i) indicating the position opened at each round and
-        //    the two values at that round
-
-        // 2.1 Prepare the answers. These include two values in each oracle,
-        //     in positions (i, i XOR 1), (i >> 1, (i >> 1) XOR 1), ...
-        //     respectively.
-        let query_timer = start_timer!(|| "Basefold::open::query_phase");
-        let queries = prover_query_phase(transcript, comm, &trees, Spec::get_number_queries());
-        end_timer!(query_timer);
-
-        // 2.2 Prepare the merkle paths for these answers.
-        let query_timer = start_timer!(|| "Basefold::open::build_query_result");
-        let queries_with_merkle_path =
-            QueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
-        end_timer!(query_timer);
-
-        end_timer!(timer);
-
-        // End of query phase.----------------------------------
-
-        Ok(BasefoldProof {
-            sumcheck_messages: commit_phase_proof.sumcheck_messages,
-            roots: commit_phase_proof.roots,
-            final_message: commit_phase_proof.final_message,
-            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Single(
-                queries_with_merkle_path,
-            ),
-            sumcheck_proof: None,
-            trivial_proof: vec![],
-        })
+        None
     }
 
-    pub(crate) fn verify_inner(
-        vp: &BasefoldVerifierParams<E, Spec>,
-        comm: &BasefoldCommitment<E>,
-        point: &[E],
-        eval: &E,
+    #[allow(unused)]
+    fn prepare_commit_phase_input(
+        pp: &BasefoldProverParams<E, Spec>,
+        prover_inputs: &Self::ProverInputs<'_>,
+        transcript: &mut Transcript<E>,
+    ) -> Result<(Vec<E>, Vec<E>, Vec<E>), Error> {
+        let comm = prover_inputs.comm;
+        let point = prover_inputs.point;
+
+        assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
+        assert!(comm.num_polys == 1);
+        Ok((point.to_vec(), vec![], vec![]))
+    }
+
+    #[allow(unused)]
+    fn check_trivial_proof(
+        verifier_inputs: &Self::VerifierInputs<'_>,
         proof: &BasefoldProof<E>,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         let hasher = new_hasher::<E::BaseField>();
+        let trivial_proof = &proof.trivial_proof;
+        let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), 2, &hasher);
+        let comm = verifier_inputs.comm;
 
-        if proof.is_trivial() {
-            let trivial_proof = &proof.trivial_proof;
-            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), &hasher);
-            if comm.root() == merkle_tree.root() {
-                return Ok(());
-            } else {
-                return Err(Error::MerkleRootMismatch);
-            }
+        if comm.root() == merkle_tree.root() {
+            return Ok(());
+        } else {
+            return Err(Error::MerkleRootMismatch);
         }
+    }
 
-        let num_vars = point.len();
+    fn check_sizes(verifier_inputs: &Self::VerifierInputs<'_>) {
+        let comm = verifier_inputs.comm;
+        let num_vars = verifier_inputs.num_vars;
+
         if let Some(comm_num_vars) = comm.num_vars() {
             assert_eq!(num_vars, comm_num_vars);
             assert!(num_vars >= Spec::get_basecode_msg_size_log());
         }
-        let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
+    }
 
-        let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
-        let roots = &proof.roots;
-        let sumcheck_messages = &proof.sumcheck_messages;
-        for i in 0..num_rounds {
-            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
-            fold_challenges.push(
-                transcript
-                    .get_and_append_challenge(b"commit round")
-                    .elements,
-            );
-            if i < num_rounds - 1 {
-                write_digest_to_transcript(&roots[i], transcript);
-            }
-        }
+    #[allow(unused)]
+    fn prepare_sumcheck_target_and_point_batching_coeffs(
+        vp: &BasefoldVerifierParams<E, Spec>,
+        verifier_inputs: &Self::VerifierInputs<'_>,
+        proof: &BasefoldProof<E>,
+        transcript: &mut Transcript<E>,
+    ) -> Result<(E, Vec<E>, Vec<E>, Vec<E>), Error> {
+        // For the basic version, everything is just the same
+        Ok((
+            verifier_inputs.eval,
+            verifier_inputs.point.to_vec(),
+            vec![],
+            vec![],
+        ))
+    }
+}
 
-        let final_message = &proof.final_message;
-        transcript.append_field_element_exts(final_message.as_slice());
+pub(crate) struct BasicCommitPhaseStrategy;
+impl<E: ExtensionField> CommitPhaseStrategy<E> for BasicCommitPhaseStrategy
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    fn initial_running_oracle(
+        comms: &[BasefoldCommitmentWithData<E>],
+        _coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+    ) -> Vec<E> {
+        assert_eq!(comms.len(), 1);
+        let comm = &comms[0];
+        let codewords = comm.get_codewords();
+        assert_eq!(codewords.len(), 1);
+        let codeword = &codewords[0];
+        field_type_iter_ext(codeword).collect()
+    }
 
-        let queries: Vec<_> = (0..Spec::get_number_queries())
-            .map(|_| {
-                ext_to_usize(
-                    &transcript
-                        .get_and_append_challenge(b"query indices")
-                        .elements,
-                ) % (1 << (num_vars + Spec::get_rate_log()))
-            })
-            .collect();
-        let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_single();
+    fn initial_running_evals(
+        comms: &[BasefoldCommitmentWithData<E>],
+        _coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+    ) -> Vec<E> {
+        assert_eq!(comms.len(), 1);
+        let comm = &comms[0];
+        assert_eq!(comm.polynomials_bh_evals.len(), 1);
+        let evals = &comm.polynomials_bh_evals[0];
+        field_type_iter_ext(evals).collect()
+    }
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &point[point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
-        // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(&point[..point.len() - fold_challenges.len()]);
-        eq.par_iter_mut().for_each(|e| *e *= coeff);
+    fn update_running_oracle(
+        _comms: &[BasefoldCommitmentWithData<E>],
+        _running_oracle: &mut Vec<E>,
+        _coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+    ) {
+        // The basic version only has one polynomial. No polynomial needs to
+        // be updated to the oracle during the interaction.
+        return;
+    }
+}
 
-        verifier_query_phase::<E, Spec>(
-            queries.as_slice(),
-            &vp.encoding_params,
-            query_result_with_merkle_path,
-            sumcheck_messages,
-            &fold_challenges,
-            num_rounds,
-            num_vars,
-            final_message,
-            roots,
-            comm,
-            eq.as_slice(),
-            eval,
-            &hasher,
-        );
+pub(crate) struct BasicQueryCheckStrategy;
+impl<E: ExtensionField> QueryCheckStrategy<E> for BasicQueryCheckStrategy
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    fn initial_values(
+        query_result: &super::query_phase::BasefoldQueryResult<E>,
+        _coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+    ) -> Vec<E> {
+        let (left, right) = query_result
+            .get_single_commitments_query()
+            .single_leave_ext();
+        vec![left, right]
+    }
 
-        Ok(())
+    fn pre_update_values(
+        _query_result: &super::query_phase::BasefoldQueryResult<E>,
+        _coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+        _codeword_size_log: usize,
+    ) -> Option<Vec<E>> {
+        None
     }
 }

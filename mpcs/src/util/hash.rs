@@ -2,6 +2,7 @@
 
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
+use multilinear_extensions::mle::FieldType;
 use poseidon::Poseidon;
 
 use serde::{Deserialize, Serialize};
@@ -27,78 +28,6 @@ pub fn new_hasher<F: SmallField>() -> Hasher<F> {
     Hasher::<F>::new(8, 22)
 }
 
-pub fn hash_two_leaves_ext<E: ExtensionField>(
-    a: &E,
-    b: &E,
-    hasher: &Hasher<E::BaseField>,
-) -> Digest<E::BaseField> {
-    let mut hasher = hasher.clone();
-    hasher.update(a.as_bases());
-    hasher.update(b.as_bases());
-    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
-    Digest(result)
-}
-
-pub fn hash_two_leaves_base<E: ExtensionField>(
-    a: &E::BaseField,
-    b: &E::BaseField,
-    hasher: &Hasher<E::BaseField>,
-) -> Digest<E::BaseField> {
-    let mut hasher = hasher.clone();
-    hasher.update(&[*a]);
-    hasher.update(&[*b]);
-    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
-    Digest(result)
-}
-
-pub fn hash_two_leaves_batch_ext<E: ExtensionField>(
-    a: &[E],
-    b: &[E],
-    hasher: &Hasher<E::BaseField>,
-) -> Digest<E::BaseField> {
-    let mut left_hasher = hasher.clone();
-    a.iter().for_each(|a| left_hasher.update(a.as_bases()));
-    let left = Digest(
-        left_hasher.squeeze_vec()[0..DIGEST_WIDTH]
-            .try_into()
-            .unwrap(),
-    );
-
-    let mut right_hasher = hasher.clone();
-    b.iter().for_each(|b| right_hasher.update(b.as_bases()));
-    let right = Digest(
-        right_hasher.squeeze_vec()[0..DIGEST_WIDTH]
-            .try_into()
-            .unwrap(),
-    );
-
-    hash_two_digests(&left, &right, hasher)
-}
-
-pub fn hash_two_leaves_batch_base<E: ExtensionField>(
-    a: &[E::BaseField],
-    b: &[E::BaseField],
-    hasher: &Hasher<E::BaseField>,
-) -> Digest<E::BaseField> {
-    let mut left_hasher = hasher.clone();
-    left_hasher.update(a);
-    let left = Digest(
-        left_hasher.squeeze_vec()[0..DIGEST_WIDTH]
-            .try_into()
-            .unwrap(),
-    );
-
-    let mut right_hasher = hasher.clone();
-    right_hasher.update(b);
-    let right = Digest(
-        right_hasher.squeeze_vec()[0..DIGEST_WIDTH]
-            .try_into()
-            .unwrap(),
-    );
-
-    hash_two_digests(&left, &right, hasher)
-}
-
 pub fn hash_two_digests<F: SmallField>(
     a: &Digest<F>,
     b: &Digest<F>,
@@ -107,6 +36,49 @@ pub fn hash_two_digests<F: SmallField>(
     let mut hasher = hasher.clone();
     hasher.update(a.0.as_slice());
     hasher.update(b.0.as_slice());
+    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
+    Digest(result)
+}
+
+pub fn hash_field_type<E: ExtensionField>(
+    field_type: &FieldType<E>,
+    hasher: &Hasher<E::BaseField>,
+) -> Digest<E::BaseField> {
+    let mut hasher = hasher.clone();
+    match field_type {
+        FieldType::Ext(ext) => {
+            ext.iter().for_each(|x| {
+                hasher.update(x.as_bases());
+            });
+        }
+        FieldType::Base(base) => {
+            hasher.update(base);
+        }
+        FieldType::Unreachable => panic!("Unreachable"),
+    };
+    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
+    Digest(result)
+}
+
+pub fn hash_field_type_subvector<E: ExtensionField>(
+    field_type: &FieldType<E>,
+    range: impl IntoIterator<Item = usize>,
+    hasher: &Hasher<E::BaseField>,
+) -> Digest<E::BaseField> {
+    let mut hasher = hasher.clone();
+    match field_type {
+        FieldType::Ext(ext) => {
+            range.into_iter().for_each(|i| {
+                hasher.update(&ext[i].as_bases());
+            });
+        }
+        FieldType::Base(base) => {
+            for i in range {
+                hasher.update(&[base[i]]);
+            }
+        }
+        FieldType::Unreachable => panic!("Unreachable"),
+    };
     let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
     Digest(result)
 }

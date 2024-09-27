@@ -1,365 +1,348 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use multilinear_extensions::{
-    mle::FieldType, virtual_poly::build_eq_x_r_vec, virtual_poly_v2::ArcMultilinearExtension,
+    virtual_poly::build_eq_x_r_vec, virtual_poly_v2::ArcMultilinearExtension,
 };
-use rand_chacha::rand_core::RngCore;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
 use crate::{
-    basefold::{
-        commit_phase::basefold_one_round_by_interpolation_weights,
-        sumcheck::{sum_check_challenge_round, sum_check_first_round, sum_check_last_round},
-    },
-    util::{
-        arithmetic::{inner_product, interpolate_over_boolean_hypercube},
-        field_type_index_ext,
-        hash::{new_hasher, write_digest_to_transcript, Hasher},
-        log2_strict,
-        merkle_tree::MerkleTree,
-        plonky2_util::reverse_index_bits_in_place,
-    },
+    util::{arithmetic::inner_product, field_type_index_ext, field_type_iter_ext, log2_strict},
     Error,
 };
 
 use super::{
-    structure::{BasefoldCommitPhaseProof, BasefoldProof},
-    Basefold, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
-    BasefoldVerifierParams, EncodingScheme,
+    commit_phase::CommitPhaseStrategy, query_phase::QueryCheckStrategy, structure::BasefoldProof,
+    BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
+    BasefoldStrategy, BasefoldVerifierParams,
 };
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug>
-    Basefold<E, Spec, Rng>
+pub(crate) struct ProverInputs<'a, E: ExtensionField>
 where
-    E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) fn batch_open_vlop_inner(
-        pp: &BasefoldProverParams<E, Spec>,
-        polys: &[&[ArcMultilinearExtension<E>]],
-        comms: &[super::BasefoldCommitmentWithData<E>],
-        point: &[E],
-        evals: &[&[E]],
-        transcript: &mut Transcript<E>,
-    ) -> Result<BasefoldProof<E>, Error> {
-        // Make some basic checks on the inputs
-        assert_eq!(polys.len(), comms.len());
-        assert_eq!(polys.len(), evals.len());
-        polys
-            .iter()
-            .zip(evals)
-            .zip(comms)
-            .for_each(|((polys, evals), comm)| {
-                assert_eq!(polys.len(), comm.num_polys);
-                assert_eq!(evals.len(), comm.num_polys);
-                assert!(point.len() >= polys[0].num_vars());
-                polys.iter().for_each(|poly| {
-                    assert_eq!(poly.num_vars(), comm.num_vars);
-                });
-            });
+    pub(crate) polys: &'a [&'a [ArcMultilinearExtension<'a, E>]],
+    pub(crate) comms: &'a [BasefoldCommitmentWithData<E>],
+    pub(crate) point: &'a [E],
+}
 
-        let hasher = new_hasher::<E::BaseField>();
-        let num_vars = comms.iter().map(|c| c.num_vars).max().unwrap();
-        let max_group_size = polys.iter().map(|polys| polys.len()).max().unwrap();
-        let point = &point[..num_vars];
-
-        // Since the polys are batched into two levels, we use two challenge
-        // vectors to generate the coefficients for RLC, one for batching the
-        // different groups, another for batching the inside polynomials in
-        // each group.
-        let batch_size_log_outer = polys.len().next_power_of_two().ilog2() as usize;
-        let batch_size_log_inner = max_group_size.next_power_of_two().ilog2() as usize;
-        let t_outer = (0..batch_size_log_outer)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs outer")
-                    .elements
-            })
-            .collect::<Vec<_>>();
-        let t_inner = (0..batch_size_log_inner)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs inner")
-                    .elements
-            })
-            .collect::<Vec<_>>();
-        // Use eq(X,t) where t is random to batch the different evaluation queries.
-        // Note that this is a small polynomial (only batch_size) compared to the polynomials
-        // to open.
-        let eq_xt_outer = build_eq_x_r_vec(&t_outer)[..polys.len()].to_vec();
-        let eq_xt_inner = build_eq_x_r_vec(&t_inner)[..max_group_size].to_vec();
-        // Now both the prover and the verifier can compute the rlc of the
-        // evaluations using `eq_xt`. However, they don't need to do this
-        // explicitly.
-        // let evals_flatten = evals
-        //     .iter()
-        //     .flat_map(|e| e.iter())
-        //     .cloned()
-        //     .collect::<Vec<_>>();
-        // let target_sum = inner_product(&evals_flatten, &eq_xt);
-
-        let (trees, commit_phase_proof) = batch_vlop_commit_phase::<E, Spec>(
-            &pp.encoding_params,
-            point,
-            comms,
-            transcript,
-            num_vars - Spec::get_basecode_msg_size_log(),
-            &eq_xt_outer,
-            &eq_xt_inner,
-            &hasher,
-        );
-
-        unimplemented!();
-    }
-
-    pub(crate) fn batch_verify_vlop_inner(
-        vp: &BasefoldVerifierParams<E, Spec>,
-        comms: &[BasefoldCommitment<E>],
-        point: &[E],
-        num_vars: usize,
-        evals: &[&[E]],
-        proof: &BasefoldProof<E>,
-        transcript: &mut Transcript<E>,
-    ) -> Result<(), Error> {
-        // Make some basic checks on the inputs
-        assert!(num_vars <= point.len());
-        assert_eq!(evals.len(), comms.len());
-        comms.iter().zip(evals).for_each(|(comm, evals)| {
-            if let Some(num_polys) = comm.num_polys.as_ref() {
-                assert_eq!(num_polys, &evals.len());
-            }
-            if let Some(comm_num_vars) = comm.num_vars.as_ref() {
-                assert!(&num_vars >= comm_num_vars);
-            }
-        });
-
-        let max_group_size = evals.iter().map(|evals| evals.len()).max().unwrap();
-        // Since the polys are batched into two levels, we use two challenge
-        // vectors to generate the coefficients for RLC, one for batching the
-        // different groups, another for batching the inside polynomials in
-        // each group.
-        let batch_size_log_outer = evals.len().next_power_of_two().ilog2() as usize;
-        let batch_size_log_inner = max_group_size.next_power_of_two().ilog2() as usize;
-        let t_outer = (0..batch_size_log_outer)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs outer")
-                    .elements
-            })
-            .collect::<Vec<_>>();
-        let t_inner = (0..batch_size_log_inner)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs inner")
-                    .elements
-            })
-            .collect::<Vec<_>>();
-        // Use eq(X,t) where t is random to batch the different evaluation queries.
-        // Note that this is a small polynomial (only batch_size) compared to the polynomials
-        // to open.
-        let eq_xt_outer = build_eq_x_r_vec(&t_outer)[..evals.len()].to_vec();
-        let eq_xt_inner = build_eq_x_r_vec(&t_inner)[..max_group_size].to_vec();
-
-        let point = &point[..num_vars];
-        let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
-        let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
-        let roots = &proof.roots;
-        let sumcheck_messages = &proof.sumcheck_messages;
-        for i in 0..num_rounds {
-            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
-            fold_challenges.push(
-                transcript
-                    .get_and_append_challenge(b"commit round")
-                    .elements,
-            );
-            if i < num_rounds - 1 {
-                write_digest_to_transcript(&roots[i], transcript);
-            }
-        }
-        let final_message = &proof.final_message;
-        transcript.append_field_element_exts(final_message.as_slice());
-
-        unimplemented!();
+impl<'a, E: ExtensionField> super::ProverInputs<E> for ProverInputs<'a, E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    fn comms(&self) -> &[BasefoldCommitmentWithData<E>] {
+        self.comms
     }
 }
 
-// outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-#[allow(clippy::too_many_arguments)]
-fn batch_vlop_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
-    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-    point: &[E],
-    comms: &[BasefoldCommitmentWithData<E>],
-    transcript: &mut Transcript<E>,
-    num_rounds: usize,
-    coeffs_outer: &[E],
-    coeffs_inner: &[E],
-    hasher: &Hasher<E::BaseField>,
-) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
+pub(crate) struct VerifierInputs<'a, E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let num_vars = comms.iter().map(|c| c.num_vars).max().unwrap();
-    let timer = start_timer!(|| "Batch vlop Commit phase");
-    assert_eq!(point.len(), num_vars);
-    let mut trees = Vec::with_capacity(num_vars);
-    let mut running_oracle = vec![E::ZERO; 1 << (num_vars + Spec::get_rate_log())];
+    pub(crate) comms: &'a [BasefoldCommitment<E>],
+    pub(crate) point: &'a [E],
+    pub(crate) num_vars: usize,
+    pub(crate) evals: &'a [&'a [E]],
+}
 
-    let build_oracle_timer = start_timer!(|| "Basefold build initial oracle");
-    // Before the interaction, collect all the polynomials whose num variables match the
-    // max num variables
-    let running_oracle_len = running_oracle.len();
-    comms
-        .iter()
-        .enumerate()
-        .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
-        .for_each(|(index, comm)| {
-            running_oracle
-                .par_iter_mut()
-                .zip_eq(comm.par_iter_batch_codewords(coeffs_inner))
-                .for_each(|(r, a)| *r += a * coeffs_outer[index]);
+impl<'a, E: ExtensionField> super::VerifierInputs<E> for VerifierInputs<'a, E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    fn comms(&self) -> &[BasefoldCommitment<E>] {
+        self.comms
+    }
+
+    fn num_vars(&self) -> usize {
+        self.num_vars
+    }
+}
+
+pub(crate) struct BatchVLOPBasefoldStrategy;
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldStrategy<E, Spec>
+    for BatchVLOPBasefoldStrategy
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    type CommitPhaseStrategy = BatchVLOPCommitPhaseStrategy;
+    type QueryCheckStrategy = BatchVLOPQueryCheckStrategy;
+    type ProverInputs<'a> = ProverInputs<'a, E>;
+    type VerifierInputs<'a> = VerifierInputs<'a, E>;
+
+    #[allow(unused)]
+    fn trivial_proof(prover_inputs: &ProverInputs<'_, E>) -> Option<BasefoldProof<E>> {
+        // The encoded polynomial should at least have the number of
+        // variables of the basecode, i.e., the size of the message
+        // when the protocol stops. If the polynomial is smaller
+        // the protocol won't work, and saves no verifier work anyway.
+        // In the current implementation, the batch vlop case simply
+        // ignores this case and crashes on trivial proof.
+        prover_inputs.comms.iter().for_each(|comm| {
+            assert!(!comm.is_trivial::<Spec>());
         });
-    end_timer!(build_oracle_timer);
+        None
+    }
 
-    let build_oracle_timer = start_timer!(|| "Basefold build initial sumcheck evals");
-    // Unlike the FRI part, the sum-check part still follows the original procedure,
-    // and linearly combine all the polynomials once for all
-    let mut sum_of_all_evals_for_sumcheck = vec![E::ZERO; 1 << num_vars];
-    comms.iter().enumerate().for_each(|(index_outer, comm)| {
-        sum_of_all_evals_for_sumcheck
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(pos, r)| {
-                // Evaluating the multilinear polynomial outside of its interpolation hypercube
-                // is equivalent to repeating each element in place.
-                // Here is the tricky part: the bh_evals are stored in big endian, but we want
-                // to align the polynomials to the variable with index 0 before adding them
-                // together. So each element is repeated by
-                // sum_of_all_evals_for_sumcheck.len() / bh_evals.len() times
-                comm.polynomials_bh_evals
+    #[allow(unused)]
+    fn prepare_commit_phase_input(
+        pp: &BasefoldProverParams<E, Spec>,
+        prover_inputs: &ProverInputs<'_, E>,
+        transcript: &mut Transcript<E>,
+    ) -> Result<(Vec<E>, Vec<E>, Vec<E>), Error> {
+        let comms = prover_inputs.comms;
+        let polys = prover_inputs.polys;
+        let num_vars = comms.iter().map(|comm| comm.num_vars).max().unwrap();
+        let min_num_vars = comms.iter().map(|comm| comm.num_vars).min().unwrap();
+        assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
+
+        comms.iter().for_each(|comm| {
+            assert!(comm.num_polys == 1);
+            assert!(!comm.is_trivial::<Spec>());
+        });
+
+        polys
+            .iter()
+            .zip(prover_inputs.comms.iter())
+            .for_each(|(polys, comm)| {
+                let num_vars = comm.num_vars;
+                assert_eq!(polys.len(), comm.num_polys);
+                polys
                     .iter()
-                    .enumerate()
-                    .for_each(|(index_inner, poly)| {
-                        *r += field_type_index_ext(poly, pos >> (num_vars - comm.num_vars))
-                            * coeffs_outer[index_outer]
-                            * coeffs_inner[index_inner]
-                    });
+                    .for_each(|poly| assert_eq!(poly.num_vars(), num_vars));
+                assert!(prover_inputs.point.len() >= num_vars);
             });
-    });
-    end_timer!(build_oracle_timer);
 
-    // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let mut eq = build_eq_x_r_vec(point);
-    reverse_index_bits_in_place(&mut eq);
+        assert_eq!(prover_inputs.polys.len(), prover_inputs.comms.len());
 
-    let sumcheck_timer = start_timer!(|| "Basefold first round");
-    let mut sumcheck_messages = Vec::with_capacity(num_rounds + 1);
-    let mut last_sumcheck_message =
-        sum_check_first_round(&mut eq, &mut sum_of_all_evals_for_sumcheck);
-    sumcheck_messages.push(last_sumcheck_message.clone());
-    end_timer!(sumcheck_timer);
+        let batch_size_outer = polys.len();
+        let batch_size_outer_log = batch_size_outer.next_power_of_two().ilog2() as usize;
+        let t_outer = (0..batch_size_outer_log)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"batch coeffs")
+                    .elements
+            })
+            .collect::<Vec<_>>();
 
-    let mut roots = Vec::with_capacity(num_rounds - 1);
-    let mut final_message = Vec::new();
-    let mut running_tree_inner = Vec::new();
-    for i in 0..num_rounds {
-        let sumcheck_timer = start_timer!(|| format!("Batch basefold round {}", i));
-        // For the first round, no need to send the running root, because this root is
-        // committing to a vector that can be recovered from linearly combining other
-        // already-committed vectors.
-        transcript.append_field_element_exts(&last_sumcheck_message);
+        let batch_size_inner = polys.iter().map(|polys| polys.len()).max().unwrap();
+        let batch_size_inner_log = batch_size_inner.next_power_of_two().ilog2() as usize;
+        let t_inner = (0..batch_size_inner_log)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"batch coeffs")
+                    .elements
+            })
+            .collect::<Vec<_>>();
 
-        let challenge = transcript
-            .get_and_append_challenge(b"commit round")
-            .elements;
+        let eq_xt_outer = build_eq_x_r_vec(&t_outer)[..batch_size_outer].to_vec();
+        let eq_xt_inner = build_eq_x_r_vec(&t_inner)[..batch_size_inner].to_vec();
 
-        // Fold the current oracle for FRI
-        let mut new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
-            pp,
-            log2_strict(running_oracle.len()) - 1,
-            &running_oracle,
-            challenge,
+        Ok((
+            prover_inputs.point[..num_vars].to_vec(),
+            eq_xt_outer,
+            eq_xt_inner,
+        ))
+    }
+
+    #[allow(unused)]
+    fn check_trivial_proof(
+        verifier_inputs: &VerifierInputs<'_, E>,
+        proof: &BasefoldProof<E>,
+        transcript: &mut Transcript<E>,
+    ) -> Result<(), Error> {
+        assert!(!proof.is_trivial());
+
+        Ok(())
+    }
+
+    fn check_sizes(verifier_inputs: &VerifierInputs<'_, E>) {
+        let num_vars = verifier_inputs.num_vars;
+        assert!(verifier_inputs.point.len() >= num_vars);
+        verifier_inputs
+            .comms
+            .iter()
+            .zip_eq(verifier_inputs.evals)
+            .for_each(|(comm, evals)| {
+                if let Some(comm_num_vars) = comm.num_vars {
+                    assert!(comm_num_vars <= num_vars);
+                    assert!(comm_num_vars >= Spec::get_basecode_msg_size_log());
+                }
+                if let Some(num_polys) = comm.num_polys {
+                    assert_eq!(num_polys, evals.len());
+                }
+            });
+    }
+
+    #[allow(unused)]
+    fn prepare_sumcheck_target_and_point_batching_coeffs(
+        vp: &BasefoldVerifierParams<E, Spec>,
+        verifier_inputs: &VerifierInputs<'_, E>,
+        proof: &BasefoldProof<E>,
+        transcript: &mut Transcript<E>,
+    ) -> Result<(E, Vec<E>, Vec<E>, Vec<E>), Error> {
+        let batch_size_outer = verifier_inputs.evals.len();
+        let batch_size_outer_log = batch_size_outer.next_power_of_two().ilog2() as usize;
+        let t_outer = (0..batch_size_outer_log)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"batch coeffs")
+                    .elements
+            })
+            .collect::<Vec<_>>();
+
+        let batch_size_inner = verifier_inputs
+            .evals
+            .iter()
+            .map(|eval| eval.len())
+            .max()
+            .unwrap();
+        let batch_size_inner_log = batch_size_inner.next_power_of_two().ilog2() as usize;
+        let t_inner = (0..batch_size_inner_log)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"batch coeffs")
+                    .elements
+            })
+            .collect::<Vec<_>>();
+
+        let eq_xt_outer = build_eq_x_r_vec(&t_outer)[..batch_size_outer].to_vec();
+        let eq_xt_inner = build_eq_x_r_vec(&t_inner)[..batch_size_inner].to_vec();
+
+        let target_sum = inner_product(
+            &verifier_inputs
+                .evals
+                .iter()
+                .map(|evals| inner_product::<E>(evals.iter(), &eq_xt_inner[..evals.len()]))
+                .collect::<Vec<_>>(),
+            &eq_xt_outer[..verifier_inputs.evals.len()],
         );
 
-        if i > 0 {
-            let running_tree = MerkleTree::<E>::from_inner_leaves(
-                running_tree_inner,
-                FieldType::Ext(running_oracle),
-            );
-            trees.push(running_tree);
-        }
-
-        if i < num_rounds - 1 {
-            last_sumcheck_message =
-                sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
-            sumcheck_messages.push(last_sumcheck_message.clone());
-            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle, hasher);
-            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
-            write_digest_to_transcript(&running_root, transcript);
-            roots.push(running_root);
-
-            // Then merge the rest polynomials whose sizes match the current running oracle
-            let running_oracle_len = new_running_oracle.len();
-            comms
-                .iter()
-                .enumerate()
-                .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
-                .for_each(|(index, comm)| {
-                    new_running_oracle
-                        .par_iter_mut()
-                        .zip_eq(comm.par_iter_batch_codewords(coeffs_inner))
-                        .for_each(|(r, a)| *r += a * coeffs_outer[index]);
-                });
-            running_oracle = new_running_oracle;
-        } else {
-            // Clear the value so the compiler does not think they are moved
-            running_oracle = Vec::new();
-            running_tree_inner = Vec::new();
-            // The difference of the last round is that we don't need to compute the message,
-            // and we don't interpolate the small polynomials. So after the last round,
-            // sum_of_all_evals_for_sumcheck is exactly the evaluation representation of the
-            // folded polynomial so far.
-            sum_check_last_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
-            // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
-            reverse_index_bits_in_place(&mut sum_of_all_evals_for_sumcheck);
-            transcript.append_field_element_exts(&sum_of_all_evals_for_sumcheck);
-            final_message = sum_of_all_evals_for_sumcheck;
-            // To prevent the compiler from complaining that the value is moved
-            sum_of_all_evals_for_sumcheck = Vec::new();
-
-            if cfg!(feature = "sanity-check") {
-                // If the prover is honest, in the last round, the running oracle
-                // on the prover side should be exactly the encoding of the folded polynomial.
-
-                let mut coeffs = final_message.clone();
-                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
-                    reverse_index_bits_in_place(&mut coeffs);
-                }
-                interpolate_over_boolean_hypercube(&mut coeffs);
-                let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
-                    pp,
-                    &FieldType::Ext(coeffs),
-                );
-                let basecode = match basecode {
-                    FieldType::Ext(x) => x,
-                    _ => panic!("Expected ext field"),
-                };
-
-                reverse_index_bits_in_place(&mut new_running_oracle);
-                assert_eq!(basecode, new_running_oracle);
-            }
-        }
-        end_timer!(sumcheck_timer);
+        Ok((
+            target_sum,
+            verifier_inputs.point[..verifier_inputs.num_vars].to_vec(),
+            eq_xt_outer,
+            eq_xt_inner,
+        ))
     }
-    end_timer!(timer);
-    (
-        trees,
-        BasefoldCommitPhaseProof {
-            sumcheck_messages,
-            roots,
-            final_message,
-        },
-    )
+}
+
+pub(crate) struct BatchVLOPCommitPhaseStrategy;
+impl<E: ExtensionField> CommitPhaseStrategy<E> for BatchVLOPCommitPhaseStrategy
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    fn initial_running_oracle(
+        comms: &[BasefoldCommitmentWithData<E>],
+        coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+    ) -> Vec<E> {
+        let codeword_size = comms.iter().map(|comm| comm.codeword_size()).max().unwrap();
+        let mut running_oracle = vec![E::ZERO; codeword_size];
+
+        let build_oracle_timer = start_timer!(|| "Basefold build initial oracle");
+        // Before the interaction, collect all the polynomials whose num variables match the
+        // max num variables
+        let running_oracle_len = running_oracle.len();
+        comms
+            .iter()
+            .enumerate()
+            .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
+            .for_each(|(index, comm)| {
+                running_oracle
+                    .iter_mut()
+                    .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
+                    .for_each(|(r, a)| *r += a * coeffs_outer[index]);
+            });
+        end_timer!(build_oracle_timer);
+
+        running_oracle
+    }
+
+    fn initial_running_evals(
+        comms: &[BasefoldCommitmentWithData<E>],
+        coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+    ) -> Vec<E> {
+        let num_vars = comms.iter().map(|comm| comm.num_vars).max().unwrap();
+        let build_evals_timer = start_timer!(|| "Basefold build initial sumcheck evals");
+        // Unlike the FRI part, the sum-check part still follows the original procedure,
+        // and linearly combine all the polynomials once for all
+        let mut sum_of_all_evals_for_sumcheck = vec![E::ZERO; 1 << num_vars];
+        comms.iter().enumerate().for_each(|(index, comm)| {
+            sum_of_all_evals_for_sumcheck
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(pos, r)| {
+                    // Evaluating the multilinear polynomial outside of its interpolation hypercube
+                    // is equivalent to repeating each element in place.
+                    // Here is the tricky part: the bh_evals are stored in big endian, but we want
+                    // to align the polynomials to the variable with index 0 before adding them
+                    // together. So each element is repeated by
+                    // sum_of_all_evals_for_sumcheck.len() / bh_evals.len() times
+                    *r += field_type_index_ext(
+                        &comm.polynomials_bh_evals[0],
+                        pos >> (num_vars - log2_strict(comm.polynomials_bh_evals[0].len())),
+                    ) * coeffs_outer[index]
+                });
+        });
+        end_timer!(build_evals_timer);
+        sum_of_all_evals_for_sumcheck
+    }
+
+    fn update_running_oracle(
+        comms: &[BasefoldCommitmentWithData<E>],
+        running_oracle: &mut Vec<E>,
+        coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+    ) {
+        let running_oracle_len = running_oracle.len();
+        comms
+            .iter()
+            .enumerate()
+            .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
+            .for_each(|(index, comm)| {
+                running_oracle
+                    .iter_mut()
+                    .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
+                    .for_each(|(r, a)| *r += a * coeffs_outer[index]);
+            });
+    }
+}
+
+pub(crate) struct BatchVLOPQueryCheckStrategy;
+impl<E: ExtensionField> QueryCheckStrategy<E> for BatchVLOPQueryCheckStrategy
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    fn initial_values(
+        _query_result: &super::query_phase::BasefoldQueryResult<E>,
+        _coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+    ) -> Vec<E> {
+        // Initialize the current values to zero, and before each round
+        // add the matching commitments to the current values
+        vec![E::ZERO, E::ZERO]
+    }
+
+    fn pre_update_values(
+        query_result: &super::query_phase::BasefoldQueryResult<E>,
+        coeffs_outer: &[E],
+        _coeffs_inner: &[E],
+        codeword_size_log: usize,
+    ) -> Option<Vec<E>> {
+        let matching_pairs =
+            query_result.get_commitments_query_matching_size_log(codeword_size_log);
+        let (left, right) = matching_pairs
+            .iter()
+            .map(|(index, pair)| {
+                let pair = pair.as_ext();
+                assert_eq!(pair.len(), 1);
+                let pair = pair[0];
+                (pair.0 * coeffs_outer[*index], pair.1 * coeffs_outer[*index])
+            })
+            .fold((E::ZERO, E::ZERO), |(s, t), (a, b)| (s + a, t + b));
+        Some(vec![left, right])
+    }
 }

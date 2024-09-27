@@ -1,18 +1,19 @@
 use super::{
     encoding::EncodingScheme,
     structure::{BasefoldCommitPhaseProof, BasefoldSpec},
-    sumcheck::{sum_check_challenge_round, sum_check_first_round_field_type, sum_check_last_round},
+    sumcheck::{sum_check_challenge_round, sum_check_last_round},
 };
-use crate::util::{
-    arithmetic::{interpolate2_weights, interpolate_over_boolean_hypercube},
-    field_type_iter_ext,
-    hash::{write_digest_to_transcript, Hasher},
-    log2_strict,
-    merkle_tree::MerkleTree,
+use crate::{
+    basefold::sumcheck::sum_check_first_round,
+    util::{
+        arithmetic::{interpolate2_weights, interpolate_over_boolean_hypercube},
+        hash::{write_digest_to_transcript, Hasher},
+        log2_strict,
+        merkle_tree::{MerkleTree, MerkleTreeDigests},
+    },
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
@@ -23,25 +24,51 @@ use rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSlice};
 
 use super::structure::BasefoldCommitmentWithData;
 
+pub trait CommitPhaseStrategy<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    fn initial_running_oracle(
+        comms: &[BasefoldCommitmentWithData<E>],
+        coeffs_outer: &[E],
+        coeffs_inner: &[E],
+    ) -> Vec<E>;
+
+    fn initial_running_evals(
+        comms: &[BasefoldCommitmentWithData<E>],
+        coeffs_outer: &[E],
+        coeffs_inner: &[E],
+    ) -> Vec<E>;
+
+    fn update_running_oracle(
+        comms: &[BasefoldCommitmentWithData<E>],
+        running_oracle: &mut Vec<E>,
+        coeffs_outer: &[E],
+        coeffs_inner: &[E],
+    );
+}
+
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>, CPS: CommitPhaseStrategy<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
-    comm: &BasefoldCommitmentWithData<E>,
+    coeffs_outer: &[E],
+    coeffs_inner: &[E],
+    comms: &[BasefoldCommitmentWithData<E>],
     transcript: &mut Transcript<E>,
-    num_vars: usize,
-    num_rounds: usize,
     hasher: &Hasher<E::BaseField>,
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    let num_vars = comms.iter().map(|c| c.num_vars).max().unwrap();
+    let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
     let timer = start_timer!(|| "Commit phase");
     #[cfg(feature = "sanity-check")]
     assert_eq!(point.len(), num_vars);
     let mut trees = Vec::with_capacity(num_vars);
-    let mut running_oracle = field_type_iter_ext(&comm.get_codewords()[0]).collect_vec();
-    let mut running_evals = comm.polynomials_bh_evals[0].clone();
+    let mut running_oracle = CPS::initial_running_oracle(comms, coeffs_outer, coeffs_inner);
+    let mut running_evals = CPS::initial_running_evals(comms, coeffs_outer, coeffs_inner);
 
     #[cfg(feature = "sanity-check")]
     assert_eq!(
@@ -58,51 +85,60 @@ where
     reverse_index_bits_in_place(&mut eq);
 
     let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
-    let mut last_sumcheck_message = sum_check_first_round_field_type(&mut eq, &mut running_evals);
+    let mut last_sumcheck_message = sum_check_first_round(&mut eq, &mut running_evals);
     end_timer!(sumcheck_timer);
 
     #[cfg(feature = "sanity-check")]
     assert_eq!(last_sumcheck_message.len(), 3);
 
-    let mut running_evals = match running_evals {
-        FieldType::Ext(evals) => evals,
-        FieldType::Base(evals) => evals.iter().map(|x| E::from(*x)).collect_vec(),
-        _ => unreachable!(),
-    };
-
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut roots = Vec::with_capacity(num_rounds - 1);
     let mut final_message = Vec::new();
-    let mut running_tree_inner = Vec::new();
+    let mut running_tree_inner = MerkleTreeDigests::default();
     for i in 0..num_rounds {
-        let sumcheck_timer = start_timer!(|| format!("Basefold round {}", i));
+        let round_timer = start_timer!(|| format!("Basefold round {}", i));
+        // 1. Prover sends the sum-check message.
+        //
         // For the first round, no need to send the running root, because this root is
         // committing to a vector that can be recovered from linearly combining other
         // already-committed vectors.
         transcript.append_field_element_exts(&last_sumcheck_message);
         sumcheck_messages.push(last_sumcheck_message);
 
-        let challenge = transcript.get_and_append_challenge(b"commit round");
+        // 2. Receives the current round challenge.
+        let challenge = transcript
+            .get_and_append_challenge(b"commit round")
+            .elements;
+
+        // 3. Send the oracle of the folded codeword (or the original message
+        //    in the last round).
 
         // Fold the current oracle for FRI
-        let new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
+        let mut new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
             pp,
             log2_strict(running_oracle.len()) - 1,
             &running_oracle,
-            challenge.elements,
+            challenge,
         );
 
         if i > 0 {
-            let running_tree = MerkleTree::<E>::from_inner_leaves(
-                running_tree_inner,
-                FieldType::Ext(running_oracle),
-            );
+            // Consume the previous running tree digests and running oracle
+            // to assemble the full Merkle tree. This actually belongs to the
+            // previous round, but we postpone it to the current round because only
+            // now the running oracle of the previous round is no longer used,
+            // so we can move its ownership instead of cloning it.
+            let running_tree =
+                MerkleTree::<E>::new(running_tree_inner, FieldType::Ext(running_oracle));
             trees.push(running_tree);
         }
 
         if i < num_rounds - 1 {
+            // This (sumcheck) actually belongs to the next round (in the paper.)
+            // But let's compute it here in advance, because we put the
+            // first sumcheck round before the loop, so the loop starts with
+            // sending the last sumcheck message.
             last_sumcheck_message =
-                sum_check_challenge_round(&mut eq, &mut running_evals, challenge.elements);
+                sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
 
             // To avoid cloning the running oracle, explicitly separate the
             // computation of Merkle tree inner nodes and the building of
@@ -111,24 +147,39 @@ where
             // Then the oracle will be used to fold to the next oracle in the next
             // round. After that, this oracle is free to be moved to build the
             // complete Merkle tree.
-            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle, hasher);
-            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
+            running_tree_inner =
+                MerkleTreeDigests::<E>::from_leaves_ext(&new_running_oracle, 2, hasher);
+            let running_root = running_tree_inner.root();
+            // Finally, the prover sends the root (oracle) to the verifier.
             write_digest_to_transcript(&running_root, transcript);
-            roots.push(running_root.clone());
+            roots.push(running_root);
 
+            // This new running oracle may not be folded alone. For some
+            // strategies, it may be added by some codewords, e.g., from the
+            // committed polynomials matching its size.
+            CPS::update_running_oracle(comms, &mut new_running_oracle, coeffs_outer, coeffs_inner);
+
+            // Now, the new running oracle still waits to be folded, but this
+            // is going to be in the next round. After that, it will be moved
+            // into the Merkle tree. Let's put it in the old running oracle.
             running_oracle = new_running_oracle;
         } else {
             // Clear this so the compiler knows the old value is safe to move.
             last_sumcheck_message = Vec::new();
             running_oracle = Vec::new();
-            running_tree_inner = Vec::new();
-            // The difference of the last round is that we don't need to compute the message,
-            // and we don't interpolate the small polynomials. So after the last round,
+            running_tree_inner = MerkleTreeDigests::default();
+            // The difference of the last round is that we don't need to
+            // compute the sumcheck message to send in the next round,
+            // (since there is no next round at all),
+            // so now we only apply the folding to the sumcheck booktable,
+            // but don't interpolate the degree-two polynomials.
+            // So after the last round of sum-check,
             // running_evals is exactly the evaluation representation of the
-            // folded polynomial so far.
-            sum_check_last_round(&mut eq, &mut running_evals, challenge.elements);
+            // folded polynomial, which is exactly the final message of FRI.
+            sum_check_last_round(&mut eq, &mut running_evals, challenge);
             // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
+            // Remember that it has been bit reversed to make the left-right
+            // folding into even-odd folding. So we need to reverse it back.
             reverse_index_bits_in_place(&mut running_evals);
             transcript.append_field_element_exts(&running_evals);
             final_message = running_evals;
@@ -158,7 +209,7 @@ where
                 assert_eq!(basecode, new_running_oracle);
             }
         }
-        end_timer!(sumcheck_timer);
+        end_timer!(round_timer);
     }
     end_timer!(timer);
 

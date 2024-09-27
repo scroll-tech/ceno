@@ -6,6 +6,7 @@ use rayon::prelude::{
     ParallelSliceMut,
 };
 
+#[allow(unused)]
 pub fn sum_check_first_round_field_type<E: ExtensionField>(
     eq: &mut Vec<E>,
     bh_values: &mut FieldType<E>,
@@ -35,6 +36,7 @@ pub fn sum_check_first_round<E: ExtensionField>(eq: &mut Vec<E>, bh_values: &mut
     //    p_i(&bh_values, &eq)
 }
 
+#[allow(unused)]
 pub fn one_level_interp_hc_field_type<E: ExtensionField>(evals: &mut FieldType<E>) {
     match evals {
         FieldType::Ext(evals) => one_level_interp_hc(evals),
@@ -65,6 +67,7 @@ pub fn one_level_eval_hc<F: Field>(evals: &mut Vec<F>, challenge: F) {
     });
 }
 
+#[allow(unused)]
 fn parallel_pi_field_type<E: ExtensionField>(evals: &mut FieldType<E>, eq: &mut [E]) -> Vec<E> {
     match evals {
         FieldType::Ext(evals) => parallel_pi(evals, eq),
@@ -108,6 +111,7 @@ fn parallel_pi<F: Field>(evals: &[F], eq: &[F]) -> Vec<F> {
     coeffs
 }
 
+#[allow(unused)]
 fn parallel_pi_base<E: ExtensionField>(evals: &[E::BaseField], eq: &[E]) -> Vec<E> {
     if evals.len() == 1 {
         return vec![E::from(evals[0]), E::from(evals[0]), E::from(evals[0])];

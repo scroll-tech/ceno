@@ -17,11 +17,7 @@ use rand_chacha::ChaCha8Rng;
 use std::{marker::PhantomData, slice};
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
-use super::{
-    batch_simple::SimpleBatchQueriesResultWithMerklePath,
-    batch_vlmp::BatchedQueriesResultWithMerklePath, query_phase::QueriesResultWithMerklePath,
-    Basecode, BasecodeDefaultSpec,
-};
+use super::{query_phase::BasefoldQueriesResult, Basecode, BasecodeDefaultSpec};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -127,7 +123,7 @@ where
     }
 
     pub fn codeword_size(&self) -> usize {
-        self.codeword_tree.size().1
+        self.codeword_tree.leaves_size().1
     }
 
     pub fn codeword_size_log(&self) -> usize {
@@ -209,6 +205,10 @@ where
 
     pub fn root(&self) -> Digest<E::BaseField> {
         self.root.clone()
+    }
+
+    pub fn root_ref(&self) -> &Digest<E::BaseField> {
+        &self.root
     }
 
     pub fn num_vars(&self) -> Option<usize> {
@@ -305,42 +305,6 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ProofQueriesResultWithMerklePath<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    Single(QueriesResultWithMerklePath<E>),
-    Batched(BatchedQueriesResultWithMerklePath<E>),
-    SimpleBatched(SimpleBatchQueriesResultWithMerklePath<E>),
-}
-
-impl<E: ExtensionField> ProofQueriesResultWithMerklePath<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    pub fn as_single(&self) -> &QueriesResultWithMerklePath<E> {
-        match self {
-            Self::Single(x) => x,
-            _ => panic!("Not a single query result"),
-        }
-    }
-
-    pub fn as_batched(&self) -> &BatchedQueriesResultWithMerklePath<E> {
-        match self {
-            Self::Batched(x) => x,
-            _ => panic!("Not a batched query result"),
-        }
-    }
-
-    pub fn as_simple_batched(&self) -> &SimpleBatchQueriesResultWithMerklePath<E> {
-        match self {
-            Self::SimpleBatched(x) => x,
-            _ => panic!("Not a simple batched query result"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -348,7 +312,7 @@ where
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) roots: Vec<Digest<E::BaseField>>,
     pub(crate) final_message: Vec<E>,
-    pub(crate) query_result_with_merkle_path: ProofQueriesResultWithMerklePath<E>,
+    pub(crate) query_result: BasefoldQueriesResult<E>,
     pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
     pub(crate) trivial_proof: Vec<FieldType<E>>,
 }
@@ -362,9 +326,7 @@ where
             sumcheck_messages: vec![],
             roots: vec![],
             final_message: vec![],
-            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Single(
-                QueriesResultWithMerklePath::empty(),
-            ),
+            query_result: BasefoldQueriesResult::empty(),
             sumcheck_proof: None,
             trivial_proof: evals,
         }
