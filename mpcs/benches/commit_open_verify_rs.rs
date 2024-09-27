@@ -11,8 +11,7 @@ use mpcs::{
 };
 
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, MultilinearExtension},
-    virtual_poly_v2::ArcMultilinearExtension,
+    mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
 };
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -51,15 +50,15 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
 
         let mut transcript = T::new(b"BaseFold");
         let poly = if is_base {
-            DenseMultilinearExtension::random(num_vars, &mut OsRng)
+            ArcMultilinearExtension::from(DenseMultilinearExtension::random(num_vars, &mut OsRng))
         } else {
-            DenseMultilinearExtension::from_evaluations_ext_vec(
+            ArcMultilinearExtension::from(DenseMultilinearExtension::from_evaluations_ext_vec(
                 num_vars,
                 (0..1 << num_vars)
                     .into_par_iter()
                     .map(|_| E::random(&mut OsRng))
                     .collect(),
-            )
+            ))
         };
 
         let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
@@ -139,17 +138,19 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             let polys = (0..batch_size)
                 .map(|i| {
                     if is_base {
-                        DenseMultilinearExtension::random(
+                        ArcMultilinearExtension::from(DenseMultilinearExtension::random(
                             num_vars - log2_ceil((i >> 1) + 1),
                             &mut rng.clone(),
-                        )
+                        ))
                     } else {
-                        DenseMultilinearExtension::from_evaluations_ext_vec(
-                            num_vars - log2_ceil((i >> 1) + 1),
-                            (0..1 << (num_vars - log2_ceil((i >> 1) + 1)))
-                                .into_par_iter()
-                                .map(|_| E::random(&mut OsRng))
-                                .collect(),
+                        ArcMultilinearExtension::from(
+                            DenseMultilinearExtension::from_evaluations_ext_vec(
+                                num_vars - log2_ceil((i >> 1) + 1),
+                                (0..1 << (num_vars - log2_ceil((i >> 1) + 1)))
+                                    .into_par_iter()
+                                    .map(|_| E::random(&mut OsRng))
+                                    .collect(),
+                            ),
                         )
                     }
                 })
@@ -182,8 +183,19 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                 .collect::<Vec<E>>();
             transcript.append_field_element_exts(values.as_slice());
             let transcript_for_bench = transcript.clone();
-            let proof = Pcs::batch_open_vlmp(&pp, &polys, &comms, &points, &evals, &mut transcript)
-                .unwrap();
+            let proof = Pcs::batch_open_vlmp(
+                &pp,
+                &polys,
+                &comms,
+                points
+                    .iter()
+                    .map(|point| point.as_slice())
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                &evals,
+                &mut transcript,
+            )
+            .unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
@@ -195,7 +207,11 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                                 &pp,
                                 &polys,
                                 &comms,
-                                &points,
+                                points
+                                    .iter()
+                                    .map(|point| point.as_slice())
+                                    .collect::<Vec<_>>()
+                                    .as_slice(),
                                 &evals,
                                 &mut transcript,
                             )
@@ -233,7 +249,19 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
 
             let backup_transcript = transcript.clone();
 
-            Pcs::batch_verify_vlmp(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
+            Pcs::batch_verify_vlmp(
+                &vp,
+                &comms,
+                points
+                    .iter()
+                    .map(|point| point.as_slice())
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                &evals,
+                &proof,
+                &mut transcript,
+            )
+            .unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_verify", format!("{}-{}", num_vars, batch_size)),
@@ -244,7 +272,11 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                             Pcs::batch_verify_vlmp(
                                 &vp,
                                 &comms,
-                                &points,
+                                points
+                                    .iter()
+                                    .map(|point| point.as_slice())
+                                    .collect::<Vec<_>>()
+                                    .as_slice(),
                                 &evals,
                                 &proof,
                                 &mut transcript,
@@ -279,14 +311,19 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
             let polys = (0..batch_size)
                 .map(|_| {
                     if is_base {
-                        DenseMultilinearExtension::random(num_vars, &mut rng.clone())
-                    } else {
-                        DenseMultilinearExtension::from_evaluations_ext_vec(
+                        ArcMultilinearExtension::from(DenseMultilinearExtension::random(
                             num_vars,
-                            (0..1 << num_vars)
-                                .into_par_iter()
-                                .map(|_| E::random(&mut OsRng))
-                                .collect(),
+                            &mut rng.clone(),
+                        ))
+                    } else {
+                        ArcMultilinearExtension::from(
+                            DenseMultilinearExtension::from_evaluations_ext_vec(
+                                num_vars,
+                                (0..1 << num_vars)
+                                    .into_par_iter()
+                                    .map(|_| E::random(&mut OsRng))
+                                    .collect(),
+                            ),
                         )
                     }
                 })

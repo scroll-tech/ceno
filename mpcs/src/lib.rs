@@ -1,5 +1,4 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::DenseMultilinearExtension;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
@@ -32,14 +31,14 @@ pub fn pcs_trim<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    poly: &DenseMultilinearExtension<E>,
+    poly: &ArcMultilinearExtension<E>,
 ) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::commit(pp, poly)
 }
 
 pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    poly: &DenseMultilinearExtension<E>,
+    poly: &ArcMultilinearExtension<E>,
     transcript: &mut Transcript<E>,
 ) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::commit_and_write(pp, poly, transcript)
@@ -47,14 +46,14 @@ pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
 
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[DenseMultilinearExtension<E>],
+    polys: &[ArcMultilinearExtension<E>],
 ) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::batch_commit(pp, polys)
 }
 
 pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[DenseMultilinearExtension<E>],
+    polys: &[ArcMultilinearExtension<E>],
     transcript: &mut Transcript<E>,
 ) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::batch_commit_and_write(pp, polys, transcript)
@@ -126,12 +125,12 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn commit(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        poly: &ArcMultilinearExtension<E>,
     ) -> Result<Self::CommitmentWithData, Error>;
 
     fn commit_and_write(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        poly: &ArcMultilinearExtension<E>,
         transcript: &mut Transcript<E>,
     ) -> Result<Self::CommitmentWithData, Error> {
         let comm = Self::commit(pp, poly)?;
@@ -148,12 +147,12 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithData, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::CommitmentWithData, Error> {
         let comm = Self::batch_commit(pp, polys)?;
@@ -366,8 +365,7 @@ pub mod test_util {
     use ff_ext::ExtensionField;
     use itertools::{chain, Itertools};
     use multilinear_extensions::{
-        mle::{DenseMultilinearExtension, MultilinearExtension},
-        virtual_poly_v2::ArcMultilinearExtension,
+        mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
     };
     use rand::{prelude::*, rngs::OsRng};
     use rand_chacha::ChaCha8Rng;
@@ -391,11 +389,15 @@ pub mod test_util {
             let (comm, eval, proof, challenge) = {
                 let mut transcript = Transcript::new(b"BaseFold");
                 let poly = if base {
-                    DenseMultilinearExtension::random(num_vars, &mut OsRng)
+                    ArcMultilinearExtension::from(DenseMultilinearExtension::random(
+                        num_vars, &mut OsRng,
+                    ))
                 } else {
-                    DenseMultilinearExtension::from_evaluations_ext_vec(
-                        num_vars,
-                        (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                    ArcMultilinearExtension::from(
+                        DenseMultilinearExtension::from_evaluations_ext_vec(
+                            num_vars,
+                            (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                        ),
                     )
                 };
 
@@ -463,11 +465,16 @@ pub mod test_util {
                 let polys = (0..batch_size)
                     .map(|i| {
                         if base {
-                            DenseMultilinearExtension::random(num_vars - (i >> 1), &mut rng.clone())
+                            ArcMultilinearExtension::from(DenseMultilinearExtension::random(
+                                num_vars - (i >> 1),
+                                &mut rng.clone(),
+                            ))
                         } else {
-                            DenseMultilinearExtension::from_evaluations_ext_vec(
-                                num_vars,
-                                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                            ArcMultilinearExtension::from(
+                                DenseMultilinearExtension::from_evaluations_ext_vec(
+                                    num_vars,
+                                    (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                                ),
                             )
                         }
                     })
@@ -596,11 +603,16 @@ pub mod test_util {
                 let polys = (0..batch_size)
                     .map(|_| {
                         if base {
-                            DenseMultilinearExtension::random(num_vars, &mut rng.clone())
-                        } else {
-                            DenseMultilinearExtension::from_evaluations_ext_vec(
+                            ArcMultilinearExtension::from(DenseMultilinearExtension::random(
                                 num_vars,
-                                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                                &mut rng.clone(),
+                            ))
+                        } else {
+                            ArcMultilinearExtension::from(
+                                DenseMultilinearExtension::from_evaluations_ext_vec(
+                                    num_vars,
+                                    (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
+                                ),
                             )
                         }
                     })

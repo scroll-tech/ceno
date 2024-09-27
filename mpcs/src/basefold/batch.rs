@@ -1,6 +1,6 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
+use multilinear_extensions::{mle::FieldType, virtual_poly_v2::ArcMultilinearExtension};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -22,7 +22,7 @@ where
 {
     pub(crate) fn batch_commit_inner(
         pp: &BasefoldProverParams<E, Spec>,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
     ) -> Result<BasefoldCommitmentWithData<E>, Error> {
         // assumptions
         // 1. there must be at least one polynomial
@@ -37,14 +37,14 @@ where
             ));
         }
 
-        let is_base = match polys[0].evaluations {
+        let is_base = match polys[0].evaluations() {
             FieldType::Ext(_) => false,
             FieldType::Base(_) => true,
             _ => unreachable!(),
         };
 
         for i in 1..polys.len() {
-            if polys[i].num_vars != polys[0].num_vars {
+            if polys[i].num_vars() != polys[0].num_vars() {
                 return Err(Error::InvalidPcsParam(
                     "cannot batch commit to polynomials with different number of variables"
                         .to_string(),
@@ -82,7 +82,7 @@ where
                 BasefoldCommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
-                    num_vars: polys[0].num_vars,
+                    num_vars: polys[0].num_vars(),
                     is_base,
                     num_polys: polys.len(),
                 }
@@ -103,7 +103,7 @@ where
                 BasefoldCommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
-                    num_vars: polys[0].num_vars,
+                    num_vars: polys[0].num_vars(),
                     is_base,
                     num_polys: polys.len(),
                 }
