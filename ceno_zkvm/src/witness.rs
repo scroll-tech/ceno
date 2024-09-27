@@ -46,7 +46,7 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send> {
 
 impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize) -> Self {
-        let num_total_rows = num_rows.next_power_of_two();
+        let num_total_rows = num_rows.next_power_of_two().max(2);
         let num_padding_rows = num_total_rows - num_rows;
         RowMajorMatrix {
             values: create_uninit_vec(num_total_rows * num_col),
