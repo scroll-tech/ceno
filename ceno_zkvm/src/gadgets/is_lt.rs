@@ -1,5 +1,6 @@
 use std::{fmt::Display, mem::MaybeUninit};
 
+use ceno_emul::SWord;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -20,6 +21,8 @@ pub struct IsLtConfig<const N_U16: usize> {
 }
 
 impl<const N_U16: usize> IsLtConfig<N_U16> {
+    const RANGE: u64 = 1_u64 << (N_U16 * u16::BITS as usize);
+
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
         self.is_lt.unwrap().expr()
     }
@@ -79,7 +82,7 @@ impl<const N_U16: usize> IsLtConfig<N_U16> {
                     .reduce(|a, b| a + b)
                     .expect("reduce error");
 
-                let range = (1 << (N_U16 * u16::BITS as usize)).into();
+                let range = Expression::Constant(Self::RANGE.into());
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
@@ -107,7 +110,38 @@ impl<const N_U16: usize> IsLtConfig<N_U16> {
             true
         };
 
-        let diff = if is_lt { 1u64 << u32::BITS } else { 0 } + lhs - rhs;
+        let diff = if is_lt { Self::RANGE } else { 0 } + lhs - rhs;
+        self.diff.iter().enumerate().for_each(|(i, wit)| {
+            // extract the 16 bit limb from diff and assign to instance
+            let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
+            lkm.assert_ux::<16>(val);
+            set_val!(instance, wit, val);
+        });
+        Ok(())
+    }
+
+    // TODO: refactor with the above function
+    pub fn assign_instance_signed<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        lkm: &mut LkMultiplicity,
+        lhs: SWord,
+        rhs: SWord,
+    ) -> Result<(), ZKVMError> {
+        let is_lt = if let Some(is_lt_wit) = self.is_lt {
+            let is_lt = lhs < rhs;
+            set_val!(instance, is_lt_wit, is_lt as u64);
+            is_lt
+        } else {
+            // assert is_lt == true
+            true
+        };
+
+        let diff = if is_lt {
+            Self::RANGE - (rhs - lhs) as u64
+        } else {
+            (lhs - rhs) as u64
+        };
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
             let val = (diff >> (i * u16::BITS as usize)) & 0xffff;

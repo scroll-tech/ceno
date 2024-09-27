@@ -21,6 +21,7 @@ pub const PC_STEP_SIZE: usize = 4;
 
 // Type aliases to clarify the code without wrapper types.
 pub type Word = u32;
+pub type SWord = i32;
 pub type Addr = u32;
 pub type Cycle = u64;
 pub type RegIdx = usize;
