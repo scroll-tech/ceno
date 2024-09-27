@@ -1,5 +1,6 @@
 use std::{fmt::Display, mem::MaybeUninit};
 
+use ceno_emul::SWord;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -21,6 +22,10 @@ pub struct IsLtConfig {
 }
 
 impl IsLtConfig {
+    fn range(max_num_u16_limbs: usize) -> u64 {
+        1_u64 << (max_num_u16_limbs * u16::BITS as usize)
+    }
+
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
         self.is_lt.unwrap().expr()
     }
@@ -81,7 +86,8 @@ impl IsLtConfig {
                     .reduce(|a, b| a + b)
                     .expect("reduce error");
 
-                let range = (1 << (max_num_u16_limbs * u16::BITS as usize)).into();
+                let range: Expression<E> =
+                    Expression::Constant(Self::range(max_num_u16_limbs).into());
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
@@ -96,11 +102,20 @@ impl IsLtConfig {
 
     pub fn cal_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) -> u64 {
         (if is_lt {
-            1u64 << (u16::BITS as usize * max_num_u16_limbs)
+            Self::range(max_num_u16_limbs)
         } else {
             0
         } + lhs
             - rhs)
+    }
+
+    // TODO merge with cal_diff
+    pub fn cal_diff_signed(is_lt: bool, max_num_u16_limbs: usize, lhs: SWord, rhs: SWord) -> u64 {
+        if is_lt {
+            Self::range(max_num_u16_limbs) - (rhs - lhs) as u64
+        } else {
+            (lhs - rhs) as u64
+        }
     }
 
     pub fn assign_instance<F: SmallField>(
@@ -119,6 +134,33 @@ impl IsLtConfig {
             true
         };
         let diff = Self::cal_diff(is_lt, self.max_num_u16_limbs, lhs, rhs);
+        self.diff.iter().enumerate().for_each(|(i, wit)| {
+            // extract the 16 bit limb from diff and assign to instance
+            let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
+            lkm.assert_ux::<16>(val as u64);
+            set_val!(instance, wit, val);
+        });
+        Ok(())
+    }
+
+    // TODO: refactor with the above function
+    pub fn assign_instance_signed<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        lkm: &mut LkMultiplicity,
+        lhs: SWord,
+        rhs: SWord,
+    ) -> Result<(), ZKVMError> {
+        let is_lt = if let Some(is_lt_wit) = self.is_lt {
+            let is_lt = lhs < rhs;
+            set_val!(instance, is_lt_wit, is_lt as u64);
+            is_lt
+        } else {
+            // assert is_lt == true
+            true
+        };
+
+        let diff = Self::cal_diff_signed(is_lt, self.max_num_u16_limbs, lhs, rhs);
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
             let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
