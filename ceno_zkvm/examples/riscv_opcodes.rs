@@ -106,7 +106,6 @@ fn main() {
     let blt_config = zkvm_cs.register_opcode_circuit::<BltInstruction>();
     // tables
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
-    // let u1_range_config = zkvm_cs.register_table_circuit::<U1TableCircuit<E>>();
     let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
     let ltu_config = zkvm_cs.register_table_circuit::<LtuTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
@@ -126,11 +125,6 @@ fn main() {
         u16_range_config.clone(),
         &(),
     );
-    //    zkvm_fixed_traces.register_table_circuit::<U1TableCircuit<E>>(
-    //        &zkvm_cs,
-    //        u1_range_config.clone(),
-    //        &(),
-    //    );
     zkvm_fixed_traces.register_table_circuit::<AndTableCircuit<E>>(
         &zkvm_cs,
         and_config.clone(),
@@ -187,8 +181,6 @@ fn main() {
                 blt_records.push(record.clone());
             }
         });
-        // temporarily hack: just one record
-        add_records = add_records[0..1].to_vec();
 
         tracing::info!(
             "tracer generated {} ADD records, {} BLT records",
@@ -209,9 +201,6 @@ fn main() {
         zkvm_witness
             .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
             .unwrap();
-        //        zkvm_witness
-        //            .assign_table_circuit::<U1TableCircuit<E>>(&zkvm_cs, &u1_range_config, &())
-        //            .unwrap();
         zkvm_witness
             .assign_table_circuit::<AndTableCircuit<E>>(&zkvm_cs, &and_config, &())
             .unwrap();

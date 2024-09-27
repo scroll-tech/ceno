@@ -31,7 +31,7 @@ use crate::{
     structs::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
-    utils::{get_challenge_pows, proper_num_threads},
+    utils::{get_challenge_pows, next_pow2_instance_padding, proper_num_threads},
     virtual_polys::VirtualPolynomials,
 };
 
@@ -181,7 +181,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         challenges: &[E; 2],
     ) -> Result<ZKVMOpcodeProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
-        let next_pow2_instances = num_instances.next_power_of_two().max(2);
+        let next_pow2_instances = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instances);
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 

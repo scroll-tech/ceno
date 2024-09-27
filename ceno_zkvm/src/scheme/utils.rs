@@ -18,7 +18,9 @@ use rayon::{
     prelude::ParallelSliceMut,
 };
 
-use crate::{expression::Expression, scheme::constants::MIN_PAR_SIZE};
+use crate::{
+    expression::Expression, scheme::constants::MIN_PAR_SIZE, utils::next_pow2_instance_padding,
+};
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
@@ -31,7 +33,7 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
 ) -> Vec<ArcMultilinearExtension<'a, E>> {
     assert!(num_limbs.is_power_of_two());
     assert!(!mles.is_empty());
-    let next_power_of_2 = num_instances.next_power_of_two().max(2);
+    let next_power_of_2 = next_pow2_instance_padding(num_instances);
     assert!(
         mles.iter()
             .all(|mle| mle.evaluations().len() <= next_power_of_2)
