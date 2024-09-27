@@ -161,8 +161,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     .rs1_read
                     .assign_limbs(instance, rs1_read.u16_fields());
 
-                let (_, carries, carries_of_carries) =
-                    rs1_read.mul(&rs2_read, lk_multiplicity, true);
+                let (_, carries, carries_overflow) = rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
                 config
                     .rd_written
@@ -175,7 +174,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                         .map(|carry| E::BaseField::from(carry as u64))
                         .collect_vec(),
                     Some(
-                        carries_of_carries
+                        carries_overflow
                             .unwrap()
                             .iter()
                             .map(|&c| E::BaseField::from(c as u64))
@@ -439,6 +438,8 @@ mod test {
             let u16_max = u16::MAX as u32;
             verify("basic", 11, 2, 22);
             verify("mul 0", 11, 0, 0);
+            verify("0 * 0", 0, 0, 0);
+            verify("0 * 2", 0, 2, 0);
             verify("overflow", u32::MAX / 2 + 1, 2, 0);
             verify("overflow2", 4294901760, 4294901760, 0);
             verify("< 2^32", u16_max, u16_max, 4_294_836_225);

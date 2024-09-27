@@ -746,11 +746,10 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
                         carries[idx + 1] += overflow_carry as u16;
                         carries_overflow[i] += overflow_carry as u16;
                     }
-                    println!("{:?} * {:?} -> carries: {:?}", a_limb, a_limb, carries);
                 }
             })
         });
-        println!("c_limbs: {:?}", c_limbs);
+
         // complete the computation by adding prev_carry
         (1..num_limbs).for_each(|i| {
             if carries[i - 1] > 0 {
@@ -759,7 +758,6 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
                 carries[i] += overflow as u16;
             }
         });
-        println!("Final c_limbs: {:?} / {:?}", c_limbs, carries);
 
         if !with_overflow {
             // If the outcome overflows, `with_overflow` can't be false
@@ -789,73 +787,73 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
 #[cfg(test)]
 mod tests {
 
-    // mod value {
-    //     use crate::{witness::LkMultiplicity, Value};
-    //     #[test]
-    //     fn test_add() {
-    //         let a = Value::new_unchecked(1u32);
-    //         let b = Value::new_unchecked(2u32);
-    //         let mut lkm = LkMultiplicity::default();
+    mod value {
+        use crate::{witness::LkMultiplicity, Value};
+        #[test]
+        fn test_add() {
+            let a = Value::new_unchecked(1u32);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    //         let (c, carries) = a.add(&b, &mut lkm, true);
-    //         assert_eq!(c[0], 3);
-    //         assert_eq!(c[1], 0);
-    //         assert_eq!(carries[0], 0);
-    //         assert_eq!(carries[1], 0);
-    //     }
+            let (c, carries) = a.add(&b, &mut lkm, true);
+            assert_eq!(c[0], 3);
+            assert_eq!(c[1], 0);
+            assert_eq!(carries[0], 0);
+            assert_eq!(carries[1], 0);
+        }
 
-    //     #[test]
-    //     fn test_add_carry() {
-    //         let a = Value::new_unchecked(u16::MAX as u32);
-    //         let b = Value::new_unchecked(2u32);
-    //         let mut lkm = LkMultiplicity::default();
+        #[test]
+        fn test_add_carry() {
+            let a = Value::new_unchecked(u16::MAX as u32);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    //         let (c, carries) = a.add(&b, &mut lkm, true);
-    //         assert_eq!(c[0], 1);
-    //         assert_eq!(c[1], 1);
-    //         assert_eq!(carries[0], 1);
-    //         assert_eq!(carries[1], 0);
-    //     }
+            let (c, carries) = a.add(&b, &mut lkm, true);
+            assert_eq!(c[0], 1);
+            assert_eq!(c[1], 1);
+            assert_eq!(carries[0], 1);
+            assert_eq!(carries[1], 0);
+        }
 
-    //     #[test]
-    //     fn test_mul() {
-    //         let a = Value::new_unchecked(1u32);
-    //         let b = Value::new_unchecked(2u32);
-    //         let mut lkm = LkMultiplicity::default();
+        #[test]
+        fn test_mul() {
+            let a = Value::new_unchecked(1u32);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    //         let (c, carries) = a.mul(&b, &mut lkm, true);
-    //         assert_eq!(c[0], 2);
-    //         assert_eq!(c[1], 0);
-    //         assert_eq!(carries[0], 0);
-    //         assert_eq!(carries[1], 0);
-    //     }
+            let (c, carries, _) = a.mul(&b, &mut lkm, true);
+            assert_eq!(c.low[0], 2);
+            assert_eq!(c.low[1], 0);
+            assert_eq!(carries.low[0], 0);
+            assert_eq!(carries.low[1], 0);
+        }
 
-    //     #[test]
-    //     fn test_mul_carry() {
-    //         let a = Value::new_unchecked(u16::MAX as u32);
-    //         let b = Value::new_unchecked(2u32);
-    //         let mut lkm = LkMultiplicity::default();
+        #[test]
+        fn test_mul_carry() {
+            let a = Value::new_unchecked(u16::MAX as u32);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    //         let (c, carries) = a.mul(&b, &mut lkm, true);
-    //         assert_eq!(c.low[0], u16::MAX - 1);
-    //         assert_eq!(c.low[1], 1);
-    //         assert_eq!(carries.low[0], 1);
-    //         assert_eq!(carries.low[1], 0);
-    //     }
+            let (c, carries, _) = a.mul(&b, &mut lkm, true);
+            assert_eq!(c.low[0], u16::MAX - 1);
+            assert_eq!(c.low[1], 1);
+            assert_eq!(carries.low[0], 1);
+            assert_eq!(carries.low[1], 0);
+        }
 
-    //     #[test]
-    //     fn test_mul_overflow() {
-    //         let a = Value::new_unchecked(u32::MAX / 2 + 1);
-    //         let b = Value::new_unchecked(2u32);
-    //         let mut lkm = LkMultiplicity::default();
+        #[test]
+        fn test_mul_overflow() {
+            let a = Value::new_unchecked(u32::MAX / 2 + 1);
+            let b = Value::new_unchecked(2u32);
+            let mut lkm = LkMultiplicity::default();
 
-    //         let (c, carries) = a.mul(&b, &mut lkm, true);
-    //         assert_eq!(c[0], 0);
-    //         assert_eq!(c[1], 0);
-    //         assert_eq!(carries[0], 0);
-    //         assert_eq!(carries[1], 1);
-    //     }
-    // }
+            let (c, carries, _) = a.mul(&b, &mut lkm, true);
+            assert_eq!(c.low[0], 0);
+            assert_eq!(c.low[1], 0);
+            assert_eq!(carries.low[0], 0);
+            assert_eq!(carries.low[1], 1);
+        }
+    }
 
     // #[test]
     // fn test_uint_from_cell_ids() {
