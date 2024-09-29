@@ -77,7 +77,7 @@ where
     }
 
     pub fn bottom_size(&self) -> usize {
-        self.inner.last().unwrap().len()
+        self.inner.first().unwrap().len()
     }
 
     pub fn merkle_path_without_leaf_sibling_or_root(
@@ -226,7 +226,7 @@ where
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MerklePathWithoutLeafOrRoot<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -548,6 +548,32 @@ impl<E: ExtensionField> BatchLeavesPair<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    pub fn is_single(&self) -> bool {
+        match self {
+            BatchLeavesPair::Ext(x) => x.len() == 1,
+            BatchLeavesPair::Base(x) => x.len() == 1,
+        }
+    }
+
+    pub fn get_single(&self) -> Option<SingleLeavesGroup<E>> {
+        match self {
+            BatchLeavesPair::Ext(x) => {
+                if x.len() == 1 {
+                    Some(SingleLeavesGroup(FieldType::Ext(vec![x[0].0, x[0].1])))
+                } else {
+                    None
+                }
+            }
+            BatchLeavesPair::Base(x) => {
+                if x.len() == 1 {
+                    Some(SingleLeavesGroup(FieldType::Base(vec![x[0].0, x[0].1])))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     pub fn from_all_leaves(index: usize, leaves: &[&FieldType<E>]) -> Self {
         FieldType::<E>::get_leaves_pair_at(leaves, index)
     }
@@ -633,8 +659,75 @@ pub fn hash_two_leaves_batch<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    if let Some(leaves) = leaves.get_single() {
+        return hash_leaves_group(&leaves, hasher);
+    }
     let left_hash = hash_field_type(&leaves.left(), hasher);
     let right_hash = hash_field_type(&leaves.right(), hasher);
 
     hash_two_digests(&left_hash, &right_hash, hasher)
+}
+
+#[cfg(test)]
+mod tests {
+    use goldilocks::{Goldilocks, GoldilocksExt2};
+
+    use crate::util::hash::new_hasher;
+
+    use super::*;
+    type E = GoldilocksExt2;
+
+    #[test]
+    fn test_single_leaves_group() {
+        let group = SingleLeavesGroup::<E>(FieldType::Base(vec![
+            Goldilocks::from(1),
+            Goldilocks::from(2),
+            Goldilocks::from(3),
+            Goldilocks::from(4),
+        ]));
+        assert_eq!(
+            group.as_ext(),
+            vec![
+                GoldilocksExt2::from(1),
+                GoldilocksExt2::from(2),
+                GoldilocksExt2::from(3),
+                GoldilocksExt2::from(4),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merkelize() {
+        let hasher = new_hasher();
+        let leaves = FieldType::Base(vec![
+            Goldilocks::from(1),
+            Goldilocks::from(2),
+            Goldilocks::from(3),
+            Goldilocks::from(4),
+            Goldilocks::from(5),
+            Goldilocks::from(3),
+            Goldilocks::from(1),
+            Goldilocks::from(0),
+        ]);
+        let merkle_tree = MerkleTree::<GoldilocksExt2>::from_leaves(leaves.clone(), 2, &hasher);
+        assert_eq!(merkle_tree.leaf_group_num(), 4);
+        assert_eq!(merkle_tree.leaf_group_size(), 2);
+        for i in 0..leaves.len() {
+            assert_eq!(
+                merkle_tree.get_leaf_as_base(i),
+                vec![field_type_index_base(&leaves, i)]
+            );
+        }
+        for i in 0..(leaves.len() >> 1) {
+            let path = merkle_tree.merkle_path_without_leaf_sibling_or_root(i << 1);
+            assert_eq!(path.len(), 2);
+            assert_eq!(path.height(), 3);
+            assert_eq!(
+                path,
+                merkle_tree.merkle_path_without_leaf_sibling_or_root((i << 1) + 1)
+            );
+            let leaves_group = SingleLeavesGroup::from_all_leaves(i, 2, &leaves);
+            path.authenticate_leaves_group(&leaves_group, i, &merkle_tree.root(), &hasher);
+        }
+    }
 }
