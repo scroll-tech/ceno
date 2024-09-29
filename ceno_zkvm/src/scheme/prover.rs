@@ -223,7 +223,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let span = entered_span!("wit_inference::tower_witness_r_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let r_records_last_layer =
-            interleaving_mles_to_mles(r_records_wit, log2_num_instances, NUM_FANIN, E::ONE);
+            interleaving_mles_to_mles(r_records_wit, num_instances, NUM_FANIN, E::ONE);
         assert_eq!(r_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
@@ -239,7 +239,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let span = entered_span!("wit_inference::tower_witness_w_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let w_records_last_layer =
-            interleaving_mles_to_mles(w_records_wit, log2_num_instances, NUM_FANIN, E::ONE);
+            interleaving_mles_to_mles(w_records_wit, num_instances, NUM_FANIN, E::ONE);
         assert_eq!(w_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
@@ -253,12 +253,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
-        let lk_records_last_layer = interleaving_mles_to_mles(
-            lk_records_wit,
-            log2_num_instances,
-            NUM_FANIN,
-            chip_record_alpha,
-        );
+        let lk_records_last_layer =
+            interleaving_mles_to_mles(lk_records_wit, num_instances, NUM_FANIN, chip_record_alpha);
         assert_eq!(lk_records_last_layer.len(), 2);
         exit_span!(span);
 
@@ -661,9 +657,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let lk_denominator_last_layer =
-            interleaving_mles_to_mles(lk_d_wit, log2_num_instances, NUM_FANIN_LOGUP, E::ONE);
+            interleaving_mles_to_mles(lk_d_wit, num_instances, NUM_FANIN_LOGUP, E::ONE);
         let lk_numerator_last_layer =
-            interleaving_mles_to_mles(lk_n_wit, log2_num_instances, NUM_FANIN_LOGUP, E::ZERO);
+            interleaving_mles_to_mles(lk_n_wit, num_instances, NUM_FANIN_LOGUP, E::ZERO);
         assert_eq!(lk_denominator_last_layer.len(), NUM_FANIN_LOGUP);
         assert_eq!(lk_numerator_last_layer.len(), NUM_FANIN_LOGUP);
         exit_span!(span);

@@ -25,16 +25,20 @@ use crate::{expression::Expression, scheme::constants::MIN_PAR_SIZE};
 /// output [[1,3,5,7,0,0,0,0],[2,4,6,8,0,0,0,0]]
 pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
     mles: &[ArcMultilinearExtension<E>],
-    log2_num_instances: usize,
+    num_instances: usize,
     num_limbs: usize,
     default: E,
 ) -> Vec<ArcMultilinearExtension<'a, E>> {
-    let num_instances = 1 << log2_num_instances;
+    let log2_num_instances = ceil_log2(num_instances);
+    let num_instances_padded = 1 << log2_num_instances;
+
+    // the modification of records mle below depends on num_limbs = 2
+    assert!(num_limbs == 2);
     assert!(num_limbs.is_power_of_two());
     assert!(!mles.is_empty());
     assert!(
         mles.iter()
-            .all(|mle| mle.evaluations().len() == num_instances)
+            .all(|mle| mle.evaluations().len() == num_instances_padded)
     );
     let per_fanin_len = (mles[0].evaluations().len() / num_limbs).max(1); // minimal size 1
     let log2_mle_size = ceil_log2(mles.len());
@@ -59,21 +63,36 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
                         .unwrap_or(&[])
                         .par_iter()
                         .zip(evaluations.par_chunks_mut(per_instance_size))
+                        .enumerate()
                         .with_min_len(MIN_PAR_SIZE)
-                        .for_each(|(value, instance)| {
+                        .for_each(|(row_id, (value, instance))| {
                             assert_eq!(instance.len(), per_instance_size);
-                            instance[i] = *value;
+                            // modify the padded instance values to default (assume num_limb = 2
+                            // here)
+                            if start > 0 && (per_fanin_len + row_id) >= num_instances {
+                                instance[i] = default;
+                            } else {
+                                instance[i] = *value;
+                            }
                         }),
                     FieldType::Base(mle) => mle
                         .get(start..(start + per_fanin_len))
                         .unwrap_or(&[])
                         .par_iter()
                         .zip(evaluations.par_chunks_mut(per_instance_size))
+                        .enumerate()
                         .with_min_len(MIN_PAR_SIZE)
-                        .for_each(|(value, instance)| {
+                        .for_each(|(row_id, (value, instance))| {
                             assert_eq!(instance.len(), per_instance_size);
-                            instance[i] =
-                                <<E as ff_ext::ExtensionField>::BaseField as Into<E>>::into(*value);
+                            // modify the padded instance values to default (assume num_limb = 2
+                            // here)
+                            if start > 0 && (per_fanin_len + row_id) >= num_instances {
+                                instance[i] = default;
+                            } else {
+                                instance[i] = <<E as ff_ext::ExtensionField>::BaseField as Into<
+                                    E,
+                                >>::into(*value);
+                            }
                         }),
                     _ => unreachable!(),
                 });

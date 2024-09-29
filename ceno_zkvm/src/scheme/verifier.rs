@@ -185,6 +185,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         let num_instances = proof.num_instances;
         let log2_num_instances = ceil_log2(num_instances);
+        println!("hehe, verify_opcode: num_instances={}", num_instances);
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -258,6 +259,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             },
             transcript,
         );
+        println!("hehe, pass sum_check_verify");
         let (input_opening_point, expected_evaluation) = (
             main_sel_subclaim
                 .point

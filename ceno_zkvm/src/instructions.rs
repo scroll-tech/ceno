@@ -47,6 +47,15 @@ pub trait Instruction<E: ExtensionField> {
         let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin);
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
+        let pad_iterator = |steps: Vec<StepRecord>| -> Vec<StepRecord> {
+            let padded_len = steps.len().next_power_of_two() - steps.len();
+            let mut extended_iter = steps.clone();
+            let last_elem = steps.last().expect("Iterator should not be empty");
+            extended_iter.extend(std::iter::repeat(last_elem.clone()).take(padded_len));
+            extended_iter
+        };
+        let steps = pad_iterator(steps);
+
         raw_witin_iter
             .zip_eq(steps.par_chunks(num_instance_per_batch))
             .flat_map(|(instances, steps)| {

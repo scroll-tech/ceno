@@ -159,6 +159,7 @@ fn main() {
 
     for instance_num_vars in args.start..args.end {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
+        //let step_loop = 7;
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
 
