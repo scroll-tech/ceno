@@ -9,7 +9,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
 use crate::{
-    util::{arithmetic::inner_product, field_type_index_ext, field_type_iter_ext, log2_strict},
+    util::{arithmetic::inner_product, field_type_index_ext, log2_strict},
     Error,
 };
 
@@ -236,29 +236,14 @@ where
 {
     fn initial_running_oracle(
         comms: &[BasefoldCommitmentWithData<E>],
-        coeffs_outer: &[E],
+        _coeffs_outer: &[E],
         _coeffs_inner: &[E],
     ) -> Vec<E> {
+        // Initialize to zero oracle, and before each folding. All the
+        // committed polynomial values are added to the oracle in the matching
+        // round.
         let codeword_size = comms.iter().map(|comm| comm.codeword_size()).max().unwrap();
-        let mut running_oracle = vec![E::ZERO; codeword_size];
-
-        let build_oracle_timer = start_timer!(|| "Basefold build initial oracle");
-        // Before the interaction, collect all the polynomials whose num variables match the
-        // max num variables
-        let running_oracle_len = running_oracle.len();
-        comms
-            .iter()
-            .enumerate()
-            .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
-            .for_each(|(index, comm)| {
-                running_oracle
-                    .iter_mut()
-                    .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
-                    .for_each(|(r, a)| *r += a * coeffs_outer[index]);
-            });
-        end_timer!(build_oracle_timer);
-
-        running_oracle
+        vec![E::ZERO; codeword_size]
     }
 
     fn initial_running_evals(
@@ -294,21 +279,17 @@ where
 
     fn update_running_oracle(
         comms: &[BasefoldCommitmentWithData<E>],
-        running_oracle: &mut Vec<E>,
+        running_oracle_len: usize,
+        index: usize,
         coeffs_outer: &[E],
-        _coeffs_inner: &[E],
-    ) {
-        let running_oracle_len = running_oracle.len();
+        coeffs_inner: &[E],
+    ) -> E {
         comms
             .iter()
             .enumerate()
             .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
-            .for_each(|(index, comm)| {
-                running_oracle
-                    .iter_mut()
-                    .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
-                    .for_each(|(r, a)| *r += a * coeffs_outer[index]);
-            });
+            .map(|(i, comm)| comm.batch_codewords_at(coeffs_inner, index) * coeffs_outer[i])
+            .sum()
     }
 }
 

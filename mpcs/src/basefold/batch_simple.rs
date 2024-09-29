@@ -225,14 +225,15 @@ where
 
     fn update_running_oracle(
         _comms: &[BasefoldCommitmentWithData<E>],
-        _running_oracle: &mut Vec<E>,
+        _running_oracle_len: usize,
+        _index: usize,
         _coeffs_outer: &[E],
         _coeffs_inner: &[E],
-    ) {
+    ) -> E {
         // The simple batch version only has one group of polynomials.
         // No polynomial needs to
         // be updated to the oracle during the interaction.
-        return;
+        E::ZERO
     }
 }
 

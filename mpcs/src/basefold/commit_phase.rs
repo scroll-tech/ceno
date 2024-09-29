@@ -7,9 +7,10 @@ use crate::{
     basefold::sumcheck::sum_check_first_round,
     util::{
         arithmetic::{interpolate2_weights, interpolate_over_boolean_hypercube},
+        field_type_as_ext,
         hash::{write_digest_to_transcript, Hasher},
         log2_strict,
-        merkle_tree::{MerkleTree, MerkleTreeDigests},
+        merkle_tree::MerkleTree,
     },
 };
 use ark_std::{end_timer, start_timer};
@@ -20,7 +21,10 @@ use transcript::Transcript;
 use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSlice};
+use rayon::{
+    iter::IntoParallelRefMutIterator,
+    prelude::{IndexedParallelIterator, ParallelIterator, ParallelSlice},
+};
 
 use super::structure::BasefoldCommitmentWithData;
 
@@ -42,10 +46,11 @@ where
 
     fn update_running_oracle(
         comms: &[BasefoldCommitmentWithData<E>],
-        running_oracle: &mut Vec<E>,
+        running_oracle_len: usize,
+        index: usize,
         coeffs_outer: &[E],
         coeffs_inner: &[E],
-    );
+    ) -> E;
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
@@ -67,7 +72,7 @@ where
     #[cfg(feature = "sanity-check")]
     assert_eq!(point.len(), num_vars);
     let mut trees = Vec::with_capacity(num_vars);
-    let mut running_oracle = CPS::initial_running_oracle(comms, coeffs_outer, coeffs_inner);
+    let mut running_oracle = &CPS::initial_running_oracle(comms, coeffs_outer, coeffs_inner);
     let mut running_evals = CPS::initial_running_evals(comms, coeffs_outer, coeffs_inner);
 
     #[cfg(feature = "sanity-check")]
@@ -94,7 +99,6 @@ where
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut roots = Vec::with_capacity(num_rounds - 1);
     let mut final_message = Vec::new();
-    let mut running_tree_inner = MerkleTreeDigests::default();
     for i in 0..num_rounds {
         let round_timer = start_timer!(|| format!("Basefold round {}", i));
         // 1. Prover sends the sum-check message.
@@ -113,24 +117,24 @@ where
         // 3. Send the oracle of the folded codeword (or the original message
         //    in the last round).
 
-        // Fold the current oracle for FRI
+        // Fold the current oracle for FRI. Note that for some strategies,
+        // the oracle may be updated before the folding. The updated values
+        // are provided by the `update_running_oracle` callback.
         let mut new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
             pp,
             log2_strict(running_oracle.len()) - 1,
-            &running_oracle,
+            running_oracle,
+            |i| {
+                CPS::update_running_oracle(
+                    comms,
+                    running_oracle.len(),
+                    i,
+                    coeffs_outer,
+                    coeffs_inner,
+                )
+            },
             challenge,
         );
-
-        if i > 0 {
-            // Consume the previous running tree digests and running oracle
-            // to assemble the full Merkle tree. This actually belongs to the
-            // previous round, but we postpone it to the current round because only
-            // now the running oracle of the previous round is no longer used,
-            // so we can move its ownership instead of cloning it.
-            let running_tree =
-                MerkleTree::<E>::new(running_tree_inner, FieldType::Ext(running_oracle));
-            trees.push(running_tree);
-        }
 
         if i < num_rounds - 1 {
             // This (sumcheck) actually belongs to the next round (in the paper.)
@@ -140,34 +144,36 @@ where
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
 
-            // To avoid cloning the running oracle, explicitly separate the
-            // computation of Merkle tree inner nodes and the building of
-            // entire Merkle tree. First compute the inner nodes without
-            // consuming the leaves, so that we can get the challenge.
-            // Then the oracle will be used to fold to the next oracle in the next
-            // round. After that, this oracle is free to be moved to build the
-            // complete Merkle tree.
-            running_tree_inner =
-                MerkleTreeDigests::<E>::from_leaves_ext(&new_running_oracle, 2, hasher);
-            let running_root = running_tree_inner.root();
-            // Finally, the prover sends the root (oracle) to the verifier.
-            write_digest_to_transcript(&running_root, transcript);
-            roots.push(running_root);
-
-            // This new running oracle may not be folded alone. For some
-            // strategies, it may be added by some codewords, e.g., from the
-            // committed polynomials matching its size.
-            CPS::update_running_oracle(comms, &mut new_running_oracle, coeffs_outer, coeffs_inner);
+            // Now commit to the current oracle
+            let tree = MerkleTree::<E>::from_leaves_ext(new_running_oracle, 2, hasher);
+            write_digest_to_transcript(&tree.root(), transcript);
+            roots.push(tree.root());
+            trees.push(tree);
 
             // Now, the new running oracle still waits to be folded, but this
             // is going to be in the next round. After that, it will be moved
             // into the Merkle tree. Let's put it in the old running oracle.
-            running_oracle = new_running_oracle;
+            running_oracle = field_type_as_ext(&trees.last().unwrap().leaves()[0]);
         } else {
             // Clear this so the compiler knows the old value is safe to move.
             last_sumcheck_message = Vec::new();
-            running_oracle = Vec::new();
-            running_tree_inner = MerkleTreeDigests::default();
+            // Update the running oracle. Although it is not going to fold, this
+            // update is needed because some polynomials may have exactly the same
+            // size of the final message.
+            let running_oracle_len = new_running_oracle.len();
+            new_running_oracle
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(i, x)| {
+                    *x += CPS::update_running_oracle(
+                        comms,
+                        running_oracle_len,
+                        i,
+                        coeffs_outer,
+                        coeffs_inner,
+                    )
+                });
+
             // The difference of the last round is that we don't need to
             // compute the sumcheck message to send in the next round,
             // (since there is no next round at all),
@@ -204,7 +210,6 @@ where
                     _ => panic!("Should be ext field"),
                 };
 
-                let mut new_running_oracle = new_running_oracle;
                 reverse_index_bits_in_place(&mut new_running_oracle);
                 assert_eq!(basecode, new_running_oracle);
             }
@@ -230,6 +235,7 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     level: usize,
     values: &Vec<E>,
+    additional_values: impl Fn(usize) -> E + Sync,
     challenge: E,
 ) -> Vec<E> {
     values
@@ -238,7 +244,14 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
         .map(|(i, ys)| {
             let (x0, x1, w) =
                 <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs(pp, level, i);
-            interpolate2_weights([(x0, ys[0]), (x1, ys[1])], w, challenge)
+            interpolate2_weights(
+                [
+                    (x0, ys[0] + additional_values(i << 1)),
+                    (x1, ys[1] + additional_values((i << 1) + 1)),
+                ],
+                w,
+                challenge,
+            )
         })
         .collect::<Vec<_>>()
 }

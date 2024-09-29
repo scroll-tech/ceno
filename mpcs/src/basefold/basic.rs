@@ -177,13 +177,14 @@ where
 
     fn update_running_oracle(
         _comms: &[BasefoldCommitmentWithData<E>],
-        _running_oracle: &mut Vec<E>,
+        _running_oracle: usize,
+        _index: usize,
         _coeffs_outer: &[E],
         _coeffs_inner: &[E],
-    ) {
+    ) -> E {
         // The basic version only has one polynomial. No polynomial needs to
         // be updated to the oracle during the interaction.
-        return;
+        E::ZERO
     }
 }
 

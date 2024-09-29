@@ -130,6 +130,17 @@ where
         }
     }
 
+    pub fn from_leaves_ext(
+        leaves: Vec<E>,
+        group_size: usize,
+        hasher: &Hasher<E::BaseField>,
+    ) -> Self {
+        Self {
+            inner: MerkleTreeDigests::<E>::from_leaves_ext(&leaves, group_size, hasher),
+            leaves: vec![FieldType::Ext(leaves)],
+        }
+    }
+
     pub fn from_batch_leaves(
         leaves: Vec<FieldType<E>>,
         group_size: usize,
@@ -164,14 +175,16 @@ where
     pub fn batch_leaves(&self, coeffs: &[E]) -> Vec<E> {
         (0..self.leaves[0].len())
             .into_par_iter()
-            .map(|i| {
-                self.leaves
-                    .iter()
-                    .zip(coeffs.iter())
-                    .map(|(leaf, coeff)| field_type_index_ext(leaf, i) * *coeff)
-                    .sum()
-            })
+            .map(|i| self.batch_leaf(coeffs, i))
             .collect()
+    }
+
+    pub fn batch_leaf(&self, coeffs: &[E], index: usize) -> E {
+        self.leaves
+            .iter()
+            .zip(coeffs.iter())
+            .map(|(leaf, coeff)| field_type_index_ext(leaf, index) * *coeff)
+            .sum()
     }
 
     pub fn leaves_size(&self) -> (usize, usize) {

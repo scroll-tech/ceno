@@ -99,6 +99,10 @@ where
         self.codeword_tree.batch_leaves(coeffs)
     }
 
+    pub fn batch_codewords_at(&self, coeffs: &[E], index: usize) -> E {
+        self.codeword_tree.batch_leaf(coeffs, index)
+    }
+
     pub fn iter_batch_codewords<'a>(&'a self, coeffs: &'a [E]) -> impl Iterator<Item = E> + 'a {
         (0..self.codeword_size()).map(|i| {
             self.get_codeword_entry_ext(i)

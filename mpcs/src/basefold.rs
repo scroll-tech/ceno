@@ -627,8 +627,11 @@ where
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
         if cfg!(feature = "sanity-check") {
-            evals.iter().zip(polys).for_each(|(eval, poly)| {
-                assert_eq!(&poly.evaluate(points[eval.point()]), eval.value())
+            evals.iter().for_each(|eval| {
+                assert_eq!(
+                    &polys[eval.poly()].evaluate(points[eval.point()]),
+                    eval.value()
+                )
             })
         }
 
