@@ -177,7 +177,7 @@ where
 
     fn update_running_oracle(
         _comms: &[BasefoldCommitmentWithData<E>],
-        _running_oracle: usize,
+        _running_oracle_len: usize,
         _index: usize,
         _coeffs_outer: &[E],
         _coeffs_inner: &[E],
