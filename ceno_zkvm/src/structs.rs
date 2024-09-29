@@ -56,6 +56,7 @@ pub enum ROMType {
 pub enum RAMType {
     GlobalState,
     Register,
+    Memory,
 }
 
 /// A point is a vector of num_var length

@@ -63,7 +63,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: make
-          args: fmt-check-selected-packages
+          args: fmt
 
       - name: Run clippy
         uses: actions-rs/cargo@v1
@@ -71,5 +71,5 @@ jobs:
           TARGET: ${{ matrix.target }}
         with:
           command: make
-          args: clippy-check-selected-packages
+          args: clippy
 

@@ -60,8 +60,7 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub lk_n_in_evals: Vec<E>,
 
     pub fixed_in_evals: Vec<E>,
-    // TODO: add fixed_opening_proof
-    // pub fixed_opening_proof: PCS::Proof,
+    pub fixed_opening_proof: PCS::Proof,
     pub wits_commit: PCS::Commitment,
     pub wits_in_evals: Vec<E>,
     pub wits_opening_proof: PCS::Proof,

@@ -18,8 +18,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     fn internal_add(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
-        addend1: &Vec<Expression<E>>,
-        addend2: &Vec<Expression<E>>,
+        addend: &Vec<Expression<E>>,
         with_overflow: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         let mut c = UIntLimbs::<M, C, E>::new_as_empty();
@@ -30,9 +29,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         // perform add operation
         // c[i] = a[i] + b[i] + carry[i-1] - carry[i] * 2 ^ C
         c.limbs = UintLimb::Expression(
-            (*addend1)
+            (self.expr())
                 .iter()
-                .zip((*addend2).iter())
+                .zip((*addend).iter())
                 .enumerate()
                 .map(|(i, (a, b))| {
                     let carries = c.carries.as_ref().unwrap();
@@ -78,7 +77,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 })
                 .collect_vec();
 
-            self.internal_add(cb, &self.expr(), &b_limbs, with_overflow)
+            self.internal_add(cb, &b_limbs, with_overflow)
         })
     }
 
@@ -91,7 +90,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         with_overflow: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            self.internal_add(cb, &self.expr(), &addend.expr(), with_overflow)
+            self.internal_add(cb, &addend.expr(), with_overflow)
         })
     }
 
@@ -181,6 +180,23 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         })
     }
 
+    pub fn mul_add<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+        multiplier: &mut UIntLimbs<M, C, E>,
+        addend: &UIntLimbs<M, C, E>,
+        with_overflow: bool,
+    ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M, C, E>), ZKVMError> {
+        circuit_builder.namespace(name_fn, |cb| {
+            let c = self.internal_mul(cb, multiplier, with_overflow)?;
+            Ok((
+                c.clone(),
+                c.internal_add(cb, &addend.expr(), with_overflow).unwrap(),
+            ))
+        })
+    }
+
     /// Check two UIntLimbs are equal
     pub fn eq<NR: Into<String>, N: FnOnce() -> NR>(
         &self,
@@ -190,16 +206,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     ) -> Result<(), ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             izip!(self.expr(), rhs.expr())
-                .try_for_each(|(lhs, rhs)| cb.require_equal(|| "uint_eq", lhs, rhs))
+                .enumerate()
+                .try_for_each(|(i, (lhs, rhs))| {
+                    cb.require_equal(|| format!("uint_eq_{i}"), lhs, rhs)
+                })
         })
-    }
-
-    pub fn lt(
-        &self,
-        _circuit_builder: &mut CircuitBuilder<E>,
-        _rhs: &UIntLimbs<M, C, E>,
-    ) -> Result<Expression<E>, ZKVMError> {
-        Ok(self.expr().remove(0) + 1.into())
     }
 
     pub fn is_equal(
@@ -219,7 +230,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         let sum_expr = is_equal_per_limb
             .iter()
-            .fold(Expression::from(0), |acc, flag| acc.clone() + flag.expr());
+            .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
 
         let sum_flag = create_witin_from_expr!(|| "sum_flag", circuit_builder, false, sum_expr)?;
         let (is_equal, diff_inv) =
@@ -274,13 +285,13 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
 
         // indicate the first non-zero byte index i_0 of a[i] - b[i]
         // from high to low
-        indexes
-            .iter()
-            .try_for_each(|idx| circuit_builder.assert_bit(|| "bit assert", idx.expr()))?;
-        let index_sum = indexes
-            .iter()
-            .fold(Expression::from(0), |acc, idx| acc + idx.expr());
-        circuit_builder.assert_bit(|| "bit assert", index_sum)?;
+        //        indexes
+        //            .iter()
+        //            .try_for_each(|idx| circuit_builder.assert_bit(|| "bit assert", idx.expr()))?;
+        //        let index_sum = indexes
+        //            .iter()
+        //            .fold(Expression::from(0), |acc, idx| acc + idx.expr());
+        // circuit_builder.assert_bit(|| "bit assert", index_sum)?;
 
         // equal zero if a==b, otherwise equal (a[i_0]-b[i_0])^{-1}
         let byte_diff_inv = circuit_builder.create_witin(|| "byte_diff_inverse")?;
@@ -307,9 +318,10 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         si.iter()
             .zip(self.limbs.iter())
             .zip(rhs.limbs.iter())
-            .try_for_each(|((flag, a), b)| {
+            .enumerate()
+            .try_for_each(|(i, ((flag, a), b))| {
                 circuit_builder.require_zero(
-                    || "byte diff zero check",
+                    || format!("byte diff {i} zero check"),
                     a.expr() - b.expr() - flag.expr() * a.expr() + flag.expr() * b.expr(),
                 )
             })?;
@@ -346,7 +358,6 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         )?;
 
         let is_ltu = circuit_builder.create_witin(|| "is_ltu")?;
-        // circuit_builder.assert_bit(is_ltu.expr())?; // lookup ensure it is bit
         // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
         circuit_builder.lookup_ltu_byte(lhs_ne_byte.expr(), rhs_ne_byte.expr(), is_ltu.expr())?;
         Ok(UIntLtuConfig {
@@ -365,7 +376,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         rhs: &UIntLimbs<M, 8, E>,
     ) -> Result<UIntLtConfig, ZKVMError> {
         let is_lt = circuit_builder.create_witin(|| "is_lt")?;
-        circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
+        // circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
 
         let lhs_msb = self.msb_decompose(circuit_builder)?;
         let rhs_msb = rhs.msb_decompose(circuit_builder)?;
@@ -694,13 +705,10 @@ mod tests {
 
         #[test]
         fn test_mul32_16_w_carries() {
-            // a = 256
-            // b = 257
-            // c = 256 + 1 * 2^16 = 65,792
-            let wit_a = vec![256, 0];
-            let wit_b = vec![257, 0];
-            let wit_c = vec![256, 1];
-            let wit_carries = vec![1, 0];
+            let wit_a = vec![48683, 2621];
+            let wit_b = vec![7, 0];
+            let wit_c = vec![13101, 18352];
+            let wit_carries = vec![5, 0];
             let witness_values = [wit_a, wit_b, wit_c, wit_carries].concat();
             verify::<32, 16, E>(witness_values, false);
         }
@@ -960,6 +968,51 @@ mod tests {
                 .unwrap();
             let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
             let uint_e = uint_c.add(|| "uint_e", &mut cb, &uint_d, false).unwrap();
+
+            uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
+                // limbs check
+                assert_eq!(
+                    eval_by_expr(&witness_values, &challenges, ret),
+                    E::from(e.clone()[i])
+                );
+            });
+        }
+
+        #[test]
+        fn test_mul_add2() {
+            // c = a * b
+            // e = c + d
+
+            // a = 1 + 1 * 2^16
+            // b = 2 + 1 * 2^16
+            // ==> c = 2 + 3 * 2^16 + 1 * 2^32
+            // d = 1 + 1 * 2^16
+            // ==> e = 3 + 4 * 2^16 + 1 * 2^32
+            let a = vec![1, 1, 0, 0];
+            let b = vec![2, 1, 0, 0];
+            let c = vec![2, 3, 1, 0];
+            let c_carries = vec![0; 3];
+            // e = c + d
+            let d = vec![1, 1, 0, 0];
+            let e = vec![3, 4, 1, 0];
+            let e_carries = vec![0; 3];
+
+            let witness_values: Vec<E> = [a, b, d, c, c_carries, e_carries]
+                .concat()
+                .iter()
+                .map(|&a| a.into())
+                .collect_vec();
+
+            let mut cs = ConstraintSystem::new(|| "test_mul_add");
+            let mut cb = CircuitBuilder::<E>::new(&mut cs);
+            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
+
+            let mut uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
+            let mut uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
+            let mut uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
+            let (_, uint_e) = uint_a
+                .mul_add(|| "uint_c", &mut cb, &mut uint_b, &mut uint_d, false)
+                .unwrap();
 
             uint_e.expr().iter().enumerate().for_each(|(i, ret)| {
                 // limbs check
