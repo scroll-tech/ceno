@@ -484,6 +484,11 @@ where
     ) -> Option<Vec<E>> {
         let matching_pairs =
             query_result.get_commitments_query_matching_size_log(codeword_size_log);
+
+        if matching_pairs.is_empty() {
+            return None;
+        }
+
         let (left, right) = matching_pairs
             .iter()
             .map(|(index, pair)| {
@@ -494,6 +499,10 @@ where
             })
             .fold((E::ZERO, E::ZERO), |(s, t), (a, b)| (s + a, t + b));
         Some(vec![left, right])
+    }
+
+    fn has_update_value_at_first_round() -> bool {
+        true
     }
 }
 

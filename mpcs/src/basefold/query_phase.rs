@@ -326,7 +326,7 @@ where
 
     #[allow(unused)]
     pub fn group_num(&self) -> usize {
-        1 << self.height()
+        1 << self.merkle_path.len()
     }
 
     #[allow(unused)]
@@ -336,8 +336,8 @@ where
 
     pub fn codeword_size_log(&self) -> usize {
         // The group size is guaranteed to be 2 for Merkle trees in commitments.
-        // So the number of leaves is exactly twice the number of groups.
-        self.height() + 1
+        // So the number of leaves is exactly 2^(merkle height)
+        self.height()
     }
 
     pub fn get_query_result(
@@ -445,6 +445,10 @@ where
         coeffs_inner: &[E],
         codeword_size_log: usize,
     ) -> Option<Vec<E>>;
+
+    fn has_update_value_at_first_round() -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -592,6 +596,8 @@ where
                     .iter_mut()
                     .zip(update_values)
                     .for_each(|(a, b)| *a += b);
+            } else if i == 0 && QCS::has_update_value_at_first_round() {
+                panic!("The first round should have an update value");
             }
 
             // Where are the current values in the current codeword?
@@ -636,7 +642,8 @@ where
                         .expect("Something wrong with the oracle schedule, too few oracles");
                     assert_eq!(
                         current_values[0],
-                        oracle_query_result.get_ext(current_value_starting_index % oracle_query_result.len()),
+                        oracle_query_result
+                            .get_ext(current_value_starting_index % oracle_query_result.len()),
                         "Current value different from what's read from the oracle"
                     );
                     current_values = oracle_query_result.as_ext();
