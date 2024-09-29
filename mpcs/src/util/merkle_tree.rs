@@ -473,6 +473,14 @@ impl<E: ExtensionField> SingleLeavesGroup<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    pub fn len(&self) -> usize {
+        match &self.0 {
+            FieldType::Ext(leaves) => leaves.len(),
+            FieldType::Base(leaves) => leaves.len(),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn as_ext(&self) -> Vec<E> {
         match &self.0 {
             FieldType::Ext(leaves) => leaves.clone(),

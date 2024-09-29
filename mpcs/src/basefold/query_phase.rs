@@ -636,7 +636,7 @@ where
                         .expect("Something wrong with the oracle schedule, too few oracles");
                     assert_eq!(
                         current_values[0],
-                        oracle_query_result.get_ext(current_value_starting_index),
+                        oracle_query_result.get_ext(current_value_starting_index % oracle_query_result.len()),
                         "Current value different from what's read from the oracle"
                     );
                     current_values = oracle_query_result.as_ext();
