@@ -4,6 +4,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
 use crate::{
+    basefold::CommitPhaseInput,
     util::{field_type_iter_ext, hash::new_hasher, merkle_tree::MerkleTree},
     Error,
 };
@@ -85,13 +86,18 @@ where
         pp: &BasefoldProverParams<E, Spec>,
         prover_inputs: &Self::ProverInputs<'_>,
         transcript: &mut Transcript<E>,
-    ) -> Result<(Vec<E>, Vec<E>, Vec<E>), Error> {
+    ) -> Result<CommitPhaseInput<E>, Error> {
         let comm = prover_inputs.comm;
         let point = prover_inputs.point;
 
         assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
         assert!(comm.num_polys == 1);
-        Ok((point.to_vec(), vec![], vec![]))
+        Ok(CommitPhaseInput {
+            point: point.to_vec(),
+            coeffs_outer: vec![],
+            coeffs_inner: vec![],
+            sumcheck_proof: None,
+        })
     }
 
     #[allow(unused)]

@@ -11,6 +11,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
 use crate::{
+    basefold::CommitPhaseInput,
     sum_check::{eq_xy_eval, SumCheck as _, VirtualPolynomial},
     util::{
         add_polynomial_with_coeff,
@@ -81,7 +82,6 @@ where
     type ProverInputs<'a> = ProverInputs<'a, E>;
     type VerifierInputs<'a> = VerifierInputs<'a, E>;
 
-    #[allow(unused)]
     fn trivial_proof(prover_inputs: &ProverInputs<'_, E>) -> Option<BasefoldProof<E>> {
         // The encoded polynomial should at least have the number of
         // variables of the basecode, i.e., the size of the message
@@ -95,12 +95,11 @@ where
         None
     }
 
-    #[allow(unused)]
     fn prepare_commit_phase_input(
         pp: &BasefoldProverParams<E, Spec>,
         prover_inputs: &ProverInputs<'_, E>,
         transcript: &mut Transcript<E>,
-    ) -> Result<(Vec<E>, Vec<E>, Vec<E>), Error> {
+    ) -> Result<CommitPhaseInput<E>, Error> {
         let comms = prover_inputs.comms;
         let polys = prover_inputs.polys;
         let num_vars = polys.iter().map(|poly| poly.num_vars()).max().unwrap();
@@ -285,14 +284,18 @@ where
 
         let point = challenges;
 
-        Ok((point, coeffs, vec![]))
+        Ok(CommitPhaseInput {
+            point: point.to_vec(),
+            coeffs_outer: coeffs,
+            coeffs_inner: vec![],
+            sumcheck_proof: Some(sumcheck_proof),
+        })
     }
 
-    #[allow(unused)]
     fn check_trivial_proof(
-        verifier_inputs: &VerifierInputs<'_, E>,
+        _verifier_inputs: &VerifierInputs<'_, E>,
         proof: &BasefoldProof<E>,
-        transcript: &mut Transcript<E>,
+        _transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         assert!(!proof.is_trivial());
 
@@ -311,9 +314,8 @@ where
         assert!(poly_num_vars.iter().min().unwrap() >= &Spec::get_basecode_msg_size_log());
     }
 
-    #[allow(unused)]
     fn prepare_sumcheck_target_and_point_batching_coeffs(
-        vp: &BasefoldVerifierParams<E, Spec>,
+        _vp: &BasefoldVerifierParams<E, Spec>,
         verifier_inputs: &VerifierInputs<'_, E>,
         proof: &BasefoldProof<E>,
         transcript: &mut Transcript<E>,

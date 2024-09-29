@@ -1,6 +1,6 @@
 use crate::{
     sum_check::{
-        classic::{ClassicSumCheck, CoefficientsProver},
+        classic::{ClassicSumCheck, Coefficients, CoefficientsProver, SumcheckProof},
         eq_xy_eval,
     },
     util::{
@@ -85,6 +85,16 @@ where
     fn num_vars(&self) -> usize;
 }
 
+pub(crate) struct CommitPhaseInput<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    point: Vec<E>,
+    coeffs_outer: Vec<E>,
+    coeffs_inner: Vec<E>,
+    sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
+}
+
 pub(crate) trait BasefoldStrategy<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -106,7 +116,7 @@ where
         pp: &BasefoldProverParams<E, Spec>,
         prover_inputs: &Self::ProverInputs<'a>,
         transcript: &mut Transcript<E>,
-    ) -> Result<(Vec<E>, Vec<E>, Vec<E>), Error>;
+    ) -> Result<CommitPhaseInput<E>, Error>;
 
     fn check_trivial_proof<'a>(
         verifier_inputs: &Self::VerifierInputs<'a>,
@@ -374,7 +384,7 @@ where
         let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
 
-        let (point, coeffs_outer, coeffs_inner) =
+        let commit_phase_input =
             Strategy::prepare_commit_phase_input(pp, prover_inputs, transcript)?;
 
         // 1. Committing phase. This phase runs the sum-check and
@@ -386,9 +396,9 @@ where
         //    trees built over them.
         let (trees, commit_phase_proof) = commit_phase::<E, Spec, Strategy::CommitPhaseStrategy>(
             &pp.encoding_params,
-            point.as_slice(),
-            coeffs_outer.as_slice(),
-            coeffs_inner.as_slice(),
+            commit_phase_input.point.as_slice(),
+            commit_phase_input.coeffs_outer.as_slice(),
+            commit_phase_input.coeffs_inner.as_slice(),
             prover_inputs.comms(),
             transcript,
             &hasher,
@@ -422,7 +432,7 @@ where
             roots: commit_phase_proof.roots,
             final_message: commit_phase_proof.final_message,
             query_result: queries,
-            sumcheck_proof: None,
+            sumcheck_proof: commit_phase_input.sumcheck_proof,
             trivial_proof: vec![],
         })
     }

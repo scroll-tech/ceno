@@ -16,7 +16,7 @@ use crate::{
 use super::{
     commit_phase::CommitPhaseStrategy, query_phase::QueryCheckStrategy, structure::BasefoldProof,
     BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
-    BasefoldStrategy, BasefoldVerifierParams,
+    BasefoldStrategy, BasefoldVerifierParams, CommitPhaseInput,
 };
 
 pub(crate) struct ProverInputs<'a, E: ExtensionField>
@@ -90,7 +90,7 @@ where
         pp: &BasefoldProverParams<E, Spec>,
         prover_inputs: &ProverInputs<'_, E>,
         transcript: &mut Transcript<E>,
-    ) -> Result<(Vec<E>, Vec<E>, Vec<E>), Error> {
+    ) -> Result<CommitPhaseInput<E>, Error> {
         let comms = prover_inputs.comms;
         let polys = prover_inputs.polys;
         let num_vars = comms.iter().map(|comm| comm.num_vars).max().unwrap();
@@ -139,11 +139,12 @@ where
         let eq_xt_outer = build_eq_x_r_vec(&t_outer)[..batch_size_outer].to_vec();
         let eq_xt_inner = build_eq_x_r_vec(&t_inner)[..batch_size_inner].to_vec();
 
-        Ok((
-            prover_inputs.point[..num_vars].to_vec(),
-            eq_xt_outer,
-            eq_xt_inner,
-        ))
+        Ok(CommitPhaseInput {
+            point: prover_inputs.point[..num_vars].to_vec(),
+            coeffs_outer: eq_xt_outer,
+            coeffs_inner: eq_xt_inner,
+            sumcheck_proof: None,
+        })
     }
 
     #[allow(unused)]

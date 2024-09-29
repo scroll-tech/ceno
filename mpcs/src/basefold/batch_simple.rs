@@ -7,6 +7,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
 use crate::{
+    basefold::CommitPhaseInput,
     util::{
         arithmetic::inner_product, field_type_index_ext, hash::new_hasher, merkle_tree::MerkleTree,
     },
@@ -90,7 +91,7 @@ where
         pp: &BasefoldProverParams<E, Spec>,
         prover_inputs: &ProverInputs<'_, E>,
         transcript: &mut Transcript<E>,
-    ) -> Result<(Vec<E>, Vec<E>, Vec<E>), Error> {
+    ) -> Result<CommitPhaseInput<E>, Error> {
         let comm = prover_inputs.comm;
         let point = prover_inputs.point;
         let polys = prover_inputs.polys;
@@ -122,7 +123,12 @@ where
         let eq_xt = build_eq_x_r_vec(&t)[..batch_size].to_vec();
         // let _target_sum = inner_product(evals, &eq_xt);
 
-        Ok((point.to_vec(), vec![], eq_xt))
+        Ok(CommitPhaseInput {
+            point: point.to_vec(),
+            coeffs_outer: vec![],
+            coeffs_inner: eq_xt,
+            sumcheck_proof: None,
+        })
     }
 
     #[allow(unused)]
