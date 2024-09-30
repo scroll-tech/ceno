@@ -10,15 +10,9 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind::EANY, StepRecord, PC_STEP_SIZE};
+use ceno_emul::{InsnKind::EANY, StepRecord, CENO_PLATFORM, PC_STEP_SIZE};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
-
-const X5: u64 = 5;
-#[allow(dead_code)]
-const X10: usize = 10;
-#[allow(dead_code)]
-const X11: usize = 11;
 
 pub struct EcallInstructionConfig {
     pub pc: WitIn,
@@ -54,7 +48,7 @@ impl EcallInstructionConfig {
         // read syscall_id from x5 and write return value to x5
         let (_, lt_x5_cfg) = cb.register_write(
             || "write x5",
-            E::BaseField::from(X5),
+            E::BaseField::from(CENO_PLATFORM.reg_ecall() as u64),
             prev_x5_ts.expr(),
             ts.expr(),
             syscall_id.clone(),
