@@ -678,10 +678,9 @@ where
     ) -> Result<Self::Proof, Error> {
         if cfg!(feature = "sanity-check") {
             evals.iter().zip_eq(polys).for_each(|(evals, polys)| {
-                evals
-                    .iter()
-                    .zip_eq(polys.iter())
-                    .for_each(|(eval, poly)| assert_eq!(&poly.evaluate(point), eval))
+                evals.iter().zip_eq(polys.iter()).for_each(|(eval, poly)| {
+                    assert_eq!(&poly.evaluate(&point[..poly.num_vars()]), eval)
+                })
             })
         }
 
@@ -846,34 +845,34 @@ mod test {
 
     #[test]
     fn batch_vlop_commit_open_verify() {
-        for batch_inner in 1..2 {
+        for batch_inner in 1..4 {
             for batch_outer in 1..2 {
                 // Both challenge and poly are over base field
                 run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
                     true,
-                    10,
-                    11,
+                    8,
+                    9,
                     batch_outer,
                     batch_inner,
                 );
                 run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
                     true,
-                    10,
-                    11,
+                    8,
+                    9,
                     batch_outer,
                     batch_inner,
                 );
                 run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
                     false,
-                    10,
-                    11,
+                    8,
+                    9,
                     batch_outer,
                     batch_inner,
                 );
                 run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
                     false,
-                    10,
-                    11,
+                    8,
+                    9,
                     batch_outer,
                     batch_inner,
                 );

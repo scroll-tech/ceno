@@ -643,12 +643,8 @@ pub mod test_util {
                 let (polys, comms) = (0..batch_size_outer)
                     .map(|i| {
                         let polys = gen_rand_polys(|_| num_vars - i, batch_size_inner, base);
-                        let comm = Pcs::batch_commit_and_write(
-                            &pp,
-                            &polys[i * batch_size_inner..(i + 1) * batch_size_inner],
-                            &mut transcript,
-                        )
-                        .unwrap();
+                        let comm =
+                            Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
                         (polys, comm)
                     })
                     .collect::<(Vec<_>, Vec<_>)>();
@@ -657,7 +653,10 @@ pub mod test_util {
                 let evals = polys
                     .iter()
                     .map(|polys| {
-                        let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
+                        let evals = polys
+                            .iter()
+                            .map(|poly| poly.evaluate(&point[..poly.num_vars()]))
+                            .collect_vec();
                         transcript.append_field_element_exts(&evals);
                         evals
                     })

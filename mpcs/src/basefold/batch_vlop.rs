@@ -98,7 +98,6 @@ where
         assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
 
         comms.iter().for_each(|comm| {
-            assert!(comm.num_polys == 1);
             assert!(!comm.is_trivial::<Spec>());
         });
 
@@ -249,7 +248,7 @@ where
     fn initial_running_evals(
         comms: &[BasefoldCommitmentWithData<E>],
         coeffs_outer: &[E],
-        _coeffs_inner: &[E],
+        coeffs_inner: &[E],
     ) -> Vec<E> {
         let num_vars = comms.iter().map(|comm| comm.num_vars).max().unwrap();
         let build_evals_timer = start_timer!(|| "Basefold build initial sumcheck evals");
@@ -267,10 +266,18 @@ where
                     // to align the polynomials to the variable with index 0 before adding them
                     // together. So each element is repeated by
                     // sum_of_all_evals_for_sumcheck.len() / bh_evals.len() times
-                    *r += field_type_index_ext(
-                        &comm.polynomials_bh_evals[0],
-                        pos >> (num_vars - log2_strict(comm.polynomials_bh_evals[0].len())),
-                    ) * coeffs_outer[index]
+                    *r += comm
+                        .polynomials_bh_evals
+                        .iter()
+                        .enumerate()
+                        .map(|(i, bh_evals)| {
+                            field_type_index_ext(
+                                bh_evals,
+                                pos >> (num_vars - log2_strict(comm.polynomials_bh_evals[0].len())),
+                            ) * coeffs_inner[i]
+                        })
+                        .sum::<E>()
+                        * coeffs_outer[index]
                 });
         });
         end_timer!(build_evals_timer);
@@ -311,7 +318,7 @@ where
     fn pre_update_values(
         query_result: &super::query_phase::BasefoldQueryResult<E>,
         coeffs_outer: &[E],
-        _coeffs_inner: &[E],
+        coeffs_inner: &[E],
         codeword_size_log: usize,
     ) -> Option<Vec<E>> {
         let matching_pairs =
@@ -319,9 +326,7 @@ where
         let (left, right) = matching_pairs
             .iter()
             .map(|(index, pair)| {
-                let pair = pair.as_ext();
-                assert_eq!(pair.len(), 1);
-                let pair = pair[0];
+                let pair = pair.batch(coeffs_inner);
                 (pair.0 * coeffs_outer[*index], pair.1 * coeffs_outer[*index])
             })
             .fold((E::ZERO, E::ZERO), |(s, t), (a, b)| (s + a, t + b));
