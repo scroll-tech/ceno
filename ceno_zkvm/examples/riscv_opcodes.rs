@@ -19,6 +19,7 @@ use ceno_zkvm::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
+use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
@@ -235,7 +236,7 @@ fn main() {
         let timer = Instant::now();
 
         let transcript = Transcript::new(b"riscv");
-        let zkvm_proof = prover
+        let mut zkvm_proof = prover
             .create_proof(zkvm_witness, pi, max_threads, transcript)
             .expect("create_proof failed");
 
@@ -248,8 +249,16 @@ fn main() {
         let transcript = Transcript::new(b"riscv");
         assert!(
             verifier
-                .verify_proof(zkvm_proof, transcript)
+                .verify_proof(zkvm_proof.clone(), transcript)
                 .expect("verify proof return with error"),
         );
+
+        let transcript = Transcript::new(b"riscv");
+        // change public input maliciously should cause verifier to reject proof
+        zkvm_proof.pv[0] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
+        zkvm_proof.pv[1] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
+        verifier
+            .verify_proof(zkvm_proof, transcript)
+            .expect_err("verify proof should return with error");
     }
 }

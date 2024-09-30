@@ -90,7 +90,7 @@ impl PublicValues<u32> {
 /// - an index unique across both types.
 #[derive(Clone)]
 pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pv: Vec<E::BaseField>,
+    pub pv: Vec<E::BaseField>,
     opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E, PCS>)>,
     table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E, PCS>)>,
 }
