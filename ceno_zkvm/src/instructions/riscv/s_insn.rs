@@ -1,17 +1,14 @@
 use crate::{
     chip_handler::{
-        GlobalStateRegisterMachineChipOperations, MemoryChipOperations, MemoryExpr,
-        RegisterChipOperations, RegisterExpr,
+        register_expr_to_memory_expr, GlobalStateRegisterMachineChipOperations,
+        MemoryChipOperations, MemoryExpr, RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::{
-        riscv::{
-            config::{ExprLtConfig, ExprLtInput},
-            constants::UInt,
-        },
-        Instruction,
+    instructions::riscv::{
+        config::{ExprLtConfig, ExprLtInput},
+        constants::UInt,
     },
     set_val,
     tables::InsnRecord,
@@ -47,7 +44,6 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
         memory_addr: MemoryExpr<E>,
-        memory_written: MemoryExpr<E>,
     ) -> Result<Self, ZKVMError> {
         // State in
         let pc = circuit_builder.create_witin(|| "pc")?;
@@ -100,7 +96,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             prev_memory_ts.expr(),
             next_ts,
             prev_memory_value,
-            memory_written,
+            register_expr_to_memory_expr(&rs2_read),
         )?;
 
         // State out.
@@ -134,7 +130,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
 
         // Register indexes.
         set_val!(instance, self.rs1_id, step.insn().rs1() as u64);
-        set_val!(instance, self.rs2_id, step.insn().rs1() as u64);
+        set_val!(instance, self.rs2_id, step.insn().rs2() as u64);
 
         // Fetch the instruction
         lk_multiplicity.fetch(step.pc().before.0);

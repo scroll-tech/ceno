@@ -1,7 +1,6 @@
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    gadgets::IsEqualConfig,
     instructions::{
         riscv::{constants::UInt, s_insn::SInstructionConfig, RIVInstruction},
         Instruction,
@@ -37,11 +36,8 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_red", circuit_builder)?;
         let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
-        // TODO: what does this true bool stand for
-        let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
 
-        // TODO: this should be the same as rs2_read (check for equality)
-        // let memory_written = UInt::new_unchecked(|| "memory_written", circuit_builder)?;
+        let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
 
         let s_insn = SInstructionConfig::<E>::construct_circuit(
             circuit_builder,
