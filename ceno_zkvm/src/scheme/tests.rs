@@ -24,6 +24,7 @@ use super::{
     constants::{MAX_NUM_VARIABLES, NUM_FANIN},
     prover::ZKVMProver,
     verifier::ZKVMVerifier,
+    PublicValues,
 };
 
 struct TestConfig {
@@ -130,6 +131,7 @@ fn test_rw_lk_expression_combination() {
                 prover.pk.circuit_pks.get(&name).unwrap(),
                 wits_in,
                 commit,
+                &[],
                 num_instances,
                 1,
                 &mut transcript,
@@ -243,9 +245,10 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program_code.len())
         .unwrap();
 
+    let pi = PublicValues::new(0, 0);
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
-        .create_proof(zkvm_witness, 1, transcript)
+        .create_proof(zkvm_witness, pi, 1, transcript)
         .expect("create_proof failed");
 
     let transcript = Transcript::new(b"riscv");

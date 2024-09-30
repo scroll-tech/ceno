@@ -219,7 +219,8 @@ fn fmt_expr<E: ExtensionField>(
             }
         }
         Expression::Constant(constant) => fmt_base_field::<E>(constant, true).to_string(),
-        Expression::Fixed(fixed) => format!("{:?}", fixed),
+        Expression::Fixed(fixed) => format!("Fixed[{}]", fixed.0),
+        Expression::Instance(i) => format!("Instance[{}]", i.0),
         Expression::Sum(left, right) => {
             let s = format!(
                 "{} + {}",
@@ -434,19 +435,20 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: [E; 2],
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, Some(challenge))
+        Self::run_maybe_challenge(cb, wits_in, &[], Some(challenge))
     }
 
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, None)
+        Self::run_maybe_challenge(cb, wits_in, &[], None)
     }
 
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        pi: &[E::BaseField],
         challenge: Option<[E; 2]>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         let table = challenge.map(|challenge| load_tables(cb, challenge));
@@ -476,10 +478,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let left = left.neg().neg(); // TODO get_ext_field_vec doesn't work without this
                 let right = right.neg();
 
-                let left_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &left);
+                let left_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &left);
                 let left_evaluated = left_evaluated.get_ext_field_vec();
 
-                let right_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &right);
+                let right_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &right);
                 let right_evaluated = right_evaluated.get_ext_field_vec();
 
                 for (inst_id, (left_element, right_element)) in
@@ -499,7 +501,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             } else {
                 // contains require_zero
                 let expr = expr.clone().neg().neg(); // TODO get_ext_field_vec doesn't work without this
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &expr);
+                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &expr);
                 let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
                 for (inst_id, element) in expr_evaluated.iter().enumerate() {
@@ -522,7 +524,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             .iter()
             .zip_eq(cb.cs.lk_expressions_namespace_map.iter())
         {
-            let expr_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, expr);
+            let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
             // Check each lookup expr exists in t vec
