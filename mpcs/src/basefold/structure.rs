@@ -5,7 +5,6 @@ use crate::{
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 
-use rand::RngCore;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
@@ -13,7 +12,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use multilinear_extensions::mle::FieldType;
 
-use rand_chacha::ChaCha8Rng;
 use std::{marker::PhantomData, slice};
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
@@ -276,13 +274,11 @@ where
 }
 
 #[derive(Debug)]
-pub struct Basefold<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore>(
-    PhantomData<(E, Spec, Rng)>,
-);
+pub struct Basefold<E: ExtensionField, Spec: BasefoldSpec<E>>(PhantomData<(E, Spec)>);
 
-pub type BasefoldDefault<F> = Basefold<F, BasefoldRSParams, ChaCha8Rng>;
+pub type BasefoldDefault<F> = Basefold<F, BasefoldRSParams>;
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore> Clone for Basefold<E, Spec, Rng> {
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }

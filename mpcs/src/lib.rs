@@ -358,20 +358,23 @@ pub use basefold::{
 };
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 
-#[cfg(test)]
+#[doc(hidden)]
 pub mod test_util {
+    #[cfg(test)]
+    use crate::Evaluation;
+    #[cfg(test)]
+    use itertools::chain;
 
-    use crate::{Evaluation, PolynomialCommitmentScheme};
+    use crate::PolynomialCommitmentScheme;
     use ff_ext::ExtensionField;
-    use itertools::{chain, Itertools};
+    use itertools::Itertools;
     use multilinear_extensions::{
         mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
-    use rand_chacha::ChaCha8Rng;
     use transcript::Transcript;
 
-    fn setup_pcs<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>>(
+    pub fn setup_pcs<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         num_vars: usize,
     ) -> (Pcs::ProverParam, Pcs::VerifierParam) {
         let poly_size = 1 << num_vars;
@@ -379,7 +382,7 @@ pub mod test_util {
         Pcs::trim(&param, poly_size).unwrap()
     }
 
-    fn gen_rand_poly<'a, E: ExtensionField>(
+    pub fn gen_rand_poly<'a, E: ExtensionField>(
         num_vars: usize,
         base: bool,
     ) -> ArcMultilinearExtension<'a, E> {
@@ -395,7 +398,7 @@ pub mod test_util {
         }
     }
 
-    fn gen_rand_polys<'a, E: ExtensionField>(
+    pub fn gen_rand_polys<'a, E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,
         batch_size: usize,
         base: bool,
@@ -405,7 +408,7 @@ pub mod test_util {
             .collect_vec()
     }
 
-    fn get_point_from_challenge<E: ExtensionField>(
+    pub fn get_point_from_challenge<E: ExtensionField>(
         num_vars: usize,
         transcript: &mut Transcript<E>,
     ) -> Vec<E> {
@@ -414,7 +417,7 @@ pub mod test_util {
             .collect()
     }
 
-    fn get_points_from_challenge<E: ExtensionField>(
+    pub fn get_points_from_challenge<E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,
         num_points: usize,
         transcript: &mut Transcript<E>,
@@ -424,10 +427,7 @@ pub mod test_util {
             .collect()
     }
 
-    fn commit_polys_individually<
-        E: ExtensionField,
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
-    >(
+    pub fn commit_polys_individually<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         pp: &Pcs::ProverParam,
         polys: &[ArcMultilinearExtension<E>],
         transcript: &mut Transcript<E>,
@@ -438,14 +438,12 @@ pub mod test_util {
             .collect_vec()
     }
 
-    fn vecs_as_slices<'a, T>(values: &'a Vec<Vec<T>>) -> Vec<&'a [T]> {
+    pub fn vecs_as_slices<'a, T>(values: &'a Vec<Vec<T>>) -> Vec<&'a [T]> {
         values.iter().map(|vec| vec.as_slice()).collect::<Vec<_>>()
     }
 
-    pub fn run_commit_open_verify<
-        E: ExtensionField,
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
-    >(
+    #[cfg(test)]
+    pub fn run_commit_open_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         base: bool,
         num_vars_start: usize,
         num_vars_end: usize,
@@ -457,7 +455,6 @@ pub mod test_util {
             let (comm, eval, proof, challenge) = {
                 let mut transcript = Transcript::new(b"BaseFold");
                 let poly = gen_rand_poly(num_vars, base);
-
                 let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let eval = poly.evaluate(point.as_slice());
@@ -484,13 +481,14 @@ pub mod test_util {
         }
     }
 
+    #[cfg(test)]
     pub fn run_batch_vlmp_commit_open_verify<E, Pcs>(
         base: bool,
         num_vars_start: usize,
         num_vars_end: usize,
     ) where
         E: ExtensionField,
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
             let batch_size = 4;
@@ -578,6 +576,7 @@ pub mod test_util {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn run_simple_batch_commit_open_verify<E, Pcs>(
         base: bool,
         num_vars_start: usize,
@@ -585,7 +584,7 @@ pub mod test_util {
         batch_size: usize,
     ) where
         E: ExtensionField,
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
@@ -625,6 +624,7 @@ pub mod test_util {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn run_batch_vlop_commit_open_verify<E, Pcs>(
         base: bool,
         num_vars_start: usize,
@@ -633,7 +633,7 @@ pub mod test_util {
         batch_size_inner: usize,
     ) where
         E: ExtensionField,
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);

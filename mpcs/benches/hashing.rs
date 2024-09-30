@@ -9,28 +9,18 @@ fn random_ceno_goldy() -> Goldilocks {
 }
 pub fn criterion_benchmark(c: &mut Criterion) {
     let hasher = new_hasher();
-    let left = Digest(
-        vec![Goldilocks::random(&mut test_rng()); 4]
-            .try_into()
-            .unwrap(),
-    );
-    let right = Digest(
-        vec![Goldilocks::random(&mut test_rng()); 4]
-            .try_into()
-            .unwrap(),
-    );
+    let left = Digest(vec![random_ceno_goldy(); 4].try_into().unwrap());
+    let right = Digest(vec![random_ceno_goldy(); 4].try_into().unwrap());
     c.bench_function("ceno hash 2 to 1", |bencher| {
         bencher.iter(|| hash_two_digests(&left, &right, &hasher))
     });
 
     let mut hasher = new_hasher();
-    let values = (0..60)
-        .map(|_| Goldilocks::random(&mut test_rng()))
-        .collect::<Vec<_>>();
+    let values = (0..60).map(|_| random_ceno_goldy()).collect::<Vec<_>>();
     c.bench_function("ceno hash 60 to 1", |bencher| {
         bencher.iter(|| {
             hasher.update(values.as_slice());
-            let result = &hasher.squeeze_vec()[0..DIGEST_WIDTH];
+            let _ = &hasher.squeeze_vec()[0..DIGEST_WIDTH];
         })
     });
 }

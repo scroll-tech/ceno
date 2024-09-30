@@ -33,7 +33,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
 
-use rand_chacha::{rand_core::RngCore, ChaCha8Rng};
+use rand_chacha::ChaCha8Rng;
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelRefIterator, ParallelIterator},
@@ -134,7 +134,7 @@ where
     ) -> Result<(E, Vec<E>, Vec<E>, Vec<E>), Error>;
 }
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore> Basefold<E, Spec, Rng>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
@@ -521,8 +521,8 @@ where
         Ok(())
     }
 }
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug>
-    PolynomialCommitmentScheme<E> for Basefold<E, Spec, Rng>
+
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> PolynomialCommitmentScheme<E> for Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
@@ -768,8 +768,7 @@ where
     }
 }
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug> NoninteractivePCS<E>
-    for Basefold<E, Spec, Rng>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> NoninteractivePCS<E> for Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
@@ -786,12 +785,11 @@ mod test {
         },
     };
     use goldilocks::GoldilocksExt2;
-    use rand_chacha::ChaCha8Rng;
 
     use super::{structure::BasefoldBasecodeParams, BasefoldRSParams};
 
-    type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
-    type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;
+    type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
 
     #[test]
     fn commit_open_verify_goldilocks() {

@@ -12,10 +12,8 @@ use crate::{
 use super::{
     Basefold, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec, PolyEvalsCodeword,
 };
-use rand_chacha::rand_core::RngCore;
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug>
-    Basefold<E, Spec, Rng>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
