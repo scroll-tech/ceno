@@ -65,8 +65,8 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let rs1 = step.rs1().unwrap().value;
-        let rs2 = step.rs2().unwrap().value;
+        let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
+        let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
         config
@@ -75,5 +75,7 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
         config.rs1_read.assign_limbs(instance, rs1.u16_fields());
         config.rs2_read.assign_limbs(instance, rs2.u16_fields());
         config.imm.assign_value(instance, imm);
+
+        Ok(())
     }
 }

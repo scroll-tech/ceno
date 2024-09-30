@@ -12,6 +12,7 @@ pub mod logic;
 mod r_insn;
 pub mod shift_imm;
 
+mod im_insn;
 mod mem;
 mod s_insn;
 #[cfg(test)]

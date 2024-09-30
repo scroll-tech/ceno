@@ -56,7 +56,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         memory_addr: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
+        value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
@@ -67,12 +67,17 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         memory_addr: &WitIn,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: crate::chip_handler::MemoryExpr<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
+        prev_values: MemoryExpr<E>,
+        value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, ExprLtConfig), ZKVMError>;
 }
 
 pub fn register_expr_to_memory_expr<E: ExtensionField>(value: &RegisterExpr<E>) -> MemoryExpr<E> {
+    let expression_values = value.to_vec();
+    [expression_values[0].clone(), expression_values[1].clone()]
+}
+
+pub fn memory_expr_to_register_expr<E: ExtensionField>(value: &MemoryExpr<E>) -> RegisterExpr<E> {
     let expression_values = value.to_vec();
     [expression_values[0].clone(), expression_values[1].clone()]
 }
