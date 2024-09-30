@@ -584,6 +584,7 @@ mod tests {
         gadgets::IsLtConfig,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
+        ROMType::U5,
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -729,15 +730,18 @@ mod tests {
         assert_eq!(
             err,
             vec![MockProverError::LookupError {
-                expression: Expression::ScaledSum(
-                    Box::new(Expression::WitIn(0)),
-                    Box::new(Expression::Challenge(
-                        1,
-                        1,
-                        // TODO this still uses default challenge in ConstraintSystem, but challengeId
-                        // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
-                        GoldilocksExt2::ONE,
-                        GoldilocksExt2::ZERO,
+                expression: Expression::Sum(
+                    Box::new(Expression::ScaledSum(
+                        Box::new(Expression::WitIn(0)),
+                        Box::new(Expression::Challenge(
+                            1,
+                            1,
+                            // TODO this still uses default challenge in ConstraintSystem, but challengeId
+                            // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
+                            GoldilocksExt2::ONE,
+                            GoldilocksExt2::ZERO,
+                        )),
+                        Box::new(Expression::Constant(U5 as u64)),
                     )),
                     Box::new(Expression::Challenge(
                         0,
