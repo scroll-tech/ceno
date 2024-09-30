@@ -42,6 +42,12 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
     }
 }
 
+pub type SumCheckProverOutput<E, SC> = (
+    Vec<E>,
+    Vec<E>,
+    SumcheckProof<E, <SC as SumCheck<E>>::RoundMessage>,
+);
+
 pub trait SumCheck<E: ExtensionField>: Clone + Debug
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -57,7 +63,7 @@ where
         virtual_poly: VirtualPolynomial<E>,
         sum: E,
         transcript: &mut Transcript<E>,
-    ) -> Result<(Vec<E>, Vec<E>, SumcheckProof<E, Self::RoundMessage>), Error>;
+    ) -> Result<SumCheckProverOutput<E, Self>, Error>;
 
     fn verify(
         vp: &Self::VerifierParam,

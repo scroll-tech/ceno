@@ -11,7 +11,7 @@ use crate::{
 };
 use ark_std::test_rng;
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
-use ceno_emul::{ByteAddr, Change, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
@@ -33,6 +33,7 @@ pub const MOCK_RS2: u32 = 3;
 pub const MOCK_RD: u32 = 4;
 pub const MOCK_IMM_3: u32 = 3;
 pub const MOCK_IMM_31: u32 = 31;
+pub const MOCK_IMM_NEG3: u32 = 32 - 3;
 /// The program baked in the MockProver.
 /// TODO: Make this a parameter?
 #[allow(clippy::identity_op)]
@@ -61,11 +62,23 @@ pub const MOCK_PROGRAM: &[u32] = &[
     // blt x2, x3, -8
     0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
     // divu (0x01, 0x05, 0x33)
-    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x33,
+    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
     // srli x4, x2, 3
     0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
     // srli x4, x2, 31
     0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
+    // sltu (0x00, 0x03, 0x33)
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b011 << 12 | MOCK_RD << 7 | 0x33,
+    // addi x4, x2, 3
+    0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
+    // addi x4, x2, -3, correc this below
+    0b_1_111111 << 25 | MOCK_IMM_NEG3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
+    // bltu x2, x3, -8
+    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_110 << 12 | 0b_1100_1 << 7 | 0x63,
+    // bgeu x2, x3, -8
+    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_111 << 12 | 0b_1100_1 << 7 | 0x63,
+    // bge x2, x3, -8
+    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_101 << 12 | 0b_1100_1 << 7 | 0x63,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
@@ -76,13 +89,16 @@ pub const MOCK_PC_OR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 16);
 pub const MOCK_PC_XOR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 20);
 pub const MOCK_PC_BEQ: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 24);
 pub const MOCK_PC_BNE: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 28);
-pub const MOCK_PC_BLT: Change<ByteAddr> = Change {
-    before: ByteAddr(CENO_PLATFORM.pc_start() + 32),
-    after: ByteAddr(CENO_PLATFORM.pc_start() + 24),
-};
+pub const MOCK_PC_BLT: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 32);
 pub const MOCK_PC_DIVU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 36);
 pub const MOCK_PC_SRLI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 40);
 pub const MOCK_PC_SRLI_31: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 44);
+pub const MOCK_PC_SLTU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 48);
+pub const MOCK_PC_ADDI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 52);
+pub const MOCK_PC_ADDI_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 56);
+pub const MOCK_PC_BLTU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 60);
+pub const MOCK_PC_BGEU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 64);
+pub const MOCK_PC_BGE: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 68);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]
@@ -301,9 +317,9 @@ pub(crate) struct MockProver<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 
-fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> HashSet<Vec<u8>> {
+fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> HashSet<Vec<u64>> {
     fn load_range_table<RANGE: RangeTable, E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
+        t_vec: &mut Vec<Vec<u64>>,
         cb: &CircuitBuilder<E>,
         challenge: [E; 2],
     ) {
@@ -311,12 +327,12 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
             let rlc_record =
                 cb.rlc_chip_record(vec![(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
             let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+            t_vec.push(rlc_record.to_canonical_u64_vec());
         }
     }
 
     fn load_op_table<OP: OpsTable, E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
+        t_vec: &mut Vec<Vec<u64>>,
         cb: &CircuitBuilder<E>,
         challenge: [E; 2],
     ) {
@@ -328,12 +344,12 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
                 (c as usize).into(),
             ]);
             let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
-            t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+            t_vec.push(rlc_record.to_canonical_u64_vec());
         }
     }
 
     fn load_program_table<E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u8>>,
+        t_vec: &mut Vec<Vec<u64>>,
         _cb: &CircuitBuilder<E>,
         challenge: [E; 2],
     ) {
@@ -350,7 +366,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
                     .map(|v| unsafe { (*v).assume_init() }.into())
                     .collect::<Vec<_>>();
                 let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
-                t_vec.push(rlc_record.to_repr().as_ref().to_vec());
+                t_vec.push(rlc_record.to_canonical_u64_vec());
             }
         }
     }
@@ -372,8 +388,8 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
 #[allow(clippy::type_complexity)]
 fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     cb: &CircuitBuilder<E>,
-) -> ([E; 2], &'static HashSet<Vec<u8>>) {
-    static CACHE: OnceLock<StaticTypeMap<([Vec<u8>; 2], HashSet<Vec<u8>>)>> = OnceLock::new();
+) -> ([E; 2], &'static HashSet<Vec<u64>>) {
+    static CACHE: OnceLock<StaticTypeMap<([Vec<u64>; 2], HashSet<Vec<u64>>)>> = OnceLock::new();
     let cache = CACHE.get_or_init(StaticTypeMap::new);
 
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
@@ -400,7 +416,7 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
             Err(e) => panic!("{:?}", e),
         };
 
-        (challenge.map(|c| c.to_repr().as_ref().to_vec()), table)
+        (challenge.map(|c| c.to_canonical_u64_vec()), table)
     });
     // reinitialize per generic type E
     (
@@ -511,7 +527,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
             // Check each lookup expr exists in t vec
             for (inst_id, element) in expr_evaluated.iter().enumerate() {
-                if !table.contains(element.to_repr().as_ref()) {
+                if !table.contains(&element.to_canonical_u64_vec()) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
                         evaluated: *element,
@@ -563,7 +579,7 @@ mod tests {
     use crate::{
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        instructions::riscv::config::{ExprLtConfig, ExprLtInput},
+        gadgets::IsLtConfig,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -740,7 +756,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: ExprLtConfig,
+        pub lt_wtns: IsLtConfig<1>,
     }
 
     struct AssertLtCircuitInput {
@@ -764,11 +780,8 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            ExprLtInput {
-                lhs: input.a,
-                rhs: input.b,
-            }
-            .assign(instance, &self.lt_wtns, lk_multiplicity);
+            self.lt_wtns
+                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
 
             Ok(())
         }
@@ -863,7 +876,7 @@ mod tests {
     struct LtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: ExprLtConfig,
+        pub lt_wtns: IsLtConfig<1>,
     }
 
     struct LtCircuitInput {
@@ -887,11 +900,8 @@ mod tests {
         ) -> Result<(), ZKVMError> {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
-            ExprLtInput {
-                lhs: input.a,
-                rhs: input.b,
-            }
-            .assign(instance, &self.lt_wtns, lk_multiplicity);
+            self.lt_wtns
+                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
 
             Ok(())
         }

@@ -1,7 +1,7 @@
 use std::{iter, time::Instant};
 
 use ceno_zkvm::{
-    instructions::riscv::{arith::AddInstruction, blt::BltInstruction},
+    instructions::riscv::{arith::AddInstruction, branch::BltuInstruction},
     scheme::prover::ZKVMProver,
     tables::ProgramTableCircuit,
 };
@@ -10,7 +10,7 @@ use const_env::from_env;
 
 use ceno_emul::{
     ByteAddr,
-    InsnKind::{ADD, BLT, EANY},
+    InsnKind::{ADD, BLTU, EANY},
     StepRecord, VMState, CENO_PLATFORM,
 };
 use ceno_zkvm::{
@@ -43,7 +43,7 @@ const PROGRAM_CODE: [u32; 4] = [
     // func7   rs2   rs1   f3  rd    opcode
     0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
     0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
-    0b_1_111111_00011_00000_100_1100_1_1100011, // blt x0, x3, -8
+    0b_1_111111_00011_00000_110_1100_1_1100011, // bltu x0, x3, -8
     ECALL_HALT,                               // ecall halt
 ];
 
@@ -104,11 +104,10 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
-    let blt_config = zkvm_cs.register_opcode_circuit::<BltInstruction>();
+    let bltu_config = zkvm_cs.register_opcode_circuit::<BltuInstruction>();
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     // tables
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
-    // let u1_range_config = zkvm_cs.register_table_circuit::<U1TableCircuit<E>>();
     let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
     let ltu_config = zkvm_cs.register_table_circuit::<LtuTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
@@ -121,7 +120,7 @@ fn main() {
         .collect();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces.register_opcode_circuit::<BltInstruction>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<BltuInstruction>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
@@ -129,11 +128,6 @@ fn main() {
         u16_range_config.clone(),
         &(),
     );
-    //    zkvm_fixed_traces.register_table_circuit::<U1TableCircuit<E>>(
-    //        &zkvm_cs,
-    //        u1_range_config.clone(),
-    //        &(),
-    //    );
     zkvm_fixed_traces.register_table_circuit::<AndTableCircuit<E>>(
         &zkvm_cs,
         and_config.clone(),
@@ -181,13 +175,13 @@ fn main() {
             .into_iter()
             .collect::<Vec<_>>();
         let mut add_records = Vec::new();
-        let mut blt_records = Vec::new();
+        let mut bltu_records = Vec::new();
         let mut halt_records = Vec::new();
         all_records.into_iter().for_each(|record| {
             let kind = record.insn().kind().1;
             match kind {
                 ADD => add_records.push(record),
-                BLT => blt_records.push(record),
+                BLTU => bltu_records.push(record),
                 EANY => {
                     if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
                         halt_records.push(record);
@@ -202,9 +196,9 @@ fn main() {
         let pi = PublicValues::new(exit_code, 0);
 
         tracing::info!(
-            "tracer generated {} ADD records, {} BLT records",
+            "tracer generated {} ADD records, {} BLTU records",
             add_records.len(),
-            blt_records.len()
+            bltu_records.len()
         );
 
         let mut zkvm_witness = ZKVMWitnesses::default();
@@ -213,7 +207,7 @@ fn main() {
             .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
             .unwrap();
         zkvm_witness
-            .assign_opcode_circuit::<BltInstruction>(&zkvm_cs, &blt_config, blt_records)
+            .assign_opcode_circuit::<BltuInstruction>(&zkvm_cs, &bltu_config, bltu_records)
             .unwrap();
         zkvm_witness
             .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
@@ -224,9 +218,6 @@ fn main() {
         zkvm_witness
             .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
             .unwrap();
-        //        zkvm_witness
-        //            .assign_table_circuit::<U1TableCircuit<E>>(&zkvm_cs, &u1_range_config, &())
-        //            .unwrap();
         zkvm_witness
             .assign_table_circuit::<AndTableCircuit<E>>(&zkvm_cs, &and_config, &())
             .unwrap();

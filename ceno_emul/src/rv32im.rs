@@ -326,7 +326,7 @@ impl DecodedInstruction {
         match self.codes() {
             InsnCodes { format: R, .. } => false,
             InsnCodes {
-                kind: SLLI | SRLI | SRAI,
+                kind: SLLI | SRLI | SRAI | ADDI,
                 ..
             } => false,
             _ => self.top_bit != 0,
@@ -377,6 +377,7 @@ impl DecodedInstruction {
 
 #[cfg(test)]
 #[test]
+#[allow(clippy::identity_op)]
 fn test_decode_imm() {
     for (i, expected) in [
         // Example of I-type: ADDI.

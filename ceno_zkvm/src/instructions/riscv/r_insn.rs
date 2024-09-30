@@ -1,10 +1,7 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{
-    config::ExprLtConfig,
-    constants::{UInt, PC_STEP_SIZE},
-};
+use super::constants::{UInt, PC_STEP_SIZE, UINT_LIMBS};
 use crate::{
     chip_handler::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
@@ -12,7 +9,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    instructions::riscv::config::ExprLtInput,
+    gadgets::IsLtConfig,
     set_val,
     tables::InsnRecord,
     uint::Value,
@@ -36,9 +33,9 @@ pub struct RInstructionConfig<E: ExtensionField> {
     prev_rs1_ts: WitIn,
     prev_rs2_ts: WitIn,
     prev_rd_ts: WitIn,
-    lt_rs1_cfg: ExprLtConfig,
-    lt_rs2_cfg: ExprLtConfig,
-    lt_prev_ts_cfg: ExprLtConfig,
+    lt_rs1_cfg: IsLtConfig<UINT_LIMBS>,
+    lt_rs2_cfg: IsLtConfig<UINT_LIMBS>,
+    lt_prev_ts_cfg: IsLtConfig<UINT_LIMBS>,
 }
 
 impl<E: ExtensionField> RInstructionConfig<E> {
@@ -156,21 +153,24 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         );
 
         // Register read and write.
-        ExprLtInput {
-            lhs: step.rs1().unwrap().previous_cycle,
-            rhs: step.cycle(),
-        }
-        .assign(instance, &self.lt_rs1_cfg, lk_multiplicity);
-        ExprLtInput {
-            lhs: step.rs2().unwrap().previous_cycle,
-            rhs: step.cycle() + 1,
-        }
-        .assign(instance, &self.lt_rs2_cfg, lk_multiplicity);
-        ExprLtInput {
-            lhs: step.rd().unwrap().previous_cycle,
-            rhs: step.cycle() + 2,
-        }
-        .assign(instance, &self.lt_prev_ts_cfg, lk_multiplicity);
+        self.lt_rs1_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.rs1().unwrap().previous_cycle,
+            step.cycle(),
+        )?;
+        self.lt_rs2_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.rs2().unwrap().previous_cycle,
+            step.cycle() + 1,
+        )?;
+        self.lt_prev_ts_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.rd().unwrap().previous_cycle,
+            step.cycle() + 2,
+        )?;
 
         Ok(())
     }

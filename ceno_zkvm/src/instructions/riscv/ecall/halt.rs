@@ -3,10 +3,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
+    gadgets::IsLtConfig,
     instructions::{
         riscv::{
-            config::{ExprLtConfig, ExprLtInput},
-            constants::ECALL_HALT_OPCODE,
+            constants::{ECALL_HALT_OPCODE, UINT_LIMBS},
             ecall_insn::EcallInstructionConfig,
         },
         Instruction,
@@ -21,7 +21,7 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
     prev_x10_ts: WitIn,
-    lt_x10_cfg: ExprLtConfig,
+    lt_x10_cfg: IsLtConfig<UINT_LIMBS>,
 }
 
 pub struct HaltInstruction<E>(PhantomData<E>);
@@ -87,11 +87,12 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             step.rs2().unwrap().previous_cycle
         );
 
-        ExprLtInput {
-            lhs: step.rs2().unwrap().previous_cycle,
-            rhs: step.cycle(),
-        }
-        .assign(instance, &config.lt_x10_cfg, lk_multiplicity);
+        config.lt_x10_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.rs2().unwrap().previous_cycle,
+            step.cycle(),
+        )?;
 
         config
             .ecall_cfg

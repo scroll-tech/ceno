@@ -213,14 +213,6 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         })
     }
 
-    pub fn lt(
-        &self,
-        _circuit_builder: &mut CircuitBuilder<E>,
-        _rhs: &UIntLimbs<M, C, E>,
-    ) -> Result<Expression<E>, ZKVMError> {
-        Ok(self.expr().remove(0) + 1.into())
-    }
-
     pub fn is_equal(
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
@@ -238,7 +230,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         let sum_expr = is_equal_per_limb
             .iter()
-            .fold(Expression::from(0), |acc, flag| acc.clone() + flag.expr());
+            .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
 
         let sum_flag = create_witin_from_expr!(|| "sum_flag", circuit_builder, false, sum_expr)?;
         let (is_equal, diff_inv) =

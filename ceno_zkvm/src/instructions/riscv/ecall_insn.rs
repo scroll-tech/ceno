@@ -5,7 +5,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::config::{ExprLtConfig, ExprLtInput},
+    gadgets::IsLtConfig,
+    instructions::riscv::constants::UINT_LIMBS,
     set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
@@ -18,7 +19,7 @@ pub struct EcallInstructionConfig {
     pub pc: WitIn,
     pub ts: WitIn,
     prev_x5_ts: WitIn,
-    lt_x5_cfg: ExprLtConfig,
+    lt_x5_cfg: IsLtConfig<UINT_LIMBS>,
 }
 
 impl EcallInstructionConfig {
@@ -85,11 +86,12 @@ impl EcallInstructionConfig {
             step.rs1().unwrap().previous_cycle
         );
 
-        ExprLtInput {
-            lhs: step.rs1().unwrap().previous_cycle,
-            rhs: step.cycle(),
-        }
-        .assign(instance, &self.lt_x5_cfg, lk_multiplicity);
+        self.lt_x5_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.rs1().unwrap().previous_cycle,
+            step.cycle(),
+        )?;
 
         Ok(())
     }
