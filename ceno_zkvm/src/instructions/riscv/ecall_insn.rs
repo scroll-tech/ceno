@@ -33,7 +33,6 @@ impl EcallInstructionConfig {
         syscall_id: RegisterExpr<E>,
         syscall_ret_value: Option<RegisterExpr<E>>,
         next_pc: Option<Expression<E>>,
-        exit_code: Option<RegisterExpr<E>>,
     ) -> Result<Self, ZKVMError> {
         let pc = cb.create_witin(|| "pc")?;
         let ts = cb.create_witin(|| "cur_ts")?;
@@ -62,12 +61,9 @@ impl EcallInstructionConfig {
             syscall_ret_value.map_or(syscall_id, |v| v),
         )?;
 
-        cb.state_out_with_exit_code(
+        cb.state_out(
             next_pc.map_or(pc.expr() + PC_STEP_SIZE.into(), |next_pc| next_pc),
             ts.expr() + 4.into(),
-            exit_code.map_or(0.into(), |ec| {
-                ec[0].clone() + (Expression::<E>::from(1usize << 16) * ec[1].clone())
-            }),
         )?;
 
         Ok(Self {
@@ -89,7 +85,6 @@ impl EcallInstructionConfig {
         lk_multiplicity.fetch(step.pc().before.0);
 
         // the access of X5 register is stored in rs1()
-        // the access of X10 register is stored in rs2()
         set_val!(
             instance,
             self.prev_x5_ts,

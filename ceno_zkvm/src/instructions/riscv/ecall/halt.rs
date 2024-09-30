@@ -6,22 +6,20 @@ use crate::{
     instructions::{
         riscv::{
             config::{ExprLtConfig, ExprLtInput},
-            constants::{UInt, ECALL_HALT},
+            constants::ECALL_HALT_OPCODE,
             ecall_insn::EcallInstructionConfig,
         },
         Instruction,
     },
     set_val,
     witness::LkMultiplicity,
-    Value,
 };
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
-pub struct HaltConfig<E: ExtensionField> {
+pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
-    prev_x10_value: UInt<E>,
     prev_x10_ts: WitIn,
     lt_x10_cfg: ExprLtConfig,
 }
@@ -29,7 +27,7 @@ pub struct HaltConfig<E: ExtensionField> {
 pub struct HaltInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
-    type InstructionConfig = HaltConfig<E>;
+    type InstructionConfig = HaltConfig;
 
     fn name() -> String {
         "ECALL_HALT".into()
@@ -37,28 +35,29 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         let prev_x10_ts = cb.create_witin(|| "prev_x10_ts")?;
-        let prev_x10_value = UInt::new_unchecked(|| "prev_x10_value", cb)?;
+        let exit_code = {
+            let exit_code = cb.query_exit_code()?;
+            [exit_code[0].expr(), exit_code[1].expr()]
+        };
 
         let ecall_cfg = EcallInstructionConfig::construct_circuit(
             cb,
-            [ECALL_HALT[0].into(), ECALL_HALT[1].into()],
+            [ECALL_HALT_OPCODE[0].into(), ECALL_HALT_OPCODE[1].into()],
             None,
             Some(0.into()),
-            Some(prev_x10_value.register_expr()),
         )?;
 
-        // read exit_code from arg0 (X10 register) and write it to global state
+        // read exit_code from arg0 (X10 register)
         let (_, lt_x10_cfg) = cb.register_read(
             || "read x10",
             E::BaseField::from(ceno_emul::CENO_PLATFORM.reg_arg0() as u64),
             prev_x10_ts.expr(),
             ecall_cfg.ts.expr(),
-            prev_x10_value.register_expr(),
+            exit_code,
         )?;
 
         Ok(HaltConfig {
             ecall_cfg,
-            prev_x10_value,
             prev_x10_ts,
             lt_x10_cfg,
         })
@@ -72,7 +71,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
     ) -> Result<(), ZKVMError> {
         assert_eq!(
             step.rs1().unwrap().value,
-            (ECALL_HALT[0] + (ECALL_HALT[1] << 16)) as u32
+            (ECALL_HALT_OPCODE[0] + (ECALL_HALT_OPCODE[1] << 16)) as u32
         );
         assert_eq!(
             step.pc().after.0,
@@ -81,14 +80,11 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             step.pc().after.0
         );
 
+        // the access of X10 register is stored in rs2()
         set_val!(
             instance,
             config.prev_x10_ts,
             step.rs2().unwrap().previous_cycle
-        );
-        config.prev_x10_value.assign_limbs(
-            instance,
-            Value::new_unchecked(step.rs2().unwrap().value).u16_fields(),
         );
 
         ExprLtInput {
