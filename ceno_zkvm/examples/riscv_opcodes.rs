@@ -15,7 +15,7 @@ use ceno_emul::{
 };
 use ceno_zkvm::{
     instructions::riscv::ecall::HaltInstruction,
-    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier, PublicValues},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
@@ -197,6 +197,10 @@ fn main() {
             }
         });
 
+        assert_eq!(halt_records.len(), 1);
+        let exit_code = halt_records[0].rs2().unwrap().value;
+        let pi = PublicValues::new(exit_code, 0);
+
         tracing::info!(
             "tracer generated {} ADD records, {} BLT records",
             add_records.len(),
@@ -241,7 +245,7 @@ fn main() {
 
         let transcript = Transcript::new(b"riscv");
         let zkvm_proof = prover
-            .create_proof(zkvm_witness, max_threads, transcript)
+            .create_proof(zkvm_witness, pi, max_threads, transcript)
             .expect("create_proof failed");
 
         println!(

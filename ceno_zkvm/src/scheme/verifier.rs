@@ -17,7 +17,7 @@ use crate::{
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
-        utils::eval_by_expr_with_fixed,
+        utils::eval_by_expr_with_instance,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{get_challenge_pows, sel_eval},
@@ -127,6 +127,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &table_proof,
+                &vm_proof.pv,
                 transcript,
                 NUM_FANIN_LOGUP,
                 &point_eval,
@@ -397,6 +398,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMTableProof<E, PCS>,
+        pi: &[E::BaseField],
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -498,9 +500,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .chain(proof.lk_n_in_evals[..lk_counts_per_instance].iter()),
             )
             .any(|(expr, expected_evals)| {
-                eval_by_expr_with_fixed(
+                eval_by_expr_with_instance(
                     &proof.fixed_in_evals,
                     &proof.wits_in_evals,
+                    pi,
                     challenges,
                     expr,
                 ) != *expected_evals

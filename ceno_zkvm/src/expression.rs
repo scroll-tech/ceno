@@ -71,25 +71,63 @@ impl<E: ExtensionField> Expression<E> {
         product: &impl Fn(T, T) -> T,
         scaled: &impl Fn(T, T, T) -> T,
     ) -> T {
+        self.evaluate_with_instance(
+            fixed_in,
+            wit_in,
+            &|_| unreachable!(),
+            constant,
+            challenge,
+            sum,
+            product,
+            scaled,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_instance<T>(
+        &self,
+        fixed_in: &impl Fn(&Fixed) -> T,
+        wit_in: &impl Fn(WitnessId) -> T, // witin id
+        instance: &impl Fn(Instance) -> T,
+        constant: &impl Fn(E::BaseField) -> T,
+        challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
+        sum: &impl Fn(T, T) -> T,
+        product: &impl Fn(T, T) -> T,
+        scaled: &impl Fn(T, T, T) -> T,
+    ) -> T {
         match self {
             Expression::Fixed(f) => fixed_in(f),
             Expression::WitIn(witness_id) => wit_in(*witness_id),
-            Expression::Instance(_) => todo!(),
+            Expression::Instance(i) => instance(*i),
             Expression::Constant(scalar) => constant(*scalar),
             Expression::Sum(a, b) => {
-                let a = a.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
-                let b = b.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let a = a.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
+                let b = b.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
                 sum(a, b)
             }
             Expression::Product(a, b) => {
-                let a = a.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
-                let b = b.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let a = a.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
+                let b = b.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
                 product(a, b)
             }
             Expression::ScaledSum(x, a, b) => {
-                let x = x.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
-                let a = a.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
-                let b = b.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let x = x.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
+                let a = a.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
+                let b = b.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
                 scaled(x, a, b)
             }
             Expression::Challenge(challenge_id, pow, scalar, offset) => {
