@@ -741,7 +741,9 @@ mod tests {
                             GoldilocksExt2::ONE,
                             GoldilocksExt2::ZERO,
                         )),
-                        Box::new(Expression::Constant(U5 as u64)),
+                        Box::new(Expression::Constant(
+                            <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
+                        )),
                     )),
                     Box::new(Expression::Challenge(
                         0,
