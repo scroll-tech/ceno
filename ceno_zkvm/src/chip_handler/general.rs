@@ -7,8 +7,8 @@ use crate::{
     chip_handler::utils::pows_expr,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    expression::{Expression, Fixed, ToExpr, WitIn},
-    instructions::riscv::config::ExprLtConfig,
+    expression::{Expression, Fixed, Instance, ToExpr, WitIn},
+    instructions::riscv::{config::ExprLtConfig, constants::EXIT_CODE_IDX},
     structs::ROMType,
     tables::InsnRecord,
 };
@@ -34,6 +34,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.create_fixed(name_fn)
+    }
+
+    pub fn query_exit_code(&mut self) -> Result<[Instance; 2], ZKVMError> {
+        Ok([
+            self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
+            self.cs
+                .query_instance(|| "exit_code_high", EXIT_CODE_IDX + 1)?,
+        ])
     }
 
     pub fn lk_record<NR, N>(

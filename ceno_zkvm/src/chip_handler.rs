@@ -16,13 +16,6 @@ pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
 
     fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
-
-    fn state_out_with_exit_code(
-        &mut self,
-        pc: Expression<E>,
-        ts: Expression<E>,
-        exit_code: Expression<E>,
-    ) -> Result<(), ZKVMError>;
 }
 
 /// The common representation of a register value.
