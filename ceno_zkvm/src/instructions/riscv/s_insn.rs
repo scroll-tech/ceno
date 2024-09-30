@@ -118,7 +118,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         })
     }
 
-    fn assign_instance(
+    pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,

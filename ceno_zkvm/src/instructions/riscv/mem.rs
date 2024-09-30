@@ -6,6 +6,7 @@ use crate::{
         Instruction,
     },
     witness::LkMultiplicity,
+    Value,
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
@@ -16,6 +17,7 @@ struct SWConfig<E: ExtensionField> {
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
+    imm: UInt<E>,
 }
 pub struct SWOp;
 
@@ -37,6 +39,7 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
         let rs2_read = UInt::new_unchecked(|| "rs2_red", circuit_builder)?;
         let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
 
+        // TODO: feels like this is the responsibility of the s_insn
         let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
 
         let s_insn = SInstructionConfig::<E>::construct_circuit(
@@ -46,13 +49,13 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.memory_expr(),
-            rs2_read.memory_expr(),
         )?;
 
         Ok(SWConfig {
             s_insn,
             rs1_read,
             rs2_read,
+            imm,
         })
     }
 
@@ -62,6 +65,15 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        todo!()
+        let rs1 = step.rs1().unwrap().value;
+        let rs2 = step.rs2().unwrap().value;
+        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
+
+        config
+            .s_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
+        config.rs1_read.assign_limbs(instance, rs1.u16_fields());
+        config.rs2_read.assign_limbs(instance, rs2.u16_fields());
+        config.imm.assign_value(instance, imm);
     }
 }
