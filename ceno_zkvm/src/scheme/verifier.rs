@@ -185,7 +185,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         let num_instances = proof.num_instances;
         let log2_num_instances = ceil_log2(num_instances);
-        println!("hehe, verify_opcode: num_instances={}", num_instances);
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -259,7 +258,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             },
             transcript,
         );
-        println!("hehe, pass sum_check_verify");
         let (input_opening_point, expected_evaluation) = (
             main_sel_subclaim
                 .point
@@ -272,28 +270,60 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let eq_w = build_eq_x_r_vec_sequential(&rt_w[..log2_w_count]);
         let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
-        let (sel_r, sel_w, sel_lk, sel_non_lc_zero_sumcheck) = {
-            // sel(rt, t) = eq(rt, t) x sel(t)
+        // TODO: optimize it
+        let (sel_r, sel_w, sel_lk) = {
+            let eq_xr = build_eq_x_r_vec_sequential(&input_opening_point);
+            // TODO sel can be shared if expression count match
+            let mut sel_r = build_eq_x_r_vec_sequential(&rt_r[log2_r_count..]);
+            if num_instances < sel_r.len() {
+                sel_r.splice(
+                    num_instances..sel_r.len(),
+                    std::iter::repeat(E::ZERO).take(sel_r.len() - num_instances),
+                );
+            }
+
+            let mut sel_w = build_eq_x_r_vec_sequential(&rt_w[log2_w_count..]);
+            if num_instances < sel_w.len() {
+                sel_w.splice(
+                    num_instances..sel_w.len(),
+                    std::iter::repeat(E::ZERO).take(sel_w.len() - num_instances),
+                );
+            }
+
+            let mut sel_lk = build_eq_x_r_vec_sequential(&rt_lk[log2_lk_count..]);
+            if num_instances < sel_lk.len() {
+                sel_lk.splice(
+                    num_instances..sel_lk.len(),
+                    std::iter::repeat(E::ZERO).take(sel_lk.len() - num_instances),
+                );
+            }
+
             (
-                eq_eval(&rt_r[log2_r_count..], &input_opening_point)
-                    * sel_eval(num_instances, &input_opening_point),
-                eq_eval(&rt_w[log2_w_count..], &input_opening_point)
-                    * sel_eval(num_instances, &input_opening_point),
-                eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
-                    * sel_eval(num_instances, &input_opening_point),
-                // only initialize when circuit got non empty assert_zero_sumcheck_expressions
-                {
-                    let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
-                    if !cs.assert_zero_sumcheck_expressions.is_empty() {
-                        Some(
-                            eq_eval(&rt_non_lc_sumcheck, &input_opening_point)
-                                * sel_eval(num_instances, &rt_non_lc_sumcheck),
-                        )
-                    } else {
-                        None
-                    }
-                },
+                sel_r
+                    .iter()
+                    .zip(eq_xr.iter())
+                    .fold(E::ZERO, |acc, (&a, &b)| acc + a * b),
+                sel_w
+                    .iter()
+                    .zip(eq_xr.iter())
+                    .fold(E::ZERO, |acc, (&a, &b)| acc + a * b),
+                sel_lk
+                    .iter()
+                    .zip(eq_xr.iter())
+                    .fold(E::ZERO, |acc, (&a, &b)| acc + a * b),
             )
+        };
+        // only initialize when circuit got non empty assert_zero_sumcheck_expressions
+        let sel_non_lc_zero_sumcheck: Option<E> = {
+            let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
+            if !cs.assert_zero_sumcheck_expressions.is_empty() {
+                Some(
+                    eq_eval(&rt_non_lc_sumcheck, &input_opening_point)
+                        * sel_eval(num_instances, &rt_non_lc_sumcheck),
+                )
+            } else {
+                None
+            }
         };
 
         let computed_evals = [

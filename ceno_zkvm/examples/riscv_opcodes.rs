@@ -103,7 +103,7 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
-    let blt_config = zkvm_cs.register_opcode_circuit::<BltInstruction>();
+    //let blt_config = zkvm_cs.register_opcode_circuit::<BltInstruction>();
     // tables
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
     // let u1_range_config = zkvm_cs.register_table_circuit::<U1TableCircuit<E>>();
@@ -115,11 +115,11 @@ fn main() {
         .iter()
         .cloned()
         .chain(iter::repeat(ECALL_HALT))
-        .take(512)
+        .take(8)
         .collect();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces.register_opcode_circuit::<BltInstruction>(&zkvm_cs);
+    //zkvm_fixed_traces.register_opcode_circuit::<BltInstruction>(&zkvm_cs);
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
@@ -158,8 +158,8 @@ fn main() {
     let verifier = ZKVMVerifier::new(vk);
 
     for instance_num_vars in args.start..args.end {
-        let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
-        //let step_loop = 7;
+        // let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
+        let step_loop = 7;
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
 
@@ -179,30 +179,30 @@ fn main() {
             .into_iter()
             .collect::<Vec<_>>();
         let mut add_records = Vec::new();
-        let mut blt_records = Vec::new();
+        //let mut blt_records = Vec::new();
         all_records.iter().for_each(|record| {
             let kind = record.insn().kind().1;
             if kind == ADD {
                 add_records.push(record.clone());
             } else if kind == BLT {
-                blt_records.push(record.clone());
+         //       blt_records.push(record.clone());
             }
         });
 
-        tracing::info!(
-            "tracer generated {} ADD records, {} BLT records",
-            add_records.len(),
-            blt_records.len()
-        );
+//        tracing::info!(
+//            "tracer generated {} ADD records, {} BLT records",
+//            add_records.len(),
+//            blt_records.len()
+//        );
 
         let mut zkvm_witness = ZKVMWitnesses::default();
         // assign opcode circuits
         zkvm_witness
             .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
             .unwrap();
-        zkvm_witness
-            .assign_opcode_circuit::<BltInstruction>(&zkvm_cs, &blt_config, blt_records)
-            .unwrap();
+//        zkvm_witness
+//            .assign_opcode_circuit::<BltInstruction>(&zkvm_cs, &blt_config, blt_records)
+//            .unwrap();
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
         zkvm_witness
