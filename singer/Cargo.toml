@@ -44,6 +44,3 @@ dbg-add-opcode = []
 [[bench]]
 name = "add"
 harness = false
-
-[profile.bench]
-opt-level = 0
