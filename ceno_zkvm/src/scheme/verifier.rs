@@ -20,7 +20,7 @@ use crate::{
         utils::eval_by_expr_with_fixed,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{get_challenge_pows, sel_eval},
+    utils::{eq_eval_less_or_equal_than, get_challenge_pows, next_pow2_instance_padding},
 };
 
 use super::{
@@ -98,9 +98,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
             // getting the number of dummy padding item that we used in this opcode circuit
             let num_lks = circuit_vk.get_cs().lk_expressions.len();
-            let num_padded_lks_per_instance = num_lks.next_power_of_two() - num_lks;
+            let num_padded_lks_per_instance = next_pow2_instance_padding(num_lks) - num_lks;
             let num_padded_instance =
-                opcode_proof.num_instances.next_power_of_two() - opcode_proof.num_instances;
+                next_pow2_instance_padding(opcode_proof.num_instances) - opcode_proof.num_instances;
             dummy_table_item_multiplicity += num_padded_lks_per_instance
                 * opcode_proof.num_instances
                 + num_lks.next_power_of_two() * num_padded_instance;
@@ -184,7 +184,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         let num_instances = proof.num_instances;
-        let log2_num_instances = ceil_log2(num_instances);
+        let next_pow2_instance = next_pow2_instance_padding(num_instances);
+        let log2_num_instances = ceil_log2(next_pow2_instance);
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -271,22 +272,32 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
         let (sel_r, sel_w, sel_lk, sel_non_lc_zero_sumcheck) = {
-            // sel(rt, t) = eq(rt, t) x sel(t)
+            // sel(rt, t)
             (
-                eq_eval(&rt_r[log2_r_count..], &input_opening_point)
-                    * sel_eval(num_instances, &input_opening_point),
-                eq_eval(&rt_w[log2_w_count..], &input_opening_point)
-                    * sel_eval(num_instances, &input_opening_point),
-                eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
-                    * sel_eval(num_instances, &input_opening_point),
+                eq_eval_less_or_equal_than(
+                    num_instances - 1,
+                    &input_opening_point,
+                    &rt_r[log2_r_count..],
+                ),
+                eq_eval_less_or_equal_than(
+                    num_instances - 1,
+                    &input_opening_point,
+                    &rt_w[log2_w_count..],
+                ),
+                eq_eval_less_or_equal_than(
+                    num_instances - 1,
+                    &input_opening_point,
+                    &rt_lk[log2_lk_count..],
+                ),
                 // only initialize when circuit got non empty assert_zero_sumcheck_expressions
                 {
                     let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
                     if !cs.assert_zero_sumcheck_expressions.is_empty() {
-                        Some(
-                            eq_eval(&rt_non_lc_sumcheck, &input_opening_point)
-                                * sel_eval(num_instances, &rt_non_lc_sumcheck),
-                        )
+                        Some(eq_eval_less_or_equal_than(
+                            num_instances - 1,
+                            &input_opening_point,
+                            &rt_non_lc_sumcheck,
+                        ))
                     } else {
                         None
                     }
@@ -462,8 +473,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         );
         let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
-        let sel_lk = eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
-            * sel_eval(num_instances, &rt_lk[log2_lk_count..]);
+        let sel_lk = eq_eval_less_or_equal_than(
+            num_instances - 1,
+            &rt_lk[log2_lk_count..],
+            &input_opening_point,
+        );
 
         let computed_evals = [
             // lookup denominator

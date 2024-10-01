@@ -10,13 +10,24 @@ use rayon::{
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
+    scheme::constants::MIN_PAR_SIZE,
     witness::{LkMultiplicity, RowMajorMatrix},
 };
+use ff::Field;
 
 pub mod riscv;
 
+pub enum InstancePaddingStrategy {
+    Zero,
+    RepeatLast,
+}
+
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
+
+    fn padding_strategy() -> InstancePaddingStrategy {
+        InstancePaddingStrategy::RepeatLast
+    }
 
     fn name() -> String;
     fn construct_circuit(
@@ -39,7 +50,7 @@ pub trait Instruction<E: ExtensionField> {
         let nthreads =
             std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
         let num_instance_per_batch = if steps.len() > 256 {
-            steps.len() / nthreads
+            (steps.len() + (nthreads - 1)) / nthreads
         } else {
             steps.len()
         };
@@ -48,7 +59,7 @@ pub trait Instruction<E: ExtensionField> {
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
         raw_witin_iter
-            .zip_eq(steps.par_chunks(num_instance_per_batch))
+            .zip(steps.par_chunks(num_instance_per_batch))
             .flat_map(|(instances, steps)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 instances
@@ -60,6 +71,32 @@ pub trait Instruction<E: ExtensionField> {
                     .collect::<Vec<_>>()
             })
             .collect::<Result<(), ZKVMError>>()?;
+
+        let num_padding_instances = raw_witin.num_padding_instances();
+        if num_padding_instances > 0 {
+            // Fill the padding based on strategy
+
+            let padding_instance = match Self::padding_strategy() {
+                InstancePaddingStrategy::Zero => {
+                    vec![MaybeUninit::new(E::BaseField::ZERO); num_witin]
+                }
+                InstancePaddingStrategy::RepeatLast => raw_witin[steps.len() - 1].to_vec(),
+            };
+
+            let num_padding_instance_per_batch = if num_padding_instances > 256 {
+                (num_padding_instances + (nthreads - 1)) / nthreads
+            } else {
+                num_padding_instances
+            };
+            raw_witin
+                .par_batch_iter_padding_mut(num_padding_instance_per_batch)
+                .with_min_len(MIN_PAR_SIZE)
+                .for_each(|row| {
+                    row.chunks_mut(num_witin)
+                        .for_each(|instance| instance.copy_from_slice(padding_instance.as_slice()));
+                });
+        }
+
         Ok((raw_witin, lk_multiplicity))
     }
 }

@@ -1,24 +1,30 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
-use ceno_emul::StepRecord;
+use ceno_emul::{Change, StepRecord};
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
-use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
+use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
+use rand_chacha::ChaCha8Rng;
 use transcript::Transcript;
 
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::Instruction,
+    instructions::{riscv::arith::AddInstruction, Instruction},
     set_val,
     structs::{PointAndEval, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
 };
 
-use super::{constants::NUM_FANIN, prover::ZKVMProver, verifier::ZKVMVerifier};
+use super::{
+    constants::{MAX_NUM_VARIABLES, NUM_FANIN},
+    prover::ZKVMProver,
+    verifier::ZKVMVerifier,
+};
 
 struct TestConfig {
     pub(crate) reg_id: WitIn,
@@ -160,4 +166,92 @@ fn test_rw_lk_expression_combination() {
     test_rw_lk_expression_combination_inner::<19, 17>();
     test_rw_lk_expression_combination_inner::<61, 17>();
     test_rw_lk_expression_combination_inner::<17, 61>();
+}
+
+#[allow(clippy::unusual_byte_groupings)]
+const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
+#[allow(clippy::unusual_byte_groupings)]
+const PROGRAM_CODE: [u32; 4] = [
+    // func7   rs2   rs1   f3  rd    opcode
+    0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
+    ECALL_HALT,                               // ecall halt
+    ECALL_HALT,                               // ecall halt
+    ECALL_HALT,                               // ecall halt
+];
+#[test]
+fn test_single_add_instance_e2e() {
+    type E = GoldilocksExt2;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+
+    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let mut zkvm_cs = ZKVMConstraintSystem::default();
+    // opcode circuits
+    let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
+    let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
+
+    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
+
+    let program_code: Vec<u32> = PROGRAM_CODE.to_vec();
+    let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
+    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
+
+    zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
+        &zkvm_cs,
+        u16_range_config.clone(),
+        &(),
+    );
+
+    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
+        &zkvm_cs,
+        prog_config.clone(),
+        &program_code,
+    );
+
+    let pk = zkvm_cs
+        .clone()
+        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
+        .expect("keygen failed");
+    let vk = pk.get_vk();
+
+    // single instance
+    let add_records = vec![StepRecord::new_r_instruction(
+        4,
+        0x20000000.into(),
+        4227635,
+        1,
+        0,
+        Change {
+            before: 0,
+            after: 1,
+        },
+        3,
+    )];
+    // proving
+    let prover = ZKVMProver::new(pk);
+    let verifier = ZKVMVerifier::new(vk);
+    let mut zkvm_witness = ZKVMWitnesses::default();
+    // assign opcode circuits
+    zkvm_witness
+        .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
+        .unwrap();
+    zkvm_witness.finalize_lk_multiplicities();
+    zkvm_witness
+        .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
+        .unwrap();
+    zkvm_witness
+        .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program_code.len())
+        .unwrap();
+
+    let transcript = Transcript::new(b"riscv");
+    let zkvm_proof = prover
+        .create_proof(zkvm_witness, 1, transcript)
+        .expect("create_proof failed");
+
+    let transcript = Transcript::new(b"riscv");
+    assert!(
+        verifier
+            .verify_proof(zkvm_proof, transcript)
+            .expect("verify proof return with error"),
+    );
 }

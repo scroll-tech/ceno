@@ -18,24 +18,27 @@ use rayon::{
     prelude::ParallelSliceMut,
 };
 
-use crate::{expression::Expression, scheme::constants::MIN_PAR_SIZE};
+use crate::{
+    expression::Expression, scheme::constants::MIN_PAR_SIZE, utils::next_pow2_instance_padding,
+};
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
 /// output [[1,3,5,7,0,0,0,0],[2,4,6,8,0,0,0,0]]
 pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
     mles: &[ArcMultilinearExtension<E>],
-    log2_num_instances: usize,
+    num_instances: usize,
     num_limbs: usize,
     default: E,
 ) -> Vec<ArcMultilinearExtension<'a, E>> {
-    let num_instances = 1 << log2_num_instances;
     assert!(num_limbs.is_power_of_two());
     assert!(!mles.is_empty());
+    let next_power_of_2 = next_pow2_instance_padding(num_instances);
     assert!(
         mles.iter()
-            .all(|mle| mle.evaluations().len() == num_instances)
+            .all(|mle| mle.evaluations().len() <= next_power_of_2)
     );
+    let log2_num_instances = ceil_log2(next_power_of_2);
     let per_fanin_len = (mles[0].evaluations().len() / num_limbs).max(1); // minimal size 1
     let log2_mle_size = ceil_log2(mles.len());
     let log2_num_limbs = ceil_log2(num_limbs);
@@ -51,32 +54,36 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
             let per_instance_size = 1 << log2_mle_size;
             assert!(evaluations.len() >= per_instance_size);
             let start = per_fanin_len * fanin_index;
-            mles.iter()
-                .enumerate()
-                .for_each(|(i, mle)| match mle.evaluations() {
-                    FieldType::Ext(mle) => mle
-                        .get(start..(start + per_fanin_len))
-                        .unwrap_or(&[])
-                        .par_iter()
-                        .zip(evaluations.par_chunks_mut(per_instance_size))
-                        .with_min_len(MIN_PAR_SIZE)
-                        .for_each(|(value, instance)| {
-                            assert_eq!(instance.len(), per_instance_size);
-                            instance[i] = *value;
-                        }),
-                    FieldType::Base(mle) => mle
-                        .get(start..(start + per_fanin_len))
-                        .unwrap_or(&[])
-                        .par_iter()
-                        .zip(evaluations.par_chunks_mut(per_instance_size))
-                        .with_min_len(MIN_PAR_SIZE)
-                        .for_each(|(value, instance)| {
-                            assert_eq!(instance.len(), per_instance_size);
-                            instance[i] =
-                                <<E as ff_ext::ExtensionField>::BaseField as Into<E>>::into(*value);
-                        }),
-                    _ => unreachable!(),
-                });
+            if start < num_instances {
+                let valid_instances_len = per_fanin_len.min(num_instances - start);
+                mles.iter()
+                    .enumerate()
+                    .for_each(|(i, mle)| match mle.evaluations() {
+                        FieldType::Ext(mle) => mle
+                            .get(start..(start + valid_instances_len))
+                            .unwrap_or(&[])
+                            .par_iter()
+                            .zip(evaluations.par_chunks_mut(per_instance_size))
+                            .with_min_len(MIN_PAR_SIZE)
+                            .for_each(|(value, instance)| {
+                                assert_eq!(instance.len(), per_instance_size);
+                                instance[i] = *value;
+                            }),
+                        FieldType::Base(mle) => mle
+                            .get(start..(start + per_fanin_len))
+                            .unwrap_or(&[])
+                            .par_iter()
+                            .zip(evaluations.par_chunks_mut(per_instance_size))
+                            .with_min_len(MIN_PAR_SIZE)
+                            .for_each(|(value, instance)| {
+                                assert_eq!(instance.len(), per_instance_size);
+                                instance[i] = <<E as ff_ext::ExtensionField>::BaseField as Into<
+                                    E,
+                                >>::into(*value);
+                            }),
+                        _ => unreachable!(),
+                    });
+            }
             evaluations.into_mle().into()
         })
         .collect::<Vec<ArcMultilinearExtension<E>>>()
@@ -427,7 +434,7 @@ mod tests {
             vec![E::from(5u64), E::from(6u64)].into_mle().into(),
             vec![E::from(7u64), E::from(8u64)].into_mle().into(),
         ];
-        let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
+        let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ONE);
         // [[1, 3, 5, 7], [2, 4, 6, 8]]
         assert_eq!(
             res[0].get_ext_field_vec(),
@@ -443,13 +450,15 @@ mod tests {
     fn test_interleaving_mles_to_mles_padding() {
         type E = GoldilocksExt2;
         let num_product_fanin = 2;
+
+        // case 1: test limb level padding
         // [[1,2],[3,4],[5,6]]]
         let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
             vec![E::ONE, E::from(2u64)].into_mle().into(),
             vec![E::from(3u64), E::from(4u64)].into_mle().into(),
             vec![E::from(5u64), E::from(6u64)].into_mle().into(),
         ];
-        let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ZERO);
+        let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ZERO);
         // [[1, 3, 5, 0], [2, 4, 6, 0]]
         assert_eq!(
             res[0].get_ext_field_vec(),
@@ -459,6 +468,21 @@ mod tests {
             res[1].get_ext_field_vec(),
             vec![E::from(2u64), E::from(4u64), E::from(6u64), E::from(0u64)],
         );
+
+        // case 2: test instance level padding
+        // [[1,0],[3,0],[5,0]]]
+        let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
+            vec![E::ONE, E::from(0u64)].into_mle().into(),
+            vec![E::from(3u64), E::from(0u64)].into_mle().into(),
+            vec![E::from(5u64), E::from(0u64)].into_mle().into(),
+        ];
+        let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
+        // [[1, 3, 5, 1], [1, 1, 1, 1]]
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::ONE, E::from(3u64), E::from(5u64), E::ONE],
+        );
+        assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE; 4],);
     }
 
     #[test]
@@ -470,7 +494,7 @@ mod tests {
             vec![E::from(2u64)].into_mle().into(),
             vec![E::from(3u64)].into_mle().into(),
         ];
-        let res = interleaving_mles_to_mles(&input_mles, 0, num_product_fanin, E::ONE);
+        let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[2, 3], [1, 1]]
         assert_eq!(
             res[0].get_ext_field_vec(),
