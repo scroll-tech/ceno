@@ -95,13 +95,12 @@ impl IsLtConfig {
     }
 
     pub fn cal_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) -> u64 {
-        let diff = if is_lt {
+        (if is_lt {
             1u64 << (u16::BITS as usize * max_num_u16_limbs)
         } else {
             0
         } + lhs
-            - rhs;
-        diff
+            - rhs)
     }
 
     pub fn assign_instance<F: SmallField>(

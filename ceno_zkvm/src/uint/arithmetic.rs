@@ -114,7 +114,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let Some(carries) = &c.carries else {
             return Err(ZKVMError::CircuitError);
         };
-
+        // assert carry range less than max carry value constant
         c.carries_auxiliray_lt_config = Some(
             carries
                 .iter()
@@ -133,25 +133,26 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         );
 
         // creating a witness constrained as expression to reduce overall degree
-        let mut swap_witin =
-            |name: &str, u: &mut UIntLimbs<M, C, E>| -> Result<Vec<Expression<E>>, ZKVMError> {
-                if u.is_expr() {
-                    circuit_builder.namespace(
-                        || name.to_owned(),
-                        |cb| {
-                            let existing_expr = u.expr();
-                            // this will overwrite existing expressions
-                            u.replace_limbs_with_witin(|| format!("replace_limbs_with_witin"), cb)?;
-                            // check if the new witness equals the existing expression
-                            izip!(u.expr(), existing_expr).try_for_each(|(lhs, rhs)| {
-                                cb.require_equal(|| format!("new_witin_equal_expr"), lhs, rhs)
-                            })?;
-                            Ok(())
-                        },
-                    )?;
-                }
-                Ok(u.expr())
-            };
+        let mut swap_witin = |name: &str,
+                              u: &mut UIntLimbs<M, C, E>|
+         -> Result<Vec<Expression<E>>, ZKVMError> {
+            if u.is_expr() {
+                circuit_builder.namespace(
+                    || name.to_owned(),
+                    |cb| {
+                        let existing_expr = u.expr();
+                        // this will overwrite existing expressions
+                        u.replace_limbs_with_witin(|| "replace_limbs_with_witin".to_string(), cb)?;
+                        // check if the new witness equals the existing expression
+                        izip!(u.expr(), existing_expr).try_for_each(|(lhs, rhs)| {
+                            cb.require_equal(|| "new_witin_equal_expr".to_string(), lhs, rhs)
+                        })?;
+                        Ok(())
+                    },
+                )?;
+            }
+            Ok(u.expr())
+        };
 
         let a_expr = swap_witin("lhs", self)?;
         let b_expr = swap_witin("rhs", multiplier)?;

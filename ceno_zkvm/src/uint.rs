@@ -183,7 +183,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         if let UintLimb::WitIn(wires) = &self.limbs {
             for (wire, limb) in wires.iter().zip(
                 limbs_values
-                    .into_iter()
+                    .iter()
                     .map(|v| E::BaseField::from(*v as u64))
                     .chain(std::iter::repeat(E::BaseField::ZERO)),
             ) {
@@ -209,7 +209,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         if let Some(carries) = &self.carries {
             for (wire, carry) in carries.iter().zip(
                 carry_values
-                    .into_iter()
+                    .iter()
                     .map(|v| E::BaseField::from(Into::<u64>::into(*v)))
                     .chain(std::iter::repeat(E::BaseField::ZERO)),
             ) {
@@ -712,14 +712,13 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         });
 
         tmp.iter()
-            .into_iter()
             .zip(c_limbs.iter_mut())
             .enumerate()
             .for_each(|(i, (tmp, limb))| {
                 // tmp + prev_carry - carry * Self::LIMB_BASE_MUL
                 let mut tmp = *tmp;
                 if i > 0 {
-                    tmp = tmp + carries[i - 1];
+                    tmp += carries[i - 1];
                 }
                 // update carry
                 carries[i] = tmp >> Self::C;
@@ -735,7 +734,6 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
 
         // range check
         c_limbs.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
-        // calculate max possible carry value
 
         (c_limbs, carries, max_degree_2_carry_value(Self::M, Self::C))
     }

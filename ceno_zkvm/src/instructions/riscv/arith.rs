@@ -146,11 +146,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     .rs1_read
                     .assign_limbs(instance, rs1_read.as_u16_limbs());
 
-                let (_, carries, max_carry) = rs1_read.mul(&rs2_read, lk_multiplicity, true);
-
-                config
-                    .rd_written
-                    .assign_limbs(instance, rd_written.as_u16_limbs());
+                let (_, carries, max_carry_value) = rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
                 config
                     .rd_written
@@ -160,7 +156,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     instance,
                     lk_multiplicity,
                     &carries,
-                    max_carry,
+                    max_carry_value,
                 )?;
             }
 
