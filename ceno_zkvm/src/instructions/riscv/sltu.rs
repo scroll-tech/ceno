@@ -24,7 +24,7 @@ pub struct ArithConfig<E: ExtensionField> {
     #[allow(dead_code)]
     rd_written: UInt<E>,
 
-    is_lt: IsLtConfig<UINT_LIMBS>,
+    is_lt: IsLtConfig,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -55,8 +55,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rs1_read.value(),
             rs2_read.value(),
             None,
+            UINT_LIMBS,
         )?;
-        let rd_written = UInt::new_from_exprs_unchecked(vec![lt.expr()])?;
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -90,10 +91,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let rs2_read = Value::new_unchecked(rs2);
         config
             .rs1_read
-            .assign_limbs(instance, rs1_read.u16_fields());
+            .assign_limbs(instance, rs1_read.as_u16_limbs());
         config
             .rs2_read
-            .assign_limbs(instance, rs2_read.u16_fields());
+            .assign_limbs(instance, rs2_read.as_u16_limbs());
         config
             .is_lt
             .assign_instance(instance, lkm, rs1.into(), rs2.into())?;

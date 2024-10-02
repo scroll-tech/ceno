@@ -109,22 +109,23 @@ impl<E: ExtensionField> LogicConfig<E> {
             .assign_instance(instance, lk_multiplicity, step)?;
 
         let rs1_read = Self::u8_limbs(step.rs1().unwrap().value);
-        self.rs1_read.assign_limbs(instance, rs1_read);
+        self.rs1_read.assign_limbs(instance, &rs1_read);
 
         let rs2_read = Self::u8_limbs(step.rs2().unwrap().value);
-        self.rs2_read.assign_limbs(instance, rs2_read);
+        self.rs2_read.assign_limbs(instance, &rs2_read);
 
         let rd_written = Self::u8_limbs(step.rd().unwrap().value.after);
-        self.rd_written.assign_limbs(instance, rd_written);
+        self.rd_written.assign_limbs(instance, &rd_written);
 
         Ok(())
     }
 
-    /// Decompose a word into byte field elements in little-endian order.
-    fn u8_limbs(v: Word) -> Vec<E::BaseField> {
+    /// Decompose a word into byte in little-endian order, each hold in u16
+    /// using u16 as placeholder
+    fn u8_limbs(v: Word) -> Vec<u16> {
         let mut limbs = Vec::with_capacity(WORD_SIZE);
         for i in 0..WORD_SIZE {
-            limbs.push(E::BaseField::from(((v >> (i * 8)) & 0xff) as u64));
+            limbs.push((v >> (i * 8) & 0xff) as u16);
         }
         limbs
     }

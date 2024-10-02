@@ -8,6 +8,7 @@ use crate::{
     create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
+    gadgets::IsLtConfig,
     instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
 };
 
@@ -25,6 +26,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         // allocate witness cells and do range checks for carries
         c.alloc_carry_unchecked(|| "add_carry", circuit_builder, with_overflow)?;
+        let Some(carries) = &c.carries else {
+            return Err(ZKVMError::CircuitError);
+        };
+        carries.iter().enumerate().try_for_each(|(i, carry)| {
+            circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr())
+        })?;
 
         // perform add operation
         // c[i] = a[i] + b[i] + carry[i-1] - carry[i] * 2 ^ C
@@ -99,11 +106,36 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         multiplier: &mut UIntLimbs<M, C, E>,
         with_overflow: bool,
-        is_hi_limb: bool,
+        _is_hi_limb: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         let mut c = UIntLimbs::<M, C, E>::new(|| "c", circuit_builder)?;
         // allocate witness cells and do range checks for carries
         c.alloc_carry_unchecked(|| "mul_carry", circuit_builder, with_overflow)?;
+        let Some(carries) = &c.carries else {
+            return Err(ZKVMError::CircuitError);
+        };
+        println!(
+            "MAX_DEGREE_2_MUL_CARRY_BITS {:?} Self::MAX_DEGREE_2_MUL_CARRY_BITS_POW2 {:?} Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB {:?}",
+            Self::MAX_DEGREE_2_MUL_CARRY_BITS,
+            Self::MAX_DEGREE_2_MUL_CARRY_VALUE,
+            Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB
+        );
+        c.carries_auxiliray_lt_config = Some(
+            carries
+                .iter()
+                .enumerate()
+                .map(|(i, carry)| {
+                    IsLtConfig::construct_circuit(
+                        circuit_builder,
+                        || format!("carry_{i}_in_less_than"),
+                        carry.expr(),
+                        (Self::MAX_DEGREE_2_MUL_CARRY_VALUE as usize).into(),
+                        Some(true),
+                        Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
+                    )
+                })
+                .collect::<Result<Vec<IsLtConfig>, ZKVMError>>()?,
+        );
 
         // creating a witness constrained as expression to reduce overall degree
         let mut swap_witin =
@@ -179,14 +211,60 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         multiplier: &mut UIntLimbs<M, C, E>,
         with_overflow: bool,
-        is_hi_limb: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            self.internal_mul(cb, multiplier, with_overflow, is_hi_limb)
+            self.internal_mul(cb, multiplier, with_overflow, false)
+        })
+    }
+    pub fn mul_hi<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+        multiplier: &mut UIntLimbs<M, C, E>,
+        with_overflow: bool,
+    ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
+        circuit_builder.namespace(name_fn, |cb| {
+            self.internal_mul(cb, multiplier, with_overflow, true)
         })
     }
 
     pub fn mul_add<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+        multiplier: &mut UIntLimbs<M, C, E>,
+        addend: &UIntLimbs<M, C, E>,
+        with_overflow: bool,
+    ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M, C, E>), ZKVMError> {
+        self.internal_mul_add(
+            name_fn,
+            circuit_builder,
+            multiplier,
+            addend,
+            with_overflow,
+            false,
+        )
+    }
+
+    pub fn mul_add_hi<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+        multiplier: &mut UIntLimbs<M, C, E>,
+        addend: &UIntLimbs<M, C, E>,
+        with_overflow: bool,
+    ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M, C, E>), ZKVMError> {
+        self.internal_mul_add(
+            name_fn,
+            circuit_builder,
+            multiplier,
+            addend,
+            with_overflow,
+            true,
+        )
+    }
+
+    fn internal_mul_add<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
@@ -199,7 +277,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             let c = self.internal_mul(cb, multiplier, with_overflow, is_hi_limb)?;
             Ok((
                 c.clone(),
-                c.internal_add(cb, &addend.expr(), with_overflow).unwrap(),
+                c.internal_add(cb, &addend.expr(), with_overflow)?,
             ))
         })
     }
@@ -390,10 +468,10 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
 
         let mut lhs_limbs = self.limbs.iter().copied().collect_vec();
         lhs_limbs[Self::NUM_CELLS - 1] = lhs_msb.high_limb_no_msb;
-        let lhs_no_msb = Self::new_from_limbs(&lhs_limbs);
+        let lhs_no_msb = Self::from_witin_unchecked(&lhs_limbs);
         let mut rhs_limbs = rhs.limbs.iter().copied().collect_vec();
         rhs_limbs[Self::NUM_CELLS - 1] = rhs_msb.high_limb_no_msb;
-        let rhs_no_msb = Self::new_from_limbs(&rhs_limbs);
+        let rhs_no_msb = Self::from_witin_unchecked(&rhs_limbs);
 
         // (1) compute ltu(a_{<s},b_{<s})
         let is_ltu = lhs_no_msb.ltu_limb8(circuit_builder, &rhs_no_msb)?;
@@ -807,8 +885,11 @@ mod tests {
     mod mul_add {
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
+            gadgets::IsLtConfig,
             scheme::mock_prover::MockProver,
             uint::UIntLimbs,
+            witness::LkMultiplicity,
+            Value,
         };
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
@@ -839,6 +920,20 @@ mod tests {
             }
         }
 
+        fn calculate_carry_diff<const M: usize, const C: usize>(carries: Vec<u64>) -> Vec<u64> {
+            carries
+                .into_iter()
+                .flat_map(|carry| {
+                    let max_carry_value = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_VALUE;
+                    let max_carry_u16_limb = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_U16_LIMB;
+                    let diff =
+                        IsLtConfig::cal_diff(true, max_carry_u16_limb, carry, max_carry_value);
+                    let mut diff_u16_limb = Value::new_unchecked(diff).as_u16_limbs().to_vec();
+                    diff_u16_limb.resize(max_carry_u16_limb, 0);
+                    diff_u16_limb.iter().map(|v| *v as u64).collect_vec()
+                })
+                .collect_vec()
+        }
         #[test]
         fn test_add_mul() {
             let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
@@ -855,6 +950,8 @@ mod tests {
                 vec![3, 5, 2, 0],
                 // alloc e carry
                 vec![0; 3],
+                // each carry alloc with diff
+                calculate_carry_diff::<64, 16>(vec![0; 3]),
                 // alloc c limb
                 vec![3, 2, 0, 0],
             ]
@@ -895,6 +992,8 @@ mod tests {
                 vec![9, 12, 4, 0],
                 // alloc g carry
                 vec![0; 3],
+                // each carry alloc with diff
+                calculate_carry_diff::<64, 16>(vec![0; 3]),
                 // alloc c limb
                 vec![3, 2, 0, 0],
                 // alloc f limb
@@ -930,6 +1029,8 @@ mod tests {
                 vec![2, 3, 1, 0],
                 // alloc mul_c carry
                 vec![0; 3],
+                // each carry alloc with diff
+                calculate_carry_diff::<64, 16>(vec![0; 3]),
                 // alloc d
                 vec![1, 1, 0, 0],
                 // e = c + d, carry only
@@ -965,9 +1066,11 @@ mod tests {
                 // tmp = a * b = [2, 3, 1, 0]
                 vec![2, 3, 1, 0],
                 // tmp carry
-                vec![0; 4],
+                vec![0; 3],
+                // each carry alloc with diff
+                calculate_carry_diff::<64, 16>(vec![0; 3]),
                 // e carry
-                vec![0; 4],
+                vec![0; 3],
             ]
             .concat()
             .into_arc_mle();
@@ -993,21 +1096,30 @@ mod tests {
                 // alloc b = 2^16 + (2^16 - 1) * 2^16
                 vec![u16::MAX as u64, u16::MAX as u64],
                 // mul_c = a * b,
-                // alloc c
-                vec![1, 0xfffe, 0xffff, 0],
+                // alloc c [1, 0xfffe, 0xffff, 0] with lo part only
+                vec![1, 0xfffe],
                 // c carry
-                vec![0x1fffd],
+                vec![0x1fffd, 0],
+                // each carry alloc with diff
+                calculate_carry_diff::<32, 16>(vec![0x1fffd, 0]),
             ]
             .concat()
             .into_arc_mle();
 
+            let a = Value::<'_, u32>::new_unchecked(u32::MAX);
+            let b = Value::<'_, u32>::new_unchecked(u32::MAX);
+            let (limb, carry, max_carry_value) = a.mul(&b, &mut LkMultiplicity::default(), false);
+            println!(
+                "limb {:?} carry {:?} max_carry_value {max_carry_value}",
+                limb, carry
+            );
             let mut cs = ConstraintSystem::new(|| "test_mul_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
             let mut uint_a = UIntLimbs::<32, 16, E>::new(|| "uint_a", &mut cb).unwrap();
             let mut uint_b = UIntLimbs::<32, 16, E>::new(|| "uint_b", &mut cb).unwrap();
             let _ = uint_a
-                .mul::<_, _, 64, 32>(|| "mul_add", &mut cb, &mut uint_b, false)
+                .mul(|| "mul_add", &mut cb, &mut uint_b, false)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, None);

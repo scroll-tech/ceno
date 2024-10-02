@@ -1,7 +1,7 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::constants::{UInt, PC_STEP_SIZE, UINT_LIMBS};
+use super::constants::{UInt, PC_STEP_SIZE};
 use crate::{
     chip_handler::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
@@ -31,8 +31,8 @@ pub struct IInstructionConfig<E: ExtensionField> {
     pub prev_rd_value: UInt<E>,
     pub prev_rs1_ts: WitIn,
     pub prev_rd_ts: WitIn,
-    pub lt_rs1_cfg: IsLtConfig<UINT_LIMBS>,
-    pub lt_rd_cfg: IsLtConfig<UINT_LIMBS>,
+    pub lt_rs1_cfg: IsLtConfig,
+    pub lt_rd_cfg: IsLtConfig,
 }
 
 impl<E: ExtensionField> IInstructionConfig<E> {
@@ -128,7 +128,7 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         set_val!(instance, self.prev_rd_ts, step.rd().unwrap().previous_cycle);
         self.prev_rd_value.assign_limbs(
             instance,
-            Value::new_unchecked(step.rd().unwrap().value.before).u16_fields(),
+            Value::new_unchecked(step.rd().unwrap().value.before).as_u16_limbs(),
         );
 
         // Register read and write.

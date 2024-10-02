@@ -1,6 +1,5 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 
 use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
@@ -110,32 +109,30 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         // assignment
         config.r_insn.assign_instance(instance, lkm, step)?;
-        config.divisor.assign_limbs(instance, divisor.u16_fields());
-        config.outcome.assign_limbs(instance, outcome.u16_fields());
+        config
+            .divisor
+            .assign_limbs(instance, divisor.as_u16_limbs());
+        config
+            .outcome
+            .assign_limbs(instance, outcome.as_u16_limbs());
 
-        let (_, mul_carries, add_carries) = divisor.mul_add(&outcome, &r, lkm, true);
+        let (_, mul_carries, add_carries, max_carry_value) =
+            divisor.mul_add(&outcome, &r, lkm, true);
         config
             .inter_mul_value
-            .assign_limbs(instance, inter_mul_value.u16_fields());
-        config.inter_mul_value.assign_carries(
-            instance,
-            mul_carries
-                .into_iter()
-                .map(|carry| E::BaseField::from(carry as u64))
-                .collect_vec(),
-        );
-        config.remainder.assign_limbs(instance, r.u16_fields());
+            .assign_limbs(instance, inter_mul_value.as_u16_limbs());
+        config
+            .inter_mul_value
+            .assign_carries(instance, &mul_carries);
+        config.remainder.assign_limbs(instance, r.as_u16_limbs());
 
         config
             .dividend
-            .assign_limbs(instance, dividend.u16_fields());
-        config.dividend.assign_carries(
-            instance,
-            add_carries
-                .into_iter()
-                .map(|carry| E::BaseField::from(carry as u64))
-                .collect_vec(),
-        );
+            .assign_limbs(instance, dividend.as_u16_limbs());
+        config.dividend.assign_carries(instance, &add_carries);
+        config
+            .dividend
+            .assign_carries_auxiliary(instance, lkm, &add_carries, max_carry_value)?;
 
         config
             .is_zero

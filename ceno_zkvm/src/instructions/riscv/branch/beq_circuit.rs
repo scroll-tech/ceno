@@ -83,12 +83,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
         let rs1_read = step.rs1().unwrap().value;
         config
             .rs1_read
-            .assign_limbs(instance, Value::new_unchecked(rs1_read).u16_fields());
+            .assign_limbs(instance, Value::new_unchecked(rs1_read).as_u16_limbs());
 
         let rs2_read = step.rs2().unwrap().value;
         config
             .rs2_read
-            .assign_limbs(instance, Value::new_unchecked(rs2_read).u16_fields());
+            .assign_limbs(instance, Value::new_unchecked(rs2_read).as_u16_limbs());
 
         config.equal.assign_instance(
             instance,

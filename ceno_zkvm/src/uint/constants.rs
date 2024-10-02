@@ -27,4 +27,23 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     /// The number of `RANGE_CHIP_BIT_WIDTH` cells needed to represent the entire `UIntLimbs<M, C>`
     pub const N_RANGE_CELLS: usize = Self::NUM_CELLS * Self::N_RANGE_CELLS_PER_CELL;
+
+    /// Max carry value during degree 2 limb multiplication
+    pub const MAX_DEGREE_2_MUL_CARRY_VALUE: u64 = {
+        assert!(M <= u64::BITS as usize);
+        let max_carry_value: u128 = ((1 << C) - 1) as u128 * ((1 << C) - 1 ) as u128 // 2^C * 2^C
+            * (2 * Self::NUM_CELLS - 1) as u128; // max number of limbs for degree 2 mul
+        assert!(max_carry_value <= u64::MAX as u128);
+        max_carry_value as u64
+    };
+
+    /// Min bits to cover MAX_DEGREE_2_MUL_CARRY_VALUE
+    pub const MAX_DEGREE_2_MUL_CARRY_BITS: usize = {
+        let max_bit_of_carry = u64::BITS - Self::MAX_DEGREE_2_MUL_CARRY_VALUE.leading_zeros();
+        max_bit_of_carry as usize
+    };
+
+    /// Min number of u16 limb to cover max carry value
+    pub const MAX_DEGREE_2_MUL_CARRY_U16_LIMB: usize =
+        (Self::MAX_DEGREE_2_MUL_CARRY_BITS + 15) / 16;
 }

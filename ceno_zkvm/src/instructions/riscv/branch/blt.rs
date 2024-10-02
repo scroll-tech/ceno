@@ -79,8 +79,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
     ) -> Result<(), ZKVMError> {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
-        config.read_rs1.assign_limbs(instance, rs1.u16_fields());
-        config.read_rs2.assign_limbs(instance, rs2.u16_fields());
+        config.read_rs1.assign_limbs(instance, rs1.as_u16_limbs());
+        config.read_rs2.assign_limbs(instance, rs2.as_u16_limbs());
         config.is_lt.assign_instance::<E>(
             instance,
             lk_multiplicity,

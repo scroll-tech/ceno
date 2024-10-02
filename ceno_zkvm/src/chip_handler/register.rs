@@ -21,7 +21,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError> {
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -51,7 +51,12 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             cb.write_record(|| "write_record", write_record)?;
 
             // assert prev_ts < current_ts
-            let lt_cfg = cb.less_than(|| "prev_ts < ts", prev_ts, ts.clone(), Some(true))?;
+            let lt_cfg = cb.less_than::<_, _, UINT_LIMBS>(
+                || "prev_ts < ts",
+                prev_ts,
+                ts.clone(),
+                Some(true),
+            )?;
 
             let next_ts = ts + 1.into();
 
@@ -67,7 +72,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError> {
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -96,7 +101,12 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             cb.read_record(|| "read_record", read_record)?;
             cb.write_record(|| "write_record", write_record)?;
 
-            let lt_cfg = cb.less_than(|| "prev_ts < ts", prev_ts, ts.clone(), Some(true))?;
+            let lt_cfg = cb.less_than::<_, _, UINT_LIMBS>(
+                || "prev_ts < ts",
+                prev_ts,
+                ts.clone(),
+                Some(true),
+            )?;
 
             let next_ts = ts + 1.into();
 
