@@ -17,7 +17,7 @@ TASK_RUN = { script = [
         #!/bin/bash
         exclude_projects=" singer-pro ceno_rt " # NOTE:keep leading and end with one space
 
-        if echo "$exclude_projects" | grep -q -E "( )${CARGO_MAKE_CRATE_NAME}( )"; then
+        if echo "$exclude_projects" | grep --silent --extended-regexp "( )${CARGO_MAKE_CRATE_NAME}( )"; then
             echo "false"
         else
             echo "true"
@@ -28,7 +28,7 @@ TASK_RUN = { script = [
 [tasks.tests]
 condition = { env_true = ["TASK_RUN"] }
 command = "cargo"
-args = ["test", "--lib", "--release", "--target", "${CUR_TARGET}", "-p", "${CARGO_MAKE_CRATE_NAME}"]
+args = ["test", "--lib", "--release", "--target", "${CUR_TARGET}", "--package", "${CARGO_MAKE_CRATE_NAME}"]
 
 [tasks.fmt-all-check]
 command = "cargo"
