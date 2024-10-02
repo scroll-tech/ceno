@@ -259,9 +259,9 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 16);
-        let layers = vec![2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0];
-        for cell_id in 0..0 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        let layers = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0];
+        for (cell, layer) in itertools::izip! {circuit_builder.cells, layers} {
+            assert_eq!(cell.layer, Some(layer));
         }
     }
 }
