@@ -509,8 +509,6 @@ impl<E: ExtensionField> Display for Expression<E> {
 
 pub mod fmt {
     use super::*;
-    use itertools::Itertools;
-    use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
     use std::fmt::Write;
 
     pub fn expr<E: ExtensionField>(
@@ -603,30 +601,6 @@ pub mod fmt {
 
     pub fn prn(s: String, add_prn: bool) -> String {
         if add_prn { format!("({})", s) } else { s }
-    }
-
-    #[allow(dead_code)]
-    pub fn wtns<E: ExtensionField>(
-        wtns: &[WitnessId],
-        wits_in: &[ArcMultilinearExtension<E>],
-        inst_id: usize,
-        wits_in_name: &[String],
-    ) -> String {
-        wtns.iter()
-            .sorted()
-            .map(|wt_id| {
-                let wit = &wits_in[*wt_id as usize];
-                let name = &wits_in_name[*wt_id as usize];
-                let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
-                    field(&e[inst_id])
-                } else if let Some(bf) = wit.get_base_field_vec_optn() {
-                    base_field::<E>(&bf[inst_id], true)
-                } else {
-                    "Unknown".to_string()
-                };
-                format!("  WitIn({wt_id})={value_fmt} {name:?}")
-            })
-            .join("\n")
     }
 }
 
