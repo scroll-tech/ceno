@@ -11,6 +11,9 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 
+#[cfg(test)]
+use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -601,6 +604,32 @@ pub mod fmt {
 
     pub fn prn(s: String, add_prn: bool) -> String {
         if add_prn { format!("({})", s) } else { s }
+    }
+
+    #[cfg(test)]
+    pub fn wtns<E: ExtensionField>(
+        wtns: &[WitnessId],
+        wits_in: &[ArcMultilinearExtension<E>],
+        inst_id: usize,
+        wits_in_name: &[String],
+    ) -> String {
+        use itertools::Itertools;
+
+        wtns.iter()
+            .sorted()
+            .map(|wt_id| {
+                let wit = &wits_in[*wt_id as usize];
+                let name = &wits_in_name[*wt_id as usize];
+                let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
+                    field(&e[inst_id])
+                } else if let Some(bf) = wit.get_base_field_vec_optn() {
+                    base_field::<E>(&bf[inst_id], true)
+                } else {
+                    "Unknown".to_string()
+                };
+                format!("  WitIn({wt_id})={value_fmt} {name:?}")
+            })
+            .join("\n")
     }
 }
 

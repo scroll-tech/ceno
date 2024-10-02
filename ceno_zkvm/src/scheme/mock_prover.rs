@@ -3,7 +3,6 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     expression::{fmt, Expression},
     scheme::utils::eval_by_expr_with_fixed,
-    structs::WitnessId,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, ProgramTableCircuit, RangeTable, TableCircuit,
         U16Table, U5Table, U8Table, XorTable,
@@ -138,7 +137,7 @@ impl<E: ExtensionField> MockProverError<E> {
                 inst_id,
             } => {
                 let expression_fmt = fmt::expr(expression, &mut wtns, false);
-                let wtns_fmt = fmt_wtns(&wtns, wits_in, *inst_id, wits_in_name);
+                let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
                 let eval_fmt = fmt::field(evaluated);
                 println!(
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
@@ -157,7 +156,7 @@ impl<E: ExtensionField> MockProverError<E> {
             } => {
                 let left_expression_fmt = fmt::expr(left_expression, &mut wtns, false);
                 let right_expression_fmt = fmt::expr(right_expression, &mut wtns, false);
-                let wtns_fmt = fmt_wtns(&wtns, wits_in, *inst_id, wits_in_name);
+                let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
                 let left_eval_fmt = fmt::field(left);
                 let right_eval_fmt = fmt::field(right);
                 println!(
@@ -175,7 +174,7 @@ impl<E: ExtensionField> MockProverError<E> {
                 inst_id,
             } => {
                 let expression_fmt = fmt::expr(expression, &mut wtns, false);
-                let wtns_fmt = fmt_wtns(&wtns, wits_in, *inst_id, wits_in_name);
+                let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
                 let eval_fmt = fmt::field(evaluated);
                 println!(
                     "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\n\
@@ -186,29 +185,6 @@ impl<E: ExtensionField> MockProverError<E> {
             }
         }
     }
-}
-
-pub fn fmt_wtns<E: ExtensionField>(
-    wtns: &[WitnessId],
-    wits_in: &[ArcMultilinearExtension<E>],
-    inst_id: usize,
-    wits_in_name: &[String],
-) -> String {
-    wtns.iter()
-        .sorted()
-        .map(|wt_id| {
-            let wit = &wits_in[*wt_id as usize];
-            let name = &wits_in_name[*wt_id as usize];
-            let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
-                fmt::field(&e[inst_id])
-            } else if let Some(bf) = wit.get_base_field_vec_optn() {
-                fmt::base_field::<E>(&bf[inst_id], true)
-            } else {
-                "Unknown".to_string()
-            };
-            format!("  WitIn({wt_id})={value_fmt} {name:?}")
-        })
-        .join("\n")
 }
 
 pub(crate) struct MockProver<E: ExtensionField> {
