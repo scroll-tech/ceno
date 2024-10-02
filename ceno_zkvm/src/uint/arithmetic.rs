@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 
 use super::{UIntLimbs, UintLimb};
 use crate::{

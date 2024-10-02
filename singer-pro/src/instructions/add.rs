@@ -4,8 +4,8 @@ use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip,
-        rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip,
+        rom_handler::ROMHandler, stack::StackChip,
     },
     chips::IntoEnumIterator,
     constants::OpcodeType,

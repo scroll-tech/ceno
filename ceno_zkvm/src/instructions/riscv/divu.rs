@@ -2,7 +2,7 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
-use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
+use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsZeroConfig,
     instructions::Instruction, uint::Value, witness::LkMultiplicity,
@@ -159,8 +159,8 @@ mod test {
 
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
-            instructions::{riscv::divu::DivUInstruction, Instruction},
-            scheme::mock_prover::{MockProver, MOCK_PC_DIVU, MOCK_PROGRAM},
+            instructions::{Instruction, riscv::divu::DivUInstruction},
+            scheme::mock_prover::{MOCK_PC_DIVU, MOCK_PROGRAM, MockProver},
         };
 
         fn verify(name: &'static str, dividend: Word, divisor: Word, outcome: Word) {
@@ -175,20 +175,19 @@ mod test {
                 .unwrap();
 
             // values assignment
-            let (raw_witin, _) = DivUInstruction::assign_instances(
-                &config,
-                cb.cs.num_witin as usize,
-                vec![StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_DIVU,
-                    MOCK_PROGRAM[9],
-                    dividend,
-                    divisor,
-                    Change::new(0, outcome),
-                    0,
-                )],
-            )
-            .unwrap();
+            let (raw_witin, _) =
+                DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                    StepRecord::new_r_instruction(
+                        3,
+                        MOCK_PC_DIVU,
+                        MOCK_PROGRAM[9],
+                        dividend,
+                        divisor,
+                        Change::new(0, outcome),
+                        0,
+                    ),
+                ])
+                .unwrap();
 
             MockProver::assert_satisfied(
                 &mut cb,

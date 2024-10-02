@@ -4,7 +4,7 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
-use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
+use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
     witness::LkMultiplicity,
@@ -191,7 +191,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_ADD, MOCK_PC_MUL, MOCK_PC_SUB, MOCK_PROGRAM},
+        scheme::mock_prover::{MOCK_PC_ADD, MOCK_PC_MUL, MOCK_PC_SUB, MOCK_PROGRAM, MockProver},
     };
 
     #[test]
@@ -210,20 +210,19 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = AddInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_ADD,
-                MOCK_PROGRAM[0],
-                11,
-                0xfffffffe,
-                Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_ADD,
+                    MOCK_PROGRAM[0],
+                    11,
+                    0xfffffffe,
+                    Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,
@@ -253,20 +252,19 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = AddInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_ADD,
-                MOCK_PROGRAM[0],
-                u32::MAX - 1,
-                u32::MAX - 1,
-                Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_ADD,
+                    MOCK_PROGRAM[0],
+                    u32::MAX - 1,
+                    u32::MAX - 1,
+                    Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,
@@ -296,20 +294,19 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = SubInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_SUB,
-                MOCK_PROGRAM[1],
-                11,
-                2,
-                Change::new(0, 11_u32.wrapping_sub(2)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_SUB,
+                    MOCK_PROGRAM[1],
+                    11,
+                    2,
+                    Change::new(0, 11_u32.wrapping_sub(2)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,
@@ -339,20 +336,19 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = SubInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_SUB,
-                MOCK_PROGRAM[1],
-                3,
-                11,
-                Change::new(0, 3_u32.wrapping_sub(11)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_SUB,
+                    MOCK_PROGRAM[1],
+                    3,
+                    11,
+                    Change::new(0, 3_u32.wrapping_sub(11)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,
@@ -376,20 +372,19 @@ mod test {
             .unwrap();
 
         // values assignment
-        let (raw_witin, _) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MUL,
-                MOCK_PROGRAM[2],
-                11,
-                2,
-                Change::new(0, 22),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_MUL,
+                    MOCK_PROGRAM[2],
+                    11,
+                    2,
+                    Change::new(0, 22),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,
@@ -413,20 +408,19 @@ mod test {
             .unwrap();
 
         // values assignment
-        let (raw_witin, _) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MUL,
-                MOCK_PROGRAM[2],
-                u32::MAX / 2 + 1,
-                2,
-                Change::new(0, 0),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_MUL,
+                    MOCK_PROGRAM[2],
+                    u32::MAX / 2 + 1,
+                    2,
+                    Change::new(0, 0),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,
@@ -450,20 +444,19 @@ mod test {
             .unwrap();
 
         // values assignment
-        let (raw_witin, _) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MUL,
-                MOCK_PROGRAM[2],
-                4294901760,
-                4294901760,
-                Change::new(0, 0),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_MUL,
+                    MOCK_PROGRAM[2],
+                    4294901760,
+                    4294901760,
+                    Change::new(0, 0),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,

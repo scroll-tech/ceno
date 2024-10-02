@@ -3,7 +3,7 @@ use gkr::structs::Circuit;
 use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
-    chip_handler::{calldata::CalldataChip, ChipHandler},
+    chip_handler::{ChipHandler, calldata::CalldataChip},
     chips::IntoEnumIterator,
     constants::OpcodeType,
     register_witness,

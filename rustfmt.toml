@@ -1,5 +1,4 @@
 edition = "2024"
-version = "Two"
 style_edition = "2024"
 wrap_comments = false
 comment_width = 300

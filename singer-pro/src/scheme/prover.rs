@@ -6,7 +6,7 @@ use itertools::Itertools;
 use transcript::Transcript;
 
 use crate::{
-    error::ZKVMError, SingerCircuit, SingerWiresOutID, SingerWiresOutValues, SingerWitness,
+    SingerCircuit, SingerWiresOutID, SingerWiresOutValues, SingerWitness, error::ZKVMError,
 };
 
 use super::{GKRGraphProverState, SingerProof};

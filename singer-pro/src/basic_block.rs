@@ -2,24 +2,24 @@ use std::{collections::HashSet, mem};
 
 use ff_ext::ExtensionField;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType, structs::ChipChallenges};
 
 use crate::{
+    BasicBlockWiresIn, SingerParams,
     basic_block::bb_ret::{BBReturnRestMemLoad, BBReturnRestMemStore},
     component::{AccessoryCircuit, BBFinalCircuit, BBStartCircuit},
     error::ZKVMError,
     instructions::{
-        construct_inst_graph, construct_inst_graph_and_witness, SingerInstCircuitBuilder,
+        SingerInstCircuitBuilder, construct_inst_graph, construct_inst_graph_and_witness,
     },
-    BasicBlockWiresIn, SingerParams,
 };
 
 use self::{
     bb_final::BasicBlockFinal,
     bb_ret::{BBReturnRestStackPop, BasicBlockReturn},
     bb_start::BasicBlockStart,
-    utils::{lower_bound, BasicBlockStack, StackOpMode},
+    utils::{BasicBlockStack, StackOpMode, lower_bound},
 };
 
 // basic block
@@ -367,11 +367,13 @@ impl<E: ExtensionField> BasicBlock<E> {
         let bb_final_circuit = &self.bb_final_circuit;
         let bb_acc_circuits = &self.bb_acc_circuits;
 
-        let bb_start_node_id = graph_builder.add_node(
-            "BB start",
-            &bb_start_circuit.circuit,
-            vec![PredType::Source; bb_start_circuit.circuit.n_witness_in],
-        )?;
+        let bb_start_node_id =
+            graph_builder.add_node("BB start", &bb_start_circuit.circuit, vec![
+                PredType::Source;
+                bb_start_circuit
+                    .circuit
+                    .n_witness_in
+            ])?;
 
         // The instances wire in values are padded to the power of two, but we
         // need the real number of instances here.
@@ -461,11 +463,10 @@ impl<E: ExtensionField> BasicBlock<E> {
             params.n_stack_finalize,
         ];
         for (acc, real_n_instances) in bb_acc_circuits.iter().zip(real_n_instances_bb_accs) {
-            let acc_node_id = graph_builder.add_node(
-                "BB acc",
-                &acc.circuit,
-                vec![PredType::Source; acc.circuit.n_witness_in],
-            )?;
+            let acc_node_id = graph_builder.add_node("BB acc", &acc.circuit, vec![
+                    PredType::Source;
+                    acc.circuit.n_witness_in
+                ])?;
             chip_builder.construct_chip_check_graph(
                 graph_builder,
                 acc_node_id,
@@ -480,12 +481,12 @@ impl<E: ExtensionField> BasicBlock<E> {
 #[cfg(test)]
 mod test {
     use crate::{
-        basic_block::{
-            bb_final::BasicBlockFinal, bb_start::BasicBlockStart, BasicBlock, BasicBlockInfo,
-        },
-        instructions::{add::AddInstruction, SingerInstCircuitBuilder},
-        scheme::GKRGraphProverState,
         BasicBlockWiresIn, SingerParams,
+        basic_block::{
+            BasicBlock, BasicBlockInfo, bb_final::BasicBlockFinal, bb_start::BasicBlockStart,
+        },
+        instructions::{SingerInstCircuitBuilder, add::AddInstruction},
+        scheme::GKRGraphProverState,
     };
     use ark_std::test_rng;
     use ff::Field;

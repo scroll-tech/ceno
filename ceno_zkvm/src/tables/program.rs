@@ -10,7 +10,7 @@ use crate::{
     tables::TableCircuit,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{DecodedInstruction, Word, CENO_PLATFORM, PC_STEP_SIZE, WORD_SIZE};
+use ceno_emul::{CENO_PLATFORM, DecodedInstruction, PC_STEP_SIZE, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
