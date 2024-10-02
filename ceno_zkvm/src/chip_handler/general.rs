@@ -180,7 +180,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             16 => self.assert_u16(name_fn, expr),
             8 => self.assert_byte(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
-            1 => self.assert_bit(name_fn, expr),
             c => panic!("Unsupported bit range {c}"),
         }
     }
@@ -316,18 +315,19 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     }
 
     /// less_than
-    pub(crate) fn less_than<N, NR, const MAX_U16_LIMB: usize>(
+    pub(crate) fn less_than<N, NR>(
         &mut self,
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
         assert_less_than: Option<bool>,
+        max_num_u16_limbs: usize,
     ) -> Result<IsLtConfig, ZKVMError>
     where
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
     {
-        IsLtConfig::construct_circuit(self, name_fn, lhs, rhs, assert_less_than, MAX_U16_LIMB)
+        IsLtConfig::construct_circuit(self, name_fn, lhs, rhs, assert_less_than, max_num_u16_limbs)
     }
 
     pub(crate) fn is_equal(

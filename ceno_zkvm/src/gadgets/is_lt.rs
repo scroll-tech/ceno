@@ -95,7 +95,6 @@ impl IsLtConfig {
     }
 
     pub fn cal_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) -> u64 {
-        println!("max_num_u16_limbs {max_num_u16_limbs}");
         let diff = if is_lt {
             1u64 << (u16::BITS as usize * max_num_u16_limbs)
         } else {

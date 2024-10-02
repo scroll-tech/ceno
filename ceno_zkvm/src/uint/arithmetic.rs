@@ -114,12 +114,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let Some(carries) = &c.carries else {
             return Err(ZKVMError::CircuitError);
         };
-        println!(
-            "MAX_DEGREE_2_MUL_CARRY_BITS {:?} Self::MAX_DEGREE_2_MUL_CARRY_BITS_POW2 {:?} Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB {:?}",
-            Self::MAX_DEGREE_2_MUL_CARRY_BITS,
-            Self::MAX_DEGREE_2_MUL_CARRY_VALUE,
-            Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB
-        );
+
         c.carries_auxiliray_lt_config = Some(
             carries
                 .iter()
@@ -1090,6 +1085,9 @@ mod tests {
 
         #[test]
         fn test_mul_overflow() {
+            let a = Value::<'_, u32>::new_unchecked(u32::MAX);
+            let b = Value::<'_, u32>::new_unchecked(u32::MAX);
+            let (c_limb, c_carry, _) = a.mul(&b, &mut LkMultiplicity::default(), true);
             let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
                 // alloc a = 2^16 + (2^16 -1) * 2^16
                 vec![u16::MAX as u64, u16::MAX as u64],
@@ -1097,29 +1095,22 @@ mod tests {
                 vec![u16::MAX as u64, u16::MAX as u64],
                 // mul_c = a * b,
                 // alloc c [1, 0xfffe, 0xffff, 0] with lo part only
-                vec![1, 0xfffe],
+                c_limb.iter().map(|v| *v as u64).collect_vec(),
                 // c carry
-                vec![0x1fffd, 0],
+                c_carry.iter().map(|v| *v as u64).collect_vec(),
                 // each carry alloc with diff
-                calculate_carry_diff::<32, 16>(vec![0x1fffd, 0]),
+                calculate_carry_diff::<32, 16>(c_carry.to_vec()),
             ]
             .concat()
             .into_arc_mle();
 
-            let a = Value::<'_, u32>::new_unchecked(u32::MAX);
-            let b = Value::<'_, u32>::new_unchecked(u32::MAX);
-            let (limb, carry, max_carry_value) = a.mul(&b, &mut LkMultiplicity::default(), false);
-            println!(
-                "limb {:?} carry {:?} max_carry_value {max_carry_value}",
-                limb, carry
-            );
             let mut cs = ConstraintSystem::new(|| "test_mul_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
             let mut uint_a = UIntLimbs::<32, 16, E>::new(|| "uint_a", &mut cb).unwrap();
             let mut uint_b = UIntLimbs::<32, 16, E>::new(|| "uint_b", &mut cb).unwrap();
             let _ = uint_a
-                .mul(|| "mul_add", &mut cb, &mut uint_b, false)
+                .mul(|| "mul_add", &mut cb, &mut uint_b, true)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, None);

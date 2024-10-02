@@ -440,6 +440,10 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let a = Value::<'_, u32>::new_unchecked(u32::MAX);
+        let b = Value::<'_, u32>::new_unchecked(u32::MAX);
+        let (c_limb, _, _) = a.mul(&b, &mut LkMultiplicity::default(), true);
+
         // values assignment
         let (raw_witin, _) = MulInstruction::assign_instances(
             &config,
@@ -448,9 +452,9 @@ mod test {
                 3,
                 MOCK_PC_MUL,
                 MOCK_PROGRAM[2],
-                4294901760,
-                4294901760,
-                Change::new(0, 0),
+                a.as_u64() as u32,
+                b.as_u64() as u32,
+                Change::new(0, Value::<u32>::from_limb_unchecked(c_limb).as_u64() as u32),
                 0,
             )],
         )

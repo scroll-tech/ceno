@@ -124,15 +124,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         config
             .inter_mul_value
             .assign_carries(instance, &mul_carries);
+        config.inter_mul_value.assign_carries_auxiliary(
+            instance,
+            lkm,
+            &mul_carries,
+            max_carry_value,
+        )?;
+
         config.remainder.assign_limbs(instance, r.as_u16_limbs());
 
         config
             .dividend
             .assign_limbs(instance, dividend.as_u16_limbs());
         config.dividend.assign_carries(instance, &add_carries);
-        config
-            .dividend
-            .assign_carries_auxiliary(instance, lkm, &add_carries, max_carry_value)?;
 
         config
             .is_zero
@@ -204,6 +208,7 @@ mod test {
             verify("dividend > divisor", 10, 11, 0);
             verify("remainder", 11, 2, 5);
             verify("u32::MAX", u32::MAX, u32::MAX, 1);
+            verify("div u32::MAX", 3, u32::MAX, 0);
             verify("u32::MAX div by 2", u32::MAX, 2, u32::MAX / 2);
             verify("div by zero", 10, 0, u32::MAX);
             verify("mul carry", 1202729773, 171818539, 7);

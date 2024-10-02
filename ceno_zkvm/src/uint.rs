@@ -26,6 +26,7 @@ use std::{
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
+use util::max_degree_2_carry_value;
 
 #[derive(Clone, EnumIter, Debug)]
 pub enum UintLimb<E: ExtensionField> {
@@ -562,10 +563,11 @@ pub struct Value<'a, T: Into<u64> + From<u32> + Copy + Default> {
 // TODO generalize to support non 16 bit limbs
 // TODO optimize api with fixed size array
 impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
-    const LIMBS: usize = {
-        let u16_bytes = (u16::BITS / 8) as usize;
-        mem::size_of::<T>() / u16_bytes
-    };
+    const M: usize = { mem::size_of::<T>() * 8 };
+
+    const C: usize = 16;
+
+    const LIMBS: usize = (Self::M + 15) / 16;
 
     pub fn new(val: T, lkm: &mut LkMultiplicity) -> Self {
         let uint = Value::<T> {
@@ -699,30 +701,31 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         let mut c_limbs = vec![0u16; num_limbs];
         let mut carries = vec![0u64; num_limbs];
         // TODO FIXME: support full size multiplication
-        let tx = vec![0u64; num_limbs];
+        let mut tmp = vec![0u64; num_limbs];
         a_limbs.iter().enumerate().for_each(|(i, &a_limb)| {
             b_limbs.iter().enumerate().for_each(|(j, &b_limb)| {
                 let idx = i + j;
                 if idx < num_limbs {
-                    let (c, overflow_mul) = a_limb.overflowing_mul(b_limb);
-                    let (ret, overflow_add) = c_limbs[idx].overflowing_add(c);
-
-                    c_limbs[idx] = ret;
-                    carries[idx] += overflow_add as u64;
-                    if overflow_mul {
-                        carries[idx] += ((a_limb as u32 * b_limb as u32) / (1 << 16)) as u64;
-                    }
+                    tmp[idx] += a_limb as u64 * b_limb as u64;
                 }
             })
         });
-        // complete the computation by adding prev_carry
-        (1..num_limbs).for_each(|i| {
-            if carries[i - 1] > 0 {
-                let (ret, overflow) = c_limbs[i].overflowing_add(carries[i - 1]);
-                c_limbs[i] = ret;
-                carries[i] += overflow as u64;
-            }
-        });
+
+        tmp.iter()
+            .into_iter()
+            .zip(c_limbs.iter_mut())
+            .enumerate()
+            .for_each(|(i, (tmp, limb))| {
+                // tmp + prev_carry - carry * Self::LIMB_BASE_MUL
+                let mut tmp = *tmp;
+                if i > 0 {
+                    tmp = tmp + carries[i - 1];
+                }
+                // update carry
+                carries[i] = tmp >> Self::C;
+                // update limb
+                *limb = (tmp - (carries[i] << Self::C)) as u16;
+            });
 
         if !with_overflow {
             // If the outcome overflows, `with_overflow` can't be false
@@ -733,10 +736,8 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         // range check
         c_limbs.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
         // calculate max possible carry value
-        let max_carry_value: u64 = u16::MAX as u64 * u16::MAX as u64 // 2^C * 2^C
-        * (2 * Self::LIMBS - 1) as u64; // max number of limbs for degree 2 mul
 
-        (c_limbs, carries, max_carry_value)
+        (c_limbs, carries, max_degree_2_carry_value(Self::M, Self::C))
     }
 }
 
