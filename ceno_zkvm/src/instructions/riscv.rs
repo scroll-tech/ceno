@@ -7,6 +7,7 @@ pub mod config;
 pub mod constants;
 pub mod divu;
 pub mod logic;
+pub mod mulh;
 pub mod shift_imm;
 pub mod sltu;
 

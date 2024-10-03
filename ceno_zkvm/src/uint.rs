@@ -106,7 +106,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 
     /// this fn does not create new witness
-    pub fn from_witin_unchecked(limbs: &[WitIn]) -> Self {
+    pub fn from_witin_unchecked(limbs: Vec<WitIn>) -> Self {
         assert!(limbs.len() == Self::NUM_CELLS);
         UIntLimbs {
             limbs: UintLimb::WitIn(
@@ -132,6 +132,20 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             ),
             carries: None,
             carries_auxiliary_lt_config: None,
+        }
+    }
+
+    /// this fn does not create new witness
+    pub fn from_witin_carry_unchecked(
+        limbs: Vec<WitIn>,
+        carries: Option<Vec<WitIn>>,
+        carries_auxiliary_lt_config: Option<Vec<IsLtConfig>>,
+    ) -> Self {
+        assert!(limbs.len() == Self::NUM_CELLS);
+        UIntLimbs {
+            limbs: UintLimb::WitIn(limbs),
+            carries,
+            carries_auxiliary_lt_config,
         }
     }
 
@@ -387,13 +401,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
         with_overflow: bool,
+        num_carries: usize,
     ) -> Result<(), ZKVMError> {
         if self.carries.is_none() {
             circuit_builder.namespace(name_fn, |cb| {
                 let carries_len = if with_overflow {
-                    Self::NUM_CELLS
+                    num_carries
                 } else {
-                    Self::NUM_CELLS - 1
+                    num_carries - 1
                 };
                 self.carries = Some(
                     (0..carries_len)
@@ -700,7 +715,16 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
     ) -> (Vec<u16>, Vec<u64>, u64) {
-        self.internal_mul(rhs, lkm, with_overflow)
+        self.internal_mul(rhs, lkm, with_overflow, false)
+    }
+
+    pub fn mul_hi(
+        &self,
+        rhs: &Self,
+        lkm: &mut LkMultiplicity,
+        with_overflow: bool,
+    ) -> (Vec<u16>, Vec<u64>, u64) {
+        self.internal_mul(rhs, lkm, with_overflow, true)
     }
 
     #[allow(clippy::type_complexity)]
@@ -711,7 +735,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
     ) -> ((Vec<u16>, Vec<u16>), (Vec<u16>, Vec<u64>, u64)) {
-        let mul_result = self.internal_mul(mul, lkm, with_overflow);
+        let mul_result = self.internal_mul(mul, lkm, with_overflow, false);
         let add_result = addend.add(
             &Self::from_limb_unchecked(mul_result.0.clone()),
             lkm,
@@ -725,14 +749,18 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         mul: &Self,
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
+        with_hi_limbs: bool,
     ) -> (Vec<u16>, Vec<u64>, u64) {
         let a_limbs = self.as_u16_limbs();
         let b_limbs = mul.as_u16_limbs();
 
-        let num_limbs = a_limbs.len();
+        let num_limbs = if !with_hi_limbs {
+            a_limbs.len()
+        } else {
+            2 * a_limbs.len()
+        };
         let mut c_limbs = vec![0u16; num_limbs];
         let mut carries = vec![0u64; num_limbs];
-        // TODO FIXME: support full size multiplication
         let mut tmp = vec![0u64; num_limbs];
         a_limbs.iter().enumerate().for_each(|(i, &a_limb)| {
             b_limbs.iter().enumerate().for_each(|(j, &b_limb)| {
@@ -755,7 +783,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
                 // update carry
                 carries[i] = tmp >> Self::C;
                 // update limb
-                *limb = (tmp - (carries[i] << Self::C)) as u16;
+                *limb = (tmp & u16::MAX as u64) as u16;
             });
 
         if !with_overflow {
