@@ -49,6 +49,7 @@ pub enum ROMType {
     Or,          // a | b where a, b are bytes
     Xor,         // a ^ b where a, b are bytes
     Ltu,         // a <(usign) b where a, b are bytes and the result is 0/1.
+    Pow,         // a ** b where a is a 5-bit number
     Instruction, // Decoded instruction from the fixed program.
 }
 
