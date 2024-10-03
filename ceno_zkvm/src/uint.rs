@@ -26,7 +26,7 @@ use std::{
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use sumcheck::util::ceil_log2;
-use util::max_degree_2_carry_value;
+use util::max_carry_word_for_multiplication;
 
 #[derive(Clone, EnumIter, Debug)]
 pub enum UintLimb<E: ExtensionField> {
@@ -236,8 +236,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         );
         if let Some(carries_auxiliray_lt_config) = &self.carries_auxiliray_lt_config {
             // constrain carry range
-            for (config, carry) in carries_auxiliray_lt_config.iter().zip_eq(carry_values) {
-                config.assign_instance(instance, lkm, Into::<u64>::into(*carry), max_carry)?;
+            for (lt_config, carry) in carries_auxiliray_lt_config.iter().zip_eq(carry_values) {
+                lt_config.assign_instance(instance, lkm, Into::<u64>::into(*carry), max_carry)?;
             }
         }
         Ok(())
@@ -735,7 +735,11 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         // range check
         c_limbs.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
 
-        (c_limbs, carries, max_degree_2_carry_value(Self::M, Self::C))
+        (
+            c_limbs,
+            carries,
+            max_carry_word_for_multiplication(2, Self::M, Self::C),
+        )
     }
 }
 
