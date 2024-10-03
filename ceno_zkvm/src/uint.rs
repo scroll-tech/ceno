@@ -173,6 +173,17 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         self.assign_carries(instance, carries);
     }
 
+    pub fn assign_limb_with_carry_auxiliary(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        lkm: &mut LkMultiplicity,
+        (limbs, carries, max_carry): &(Vec<u16>, Vec<u64>, u64),
+    ) -> Result<(), ZKVMError> {
+        self.assign_limbs(instance, limbs);
+        self.assign_carries(instance, carries);
+        self.assign_carries_auxiliary(instance, lkm, carries, *max_carry)
+    }
+
     pub fn assign_limbs(&self, instance: &mut [MaybeUninit<E::BaseField>], limbs_values: &[u16]) {
         assert!(
             limbs_values.len() <= Self::NUM_CELLS,
@@ -676,16 +687,21 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         self.internal_mul(rhs, lkm, with_overflow)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn mul_add(
         &self,
         mul: &Self,
         addend: &Self,
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
-    ) -> (Vec<u16>, Vec<u64>, Vec<u16>, u64) {
-        let (ret, mul_carries, max_carry) = self.internal_mul(mul, lkm, with_overflow);
-        let (ret, add_carries) = addend.add(&Self::from_limb_unchecked(ret), lkm, with_overflow);
-        (ret, mul_carries, add_carries, max_carry)
+    ) -> ((Vec<u16>, Vec<u16>), (Vec<u16>, Vec<u64>, u64)) {
+        let mul_result = self.internal_mul(mul, lkm, with_overflow);
+        let add_result = addend.add(
+            &Self::from_limb_unchecked(mul_result.0.clone()),
+            lkm,
+            with_overflow,
+        );
+        (add_result, mul_result)
     }
 
     fn internal_mul(
