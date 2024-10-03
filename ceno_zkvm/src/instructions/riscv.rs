@@ -8,6 +8,7 @@ pub mod constants;
 pub mod divu;
 mod i_insn;
 pub mod logic;
+pub mod sll;
 pub mod sltu;
 
 mod b_insn;

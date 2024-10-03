@@ -173,6 +173,16 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         self.assign_carries(instance, carries);
     }
 
+    pub fn assign_limb_with_carry_auxiliary(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        lkm: &mut LkMultiplicity,
+        (limbs, carries, max_carry): &(Vec<u16>, Vec<u64>, u64),
+    ) -> Result<(), ZKVMError> {
+        self.assign_limbs(instance, limbs);
+        self.assign_carries_auxiliary(instance, lkm, carries, *max_carry)
+    }
+
     pub fn assign_limbs(&self, instance: &mut [MaybeUninit<E::BaseField>], limbs_values: &[u16]) {
         assert!(
             limbs_values.len() <= Self::NUM_CELLS,

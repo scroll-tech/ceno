@@ -314,6 +314,15 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.logic_u8(ROMType::Ltu, a, b, c)
     }
 
+    pub fn lookup_pow(
+        &mut self,
+        a: Expression<E>,
+        b: Expression<E>,
+        c: Expression<E>,
+    ) -> Result<(), ZKVMError> {
+        self.logic_u8(ROMType::Pow, a, b, c)
+    }
+
     /// less_than
     pub(crate) fn less_than<N, NR>(
         &mut self,
