@@ -234,9 +234,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .unwrap_or_default(),
             "assign input length mismatch",
         );
-        if let Some(carries_auxiliray_lt_config) = &self.carries_auxiliary_lt_config {
+        if let Some(carries_auxiliary_lt_config) = &self.carries_auxiliary_lt_config {
             // constrain carry range
-            for (lt_config, carry) in carries_auxiliray_lt_config.iter().zip_eq(carry_values) {
+            for (lt_config, carry) in carries_auxiliary_lt_config.iter().zip_eq(carry_values) {
                 lt_config.assign_instance(instance, lkm, Into::<u64>::into(*carry), max_carry)?;
             }
         }

@@ -54,7 +54,10 @@ mod tests {
 
     #[test]
     fn test_max_combinations_degree() {
+        // degree=1 is pure add, therefore only one term
         assert_eq!(1, max_combinations(1, 4));
+        // for degree=2 mul, we have u[0]*v[3], u[1]*v[2], u[2]*v[1], u[3]*v[0]
+        // thus 4 terms
         assert_eq!(4, max_combinations(2, 4));
     }
 
