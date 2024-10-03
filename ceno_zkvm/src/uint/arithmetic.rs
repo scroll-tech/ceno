@@ -276,19 +276,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 
     /// Check two UIntLimbs are equal
-    pub fn eq<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn require_equal<NR: Into<String>, N: FnOnce() -> NR>(
         &self,
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UIntLimbs<M, C, E>,
     ) -> Result<(), ZKVMError> {
-        circuit_builder.namespace(name_fn, |cb| {
-            izip!(self.expr(), rhs.expr())
-                .enumerate()
-                .try_for_each(|(i, (lhs, rhs))| {
-                    cb.require_equal(|| format!("uint_eq_{i}"), lhs, rhs)
-                })
-        })
+        circuit_builder.require_equal(name_fn, self.value(), rhs.value())
     }
 
     pub fn is_equal(
@@ -958,8 +952,12 @@ mod tests {
             let uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
             let mut uint_c = uint_a.add(|| "uint_c", &mut cb, &uint_b, false).unwrap();
             let mut uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
-            let _ = uint_c
+            let uint_e = uint_c
                 .mul(|| "uint_e", &mut cb, &mut uint_d, false)
+                .unwrap();
+            let expected_e = UIntLimbs::<64, 16, E>::from_const_unchecked(vec![3u64, 5, 2, 0]);
+            expected_e
+                .require_equal(|| "assert_g", &mut cb, &uint_e)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, None);
@@ -1004,8 +1002,12 @@ mod tests {
             let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
             let uint_e = UIntLimbs::<64, 16, E>::new(|| "uint_e", &mut cb).unwrap();
             let mut uint_f = uint_d.add(|| "uint_f", &mut cb, &uint_e, false).unwrap();
-            let _ = uint_c
+            let uint_g = uint_c
                 .mul(|| "unit_g", &mut cb, &mut uint_f, false)
+                .unwrap();
+            let expected_g = UIntLimbs::<64, 16, E>::from_const_unchecked(vec![9u64, 12, 4, 0]);
+            expected_g
+                .require_equal(|| "assert_g", &mut cb, &uint_g)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, None);
