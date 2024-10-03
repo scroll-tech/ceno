@@ -62,7 +62,7 @@ pub struct UIntLimbs<const M: usize, const C: usize, E: ExtensionField> {
     // We don't need `overflow` witness since the last element of `carries` represents it.
     pub carries: Option<Vec<WitIn>>,
     // for carry range check using lt tricks
-    pub carries_auxiliray_lt_config: Option<Vec<IsLtConfig>>,
+    pub carries_auxiliary_lt_config: Option<Vec<IsLtConfig>>,
 }
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
@@ -100,7 +100,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                         .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
                 ),
                 carries: None,
-                carries_auxiliray_lt_config: None,
+                carries_auxiliary_lt_config: None,
             })
         })
     }
@@ -115,7 +115,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .collect::<Vec<WitIn>>(),
             ),
             carries: None,
-            carries_auxiliray_lt_config: None,
+            carries_auxiliary_lt_config: None,
         }
     }
 
@@ -124,7 +124,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         Self {
             limbs: UintLimb::Expression(vec![]),
             carries: None,
-            carries_auxiliray_lt_config: None,
+            carries_auxiliary_lt_config: None,
         }
     }
 
@@ -152,7 +152,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         Self {
             limbs: UintLimb::WitIn(limbs),
             carries: None,
-            carries_auxiliray_lt_config: None,
+            carries_auxiliary_lt_config: None,
         }
     }
 
@@ -234,7 +234,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .unwrap_or_default(),
             "assign input length mismatch",
         );
-        if let Some(carries_auxiliray_lt_config) = &self.carries_auxiliray_lt_config {
+        if let Some(carries_auxiliray_lt_config) = &self.carries_auxiliary_lt_config {
             // constrain carry range
             for (lt_config, carry) in carries_auxiliray_lt_config.iter().zip_eq(carry_values) {
                 lt_config.assign_instance(instance, lkm, Into::<u64>::into(*carry), max_carry)?;
@@ -326,7 +326,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .collect_vec(),
             ),
             carries: None,
-            carries_auxiliray_lt_config: None,
+            carries_auxiliary_lt_config: None,
         };
         Ok(n)
     }
@@ -504,7 +504,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for 
         Ok(Self {
             limbs: UintLimb::WitIn(limbs),
             carries: None,
-            carries_auxiliray_lt_config: None,
+            carries_auxiliary_lt_config: None,
         })
     }
 }

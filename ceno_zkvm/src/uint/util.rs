@@ -1,4 +1,4 @@
-// Stars and Bars formula for the maximum number of combinations using usize
+// calculate the maximum number of combinations for stars and bars formula
 const fn max_combinations(degree: usize, num_cells: usize) -> usize {
     // compute factorial of n using usize
     const fn factorial(n: usize) -> usize {

@@ -115,7 +115,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             return Err(ZKVMError::CircuitError);
         };
         // assert carry range less than max carry value constant
-        c.carries_auxiliray_lt_config = Some(
+        c.carries_auxiliary_lt_config = Some(
             carries
                 .iter()
                 .enumerate()
