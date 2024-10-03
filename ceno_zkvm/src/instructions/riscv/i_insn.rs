@@ -1,18 +1,13 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::constants::{UInt, PC_STEP_SIZE};
 use crate::{
-    chip_handler::{
-        GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
-    },
+    chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
-    gadgets::IsLtConfig,
-    set_val,
+    expression::{Expression, ToExpr},
+    instructions::riscv::insn_base::{ReadRS1, StateInOut, WriteRD},
     tables::InsnRecord,
-    uint::Value,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -24,15 +19,9 @@ use core::mem::MaybeUninit;
 /// It does not witness of the register values, nor the actual function (e.g. srli, addi, etc).
 #[derive(Debug)]
 pub struct IInstructionConfig<E: ExtensionField> {
-    pub pc: WitIn,
-    pub ts: WitIn,
-    pub rs1_id: WitIn,
-    pub rd_id: WitIn,
-    pub prev_rd_value: UInt<E>,
-    pub prev_rs1_ts: WitIn,
-    pub prev_rd_ts: WitIn,
-    pub lt_rs1_cfg: IsLtConfig,
-    pub lt_rd_cfg: IsLtConfig,
+    pub vm_state: StateInOut<E>,
+    pub rs1: ReadRS1<E>,
+    pub rd: WriteRD<E>,
 }
 
 impl<E: ExtensionField> IInstructionConfig<E> {
@@ -43,63 +32,27 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         rs1_read: RegisterExpr<E>,
         rd_written: RegisterExpr<E>,
     ) -> Result<Self, ZKVMError> {
-        // State in.
-        let pc = circuit_builder.create_witin(|| "pc")?;
-        let cur_ts = circuit_builder.create_witin(|| "cur_ts")?;
-        circuit_builder.state_in(pc.expr(), cur_ts.expr())?;
+        // State in and out
+        let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
 
-        // Register indexes.
-        let rs1_id = circuit_builder.create_witin(|| "rs1_id")?;
-        let rd_id = circuit_builder.create_witin(|| "rd_id")?;
+        // Registers
+        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
+        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
+
+        // TODO make imm representation consistent between instruction types
 
         // Fetch the instruction.
         circuit_builder.lk_fetch(&InsnRecord::new(
-            pc.expr(),
+            vm_state.pc.expr(),
             (insn_kind.codes().opcode as usize).into(),
-            rd_id.expr(),
+            rd.id.expr(),
             (insn_kind.codes().func3 as usize).into(),
-            rs1_id.expr(),
+            rs1.id.expr(),
             0.into(),
             imm.clone(),
         ))?;
 
-        // Register state.
-        let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
-        let prev_rd_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
-        let prev_rd_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
-
-        // Register read and write.
-        let (next_ts, lt_rs1_cfg) = circuit_builder.register_read(
-            || "read_rs1",
-            &rs1_id,
-            prev_rs1_ts.expr(),
-            cur_ts.expr(),
-            rs1_read,
-        )?;
-        let (next_ts, lt_rd_cfg) = circuit_builder.register_write(
-            || "write_rd",
-            &rd_id,
-            prev_rd_ts.expr(),
-            next_ts,
-            prev_rd_value.register_expr(),
-            rd_written,
-        )?;
-
-        // State out.
-        let next_pc = pc.expr() + PC_STEP_SIZE.into();
-        circuit_builder.state_out(next_pc, next_ts)?;
-
-        Ok(IInstructionConfig {
-            pc,
-            ts: cur_ts,
-            rs1_id,
-            rd_id,
-            prev_rd_value,
-            prev_rs1_ts,
-            prev_rd_ts,
-            lt_rs1_cfg,
-            lt_rd_cfg,
-        })
+        Ok(IInstructionConfig { vm_state, rs1, rd })
     }
 
     pub fn assign_instance(
@@ -108,42 +61,12 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        // State in.
-        set_val!(instance, self.pc, step.pc().before.0 as u64);
-        set_val!(instance, self.ts, step.cycle());
+        self.vm_state.assign_instance(instance, step)?;
+        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
+        self.rd.assign_instance(instance, lk_multiplicity, step)?;
 
-        // Register indexes.
-        set_val!(instance, self.rs1_id, step.insn().rs1() as u64);
-        set_val!(instance, self.rd_id, step.insn().rd() as u64);
-
-        // Fetch the instruction.
+        // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
-
-        // Register state.
-        set_val!(
-            instance,
-            self.prev_rs1_ts,
-            step.rs1().unwrap().previous_cycle
-        );
-        set_val!(instance, self.prev_rd_ts, step.rd().unwrap().previous_cycle);
-        self.prev_rd_value.assign_limbs(
-            instance,
-            Value::new_unchecked(step.rd().unwrap().value.before).as_u16_limbs(),
-        );
-
-        // Register read and write.
-        self.lt_rs1_cfg.assign_instance(
-            instance,
-            lk_multiplicity,
-            step.rs1().unwrap().previous_cycle,
-            step.cycle(),
-        )?;
-        self.lt_rd_cfg.assign_instance(
-            instance,
-            lk_multiplicity,
-            step.rd().unwrap().previous_cycle,
-            step.cycle() + 1,
-        )?;
 
         Ok(())
     }

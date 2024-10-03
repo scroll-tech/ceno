@@ -23,7 +23,7 @@ use ceno_emul::InsnKind;
 pub struct BltuCircuit<I>(PhantomData<I>);
 
 pub struct InstructionConfig<E: ExtensionField> {
-    pub b_insn: BInstructionConfig,
+    pub b_insn: BInstructionConfig<E>,
     pub read_rs1: UInt<E>,
     pub read_rs2: UInt<E>,
     pub is_lt: IsLtConfig,
@@ -93,7 +93,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
 
         config
             .b_insn
-            .assign_instance::<E>(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())
     }

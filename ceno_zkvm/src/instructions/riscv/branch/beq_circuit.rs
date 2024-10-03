@@ -17,7 +17,7 @@ use crate::{
 };
 
 pub struct BeqConfig<E: ExtensionField> {
-    b_insn: BInstructionConfig,
+    b_insn: BInstructionConfig<E>,
 
     // TODO: Limb decomposition is not necessary. Replace with a single witness.
     rs1_read: UInt<E>,
@@ -78,7 +78,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
     ) -> Result<(), ZKVMError> {
         config
             .b_insn
-            .assign_instance::<E>(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         let rs1_read = step.rs1().unwrap().value;
         config
