@@ -46,6 +46,10 @@ unsafe impl GlobalAlloc for SimpleAllocator {
         self.arena.get().cast::<u8>().add(*remaining)
     }
 
+    // TODO(Matthias): consider adding alloc_zeroed, but let's make sure that our constraints actually guarantee it!
+    // Run some benchmarks!
+    // unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 { self.alloc(layout) }
+
     /// Never deallocate.
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 }
