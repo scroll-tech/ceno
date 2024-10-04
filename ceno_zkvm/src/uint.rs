@@ -119,6 +119,22 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         }
     }
 
+    /// this fn does not create new witness
+    pub fn from_const_unchecked<T: Into<u64>>(limbs: Vec<T>) -> Self {
+        assert!(limbs.len() == Self::NUM_CELLS);
+        UIntLimbs {
+            limbs: UintLimb::Expression(
+                limbs
+                    .into_iter()
+                    .take(Self::NUM_CELLS)
+                    .map(|limb| Expression::Constant(E::BaseField::from(limb.into())))
+                    .collect::<Vec<Expression<E>>>(),
+            ),
+            carries: None,
+            carries_auxiliary_lt_config: None,
+        }
+    }
+
     /// expr_limbs is little endian order
     pub fn new_as_empty() -> Self {
         Self {

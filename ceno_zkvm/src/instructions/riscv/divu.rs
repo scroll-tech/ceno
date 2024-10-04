@@ -14,7 +14,7 @@ pub struct ArithConfig<E: ExtensionField> {
 
     dividend: UInt<E>,
     divisor: UInt<E>,
-    outcome: UInt<E>,
+    pub(crate) outcome: UInt<E>,
 
     remainder: UInt<E>,
     inter_mul_value: UInt<E>,
@@ -145,8 +145,12 @@ mod test {
 
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
-            instructions::{riscv::divu::DivUInstruction, Instruction},
+            instructions::{
+                riscv::{constants::UInt, divu::DivUInstruction},
+                Instruction,
+            },
             scheme::mock_prover::{MockProver, MOCK_PC_DIVU, MOCK_PROGRAM},
+            Value,
         };
 
         fn verify(name: &'static str, dividend: Word, divisor: Word, outcome: Word) {
@@ -175,6 +179,14 @@ mod test {
                 )],
             )
             .unwrap();
+
+            let expected_rd_written =
+                UInt::from_const_unchecked(Value::new_unchecked(outcome).as_u16_limbs().to_vec());
+
+            config
+                .outcome
+                .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
+                .unwrap();
 
             MockProver::assert_satisfied(
                 &mut cb,

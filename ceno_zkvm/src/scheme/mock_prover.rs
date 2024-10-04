@@ -346,25 +346,42 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         {
             if name.contains("require_equal") {
                 let (left, right) = expr.unpack_sum().unwrap();
-
-                let left = left.neg().neg(); // TODO get_ext_field_vec doesn't work without this
                 let right = right.neg();
 
                 let left_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &left);
-                let left_evaluated = left_evaluated.get_ext_field_vec();
+                let left_evaluated = left_evaluated
+                    .get_ext_field_vec_optn()
+                    .map(|v| v.to_vec())
+                    .unwrap_or_else(|| {
+                        left_evaluated
+                            .get_base_field_vec()
+                            .iter()
+                            .map(|v| E::from(*v))
+                            .collect_vec()
+                    });
 
                 let right_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &right);
-                let right_evaluated = right_evaluated.get_ext_field_vec();
+                let right_evaluated = right_evaluated
+                    .get_ext_field_vec_optn()
+                    .map(|v| v.to_vec())
+                    .unwrap_or_else(|| {
+                        right_evaluated
+                            .get_base_field_vec()
+                            .iter()
+                            .map(|v| E::from(*v))
+                            .collect_vec()
+                    });
 
+                // left_evaluated.len() ?= right_evaluated.len() due to padding instance
                 for (inst_id, (left_element, right_element)) in
-                    left_evaluated.iter().zip_eq(right_evaluated).enumerate()
+                    left_evaluated.into_iter().zip(right_evaluated).enumerate()
                 {
-                    if *left_element != *right_element {
+                    if left_element != right_element {
                         errors.push(MockProverError::AssertEqualError {
                             left_expression: left.clone(),
                             right_expression: right.clone(),
-                            left: *left_element,
-                            right: *right_element,
+                            left: left_element,
+                            right: right_element,
                             name: name.clone(),
                             inst_id,
                         });
@@ -372,9 +389,17 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr = expr.clone().neg().neg(); // TODO get_ext_field_vec doesn't work without this
                 let expr_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &expr);
-                let expr_evaluated = expr_evaluated.get_ext_field_vec();
+                let expr_evaluated = expr_evaluated
+                    .get_ext_field_vec_optn()
+                    .map(|v| v.to_vec())
+                    .unwrap_or_else(|| {
+                        expr_evaluated
+                            .get_base_field_vec()
+                            .iter()
+                            .map(|v| E::from(*v))
+                            .collect_vec()
+                    });
 
                 for (inst_id, element) in expr_evaluated.iter().enumerate() {
                     if *element != E::ZERO {
