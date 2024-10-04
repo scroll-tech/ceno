@@ -206,10 +206,10 @@ impl UIntLtInput<'_> {
 #[derive(Debug)]
 pub struct UIntLtSignedConfig {
     pub is_lt: Option<WitIn>,
-    pub is_lhs_pos: IsLtConfig<1>,
-    pub is_rhs_pos: IsLtConfig<1>,
-    pub is_both_pos_lt: IsLtConfig<UINT_LIMBS>,
-    pub is_both_neg_lt: IsLtConfig<UINT_LIMBS>,
+    pub is_lhs_pos: IsLtConfig,
+    pub is_rhs_pos: IsLtConfig,
+    pub is_both_pos_lt: IsLtConfig,
+    pub is_both_neg_lt: IsLtConfig,
 }
 
 impl UIntLtSignedConfig {
@@ -248,20 +248,22 @@ impl UIntLtSignedConfig {
                 };
 
                 // detect lhs signed
-                let is_lhs_pos = IsLtConfig::<1>::construct_circuit(
+                let is_lhs_pos = IsLtConfig::construct_circuit(
                     cb,
                     || "lhs_msb",
                     lhs.limbs.iter().last().unwrap().expr(), // msb limb
                     (1 << UInt::<E>::C).into(),
                     None,
+                    1,
                 )?;
                 // detect rhs signed
-                let is_rhs_pos = IsLtConfig::<1>::construct_circuit(
+                let is_rhs_pos = IsLtConfig::construct_circuit(
                     cb,
                     || "rhs_msb",
                     rhs.limbs.iter().last().unwrap().expr(), // msb limb
                     (1 << UInt::<E>::C).into(),
                     None,
+                    1,
                 )?;
                 let lhs_value = lhs.value();
                 let rhs_value = rhs.value();
@@ -271,9 +273,16 @@ impl UIntLtSignedConfig {
                     lhs_value.clone(),
                     rhs_value.clone(),
                     None,
+                    UINT_LIMBS,
                 )?;
-                let is_both_neg_lt =
-                    IsLtConfig::construct_circuit(cb, || "rhs < lhs", rhs_value, lhs_value, None)?;
+                let is_both_neg_lt = IsLtConfig::construct_circuit(
+                    cb,
+                    || "rhs < lhs",
+                    rhs_value,
+                    lhs_value,
+                    None,
+                    UINT_LIMBS,
+                )?;
                 cb.require_equal(
                     || "is_lt_expr",
                     is_lt_expr,

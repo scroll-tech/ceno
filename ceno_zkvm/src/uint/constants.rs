@@ -1,6 +1,6 @@
 use crate::utils::const_min;
 
-use super::UIntLimbs;
+use super::{util::max_carry_word_for_multiplication, UIntLimbs};
 
 pub const RANGE_CHIP_BIT_WIDTH: usize = 16;
 pub const BYTE_BIT_WIDTH: usize = 8;
@@ -27,4 +27,18 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     /// The number of `RANGE_CHIP_BIT_WIDTH` cells needed to represent the entire `UIntLimbs<M, C>`
     pub const N_RANGE_CELLS: usize = Self::NUM_CELLS * Self::N_RANGE_CELLS_PER_CELL;
+
+    /// Max carry value during degree 2 limb multiplication
+    pub const MAX_DEGREE_2_MUL_CARRY_VALUE: u64 =
+        max_carry_word_for_multiplication(2, Self::M, Self::C);
+
+    /// Min bits to cover MAX_DEGREE_2_MUL_CARRY_VALUE
+    pub const MAX_DEGREE_2_MUL_CARRY_BITS: usize = {
+        let max_bit_of_carry = u64::BITS - Self::MAX_DEGREE_2_MUL_CARRY_VALUE.leading_zeros();
+        max_bit_of_carry as usize
+    };
+
+    /// Min number of u16 limb to cover max carry value
+    pub const MAX_DEGREE_2_MUL_CARRY_U16_LIMB: usize =
+        (Self::MAX_DEGREE_2_MUL_CARRY_BITS + 15) / 16;
 }
