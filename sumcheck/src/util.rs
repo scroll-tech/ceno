@@ -195,7 +195,7 @@ pub fn ceil_log2(x: usize) -> usize {
 }
 
 pub fn is_power_of_2(x: usize) -> bool {
-    (x != 0) && ((x & (x - 1)) == 0)
+    (x != 0) && x.is_power_of_two()
 }
 
 pub(crate) fn merge_sumcheck_polys<E: ExtensionField>(

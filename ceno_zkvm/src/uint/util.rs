@@ -28,7 +28,7 @@ const fn max_combinations(degree: usize, num_cells: usize) -> usize {
 pub(crate) const fn max_carry_word_for_multiplication(n: usize, m: usize, c: usize) -> u64 {
     assert!(n > 1);
     assert!(m <= u64::BITS as usize);
-    let num_cells = (m + c - 1) / c;
+    let num_cells = m.div_ceil(c);
 
     // calculate maximum multiplication value max_limb^(n)
     let mut max_mul_value = 1u128;
