@@ -1,3 +1,7 @@
+# Ceno: Non-uniform, Segment and Parallel Zero-knowledge Virtual Machine
+
+Please see [the paper](https://eprint.iacr.org/2024/387) for an introduction to Ceno.
+
 # MVP
 step 1
 - non-uniform prover end to end
