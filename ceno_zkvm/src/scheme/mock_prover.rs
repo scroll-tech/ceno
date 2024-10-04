@@ -1,7 +1,7 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    expression::{fmt, Expression},
+    expression::{Expression, fmt},
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, ProgramTableCircuit, RangeTable, TableCircuit,
