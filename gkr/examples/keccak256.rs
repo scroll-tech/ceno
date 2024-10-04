@@ -12,7 +12,6 @@ use gkr::{
 use goldilocks::GoldilocksExt2;
 use itertools::{izip, Itertools};
 use multilinear_extensions::mle::IntoMLE;
-use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 
@@ -27,7 +26,7 @@ fn main() {
         .map(|v| str::parse::<usize>(&v).unwrap_or(1))
         .unwrap();
 
-    if !is_power_of_2(max_thread_id) {
+    if !max_thread_id.is_power_of_two() {
         #[cfg(not(feature = "non_pow2_rayon_thread"))]
         {
             panic!(

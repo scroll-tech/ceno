@@ -239,7 +239,7 @@ fn encode_field_type_rs_basecode<E: ExtensionField>(
 // Split the input into chunks of message size, encode each message, and return the codewords
 // FIXME: It is expensive for now because it is using naive FFT (although it is
 // over a small domain)
-fn get_basecode<F: Field>(poly: &Vec<F>, rate: usize, message_size: usize) -> Vec<Vec<F>> {
+fn get_basecode<F: Field>(poly: &[F], rate: usize, message_size: usize) -> Vec<Vec<F>> {
     let timer = start_timer!(|| "Encode basecode");
     // The domain is just counting 1, 2, 3, ... , domain_size
     let domain: Vec<F> = steps(F::ONE).take(message_size * rate).collect();

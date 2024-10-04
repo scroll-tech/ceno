@@ -21,7 +21,6 @@ use ceno_zkvm::{
 use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
-use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 use transcript::Transcript;
@@ -65,7 +64,7 @@ fn main() {
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 
     let max_threads = {
-        if !is_power_of_2(RAYON_NUM_THREADS) {
+        if !RAYON_NUM_THREADS.is_power_of_two() {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
             {
                 panic!(
