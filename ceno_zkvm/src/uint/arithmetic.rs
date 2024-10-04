@@ -235,17 +235,18 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         with_overflow: bool,
     ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            let c = self.internal_mul::<M2>(cb, multiplier, with_overflow)?;
-            let mut c_lo = c.expr();
-            let c_hi = c_lo.split_off(c_lo.len() / 2);
-            let c_lo_hi = if M2 == 2 * M {
+            let mul_tmp = self.internal_mul::<M2>(cb, multiplier, with_overflow)?;
+            let mut tmp_expr = mul_tmp.expr();
+            let c = if M2 == 2 * M {
                 // hi limb
+                let c_hi = tmp_expr.split_off(tmp_expr.len() / 2);
                 UIntLimbs::from_exprs_unchecked(c_hi)?
             } else {
                 // lo limb
-                UIntLimbs::from_exprs_unchecked(c_lo)?
+                UIntLimbs::from_exprs_unchecked(tmp_expr)?
             };
-            Ok((c_lo_hi.internal_add(cb, &addend.expr(), with_overflow)?, c))
+
+            Ok((c.internal_add(cb, &addend.expr(), with_overflow)?, mul_tmp))
         })
     }
 
@@ -1017,7 +1018,12 @@ mod tests {
                 .mul(|| "uint_c", &mut cb, &mut uint_b, false)
                 .unwrap();
             let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
-            let _ = uint_c.add(|| "uint_e", &mut cb, &uint_d, false).unwrap();
+            let uint_e = uint_c.add(|| "uint_e", &mut cb, &uint_d, false).unwrap();
+
+            let expected_e = UIntLimbs::<64, 16, E>::from_const_unchecked(vec![3u64, 4, 1, 0]);
+            expected_e
+                .require_equal(|| "assert_e", &mut cb, &uint_e)
+                .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, None);
         }
@@ -1050,8 +1056,13 @@ mod tests {
             let mut uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
             let mut uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
             let mut uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
-            let _: (_, UIntLimbs<64, 16, E>) = uint_a
-                .mul_add(|| "uint_c", &mut cb, &mut uint_b, &mut uint_d, false)
+            let (uint_e, _): (_, UIntLimbs<64, 16, E>) = uint_a
+                .mul_add(|| "uint_e", &mut cb, &mut uint_b, &mut uint_d, false)
+                .unwrap();
+
+            let expected_e = UIntLimbs::<64, 16, E>::from_const_unchecked(vec![3u64, 4, 1, 0]);
+            expected_e
+                .require_equal(|| "assert_e", &mut cb, &uint_e)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, None);
@@ -1062,7 +1073,6 @@ mod tests {
             let a = Value::<'_, u32>::new_unchecked(u32::MAX);
             let b = Value::<'_, u32>::new_unchecked(u32::MAX);
             let (c_limb, c_carry, _) = a.mul(&b, &mut LkMultiplicity::default(), true);
-            println!("!!c_limb {:?}, c_carry {:?}", c_limb, c_carry);
             let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
                 // alloc a = 2^16 + (2^16 -1) * 2^16
                 vec![u16::MAX as u64, u16::MAX as u64],
@@ -1084,8 +1094,13 @@ mod tests {
 
             let mut uint_a = UIntLimbs::<32, 16, E>::new(|| "uint_a", &mut cb).unwrap();
             let mut uint_b = UIntLimbs::<32, 16, E>::new(|| "uint_b", &mut cb).unwrap();
-            let _: UIntLimbs<32, 16, E> = uint_a
+            let uint_c: UIntLimbs<32, 16, E> = uint_a
                 .mul(|| "mul_add", &mut cb, &mut uint_b, true)
+                .unwrap();
+
+            let expected_c = UIntLimbs::<32, 16, E>::from_const_unchecked(c_limb);
+            expected_c
+                .require_equal(|| "assert_g", &mut cb, &uint_c)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, None);
