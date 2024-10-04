@@ -490,7 +490,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     /// Generate ((0)_{2^C}, (1)_{2^C}, ..., (size - 1)_{2^C})
     pub fn counter_vector<F: SmallField>(size: usize) -> Vec<Vec<F>> {
         let num_vars = ceil_log2(size);
-        let number_of_limbs = (num_vars + C - 1) / C;
+        let number_of_limbs = num_vars.div_ceil(C);
         let cell_modulo = F::from(1 << C);
 
         let mut res = vec![vec![F::ZERO; number_of_limbs]];

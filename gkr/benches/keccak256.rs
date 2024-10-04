@@ -8,7 +8,6 @@ use criterion::*;
 
 use gkr::gadgets::keccak256::{keccak256_circuit, prove_keccak256, verify_keccak256};
 use goldilocks::GoldilocksExt2;
-use sumcheck::util::is_power_of_2;
 
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
@@ -39,7 +38,7 @@ fn bench_keccak256(c: &mut Criterion) {
     );
 
     let max_thread_id = {
-        if !is_power_of_2(RAYON_NUM_THREADS) {
+        if !RAYON_NUM_THREADS.is_power_of_two() {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
             {
                 panic!(
