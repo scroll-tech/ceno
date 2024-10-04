@@ -236,14 +236,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             let mul_tmp = self.internal_mul::<M2>(cb, multiplier, with_overflow)?;
-            let mut tmp_expr = mul_tmp.expr();
             let c = if M2 == 2 * M {
                 // hi limb
-                let c_hi = tmp_expr.split_off(tmp_expr.len() / 2);
-                UIntLimbs::from_exprs_unchecked(c_hi)?
+                let (_, c_hi) = mul_tmp.as_lo_hi()?;
+                c_hi
             } else {
                 // lo limb
-                UIntLimbs::from_exprs_unchecked(tmp_expr)?
+                UIntLimbs::from_exprs_unchecked(mul_tmp.expr())?
             };
 
             Ok((c.internal_add(cb, &addend.expr(), with_overflow)?, mul_tmp))

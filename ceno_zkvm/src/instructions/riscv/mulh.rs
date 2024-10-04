@@ -9,8 +9,8 @@ use super::{
     RIVInstruction,
 };
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, expression::ToExpr,
-    instructions::Instruction, uint::Value, witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
+    witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 
@@ -49,11 +49,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
                 let mut rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
                 let rd_written: UIntMul<E> =
                     rs1_read.mul(|| "rd_written", circuit_builder, &mut rs2_read, true)?;
-                let rd_written_exprs = rd_written.expr();
-                let rd_hi = UInt::from_exprs_unchecked(
-                    rd_written_exprs[(rd_written_exprs.len() / 2)..].to_vec(),
-                )?;
-                (rs1_read, rs2_read, rd_written, rd_hi.register_expr())
+                let (_, rd_written_hi) = rd_written.as_lo_hi()?;
+                (
+                    rs1_read,
+                    rs2_read,
+                    rd_written,
+                    rd_written_hi.register_expr(),
+                )
             }
 
             _ => unreachable!("Unsupported instruction kind"),

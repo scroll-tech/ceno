@@ -526,6 +526,19 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .reduce(|sum, limb| sum * base.clone() + limb)
             .unwrap()
     }
+
+    /// split into 2 UIntLimbs with each taking half size of limbs
+    pub fn as_lo_hi<const M2: usize>(
+        &self,
+    ) -> Result<(UIntLimbs<M2, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
+        assert!(M == 2 * M2);
+        let mut self_lo = self.expr();
+        let self_hi = self_lo.split_off(self_lo.len() / 2);
+        Ok((
+            UIntLimbs::from_exprs_unchecked(self_lo)?,
+            UIntLimbs::from_exprs_unchecked(self_hi)?,
+        ))
+    }
 }
 
 /// Construct `UIntLimbs` from `Vec<CellId>`
