@@ -20,10 +20,6 @@ pub fn bits_u64(n: u64) -> usize {
     (64 - n.leading_zeros()) as usize
 }
 
-pub const fn ceil_div_usize(a: usize, b: usize) -> usize {
-    (a + b - 1) / b
-}
-
 /// Computes `ceil(log_2(n))`.
 #[must_use]
 pub fn log2_ceil(n: usize) -> usize {

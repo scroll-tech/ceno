@@ -44,14 +44,14 @@ where
     }
 
     pub fn compute_inner_base(
-        leaves: &Vec<E::BaseField>,
+        leaves: &[E::BaseField],
         hasher: &Hasher<E::BaseField>,
     ) -> Vec<Vec<Digest<E::BaseField>>> {
         merkelize_base::<E>(&[leaves], hasher)
     }
 
     pub fn compute_inner_ext(
-        leaves: &Vec<E>,
+        leaves: &[E],
         hasher: &Hasher<E::BaseField>,
     ) -> Vec<Vec<Digest<E::BaseField>>> {
         merkelize_ext::<E>(&[leaves], hasher)
