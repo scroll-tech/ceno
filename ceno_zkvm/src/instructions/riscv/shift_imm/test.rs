@@ -4,10 +4,10 @@ use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::{riscv::constants::UInt, Instruction},
-    scheme::mock_prover::{MockProver, MOCK_PC_SRLI, MOCK_PC_SRLI_31, MOCK_PROGRAM},
     Value,
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
+    instructions::{Instruction, riscv::constants::UInt},
+    scheme::mock_prover::{MOCK_PC_SRLI, MOCK_PC_SRLI_31, MOCK_PROGRAM, MockProver},
 };
 
 use super::{SrliOp, shift_imm_circuit::ShiftImmInstruction};

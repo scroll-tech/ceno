@@ -144,13 +144,13 @@ mod test {
         use rand::Rng;
 
         use crate::{
+            Value,
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             instructions::{
-                riscv::{constants::UInt, divu::DivUInstruction},
                 Instruction,
+                riscv::{constants::UInt, divu::DivUInstruction},
             },
-            scheme::mock_prover::{MockProver, MOCK_PC_DIVU, MOCK_PROGRAM},
-            Value,
+            scheme::mock_prover::{MOCK_PC_DIVU, MOCK_PROGRAM, MockProver},
         };
 
         fn verify(name: &'static str, dividend: Word, divisor: Word, outcome: Word) {

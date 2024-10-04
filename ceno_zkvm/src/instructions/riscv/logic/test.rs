@@ -6,10 +6,9 @@ use multilinear_extensions::mle::IntoMLEs;
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::{riscv::constants::UInt8, Instruction},
-    scheme::mock_prover::{MockProver, MOCK_PC_AND, MOCK_PC_OR, MOCK_PC_XOR, MOCK_PROGRAM},
+    instructions::{Instruction, riscv::constants::UInt8},
+    scheme::mock_prover::{MOCK_PC_AND, MOCK_PC_OR, MOCK_PC_XOR, MOCK_PROGRAM, MockProver},
     utils::split_to_u8,
-    ROMType,
 };
 
 use super::*;
