@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::ChipCircuitGadgets;
-use crate::chip_handler::{calldata::CalldataChip, rom_handler::ROMHandler, ChipHandler};
+use crate::chip_handler::{ChipHandler, calldata::CalldataChip, rom_handler::ROMHandler};
 use ff::Field;
 use ff_ext::ExtensionField;
 use gkr::structs::Circuit;

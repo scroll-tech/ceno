@@ -7,7 +7,7 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use gkr::structs::PointAndEval;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use std::mem;
 use transcript::Transcript;
 

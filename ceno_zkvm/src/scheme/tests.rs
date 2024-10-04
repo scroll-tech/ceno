@@ -13,7 +13,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::{riscv::arith::AddInstruction, Instruction},
+    instructions::{Instruction, riscv::arith::AddInstruction},
     set_val,
     structs::{PointAndEval, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{ProgramTableCircuit, U16TableCircuit},
@@ -249,7 +249,9 @@ fn test_single_add_instance_e2e() {
         .expect("create_proof failed");
 
     let transcript = Transcript::new(b"riscv");
-    assert!(verifier
-        .verify_proof(zkvm_proof, transcript)
-        .expect("verify proof return with error"),);
+    assert!(
+        verifier
+            .verify_proof(zkvm_proof, transcript)
+            .expect("verify proof return with error"),
+    );
 }

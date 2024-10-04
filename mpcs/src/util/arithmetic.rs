@@ -135,11 +135,7 @@ pub fn modulus<F: PrimeField>() -> BigUint {
 }
 
 pub fn fe_from_bool<F: Field>(value: bool) -> F {
-    if value {
-        F::ONE
-    } else {
-        F::ZERO
-    }
+    if value { F::ONE } else { F::ZERO }
 }
 
 pub fn fe_mod_from_le_bytes<F: PrimeField>(bytes: impl AsRef<[u8]>) -> F {

@@ -9,9 +9,9 @@ use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr,
+    ByteAddr, CENO_PLATFORM,
     InsnKind::{ADD, BLTU},
-    StepRecord, VMState, CENO_PLATFORM,
+    StepRecord, VMState,
 };
 use ceno_zkvm::{
     scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -23,7 +23,7 @@ use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
 use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
+use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
 
 #[from_env]
@@ -229,8 +229,10 @@ fn main() {
         );
 
         let transcript = Transcript::new(b"riscv");
-        assert!(verifier
-            .verify_proof(zkvm_proof, transcript)
-            .expect("verify proof return with error"),);
+        assert!(
+            verifier
+                .verify_proof(zkvm_proof, transcript)
+                .expect("verify proof return with error"),
+        );
     }
 }

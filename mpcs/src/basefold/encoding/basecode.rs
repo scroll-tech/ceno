@@ -1,11 +1,12 @@
 use std::marker::PhantomData;
 
-use super::{concatenate_field_types, EncodingProverParameters, EncodingScheme};
+use super::{EncodingProverParameters, EncodingScheme, concatenate_field_types};
 use crate::{
+    Error,
     util::{
         arithmetic::base_from_raw_bytes, log2_strict, num_of_bytes, plonky2_util::reverse_bits,
     },
-    vec_mut, Error,
+    vec_mut,
 };
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use ark_std::{end_timer, start_timer};
@@ -17,10 +18,10 @@ use rand::SeedableRng;
 use rayon::prelude::{ParallelIterator, ParallelSlice, ParallelSliceMut};
 
 use itertools::Itertools;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rand_chacha::{rand_core::RngCore, ChaCha8Rng};
+use rand_chacha::{ChaCha8Rng, rand_core::RngCore};
 use rayon::prelude::IntoParallelRefIterator;
 
 use crate::util::arithmetic::{horner, steps};

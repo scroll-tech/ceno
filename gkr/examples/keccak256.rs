@@ -10,11 +10,11 @@ use gkr::{
     structs::CircuitWitness,
 };
 use goldilocks::GoldilocksExt2;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use multilinear_extensions::mle::IntoMLE;
 use sumcheck::util::is_power_of_2;
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
+use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 
 fn main() {
     println!(

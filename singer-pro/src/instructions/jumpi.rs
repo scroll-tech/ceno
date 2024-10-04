@@ -6,7 +6,7 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, range::RangeChip, rom_handler::ROMHandler, ChipHandler,
+        ChipHandler, bytecode::BytecodeChip, range::RangeChip, rom_handler::ROMHandler,
     },
     chips::IntoEnumIterator,
     constants::OpcodeType,

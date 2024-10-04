@@ -108,11 +108,7 @@ impl<E: ExtensionField> Ord for Expression<E> {
                     let cmp = b.cmp(f);
                     if cmp == Equal {
                         let cmp = cmp_ext(c, g);
-                        if cmp == Equal {
-                            cmp_ext(d, h)
-                        } else {
-                            cmp
-                        }
+                        if cmp == Equal { cmp_ext(d, h) } else { cmp }
                     } else {
                         cmp
                     }
@@ -122,29 +118,17 @@ impl<E: ExtensionField> Ord for Expression<E> {
             }
             (Sum(a, b), Sum(c, d)) => {
                 let cmp = a.cmp(c);
-                if cmp == Equal {
-                    b.cmp(d)
-                } else {
-                    cmp
-                }
+                if cmp == Equal { b.cmp(d) } else { cmp }
             }
             (Product(a, b), Product(c, d)) => {
                 let cmp = a.cmp(c);
-                if cmp == Equal {
-                    b.cmp(d)
-                } else {
-                    cmp
-                }
+                if cmp == Equal { b.cmp(d) } else { cmp }
             }
             (ScaledSum(x, a, b), ScaledSum(y, c, d)) => {
                 let cmp = x.cmp(y);
                 if cmp == Equal {
                     let cmp = a.cmp(c);
-                    if cmp == Equal {
-                        b.cmp(d)
-                    } else {
-                        cmp
-                    }
+                    if cmp == Equal { b.cmp(d) } else { cmp }
                 } else {
                     cmp
                 }
@@ -183,7 +167,7 @@ mod tests {
     use super::*;
     use ff::Field;
     use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
-    use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+    use rand_chacha::{ChaChaRng, rand_core::SeedableRng};
 
     #[test]
     fn test_to_monomial_form() {

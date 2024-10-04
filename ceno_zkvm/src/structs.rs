@@ -166,13 +166,14 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
         input: &TC::FixedInput,
     ) {
         let cs = cs.get_cs(&TC::name()).expect("cs not found");
-        assert!(self
-            .circuit_fixed_traces
-            .insert(
-                TC::name(),
-                Some(TC::generate_fixed_traces(&config, cs.num_fixed, input)),
-            )
-            .is_none());
+        assert!(
+            self.circuit_fixed_traces
+                .insert(
+                    TC::name(),
+                    Some(TC::generate_fixed_traces(&config, cs.num_fixed, input)),
+                )
+                .is_none()
+        );
     }
 }
 
@@ -196,10 +197,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let (witness, logup_multiplicity) =
             OC::assign_instances(config, cs.num_witin as usize, records)?;
         assert!(self.witnesses.insert(OC::name(), witness).is_none());
-        assert!(self
-            .lk_mlts
-            .insert(OC::name(), logup_multiplicity)
-            .is_none());
+        assert!(
+            self.lk_mlts
+                .insert(OC::name(), logup_multiplicity)
+                .is_none()
+        );
 
         Ok(())
     }

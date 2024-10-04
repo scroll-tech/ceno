@@ -1,4 +1,5 @@
 use crate::{
+    Error,
     sum_check::{SumCheck, VirtualPolynomial},
     util::{
         arithmetic::BooleanHypercube,
@@ -6,14 +7,13 @@ use crate::{
         parallel::par_map_collect,
         poly_index_ext,
     },
-    Error,
 };
 use ark_std::{end_timer, start_timer};
 use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use num_integer::Integer;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{borrow::Cow, collections::HashMap, fmt::Debug, marker::PhantomData};
 use transcript::Transcript;
 mod coeff;
@@ -329,14 +329,18 @@ mod tests {
     #[test]
     fn test_sum_check_protocol() {
         let polys = [
-            DenseMultilinearExtension::<E>::from_evaluations_vec(
-                2,
-                vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)],
-            ),
-            DenseMultilinearExtension::from_evaluations_vec(
-                2,
-                vec![Fr::from(0), Fr::from(1), Fr::from(1), Fr::from(0)],
-            ),
+            DenseMultilinearExtension::<E>::from_evaluations_vec(2, vec![
+                Fr::from(1),
+                Fr::from(2),
+                Fr::from(3),
+                Fr::from(4),
+            ]),
+            DenseMultilinearExtension::from_evaluations_vec(2, vec![
+                Fr::from(0),
+                Fr::from(1),
+                Fr::from(1),
+                Fr::from(0),
+            ]),
             DenseMultilinearExtension::from_evaluations_vec(1, vec![Fr::from(0), Fr::from(1)]),
         ];
         let points = vec![vec![E::from(1), E::from(2)], vec![E::from(1)]];

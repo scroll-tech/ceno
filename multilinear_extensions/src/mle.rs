@@ -74,9 +74,7 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     }
 }
 
-impl<E: ExtensionField> Debug
-    for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>
-{
+impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:?}", self.evaluations())
     }

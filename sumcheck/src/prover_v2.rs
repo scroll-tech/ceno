@@ -12,21 +12,21 @@ use multilinear_extensions::{
     virtual_poly_v2::VirtualPolynomialV2,
 };
 use rayon::{
+    Scope,
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
-    Scope,
 };
 use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
 #[cfg(feature = "non_pow2_rayon_thread")]
-use crate::local_thread_pool::{create_local_pool_once, LOCAL_THREAD_POOL};
+use crate::local_thread_pool::{LOCAL_THREAD_POOL, create_local_pool_once};
 
 use crate::{
     entered_span, exit_span,
     structs::{IOPProof, IOPProverMessage, IOPProverStateV2},
     util::{
-        barycentric_weights, ceil_log2, extrapolate, merge_sumcheck_polys_v2, AdditiveArray,
-        AdditiveVec,
+        AdditiveArray, AdditiveVec, barycentric_weights, ceil_log2, extrapolate,
+        merge_sumcheck_polys_v2,
     },
 };
 
@@ -45,10 +45,12 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         assert_eq!(polys.len(), max_thread_id);
 
         let log2_max_thread_id = ceil_log2(max_thread_id); // do not support SIZE not power of 2
-        assert!(polys
-            .iter()
-            .map(|poly| (poly.aux_info.max_num_variables, poly.aux_info.max_degree))
-            .all_equal());
+        assert!(
+            polys
+                .iter()
+                .map(|poly| (poly.aux_info.max_num_variables, poly.aux_info.max_degree))
+                .all_equal()
+        );
         let (num_variables, max_degree) = (
             polys[0].aux_info.max_num_variables,
             polys[0].aux_info.max_degree,
@@ -56,13 +58,10 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
-            return (
-                IOPProof::default(),
-                IOPProverStateV2 {
-                    poly: polys[0].clone(),
-                    ..Default::default()
-                },
-            );
+            return (IOPProof::default(), IOPProverStateV2 {
+                poly: polys[0].clone(),
+                ..Default::default()
+            });
         }
         let start = start_timer!(|| "sum check prove");
 
@@ -608,13 +607,10 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
-            return (
-                IOPProof::default(),
-                IOPProverStateV2 {
-                    poly,
-                    ..Default::default()
-                },
-            );
+            return (IOPProof::default(), IOPProverStateV2 {
+                poly,
+                ..Default::default()
+            });
         }
         let start = start_timer!(|| "sum check prove");
 

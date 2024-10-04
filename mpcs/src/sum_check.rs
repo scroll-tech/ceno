@@ -1,10 +1,10 @@
 use crate::{
-    util::{
-        arithmetic::{inner_product, powers, product, BooleanHypercube},
-        expression::{CommonPolynomial, Expression, Query},
-        BitIndex,
-    },
     Error,
+    util::{
+        BitIndex,
+        arithmetic::{BooleanHypercube, inner_product, powers, product},
+        expression::{CommonPolynomial, Expression, Query},
+    },
 };
 use std::{collections::HashMap, fmt::Debug};
 
@@ -13,7 +13,7 @@ use ff::PrimeField;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 pub mod classic;
@@ -118,11 +118,7 @@ pub fn lagrange_eval<F: PrimeField>(x: &[F], b: usize) -> F {
 
     product(x.iter().enumerate().map(
         |(idx, x_i)| {
-            if b.nth_bit(idx) {
-                *x_i
-            } else {
-                F::ONE - x_i
-            }
+            if b.nth_bit(idx) { *x_i } else { F::ONE - x_i }
         },
     ))
 }

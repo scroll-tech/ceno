@@ -1,11 +1,11 @@
 use ff_ext::ExtensionField;
 use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
 use gkr_graph::structs::TargetEvaluations;
-use itertools::{chain, Itertools};
+use itertools::{Itertools, chain};
 use multilinear_extensions::mle::MultilinearExtension;
 use transcript::Transcript;
 
-use crate::{error::ZKVMError, SingerAuxInfo, SingerCircuit, SingerWiresOutValues};
+use crate::{SingerAuxInfo, SingerCircuit, SingerWiresOutValues, error::ZKVMError};
 
 use super::{GKRGraphVerifierState, SingerProof};
 

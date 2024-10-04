@@ -546,11 +546,7 @@ pub mod fmt {
             Expression::Fixed(fixed) => format!("{:?}", fixed),
             Expression::Sum(left, right) => {
                 let s = format!("{} + {}", expr(left, wtns, false), expr(right, wtns, false));
-                if add_prn_sum {
-                    format!("({})", s)
-                } else {
-                    s
-                }
+                if add_prn_sum { format!("({})", s) } else { s }
             }
             Expression::Product(left, right) => {
                 format!("{} * {}", expr(left, wtns, true), expr(right, wtns, true))
@@ -562,11 +558,7 @@ pub mod fmt {
                     expr(x, wtns, true),
                     expr(b, wtns, false)
                 );
-                if add_prn_sum {
-                    format!("({})", s)
-                } else {
-                    s
-                }
+                if add_prn_sum { format!("({})", s) } else { s }
             }
         }
     }
@@ -611,11 +603,7 @@ pub mod fmt {
     }
 
     pub fn prn(s: String, add_prn: bool) -> String {
-        if add_prn {
-            format!("({})", s)
-        } else {
-            s
-        }
+        if add_prn { format!("({})", s) } else { s }
     }
 
     #[cfg(test)]
@@ -651,7 +639,7 @@ mod tests {
 
     use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
 
-    use super::{fmt, Expression, ToExpr};
+    use super::{Expression, ToExpr, fmt};
     use ff::Field;
 
     #[test]

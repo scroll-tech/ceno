@@ -8,7 +8,7 @@ use simple_frontend::structs::WitnessId;
 use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType, structs::ChipChallenges};
 use strum_macros::EnumIter;
 
-use crate::{error::ZKVMError, CircuitWiresIn, SingerParams};
+use crate::{CircuitWiresIn, SingerParams, error::ZKVMError};
 
 use self::{
     add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
