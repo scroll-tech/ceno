@@ -4,8 +4,9 @@ use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
+    Value,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::Instruction,
+    instructions::{Instruction, riscv::constants::UInt},
     scheme::mock_prover::{MOCK_PC_SRLI, MOCK_PC_SRLI_31, MOCK_PROGRAM, MockProver},
 };
 
@@ -39,6 +40,14 @@ fn test_opcode_srli_1() {
         )],
     )
     .unwrap();
+
+    let expected_rd_written =
+        UInt::from_const_unchecked(Value::new_unchecked(32u32 >> 3).as_u16_limbs().to_vec());
+
+    config
+        .rd_written
+        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+        .unwrap();
 
     MockProver::assert_satisfied(
         &cb,

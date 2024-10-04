@@ -21,7 +21,7 @@ pub struct InstructionConfig<E: ExtensionField> {
 
     rs1: UInt<E>,
     imm: UInt<E>,
-    rd_written: UInt<E>,
+    pub(crate) rd_written: UInt<E>,
     remainder: UInt<E>,
     rd_imm_mul: UInt<E>,
 }

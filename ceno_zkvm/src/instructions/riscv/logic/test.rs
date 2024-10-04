@@ -6,8 +6,9 @@ use multilinear_extensions::mle::IntoMLEs;
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::Instruction,
+    instructions::{Instruction, riscv::constants::UInt8},
     scheme::mock_prover::{MOCK_PC_AND, MOCK_PC_OR, MOCK_PC_XOR, MOCK_PROGRAM, MockProver},
+    utils::split_to_u8,
 };
 
 use super::*;
@@ -48,6 +49,13 @@ fn test_opcode_and() {
 
     let lkm = lkm.into_finalize_result()[ROMType::And as usize].clone();
     assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
+
+    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>((A & B) as u32));
+
+    config
+        .rd_written
+        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+        .unwrap();
 
     MockProver::assert_satisfied(
         &mut cb,
@@ -93,6 +101,13 @@ fn test_opcode_or() {
     let lkm = lkm.into_finalize_result()[ROMType::Or as usize].clone();
     assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
 
+    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>((A | B) as u32));
+
+    config
+        .rd_written
+        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+        .unwrap();
+
     MockProver::assert_satisfied(
         &mut cb,
         &raw_witin
@@ -136,6 +151,13 @@ fn test_opcode_xor() {
 
     let lkm = lkm.into_finalize_result()[ROMType::Xor as usize].clone();
     assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
+
+    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>((A ^ B) as u32));
+
+    config
+        .rd_written
+        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+        .unwrap();
 
     MockProver::assert_satisfied(
         &mut cb,
