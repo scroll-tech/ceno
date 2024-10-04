@@ -6,7 +6,7 @@ use crate::{
     gadgets::IsLtConfig,
     instructions::{
         riscv::{
-            constants::{ECALL_HALT_OPCODE, EXIT_PC, UINT_LIMBS},
+            constants::{ECALL_HALT_OPCODE, EXIT_PC},
             ecall_insn::EcallInstructionConfig,
         },
         Instruction,
@@ -21,7 +21,7 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
     prev_x10_ts: WitIn,
-    lt_x10_cfg: IsLtConfig<UINT_LIMBS>,
+    lt_x10_cfg: IsLtConfig,
 }
 
 pub struct HaltInstruction<E>(PhantomData<E>);

@@ -6,7 +6,6 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::IsLtConfig,
-    instructions::riscv::constants::UINT_LIMBS,
     set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
@@ -19,7 +18,7 @@ pub struct EcallInstructionConfig {
     pub pc: WitIn,
     pub ts: WitIn,
     prev_x5_ts: WitIn,
-    lt_x5_cfg: IsLtConfig<UINT_LIMBS>,
+    lt_x5_cfg: IsLtConfig,
 }
 
 impl EcallInstructionConfig {
