@@ -66,23 +66,23 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
                                 // Switch to coefficient form
                                 let mut coeffs = poly.evaluations.clone();
                                 interpolate_field_type_over_boolean_hypercube(&mut coeffs);
-            
+
                                 let mut codeword =
                                     <<BasefoldBasecodeParams as BasefoldSpec<E>>::EncodingScheme as EncodingScheme<E>>::encode(
                                         &pp.encoding_params,
                                         &coeffs,
                                     );
-            
+
                                 // If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
                                 //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
-            
+
                                 // The sum-check protocol starts from the first variable, but the FRI part
                                 // will eventually produce the evaluation at (alpha_k, ..., alpha_1), so apply
                                 // the bit-reversion to reverse the variable indices of the polynomial.
                                 // In short: store the poly and codeword in big endian
                                 reverse_index_bits_in_place_field_type(&mut coeffs);
                                 reverse_index_bits_in_place_field_type(&mut codeword);
-            
+
                                 (coeffs, codeword)
                             })
                             .collect::<(Vec<FieldType<E>>, Vec<FieldType<E>>)>();
