@@ -41,10 +41,6 @@ use singer::{
 use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;
 
-pub fn is_power_of_2(x: usize) -> bool {
-    (x != 0) && ((x & (x - 1)) == 0)
-}
-
 fn bench_add(c: &mut Criterion) {
     let max_thread_id = {
         if !is_power_of_2(RAYON_NUM_THREADS) {
