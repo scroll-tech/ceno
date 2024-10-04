@@ -50,6 +50,8 @@ pub struct VirtualPolynomial<E: ExtensionField> {
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
     pub flattened_ml_extensions: Vec<ArcDenseMultilinearExtension<E>>,
+    // TODO(Matthias): why does this cast to usize, instead of actually storing pointers?
+    // (Same for `products` above, I guess?)
     /// Pointers to the above poly extensions
     raw_pointers_lookup_table: HashMap<usize, usize>,
 }
