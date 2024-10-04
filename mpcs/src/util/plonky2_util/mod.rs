@@ -305,11 +305,9 @@ pub fn branch_hint() {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{vec, vec::Vec};
-
     use rand::{rngs::OsRng, Rng};
 
-    use crate::{log2_ceil, log2_strict};
+    use super::{log2_ceil, log2_strict};
 
     #[test]
     fn test_reverse_index_bits() {
