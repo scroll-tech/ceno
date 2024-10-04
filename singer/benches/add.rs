@@ -43,7 +43,7 @@ use transcript::Transcript;
 
 fn bench_add(c: &mut Criterion) {
     let max_thread_id = {
-        if !is_power_of_2(RAYON_NUM_THREADS) {
+        if !RAYON_NUM_THREADS.is_power_of_two() {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
             {
                 panic!(
