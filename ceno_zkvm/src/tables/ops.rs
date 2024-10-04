@@ -83,13 +83,10 @@ pub struct PowTable;
 impl OpsTable for PowTable {
     const ROM_TYPE: ROMType = ROMType::Pow;
     fn len() -> usize {
-        (1 << 5) + 1
+        1 << 5
     }
 
     fn content() -> Vec<[u64; 3]> {
-        (0..Self::len() as u64)
-            .map(|b| [2, b, 1 << b])
-            .chain(std::iter::once([0, 0, 0]))
-            .collect()
+        (0..Self::len() as u64).map(|b| [2, b, 1 << b]).collect()
     }
 }
