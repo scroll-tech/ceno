@@ -41,7 +41,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: crusty-pie/toolchain@v1
         with:
           components: rustfmt, clippy
           override: false
