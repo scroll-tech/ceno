@@ -34,10 +34,9 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
     assert!(num_limbs.is_power_of_two());
     assert!(!mles.is_empty());
     let next_power_of_2 = next_pow2_instance_padding(num_instances);
-    assert!(
-        mles.iter()
-            .all(|mle| mle.evaluations().len() <= next_power_of_2)
-    );
+    assert!(mles
+        .iter()
+        .all(|mle| mle.evaluations().len() <= next_power_of_2));
     let log2_num_instances = ceil_log2(next_power_of_2);
     let per_fanin_len = (mles[0].evaluations().len() / num_limbs).max(1); // minimal size 1
     let log2_mle_size = ceil_log2(mles.len());
@@ -233,20 +232,19 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
         &|scalar| {
-            let scalar: ArcMultilinearExtension<E> =
-                Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![
-                    scalar,
-                ]));
+            let scalar: ArcMultilinearExtension<E> = Arc::new(
+                DenseMultilinearExtension::from_evaluations_vec(0, vec![scalar]),
+            );
             scalar
         },
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be aquire once for each power
             let challenge = challenges[challenge_id as usize];
-            let challenge: ArcMultilinearExtension<E> = Arc::new(
-                DenseMultilinearExtension::from_evaluations_ext_vec(0, vec![
-                    challenge.pow([pow as u64]) * scalar + offset,
-                ]),
-            );
+            let challenge: ArcMultilinearExtension<E> =
+                Arc::new(DenseMultilinearExtension::from_evaluations_ext_vec(
+                    0,
+                    vec![challenge.pow([pow as u64]) * scalar + offset],
+                ));
             challenge
         },
         &|a, b| {
@@ -417,10 +415,9 @@ mod tests {
             })
             .product();
         assert_eq!(res.len(), num_vars);
-        assert!(
-            res.iter()
-                .all(|layer_wit| layer_wit.len() == num_product_fanin)
-        );
+        assert!(res
+            .iter()
+            .all(|layer_wit| layer_wit.len() == num_product_fanin));
         assert_eq!(final_product, expected_final_product);
     }
 
@@ -437,18 +434,14 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ONE);
         // [[1, 3, 5, 7], [2, 4, 6, 8]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::ONE,
-            E::from(3u64),
-            E::from(5u64),
-            E::from(7u64)
-        ],);
-        assert_eq!(res[1].get_ext_field_vec(), vec![
-            E::from(2u64),
-            E::from(4u64),
-            E::from(6u64),
-            E::from(8u64)
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::ONE, E::from(3u64), E::from(5u64), E::from(7u64)],
+        );
+        assert_eq!(
+            res[1].get_ext_field_vec(),
+            vec![E::from(2u64), E::from(4u64), E::from(6u64), E::from(8u64)],
+        );
     }
 
     #[test]
@@ -465,18 +458,14 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ZERO);
         // [[1, 3, 5, 0], [2, 4, 6, 0]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::ONE,
-            E::from(3u64),
-            E::from(5u64),
-            E::from(0u64)
-        ],);
-        assert_eq!(res[1].get_ext_field_vec(), vec![
-            E::from(2u64),
-            E::from(4u64),
-            E::from(6u64),
-            E::from(0u64)
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::ONE, E::from(3u64), E::from(5u64), E::from(0u64)],
+        );
+        assert_eq!(
+            res[1].get_ext_field_vec(),
+            vec![E::from(2u64), E::from(4u64), E::from(6u64), E::from(0u64)],
+        );
 
         // case 2: test instance level padding
         // [[1,0],[3,0],[5,0]]]
@@ -487,12 +476,10 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[1, 3, 5, 1], [1, 1, 1, 1]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::ONE,
-            E::from(3u64),
-            E::from(5u64),
-            E::ONE
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::ONE, E::from(3u64), E::from(5u64), E::ONE],
+        );
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE; 4],);
     }
 
@@ -507,10 +494,10 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[2, 3], [1, 1]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::from(2u64),
-            E::from(3u64)
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::from(2u64), E::from(3u64)],
+        );
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE, E::ONE],);
     }
 
@@ -596,23 +583,19 @@ mod tests {
         assert_eq!(
             layer[0].evaluations().clone(),
             // p11 * q12 + p12 * q11
-            FieldType::<E>::Ext(vec![
-                vec![(1 + 5) * (3 * 7) + (3 + 7) * 5]
-                    .into_iter()
-                    .map(E::from)
-                    .sum::<E>(),
-            ])
+            FieldType::<E>::Ext(vec![vec![(1 + 5) * (3 * 7) + (3 + 7) * 5]
+                .into_iter()
+                .map(E::from)
+                .sum::<E>(),])
         );
         // p2
         assert_eq!(
             layer[1].evaluations().clone(),
             // p21 * q22 + p22 * q21
-            FieldType::<E>::Ext(vec![
-                vec![(2 + 6) * (4 * 8) + (4 + 8) * (2 * 6)]
-                    .into_iter()
-                    .map(E::from)
-                    .sum::<E>(),
-            ])
+            FieldType::<E>::Ext(vec![vec![(2 + 6) * (4 * 8) + (4 + 8) * (2 * 6)]
+                .into_iter()
+                .map(E::from)
+                .sum::<E>(),])
         );
         // q1
         assert_eq!(
@@ -624,9 +607,10 @@ mod tests {
         assert_eq!(
             layer[3].evaluations().clone(),
             // q22 * q22
-            FieldType::<E>::Ext(vec![
-                vec![(4 * 8) * (2 * 6)].into_iter().map(E::from).sum::<E>(),
-            ])
+            FieldType::<E>::Ext(vec![vec![(4 * 8) * (2 * 6)]
+                .into_iter()
+                .map(E::from)
+                .sum::<E>(),])
         );
     }
 }

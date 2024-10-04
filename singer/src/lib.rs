@@ -6,7 +6,7 @@ use gkr_graph::structs::{
     CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
 };
 use instructions::{
-    InstOutputType, SingerCircuitBuilder, construct_inst_graph, construct_inst_graph_and_witness,
+    construct_inst_graph, construct_inst_graph_and_witness, InstOutputType, SingerCircuitBuilder,
 };
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,

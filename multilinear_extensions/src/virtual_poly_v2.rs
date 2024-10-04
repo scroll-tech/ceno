@@ -118,15 +118,13 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
 
         assert!(!mle_list.is_empty(), "input mle_list is empty");
         // sanity check: all mle in mle_list must have same num_vars()
-        assert!(
-            mle_list
-                .iter()
-                .map(|m| {
-                    assert!(m.num_vars() <= self.aux_info.max_num_variables);
-                    m.num_vars()
-                })
-                .all_equal()
-        );
+        assert!(mle_list
+            .iter()
+            .map(|m| {
+                assert!(m.num_vars() <= self.aux_info.max_num_variables);
+                m.num_vars()
+            })
+            .all_equal());
 
         self.aux_info.max_degree = max(self.aux_info.max_degree, mle_list.len());
 

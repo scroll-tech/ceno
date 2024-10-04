@@ -4,11 +4,11 @@ use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
 use crate::{
-    Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
+    witness::LkMultiplicity, Value,
 };
 
-use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};
+use super::{constants::UInt, i_insn::IInstructionConfig, RIVInstruction};
 
 pub struct AddiInstruction<E>(PhantomData<E>);
 
@@ -90,7 +90,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MOCK_PC_ADDI, MOCK_PC_ADDI_SUB, MOCK_PROGRAM, MockProver},
+        scheme::mock_prover::{MockProver, MOCK_PC_ADDI, MOCK_PC_ADDI_SUB, MOCK_PROGRAM},
     };
 
     use super::AddiInstruction;

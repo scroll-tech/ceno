@@ -5,8 +5,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip,
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
@@ -160,12 +160,12 @@ mod test {
     use transcript::Transcript;
 
     use crate::{
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
         instructions::{
             ChipChallenges, Instruction, InstructionGraph, PushInstruction, SingerCircuitBuilder,
         },
         scheme::GKRGraphProverState,
         test::test_opcode_circuit,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
     #[test]
@@ -190,32 +190,39 @@ mod test {
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert("phase0_stack_top".to_string(), vec![Goldilocks::from(
-            100u64,
-        )]);
+        phase0_values_map.insert(
+            "phase0_stack_top".to_string(),
+            vec![Goldilocks::from(100u64)],
+        );
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add_i_plus_1".to_string(),
             vec![], // carry is 0, may test carry using larger values in PCUInt
         );
-        phase0_values_map.insert("phase0_stack_ts_add".to_string(), vec![
-            Goldilocks::from(2u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
-                                     * range values, stack_ts + 1 = 4 */
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            // no place for carry
-        ]);
-        phase0_values_map.insert("phase0_stack_bytes".to_string(), vec![
-            Goldilocks::from(0u64),
-            Goldilocks::from(1u64),
-            Goldilocks::from(2u64),
-            Goldilocks::from(3u64),
-            Goldilocks::from(4u64),
-            Goldilocks::from(5u64),
-            Goldilocks::from(6u64),
-            Goldilocks::from(7u64),
-        ]);
+        phase0_values_map.insert(
+            "phase0_stack_ts_add".to_string(),
+            vec![
+                Goldilocks::from(2u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
+                                         * range values, stack_ts + 1 = 4 */
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+                // no place for carry
+            ],
+        );
+        phase0_values_map.insert(
+            "phase0_stack_bytes".to_string(),
+            vec![
+                Goldilocks::from(0u64),
+                Goldilocks::from(1u64),
+                Goldilocks::from(2u64),
+                Goldilocks::from(3u64),
+                Goldilocks::from(4u64),
+                Goldilocks::from(5u64),
+                Goldilocks::from(6u64),
+                Goldilocks::from(7u64),
+            ],
+        );
 
         let circuit_witness_challenges = vec![
             GoldilocksExt2::from(2),
@@ -241,16 +248,14 @@ mod test {
 
         let mut rng = test_rng();
         let size = PushInstruction::<N>::phase0_size();
-        let phase0: CircuitWiresIn<E> = vec![
-            (0..(1 << instance_num_vars))
-                .map(|_| {
-                    (0..size)
-                        .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
-                })
-                .collect_vec()
-                .into(),
-        ];
+        let phase0: CircuitWiresIn<E> = vec![(0..(1 << instance_num_vars))
+            .map(|_| {
+                (0..size)
+                    .map(|_| E::BaseField::random(&mut rng))
+                    .collect_vec()
+            })
+            .collect_vec()
+            .into()];
 
         let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 

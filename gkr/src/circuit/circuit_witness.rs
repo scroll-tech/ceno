@@ -197,11 +197,9 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
     ) {
         assert_eq!(new_wits_in.len(), circuit.n_witness_in);
         assert!(n_instances.is_power_of_two());
-        assert!(
-            new_wits_in
-                .iter()
-                .all(|wit_in| wit_in.evaluations().len() % n_instances == 0)
-        );
+        assert!(new_wits_in
+            .iter()
+            .all(|wit_in| wit_in.evaluations().len() % n_instances == 0));
 
         let (inferred_layer_wits, inferred_wits_out) =
             CircuitWitness::new_instances(circuit, &new_wits_in, &self.challenges, n_instances);
@@ -229,11 +227,9 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
     ) {
         assert_eq!(new_wits_in.len(), circuit.n_witness_in);
         assert!(n_instances.is_power_of_two());
-        assert!(
-            new_wits_in
-                .iter()
-                .all(|wit_in| wit_in.evaluations().len() % n_instances == 0)
-        );
+        assert!(new_wits_in
+            .iter()
+            .all(|wit_in| wit_in.evaluations().len() % n_instances == 0));
 
         let (inferred_layer_wits, inferred_wits_out) = CircuitWitness::new_instances(
             circuit,

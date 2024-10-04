@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{ChipHandler, util::cell_to_mixed},
+    chip_handler::{util::cell_to_mixed, ChipHandler},
     structs::ROMType,
 };
 use ff_ext::ExtensionField;

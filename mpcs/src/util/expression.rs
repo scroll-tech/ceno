@@ -1,4 +1,4 @@
-use crate::util::{Deserialize, Itertools, Serialize, izip};
+use crate::util::{izip, Deserialize, Itertools, Serialize};
 use ff::Field;
 use std::{
     collections::BTreeSet,

@@ -1,6 +1,6 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use itertools::{Itertools, izip};
+use itertools::{izip, Itertools};
 use simple_frontend::structs::{ChallengeConst, LayerId};
 use std::collections::HashMap;
 use transcript::Transcript;

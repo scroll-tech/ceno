@@ -47,7 +47,11 @@ pub fn split_to_u8(value: u32) -> Vec<u8> {
 /// Compile time evaluated minimum function
 /// returns min(a, b)
 pub(crate) const fn const_min(a: usize, b: usize) -> usize {
-    if a <= b { a } else { b }
+    if a <= b {
+        a
+    } else {
+        b
+    }
 }
 
 /// Assumes each limb < max_value

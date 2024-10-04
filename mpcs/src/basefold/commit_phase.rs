@@ -7,16 +7,16 @@ use super::{
     },
 };
 use crate::util::{
-    arithmetic::{interpolate_over_boolean_hypercube, interpolate2_weights},
+    arithmetic::{interpolate2_weights, interpolate_over_boolean_hypercube},
     field_type_index_ext, field_type_iter_ext,
-    hash::{Hasher, write_digest_to_transcript},
+    hash::{write_digest_to_transcript, Hasher},
     log2_strict,
     merkle_tree::MerkleTree,
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
 use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
@@ -168,11 +168,14 @@ where
     }
     end_timer!(timer);
 
-    (trees, BasefoldCommitPhaseProof {
-        sumcheck_messages,
-        roots,
-        final_message,
-    })
+    (
+        trees,
+        BasefoldCommitPhaseProof {
+            sumcheck_messages,
+            roots,
+            final_message,
+        },
+    )
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
@@ -339,11 +342,14 @@ where
         end_timer!(sumcheck_timer);
     }
     end_timer!(timer);
-    (trees, BasefoldCommitPhaseProof {
-        sumcheck_messages,
-        roots,
-        final_message,
-    })
+    (
+        trees,
+        BasefoldCommitPhaseProof {
+            sumcheck_messages,
+            roots,
+            final_message,
+        },
+    )
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
@@ -479,11 +485,14 @@ where
         end_timer!(sumcheck_timer);
     }
     end_timer!(timer);
-    (trees, BasefoldCommitPhaseProof {
-        sumcheck_messages,
-        roots,
-        final_message,
-    })
+    (
+        trees,
+        BasefoldCommitPhaseProof {
+            sumcheck_messages,
+            roots,
+            final_message,
+        },
+    )
 }
 
 fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: BasefoldSpec<E>>(

@@ -75,7 +75,11 @@ pub fn pad_cells<E: ExtensionField>(
 /// Compile time evaluated minimum function
 /// returns min(a, b)
 pub const fn const_min(a: usize, b: usize) -> usize {
-    if a <= b { a } else { b }
+    if a <= b {
+        a
+    } else {
+        b
+    }
 }
 
 /// Assumes each limb < max_value

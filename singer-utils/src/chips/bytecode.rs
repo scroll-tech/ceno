@@ -10,7 +10,7 @@ use simple_frontend::structs::CircuitBuilder;
 use sumcheck::util::ceil_log2;
 
 use crate::{
-    chip_handler::{ChipHandler, bytecode::BytecodeChip, rom_handler::ROMHandler},
+    chip_handler::{bytecode::BytecodeChip, rom_handler::ROMHandler, ChipHandler},
     error::UtilError,
     structs::{ChipChallenges, PCUInt},
 };

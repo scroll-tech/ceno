@@ -6,11 +6,12 @@ use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{
-        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip, memory::MemoryChip,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, memory::MemoryChip,
         ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        ChipHandler,
     },
     chips::{IntoEnumIterator, SingerChipBuilder},
-    constants::{EVM_STACK_BYTE_WIDTH, OpcodeType},
+    constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
     register_witness,
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
@@ -18,13 +19,13 @@ use singer_utils::{
 use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
 
 use crate::{
-    CircuitWitnessIn, SingerParams,
     component::{
         AccessoryCircuit, AccessoryLayout, FromPredInst, FromWitness, InstCircuit, InstLayout,
         ToSuccInst,
     },
     error::ZKVMError,
     utils::add_assign_each_cell,
+    CircuitWitnessIn, SingerParams,
 };
 
 use super::{Instruction, InstructionGraph};
@@ -37,9 +38,10 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
     fn construct_circuits(
         challenges: ChipChallenges,
     ) -> Result<(InstCircuit<E>, Vec<AccessoryCircuit<E>>), ZKVMError> {
-        Ok((Self::InstType::construct_circuit(challenges)?, vec![
-            MstoreAccessory::construct_circuit(challenges)?,
-        ]))
+        Ok((
+            Self::InstType::construct_circuit(challenges)?,
+            vec![MstoreAccessory::construct_circuit(challenges)?],
+        ))
     }
 
     fn construct_graph_and_witness(

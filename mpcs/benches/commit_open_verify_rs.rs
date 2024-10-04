@@ -4,17 +4,17 @@ use criterion::*;
 use ff::Field;
 use goldilocks::GoldilocksExt2;
 
-use itertools::{Itertools, chain};
+use itertools::{chain, Itertools};
 use mpcs::{
-    Basefold, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
-    util::plonky2_util::log2_ceil,
+    util::plonky2_util::log2_ceil, Basefold, BasefoldRSParams, Evaluation,
+    PolynomialCommitmentScheme,
 };
 
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly_v2::ArcMultilinearExtension,
 };
-use rand::{SeedableRng, rngs::OsRng};
+use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use transcript::Transcript;

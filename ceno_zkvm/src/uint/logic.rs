@@ -3,8 +3,8 @@ use itertools::izip;
 
 use super::UIntLimbs;
 use crate::{
-    ROMType, circuit_builder::CircuitBuilder, error::ZKVMError, expression::ToExpr,
-    tables::OpsTable, witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, expression::ToExpr, tables::OpsTable,
+    witness::LkMultiplicity, ROMType,
 };
 
 // Only implemented for u8 limbs.

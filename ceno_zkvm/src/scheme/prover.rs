@@ -187,11 +187,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);
-        assert!(
-            witnesses
-                .iter()
-                .all(|v| { v.evaluations().len() == next_pow2_instances })
-        );
+        assert!(witnesses
+            .iter()
+            .all(|v| { v.evaluations().len() == next_pow2_instances }));
 
         // main constraint: read/write record witness inference
         let span = entered_span!("wit_inference::record");

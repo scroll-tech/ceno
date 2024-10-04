@@ -1,7 +1,6 @@
 use std::{fmt::Display, mem::MaybeUninit};
 
 use crate::{
-    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
@@ -9,12 +8,13 @@ use crate::{
     set_val,
     utils::i64_to_base,
     witness::LkMultiplicity,
+    Value,
 };
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 
-use super::constants::{UINT_LIMBS, UInt};
+use super::constants::{UInt, UINT_LIMBS};
 
 #[derive(Clone)]
 pub struct IsEqualConfig {

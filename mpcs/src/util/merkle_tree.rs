@@ -9,12 +9,12 @@ use rayon::{
 };
 
 use crate::util::{
-    Deserialize, DeserializeOwned, Serialize, field_type_index_base, field_type_index_ext,
+    field_type_index_base, field_type_index_ext,
     hash::{
-        Digest, Hasher, hash_two_digests, hash_two_leaves_base, hash_two_leaves_batch_base,
-        hash_two_leaves_batch_ext, hash_two_leaves_ext,
+        hash_two_digests, hash_two_leaves_base, hash_two_leaves_batch_base,
+        hash_two_leaves_batch_ext, hash_two_leaves_ext, Digest, Hasher,
     },
-    log2_strict,
+    log2_strict, Deserialize, DeserializeOwned, Serialize,
 };
 use transcript::Transcript;
 

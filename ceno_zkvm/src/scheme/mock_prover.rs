@@ -1,15 +1,15 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    expression::{Expression, fmt},
+    expression::{fmt, Expression},
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, ProgramTableCircuit, RangeTable, TableCircuit,
-        U5Table, U8Table, U16Table, XorTable,
+        U16Table, U5Table, U8Table, XorTable,
     },
 };
 use ark_std::test_rng;
-use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
+use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
@@ -540,11 +540,9 @@ mod tests {
 
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
-        let wits_in = vec![
-            vec![Goldilocks::from(3u64), Goldilocks::from(5u64)]
-                .into_mle()
-                .into(),
-        ];
+        let wits_in = vec![vec![Goldilocks::from(3u64), Goldilocks::from(5u64)]
+            .into_mle()
+            .into()];
 
         let challenge = [1.into(), 1000.into()];
         MockProver::assert_satisfied(&builder, &wits_in, Some(challenge));
@@ -564,28 +562,31 @@ mod tests {
         let result = MockProver::run_with_challenge(&builder, &wits_in, challenge);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
-        assert_eq!(err, vec![MockProverError::LookupError {
-            expression: Expression::ScaledSum(
-                Box::new(Expression::WitIn(0)),
-                Box::new(Expression::Challenge(
-                    1,
-                    1,
-                    // TODO this still uses default challenge in ConstraintSystem, but challengeId
-                    // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
-                    GoldilocksExt2::ONE,
-                    GoldilocksExt2::ZERO,
-                )),
-                Box::new(Expression::Challenge(
-                    0,
-                    1,
-                    GoldilocksExt2::ONE,
-                    GoldilocksExt2::ZERO,
-                )),
-            ),
-            evaluated: 123002.into(), // 123 * 1000 + 2
-            name: "test_lookup_error/assert_u5/assert u5".to_string(),
-            inst_id: 0,
-        }]);
+        assert_eq!(
+            err,
+            vec![MockProverError::LookupError {
+                expression: Expression::ScaledSum(
+                    Box::new(Expression::WitIn(0)),
+                    Box::new(Expression::Challenge(
+                        1,
+                        1,
+                        // TODO this still uses default challenge in ConstraintSystem, but challengeId
+                        // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
+                        GoldilocksExt2::ONE,
+                        GoldilocksExt2::ZERO,
+                    )),
+                    Box::new(Expression::Challenge(
+                        0,
+                        1,
+                        GoldilocksExt2::ONE,
+                        GoldilocksExt2::ZERO,
+                    )),
+                ),
+                evaluated: 123002.into(), // 123 * 1000 + 2
+                name: "test_lookup_error/assert_u5/assert u5".to_string(),
+                inst_id: 0,
+            }]
+        );
     }
 
     #[allow(dead_code)]
@@ -653,10 +654,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![AssertLtCircuitInput { a: 3, b: 5 }, AssertLtCircuitInput {
-                    a: 7,
-                    b: 11,
-                }],
+                vec![
+                    AssertLtCircuitInput { a: 3, b: 5 },
+                    AssertLtCircuitInput { a: 7, b: 11 },
+                ],
                 &mut lk_multiplicity,
             )
             .unwrap();
@@ -773,10 +774,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![LtCircuitInput { a: 3, b: 5 }, LtCircuitInput {
-                    a: 7,
-                    b: 11,
-                }],
+                vec![
+                    LtCircuitInput { a: 3, b: 5 },
+                    LtCircuitInput { a: 7, b: 11 },
+                ],
                 &mut lk_multiplicity,
             )
             .unwrap();

@@ -7,7 +7,7 @@ use ark_std::test_rng;
 use const_env::from_env;
 use criterion::*;
 
-use ff_ext::{ExtensionField, ff::Field};
+use ff_ext::{ff::Field, ExtensionField};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 
@@ -34,9 +34,9 @@ const NUM_SAMPLES: usize = 10;
 const RAYON_NUM_THREADS: usize = 8;
 
 use singer::{
-    CircuitWiresIn, SingerGraphBuilder, SingerParams,
-    instructions::{Instruction, InstructionGraph, SingerCircuitBuilder, add::AddInstruction},
+    instructions::{add::AddInstruction, Instruction, InstructionGraph, SingerCircuitBuilder},
     scheme::GKRGraphProverState,
+    CircuitWiresIn, SingerGraphBuilder, SingerParams,
 };
 use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;

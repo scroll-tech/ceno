@@ -1,6 +1,6 @@
 use std::array;
 
-use crossbeam_channel::{Receiver, Sender, bounded};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 

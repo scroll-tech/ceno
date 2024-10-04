@@ -5,8 +5,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip,
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
@@ -192,13 +192,13 @@ mod test {
     use transcript::Transcript;
 
     use crate::{
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
         instructions::{
             ChipChallenges, GtInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
         },
         scheme::GKRGraphProverState,
         test::{get_uint_params, test_opcode_circuit},
         utils::u64vec,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
     #[test]
@@ -224,44 +224,56 @@ mod test {
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(3u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert("phase0_stack_top".to_string(), vec![Goldilocks::from(
-            100u64,
-        )]);
+        phase0_values_map.insert(
+            "phase0_stack_top".to_string(),
+            vec![Goldilocks::from(100u64)],
+        );
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),
             vec![], // carry is 0, may test carry using larger values in PCUInt
         );
-        phase0_values_map.insert("phase0_stack_ts_add".to_string(), vec![
-            Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
-                                     * range values, stack_ts + 1 = 4 */
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            Goldilocks::from(0u64),
-            // no place for carry
-        ]);
-        phase0_values_map.insert("phase0_old_stack_ts0".to_string(), vec![Goldilocks::from(
-            2u64,
-        )]);
+        phase0_values_map.insert(
+            "phase0_stack_ts_add".to_string(),
+            vec![
+                Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
+                                         * range values, stack_ts + 1 = 4 */
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+                Goldilocks::from(0u64),
+                // no place for carry
+            ],
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts0".to_string(),
+            vec![Goldilocks::from(2u64)],
+        );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
-        phase0_values_map.insert("phase0_old_stack_ts_lt0".to_string(), vec![
-            Goldilocks::from(range_values[0]),
-            Goldilocks::from(range_values[1]),
-            Goldilocks::from(range_values[2]),
-            Goldilocks::from(1u64),
-        ]);
-        phase0_values_map.insert("phase0_old_stack_ts1".to_string(), vec![Goldilocks::from(
-            1u64,
-        )]);
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_lt0".to_string(),
+            vec![
+                Goldilocks::from(range_values[0]),
+                Goldilocks::from(range_values[1]),
+                Goldilocks::from(range_values[2]),
+                Goldilocks::from(1u64),
+            ],
+        );
+        phase0_values_map.insert(
+            "phase0_old_stack_ts1".to_string(),
+            vec![Goldilocks::from(1u64)],
+        );
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
-        phase0_values_map.insert("phase0_old_stack_ts_lt1".to_string(), vec![
-            Goldilocks::from(range_values[0]),
-            Goldilocks::from(range_values[1]),
-            Goldilocks::from(range_values[2]),
-            Goldilocks::from(1u64),
-        ]);
+        phase0_values_map.insert(
+            "phase0_old_stack_ts_lt1".to_string(),
+            vec![
+                Goldilocks::from(range_values[0]),
+                Goldilocks::from(range_values[1]),
+                Goldilocks::from(range_values[2]),
+                Goldilocks::from(1u64),
+            ],
+        );
         phase0_values_map.insert("phase0_oprand_0".to_string(), vec![Goldilocks::from(2u64)]);
         phase0_values_map.insert("phase0_oprand_1".to_string(), vec![Goldilocks::from(1u64)]);
         // given borrow = [1,1,1,1,1,1,1,1]
@@ -297,16 +309,14 @@ mod test {
 
         let mut rng = test_rng();
         let size = GtInstruction::phase0_size();
-        let phase0: CircuitWiresIn<E> = vec![
-            (0..(1 << instance_num_vars))
-                .map(|_| {
-                    (0..size)
-                        .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
-                })
-                .collect_vec()
-                .into(),
-        ];
+        let phase0: CircuitWiresIn<E> = vec![(0..(1 << instance_num_vars))
+            .map(|_| {
+                (0..size)
+                    .map(|_| E::BaseField::random(&mut rng))
+                    .collect_vec()
+            })
+            .collect_vec()
+            .into()];
 
         let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
 

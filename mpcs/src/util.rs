@@ -6,11 +6,11 @@ pub mod plonky2_util;
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{Itertools, izip};
+use itertools::{izip, Itertools};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub mod merkle_tree;
-use crate::{Error, util::parallel::parallelize};
+use crate::{util::parallel::parallelize, Error};
 pub use plonky2_util::log2_strict;
 
 pub fn ext_to_usize<E: ExtensionField>(x: &E) -> usize {
@@ -316,8 +316,8 @@ pub mod test {
     type E = goldilocks::GoldilocksExt2;
     type F = goldilocks::Goldilocks;
     use rand::{
-        CryptoRng, RngCore, SeedableRng,
         rngs::{OsRng, StdRng},
+        CryptoRng, RngCore, SeedableRng,
     };
     use std::{array, iter, ops::Range};
 

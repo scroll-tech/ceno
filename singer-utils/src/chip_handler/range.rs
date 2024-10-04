@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{ChipHandler, rom_handler::ROMHandler, util::cell_to_mixed},
+    chip_handler::{rom_handler::ROMHandler, util::cell_to_mixed, ChipHandler},
     constants::{RANGE_CHIP_BIT_WIDTH, STACK_TOP_BIT_WIDTH},
     error::UtilError,
     structs::{PCUInt, TSUInt},
