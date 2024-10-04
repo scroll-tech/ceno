@@ -18,9 +18,9 @@ pub struct ShiftConfig<E: ExtensionField> {
     rs2_read: UInt<E>,
     rd_written: UInt<E>,
 
-    quotient: UInt<E>,
+    rs2_high: UInt<E>,
     rs2_low5: WitIn,
-    multiplier: UInt<E>,
+    pow2_rs2_low5: UInt<E>,
 
     intermediate: Option<UInt<E>>,
     remainder: Option<UInt<E>>,
@@ -50,25 +50,27 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5")?;
-        let mut multiplier = UInt::new_unchecked(|| "multiplier", circuit_builder)?;
-        let quotient = UInt::new(|| "quotient", circuit_builder)?;
+        // pow2_rs2_low5 is unchecked because it's assignment will be constrained due it's use in lookup_pow2 below
+        let mut pow2_rs2_low5 = UInt::new_unchecked(|| "pow2_rs2_low5", circuit_builder)?;
+        // rs2 = rs2_high | rs2_low5
+        let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
 
         let (rs1_read, rd_written, intermediate, remainder) = if I::INST_KIND == InsnKind::SLL {
             let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
             let rd_written = rs1_read.mul(
-                || "rd_written = rs1_read * multiplier",
+                || "rd_written = rs1_read * pow2_rs2_low5",
                 circuit_builder,
-                &mut multiplier,
+                &mut pow2_rs2_low5,
                 true,
             )?;
             (rs1_read, rd_written, None, None)
         } else if I::INST_KIND == InsnKind::SRL {
-            let mut rd_written = UInt::new_unchecked(|| "rd_written", circuit_builder)?;
-            let remainder = UInt::new_unchecked(|| "remainder", circuit_builder)?;
+            let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+            let remainder = UInt::new(|| "remainder", circuit_builder)?;
             let (intermediate, rs1_read) = rd_written.mul_add(
-                || "rs1_read = rd_written * multiplier + remainder",
+                || "rs1_read = rd_written * pow2_rs2_low5 + remainder",
                 circuit_builder,
-                &mut multiplier,
+                &mut pow2_rs2_low5,
                 &remainder,
                 true,
             )?;
@@ -85,12 +87,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rd_written.register_expr(),
         )?;
 
-        circuit_builder.lookup_pow(2.into(), rs2_low5.expr(), multiplier.value())?;
+        circuit_builder.lookup_pow2(rs2_low5.expr(), pow2_rs2_low5.value())?;
         circuit_builder.assert_ux::<_, _, 5>(|| "rs2_low5 in u5", rs2_low5.expr())?;
         circuit_builder.require_equal(
-            || "rs2 == quotient * 2^5 + rs2_low5",
+            || "rs2 == rs2_high * 2^5 + rs2_low5",
             rs2_read.value(),
-            quotient.value() * (1 << 5).into() + rs2_low5.expr(),
+            rs2_high.value() * (1 << 5).into() + rs2_low5.expr(),
         )?;
 
         Ok(ShiftConfig {
@@ -98,9 +100,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rs1_read,
             rs2_read,
             rd_written,
-            quotient,
+            rs2_high,
             rs2_low5,
-            multiplier,
+            pow2_rs2_low5,
             intermediate,
             remainder,
         })
@@ -114,12 +116,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     ) -> Result<(), crate::error::ZKVMError> {
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
         let rs2_low5 = rs2_read.as_u64() & 0b11111;
-        let multiplier = Value::new_unchecked((1 << rs2_low5) as u32);
-        let quotient = Value::new_unchecked(((rs2_read.as_u64() - rs2_low5) >> 5) as u32);
+        let pow2_rs2_low5 = Value::new_unchecked((1 << rs2_low5) as u32);
+        let rs2_high = Value::new_unchecked(((rs2_read.as_u64() - rs2_low5) >> 5) as u32);
 
         if I::INST_KIND == InsnKind::SLL {
             let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-            let rd_written = rs1_read.mul(&multiplier, lk_multiplicity, true);
+            let rd_written = rs1_read.mul(&pow2_rs2_low5, lk_multiplicity, true);
             config.rs1_read.assign_value(instance, rs1_read);
             config.rd_written.assign_limb_with_carry_auxiliary(
                 instance,
@@ -129,15 +131,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         } else if I::INST_KIND == InsnKind::SRL {
             let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
             let remainder = Value::new_unchecked(
-                // rs1 - rd * multiplier
+                // rs1 - rd * pow2_rs2_low5
                 step.rs1()
                     .unwrap()
                     .value
-                    .wrapping_sub((rd_written.as_u64() * multiplier.as_u64()) as u32),
+                    .wrapping_sub((rd_written.as_u64() * pow2_rs2_low5.as_u64()) as u32),
             );
             let (rs1_read, intermediate) =
-                rd_written.mul_add(&multiplier, &remainder, lk_multiplicity, true);
-
+                rd_written.mul_add(&pow2_rs2_low5, &remainder, lk_multiplicity, true);
+            println!("rs1_read: {:?}", rs1_read);
+            println!("intermediate: {:?}", intermediate);
+            println!("config.rs1_read: {:?}", config.rs1_read);
             config.rs1_read.assign_limb_with_carry(instance, &rs1_read);
             config.rd_written.assign_value(instance, rd_written);
             config
@@ -159,8 +163,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs2_read.assign_value(instance, rs2_read);
         set_val!(instance, config.rs2_low5, rs2_low5);
-        config.quotient.assign_value(instance, quotient);
-        config.multiplier.assign_value(instance, multiplier);
+        config.rs2_high.assign_value(instance, rs2_high);
+        config.pow2_rs2_low5.assign_value(instance, pow2_rs2_low5);
 
         Ok(())
     }
@@ -175,8 +179,9 @@ mod tests {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
+        instructions::{riscv::constants::UInt, Instruction},
         scheme::mock_prover::{MockProver, MOCK_PC_SLL, MOCK_PC_SRL, MOCK_PROGRAM},
+        Value,
     };
 
     use super::{ShiftLogicalInstruction, SllOp, SrlOp};
@@ -197,6 +202,21 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        let expected_rd_written = 32 << 3;
+
+        config
+            .rd_written
+            .require_equal(
+                || "assert_rd_written",
+                &mut cb,
+                &UInt::from_const_unchecked(
+                    Value::new_unchecked(expected_rd_written)
+                        .as_u16_limbs()
+                        .to_vec(),
+                ),
+            )
+            .unwrap();
+
         let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, SllOp>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
@@ -206,7 +226,7 @@ mod tests {
                 MOCK_PROGRAM[18],
                 32,
                 3,
-                Change::new(0, 32 << 3),
+                Change::new(0, expected_rd_written),
                 0,
             )],
         )
@@ -240,6 +260,21 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        let expected_rd_written = 33 << (33 - 32);
+
+        config
+            .rd_written
+            .require_equal(
+                || "assert_rd_written",
+                &mut cb,
+                &UInt::from_const_unchecked(
+                    Value::new_unchecked(expected_rd_written)
+                        .as_u16_limbs()
+                        .to_vec(),
+                ),
+            )
+            .unwrap();
+
         let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, SllOp>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
@@ -247,9 +282,9 @@ mod tests {
                 3,
                 MOCK_PC_SLL,
                 MOCK_PROGRAM[18],
-                32,
                 33,
-                Change::new(0, 32 << 3),
+                33,
+                Change::new(0, expected_rd_written),
                 0,
             )],
         )
@@ -283,6 +318,21 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        let expected_rd_written = 33 >> 3;
+
+        config
+            .rd_written
+            .require_equal(
+                || "assert_rd_written",
+                &mut cb,
+                &UInt::from_const_unchecked(
+                    Value::new_unchecked(expected_rd_written)
+                        .as_u16_limbs()
+                        .to_vec(),
+                ),
+            )
+            .unwrap();
+
         let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, SrlOp>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
@@ -292,7 +342,7 @@ mod tests {
                 MOCK_PROGRAM[19],
                 33,
                 3,
-                Change::new(0, 33 >> 3),
+                Change::new(0, expected_rd_written),
                 0,
             )],
         )
@@ -326,6 +376,22 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        let expected_rd_written = 0;
+
+        // TODO
+        // config
+        //     .rd_written
+        //     .require_equal(
+        //         || "assert_rd_written",
+        //         &mut cb,
+        //         &UInt::from_const_unchecked(
+        //             Value::new_unchecked(expected_rd_written)
+        //                 .as_u16_limbs()
+        //                 .to_vec(),
+        //         ),
+        //     )
+        //     .unwrap();
+
         let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, SrlOp>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
@@ -335,7 +401,7 @@ mod tests {
                 MOCK_PROGRAM[19],
                 32,
                 33,
-                Change::new(0, 0),
+                Change::new(0, expected_rd_written),
                 0,
             )],
         )
