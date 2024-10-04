@@ -15,7 +15,7 @@ CUR_TARGET = { script = [
 TASK_RUN = { script = [
         '''
         #!/bin/bash
-        exclude_projects=" singer-pro ceno_rt " # NOTE:keep leading and end with one space
+        exclude_projects=" ceno_rt " # NOTE:keep leading and end with one space
 
         if echo "$exclude_projects" | grep --silent --extended-regexp "( )${CARGO_MAKE_CRATE_NAME}( )"; then
             echo "false"
