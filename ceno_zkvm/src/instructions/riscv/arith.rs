@@ -182,7 +182,6 @@ mod test {
     };
 
     #[test]
-    #[allow(clippy::option_map_unit_fn)]
     fn test_opcode_add() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -212,6 +211,17 @@ mod test {
         )
         .unwrap();
 
+        let expected_rd_written = UInt::from_const_unchecked(
+            Value::new_unchecked(11_u32.wrapping_add(0xfffffffe))
+                .as_u16_limbs()
+                .to_vec(),
+        );
+
+        config
+            .rd_written
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .unwrap();
+
         MockProver::assert_satisfied(
             &mut cb,
             &raw_witin
@@ -225,7 +235,6 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::option_map_unit_fn)]
     fn test_opcode_add_overflow() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -255,6 +264,17 @@ mod test {
         )
         .unwrap();
 
+        let expected_rd_written = UInt::from_const_unchecked(
+            Value::new_unchecked((u32::MAX - 1).wrapping_add(u32::MAX - 1))
+                .as_u16_limbs()
+                .to_vec(),
+        );
+
+        config
+            .rd_written
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .unwrap();
+
         MockProver::assert_satisfied(
             &mut cb,
             &raw_witin
@@ -268,7 +288,6 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::option_map_unit_fn)]
     fn test_opcode_sub() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -298,6 +317,17 @@ mod test {
         )
         .unwrap();
 
+        let expected_rd_written = UInt::from_const_unchecked(
+            Value::new_unchecked(11_u32.wrapping_sub(2))
+                .as_u16_limbs()
+                .to_vec(),
+        );
+
+        config
+            .rd_written
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .unwrap();
+
         MockProver::assert_satisfied(
             &mut cb,
             &raw_witin
@@ -311,7 +341,6 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::option_map_unit_fn)]
     fn test_opcode_sub_underflow() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -340,6 +369,17 @@ mod test {
             )],
         )
         .unwrap();
+
+        let expected_rd_written = UInt::from_const_unchecked(
+            Value::new_unchecked(3_u32.wrapping_sub(11))
+                .as_u16_limbs()
+                .to_vec(),
+        );
+
+        config
+            .rd_written
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,
@@ -378,6 +418,14 @@ mod test {
         )
         .unwrap();
 
+        let expected_rd_written =
+            UInt::from_const_unchecked(Value::new_unchecked(22u32).as_u16_limbs().to_vec());
+
+        config
+            .rd_written
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .unwrap();
+
         MockProver::assert_satisfied(
             &mut cb,
             &raw_witin
@@ -415,6 +463,13 @@ mod test {
         )
         .unwrap();
 
+        let expected_rd_written = UInt::from_const_unchecked(vec![0u64, 0]);
+
+        config
+            .rd_written
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .unwrap();
+
         MockProver::assert_satisfied(
             &mut cb,
             &raw_witin
@@ -450,11 +505,21 @@ mod test {
                 MOCK_PROGRAM[2],
                 a.as_u64() as u32,
                 b.as_u64() as u32,
-                Change::new(0, Value::<u32>::from_limb_unchecked(c_limb).as_u64() as u32),
+                Change::new(
+                    0,
+                    Value::<u32>::from_limb_unchecked(c_limb.clone()).as_u64() as u32,
+                ),
                 0,
             )],
         )
         .unwrap();
+
+        let expected_rd_written = UInt::from_const_unchecked(c_limb.clone());
+
+        config
+            .rd_written
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,
