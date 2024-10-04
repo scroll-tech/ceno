@@ -2,13 +2,13 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
+    Program,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
     tracer::{Change, StepRecord, Tracer},
-    Program,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::iter::from_fn;
 
 /// An implementation of the machine state and of the side-effects of operations.

@@ -6,8 +6,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip,
+        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
     },
     chips::SingerChipBuilder,
     constants::OpcodeType,
@@ -17,7 +17,7 @@ use singer_utils::{
 };
 use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
 
-use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
+use crate::{CircuitWiresIn, SingerParams, error::ZKVMError, utils::add_assign_each_cell};
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 

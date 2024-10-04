@@ -13,7 +13,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::{riscv::arith::AddInstruction, Instruction},
+    instructions::{Instruction, riscv::arith::AddInstruction},
     set_val,
     structs::{PointAndEval, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{ProgramTableCircuit, U16TableCircuit},

@@ -2,7 +2,7 @@ mod addr;
 pub use addr::*;
 
 mod platform;
-pub use platform::{Platform, CENO_PLATFORM};
+pub use platform::{CENO_PLATFORM, Platform};
 
 mod tracer;
 pub use tracer::{Change, MemOp, ReadOp, StepRecord, Tracer, WriteOp};
