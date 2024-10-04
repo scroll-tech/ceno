@@ -8,7 +8,6 @@ members = [
     "multilinear_extensions",
     "simple-frontend",
     "singer",
-    "singer-pro",
     "singer-utils",
     "sumcheck",
     "transcript",
