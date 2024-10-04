@@ -77,22 +77,15 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     pub fn new(num_variables: usize) -> Self {
         VirtualPolynomial {
             aux_info: VPAuxInfo {
-                max_degree: 0,
                 num_variables,
-                phantom: PhantomData,
+                ..Default::default()
             },
-            products: Vec::new(),
-            flattened_ml_extensions: Vec::new(),
-            raw_pointers_lookup_table: HashMap::new(),
+            ..Default::default()
         }
     }
 
     /// Creates an new virtual polynomial from a MLE and its coefficient.
     pub fn new_from_mle(mle: ArcDenseMultilinearExtension<E>, coefficient: E::BaseField) -> Self {
-        let mle_ptr: usize = Arc::as_ptr(&mle) as usize;
-        let mut hm = HashMap::new();
-        hm.insert(mle_ptr, 0);
-
         VirtualPolynomial {
             aux_info: VPAuxInfo {
                 // The max degree is the max degree of any individual variable
@@ -102,8 +95,8 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
             },
             // here `0` points to the first polynomial of `flattened_ml_extensions`
             products: vec![(coefficient, vec![0])],
+            raw_pointers_lookup_table: HashMap::from([(Arc::as_ptr(&mle) as usize, 0)]),
             flattened_ml_extensions: vec![mle],
-            raw_pointers_lookup_table: hm,
         }
     }
 
