@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 riscv = "0.11.1"
 riscv-rt = "0.12.2"
+rand = { version = "0.8", default-features = false, features = ["alloc", "small_rng"] }

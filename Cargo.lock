@@ -325,6 +325,7 @@ dependencies = [
 name = "ceno_rt"
 version = "0.1.0"
 dependencies = [
+ "rand",
  "riscv",
  "riscv-rt",
 ]

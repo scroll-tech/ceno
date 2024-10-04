@@ -1,51 +1,45 @@
-//! A bump allocator.
-//! Based on https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html
+#[no_mangle]
+#[allow(clippy::module_name_repetitions)]
+#[allow(clippy::borrow_as_ptr)]
+pub extern "C" fn alloc_aligned(bytes: usize, align: usize) -> *mut u8 {
+    // Pointer to next heap address to use, or 0 if the heap has not been
+    // initialized.
+    static mut HEAP_POS: usize = 0;
 
-use core::{
-    alloc::{GlobalAlloc, Layout},
-    cell::UnsafeCell,
-    ptr::null_mut,
-};
+    // SAFETY: Single threaded, so nothing else can touch this while we're working.
+    let mut heap_pos = unsafe { HEAP_POS };
 
-const ARENA_SIZE: usize = 128 * 1024;
-const MAX_SUPPORTED_ALIGN: usize = 4096;
-#[repr(C, align(4096))] // 4096 == MAX_SUPPORTED_ALIGN
-struct SimpleAllocator {
-    arena: UnsafeCell<[u8; ARENA_SIZE]>,
-    remaining: UnsafeCell<usize>, // we allocate from the top, counting down
+    if heap_pos == 0 {
+        heap_pos = unsafe { core::ptr::from_ref::<u8>(&crate::_sheap).cast::<u8>() as usize };
+    }
+
+    let offset = heap_pos & (align - 1);
+    if offset != 0 {
+        heap_pos += align - offset;
+    }
+
+    let ptr = heap_pos as *mut u8;
+    heap_pos += bytes;
+
+    unsafe { HEAP_POS = heap_pos };
+    ptr
+}
+
+use core::alloc::{GlobalAlloc, Layout};
+
+struct BumpPointerAlloc;
+
+unsafe impl GlobalAlloc for BumpPointerAlloc {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        alloc_aligned(layout.size(), layout.align())
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 { self.alloc(layout) }
+
+    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {
+        // BumpPointerAlloc never deallocates memory
+    }
 }
 
 #[global_allocator]
-static ALLOCATOR: SimpleAllocator = SimpleAllocator {
-    arena: UnsafeCell::new([0; ARENA_SIZE]),
-    remaining: UnsafeCell::new(ARENA_SIZE),
-};
-
-unsafe impl Sync for SimpleAllocator {}
-
-unsafe impl GlobalAlloc for SimpleAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let size = layout.size();
-        let align = layout.align();
-
-        // `Layout` contract forbids making a `Layout` with align=0, or align not power of 2.
-        // So we can safely use a mask to ensure alignment without worrying about UB.
-        let align_mask_to_round_down = !(align - 1);
-
-        if align > MAX_SUPPORTED_ALIGN {
-            return null_mut();
-        }
-
-        let remaining = self.remaining.get();
-        if size > *remaining {
-            return null_mut();
-        }
-        *remaining -= size;
-        *remaining &= align_mask_to_round_down;
-
-        self.arena.get().cast::<u8>().add(*remaining)
-    }
-
-    /// Never deallocate.
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
-}
+static HEAP: BumpPointerAlloc = BumpPointerAlloc;

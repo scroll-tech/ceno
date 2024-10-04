@@ -33,6 +33,15 @@ fn test_ceno_rt_mem() -> Result<()> {
 }
 
 #[test]
+fn test_ceno_rt_sort() -> Result<()> {
+    let program_elf = include_bytes!("./data/ceno_rt_sort");
+    let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
+    let steps = run(&mut state)?;
+    eprintln!("Steps: {:?}", steps.len());
+    Ok(())
+}
+
+#[test]
 fn test_ceno_rt_alloc() -> Result<()> {
     let program_elf = include_bytes!("./data/ceno_rt_alloc");
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
