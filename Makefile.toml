@@ -51,5 +51,6 @@ command = "cargo"
 args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
 
 [tasks.clippy]
+workspace = false
 command = "cargo"
 args = ["clippy", "-p", "ceno_zkvm", "-p", "mpcs", "-p", "ceno_emul", "-p", "ceno_rt", "--target", "${CUR_TARGET}", "--", "-D", "warnings"]
