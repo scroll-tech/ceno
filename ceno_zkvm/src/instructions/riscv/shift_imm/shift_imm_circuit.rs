@@ -43,7 +43,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         // Goal is to constrain:
         // rs1 == rd_written * imm + remainder
         let remainder = UInt::new(|| "remainder", circuit_builder)?;
-        let (rd_imm_mul, rs1) = rd_written.mul_add(
+        let (rs1, rd_imm_mul) = rd_written.mul_add(
             || "rd_written * imm +remainder ",
             circuit_builder,
             &mut imm,
@@ -76,15 +76,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
-        // TODO design MulAdd gadget and refactor this to there
-        let remainder = {
+        let (remainder, imm) = {
             let rs1_read = step.rs1().unwrap().value;
             let imm = step.insn().imm_or_funct7();
-            let result = rs1_read.wrapping_div(imm);
-            let remainder = rs1_read.wrapping_sub(result * imm);
-            Value::new(remainder, lk_multiplicity)
+            (
+                Value::new(rs1_read % imm, lk_multiplicity),
+                Value::new(imm, lk_multiplicity),
+            )
         };
 
         let (rs1, rd_imm_mul) = rd_written.mul_add(&imm, &remainder, lk_multiplicity, true);
