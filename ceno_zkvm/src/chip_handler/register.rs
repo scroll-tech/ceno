@@ -112,6 +112,20 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
 
             let next_ts = ts + 1.into();
 
+            #[cfg(test)]
+            {
+                use crate::chip_handler::{test::DebugIndex, utils::pows_expr};
+                let pow_u16 = pows_expr((1 << u16::BITS as u64).into(), value.len());
+                cb.register_debug_expr(
+                    DebugIndex::RdWrite as usize,
+                    value
+                        .into_iter()
+                        .zip(pow_u16)
+                        .map(|(v, pow)| pow * v)
+                        .fold(Expression::ZERO, |acc, v| acc + v),
+                );
+            }
+
             Ok((next_ts, lt_cfg))
         })
     }

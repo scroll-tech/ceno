@@ -135,7 +135,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 mod test {
 
     mod divu {
-        use std::u32;
 
         use ceno_emul::{Change, StepRecord, Word};
         use goldilocks::GoldilocksExt2;

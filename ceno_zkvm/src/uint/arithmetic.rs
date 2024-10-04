@@ -120,18 +120,20 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             Self::NUM_CELLS
         };
         // with high limb, overall cell will be double
-        let (c_limbs, c_carries): (Vec<WitIn>, Vec<WitIn>) =
-            (0..num_limbs).try_fold((vec![], vec![]), |(mut c_limbs, mut c_carries), i| {
-                let limb = circuit_builder.create_witin(|| format!("limb_{i}"))?;
-                circuit_builder.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr())?;
-                c_limbs.push(limb);
-                // skip last carry if with_overflow == false
-                if i != num_limbs - 1 || with_overflow {
-                    let carry = circuit_builder.create_witin(|| format!("carry_{i}"))?;
-                    c_carries.push(carry);
-                }
-                Result::<(Vec<WitIn>, Vec<WitIn>), ZKVMError>::Ok((c_limbs, c_carries))
-            })?;
+        let c_limbs: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_limbs, i| {
+            let limb = circuit_builder.create_witin(|| format!("limb_{i}"))?;
+            circuit_builder.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr())?;
+            c_limbs.push(limb);
+            Result::<Vec<WitIn>, ZKVMError>::Ok(c_limbs)
+        })?;
+        let c_carries: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_carries, i| {
+            // skip last carry if with_overflow == false
+            if i != num_limbs - 1 || with_overflow {
+                let carry = circuit_builder.create_witin(|| format!("carry_{i}"))?;
+                c_carries.push(carry);
+            }
+            Result::<Vec<WitIn>, ZKVMError>::Ok(c_carries)
+        })?;
         // assert carry range less than max carry value constant
         let carries_auxiliary_lt_config = c_carries
             .iter()
@@ -186,10 +188,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     }
                 }
             });
+        });
+        result_c.resize(c_limbs.len(), Expression::ZERO);
 
-            // take care carries
+        // constrain each limb with carry
+        c_limbs.iter().enumerate().try_for_each(|(i, c_limb)| {
             let carry = if i > 0 { c_carries.get(i - 1) } else { None };
             let next_carry = c_carries.get(i);
+            result_c[i] = result_c[i].clone() - c_limb.expr();
             if carry.is_some() {
                 result_c[i] = result_c[i].clone() + carry.unwrap().expr();
             }
@@ -197,25 +203,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 result_c[i] =
                     result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C.into();
             }
-        });
-
-        println!("result_c len {:?}", c_limbs.len());
-
-        // result check
-        c_limbs
-            .iter()
-            .zip(
-                result_c
-                    .into_iter()
-                    .chain(std::iter::repeat(Expression::ZERO)),
-            )
-            .take(c_limbs.len())
-            .enumerate()
-            .for_each(|(i, (target, result))| {
-                circuit_builder
-                    .require_equal(|| format!("c_expr{i}"), target.expr(), result)
-                    .unwrap();
-            });
+            circuit_builder.require_zero(|| format!("mul_zero_{i}"), result_c[i].clone())?;
+            Ok::<(), ZKVMError>(())
+        })?;
 
         Ok(UIntLimbs::from_witin_carry_unchecked(
             c_limbs,
@@ -243,15 +233,17 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         multiplier: &mut UIntLimbs<M, C, E>,
         addend: &UIntLimbs<M, C, E>,
         with_overflow: bool,
-    ) -> Result<(UIntLimbs<M2, C, E>, UIntLimbs<M, C, E>), ZKVMError> {
+    ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            let c = self.internal_mul::<M2>(cb, multiplier, with_overflow, is_hi_limb)?;
+            let c = self.internal_mul::<M2>(cb, multiplier, with_overflow)?;
+            let mut c_lo = c.expr();
+            let c_hi = c_lo.split_off(c_lo.len() / 2);
             let c_lo_hi = if M2 == 2 * M {
-                // get hi limb
-                UIntLimbs::from_exprs_unchecked(c.expr()[M..M2].to_vec())?
+                // hi limb
+                UIntLimbs::from_exprs_unchecked(c_hi)?
             } else {
                 // lo limb
-                UIntLimbs::from_exprs_unchecked(c.expr()[0..M].to_vec())?
+                UIntLimbs::from_exprs_unchecked(c_lo)?
             };
             Ok((c_lo_hi.internal_add(cb, &addend.expr(), with_overflow)?, c))
         })
@@ -1058,7 +1050,7 @@ mod tests {
             let mut uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
             let mut uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
             let mut uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
-            let _: (UIntLimbs<64, 16, E>, _) = uint_a
+            let _: (_, UIntLimbs<64, 16, E>) = uint_a
                 .mul_add(|| "uint_c", &mut cb, &mut uint_b, &mut uint_d, false)
                 .unwrap();
 
@@ -1070,6 +1062,7 @@ mod tests {
             let a = Value::<'_, u32>::new_unchecked(u32::MAX);
             let b = Value::<'_, u32>::new_unchecked(u32::MAX);
             let (c_limb, c_carry, _) = a.mul(&b, &mut LkMultiplicity::default(), true);
+            println!("!!c_limb {:?}, c_carry {:?}", c_limb, c_carry);
             let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
                 // alloc a = 2^16 + (2^16 -1) * 2^16
                 vec![u16::MAX as u64, u16::MAX as u64],

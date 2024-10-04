@@ -2,7 +2,6 @@ use crate::utils::const_min;
 
 use super::{util::max_carry_word_for_multiplication, UIntLimbs};
 
-pub const RANGE_CHIP_BIT_WIDTH: usize = 16;
 pub const BYTE_BIT_WIDTH: usize = 8;
 
 use ff_ext::ExtensionField;

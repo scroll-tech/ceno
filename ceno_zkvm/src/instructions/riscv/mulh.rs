@@ -4,17 +4,13 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{
-    constants::{UInt, UIntMul, VALUE_BIT_WIDTH},
+    constants::{UInt, UIntMul},
     r_insn::RInstructionConfig,
     RIVInstruction,
 };
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::ToExpr,
-    instructions::Instruction,
-    uint::{UIntLimbs, Value},
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, expression::ToExpr,
+    instructions::Instruction, uint::Value, witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 
@@ -98,7 +94,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
             InsnKind::MULHU => {
                 // rs1_read * rs2_read = rd_written
                 let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-                let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
 
                 config
                     .rs1_read
@@ -106,11 +101,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
 
                 let (limbs, carries, max_carry_value) =
                     rs1_read.mul_hi(&rs2_read, lk_multiplicity, true);
-                println!("limbs {:?}", limbs);
 
-                config
-                    .rd_written
-                    .assign_limbs(instance, rd_written.as_u16_limbs());
+                config.rd_written.assign_limbs(instance, &limbs);
                 config.rd_written.assign_carries(instance, &carries);
                 config.rd_written.assign_carries_auxiliary(
                     instance,
@@ -136,21 +128,30 @@ mod test {
 
     use super::*;
     use crate::{
+        chip_handler::test::DebugIndex,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{
-            MockProver, MOCK_PC_ADD, MOCK_PC_MUL, MOCK_PC_MULHU, MOCK_PC_SUB, MOCK_PROGRAM,
-        },
+        scheme::mock_prover::{MockProver, MOCK_PC_MULHU, MOCK_PROGRAM},
     };
 
     #[test]
     fn test_opcode_mulhu() {
+        verify(2, 11);
+        verify(u32::MAX, u32::MAX);
+        verify(u16::MAX as u32, u16::MAX as u32);
+    }
+
+    fn verify(rs1: u32, rs2: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
             .namespace(|| "mulhu", |cb| Ok(MulhuInstruction::construct_circuit(cb)))
             .unwrap()
             .unwrap();
+
+        let a = Value::<'_, u32>::new_unchecked(rs1);
+        let b = Value::<'_, u32>::new_unchecked(rs2);
+        let (c_limb, _, _) = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
 
         // values assignment
         let (raw_witin, _) = MulhuInstruction::assign_instances(
@@ -160,11 +161,25 @@ mod test {
                 3,
                 MOCK_PC_MULHU,
                 MOCK_PROGRAM[18],
-                11,
-                2,
-                Change::new(0, 22),
+                a.as_u64() as u32,
+                b.as_u64() as u32,
+                Change::new(
+                    0,
+                    Value::<u32>::from_limb_unchecked(c_limb[(c_limb.len() / 2)..].to_vec())
+                        .as_u64() as u32,
+                ),
                 0,
             )],
+        )
+        .unwrap();
+
+        // verify value write to register, which is only hi
+        let expected_rd_written = UInt::from_const_unchecked(c_limb[c_limb.len() / 2..].to_vec());
+        let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
+        cb.require_equal(
+            || "assert_rd_written",
+            rd_written_expr,
+            expected_rd_written.value(),
         )
         .unwrap();
 
