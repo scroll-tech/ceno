@@ -639,7 +639,7 @@ mod tests {
 
     use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
 
-    use super::{Expression, ToExpr, fmt};
+    use super::{fmt, Expression, ToExpr};
     use ff::Field;
 
     #[test]

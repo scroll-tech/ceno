@@ -1,7 +1,7 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain, izip};
-use multilinear_extensions::virtual_poly::{VPAuxInfo, build_eq_x_r_vec, eq_eval};
+use itertools::{chain, izip, Itertools};
+use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval, VPAuxInfo};
 use std::mem;
 use transcript::Transcript;
 
@@ -9,7 +9,7 @@ use crate::{
     circuit::{EvaluateGate1In, EvaluateGate2In, EvaluateGate3In, EvaluateGateCIn},
     error::GKRError,
     structs::{Circuit, IOPProverStepMessage, IOPVerifierState, PointAndEval},
-    utils::{MatrixMLEColumnFirst, eq3_eval, eq4_eval},
+    utils::{eq3_eval, eq4_eval, MatrixMLEColumnFirst},
 };
 
 use super::SumcheckState;

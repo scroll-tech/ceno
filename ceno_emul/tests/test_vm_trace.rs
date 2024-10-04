@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, StepRecord, Tracer, VMState, WordAddr,
+    ByteAddr, Cycle, EmuContext, InsnKind, StepRecord, Tracer, VMState, WordAddr, CENO_PLATFORM,
 };
 
 #[test]

@@ -5,8 +5,8 @@ use paste::paste;
 use simple_frontend::structs::CircuitBuilder;
 use singer_utils::{
     chip_handler::{
-        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip,
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
+        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
     },
     chips::{IntoEnumIterator, SingerChipBuilder},
     constants::OpcodeType,
@@ -17,13 +17,13 @@ use singer_utils::{
 use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
 
 use crate::{
-    CircuitWitnessIn, SingerParams,
     component::{
         AccessoryCircuit, FromPredInst, FromPublicIO, FromWitness, InstCircuit, InstLayout,
         ToSuccInst,
     },
     error::ZKVMError,
     utils::add_assign_each_cell,
+    CircuitWitnessIn, SingerParams,
 };
 
 use super::{Instruction, InstructionGraph};

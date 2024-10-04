@@ -6,9 +6,9 @@ use itertools::Itertools;
 use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType, structs::ChipChallenges};
 
 use crate::{
-    CircuitWitnessIn, SingerParams,
     component::{AccessoryCircuit, InstCircuit},
     error::ZKVMError,
+    CircuitWitnessIn, SingerParams,
 };
 
 use self::{

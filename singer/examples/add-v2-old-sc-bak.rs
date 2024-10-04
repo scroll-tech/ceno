@@ -1,16 +1,16 @@
 use std::{array, iter, mem, sync::Arc, time::Instant};
 
 use ark_std::{end_timer, start_timer, test_rng};
-use ff_ext::{ExtensionField, ff::Field};
+use ff_ext::{ff::Field, ExtensionField};
 use gkr::structs::Point;
 use goldilocks::{Goldilocks, GoldilocksExt2};
-use itertools::{Itertools, chain, izip};
+use itertools::{chain, izip, Itertools};
 use multilinear_extensions::{
     mle::{
         ArcDenseMultilinearExtension, DenseMultilinearExtension, FieldType, MultilinearExtension,
     },
     op_mle,
-    virtual_poly::{VirtualPolynomial, build_eq_x_r_vec},
+    virtual_poly::{build_eq_x_r_vec, VirtualPolynomial},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::structs::{IOPProof, IOPProverState};

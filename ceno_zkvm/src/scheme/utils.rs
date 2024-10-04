@@ -233,20 +233,19 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
         &|scalar| {
-            let scalar: ArcMultilinearExtension<E> =
-                Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![
-                    scalar,
-                ]));
+            let scalar: ArcMultilinearExtension<E> = Arc::new(
+                DenseMultilinearExtension::from_evaluations_vec(0, vec![scalar]),
+            );
             scalar
         },
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be aquire once for each power
             let challenge = challenges[challenge_id as usize];
-            let challenge: ArcMultilinearExtension<E> = Arc::new(
-                DenseMultilinearExtension::from_evaluations_ext_vec(0, vec![
-                    challenge.pow([pow as u64]) * scalar + offset,
-                ]),
-            );
+            let challenge: ArcMultilinearExtension<E> =
+                Arc::new(DenseMultilinearExtension::from_evaluations_ext_vec(
+                    0,
+                    vec![challenge.pow([pow as u64]) * scalar + offset],
+                ));
             challenge
         },
         &|a, b| {
@@ -437,18 +436,14 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ONE);
         // [[1, 3, 5, 7], [2, 4, 6, 8]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::ONE,
-            E::from(3u64),
-            E::from(5u64),
-            E::from(7u64)
-        ],);
-        assert_eq!(res[1].get_ext_field_vec(), vec![
-            E::from(2u64),
-            E::from(4u64),
-            E::from(6u64),
-            E::from(8u64)
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::ONE, E::from(3u64), E::from(5u64), E::from(7u64)],
+        );
+        assert_eq!(
+            res[1].get_ext_field_vec(),
+            vec![E::from(2u64), E::from(4u64), E::from(6u64), E::from(8u64)],
+        );
     }
 
     #[test]
@@ -465,18 +460,14 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ZERO);
         // [[1, 3, 5, 0], [2, 4, 6, 0]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::ONE,
-            E::from(3u64),
-            E::from(5u64),
-            E::from(0u64)
-        ],);
-        assert_eq!(res[1].get_ext_field_vec(), vec![
-            E::from(2u64),
-            E::from(4u64),
-            E::from(6u64),
-            E::from(0u64)
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::ONE, E::from(3u64), E::from(5u64), E::from(0u64)],
+        );
+        assert_eq!(
+            res[1].get_ext_field_vec(),
+            vec![E::from(2u64), E::from(4u64), E::from(6u64), E::from(0u64)],
+        );
 
         // case 2: test instance level padding
         // [[1,0],[3,0],[5,0]]]
@@ -487,12 +478,10 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[1, 3, 5, 1], [1, 1, 1, 1]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::ONE,
-            E::from(3u64),
-            E::from(5u64),
-            E::ONE
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::ONE, E::from(3u64), E::from(5u64), E::ONE],
+        );
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE; 4],);
     }
 
@@ -507,10 +496,10 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[2, 3], [1, 1]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::from(2u64),
-            E::from(3u64)
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::from(2u64), E::from(3u64)],
+        );
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE, E::ONE],);
     }
 

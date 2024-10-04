@@ -3,17 +3,17 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 use ff_ext::ExtensionField;
 
 use crate::{
-    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::Expression,
     instructions::{
-        Instruction,
         riscv::{
-            RIVInstruction, b_insn::BInstructionConfig, config::UIntLtSignedConfig, constants::UInt,
+            b_insn::BInstructionConfig, config::UIntLtSignedConfig, constants::UInt, RIVInstruction,
         },
+        Instruction,
     },
     witness::LkMultiplicity,
+    Value,
 };
 use ceno_emul::InsnKind;
 

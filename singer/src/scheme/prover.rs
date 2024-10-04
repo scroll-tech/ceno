@@ -5,7 +5,7 @@ use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use transcript::Transcript;
 
 use crate::{
-    SingerCircuit, SingerWiresOutID, SingerWiresOutValues, SingerWitness, error::ZKVMError,
+    error::ZKVMError, SingerCircuit, SingerWiresOutID, SingerWiresOutValues, SingerWitness,
 };
 
 use super::{GKRGraphProverState, SingerProof};

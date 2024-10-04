@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{ChipHandler, range::RangeChip},
+    chip_handler::{range::RangeChip, ChipHandler},
     error::UtilError,
     uint::uint::UInt,
 };

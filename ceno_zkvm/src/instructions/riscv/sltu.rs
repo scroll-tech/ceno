@@ -4,9 +4,9 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{
-    RIVInstruction,
-    constants::{UINT_LIMBS, UInt},
+    constants::{UInt, UINT_LIMBS},
     r_insn::RInstructionConfig,
+    RIVInstruction,
 };
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsLtConfig,
@@ -107,7 +107,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 mod test {
     use std::u32;
 
-    use ceno_emul::{CENO_PLATFORM, Change, StepRecord, Word};
+    use ceno_emul::{Change, StepRecord, Word, CENO_PLATFORM};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -117,7 +117,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MOCK_PC_SLTU, MOCK_PROGRAM, MockProver},
+        scheme::mock_prover::{MockProver, MOCK_PC_SLTU, MOCK_PROGRAM},
     };
 
     fn verify(name: &'static str, rs1: Word, rs2: Word, rd: Word) {
@@ -135,19 +135,20 @@ mod test {
             .unwrap();
 
         let idx = (MOCK_PC_SLTU.0 - CENO_PLATFORM.pc_start()) / 4;
-        let (raw_witin, _) =
-            SltuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_SLTU,
-                    MOCK_PROGRAM[idx as usize],
-                    rs1,
-                    rs2,
-                    Change::new(0, rd),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let (raw_witin, _) = SltuInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_SLTU,
+                MOCK_PROGRAM[idx as usize],
+                rs1,
+                rs2,
+                Change::new(0, rd),
+                0,
+            )],
+        )
+        .unwrap();
 
         MockProver::assert_satisfied(
             &mut cb,

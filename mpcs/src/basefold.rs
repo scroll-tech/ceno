@@ -1,9 +1,7 @@
 use crate::{
-    Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
     sum_check::{
-        SumCheck as _, VirtualPolynomial,
         classic::{ClassicSumCheck, CoefficientsProver},
-        eq_xy_eval,
+        eq_xy_eval, SumCheck as _, VirtualPolynomial,
     },
     util::{
         add_polynomial_with_coeff,
@@ -12,14 +10,14 @@ use crate::{
         },
         expression::{Expression, Query, Rotation},
         ext_to_usize,
-        hash::{Digest, new_hasher, write_digest_to_transcript},
+        hash::{new_hasher, write_digest_to_transcript, Digest},
         log2_strict,
         merkle_tree::MerkleTree,
         multiply_poly,
         plonky2_util::reverse_index_bits_in_place_field_type,
         poly_index_ext, poly_iter_ext,
     },
-    validate_input,
+    validate_input, Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
 };
 use ark_std::{end_timer, start_timer};
 pub use encoding::{
@@ -29,10 +27,10 @@ pub use encoding::{
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
 use query_phase::{
+    batch_prover_query_phase, batch_verifier_query_phase, prover_query_phase,
+    simple_batch_prover_query_phase, simple_batch_verifier_query_phase, verifier_query_phase,
     BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
-    SimpleBatchQueriesResultWithMerklePath, batch_prover_query_phase, batch_verifier_query_phase,
-    prover_query_phase, simple_batch_prover_query_phase, simple_batch_verifier_query_phase,
-    verifier_query_phase,
+    SimpleBatchQueriesResultWithMerklePath,
 };
 use std::{borrow::BorrowMut, ops::Deref};
 pub use structure::BasefoldSpec;
@@ -40,14 +38,14 @@ use structure::{BasefoldProof, ProofQueriesResultWithMerklePath};
 use transcript::Transcript;
 
 use itertools::Itertools;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, FieldType},
     virtual_poly::build_eq_x_r_vec,
 };
 
-use rand_chacha::{ChaCha8Rng, rand_core::RngCore};
+use rand_chacha::{rand_core::RngCore, ChaCha8Rng};
 use rayon::{
     iter::IntoParallelIterator,
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
@@ -1205,7 +1203,7 @@ mod test {
     use goldilocks::GoldilocksExt2;
     use rand_chacha::ChaCha8Rng;
 
-    use super::{BasefoldRSParams, structure::BasefoldBasecodeParams};
+    use super::{structure::BasefoldBasecodeParams, BasefoldRSParams};
 
     type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
     type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;

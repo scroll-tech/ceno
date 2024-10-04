@@ -1,10 +1,10 @@
 use crate::{
-    Error,
     util::{
-        BitIndex,
-        arithmetic::{BooleanHypercube, inner_product, powers, product},
+        arithmetic::{inner_product, powers, product, BooleanHypercube},
         expression::{CommonPolynomial, Expression, Query},
+        BitIndex,
     },
+    Error,
 };
 use std::{collections::HashMap, fmt::Debug};
 
@@ -13,7 +13,7 @@ use ff::PrimeField;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use transcript::Transcript;
 
 pub mod classic;

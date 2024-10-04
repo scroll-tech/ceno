@@ -8,13 +8,13 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        Instruction,
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
+        Instruction,
     },
     tables::OpsTable,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind, StepRecord, WORD_SIZE, Word};
+use ceno_emul::{InsnKind, StepRecord, Word, WORD_SIZE};
 
 /// This trait defines a logic instruction, connecting an instruction type to a lookup table.
 pub trait LogicOp {
