@@ -271,10 +271,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M, C, E>), ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             let c = self.internal_mul(cb, multiplier, with_overflow, is_hi_limb)?;
-            Ok((
-                c.clone(),
-                c.internal_add(cb, &addend.expr(), with_overflow)?,
-            ))
+            Ok((c.internal_add(cb, &addend.expr(), with_overflow)?, c))
         })
     }
 

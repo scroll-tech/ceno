@@ -19,11 +19,11 @@ pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 pub struct InstructionConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
 
+    rs1: UInt<E>,
     imm: UInt<E>,
     rd_written: UInt<E>,
     remainder: UInt<E>,
     rd_imm_mul: UInt<E>,
-    rd_imm_rem_add: UInt<E>,
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
@@ -37,13 +37,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let mut imm = UInt::new(|| "imm", circuit_builder)?;
-        let mut rd_written = UInt::new_unchecked(|| "rd_written", circuit_builder)?;
+        let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
         // Note: `imm` is set to 2**imm (upto 32 bit) just for SRLI for efficient verification
         // Goal is to constrain:
-        // rs1_read == rd_written * imm + remainder
+        // rs1 == rd_written * imm + remainder
         let remainder = UInt::new(|| "remainder", circuit_builder)?;
-        let (rd_imm_mul, rd_imm_rem_add) = rd_written.mul_add(
+        let (rs1, rd_imm_mul) = rd_written.mul_add(
             || "rd_written * imm +remainder ",
             circuit_builder,
             &mut imm,
@@ -55,7 +55,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             circuit_builder,
             I::INST_KIND,
             &imm.value(),
-            rd_imm_rem_add.register_expr(),
+            rs1.register_expr(),
             rd_written.register_expr(),
         )?;
 
@@ -65,7 +65,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             rd_written,
             remainder,
             rd_imm_mul,
-            rd_imm_rem_add,
+            rs1,
         })
     }
 
@@ -75,50 +75,32 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        // We need to calculate result and remainder.
-        let rs1_read = step.rs1().unwrap().value;
-        let rd_written = step.rd().unwrap().value.after;
-        let imm = step.insn().imm_or_funct7();
-        let result = rs1_read.wrapping_div(imm);
-        let remainder = rs1_read.wrapping_sub(result * imm);
-        assert_eq!(result, rd_written, "SRLI: result mismatch");
+        let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
 
-        // Assignment.
-        let rd_written = Value::new_unchecked(rd_written);
-        let imm = Value::new(imm, lk_multiplicity);
-        let remainder = Value::new(remainder, lk_multiplicity);
+        let (remainder, imm) = {
+            let rs1_read = step.rs1().unwrap().value;
+            let imm = step.insn().imm_or_funct7();
+            (
+                Value::new(rs1_read % imm, lk_multiplicity),
+                Value::new(imm, lk_multiplicity),
+            )
+        };
 
-        let (rd_imm_mul_limb, rd_imm_mul_carry, max_carry_value) =
-            rd_written.mul(&imm, lk_multiplicity, true);
-
-        let rd_imm = Value::from_limb_slice_unchecked(&rd_imm_mul_limb);
-        config.rd_imm_mul.assign_limbs(instance, &rd_imm_mul_limb);
-        config
-            .rd_imm_mul
-            .assign_carries(instance, &rd_imm_mul_carry);
-        config.rd_imm_mul.assign_carries_auxiliary(
+        let (rs1, rd_imm_mul) = rd_written.mul_add(&imm, &remainder, lk_multiplicity, true);
+        config.rd_imm_mul.assign_limb_with_carry_auxiliary(
             instance,
             lk_multiplicity,
-            &rd_imm_mul_carry,
-            max_carry_value,
+            &rd_imm_mul,
         )?;
 
-        let rd_imm_rem_add = rd_imm.add(&remainder, lk_multiplicity, true);
-        debug_assert_eq!(
-            Value::<u32>::from_limb_slice_unchecked(&rd_imm_rem_add.0).as_u64(),
-            rs1_read as u64,
-            "SRLI: rd_imm_rem_add mismatch"
-        );
-        config
-            .rd_imm_rem_add
-            .assign_limb_with_carry(instance, &rd_imm_rem_add);
+        config.rs1.assign_limb_with_carry(instance, &rs1);
+        config.imm.assign_value(instance, imm);
+        config.rd_written.assign_value(instance, rd_written);
+        config.remainder.assign_value(instance, remainder);
 
         config
             .i_insn
             .assign_instance(instance, lk_multiplicity, step)?;
-        config.imm.assign_value(instance, imm);
-        config.rd_written.assign_value(instance, rd_written);
-        config.remainder.assign_value(instance, remainder);
 
         Ok(())
     }

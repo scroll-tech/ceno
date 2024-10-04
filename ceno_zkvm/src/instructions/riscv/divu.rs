@@ -44,7 +44,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let mut outcome = UInt::new(|| "outcome", circuit_builder)?;
         let r = UInt::new(|| "remainder", circuit_builder)?;
 
-        let (inter_mul_value, dividend) =
+        let (dividend, inter_mul_value) =
             divisor.mul_add(|| "dividend", circuit_builder, &mut outcome, &r, true)?;
 
         // div by zero check
@@ -95,12 +95,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let rd = step.rd().unwrap().value.after;
 
         // dividend = divisor * outcome + r
-        let dividend = Value::new_unchecked(rs1);
         let divisor = Value::new_unchecked(rs2);
         let outcome = Value::new(rd, lkm);
 
-        // divisor * outcome
-        let inter_mul_value = Value::new(rs2 * rd, lkm);
         let r = if rs2 == 0 {
             Value::new_unchecked(0)
         } else {
@@ -116,27 +113,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             .outcome
             .assign_limbs(instance, outcome.as_u16_limbs());
 
-        let (_, mul_carries, add_carries, max_carry_value) =
-            divisor.mul_add(&outcome, &r, lkm, true);
+        let (dividend, inter_mul_value) = divisor.mul_add(&outcome, &r, lkm, true);
+
         config
             .inter_mul_value
-            .assign_limbs(instance, inter_mul_value.as_u16_limbs());
-        config
-            .inter_mul_value
-            .assign_carries(instance, &mul_carries);
-        config.inter_mul_value.assign_carries_auxiliary(
-            instance,
-            lkm,
-            &mul_carries,
-            max_carry_value,
-        )?;
+            .assign_limb_with_carry_auxiliary(instance, lkm, &inter_mul_value)?;
+
+        config.dividend.assign_limb_with_carry(instance, &dividend);
 
         config.remainder.assign_limbs(instance, r.as_u16_limbs());
-
-        config
-            .dividend
-            .assign_limbs(instance, dividend.as_u16_limbs());
-        config.dividend.assign_carries(instance, &add_carries);
 
         config
             .is_zero
