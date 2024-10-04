@@ -99,16 +99,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
                     .rs1_read
                     .assign_limbs(instance, rs1_read.as_u16_limbs());
 
-                let (limbs, carries, max_carry_value) =
-                    rs1_read.mul_hi(&rs2_read, lk_multiplicity, true);
+                let rd_written = rs1_read.mul_hi(&rs2_read, lk_multiplicity, true);
 
-                config.rd_written.assign_limbs(instance, &limbs);
-                config.rd_written.assign_carries(instance, &carries);
-                config.rd_written.assign_carries_auxiliary(
+                config.rd_written.assign_limb_with_carry_auxiliary(
                     instance,
                     lk_multiplicity,
-                    &carries,
-                    max_carry_value,
+                    &rd_written,
                 )?;
             }
 
