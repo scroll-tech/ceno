@@ -6,7 +6,7 @@ use crate::{
     gadgets::IsLtConfig,
     instructions::{
         riscv::{
-            constants::{ECALL_HALT_OPCODE, UINT_LIMBS},
+            constants::{ECALL_HALT_OPCODE, EXIT_PC, UINT_LIMBS},
             ecall_insn::EcallInstructionConfig,
         },
         Instruction,
@@ -44,7 +44,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             cb,
             [ECALL_HALT_OPCODE[0].into(), ECALL_HALT_OPCODE[1].into()],
             None,
-            Some(0.into()),
+            Some(EXIT_PC.into()),
         )?;
 
         // read exit_code from arg0 (X10 register)

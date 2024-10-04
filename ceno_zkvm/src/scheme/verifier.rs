@@ -15,6 +15,7 @@ use transcript::Transcript;
 
 use crate::{
     error::ZKVMError,
+    instructions::{riscv::ecall::HaltInstruction, Instruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
@@ -46,6 +47,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
         let pi = &vm_proof.pv;
+
+        // require ecall/halt proof to exist
+        {
+            if let Some((_, proof)) = vm_proof.opcode_proofs.get(&HaltInstruction::<E>::name()) {
+                if proof.num_instances != 1 {
+                    return Err(ZKVMError::VerifyError(
+                        "ecall/halt num_instances != 1".into(),
+                    ));
+                }
+            } else {
+                return Err(ZKVMError::VerifyError(
+                    "ecall/halt proof does not exist".into(),
+                ));
+            }
+        }
 
         // write fixed commitment to transcript
         for (_, vk) in self.vk.circuit_vks.iter() {
