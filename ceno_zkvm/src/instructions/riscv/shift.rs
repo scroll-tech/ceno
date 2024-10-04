@@ -67,7 +67,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         } else if I::INST_KIND == InsnKind::SRL {
             let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
             let remainder = UInt::new(|| "remainder", circuit_builder)?;
-            let (intermediate, rs1_read) = rd_written.mul_add(
+            let (rs1_read, intermediate) = rd_written.mul_add(
                 || "rs1_read = rd_written * pow2_rs2_low5 + remainder",
                 circuit_builder,
                 &mut pow2_rs2_low5,
