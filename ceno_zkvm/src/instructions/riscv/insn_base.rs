@@ -1,7 +1,7 @@
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
-use super::constants::{UInt, PC_STEP_SIZE};
+use super::constants::{PC_STEP_SIZE, UInt};
 use crate::{
     chip_handler::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,

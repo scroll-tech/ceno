@@ -80,7 +80,7 @@ mod tests {
         hash::{hash_types::HashOut, poseidon::PoseidonHash as PlonkyPoseidonHash},
         plonk::config::{GenericHashOut, Hasher},
     };
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, thread_rng};
 
     type PlonkyFieldElements = Vec<GoldilocksField>;
     type CenoFieldElements = Vec<Goldilocks>;

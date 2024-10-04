@@ -4,14 +4,14 @@ use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        riscv::{constants::UInt, i_insn::IInstructionConfig, RIVInstruction},
         Instruction,
+        riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
     },
     witness::LkMultiplicity,
-    Value,
 };
 
 pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);

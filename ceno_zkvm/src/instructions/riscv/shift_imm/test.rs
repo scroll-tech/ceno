@@ -6,10 +6,10 @@ use multilinear_extensions::mle::IntoMLEs;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
-    scheme::mock_prover::{MockProver, MOCK_PC_SRLI, MOCK_PC_SRLI_31, MOCK_PROGRAM},
+    scheme::mock_prover::{MOCK_PC_SRLI, MOCK_PC_SRLI_31, MOCK_PROGRAM, MockProver},
 };
 
-use super::{shift_imm_circuit::ShiftImmInstruction, SrliOp};
+use super::{SrliOp, shift_imm_circuit::ShiftImmInstruction};
 
 #[test]
 fn test_opcode_srli_1() {

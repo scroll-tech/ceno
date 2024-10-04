@@ -3,12 +3,12 @@ use std::marker::PhantomData;
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
-    virtual_poly::{build_eq_x_r_vec_sequential, eq_eval, VPAuxInfo},
+    virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
@@ -24,8 +24,8 @@ use crate::{
 };
 
 use super::{
-    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMOpcodeProof, ZKVMProof,
-    ZKVMTableProof,
+    ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE,
+    utils::eval_by_expr,
 };
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
