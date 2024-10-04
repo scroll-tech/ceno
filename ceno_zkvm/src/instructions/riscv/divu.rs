@@ -1,6 +1,5 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 
 use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
@@ -45,7 +44,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let mut outcome = UInt::new(|| "outcome", circuit_builder)?;
         let r = UInt::new(|| "remainder", circuit_builder)?;
 
-        let (inter_mul_value, dividend) =
+        let (dividend, inter_mul_value) =
             divisor.mul_add(|| "dividend", circuit_builder, &mut outcome, &r, true)?;
 
         // div by zero check
@@ -96,12 +95,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let rd = step.rd().unwrap().value.after;
 
         // dividend = divisor * outcome + r
-        let dividend = Value::new_unchecked(rs1);
         let divisor = Value::new_unchecked(rs2);
         let outcome = Value::new(rd, lkm);
 
-        // divisor * outcome
-        let inter_mul_value = Value::new(rs2 * rd, lkm);
         let r = if rs2 == 0 {
             Value::new_unchecked(0)
         } else {
@@ -110,32 +106,22 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         // assignment
         config.r_insn.assign_instance(instance, lkm, step)?;
-        config.divisor.assign_limbs(instance, divisor.u16_fields());
-        config.outcome.assign_limbs(instance, outcome.u16_fields());
+        config
+            .divisor
+            .assign_limbs(instance, divisor.as_u16_limbs());
+        config
+            .outcome
+            .assign_limbs(instance, outcome.as_u16_limbs());
 
-        let (_, mul_carries, add_carries) = divisor.mul_add(&outcome, &r, lkm, true);
+        let (dividend, inter_mul_value) = divisor.mul_add(&outcome, &r, lkm, true);
+
         config
             .inter_mul_value
-            .assign_limbs(instance, inter_mul_value.u16_fields());
-        config.inter_mul_value.assign_carries(
-            instance,
-            mul_carries
-                .into_iter()
-                .map(|carry| E::BaseField::from(carry as u64))
-                .collect_vec(),
-        );
-        config.remainder.assign_limbs(instance, r.u16_fields());
+            .assign_limb_with_carry_auxiliary(instance, lkm, &inter_mul_value)?;
 
-        config
-            .dividend
-            .assign_limbs(instance, dividend.u16_fields());
-        config.dividend.assign_carries(
-            instance,
-            add_carries
-                .into_iter()
-                .map(|carry| E::BaseField::from(carry as u64))
-                .collect_vec(),
-        );
+        config.dividend.assign_limb_with_carry(instance, &dividend);
+
+        config.remainder.assign_limbs(instance, r.as_u16_limbs());
 
         config
             .is_zero
@@ -207,6 +193,7 @@ mod test {
             verify("dividend > divisor", 10, 11, 0);
             verify("remainder", 11, 2, 5);
             verify("u32::MAX", u32::MAX, u32::MAX, 1);
+            verify("div u32::MAX", 3, u32::MAX, 0);
             verify("u32::MAX div by 2", u32::MAX, 2, u32::MAX / 2);
             verify("div by zero", 10, 0, u32::MAX);
             verify("mul carry", 1202729773, 171818539, 7);

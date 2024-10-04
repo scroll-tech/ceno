@@ -2,7 +2,6 @@ use std::marker::PhantomData;
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 
 use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
@@ -115,7 +114,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
         config
             .rs2_read
-            .assign_limbs(instance, rs2_read.u16_fields());
+            .assign_limbs(instance, rs2_read.as_u16_limbs());
 
         match I::INST_KIND {
             InsnKind::ADD => {
@@ -123,15 +122,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
                 config
                     .rs1_read
-                    .assign_limbs(instance, rs1_read.u16_fields());
+                    .assign_limbs(instance, rs1_read.as_u16_limbs());
                 let (_, outcome_carries) = rs1_read.add(&rs2_read, lk_multiplicity, true);
-                config.rd_written.assign_carries(
-                    instance,
-                    outcome_carries
-                        .into_iter()
-                        .map(|carry| E::BaseField::from(carry as u64))
-                        .collect_vec(),
-                );
+                config.rd_written.assign_carries(instance, &outcome_carries);
             }
 
             InsnKind::SUB => {
@@ -139,15 +132,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
                 config
                     .rd_written
-                    .assign_limbs(instance, rd_written.u16_fields());
+                    .assign_limbs(instance, rd_written.as_u16_limbs());
                 let (_, addend_0_carries) = rs2_read.add(&rd_written, lk_multiplicity, true);
-                config.rs1_read.assign_carries(
-                    instance,
-                    addend_0_carries
-                        .into_iter()
-                        .map(|carry| E::BaseField::from(carry as u64))
-                        .collect_vec(),
-                );
+                config.rs1_read.assign_carries(instance, &addend_0_carries);
             }
 
             InsnKind::MUL => {
@@ -157,20 +144,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 config
                     .rs1_read
-                    .assign_limbs(instance, rs1_read.u16_fields());
+                    .assign_limbs(instance, rs1_read.as_u16_limbs());
 
-                let (_, carries) = rs1_read.mul(&rs2_read, lk_multiplicity, true);
+                let (_, carries, max_carry_value) = rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
                 config
                     .rd_written
-                    .assign_limbs(instance, rd_written.u16_fields());
-                config.rd_written.assign_carries(
+                    .assign_limbs(instance, rd_written.as_u16_limbs());
+                config.rd_written.assign_carries(instance, &carries);
+                config.rd_written.assign_carries_auxiliary(
                     instance,
-                    carries
-                        .into_iter()
-                        .map(|carry| E::BaseField::from(carry as u64))
-                        .collect_vec(),
-                );
+                    lk_multiplicity,
+                    &carries,
+                    max_carry_value,
+                )?;
             }
 
             _ => unreachable!("Unsupported instruction kind"),
@@ -449,6 +436,10 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let a = Value::<'_, u32>::new_unchecked(u32::MAX);
+        let b = Value::<'_, u32>::new_unchecked(u32::MAX);
+        let (c_limb, _, _) = a.mul(&b, &mut LkMultiplicity::default(), true);
+
         // values assignment
         let (raw_witin, _) = MulInstruction::assign_instances(
             &config,
@@ -457,9 +448,9 @@ mod test {
                 3,
                 MOCK_PC_MUL,
                 MOCK_PROGRAM[2],
-                4294901760,
-                4294901760,
-                Change::new(0, 0),
+                a.as_u64() as u32,
+                b.as_u64() as u32,
+                Change::new(0, Value::<u32>::from_limb_unchecked(c_limb).as_u64() as u32),
                 0,
             )],
         )

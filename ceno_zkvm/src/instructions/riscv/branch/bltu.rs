@@ -23,10 +23,10 @@ use ceno_emul::InsnKind;
 pub struct BltuCircuit<I>(PhantomData<I>);
 
 pub struct InstructionConfig<E: ExtensionField> {
-    pub b_insn: BInstructionConfig,
+    pub b_insn: BInstructionConfig<E>,
     pub read_rs1: UInt<E>,
     pub read_rs2: UInt<E>,
-    pub is_lt: IsLtConfig<UINT_LIMBS>,
+    pub is_lt: IsLtConfig,
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
@@ -48,6 +48,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
             read_rs1.value(),
             read_rs2.value(),
             None,
+            UINT_LIMBS,
         )?;
 
         let branch_taken_bit = match I::INST_KIND {
@@ -81,8 +82,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
     ) -> Result<(), ZKVMError> {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
-        config.read_rs1.assign_limbs(instance, rs1.u16_fields());
-        config.read_rs2.assign_limbs(instance, rs2.u16_fields());
+        config.read_rs1.assign_limbs(instance, rs1.as_u16_limbs());
+        config.read_rs2.assign_limbs(instance, rs2.as_u16_limbs());
         config.is_lt.assign_instance(
             instance,
             lk_multiplicity,
@@ -92,7 +93,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
 
         config
             .b_insn
-            .assign_instance::<E>(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())
     }
