@@ -133,7 +133,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 config
                     .rd_written
                     .assign_limbs(instance, rd_written.as_u16_limbs());
-                let result= rs2_read.add(&rd_written, lk_multiplicity, true);
+                let result = rs2_read.add(&rd_written, lk_multiplicity, true);
                 config.rs1_read.assign_carries(instance, &result.carries);
             }
 

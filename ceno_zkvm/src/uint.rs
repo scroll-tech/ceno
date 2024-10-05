@@ -581,16 +581,15 @@ impl<E: ExtensionField> UIntLimbs<32, 8, E> {
     }
 }
 
-
 pub struct ValueAdd {
     pub limbs: Vec<u16>,
-    pub carries: Vec<u16>
+    pub carries: Vec<u16>,
 }
 
 pub struct ValueMul {
     pub limbs: Vec<u16>,
     pub carries: Vec<u64>,
-    pub max_carry_value: u64
+    pub max_carry_value: u64,
 }
 
 pub struct Value<'a, T: Into<u64> + From<u32> + Copy + Default> {
@@ -676,12 +675,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         self.limbs.iter().map(|v| F::from(*v as u64)).collect_vec()
     }
 
-    pub fn add(
-        &self,
-        rhs: &Self,
-        lkm: &mut LkMultiplicity,
-        with_overflow: bool,
-    ) -> ValueAdd {
+    pub fn add(&self, rhs: &Self, lkm: &mut LkMultiplicity, with_overflow: bool) -> ValueAdd {
         let res = self.as_u16_limbs().iter().zip(rhs.as_u16_limbs()).fold(
             vec![],
             |mut acc, (a_limb, b_limb)| {
@@ -703,15 +697,10 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         if !with_overflow {
             carries.resize(carries.len() - 1, 0);
         }
-        ValueAdd{limbs, carries}
+        ValueAdd { limbs, carries }
     }
 
-    pub fn mul(
-        &self,
-        rhs: &Self,
-        lkm: &mut LkMultiplicity,
-        with_overflow: bool,
-    ) -> ValueMul {
+    pub fn mul(&self, rhs: &Self, lkm: &mut LkMultiplicity, with_overflow: bool) -> ValueMul {
         self.internal_mul(rhs, lkm, with_overflow)
     }
 
@@ -732,12 +721,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         (add_result, mul_result)
     }
 
-    fn internal_mul(
-        &self,
-        mul: &Self,
-        lkm: &mut LkMultiplicity,
-        with_overflow: bool,
-    ) -> ValueMul {
+    fn internal_mul(&self, mul: &Self, lkm: &mut LkMultiplicity, with_overflow: bool) -> ValueMul {
         let a_limbs = self.as_u16_limbs();
         let b_limbs = mul.as_u16_limbs();
 
@@ -779,10 +763,10 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         // range check
         c_limbs.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
 
-        ValueMul{
-            limbs:c_limbs,
+        ValueMul {
+            limbs: c_limbs,
             carries,
-            max_carry_value:max_carry_word_for_multiplication(2, Self::M, Self::C),
+            max_carry_value: max_carry_word_for_multiplication(2, Self::M, Self::C),
         }
     }
 }
@@ -824,7 +808,7 @@ mod tests {
             let b = Value::new_unchecked(2u32);
             let mut lkm = LkMultiplicity::default();
 
-            let ret= a.mul(&b, &mut lkm, true);
+            let ret = a.mul(&b, &mut lkm, true);
             assert_eq!(ret.limbs[0], 2);
             assert_eq!(ret.limbs[1], 0);
             assert_eq!(ret.carries[0], 0);
