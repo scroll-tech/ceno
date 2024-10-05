@@ -1,7 +1,7 @@
 use std::{iter, time::Instant};
 
 use ceno_zkvm::{
-    instructions::riscv::{arith::AddInstruction, branch::BltuInstruction},
+    instructions::riscv::{arith::AddInstruction, branch::BltuInstruction, jump::JalInstruction},
     scheme::prover::ZKVMProver,
     tables::ProgramTableCircuit,
 };
@@ -10,7 +10,7 @@ use const_env::from_env;
 
 use ceno_emul::{
     ByteAddr,
-    InsnKind::{ADD, BLTU},
+    InsnKind::{ADD, BLTU, JAL},
     StepRecord, VMState, CENO_PLATFORM,
 };
 use ceno_zkvm::{
@@ -37,11 +37,12 @@ const RAYON_NUM_THREADS: usize = 8;
 #[allow(clippy::unusual_byte_groupings)]
 const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
 #[allow(clippy::unusual_byte_groupings)]
-const PROGRAM_CODE: [u32; 4] = [
+const PROGRAM_CODE: [u32; 5] = [
     // func7   rs2   rs1   f3  rd    opcode
     0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
     0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
     0b_1_111111_00011_00000_110_1100_1_1100011, // bltu x0, x3, -8
+    0b_0_0000000010_0_00000000_00001_1101111, // jal x1, 4
     ECALL_HALT,                               // ecall halt
 ];
 
@@ -103,6 +104,7 @@ fn main() {
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let bltu_config = zkvm_cs.register_opcode_circuit::<BltuInstruction>();
+    let jal_config = zkvm_cs.register_opcode_circuit::<JalInstruction<E>>();
     // tables
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
     let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
@@ -118,6 +120,7 @@ fn main() {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<BltuInstruction>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<JalInstruction<E>>(&zkvm_cs);
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
@@ -172,19 +175,22 @@ fn main() {
             .collect::<Vec<_>>();
         let mut add_records = Vec::new();
         let mut bltu_records = Vec::new();
+        let mut jal_records = Vec::new();
         all_records.iter().for_each(|record| {
             let kind = record.insn().kind().1;
-            if kind == ADD {
-                add_records.push(record.clone());
-            } else if kind == BLTU {
-                bltu_records.push(record.clone());
+            match kind {
+                ADD => add_records.push(record.clone()),
+                BLTU => bltu_records.push(record.clone()),
+                JAL => jal_records.push(record.clone()),
+                _ => {}
             }
         });
 
         tracing::info!(
-            "tracer generated {} ADD records, {} BLTU records",
+            "tracer generated {} ADD records, {} BLTU records, {} JAL records",
             add_records.len(),
-            bltu_records.len()
+            bltu_records.len(),
+            jal_records.len(),
         );
 
         let mut zkvm_witness = ZKVMWitnesses::default();
@@ -194,6 +200,9 @@ fn main() {
             .unwrap();
         zkvm_witness
             .assign_opcode_circuit::<BltuInstruction>(&zkvm_cs, &bltu_config, bltu_records)
+            .unwrap();
+        zkvm_witness
+            .assign_opcode_circuit::<JalInstruction<E>>(&zkvm_cs, &jal_config, jal_records)
             .unwrap();
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
