@@ -15,27 +15,27 @@ use crate::{
 };
 use ceno_emul::PC_STEP_SIZE;
 
-pub struct JalInstruction<E, I>(PhantomData<(E, I)>);
-
-pub struct InstructionConfig<E: ExtensionField> {
+pub struct JalConfig<E: ExtensionField> {
     pub j_insn: JInstructionConfig<E>,
     pub rd_written: UInt<E>,
 }
+
+pub struct JalCircuit<E, I>(PhantomData<(E, I)>);
 
 /// JAL instruction circuit
 /// NOTE: does not validate that next_pc is aligned by 4-byte increments, which
 ///   should be verified by lookup argument of the next execution step against
 ///   the program table
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalInstruction<E, I> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalCircuit<E, I> {
+    type InstructionConfig = JalConfig<E>;
+
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    type InstructionConfig = InstructionConfig<E>;
-
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<InstructionConfig<E>, ZKVMError> {
+    ) -> Result<JalConfig<E>, ZKVMError> {
         let rd_written = UInt::new_unchecked(|| "rd_limbs", circuit_builder)?;
 
         let j_insn = JInstructionConfig::construct_circuit(
@@ -55,7 +55,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalInstruction<E, 
         let return_addr = j_insn.vm_state.pc.expr() + PC_STEP_SIZE.into();
         circuit_builder.require_equal(|| "jump rd", rd_written.value(), return_addr)?;
 
-        Ok(InstructionConfig { j_insn, rd_written })
+        Ok(JalConfig { j_insn, rd_written })
     }
 
     fn assign_instance(
