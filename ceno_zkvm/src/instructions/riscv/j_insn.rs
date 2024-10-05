@@ -1,5 +1,3 @@
-#![allow(dead_code)] // TODO: remove after BLT, BEQ, …
-
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
@@ -57,7 +55,7 @@ impl<E: ExtensionField> JInstructionConfig<E> {
             vm_state.pc.expr(),
             (insn_kind.codes().opcode as usize).into(),
             rd.id.expr(),
-            (insn_kind.codes().func3 as usize).into(),
+            0.into(),
             0.into(),
             0.into(),
             imm.expr(),

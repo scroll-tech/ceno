@@ -22,6 +22,10 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub rd_written: UInt<E>,
 }
 
+/// JAL instruction circuit
+/// NOTE: does not validate that next_pc is aligned by 4-byte increments, which
+///   should be verified by lookup argument of the next execution step against
+///   the program table
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalInstruction<E, I> {
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -41,11 +45,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalInstruction<E, 
         )?;
 
         // constrain next_pc
-        let jump_delta = j_insn.imm.expr() * 2.into();
         circuit_builder.require_equal(
             || "jump next_pc",
             j_insn.vm_state.next_pc.unwrap().expr(),
-            j_insn.vm_state.pc.expr() + jump_delta,
+            j_insn.vm_state.pc.expr() + j_insn.imm.expr(),
         )?;
 
         // constrain return address written to rd
