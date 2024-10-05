@@ -13,15 +13,7 @@ use crate::{
 };
 use core::mem::MaybeUninit;
 
-// Opcode: 1100011
-// Funct3:
-//   000  BEQ
-//   001  BNE
-//   100  BLT
-//   101  BGE
-//   110  BLTU
-//   111  BGEU
-//
+// Opcode: 1101111
 
 /// This config handles the common part of the J-type instruction (JAL):
 /// - PC, cycle, fetch
