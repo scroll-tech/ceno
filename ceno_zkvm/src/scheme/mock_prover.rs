@@ -345,7 +345,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     .chain(&cb.cs.assert_zero_sumcheck_expressions_namespace_map),
             )
         {
-            if name.contains("require_equal") {
+            // require_equal does not always have the form of Expr::Sum as
+            // the sum of witness and constant is expressed as scaled sum
+            if name.contains("require_equal") && expr.unpack_sum().is_some() {
                 let (left, right) = expr.unpack_sum().unwrap();
                 let right = right.neg();
 
