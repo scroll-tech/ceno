@@ -378,19 +378,18 @@ mod tests {
 
         let expected_rd_written = 0;
 
-        // TODO
-        // config
-        //     .rd_written
-        //     .require_equal(
-        //         || "assert_rd_written",
-        //         &mut cb,
-        //         &UInt::from_const_unchecked(
-        //             Value::new_unchecked(expected_rd_written)
-        //                 .as_u16_limbs()
-        //                 .to_vec(),
-        //         ),
-        //     )
-        //     .unwrap();
+        config
+            .rd_written
+            .require_equal(
+                || "assert_rd_written",
+                &mut cb,
+                &UInt::from_const_unchecked(
+                    Value::new_unchecked(expected_rd_written)
+                        .as_u16_limbs()
+                        .to_vec(),
+                ),
+            )
+            .unwrap();
 
         let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, SrlOp>::assign_instances(
             &config,
