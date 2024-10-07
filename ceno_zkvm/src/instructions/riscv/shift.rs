@@ -117,7 +117,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
         let rs2_low5 = rs2_read.as_u64() & 0b11111;
         let pow2_rs2_low5 = Value::new_unchecked((1 << rs2_low5) as u32);
-        let rs2_high = Value::new_unchecked(((rs2_read.as_u64() - rs2_low5) >> 5) as u32);
+        let rs2_high = Value::new(
+            ((rs2_read.as_u64() - rs2_low5) >> 5) as u32,
+            lk_multiplicity,
+        );
 
         if I::INST_KIND == InsnKind::SLL {
             let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
@@ -130,12 +133,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             )?;
         } else if I::INST_KIND == InsnKind::SRL {
             let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
-            let remainder = Value::new_unchecked(
+            let remainder = Value::new(
                 // rs1 - rd * pow2_rs2_low5
                 step.rs1()
                     .unwrap()
                     .value
                     .wrapping_sub((rd_written.as_u64() * pow2_rs2_low5.as_u64()) as u32),
+                lk_multiplicity,
             );
             let (rs1_read, intermediate) =
                 rd_written.mul_add(&pow2_rs2_low5, &remainder, lk_multiplicity, true);
