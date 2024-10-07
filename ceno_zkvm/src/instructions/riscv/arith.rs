@@ -5,7 +5,10 @@ use ff_ext::ExtensionField;
 
 use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    instructions::Instruction,
+    uint::{Value, ValueMul},
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -123,8 +126,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 config
                     .rs1_read
                     .assign_limbs(instance, rs1_read.as_u16_limbs());
-                let (_, outcome_carries) = rs1_read.add(&rs2_read, lk_multiplicity, true);
-                config.rd_written.assign_carries(instance, &outcome_carries);
+                let result = rs1_read.add(&rs2_read, lk_multiplicity, true);
+                config.rd_written.assign_carries(instance, &result.carries);
             }
 
             InsnKind::SUB => {
@@ -133,8 +136,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 config
                     .rd_written
                     .assign_limbs(instance, rd_written.as_u16_limbs());
-                let (_, addend_0_carries) = rs2_read.add(&rd_written, lk_multiplicity, true);
-                config.rs1_read.assign_carries(instance, &addend_0_carries);
+                let result = rs2_read.add(&rd_written, lk_multiplicity, true);
+                config.rs1_read.assign_carries(instance, &result.carries);
             }
 
             InsnKind::MUL => {
@@ -146,17 +149,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     .rs1_read
                     .assign_limbs(instance, rs1_read.as_u16_limbs());
 
-                let (_, carries, max_carry_value) = rs1_read.mul(&rs2_read, lk_multiplicity, true);
+                let result = rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
-                config
-                    .rd_written
-                    .assign_limbs(instance, rd_written.as_u16_limbs());
-                config.rd_written.assign_carries(instance, &carries);
-                config.rd_written.assign_carries_auxiliary(
+                config.rd_written.assign_mul_outcome(
                     instance,
                     lk_multiplicity,
-                    &carries,
-                    max_carry_value,
+                    &ValueMul {
+                        limbs: rd_written.limbs.to_vec(),
+                        carries: result.carries,
+                        max_carry_value: result.max_carry_value,
+                    },
                 )?;
             }
 
@@ -493,7 +495,8 @@ mod test {
 
         let a = Value::<'_, u32>::new_unchecked(u32::MAX);
         let b = Value::<'_, u32>::new_unchecked(u32::MAX);
-        let (c_limb, _, _) = a.mul(&b, &mut LkMultiplicity::default(), true);
+        let ret = a.mul(&b, &mut LkMultiplicity::default(), true);
+        let c_limb = ret.limbs;
 
         // values assignment
         let (raw_witin, _) = MulInstruction::assign_instances(
