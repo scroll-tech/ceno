@@ -3,7 +3,6 @@
 
 use core::alloc::{GlobalAlloc, Layout};
 
-#[repr(C, align(4096))] // 4096 == MAX_SUPPORTED_ALIGN
 struct SimpleAllocator {
     next_alloc: usize,
 }
