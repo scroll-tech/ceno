@@ -32,7 +32,7 @@ unsafe impl GlobalAlloc for SimpleAllocator {
 }
 
 #[global_allocator]
-// We initialize the heap to 0xFFFF_FFFF to indicate that it has not been initialized.
+// We initialize `next_alloc` to 0xFFFF_FFFF to indicate that the heap has not been initialized.
 // The value is chosen to make any premature allocation fail.
 static mut HEAP: SimpleAllocator = SimpleAllocator {
     next_alloc: 0xFFFF_FFFF,
