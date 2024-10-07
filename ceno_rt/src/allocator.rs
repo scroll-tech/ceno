@@ -39,5 +39,5 @@ static mut HEAP: SimpleAllocator = SimpleAllocator {
 };
 
 pub unsafe fn init_heap() {
-    HEAP.next_alloc = unsafe { core::ptr::from_ref::<u8>(&crate::_sheap).cast::<u8>() as usize };
+    HEAP.next_alloc = core::ptr::from_ref::<u8>(&crate::_sheap).cast::<u8>() as usize;
 }
