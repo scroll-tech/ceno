@@ -43,7 +43,9 @@ unsafe impl GlobalAlloc for SimpleAllocator {
         *remaining -= size;
         *remaining &= align_mask_to_round_down;
 
-        self.arena.get().cast::<u8>().add(*remaining)
+        let a= self.arena.get();
+        let b = a.cast::<u8>();
+        b.add(*remaining)
     }
 
     /// Never deallocate.
