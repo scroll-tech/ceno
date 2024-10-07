@@ -173,14 +173,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
 #[cfg(test)]
 mod tests {
-    use ceno_emul::{Change, StepRecord};
+    use ceno_emul::{Change, InsnKind, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{riscv::constants::UInt, Instruction},
+        instructions::{
+            riscv::{constants::UInt, RIVInstruction},
+            Instruction,
+        },
         scheme::mock_prover::{MockProver, MOCK_PC_SLL, MOCK_PC_SRL, MOCK_PROGRAM},
         Value,
     };
@@ -189,195 +192,45 @@ mod tests {
 
     #[test]
     fn test_opcode_sll_1() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "sll",
-                |cb| {
-                    let config =
-                        ShiftLogicalInstruction::<GoldilocksExt2, SllOp>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let expected_rd_written = 32 << 3;
-
-        config
-            .rd_written
-            .require_equal(
-                || "assert_rd_written",
-                &mut cb,
-                &UInt::from_const_unchecked(
-                    Value::new_unchecked(expected_rd_written)
-                        .as_u16_limbs()
-                        .to_vec(),
-                ),
-            )
-            .unwrap();
-
-        let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, SllOp>::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_SLL,
-                MOCK_PROGRAM[18],
-                32,
-                3,
-                Change::new(0, expected_rd_written),
-                0,
-            )],
-        )
-        .unwrap();
-
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            None,
-        );
+        test::<SllOp>(32, 3, 32 << 3);
     }
 
     #[test]
     fn test_opcode_sll_2_overflow() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "sll",
-                |cb| {
-                    let config =
-                        ShiftLogicalInstruction::<GoldilocksExt2, SllOp>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let expected_rd_written = 33 << (33 - 32);
-
-        config
-            .rd_written
-            .require_equal(
-                || "assert_rd_written",
-                &mut cb,
-                &UInt::from_const_unchecked(
-                    Value::new_unchecked(expected_rd_written)
-                        .as_u16_limbs()
-                        .to_vec(),
-                ),
-            )
-            .unwrap();
-
-        let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, SllOp>::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_SLL,
-                MOCK_PROGRAM[18],
-                33,
-                33,
-                Change::new(0, expected_rd_written),
-                0,
-            )],
-        )
-        .unwrap();
-
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            None,
-        );
+        test::<SllOp>(33, 33, 33 << (33 - 32));
     }
 
     #[test]
     fn test_opcode_srl_1() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "srl",
-                |cb| {
-                    let config =
-                        ShiftLogicalInstruction::<GoldilocksExt2, SrlOp>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let expected_rd_written = 33 >> 3;
-
-        config
-            .rd_written
-            .require_equal(
-                || "assert_rd_written",
-                &mut cb,
-                &UInt::from_const_unchecked(
-                    Value::new_unchecked(expected_rd_written)
-                        .as_u16_limbs()
-                        .to_vec(),
-                ),
-            )
-            .unwrap();
-
-        let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, SrlOp>::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_SRL,
-                MOCK_PROGRAM[19],
-                33,
-                3,
-                Change::new(0, expected_rd_written),
-                0,
-            )],
-        )
-        .unwrap();
-
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            None,
-        );
+        test::<SrlOp>(33, 3, 33 >> 3);
     }
 
     #[test]
     fn test_opcode_srl_2_overflow() {
+        test::<SrlOp>(32, 33, 0);
+    }
+
+    fn test<I: RIVInstruction>(rs1_read: u32, rs2_read: u32, expected_rd_written: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
+
+        let (name, mock_pc, mock_program_op) = if I::INST_KIND == InsnKind::SLL {
+            ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[18])
+        } else {
+            ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[19])
+        };
+
         let config = cb
             .namespace(
-                || "srl",
+                || name,
                 |cb| {
                     let config =
-                        ShiftLogicalInstruction::<GoldilocksExt2, SrlOp>::construct_circuit(cb);
+                        ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
                     Ok(config)
                 },
             )
             .unwrap()
             .unwrap();
-
-        let expected_rd_written = 0;
 
         config
             .rd_written
@@ -392,15 +245,15 @@ mod tests {
             )
             .unwrap();
 
-        let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, SrlOp>::assign_instances(
+        let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_r_instruction(
                 3,
-                MOCK_PC_SRL,
-                MOCK_PROGRAM[19],
-                32,
-                33,
+                mock_pc,
+                mock_program_op,
+                rs1_read,
+                rs2_read,
                 Change::new(0, expected_rd_written),
                 0,
             )],
