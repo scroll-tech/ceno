@@ -113,6 +113,17 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
 
             let next_ts = ts + 1.into();
 
+            #[cfg(test)]
+            {
+                use crate::chip_handler::{test::DebugIndex, utils::power_sequence};
+                use itertools::izip;
+                let pow_u16 = power_sequence((1 << u16::BITS as u64).into(), value.len());
+                cb.register_debug_expr(
+                    DebugIndex::RdWrite as usize,
+                    izip!(value, pow_u16).map(|(v, pow)| v * pow).sum(),
+                );
+            }
+
             Ok((next_ts, lt_cfg))
         })
     }
