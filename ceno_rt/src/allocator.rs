@@ -3,23 +3,19 @@
 
 use core::{
     alloc::{GlobalAlloc, Layout},
-    cell::UnsafeCell,
     ptr::null_mut,
 };
 
 const ARENA_SIZE: usize = 128 * 1024;
 const MAX_SUPPORTED_ALIGN: usize = 4096;
-#[repr(C, align(4096))] // 4096 == MAX_SUPPORTED_ALIGN
-struct SimpleAllocator {
-    arena: UnsafeCell<[u8; ARENA_SIZE]>,
-    remaining: UnsafeCell<usize>, // we allocate from the top, counting down
-}
+struct SimpleAllocator {}
+
+static mut ARENA: [u8; ARENA_SIZE] = [0; ARENA_SIZE];
+/// we allocate from the top, counting down
+static mut REMAINING: usize = ARENA_SIZE;
 
 #[global_allocator]
-static ALLOCATOR: SimpleAllocator = SimpleAllocator {
-    arena: UnsafeCell::new([0; ARENA_SIZE]),
-    remaining: UnsafeCell::new(ARENA_SIZE),
-};
+static ALLOCATOR: SimpleAllocator = SimpleAllocator {};
 
 unsafe impl Sync for SimpleAllocator {}
 
@@ -36,14 +32,13 @@ unsafe impl GlobalAlloc for SimpleAllocator {
             return null_mut();
         }
 
-        let remaining = self.remaining.get();
-        if size > *remaining {
+        if size > REMAINING {
             return null_mut();
         }
-        *remaining -= size;
-        *remaining &= align_mask_to_round_down;
+        REMAINING -= size;
+        REMAINING &= align_mask_to_round_down;
 
-        self.arena.get().cast::<u8>().add(*remaining)
+        ARENA.as_mut_ptr().add(REMAINING)
     }
 
     /// Never deallocate.
