@@ -17,7 +17,7 @@ use crate::{
 };
 
 pub struct BeqConfig<E: ExtensionField> {
-    b_insn: BInstructionConfig,
+    b_insn: BInstructionConfig<E>,
 
     // TODO: Limb decomposition is not necessary. Replace with a single witness.
     rs1_read: UInt<E>,
@@ -41,8 +41,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
 
-        let equal =
-            IsEqualConfig::construct_circuit(circuit_builder, rs2_read.value(), rs1_read.value())?;
+        let equal = IsEqualConfig::construct_circuit(
+            circuit_builder,
+            || "rs1==rs2",
+            rs2_read.value(),
+            rs1_read.value(),
+        )?;
 
         let branch_taken_bit = match I::INST_KIND {
             InsnKind::BEQ => equal.expr(),
@@ -74,17 +78,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
     ) -> Result<(), ZKVMError> {
         config
             .b_insn
-            .assign_instance::<E>(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         let rs1_read = step.rs1().unwrap().value;
         config
             .rs1_read
-            .assign_limbs(instance, Value::new_unchecked(rs1_read).u16_fields());
+            .assign_limbs(instance, Value::new_unchecked(rs1_read).as_u16_limbs());
 
         let rs2_read = step.rs2().unwrap().value;
         config
             .rs2_read
-            .assign_limbs(instance, Value::new_unchecked(rs2_read).u16_fields());
+            .assign_limbs(instance, Value::new_unchecked(rs2_read).as_u16_limbs());
 
         config.equal.assign_instance(
             instance,
