@@ -11,9 +11,6 @@ use crate::{
     witness::RowMajorMatrix,
 };
 
-#[cfg(test)]
-use std::collections::HashMap;
-
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug)]
 pub struct NameSpace {
