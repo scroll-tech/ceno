@@ -27,6 +27,8 @@ pub enum Expression<E: ExtensionField> {
     WitIn(WitnessId),
     /// Fixed
     Fixed(Fixed),
+    /// Public Values
+    Instance(Instance),
     /// Constant poly
     Constant(E::BaseField),
     /// This is the sum of two expression
@@ -34,6 +36,7 @@ pub enum Expression<E: ExtensionField> {
     /// This is the product of two polynomials
     Product(Box<Expression<E>>, Box<Expression<E>>),
     /// This is x, a, b expr to represent ax + b polynomial
+    /// and x is one of wit / fixed / instance, a and b are either constant or challenge
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
     Challenge(ChallengeId, usize, E, E), // (challenge_id, power, scalar, offset)
 }
@@ -53,10 +56,11 @@ impl<E: ExtensionField> Expression<E> {
         match self {
             Expression::Fixed(_) => 1,
             Expression::WitIn(_) => 1,
+            Expression::Instance(_) => 0,
             Expression::Constant(_) => 0,
             Expression::Sum(a_expr, b_expr) => max(a_expr.degree(), b_expr.degree()),
             Expression::Product(a_expr, b_expr) => a_expr.degree() + b_expr.degree(),
-            Expression::ScaledSum(_, _, _) => 1,
+            Expression::ScaledSum(x, _, _) => x.degree(),
             Expression::Challenge(_, _, _, _) => 0,
         }
     }
@@ -72,24 +76,63 @@ impl<E: ExtensionField> Expression<E> {
         product: &impl Fn(T, T) -> T,
         scaled: &impl Fn(T, T, T) -> T,
     ) -> T {
+        self.evaluate_with_instance(
+            fixed_in,
+            wit_in,
+            &|_| unreachable!(),
+            constant,
+            challenge,
+            sum,
+            product,
+            scaled,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_instance<T>(
+        &self,
+        fixed_in: &impl Fn(&Fixed) -> T,
+        wit_in: &impl Fn(WitnessId) -> T, // witin id
+        instance: &impl Fn(Instance) -> T,
+        constant: &impl Fn(E::BaseField) -> T,
+        challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
+        sum: &impl Fn(T, T) -> T,
+        product: &impl Fn(T, T) -> T,
+        scaled: &impl Fn(T, T, T) -> T,
+    ) -> T {
         match self {
             Expression::Fixed(f) => fixed_in(f),
             Expression::WitIn(witness_id) => wit_in(*witness_id),
+            Expression::Instance(i) => instance(*i),
             Expression::Constant(scalar) => constant(*scalar),
             Expression::Sum(a, b) => {
-                let a = a.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
-                let b = b.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let a = a.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
+                let b = b.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
                 sum(a, b)
             }
             Expression::Product(a, b) => {
-                let a = a.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
-                let b = b.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let a = a.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
+                let b = b.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
                 product(a, b)
             }
             Expression::ScaledSum(x, a, b) => {
-                let x = x.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
-                let a = a.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
-                let b = b.evaluate(fixed_in, wit_in, constant, challenge, sum, product, scaled);
+                let x = x.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
+                let a = a.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
+                let b = b.evaluate_with_instance(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                );
                 scaled(x, a, b)
             }
             Expression::Challenge(challenge_id, pow, scalar, offset) => {
@@ -117,6 +160,7 @@ impl<E: ExtensionField> Expression<E> {
         match expr {
             Expression::Fixed(_) => false,
             Expression::WitIn(_) => false,
+            Expression::Instance(_) => false,
             Expression::Constant(c) => *c == E::BaseField::ZERO,
             Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
             Expression::Product(a, b) => Self::is_zero_expr(a) || Self::is_zero_expr(b),
@@ -133,7 +177,8 @@ impl<E: ExtensionField> Expression<E> {
                 Expression::Fixed(_)
                 | Expression::WitIn(_)
                 | Expression::Challenge(..)
-                | Expression::Constant(_),
+                | Expression::Constant(_)
+                | Expression::Instance(_),
                 _,
             ) => true,
             (Expression::Sum(a, b), MonomialState::SumTerm) => {
@@ -161,11 +206,13 @@ impl<E: ExtensionField> Neg for Expression<E> {
     type Output = Expression<E>;
     fn neg(self) -> Self::Output {
         match self {
-            Expression::Fixed(_) | Expression::WitIn(_) => Expression::ScaledSum(
-                Box::new(self),
-                Box::new(Expression::Constant(E::BaseField::ONE.neg())),
-                Box::new(Expression::Constant(E::BaseField::ZERO)),
-            ),
+            Expression::Fixed(_) | Expression::WitIn(_) | Expression::Instance(_) => {
+                Expression::ScaledSum(
+                    Box::new(self),
+                    Box::new(Expression::Constant(E::BaseField::ONE.neg())),
+                    Box::new(Expression::Constant(E::BaseField::ZERO)),
+                )
+            }
             Expression::Constant(c1) => Expression::Constant(c1.neg()),
             Expression::Sum(a, b) => {
                 Expression::Sum(Box::new(-a.deref().clone()), Box::new(-b.deref().clone()))
@@ -189,6 +236,40 @@ impl<E: ExtensionField> Add for Expression<E> {
     type Output = Expression<E>;
     fn add(self, rhs: Expression<E>) -> Expression<E> {
         match (&self, &rhs) {
+            // constant + witness
+            // constant + fixed
+            // constant + instance
+            (Expression::WitIn(_), Expression::Constant(_))
+            | (Expression::Fixed(_), Expression::Constant(_))
+            | (Expression::Instance(_), Expression::Constant(_)) => Expression::ScaledSum(
+                Box::new(self),
+                Box::new(Expression::Constant(E::BaseField::ONE)),
+                Box::new(rhs),
+            ),
+            (Expression::Constant(_), Expression::WitIn(_))
+            | (Expression::Constant(_), Expression::Fixed(_))
+            | (Expression::Constant(_), Expression::Instance(_)) => Expression::ScaledSum(
+                Box::new(rhs),
+                Box::new(Expression::Constant(E::BaseField::ONE)),
+                Box::new(self),
+            ),
+            // challenge + witness
+            // challenge + fixed
+            // challenge + instance
+            (Expression::WitIn(_), Expression::Challenge(..))
+            | (Expression::Fixed(_), Expression::Challenge(..))
+            | (Expression::Instance(_), Expression::Challenge(..)) => Expression::ScaledSum(
+                Box::new(self),
+                Box::new(Expression::Constant(E::BaseField::ONE)),
+                Box::new(rhs),
+            ),
+            (Expression::Challenge(..), Expression::WitIn(_))
+            | (Expression::Challenge(..), Expression::Fixed(_))
+            | (Expression::Challenge(..), Expression::Instance(_)) => Expression::ScaledSum(
+                Box::new(rhs),
+                Box::new(Expression::Constant(E::BaseField::ONE)),
+                Box::new(self),
+            ),
             // constant + challenge
             (
                 Expression::Constant(c1),
@@ -219,19 +300,9 @@ impl<E: ExtensionField> Add for Expression<E> {
             // constant + constant
             (Expression::Constant(c1), Expression::Constant(c2)) => Expression::Constant(*c1 + c2),
 
-            // constant + scaledsum
+            // constant + scaled sum
             (c1 @ Expression::Constant(_), Expression::ScaledSum(x, a, b))
             | (Expression::ScaledSum(x, a, b), c1 @ Expression::Constant(_)) => {
-                Expression::ScaledSum(
-                    x.clone(),
-                    a.clone(),
-                    Box::new(b.deref().clone() + c1.clone()),
-                )
-            }
-
-            // challenge + scaledsum
-            (c1 @ Expression::Challenge(..), Expression::ScaledSum(x, a, b))
-            | (Expression::ScaledSum(x, a, b), c1 @ Expression::Challenge(..)) => {
                 Expression::ScaledSum(
                     x.clone(),
                     a.clone(),
@@ -254,6 +325,50 @@ impl<E: ExtensionField> Sub for Expression<E> {
     type Output = Expression<E>;
     fn sub(self, rhs: Expression<E>) -> Expression<E> {
         match (&self, &rhs) {
+            // witness - constant
+            // fixed - constant
+            // instance - constant
+            (Expression::WitIn(_), Expression::Constant(_))
+            | (Expression::Fixed(_), Expression::Constant(_))
+            | (Expression::Instance(_), Expression::Constant(_)) => Expression::ScaledSum(
+                Box::new(self),
+                Box::new(Expression::Constant(E::BaseField::ONE)),
+                Box::new(rhs.neg()),
+            ),
+
+            // constant - witness
+            // constant - fixed
+            // constant - instance
+            (Expression::Constant(_), Expression::WitIn(_))
+            | (Expression::Constant(_), Expression::Fixed(_))
+            | (Expression::Constant(_), Expression::Instance(_)) => Expression::ScaledSum(
+                Box::new(rhs),
+                Box::new(Expression::Constant(E::BaseField::ONE.neg())),
+                Box::new(self),
+            ),
+
+            // witness - challenge
+            // fixed - challenge
+            // instance - challenge
+            (Expression::WitIn(_), Expression::Challenge(..))
+            | (Expression::Fixed(_), Expression::Challenge(..))
+            | (Expression::Instance(_), Expression::Challenge(..)) => Expression::ScaledSum(
+                Box::new(self),
+                Box::new(Expression::Constant(E::BaseField::ONE)),
+                Box::new(rhs.neg()),
+            ),
+
+            // challenge - witness
+            // challenge - fixed
+            // challenge - instance
+            (Expression::Challenge(..), Expression::WitIn(_))
+            | (Expression::Challenge(..), Expression::Fixed(_))
+            | (Expression::Challenge(..), Expression::Instance(_)) => Expression::ScaledSum(
+                Box::new(rhs),
+                Box::new(Expression::Constant(E::BaseField::ONE.neg())),
+                Box::new(self),
+            ),
+
             // constant - challenge
             (
                 Expression::Constant(c1),
@@ -332,15 +447,31 @@ impl<E: ExtensionField> Mul for Expression<E> {
     fn mul(self, rhs: Expression<E>) -> Expression<E> {
         match (&self, &rhs) {
             // constant * witin
+            // constant * fixed
             (c @ Expression::Constant(_), w @ Expression::WitIn(..))
-            | (w @ Expression::WitIn(..), c @ Expression::Constant(_)) => Expression::ScaledSum(
+            | (w @ Expression::WitIn(..), c @ Expression::Constant(_))
+            | (c @ Expression::Constant(_), w @ Expression::Fixed(..))
+            | (w @ Expression::Fixed(..), c @ Expression::Constant(_)) => Expression::ScaledSum(
                 Box::new(w.clone()),
                 Box::new(c.clone()),
                 Box::new(Expression::Constant(E::BaseField::ZERO)),
             ),
             // challenge * witin
+            // challenge * fixed
             (c @ Expression::Challenge(..), w @ Expression::WitIn(..))
-            | (w @ Expression::WitIn(..), c @ Expression::Challenge(..)) => Expression::ScaledSum(
+            | (w @ Expression::WitIn(..), c @ Expression::Challenge(..))
+            | (c @ Expression::Challenge(..), w @ Expression::Fixed(..))
+            | (w @ Expression::Fixed(..), c @ Expression::Challenge(..)) => Expression::ScaledSum(
+                Box::new(w.clone()),
+                Box::new(c.clone()),
+                Box::new(Expression::Constant(E::BaseField::ZERO)),
+            ),
+            // instance * witin
+            // instance * fixed
+            (c @ Expression::Instance(..), w @ Expression::WitIn(..))
+            | (w @ Expression::WitIn(..), c @ Expression::Instance(..))
+            | (c @ Expression::Instance(..), w @ Expression::Fixed(..))
+            | (w @ Expression::Fixed(..), c @ Expression::Instance(..)) => Expression::ScaledSum(
                 Box::new(w.clone()),
                 Box::new(c.clone()),
                 Box::new(Expression::Constant(E::BaseField::ZERO)),
@@ -433,8 +564,11 @@ pub struct WitIn {
     pub id: WitnessId,
 }
 
-#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Fixed(pub usize);
+
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct Instance(pub usize);
 
 impl WitIn {
     pub fn from_expr<E: ExtensionField, N, NR>(
@@ -497,6 +631,20 @@ impl<E: ExtensionField> ToExpr<E> for WitIn {
     }
 }
 
+impl<E: ExtensionField> ToExpr<E> for &WitIn {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::WitIn(self.id)
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for Instance {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::Instance(*self)
+    }
+}
+
 impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
@@ -551,6 +699,7 @@ pub mod fmt {
             }
             Expression::Constant(constant) => base_field::<E>(constant, true).to_string(),
             Expression::Fixed(fixed) => format!("{:?}", fixed),
+            Expression::Instance(i) => format!("{:?}", i),
             Expression::Sum(left, right) => {
                 let s = format!("{} + {}", expr(left, wtns, false), expr(right, wtns, false));
                 if add_prn_sum { format!("({})", s) } else { s }

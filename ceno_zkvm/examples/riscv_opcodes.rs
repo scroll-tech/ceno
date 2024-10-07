@@ -10,14 +10,16 @@ use const_env::from_env;
 
 use ceno_emul::{
     ByteAddr,
-    InsnKind::{ADD, BLTU},
+    InsnKind::{ADD, BLTU, EANY},
     StepRecord, VMState, CENO_PLATFORM,
 };
 use ceno_zkvm::{
-    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    instructions::riscv::ecall::HaltInstruction,
+    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier, PublicValues},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
+use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
@@ -103,6 +105,7 @@ fn main() {
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let bltu_config = zkvm_cs.register_opcode_circuit::<BltuInstruction>();
+    let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     // tables
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
     let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
@@ -118,6 +121,7 @@ fn main() {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<BltuInstruction>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
@@ -172,14 +176,24 @@ fn main() {
             .collect::<Vec<_>>();
         let mut add_records = Vec::new();
         let mut bltu_records = Vec::new();
-        all_records.iter().for_each(|record| {
+        let mut halt_records = Vec::new();
+        all_records.into_iter().for_each(|record| {
             let kind = record.insn().kind().1;
-            if kind == ADD {
-                add_records.push(record.clone());
-            } else if kind == BLTU {
-                bltu_records.push(record.clone());
+            match kind {
+                ADD => add_records.push(record),
+                BLTU => bltu_records.push(record),
+                EANY => {
+                    if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
+                        halt_records.push(record);
+                    }
+                }
+                _ => {}
             }
         });
+
+        assert_eq!(halt_records.len(), 1);
+        let exit_code = halt_records[0].rs2().unwrap().value;
+        let pi = PublicValues::new(exit_code, 0);
 
         tracing::info!(
             "tracer generated {} ADD records, {} BLTU records",
@@ -195,6 +209,10 @@ fn main() {
         zkvm_witness
             .assign_opcode_circuit::<BltuInstruction>(&zkvm_cs, &bltu_config, bltu_records)
             .unwrap();
+        zkvm_witness
+            .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
+            .unwrap();
+
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
         zkvm_witness
@@ -217,8 +235,8 @@ fn main() {
         let timer = Instant::now();
 
         let transcript = Transcript::new(b"riscv");
-        let zkvm_proof = prover
-            .create_proof(zkvm_witness, max_threads, transcript)
+        let mut zkvm_proof = prover
+            .create_proof(zkvm_witness, pi, max_threads, transcript)
             .expect("create_proof failed");
 
         println!(
@@ -230,8 +248,16 @@ fn main() {
         let transcript = Transcript::new(b"riscv");
         assert!(
             verifier
-                .verify_proof(zkvm_proof, transcript)
+                .verify_proof(zkvm_proof.clone(), transcript)
                 .expect("verify proof return with error"),
         );
+
+        let transcript = Transcript::new(b"riscv");
+        // change public input maliciously should cause verifier to reject proof
+        zkvm_proof.pv[0] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
+        zkvm_proof.pv[1] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
+        verifier
+            .verify_proof(zkvm_proof, transcript)
+            .expect_err("verify proof should return with error");
     }
 }

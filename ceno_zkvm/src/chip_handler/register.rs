@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{Expression, ToExpr},
     gadgets::IsLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
@@ -17,7 +17,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
     fn register_read(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
@@ -68,12 +68,13 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
     fn register_write(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, IsLtConfig), ZKVMError> {
+        assert!(register_id.expr().degree() <= 1);
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
