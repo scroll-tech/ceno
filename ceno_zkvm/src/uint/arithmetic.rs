@@ -207,7 +207,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             Ok::<(), ZKVMError>(())
         })?;
 
-        Ok(UIntLimbs::from_witin_carry_unchecked(
+        Ok(UIntLimbs::from_witins_unchecked(
             c_limbs,
             Some(c_carries),
             Some(carries_auxiliary_lt_config),
@@ -435,10 +435,10 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
 
         let mut lhs_limbs = self.limbs.iter().copied().collect_vec();
         lhs_limbs[Self::NUM_CELLS - 1] = lhs_msb.high_limb_no_msb;
-        let lhs_no_msb = Self::from_witin_unchecked(lhs_limbs);
+        let lhs_no_msb = Self::from_witins_unchecked(lhs_limbs, None, None);
         let mut rhs_limbs = rhs.limbs.iter().copied().collect_vec();
         rhs_limbs[Self::NUM_CELLS - 1] = rhs_msb.high_limb_no_msb;
-        let rhs_no_msb = Self::from_witin_unchecked(rhs_limbs);
+        let rhs_no_msb = Self::from_witins_unchecked(rhs_limbs, None, None);
 
         // (1) compute ltu(a_{<s},b_{<s})
         let is_ltu = lhs_no_msb.ltu_limb8(circuit_builder, &rhs_no_msb)?;

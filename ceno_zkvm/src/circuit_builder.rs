@@ -325,21 +325,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn register_debug_expr<T: Into<usize>>(&mut self, debug_index: T, expr: Expression<E>) {
         let key = debug_index.into();
-        match self.debug_map.entry(key) {
-            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                entry.get_mut().push(expr);
-            }
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(vec![expr]);
-            }
-        }
+        self.debug_map.entry(key).or_default().push(expr);
     }
 
     pub fn get_debug_expr<T: Into<usize>>(&mut self, debug_index: T) -> &[Expression<E>] {
         let key = debug_index.into();
         match self.debug_map.get(&key) {
             Some(v) => v,
-            _ => panic!("non-exist entry {}", key),
+            _ => panic!("non-existent entry {}", key),
         }
     }
 }

@@ -105,21 +105,31 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         })
     }
 
-    /// this fn does not create new witness
-    pub fn from_witin_unchecked(limbs: Vec<WitIn>) -> Self {
+    /// accepts a vector of externally instantiated witnesses and carries,
+    /// delegating the responsibility for range checking to the caller.
+    pub fn from_witins_unchecked(
+        limbs: Vec<WitIn>,
+        carries: Option<Vec<WitIn>>,
+        carries_auxiliary_lt_config: Option<Vec<IsLtConfig>>,
+    ) -> Self {
         assert!(limbs.len() == Self::NUM_CELLS);
+        if let Some(carries) = &carries {
+            let diff = limbs.len() - carries.len();
+            assert!(
+                diff == 0 || diff == 1, // diff = 1 imply no overflow
+                "invalid witness: limb.len() {}, carries.len() {}",
+                limbs.len(),
+                carries.len()
+            );
+        }
         UIntLimbs {
-            limbs: UintLimb::WitIn(
-                (0..Self::NUM_CELLS)
-                    .map(|i| limbs[i])
-                    .collect::<Vec<WitIn>>(),
-            ),
-            carries: None,
-            carries_auxiliary_lt_config: None,
+            limbs: UintLimb::WitIn(limbs),
+            carries,
+            carries_auxiliary_lt_config,
         }
     }
 
-    /// this fn does not create new witness
+    /// take vector of primative type and instantiate witnesses
     pub fn from_const_unchecked<T: Into<u64>>(limbs: Vec<T>) -> Self {
         assert!(limbs.len() == Self::NUM_CELLS);
         UIntLimbs {
@@ -132,20 +142,6 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             ),
             carries: None,
             carries_auxiliary_lt_config: None,
-        }
-    }
-
-    /// this fn does not create new witness
-    pub fn from_witin_carry_unchecked(
-        limbs: Vec<WitIn>,
-        carries: Option<Vec<WitIn>>,
-        carries_auxiliary_lt_config: Option<Vec<IsLtConfig>>,
-    ) -> Self {
-        assert!(limbs.len() == Self::NUM_CELLS);
-        UIntLimbs {
-            limbs: UintLimb::WitIn(limbs),
-            carries,
-            carries_auxiliary_lt_config,
         }
     }
 
@@ -624,7 +620,7 @@ impl ValueMul {
     }
 
     pub fn as_hi_limb_slice(&self) -> &[u16] {
-        &self.limbs[(self.limbs.len() / 2)..]
+        &self.limbs[self.limbs.len() / 2..]
     }
 }
 
@@ -804,8 +800,8 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
                 }
                 // update carry
                 carries[i] = tmp >> Self::C;
-                // update limb
-                *limb = (tmp & u16::MAX as u64) as u16;
+                // update limb with only lsb 16 bit
+                *limb = tmp as u16;
             });
 
         if !with_overflow {
