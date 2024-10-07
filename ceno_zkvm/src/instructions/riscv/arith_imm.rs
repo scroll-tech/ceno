@@ -68,7 +68,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         config.rs1_read.assign_value(instance, rs1_read);
         config.imm.assign_value(instance, imm);
 
-        config.rd_written.assign_limb_with_carry(instance, &result);
+        config.rd_written.assign_add_outcome(instance, &result);
 
         config
             .i_insn

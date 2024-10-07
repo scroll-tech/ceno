@@ -180,16 +180,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         self.assign_limbs(instance, value.as_u16_limbs())
     }
 
-    pub fn assign_limb_with_carry(
-        &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
-        vaule: &ValueAdd,
-    ) {
-        self.assign_limbs(instance, &vaule.limbs);
-        self.assign_carries(instance, &vaule.carries);
+    pub fn assign_add_outcome(&self, instance: &mut [MaybeUninit<E::BaseField>], value: &ValueAdd) {
+        self.assign_limbs(instance, &value.limbs);
+        self.assign_carries(instance, &value.carries);
     }
 
-    pub fn assign_limb_with_carry_auxiliary(
+    pub fn assign_mul_outcome(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,

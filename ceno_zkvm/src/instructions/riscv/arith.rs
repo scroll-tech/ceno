@@ -5,7 +5,10 @@ use ff_ext::ExtensionField;
 
 use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    instructions::Instruction,
+    uint::{Value, ValueMul},
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -148,15 +151,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 let result = rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
-                config
-                    .rd_written
-                    .assign_limbs(instance, rd_written.as_u16_limbs());
-                config.rd_written.assign_carries(instance, &result.carries);
-                config.rd_written.assign_carries_auxiliary(
+                config.rd_written.assign_mul_outcome(
                     instance,
                     lk_multiplicity,
-                    &result.carries,
-                    result.max_carry_value,
+                    &ValueMul {
+                        limbs: rd_written.limbs.to_vec(),
+                        carries: result.carries,
+                        max_carry_value: result.max_carry_value,
+                    },
                 )?;
             }
 
