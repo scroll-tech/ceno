@@ -62,9 +62,9 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
-            (insn_kind.codes().opcode as usize).into(),
+            insn_kind.codes().opcode.into(),
             0.into(),
-            (insn_kind.codes().func3 as usize).into(),
+            insn_kind.codes().func3.into(),
             rs1.id.expr(),
             rs2.id.expr(),
             imm.expr(),
