@@ -10,7 +10,7 @@ use const_env::from_env;
 
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM,
-    InsnKind::{ADD, BLTU},
+    InsnKind::{ADD, BLTU, EANY},
     StepRecord, VMState,
 };
 use ceno_zkvm::{
