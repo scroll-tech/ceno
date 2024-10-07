@@ -145,11 +145,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
             let rd_written = rs1_read.mul(&pow2_rs2_low5, lk_multiplicity, true);
             config.rs1_read.assign_value(instance, rs1_read);
-            config.rd_written.assign_limb_with_carry_auxiliary(
-                instance,
-                lk_multiplicity,
-                &rd_written,
-            )?;
+            config
+                .rd_written
+                .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
         } else if I::INST_KIND == InsnKind::SRL {
             let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
             let remainder = Value::new(
@@ -170,18 +168,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                 pow2_rs2_low5.as_u64(),
             )?;
 
-            config.rs1_read.assign_limb_with_carry(instance, &rs1_read);
+            config.rs1_read.assign_add_outcome(instance, &rs1_read);
             config.rd_written.assign_value(instance, rd_written);
             config
                 .remainder
                 .as_ref()
                 .unwrap()
                 .assign_value(instance, remainder);
-            config
-                .intermediate
-                .as_ref()
-                .unwrap()
-                .assign_limb_with_carry_auxiliary(instance, lk_multiplicity, &intermediate)?;
+            config.intermediate.as_ref().unwrap().assign_mul_outcome(
+                instance,
+                lk_multiplicity,
+                &intermediate,
+            )?;
         } else {
             unreachable!()
         };
@@ -244,9 +242,9 @@ mod tests {
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let (name, mock_pc, mock_program_op) = if I::INST_KIND == InsnKind::SLL {
-            ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[18])
+            ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[19])
         } else if I::INST_KIND == InsnKind::SRL {
-            ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[19])
+            ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[20])
         } else {
             unreachable!()
         };
