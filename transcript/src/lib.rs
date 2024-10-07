@@ -2,8 +2,6 @@
 //! Transcript APIs are placeholders; the actual logic is to be implemented later.
 #![feature(generic_arg_infer)]
 
-extern crate core;
-
 pub mod basic;
 pub mod syncronized;
 pub use basic::Transcript;
