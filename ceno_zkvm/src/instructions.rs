@@ -50,7 +50,7 @@ pub trait Instruction<E: ExtensionField> {
         let nthreads =
             std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
         let num_instance_per_batch = if steps.len() > 256 {
-            (steps.len() + (nthreads - 1)) / nthreads
+            steps.len().div_ceil(nthreads)
         } else {
             steps.len()
         };
@@ -84,7 +84,7 @@ pub trait Instruction<E: ExtensionField> {
             };
 
             let num_padding_instance_per_batch = if num_padding_instances > 256 {
-                (num_padding_instances + (nthreads - 1)) / nthreads
+                num_padding_instances.div_ceil(nthreads)
             } else {
                 num_padding_instances
             };

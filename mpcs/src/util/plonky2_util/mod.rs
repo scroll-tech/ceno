@@ -15,10 +15,6 @@ use transpose_util::transpose_in_place_square;
 
 mod transpose_util;
 
-pub const fn bits_u64(n: u64) -> usize {
-    (64 - n.leading_zeros()) as usize
-}
-
 /// Computes `ceil(log_2(n))`.
 #[must_use]
 pub const fn log2_ceil(n: usize) -> usize {
