@@ -57,8 +57,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         // rs2 = rs2_high | rs2_low5
         let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
 
-        let (rs1_read, rd_written, intermediate, remainder, lt_config) =
-            if I::INST_KIND == InsnKind::SLL {
+        let (rs1_read, rd_written, intermediate, remainder, lt_config) = match I::INST_KIND {
+            InsnKind::SLL => {
                 let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
                 let rd_written = rs1_read.mul(
                     || "rd_written = rs1_read * pow2_rs2_low5",
@@ -67,7 +67,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                     true,
                 )?;
                 (rs1_read, rd_written, None, None, None)
-            } else if I::INST_KIND == InsnKind::SRL {
+            }
+            InsnKind::SRL => {
                 let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
                 let remainder = UInt::new(|| "remainder", circuit_builder)?;
                 let (rs1_read, intermediate) = rd_written.mul_add(
@@ -93,9 +94,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                     Some(remainder),
                     Some(lt_config),
                 )
-            } else {
-                unreachable!()
-            };
+            }
+            _ => unreachable!(),
+        };
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -141,48 +142,50 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             lk_multiplicity,
         );
 
-        if I::INST_KIND == InsnKind::SLL {
-            let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-            let rd_written = rs1_read.mul(&pow2_rs2_low5, lk_multiplicity, true);
-            config.rs1_read.assign_value(instance, rs1_read);
-            config
-                .rd_written
-                .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
-        } else if I::INST_KIND == InsnKind::SRL {
-            let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
-            let remainder = Value::new(
-                // rs1 - rd * pow2_rs2_low5
-                step.rs1()
+        match I::INST_KIND {
+            InsnKind::SLL => {
+                let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
+                let rd_written = rs1_read.mul(&pow2_rs2_low5, lk_multiplicity, true);
+                config.rs1_read.assign_value(instance, rs1_read);
+                config
+                    .rd_written
+                    .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
+            }
+            InsnKind::SRL => {
+                let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
+                let remainder = Value::new(
+                    // rs1 - rd * pow2_rs2_low5
+                    step.rs1()
+                        .unwrap()
+                        .value
+                        .wrapping_sub((rd_written.as_u64() * pow2_rs2_low5.as_u64()) as u32),
+                    lk_multiplicity,
+                );
+                let (rs1_read, intermediate) =
+                    rd_written.mul_add(&pow2_rs2_low5, &remainder, lk_multiplicity, true);
+
+                config.lt_config.as_ref().unwrap().assign_instance(
+                    instance,
+                    lk_multiplicity,
+                    remainder.as_u64(),
+                    pow2_rs2_low5.as_u64(),
+                )?;
+
+                config.rs1_read.assign_add_outcome(instance, &rs1_read);
+                config.rd_written.assign_value(instance, rd_written);
+                config
+                    .remainder
+                    .as_ref()
                     .unwrap()
-                    .value
-                    .wrapping_sub((rd_written.as_u64() * pow2_rs2_low5.as_u64()) as u32),
-                lk_multiplicity,
-            );
-            let (rs1_read, intermediate) =
-                rd_written.mul_add(&pow2_rs2_low5, &remainder, lk_multiplicity, true);
-
-            config.lt_config.as_ref().unwrap().assign_instance(
-                instance,
-                lk_multiplicity,
-                remainder.as_u64(),
-                pow2_rs2_low5.as_u64(),
-            )?;
-
-            config.rs1_read.assign_add_outcome(instance, &rs1_read);
-            config.rd_written.assign_value(instance, rd_written);
-            config
-                .remainder
-                .as_ref()
-                .unwrap()
-                .assign_value(instance, remainder);
-            config.intermediate.as_ref().unwrap().assign_mul_outcome(
-                instance,
-                lk_multiplicity,
-                &intermediate,
-            )?;
-        } else {
-            unreachable!()
-        };
+                    .assign_value(instance, remainder);
+                config.intermediate.as_ref().unwrap().assign_mul_outcome(
+                    instance,
+                    lk_multiplicity,
+                    &intermediate,
+                )?;
+            }
+            _ => unreachable!(),
+        }
 
         config
             .r_insn
@@ -241,12 +244,10 @@ mod tests {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let (name, mock_pc, mock_program_op) = if I::INST_KIND == InsnKind::SLL {
-            ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[19])
-        } else if I::INST_KIND == InsnKind::SRL {
-            ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[20])
-        } else {
-            unreachable!()
+        let (name, mock_pc, mock_program_op) = match I::INST_KIND {
+            InsnKind::SLL => ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[19]),
+            InsnKind::SRL => ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[20]),
+            _ => unreachable!(),
         };
 
         let config = cb
