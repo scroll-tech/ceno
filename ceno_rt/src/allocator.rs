@@ -10,7 +10,7 @@ struct SimpleAllocator {
 unsafe impl GlobalAlloc for SimpleAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: Single threaded, so nothing else can touch this while we're working.
-        let mut heap_pos = unsafe { HEAP.next_alloc };
+        let mut heap_pos = HEAP.next_alloc;
 
         let align = layout.align();
         let offset = heap_pos & (align - 1);
@@ -23,7 +23,7 @@ unsafe impl GlobalAlloc for SimpleAllocator {
         // (We could also return a null pointer, but only malicious programs would ever hit this.)
         heap_pos = heap_pos.strict_add(layout.size());
 
-        unsafe { HEAP.next_alloc = heap_pos };
+        HEAP.next_alloc = heap_pos;
         ptr
     }
 
