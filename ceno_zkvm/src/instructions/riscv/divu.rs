@@ -117,9 +117,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         config
             .inter_mul_value
-            .assign_limb_with_carry_auxiliary(instance, lkm, &inter_mul_value)?;
+            .assign_mul_outcome(instance, lkm, &inter_mul_value)?;
 
-        config.dividend.assign_limb_with_carry(instance, &dividend);
+        config.dividend.assign_add_outcome(instance, &dividend);
 
         config.remainder.assign_limbs(instance, r.as_u16_limbs());
 
