@@ -137,7 +137,7 @@ impl IsLtConfig {
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
             let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
-            lkm.assert_ux::<16>(val as u64);
+            lkm.assert_ux::<16>(val);
             set_val!(instance, wit, val);
         });
         Ok(())
