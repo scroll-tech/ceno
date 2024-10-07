@@ -1,5 +1,7 @@
 //! A bump allocator.
 //! Based on https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html
+//! This is a simple bump allocator that allocates from a fixed-size arena.
+//! It's only safe to use in single-threaded environments.
 
 use core::{
     alloc::{GlobalAlloc, Layout},
