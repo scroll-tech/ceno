@@ -1,6 +1,10 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
-use ceno_emul::{Change, StepRecord};
+use ceno_emul::{
+    ByteAddr,
+    InsnKind::{ADD, EANY},
+    StepRecord, VMState, CENO_PLATFORM,
+};
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
@@ -13,7 +17,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::{riscv::arith::AddInstruction, Instruction},
+    instructions::{
+        riscv::{arith::AddInstruction, ecall::HaltInstruction},
+        Instruction,
+    },
     set_val,
     structs::{PointAndEval, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{ProgramTableCircuit, U16TableCircuit},
@@ -24,6 +31,7 @@ use super::{
     constants::{MAX_NUM_VARIABLES, NUM_FANIN},
     prover::ZKVMProver,
     verifier::ZKVMVerifier,
+    PublicValues,
 };
 
 struct TestConfig {
@@ -130,6 +138,7 @@ fn test_rw_lk_expression_combination() {
                 prover.pk.circuit_pks.get(&name).unwrap(),
                 wits_in,
                 commit,
+                &[],
                 num_instances,
                 1,
                 &mut transcript,
@@ -154,6 +163,7 @@ fn test_rw_lk_expression_combination() {
                 &vk.vp,
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
+                &[],
                 &mut v_transcript,
                 NUM_FANIN,
                 &PointAndEval::default(),
@@ -178,6 +188,7 @@ const PROGRAM_CODE: [u32; 4] = [
     ECALL_HALT,                               // ecall halt
     ECALL_HALT,                               // ecall halt
 ];
+#[ignore = "this case is already tested in riscv_example as ecall_halt has only one instance"]
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
@@ -188,6 +199,7 @@ fn test_single_add_instance_e2e() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
+    let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
 
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
@@ -195,6 +207,7 @@ fn test_single_add_instance_e2e() {
     let program_code: Vec<u32> = PROGRAM_CODE.to_vec();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
@@ -215,18 +228,34 @@ fn test_single_add_instance_e2e() {
     let vk = pk.get_vk();
 
     // single instance
-    let add_records = vec![StepRecord::new_r_instruction(
-        4,
-        0x20000000.into(),
-        4227635,
-        1,
-        0,
-        Change {
-            before: 0,
-            after: 1,
-        },
-        3,
-    )];
+    let mut vm = VMState::new(CENO_PLATFORM);
+    let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
+    for (i, insn) in PROGRAM_CODE.iter().enumerate() {
+        vm.init_memory(pc_start + i, *insn);
+    }
+    let all_records = vm
+        .iter_until_halt()
+        .collect::<Result<Vec<StepRecord>, _>>()
+        .expect("vm exec failed")
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut add_records = vec![];
+    let mut halt_records = vec![];
+    all_records.into_iter().for_each(|record| {
+        let kind = record.insn().kind().1;
+        match kind {
+            ADD => add_records.push(record),
+            EANY => {
+                if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
+                    halt_records.push(record);
+                }
+            }
+            _ => {}
+        }
+    });
+    assert_eq!(add_records.len(), 1);
+    assert_eq!(halt_records.len(), 1);
+
     // proving
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
@@ -234,6 +263,9 @@ fn test_single_add_instance_e2e() {
     // assign opcode circuits
     zkvm_witness
         .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
+        .unwrap();
+    zkvm_witness
+        .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
     zkvm_witness
@@ -243,9 +275,10 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program_code.len())
         .unwrap();
 
+    let pi = PublicValues::new(0, 0);
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
-        .create_proof(zkvm_witness, 1, transcript)
+        .create_proof(zkvm_witness, pi, 1, transcript)
         .expect("create_proof failed");
 
     let transcript = Transcript::new(b"riscv");

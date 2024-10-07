@@ -35,9 +35,9 @@ impl OpTableConfig {
 
         let rlc_record = cb.rlc_chip_record(vec![
             (rom_type as usize).into(),
-            Expression::Fixed(abc[0].clone()),
-            Expression::Fixed(abc[1].clone()),
-            Expression::Fixed(abc[2].clone()),
+            Expression::Fixed(abc[0]),
+            Expression::Fixed(abc[1]),
+            Expression::Fixed(abc[2]),
         ]);
 
         cb.lk_table_record(|| "record", rlc_record, mlt.expr())?;

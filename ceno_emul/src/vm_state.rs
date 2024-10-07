@@ -93,7 +93,10 @@ impl EmuContext for VMState {
     fn ecall(&mut self) -> Result<bool> {
         let function = self.load_register(self.platform.reg_ecall())?;
         if function == self.platform.ecall_halt() {
-            let _exit_code = self.load_register(self.platform.reg_arg0())?;
+            let exit_code = self.load_register(self.platform.reg_arg0())?;
+            tracing::debug!("halt with exit_code={}", exit_code);
+
+            self.set_pc(ByteAddr(0));
             self.halted = true;
             Ok(true)
         } else {

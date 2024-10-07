@@ -1,12 +1,12 @@
 use itertools::Itertools;
-use std::marker::PhantomData;
+use std::{collections::HashMap, marker::PhantomData};
 
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, Fixed, WitIn},
+    expression::{Expression, Fixed, Instance, WitIn},
     structs::{ProvingKey, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
@@ -79,6 +79,8 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
+    pub instance_name_map: HashMap<Instance, String>,
+
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
 
@@ -117,6 +119,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
+            instance_name_map: HashMap::new(),
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
             w_expressions: vec![],
@@ -191,6 +194,19 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.fixed_namespace_map.push(path);
 
         Ok(f)
+    }
+
+    pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+        idx: usize,
+    ) -> Result<Instance, ZKVMError> {
+        let i = Instance(idx);
+
+        let name = n().into();
+        self.instance_name_map.insert(i, name);
+
+        Ok(i)
     }
 
     pub fn lk_record<NR: Into<String>, N: FnOnce() -> NR>(
