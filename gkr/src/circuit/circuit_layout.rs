@@ -34,9 +34,10 @@ impl LayerSubsets {
         if old_layer_id == self.layer_id {
             return old_wire_id;
         }
-        if !self.subsets.contains_key(&(old_layer_id, old_wire_id)) {
-            self.subsets
-                .insert((old_layer_id, old_wire_id), self.wire_id_assigner);
+        if let std::collections::btree_map::Entry::Vacant(e) =
+            self.subsets.entry((old_layer_id, old_wire_id))
+        {
+            e.insert(self.wire_id_assigner);
             self.wire_id_assigner += 1;
         }
         self.subsets[&(old_layer_id, old_wire_id)]
@@ -54,19 +55,19 @@ impl LayerSubsets {
             layers[*old_layer_id as usize]
                 .copy_to
                 .entry(self.layer_id)
-                .or_insert(vec![])
+                .or_default()
                 .push(*old_wire_id);
         }
         layers[self.layer_id as usize].paste_from = paste_from;
 
-        layers[self.layer_id as usize].num_vars = ceil_log2(self.wire_id_assigner) as usize;
+        layers[self.layer_id as usize].num_vars = ceil_log2(self.wire_id_assigner);
         layers[self.layer_id as usize].max_previous_num_vars = layers[self.layer_id as usize]
             .max_previous_num_vars
             .max(ceil_log2(
                 layers[self.layer_id as usize]
                     .paste_from
-                    .iter()
-                    .map(|(_, old_wire_ids)| old_wire_ids.len())
+                    .values()
+                    .map(|old_wire_ids| old_wire_ids.len())
                     .max()
                     .unwrap_or(1),
             ));
@@ -300,21 +301,19 @@ impl<E: ExtensionField> Circuit<E> {
                 {
                     curr_sc_steps.push(SumcheckStepType::InputPhase2Step1);
                 }
+            } else if layer.is_linear() {
+                curr_sc_steps.push(SumcheckStepType::LinearPhase2Step1);
             } else {
-                if layer.is_linear() {
-                    curr_sc_steps.push(SumcheckStepType::LinearPhase2Step1);
-                } else {
-                    curr_sc_steps.push(SumcheckStepType::Phase2Step1);
-                    if !layer.mul2s.is_empty() || !layer.mul3s.is_empty() {
-                        if layer.mul3s.is_empty() {
-                            curr_sc_steps.push(SumcheckStepType::Phase2Step2NoStep3);
-                        } else {
-                            curr_sc_steps.push(SumcheckStepType::Phase2Step2);
-                        }
+                curr_sc_steps.push(SumcheckStepType::Phase2Step1);
+                if !layer.mul2s.is_empty() || !layer.mul3s.is_empty() {
+                    if layer.mul3s.is_empty() {
+                        curr_sc_steps.push(SumcheckStepType::Phase2Step2NoStep3);
+                    } else {
+                        curr_sc_steps.push(SumcheckStepType::Phase2Step2);
                     }
-                    if !layer.mul3s.is_empty() {
-                        curr_sc_steps.push(SumcheckStepType::Phase2Step3);
-                    }
+                }
+                if !layer.mul3s.is_empty() {
+                    curr_sc_steps.push(SumcheckStepType::Phase2Step3);
                 }
             }
             layers[layer_id as usize].sumcheck_steps = curr_sc_steps;
@@ -342,12 +341,12 @@ impl<E: ExtensionField> Circuit<E> {
             ConstantType::Challenge(c, _) => {
                 challenge_exps
                     .entry(c)
-                    .or_insert(challenges[c.challenge as usize].pow(&[c.exp]));
+                    .or_insert(challenges[c.challenge as usize].pow([c.exp]));
             }
             ConstantType::ChallengeScaled(c, _, _) => {
                 challenge_exps
                     .entry(c)
-                    .or_insert(challenges[c.challenge as usize].pow(&[c.exp]));
+                    .or_insert(challenges[c.challenge as usize].pow([c.exp]));
             }
             _ => {}
         };

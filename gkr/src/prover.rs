@@ -12,8 +12,8 @@ use transcript::Transcript;
 use crate::{
     entered_span, exit_span,
     structs::{
-        Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, IOPProverStepMessage,
-        PointAndEval, SumcheckStepType,
+        Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, PointAndEval,
+        SumcheckStepType,
     },
     tracing_span,
 };
@@ -56,7 +56,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         });
 
         let sumcheck_proofs = (0..circuit.layers.len() as LayerId)
-            .map(|layer_id| {
+            .flat_map(|layer_id| {
                 let timer = start_timer!(|| format!("Prove layer {}", layer_id));
 
                 prover_state.layer_id = layer_id;
@@ -294,7 +294,6 @@ impl<E: ExtensionField> IOPProverState<E> {
 
                 proofs
             })
-            .flatten()
             .collect_vec();
         end_timer!(timer);
         exit_span!(span);

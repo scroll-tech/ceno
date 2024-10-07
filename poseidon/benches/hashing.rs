@@ -56,8 +56,8 @@ fn ceno_hash_many_to_1(values: &[Goldilocks]) {
 pub fn hashing_benchmark(c: &mut Criterion) {
     c.bench_function("plonky hash single", |bencher| {
         bencher.iter_batched(
-            || random_plonky_2_goldy(),
-            |p_a| plonky_hash_single(p_a),
+            random_plonky_2_goldy,
+            plonky_hash_single,
             BatchSize::SmallInput,
         )
     });
@@ -84,11 +84,7 @@ pub fn hashing_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("ceno hash single", |bencher| {
-        bencher.iter_batched(
-            || random_ceno_goldy(),
-            |c_a| ceno_hash_single(c_a),
-            BatchSize::SmallInput,
-        )
+        bencher.iter_batched(random_ceno_goldy, ceno_hash_single, BatchSize::SmallInput)
     });
 
     c.bench_function("ceno hash 2 to 1", |bencher| {

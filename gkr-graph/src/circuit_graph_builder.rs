@@ -17,6 +17,12 @@ use crate::{
     },
 };
 
+impl<'a, E: ExtensionField> Default for CircuitGraphBuilder<'a, E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a, E: ExtensionField> CircuitGraphBuilder<'a, E> {
     pub fn new() -> Self {
         Self {
