@@ -8,18 +8,37 @@ use crate::{
 pub struct PoseidonHash;
 
 impl PoseidonHash {
-    pub fn two_to_one<F: Poseidon + AdaptedField>(
+    pub fn two_to_one<F: Poseidon>(
         left: &Digest<F>,
         right: &Digest<F>,
     ) -> Digest<F> {
         compress(left, right)
     }
 
-    pub fn hash_or_noop<F: Poseidon + AdaptedField>(inputs: &[F]) -> Digest<F> {
+    pub fn hash_or_noop<F: Poseidon>(inputs: &[F]) -> Digest<F> {
         if inputs.len() <= DIGEST_WIDTH {
             Digest::from_partial(inputs)
         } else {
             hash_n_to_hash_no_pad(inputs)
+        }
+    }
+
+    pub fn hash_or_noop_iter<F: Poseidon, I: IntoIterator<Item = F>>(input: I) -> Digest<F> {
+        let mut input_iter = input.into_iter();
+        let mut initial_elements = Vec::with_capacity(DIGEST_WIDTH);
+
+        for _ in 0..DIGEST_WIDTH+1 {
+            match input_iter.next() {
+                Some(value) => initial_elements.push(value),
+                None => break
+            }
+        }
+
+        if initial_elements.len() <= DIGEST_WIDTH {
+            Digest::from_partial(initial_elements.as_slice())
+        } else {
+            let iter = initial_elements.into_iter().chain(input_iter);
+            hash_n_to_m_no_pad_iter(iter, DIGEST_WIDTH).try_into().unwrap()
         }
     }
 }
@@ -33,6 +52,36 @@ pub fn hash_n_to_m_no_pad<F: Poseidon>(inputs: &[F], num_outputs: usize) -> Vec<
         // where we would xor or add in the inputs. This is a well-known variant, though,
         // sometimes called "overwrite mode".
         perm.set_from_slice(input_chunk, 0);
+        perm.permute();
+    }
+
+    // Squeeze until we have the desired number of outputs
+    let mut outputs = Vec::with_capacity(num_outputs);
+    loop {
+        for &item in perm.squeeze() {
+            outputs.push(item);
+            if outputs.len() == num_outputs {
+                return outputs;
+            }
+        }
+        perm.permute();
+    }
+}
+
+pub fn hash_n_to_m_no_pad_iter<F: Poseidon, I: IntoIterator<Item = F>>(inputs: I, num_outputs: usize) -> Vec<F> {
+    let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
+    let mut input_iter = inputs.into_iter();
+
+    // Absorb all input chunks.
+    loop {
+        let chunk = input_iter.by_ref().take(SPONGE_RATE).collect::<Vec<_>>();
+        if chunk.is_empty() {
+            break;
+        }
+        // Overwrite the first r elements with the inputs. This differs from a standard sponge,
+        // where we would xor or add in the inputs. This is a well-known variant, though,
+        // sometimes called "overwrite mode".
+        perm.set_from_slice(chunk.as_slice(), 0);
         perm.permute();
     }
 
