@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     expression::{ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::DivConfig,
     instructions::Instruction,
     set_val, Value,
 };
@@ -23,9 +23,9 @@ pub struct ShiftConfig<E: ExtensionField> {
     rs2_low5: WitIn,
     pow2_rs2_low5: UInt<E>,
 
-    intermediate: Option<UInt<E>>,
+    // for SRL division arithmetics
     remainder: Option<UInt<E>>,
-    lt_config: Option<IsLtConfig>,
+    div_config: Option<DivConfig<E>>,
 }
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
@@ -57,7 +57,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         // rs2 = rs2_high | rs2_low5
         let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
 
-        let (rs1_read, rd_written, intermediate, remainder, lt_config) = match I::INST_KIND {
+        let (rs1_read, rd_written, remainder, div_config) = match I::INST_KIND {
             InsnKind::SLL => {
                 let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
                 let rd_written = rs1_read.mul(
@@ -66,33 +66,23 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                     &mut pow2_rs2_low5,
                     true,
                 )?;
-                (rs1_read, rd_written, None, None, None)
+                (rs1_read, rd_written, None, None)
             }
             InsnKind::SRL => {
                 let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
                 let remainder = UInt::new(|| "remainder", circuit_builder)?;
-                let (rs1_read, intermediate) = rd_written.mul_add(
-                    || "rs1_read = rd_written * pow2_rs2_low5 + remainder",
+                let div_config = DivConfig::construct_circuit(
                     circuit_builder,
+                    || "srl_div",
                     &mut pow2_rs2_low5,
+                    &mut rd_written,
                     &remainder,
-                    true,
                 )?;
-
-                let lt_config = circuit_builder.less_than(
-                    || "remainder < pow2_rs2_low5",
-                    remainder.value(),
-                    pow2_rs2_low5.value(),
-                    Some(true),
-                    2,
-                )?;
-
                 (
-                    rs1_read,
+                    div_config.dividend.clone(),
                     rd_written,
-                    Some(intermediate),
                     Some(remainder),
-                    Some(lt_config),
+                    Some(div_config),
                 )
             }
             _ => unreachable!(),
@@ -122,9 +112,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rs2_high,
             rs2_low5,
             pow2_rs2_low5,
-            intermediate,
             remainder,
-            lt_config,
+            div_config,
         })
     }
 
@@ -161,28 +150,21 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                         .wrapping_sub((rd_written.as_u64() * pow2_rs2_low5.as_u64()) as u32),
                     lk_multiplicity,
                 );
-                let (rs1_read, intermediate) =
-                    rd_written.mul_add(&pow2_rs2_low5, &remainder, lk_multiplicity, true);
 
-                config.lt_config.as_ref().unwrap().assign_instance(
+                config.div_config.as_ref().unwrap().assign_instance(
                     instance,
                     lk_multiplicity,
-                    remainder.as_u64(),
-                    pow2_rs2_low5.as_u64(),
+                    &pow2_rs2_low5,
+                    &rd_written,
+                    &remainder,
                 )?;
 
-                config.rs1_read.assign_add_outcome(instance, &rs1_read);
                 config.rd_written.assign_value(instance, rd_written);
                 config
                     .remainder
                     .as_ref()
                     .unwrap()
                     .assign_value(instance, remainder);
-                config.intermediate.as_ref().unwrap().assign_mul_outcome(
-                    instance,
-                    lk_multiplicity,
-                    &intermediate,
-                )?;
             }
             _ => unreachable!(),
         }
