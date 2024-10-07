@@ -308,19 +308,20 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: [E; 2],
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, Some(challenge))
+        Self::run_maybe_challenge(cb, wits_in, &[], Some(challenge))
     }
 
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, None)
+        Self::run_maybe_challenge(cb, wits_in, &[], None)
     }
 
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        pi: &[E::BaseField],
         challenge: Option<[E; 2]>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         let table = challenge.map(|challenge| load_tables(cb, challenge));
@@ -344,11 +345,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     .chain(&cb.cs.assert_zero_sumcheck_expressions_namespace_map),
             )
         {
-            if name.contains("require_equal") {
+            // require_equal does not always have the form of Expr::Sum as
+            // the sum of witness and constant is expressed as scaled sum
+            if name.contains("require_equal") && expr.unpack_sum().is_some() {
                 let (left, right) = expr.unpack_sum().unwrap();
                 let right = right.neg();
 
-                let left_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &left);
+                let left_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &left);
                 let left_evaluated = left_evaluated
                     .get_ext_field_vec_optn()
                     .map(|v| v.to_vec())
@@ -360,7 +363,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             .collect_vec()
                     });
 
-                let right_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &right);
+                let right_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &right);
                 let right_evaluated = right_evaluated
                     .get_ext_field_vec_optn()
                     .map(|v| v.to_vec())
@@ -389,7 +392,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &expr);
+                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &expr);
                 let expr_evaluated = expr_evaluated
                     .get_ext_field_vec_optn()
                     .map(|v| v.to_vec())
@@ -421,7 +424,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             .iter()
             .zip_eq(cb.cs.lk_expressions_namespace_map.iter())
         {
-            let expr_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, expr);
+            let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
             // Check each lookup expr exists in t vec
@@ -481,6 +484,7 @@ mod tests {
         gadgets::IsLtConfig,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
+        ROMType::U5,
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -592,15 +596,20 @@ mod tests {
         assert_eq!(
             err,
             vec![MockProverError::LookupError {
-                expression: Expression::ScaledSum(
-                    Box::new(Expression::WitIn(0)),
-                    Box::new(Expression::Challenge(
-                        1,
-                        1,
-                        // TODO this still uses default challenge in ConstraintSystem, but challengeId
-                        // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
-                        GoldilocksExt2::ONE,
-                        GoldilocksExt2::ZERO,
+                expression: Expression::Sum(
+                    Box::new(Expression::ScaledSum(
+                        Box::new(Expression::WitIn(0)),
+                        Box::new(Expression::Challenge(
+                            1,
+                            1,
+                            // TODO this still uses default challenge in ConstraintSystem, but challengeId
+                            // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
+                            GoldilocksExt2::ONE,
+                            GoldilocksExt2::ZERO,
+                        )),
+                        Box::new(Expression::Constant(
+                            <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
+                        )),
                     )),
                     Box::new(Expression::Challenge(
                         0,
