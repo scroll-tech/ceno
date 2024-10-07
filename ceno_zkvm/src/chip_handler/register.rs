@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use itertools::izip;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -114,15 +115,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
 
             #[cfg(test)]
             {
-                use crate::chip_handler::{test::DebugIndex, utils::pows_expr};
-                let pow_u16 = pows_expr((1 << u16::BITS as u64).into(), value.len());
+                use crate::chip_handler::{test::DebugIndex, utils::power_sequence};
+                let pow_u16 = power_sequence((1 << u16::BITS as u64).into(), value.len());
                 cb.register_debug_expr(
                     DebugIndex::RdWrite as usize,
-                    value
-                        .into_iter()
-                        .zip(pow_u16)
-                        .map(|(v, pow)| pow * v)
-                        .fold(Expression::ZERO, |acc, v| acc + v),
+                    izip!(value, pow_u16).map(|(v, pow)| v * pow).sum(),
                 );
             }
 
