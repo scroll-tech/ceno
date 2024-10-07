@@ -141,7 +141,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                     .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
             }
             InsnKind::SRL => {
-                let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
+                let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
                 let remainder = Value::new(
                     // rs1 - rd * pow2_rs2_low5
                     step.rs1()
