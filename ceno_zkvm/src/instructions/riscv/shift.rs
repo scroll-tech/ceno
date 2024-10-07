@@ -5,6 +5,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     expression::{ToExpr, WitIn},
+    gadgets::IsLtConfig,
     instructions::Instruction,
     set_val, Value,
 };
@@ -24,6 +25,7 @@ pub struct ShiftConfig<E: ExtensionField> {
 
     intermediate: Option<UInt<E>>,
     remainder: Option<UInt<E>>,
+    lt_config: Option<IsLtConfig>,
 }
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
@@ -55,29 +57,45 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         // rs2 = rs2_high | rs2_low5
         let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
 
-        let (rs1_read, rd_written, intermediate, remainder) = if I::INST_KIND == InsnKind::SLL {
-            let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-            let rd_written = rs1_read.mul(
-                || "rd_written = rs1_read * pow2_rs2_low5",
-                circuit_builder,
-                &mut pow2_rs2_low5,
-                true,
-            )?;
-            (rs1_read, rd_written, None, None)
-        } else if I::INST_KIND == InsnKind::SRL {
-            let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-            let remainder = UInt::new(|| "remainder", circuit_builder)?;
-            let (rs1_read, intermediate) = rd_written.mul_add(
-                || "rs1_read = rd_written * pow2_rs2_low5 + remainder",
-                circuit_builder,
-                &mut pow2_rs2_low5,
-                &remainder,
-                true,
-            )?;
-            (rs1_read, rd_written, Some(intermediate), Some(remainder))
-        } else {
-            unreachable!()
-        };
+        let (rs1_read, rd_written, intermediate, remainder, lt_config) =
+            if I::INST_KIND == InsnKind::SLL {
+                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+                let rd_written = rs1_read.mul(
+                    || "rd_written = rs1_read * pow2_rs2_low5",
+                    circuit_builder,
+                    &mut pow2_rs2_low5,
+                    true,
+                )?;
+                (rs1_read, rd_written, None, None, None)
+            } else if I::INST_KIND == InsnKind::SRL {
+                let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+                let remainder = UInt::new(|| "remainder", circuit_builder)?;
+                let (rs1_read, intermediate) = rd_written.mul_add(
+                    || "rs1_read = rd_written * pow2_rs2_low5 + remainder",
+                    circuit_builder,
+                    &mut pow2_rs2_low5,
+                    &remainder,
+                    true,
+                )?;
+
+                let lt_config = circuit_builder.less_than(
+                    || "remainder < pow2_rs2_low5",
+                    remainder.value(),
+                    pow2_rs2_low5.value(),
+                    Some(true),
+                    2,
+                )?;
+
+                (
+                    rs1_read,
+                    rd_written,
+                    Some(intermediate),
+                    Some(remainder),
+                    Some(lt_config),
+                )
+            } else {
+                unreachable!()
+            };
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -105,6 +123,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             pow2_rs2_low5,
             intermediate,
             remainder,
+            lt_config,
         })
     }
 
@@ -143,6 +162,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             );
             let (rs1_read, intermediate) =
                 rd_written.mul_add(&pow2_rs2_low5, &remainder, lk_multiplicity, true);
+
+            config.lt_config.as_ref().unwrap().assign_instance(
+                instance,
+                lk_multiplicity,
+                remainder.as_u64(),
+                pow2_rs2_low5.as_u64(),
+            )?;
+
             config.rs1_read.assign_limb_with_carry(instance, &rs1_read);
             config.rd_written.assign_value(instance, rd_written);
             config
@@ -192,32 +219,36 @@ mod tests {
 
     #[test]
     fn test_opcode_sll_1() {
-        test::<SllOp>(32, 3, 32 << 3);
+        verify::<SllOp>(32, 3, 32 << 3);
     }
 
     #[test]
     fn test_opcode_sll_2_overflow() {
-        test::<SllOp>(33, 33, 33 << (33 - 32));
+        // 33 << 33 === 33 << 1
+        verify::<SllOp>(33, 33, 33 << (33 - 32));
     }
 
     #[test]
     fn test_opcode_srl_1() {
-        test::<SrlOp>(33, 3, 33 >> 3);
+        verify::<SrlOp>(33, 3, 33 >> 3);
     }
 
     #[test]
     fn test_opcode_srl_2_overflow() {
-        test::<SrlOp>(32, 33, 0);
+        // 33 >> 33 === 33 >> 1
+        verify::<SrlOp>(33, 33, 33 >> 1);
     }
 
-    fn test<I: RIVInstruction>(rs1_read: u32, rs2_read: u32, expected_rd_written: u32) {
+    fn verify<I: RIVInstruction>(rs1_read: u32, rs2_read: u32, expected_rd_written: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let (name, mock_pc, mock_program_op) = if I::INST_KIND == InsnKind::SLL {
             ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[18])
-        } else {
+        } else if I::INST_KIND == InsnKind::SRL {
             ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[19])
+        } else {
+            unreachable!()
         };
 
         let config = cb
