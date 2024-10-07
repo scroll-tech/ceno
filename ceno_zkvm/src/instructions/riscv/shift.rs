@@ -220,24 +220,35 @@ mod tests {
 
     #[test]
     fn test_opcode_sll_1() {
-        verify::<SllOp>(32, 3, 32 << 3);
+        verify::<SllOp>(0b_1, 3, 0b_1000);
     }
 
     #[test]
-    fn test_opcode_sll_2_overflow() {
+    fn test_opcode_sll_2_rs2_overflow() {
         // 33 << 33 === 33 << 1
-        verify::<SllOp>(33, 33, 33 << (33 - 32));
+        verify::<SllOp>(0b_1, 33, 0b_10);
+    }
+
+    #[test]
+    fn test_opcode_sll_3_bit_loss() {
+        verify::<SllOp>(1 << 31 | 1, 1, 0b_10);
     }
 
     #[test]
     fn test_opcode_srl_1() {
-        verify::<SrlOp>(33, 3, 33 >> 3);
+        verify::<SrlOp>(0b_1000, 3, 0b_1);
     }
 
     #[test]
-    fn test_opcode_srl_2_overflow() {
+    fn test_opcode_srl_2_rs2_overflow() {
         // 33 >> 33 === 33 >> 1
-        verify::<SrlOp>(33, 33, 33 >> 1);
+        verify::<SrlOp>(0b_1010, 33, 0b_101);
+    }
+
+    #[test]
+    fn test_opcode_srl_3_bit_loss() {
+        // 33 >> 33 === 33 >> 1
+        verify::<SrlOp>(0b_1001, 1, 0b_100);
     }
 
     fn verify<I: RIVInstruction>(rs1_read: u32, rs2_read: u32, expected_rd_written: u32) {
