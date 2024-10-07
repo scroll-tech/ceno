@@ -103,11 +103,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
 
                 let rd_written = rs1_read.mul_hi(&rs2_read, lk_multiplicity, true);
 
-                config.rd_written.assign_limb_with_carry_auxiliary(
-                    instance,
-                    lk_multiplicity,
-                    &rd_written,
-                )?;
+                config
+                    .rd_written
+                    .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
             }
 
             _ => unreachable!("Unsupported instruction kind"),
@@ -149,7 +147,7 @@ mod test {
 
         let a = Value::<'_, u32>::new_unchecked(rs1);
         let b = Value::<'_, u32>::new_unchecked(rs2);
-        let (c_limb, _, _) = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
+        let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
 
         // values assignment
         let (raw_witin, _) = MulhuInstruction::assign_instances(
@@ -161,18 +159,14 @@ mod test {
                 MOCK_PROGRAM[18],
                 a.as_u64() as u32,
                 b.as_u64() as u32,
-                Change::new(
-                    0,
-                    Value::<u32>::from_limb_unchecked(c_limb[(c_limb.len() / 2)..].to_vec())
-                        .as_u64() as u32,
-                ),
+                Change::new(0, value_mul.as_hi_value::<u32>().as_u32()),
                 0,
             )],
         )
         .unwrap();
 
         // verify value write to register, which is only hi
-        let expected_rd_written = UInt::from_const_unchecked(c_limb[c_limb.len() / 2..].to_vec());
+        let expected_rd_written = UInt::from_const_unchecked(value_mul.as_hi_limb_slice().to_vec());
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
         cb.require_equal(
             || "assert_rd_written",
@@ -182,7 +176,7 @@ mod test {
         .unwrap();
 
         MockProver::assert_satisfied(
-            &mut cb,
+            &cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
