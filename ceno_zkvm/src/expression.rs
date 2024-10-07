@@ -3,6 +3,7 @@ mod monomial;
 use std::{
     cmp::max,
     fmt::Display,
+    iter::Sum,
     mem::MaybeUninit,
     ops::{Add, Deref, Mul, Neg, Sub},
 };
@@ -240,6 +241,12 @@ impl<E: ExtensionField> Add for Expression<E> {
 
             _ => Expression::Sum(Box::new(self), Box::new(rhs)),
         }
+    }
+}
+
+impl<E: ExtensionField> Sum for Expression<E> {
+    fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
+        iter.fold(Expression::Constant(E::BaseField::ZERO), |acc, x| acc + x)
     }
 }
 
