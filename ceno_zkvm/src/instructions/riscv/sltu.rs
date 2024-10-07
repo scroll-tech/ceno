@@ -105,8 +105,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
 #[cfg(test)]
 mod test {
-    use std::u32;
-
     use ceno_emul::{Change, StepRecord, Word, CENO_PLATFORM};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;

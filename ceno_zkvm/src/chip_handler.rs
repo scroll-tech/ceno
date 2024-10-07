@@ -13,6 +13,9 @@ pub mod memory;
 pub mod register;
 pub mod utils;
 
+#[cfg(test)]
+pub mod test;
+
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
 

@@ -108,6 +108,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
 
+    #[cfg(test)]
+    pub debug_map: HashMap<usize, Vec<Expression<E>>>,
+
     pub(crate) phantom: PhantomData<E>,
 }
 
@@ -135,6 +138,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             max_non_lc_degree: 0,
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
+
+            #[cfg(test)]
+            debug_map: HashMap::new(),
 
             phantom: std::marker::PhantomData,
         }
@@ -325,6 +331,22 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let t = cb(self);
         self.ns.pop_namespace();
         t
+    }
+}
+
+#[cfg(test)]
+impl<E: ExtensionField> ConstraintSystem<E> {
+    pub fn register_debug_expr<T: Into<usize>>(&mut self, debug_index: T, expr: Expression<E>) {
+        let key = debug_index.into();
+        self.debug_map.entry(key).or_default().push(expr);
+    }
+
+    pub fn get_debug_expr<T: Into<usize>>(&mut self, debug_index: T) -> &[Expression<E>] {
+        let key = debug_index.into();
+        match self.debug_map.get(&key) {
+            Some(v) => v,
+            _ => panic!("non-existent entry {}", key),
+        }
     }
 }
 
