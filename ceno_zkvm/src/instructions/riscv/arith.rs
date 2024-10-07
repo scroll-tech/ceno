@@ -151,15 +151,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 let result = rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
-                config.rd_written.assign_mul_outcome(
-                    instance,
-                    lk_multiplicity,
-                    &ValueMul {
+                config
+                    .rd_written
+                    .assign_mul_outcome(instance, lk_multiplicity, &ValueMul {
                         limbs: rd_written.limbs.to_vec(),
                         carries: result.carries,
                         max_carry_value: result.max_carry_value,
-                    },
-                )?;
+                    })?;
             }
 
             _ => unreachable!("Unsupported instruction kind"),

@@ -88,7 +88,7 @@ impl<E: ExtensionField> ReadRS1<E> {
         let prev_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs1",
-            &id,
+            id,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_RS1 as usize).into(),
             rs1_read,
@@ -143,7 +143,7 @@ impl<E: ExtensionField> ReadRS2<E> {
         let prev_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs2",
-            &id,
+            id,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_RS2 as usize).into(),
             rs2_read,
@@ -199,7 +199,7 @@ impl<E: ExtensionField> WriteRD<E> {
         let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
         let (_, lt_cfg) = circuit_builder.register_write(
             || "write_rd",
-            &id,
+            id,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_RD as usize).into(),
             prev_value.register_expr(),

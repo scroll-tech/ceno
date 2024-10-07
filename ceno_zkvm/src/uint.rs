@@ -105,21 +105,31 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         })
     }
 
-    /// this fn does not create new witness
-    pub fn from_witin_unchecked(limbs: &[WitIn]) -> Self {
+    /// accepts a vector of externally instantiated witnesses and carries,
+    /// delegating the responsibility for range checking to the caller.
+    pub fn from_witins_unchecked(
+        limbs: Vec<WitIn>,
+        carries: Option<Vec<WitIn>>,
+        carries_auxiliary_lt_config: Option<Vec<IsLtConfig>>,
+    ) -> Self {
         assert!(limbs.len() == Self::NUM_CELLS);
+        if let Some(carries) = &carries {
+            let diff = limbs.len() - carries.len();
+            assert!(
+                diff == 0 || diff == 1, // diff = 1 imply no overflow
+                "invalid witness: limb.len() {}, carries.len() {}",
+                limbs.len(),
+                carries.len()
+            );
+        }
         UIntLimbs {
-            limbs: UintLimb::WitIn(
-                (0..Self::NUM_CELLS)
-                    .map(|i| limbs[i])
-                    .collect::<Vec<WitIn>>(),
-            ),
-            carries: None,
-            carries_auxiliary_lt_config: None,
+            limbs: UintLimb::WitIn(limbs),
+            carries,
+            carries_auxiliary_lt_config,
         }
     }
 
-    /// this fn does not create new witness
+    /// take vector of primative type and instantiate witnesses
     pub fn from_const_unchecked<T: Into<u64>>(limbs: Vec<T>) -> Self {
         assert!(limbs.len() == Self::NUM_CELLS);
         UIntLimbs {
@@ -383,13 +393,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
         with_overflow: bool,
+        num_carries: usize,
     ) -> Result<(), ZKVMError> {
         if self.carries.is_none() {
             circuit_builder.namespace(name_fn, |cb| {
                 let carries_len = if with_overflow {
-                    Self::NUM_CELLS
+                    num_carries
                 } else {
-                    Self::NUM_CELLS - 1
+                    num_carries - 1
                 };
                 self.carries = Some(
                     (0..carries_len)
@@ -507,6 +518,19 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .reduce(|sum, limb| sum * base.clone() + limb)
             .unwrap()
     }
+
+    /// split into 2 UIntLimbs with each taking half size of limbs
+    pub fn as_lo_hi<const M2: usize>(
+        &self,
+    ) -> Result<(UIntLimbs<M2, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
+        assert!(M == 2 * M2);
+        let mut self_lo = self.expr();
+        let self_hi = self_lo.split_off(self_lo.len() / 2);
+        Ok((
+            UIntLimbs::from_exprs_unchecked(self_lo)?,
+            UIntLimbs::from_exprs_unchecked(self_hi)?,
+        ))
+    }
 }
 
 /// Construct `UIntLimbs` from `Vec<CellId>`
@@ -577,15 +601,27 @@ impl<E: ExtensionField> UIntLimbs<32, 8, E> {
     }
 }
 
+/// A struct holding intermediate results of arithmetic add operations from Value
 pub struct ValueAdd {
     pub limbs: Vec<u16>,
     pub carries: Vec<u16>,
 }
 
+/// A struct holding intermediate results of arithmetic mul operations from Value
 pub struct ValueMul {
     pub limbs: Vec<u16>,
     pub carries: Vec<u64>,
     pub max_carry_value: u64,
+}
+
+impl ValueMul {
+    pub fn as_hi_value<T: Into<u64> + From<u32> + Copy + Default>(&self) -> Value<T> {
+        Value::<T>::from_limb_slice_unchecked(self.as_hi_limb_slice())
+    }
+
+    pub fn as_hi_limb_slice(&self) -> &[u16] {
+        &self.limbs[self.limbs.len() / 2..]
+    }
 }
 
 pub struct Value<'a, T: Into<u64> + From<u32> + Copy + Default> {
@@ -667,6 +703,11 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         self.val.into()
     }
 
+    /// Convert the limbs to a u32 value
+    pub fn as_u32(&self) -> u32 {
+        self.as_u64() as u32
+    }
+
     pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {
         self.limbs.iter().map(|v| F::from(*v as u64)).collect_vec()
     }
@@ -697,7 +738,11 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
     }
 
     pub fn mul(&self, rhs: &Self, lkm: &mut LkMultiplicity, with_overflow: bool) -> ValueMul {
-        self.internal_mul(rhs, lkm, with_overflow)
+        self.internal_mul(rhs, lkm, with_overflow, false)
+    }
+
+    pub fn mul_hi(&self, rhs: &Self, lkm: &mut LkMultiplicity, with_overflow: bool) -> ValueMul {
+        self.internal_mul(rhs, lkm, with_overflow, true)
     }
 
     #[allow(clippy::type_complexity)]
@@ -708,7 +753,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
     ) -> (ValueAdd, ValueMul) {
-        let mul_result = self.internal_mul(mul, lkm, with_overflow);
+        let mul_result = self.internal_mul(mul, lkm, with_overflow, false);
         let add_result = addend.add(
             &Self::from_limb_unchecked(mul_result.limbs.clone()),
             lkm,
@@ -717,14 +762,23 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         (add_result, mul_result)
     }
 
-    fn internal_mul(&self, mul: &Self, lkm: &mut LkMultiplicity, with_overflow: bool) -> ValueMul {
+    fn internal_mul(
+        &self,
+        mul: &Self,
+        lkm: &mut LkMultiplicity,
+        with_overflow: bool,
+        with_hi_limbs: bool,
+    ) -> ValueMul {
         let a_limbs = self.as_u16_limbs();
         let b_limbs = mul.as_u16_limbs();
 
-        let num_limbs = a_limbs.len();
+        let num_limbs = if !with_hi_limbs {
+            a_limbs.len()
+        } else {
+            2 * a_limbs.len()
+        };
         let mut c_limbs = vec![0u16; num_limbs];
         let mut carries = vec![0u64; num_limbs];
-        // TODO FIXME: support full size multiplication
         let mut tmp = vec![0u64; num_limbs];
         a_limbs.iter().enumerate().for_each(|(i, &a_limb)| {
             b_limbs.iter().enumerate().for_each(|(j, &b_limb)| {
@@ -746,8 +800,8 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
                 }
                 // update carry
                 carries[i] = tmp >> Self::C;
-                // update limb
-                *limb = (tmp - (carries[i] << Self::C)) as u16;
+                // update limb with only lsb 16 bit
+                *limb = tmp as u16;
             });
 
         if !with_overflow {

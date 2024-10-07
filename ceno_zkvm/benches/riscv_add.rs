@@ -126,6 +126,7 @@ fn bench_add(c: &mut Criterion) {
                                 &circuit_pk,
                                 wits_in.into_iter().map(|mle| mle.into()).collect_vec(),
                                 commit,
+                                &[],
                                 num_instances,
                                 max_threads,
                                 &mut transcript,

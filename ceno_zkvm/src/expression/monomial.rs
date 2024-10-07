@@ -19,7 +19,7 @@ impl<E: ExtensionField> Expression<E> {
                 }]
             }
 
-            Fixed(_) | WitIn(_) | Challenge(..) => {
+            Fixed(_) | WitIn(_) | Instance(_) | Challenge(..) => {
                 vec![Term {
                     coeff: Expression::ONE,
                     vars: vec![self.clone()],
@@ -101,7 +101,7 @@ impl<E: ExtensionField> Ord for Expression<E> {
         match (self, other) {
             (Fixed(a), Fixed(b)) => a.cmp(b),
             (WitIn(a), WitIn(b)) => a.cmp(b),
-            (Constant(a), Constant(b)) => cmp_field(a, b),
+            (Instance(a), Instance(b)) => a.cmp(b),
             (Challenge(a, b, c, d), Challenge(e, f, g, h)) => {
                 let cmp = a.cmp(e);
                 if cmp == Equal {
@@ -116,30 +116,16 @@ impl<E: ExtensionField> Ord for Expression<E> {
                     cmp
                 }
             }
-            (Sum(a, b), Sum(c, d)) => {
-                let cmp = a.cmp(c);
-                if cmp == Equal { b.cmp(d) } else { cmp }
-            }
-            (Product(a, b), Product(c, d)) => {
-                let cmp = a.cmp(c);
-                if cmp == Equal { b.cmp(d) } else { cmp }
-            }
-            (ScaledSum(x, a, b), ScaledSum(y, c, d)) => {
-                let cmp = x.cmp(y);
-                if cmp == Equal {
-                    let cmp = a.cmp(c);
-                    if cmp == Equal { b.cmp(d) } else { cmp }
-                } else {
-                    cmp
-                }
-            }
             (Fixed(_), _) => Less,
+            (Instance(_), Fixed(_)) => Greater,
+            (Instance(_), _) => Less,
+            (WitIn(_), Fixed(_)) => Greater,
+            (WitIn(_), Instance(_)) => Greater,
             (WitIn(_), _) => Less,
-            (Constant(_), _) => Less,
-            (Challenge(..), _) => Less,
-            (Sum(..), _) => Less,
-            (Product(..), _) => Less,
-            (ScaledSum(..), _) => Less,
+            (Challenge(..), Fixed(_)) => Greater,
+            (Challenge(..), Instance(_)) => Greater,
+            (Challenge(..), WitIn(_)) => Greater,
+            _ => unreachable!(),
         }
     }
 }
@@ -150,6 +136,7 @@ impl<E: ExtensionField> PartialOrd for Expression<E> {
     }
 }
 
+#[allow(dead_code)]
 fn cmp_field<F: SmallField>(a: &F, b: &F) -> Ordering {
     a.to_canonical_u64().cmp(&b.to_canonical_u64())
 }
