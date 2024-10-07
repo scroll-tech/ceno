@@ -15,4 +15,4 @@ goldilocks.workspace = true
 halo2curves.workspace = true
 rayon.workspace = true
 serde.workspace = true
-poseidon = { git = "https://github.com/zhenfeizhang/poseidon" }
+poseidon.workspace = true
