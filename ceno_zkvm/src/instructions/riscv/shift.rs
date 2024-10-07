@@ -139,9 +139,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             );
             let (rs1_read, intermediate) =
                 rd_written.mul_add(&pow2_rs2_low5, &remainder, lk_multiplicity, true);
-            println!("rs1_read: {:?}", rs1_read);
-            println!("intermediate: {:?}", intermediate);
-            println!("config.rs1_read: {:?}", config.rs1_read);
             config.rs1_read.assign_limb_with_carry(instance, &rs1_read);
             config.rd_written.assign_value(instance, rd_written);
             config
