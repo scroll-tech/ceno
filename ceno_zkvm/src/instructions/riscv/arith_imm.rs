@@ -63,14 +63,12 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
-        let (result, carry) = rs1_read.add(&imm, lk_multiplicity, true);
+        let result = rs1_read.add(&imm, lk_multiplicity, true);
 
         config.rs1_read.assign_value(instance, rs1_read);
         config.imm.assign_value(instance, imm);
 
-        config
-            .rd_written
-            .assign_limb_with_carry(instance, &(result, carry));
+        config.rd_written.assign_add_outcome(instance, &result);
 
         config
             .i_insn

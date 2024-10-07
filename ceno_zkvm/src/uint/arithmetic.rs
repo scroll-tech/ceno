@@ -1094,7 +1094,7 @@ mod tests {
         fn test_mul_overflow() {
             let a = Value::<'_, u32>::new_unchecked(u32::MAX);
             let b = Value::<'_, u32>::new_unchecked(u32::MAX);
-            let (c_limb, c_carry, _) = a.mul(&b, &mut LkMultiplicity::default(), true);
+            let ret = a.mul(&b, &mut LkMultiplicity::default(), true);
             let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
                 // alloc a = 2^16 + (2^16 -1) * 2^16
                 vec![u16::MAX as u64, u16::MAX as u64],
@@ -1102,11 +1102,11 @@ mod tests {
                 vec![u16::MAX as u64, u16::MAX as u64],
                 // mul_c = a * b,
                 // alloc c [1, 0xfffe, 0xffff, 0] with lo part only
-                c_limb.iter().map(|v| *v as u64).collect_vec(),
+                ret.limbs.iter().map(|v| *v as u64).collect_vec(),
                 // c carry
-                c_carry.iter().map(|v| *v as u64).collect_vec(),
+                ret.carries.iter().map(|v| *v as u64).collect_vec(),
                 // each carry alloc with diff
-                calculate_carry_diff::<32, 16>(c_carry.to_vec()),
+                calculate_carry_diff::<32, 16>(ret.carries.to_vec()),
             ]
             .concat()
             .into_arc_mle();
