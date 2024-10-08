@@ -60,30 +60,18 @@ impl StepRecord {
         rs1_read: Word,
         rs2_read: Word,
         rd: Change<Word>,
-        previous_cycle: Cycle,
+        prev_cycle: Cycle,
     ) -> StepRecord {
-        let insn = DecodedInstruction::new(insn_code);
-        StepRecord {
+        let pc = Change::new(pc, pc + PC_STEP_SIZE);
+        StepRecord::new_insn(
             cycle,
-            pc: Change::new(pc, pc + PC_STEP_SIZE),
+            pc,
             insn_code,
-            rs1: Some(ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
-                value: rs1_read,
-                previous_cycle,
-            }),
-            rs2: Some(ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
-                value: rs2_read,
-                previous_cycle,
-            }),
-            rd: Some(WriteOp {
-                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
-                value: rd,
-                previous_cycle,
-            }),
-            memory_op: None,
-        }
+            Some(rs1_read),
+            Some(rs2_read),
+            Some(rd),
+            prev_cycle,
+        )
     }
 
     pub fn new_b_instruction(
@@ -92,26 +80,17 @@ impl StepRecord {
         insn_code: Word,
         rs1_read: Word,
         rs2_read: Word,
-        previous_cycle: Cycle,
+        prev_cycle: Cycle,
     ) -> StepRecord {
-        let insn = DecodedInstruction::new(insn_code);
-        StepRecord {
+        StepRecord::new_insn(
             cycle,
             pc,
             insn_code,
-            rs1: Some(ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
-                value: rs1_read,
-                previous_cycle,
-            }),
-            rs2: Some(ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
-                value: rs2_read,
-                previous_cycle,
-            }),
-            rd: None,
-            memory_op: None,
-        }
+            Some(rs1_read),
+            Some(rs2_read),
+            None,
+            prev_cycle,
+        )
     }
 
     pub fn new_i_instruction(
@@ -120,26 +99,29 @@ impl StepRecord {
         insn_code: Word,
         rs1_read: Word,
         rd: Change<Word>,
-        previous_cycle: Cycle,
+        prev_cycle: Cycle,
     ) -> StepRecord {
-        let insn = DecodedInstruction::new(insn_code);
-        StepRecord {
+        let pc = Change::new(pc, pc + PC_STEP_SIZE);
+        StepRecord::new_insn(
             cycle,
-            pc: Change::new(pc, pc + PC_STEP_SIZE),
+            pc,
             insn_code,
-            rs1: Some(ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
-                value: rs1_read,
-                previous_cycle,
-            }),
-            rs2: None,
-            rd: Some(WriteOp {
-                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
-                value: rd,
-                previous_cycle,
-            }),
-            memory_op: None,
-        }
+            Some(rs1_read),
+            None,
+            Some(rd),
+            prev_cycle,
+        )
+    }
+
+    pub fn new_u_instruction(
+        cycle: Cycle,
+        pc: ByteAddr,
+        insn_code: Word,
+        rd: Change<Word>,
+        prev_cycle: Cycle,
+    ) -> StepRecord {
+        let pc = Change::new(pc, pc + PC_STEP_SIZE);
+        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
     }
 
     pub fn new_j_instruction(
@@ -147,6 +129,18 @@ impl StepRecord {
         pc: Change<ByteAddr>,
         insn_code: Word,
         rd: Change<Word>,
+        prev_cycle: Cycle,
+    ) -> StepRecord {
+        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
+    }
+
+    fn new_insn(
+        cycle: Cycle,
+        pc: Change<ByteAddr>,
+        insn_code: Word,
+        rs1_read: Option<Word>,
+        rs2_read: Option<Word>,
+        rd: Option<Change<Word>>,
         previous_cycle: Cycle,
     ) -> StepRecord {
         let insn = DecodedInstruction::new(insn_code);
@@ -154,9 +148,17 @@ impl StepRecord {
             cycle,
             pc,
             insn_code,
-            rs1: None,
-            rs2: None,
-            rd: Some(WriteOp {
+            rs1: rs1_read.map(|rs1| ReadOp {
+                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
+                value: rs1,
+                previous_cycle,
+            }),
+            rs2: rs2_read.map(|rs2| ReadOp {
+                addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
+                value: rs2,
+                previous_cycle,
+            }),
+            rd: rd.map(|rd| WriteOp {
                 addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
                 value: rd,
                 previous_cycle,
