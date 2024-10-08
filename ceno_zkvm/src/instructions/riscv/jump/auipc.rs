@@ -33,8 +33,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for AuipcCircuit<E, I>
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<AuipcConfig<E>, ZKVMError> {
-        let pc_uint = UInt::new_unchecked(|| "pc_limbs", circuit_builder)?;
-        let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
+        let pc_uint = UInt::new(|| "pc_limbs", circuit_builder)?;
+        let imm = UInt::new(|| "imm", circuit_builder)?;
         let rd_written = pc_uint.add(|| "pc_limbs + imm", circuit_builder, &imm, true)?;
 
         let u_insn = UInstructionConfig::construct_circuit(
@@ -45,6 +45,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for AuipcCircuit<E, I>
         )?;
 
         // constrain pc UInt to equal UInstruction pc WitIn
+        // A separate UInt representation is needed here because the AUIPC
+        // instruction does mod 2^32 arithmetic on pc
         circuit_builder.require_equal(
             || "auipc pc_limbs = pc",
             pc_uint.value(),
@@ -64,7 +66,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for AuipcCircuit<E, I>
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
-        let pc_uint = Value::new_unchecked(step.pc().before.0);
+        let pc_uint = Value::new(step.pc().before.0, lk_multiplicity);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
         config

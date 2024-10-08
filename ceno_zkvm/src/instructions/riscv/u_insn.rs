@@ -12,13 +12,11 @@ use crate::{
 };
 use core::mem::MaybeUninit;
 
-// Opcode: 1101111
-
 /// This config handles the common part of the U-type instruction:
 /// - PC, cycle, fetch
 /// - Register access
 ///
-/// It does not witness the output rd value or next_pc produced by the JAL opcode
+/// It does not witness the output rd value or instruction immediate
 #[derive(Debug)]
 pub struct UInstructionConfig<E: ExtensionField> {
     pub vm_state: StateInOut<E>,

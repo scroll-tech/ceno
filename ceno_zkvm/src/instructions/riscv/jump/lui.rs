@@ -31,15 +31,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LuiCircuit<E, I> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<LuiConfig<E>, ZKVMError> {
-        // rd_written is also imm value
-        let rd_written = UInt::new_unchecked(|| "rd_limbs", circuit_builder)?;
+        let rd_written = UInt::new(|| "rd_limbs", circuit_builder)?;
 
         // rd_written = imm, so just enforce that U-type immediate from program
         // table is equal to rd_written value
         let u_insn = UInstructionConfig::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &rd_written.value(),
+            &rd_written.value(), // instruction immediate for program table lookup
             rd_written.register_expr(),
         )?;
 
@@ -56,7 +55,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LuiCircuit<E, I> {
             .u_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
-        let rd = Value::new_unchecked(step.rd().unwrap().value.after);
+        let rd = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
         config.rd_written.assign_limbs(instance, rd.as_u16_limbs());
 
         Ok(())
