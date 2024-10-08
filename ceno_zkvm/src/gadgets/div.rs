@@ -16,24 +16,29 @@ use super::IsLtConfig;
 #[derive(Debug, Clone)]
 pub struct DivConfig<E: ExtensionField> {
     pub dividend: UInt<E>,
-    pub r_lt: IsLtConfig,
+    pub divisor: UInt<E>,
+    pub(crate) quotient: UInt<E>,
+    pub remainder: UInt<E>,
+
     pub intermediate_mul: UInt<E>,
+    pub r_lt: IsLtConfig,
 }
 
 impl<E: ExtensionField> DivConfig<E> {
     /// giving divisor, quotient, and remainder
     /// deriving dividend and respective constrains
-    /// NOTE once divisor is zero, then constrain will always failed
     pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
         circuit_builder: &mut CircuitBuilder<E>,
         name_fn: N,
-        divisor: &mut UInt<E>,
-        quotient: &mut UInt<E>,
-        remainder: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
+            // quotient = dividend / divisor + remainder => dividend = divisor * quotient + r
+            let mut divisor = UInt::new_unchecked(|| "divisor", cb)?;
+            let mut quotient = UInt::new(|| "quotient", cb)?;
+            let remainder = UInt::new(|| "remainder", cb)?;
+
             let (dividend, intermediate_mul) =
-                divisor.mul_add(|| "", cb, quotient, remainder, true)?;
+                divisor.mul_add(|| "", cb, &mut quotient, &remainder, true)?;
 
             // remainder range check
             let r_lt = cb.less_than(
@@ -45,6 +50,9 @@ impl<E: ExtensionField> DivConfig<E> {
             )?;
             Ok(Self {
                 dividend,
+                divisor,
+                quotient,
+                remainder,
                 intermediate_mul,
                 r_lt,
             })
@@ -59,8 +67,13 @@ impl<E: ExtensionField> DivConfig<E> {
         quotient: &Value<'a, u32>,
         remainder: &Value<'a, u32>,
     ) -> Result<(), ZKVMError> {
-        let (dividend, intermediate) = divisor.mul_add(quotient, remainder, lkm, true);
+        self.divisor.assign_limbs(instance, divisor.as_u16_limbs());
+        self.quotient
+            .assign_limbs(instance, quotient.as_u16_limbs());
+        self.remainder
+            .assign_limbs(instance, remainder.as_u16_limbs());
 
+        let (dividend, intermediate) = divisor.mul_add(quotient, remainder, lkm, true);
         self.r_lt
             .assign_instance(instance, lkm, remainder.as_u64(), divisor.as_u64())?;
         self.intermediate_mul

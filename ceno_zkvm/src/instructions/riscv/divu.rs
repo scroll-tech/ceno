@@ -15,12 +15,6 @@ use std::marker::PhantomData;
 
 pub struct ArithConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
-
-    dividend: UInt<E>,
-    divisor: UInt<E>,
-    pub(crate) outcome: UInt<E>,
-
-    remainder: UInt<E>,
     div_config: DivConfig<E>,
     is_zero: IsZeroConfig,
 }
@@ -44,26 +38,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         // outcome = dividend / divisor + remainder => dividend = divisor * outcome + r
-        let mut divisor = UInt::new_unchecked(|| "divisor", circuit_builder)?;
-        let mut outcome = UInt::new(|| "outcome", circuit_builder)?;
-        let r = UInt::new(|| "remainder", circuit_builder)?;
+        // let mut divisor = UInt::new_unchecked(|| "divisor", circuit_builder)?;
+        // let mut outcome = UInt::new(|| "outcome", circuit_builder)?;
+        // let r = UInt::new(|| "remainder", circuit_builder)?;
 
-        let div_config = DivConfig::construct_circuit(
-            circuit_builder,
-            || "divu",
-            &mut divisor,
-            &mut outcome,
-            &r,
-        )?;
+        let div_config = DivConfig::construct_circuit(circuit_builder, || "divu")?;
 
         // div by zero check
         let is_zero = IsZeroConfig::construct_circuit(
             circuit_builder,
             || "divisor_zero_check",
-            divisor.value(),
+            div_config.divisor.value(),
         )?;
 
-        let outcome_value = outcome.value();
+        let outcome_value = div_config.quotient.value();
         circuit_builder
             .condition_require_equal(
                 || "outcome_is_zero",
@@ -78,16 +66,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             circuit_builder,
             I::INST_KIND,
             div_config.dividend.register_expr(),
-            divisor.register_expr(),
-            outcome.register_expr(),
+            div_config.divisor.register_expr(),
+            div_config.quotient.register_expr(),
         )?;
 
         Ok(ArithConfig {
             r_insn,
-            dividend: div_config.dividend.clone(),
-            divisor,
-            outcome,
-            remainder: r,
+
             div_config,
             is_zero,
         })
@@ -115,20 +100,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         // assignment
         config.r_insn.assign_instance(instance, lkm, step)?;
-        config
-            .divisor
-            .assign_limbs(instance, divisor.as_u16_limbs());
-        config
-            .outcome
-            .assign_limbs(instance, outcome.as_u16_limbs());
 
-        let (dividend, _) = divisor.mul_add(&outcome, &r, lkm, true);
         config
             .div_config
             .assign_instance(instance, lkm, &divisor, &outcome, &r)?;
-
-        config.dividend.assign_add_outcome(instance, &dividend);
-        config.remainder.assign_limbs(instance, r.as_u16_limbs());
 
         config
             .is_zero
@@ -190,7 +165,8 @@ mod test {
                 UInt::from_const_unchecked(Value::new_unchecked(outcome).as_u16_limbs().to_vec());
 
             config
-                .outcome
+                .div_config
+                .quotient
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
 
