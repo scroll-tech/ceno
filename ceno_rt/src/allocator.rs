@@ -13,9 +13,11 @@ unsafe impl GlobalAlloc for SimpleAllocator {
         let mut heap_pos = HEAP.next_alloc;
 
         let align = layout.align();
+        // `Layout` contract forbids making a `Layout` with align=0, or align not power of 2.
+        // So we can safely use subtraction and a mask to ensure alignment without worrying about UB.
         let offset = heap_pos & (align - 1);
         if offset != 0 {
-            heap_pos += align - offset;
+            heap_pos = heap_pos.strict_add(align.strict_sub(offset));
         }
 
         let ptr = heap_pos as *mut u8;
