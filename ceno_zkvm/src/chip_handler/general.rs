@@ -323,6 +323,11 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.logic_u8(ROMType::Ltu, a, b, c)
     }
 
+    // Assert that `2^b = c` and that `b` is a 5-bit unsigned integer.
+    pub fn lookup_pow2(&mut self, b: Expression<E>, c: Expression<E>) -> Result<(), ZKVMError> {
+        self.logic_u8(ROMType::Pow, 2.into(), b, c)
+    }
+
     /// less_than
     pub(crate) fn less_than<N, NR>(
         &mut self,
