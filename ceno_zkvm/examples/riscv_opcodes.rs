@@ -211,8 +211,10 @@ fn main() {
         });
 
         assert_eq!(halt_records.len(), 1);
+        let final_access = vm.tracer().final_accesses();
+        let end_ts = final_access.get(&CENO_PLATFORM.pc_vma().into()).unwrap();
         let exit_code = halt_records[0].rs2().unwrap().value;
-        let pi = PublicValues::new(exit_code, 0);
+        let pi = PublicValues::new(exit_code, 0, *end_ts as u32);
 
         tracing::info!(
             "tracer generated {} ADD records, {} BLTU records",
@@ -244,7 +246,6 @@ fn main() {
             .assign_table_circuit::<LtuTableCircuit<E>>(&zkvm_cs, &ltu_config, &())
             .unwrap();
         // assign cpu register circuit
-        let final_access = vm.tracer().final_accesses();
         zkvm_witness
             .assign_table_circuit::<RegTableCircuit<E>>(
                 &zkvm_cs,

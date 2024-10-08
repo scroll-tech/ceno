@@ -116,7 +116,7 @@ impl EmuContext for VMState {
     }
 
     fn on_normal_end(&mut self, _decoded: &DecodedInstruction) {
-        self.tracer.store_pc(ByteAddr(self.pc));
+        self.tracer.halt(ByteAddr(self.pc));
     }
 
     fn get_pc(&self) -> ByteAddr {
