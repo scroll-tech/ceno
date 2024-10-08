@@ -1,6 +1,6 @@
 use ff::Field;
 use ff_ext::ExtensionField;
-use sumcheck::util::{ceil_log2, is_power_of_2};
+use sumcheck::util::ceil_log2;
 
 use std::{iter, sync::Arc};
 
@@ -208,7 +208,7 @@ impl<E: ExtensionField> MultilinearExtensionFromVectors<E> for &[Vec<E::BaseFiel
         let log2_max_thread_id = ceil_log2(max_thread_id);
         assert!(log2_max_thread_id <= hi_num_vars);
         assert!(
-            is_power_of_2(self.len()),
+            self.len().is_power_of_two(),
             "not supporting non-power of 2 vector len {} ",
             self.len()
         );
@@ -235,7 +235,7 @@ impl<E: ExtensionField> MultilinearExtensionFromVectors<E> for &[Vec<E::BaseFiel
     }
     fn mle(&self, lo_num_vars: usize, hi_num_vars: usize) -> ArcDenseMultilinearExtension<E> {
         assert!(
-            is_power_of_2(self.len()),
+            self.len().is_power_of_two(),
             "not supporting non-power of 2 vector len {} ",
             self.len()
         );

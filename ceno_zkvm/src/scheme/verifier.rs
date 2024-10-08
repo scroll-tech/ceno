@@ -15,17 +15,17 @@ use transcript::Transcript;
 
 use crate::{
     error::ZKVMError,
+    instructions::{riscv::ecall::HaltInstruction, Instruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
-        utils::eval_by_expr_with_fixed,
+        utils::eval_by_expr_with_instance,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{get_challenge_pows, sel_eval},
+    utils::{eq_eval_less_or_equal_than, get_challenge_pows, next_pow2_instance_padding},
 };
 
 use super::{
-    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMOpcodeProof, ZKVMProof,
-    ZKVMTableProof,
+    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof,
 };
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
@@ -46,6 +46,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
+        let pi = &vm_proof.pv;
+
+        // require ecall/halt proof to exist
+        {
+            if let Some((_, proof)) = vm_proof.opcode_proofs.get(&HaltInstruction::<E>::name()) {
+                if proof.num_instances != 1 {
+                    return Err(ZKVMError::VerifyError(
+                        "ecall/halt num_instances != 1".into(),
+                    ));
+                }
+            } else {
+                return Err(ZKVMError::VerifyError(
+                    "ecall/halt proof does not exist".into(),
+                ));
+            }
+        }
 
         // write fixed commitment to transcript
         for (_, vk) in self.vk.circuit_vks.iter() {
@@ -89,6 +105,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &opcode_proof,
+                pi,
                 transcript,
                 NUM_FANIN,
                 &point_eval,
@@ -98,9 +115,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
             // getting the number of dummy padding item that we used in this opcode circuit
             let num_lks = circuit_vk.get_cs().lk_expressions.len();
-            let num_padded_lks_per_instance = num_lks.next_power_of_two() - num_lks;
+            let num_padded_lks_per_instance = next_pow2_instance_padding(num_lks) - num_lks;
             let num_padded_instance =
-                opcode_proof.num_instances.next_power_of_two() - opcode_proof.num_instances;
+                next_pow2_instance_padding(opcode_proof.num_instances) - opcode_proof.num_instances;
             dummy_table_item_multiplicity += num_padded_lks_per_instance
                 * opcode_proof.num_instances
                 + num_lks.next_power_of_two() * num_padded_instance;
@@ -127,6 +144,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &table_proof,
+                &vm_proof.pv,
                 transcript,
                 NUM_FANIN_LOGUP,
                 &point_eval,
@@ -172,6 +190,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMOpcodeProof<E, PCS>,
+        pi: &[E::BaseField],
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -191,7 +210,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         let num_instances = proof.num_instances;
-        let log2_num_instances = ceil_log2(num_instances);
+        let next_pow2_instance = next_pow2_instance_padding(num_instances);
+        let log2_num_instances = ceil_log2(next_pow2_instance);
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -278,22 +298,32 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
         let (sel_r, sel_w, sel_lk, sel_non_lc_zero_sumcheck) = {
-            // sel(rt, t) = eq(rt, t) x sel(t)
+            // sel(rt, t)
             (
-                eq_eval(&rt_r[log2_r_count..], &input_opening_point)
-                    * sel_eval(num_instances, &input_opening_point),
-                eq_eval(&rt_w[log2_w_count..], &input_opening_point)
-                    * sel_eval(num_instances, &input_opening_point),
-                eq_eval(&rt_lk[log2_lk_count..], &input_opening_point)
-                    * sel_eval(num_instances, &input_opening_point),
+                eq_eval_less_or_equal_than(
+                    num_instances - 1,
+                    &input_opening_point,
+                    &rt_r[log2_r_count..],
+                ),
+                eq_eval_less_or_equal_than(
+                    num_instances - 1,
+                    &input_opening_point,
+                    &rt_w[log2_w_count..],
+                ),
+                eq_eval_less_or_equal_than(
+                    num_instances - 1,
+                    &input_opening_point,
+                    &rt_lk[log2_lk_count..],
+                ),
                 // only initialize when circuit got non empty assert_zero_sumcheck_expressions
                 {
                     let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
                     if !cs.assert_zero_sumcheck_expressions.is_empty() {
-                        Some(
-                            eq_eval(&rt_non_lc_sumcheck, &input_opening_point)
-                                * sel_eval(num_instances, &rt_non_lc_sumcheck),
-                        )
+                        Some(eq_eval_less_or_equal_than(
+                            num_instances - 1,
+                            &input_opening_point,
+                            &rt_non_lc_sumcheck,
+                        ))
                     } else {
                         None
                     }
@@ -335,7 +365,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .zip_eq(alpha_pow_iter)
                         .map(|(expr, alpha)| {
                             // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
-                            *alpha * eval_by_expr(&proof.wits_in_evals, challenges, expr)
+                            *alpha
+                                * eval_by_expr_with_instance(
+                                    &[],
+                                    &proof.wits_in_evals,
+                                    pi,
+                                    challenges,
+                                    expr,
+                                )
                         })
                         .sum::<E>()
             },
@@ -360,7 +397,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .chain(proof.lk_records_in_evals[..lk_counts_per_instance].iter()),
             )
             .any(|(expr, expected_evals)| {
-                eval_by_expr(&proof.wits_in_evals, challenges, expr) != *expected_evals
+                eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr)
+                    != *expected_evals
             })
         {
             return Err(ZKVMError::VerifyError(
@@ -369,11 +407,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
-        if cs
-            .assert_zero_expressions
-            .iter()
-            .any(|expr| eval_by_expr(&proof.wits_in_evals, challenges, expr) != E::ZERO)
-        {
+        if cs.assert_zero_expressions.iter().any(|expr| {
+            eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr) != E::ZERO
+        }) {
             // TODO add me back
             // return Err(ZKVMError::VerifyError("zero expression != 0"));
         }
@@ -404,6 +440,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMTableProof<E, PCS>,
+        pi: &[E::BaseField],
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -591,9 +628,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         )
         .zip_eq(in_evals)
         .any(|(expr, expected_evals)| {
-            eval_by_expr_with_fixed(
+            eval_by_expr_with_instance(
                 &proof.fixed_in_evals,
                 &proof.wits_in_evals,
+                pi,
                 challenges,
                 expr,
             ) != expected_evals

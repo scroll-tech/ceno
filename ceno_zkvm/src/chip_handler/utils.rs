@@ -1,3 +1,5 @@
+use std::iter::successors;
+
 use crate::expression::Expression;
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -8,7 +10,7 @@ pub fn rlc_chip_record<E: ExtensionField>(
     chip_record_beta: Expression<E>,
 ) -> Expression<E> {
     assert!(!records.is_empty());
-    let beta_pows = pows_expr(chip_record_beta, records.len());
+    let beta_pows = power_sequence(chip_record_beta, records.len());
 
     let item_rlc = beta_pows
         .into_iter()
@@ -20,7 +22,8 @@ pub fn rlc_chip_record<E: ExtensionField>(
     item_rlc + chip_record_alpha.clone()
 }
 
-pub fn pows_expr<E: ExtensionField>(base: Expression<E>, len: usize) -> Vec<Expression<E>> {
+/// derive power sequence [1, base, base^2, ..., base^(len-1)] of base expression
+pub fn power_sequence<E: ExtensionField>(base: Expression<E>, len: usize) -> Vec<Expression<E>> {
     assert!(
         matches!(
             base,
@@ -28,10 +31,9 @@ pub fn pows_expr<E: ExtensionField>(base: Expression<E>, len: usize) -> Vec<Expr
         ),
         "expression must be constant or challenge"
     );
-    let mut beta_pows = Vec::with_capacity(len);
-    beta_pows.push(Expression::Constant(E::BaseField::ONE));
-    if len > 0 {
-        (0..len - 1).for_each(|_| beta_pows.push(base.clone() * beta_pows.last().unwrap().clone()));
-    }
-    beta_pows
+    successors(Some(Expression::Constant(E::BaseField::ONE)), |prev| {
+        Some(prev.clone() * base.clone())
+    })
+    .take(len)
+    .collect()
 }

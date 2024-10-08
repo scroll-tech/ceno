@@ -1,12 +1,12 @@
 use itertools::Itertools;
-use std::marker::PhantomData;
+use std::{collections::HashMap, marker::PhantomData};
 
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, Fixed, WitIn},
+    expression::{Expression, Fixed, Instance, WitIn},
     structs::{ProvingKey, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
@@ -86,6 +86,8 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
+    pub instance_name_map: HashMap<Instance, String>,
+
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
 
@@ -119,6 +121,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
 
+    #[cfg(test)]
+    pub debug_map: HashMap<usize, Vec<Expression<E>>>,
+
     pub(crate) phantom: PhantomData<E>,
 }
 
@@ -130,6 +135,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
+            instance_name_map: HashMap::new(),
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
             w_expressions: vec![],
@@ -149,6 +155,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             max_non_lc_degree: 0,
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
+
+            #[cfg(test)]
+            debug_map: HashMap::new(),
 
             phantom: std::marker::PhantomData,
         }
@@ -210,6 +219,19 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(f)
     }
 
+    pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+        idx: usize,
+    ) -> Result<Instance, ZKVMError> {
+        let i = Instance(idx);
+
+        let name = n().into();
+        self.instance_name_map.insert(i, name);
+
+        Ok(i)
+    }
+
     pub fn lk_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
@@ -218,8 +240,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc lk_record degree ({})",
+            name_fn().into()
         );
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -241,8 +263,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc lk_table_record degree ({})",
+            name_fn().into()
         );
         self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
@@ -315,8 +337,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc read_record degree ({})",
+            name_fn().into()
         );
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -332,8 +354,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc write_record degree ({})",
+            name_fn().into()
         );
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -355,10 +377,13 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             let path = self.ns.compute_path(name_fn().into());
             self.assert_zero_expressions_namespace_map.push(path);
         } else {
-            assert!(
-                assert_zero_expr.is_monomial_form(),
-                "only support sumcheck in monomial form"
-            );
+            let assert_zero_expr = if assert_zero_expr.is_monomial_form() {
+                assert_zero_expr
+            } else {
+                let e = assert_zero_expr.to_monomial_form();
+                assert!(e.is_monomial_form(), "failed to put into monomial form");
+                e
+            };
             self.max_non_lc_degree = self.max_non_lc_degree.max(assert_zero_expr.degree());
             self.assert_zero_sumcheck_expressions.push(assert_zero_expr);
             let path = self.ns.compute_path(name_fn().into());
@@ -377,6 +402,22 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let t = cb(self);
         self.ns.pop_namespace();
         t
+    }
+}
+
+#[cfg(test)]
+impl<E: ExtensionField> ConstraintSystem<E> {
+    pub fn register_debug_expr<T: Into<usize>>(&mut self, debug_index: T, expr: Expression<E>) {
+        let key = debug_index.into();
+        self.debug_map.entry(key).or_default().push(expr);
+    }
+
+    pub fn get_debug_expr<T: Into<usize>>(&mut self, debug_index: T) -> &[Expression<E>] {
+        let key = debug_index.into();
+        match self.debug_map.get(&key) {
+            Some(v) => v,
+            _ => panic!("non-existent entry {}", key),
+        }
     }
 }
 

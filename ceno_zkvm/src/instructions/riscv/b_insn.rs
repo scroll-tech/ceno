@@ -3,15 +3,13 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{config::ExprLtConfig, constants::PC_STEP_SIZE};
+use super::constants::PC_STEP_SIZE;
 use crate::{
-    chip_handler::{
-        GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
-    },
+    chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::config::ExprLtInput,
+    instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
     set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
@@ -36,127 +34,80 @@ use core::mem::MaybeUninit;
 /// It does _not_ range-check the `branch_taken_bit`.
 /// It does not witness of the register values, nor the actual function (e.g. BNE).
 #[derive(Debug)]
-pub struct BInstructionConfig {
-    pc: WitIn,
-    ts: WitIn,
-    rs1_id: WitIn,
-    rs2_id: WitIn,
-    imm: WitIn,
-    prev_rs1_ts: WitIn,
-    prev_rs2_ts: WitIn,
-    lt_rs1_cfg: ExprLtConfig,
-    lt_rs2_cfg: ExprLtConfig,
+pub struct BInstructionConfig<E: ExtensionField> {
+    pub vm_state: StateInOut<E>,
+    pub rs1: ReadRS1<E>,
+    pub rs2: ReadRS2<E>,
+    pub imm: WitIn,
 }
 
-impl BInstructionConfig {
-    pub fn construct_circuit<E: ExtensionField>(
+impl<E: ExtensionField> BInstructionConfig<E> {
+    pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
         branch_taken_bit: Expression<E>,
     ) -> Result<Self, ZKVMError> {
-        // State in.
-        let pc = circuit_builder.create_witin(|| "pc")?;
-        let cur_ts = circuit_builder.create_witin(|| "cur_ts")?;
-        circuit_builder.state_in(pc.expr(), cur_ts.expr())?;
+        // State in and out
+        let vm_state = StateInOut::construct_circuit(circuit_builder, true)?;
 
-        // Register indexes and immediate.
-        let rs1_id = circuit_builder.create_witin(|| "rs1_id")?;
-        let rs2_id = circuit_builder.create_witin(|| "rs2_id")?;
+        // Registers
+        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
+        let rs2 = ReadRS2::construct_circuit(circuit_builder, rs2_read, vm_state.ts)?;
+
+        // Immediate
         let imm = circuit_builder.create_witin(|| "imm")?;
 
-        // Fetch the instruction.
+        // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
-            pc.expr(),
+            vm_state.pc.expr(),
             (insn_kind.codes().opcode as usize).into(),
-            0.into(), // TODO: Make sure the program table sets rd=0.
+            0.into(),
             (insn_kind.codes().func3 as usize).into(),
-            rs1_id.expr(),
-            rs2_id.expr(),
-            imm.expr(), // TODO: Make sure the program table sets the full immediate.
+            rs1.id.expr(),
+            rs2.id.expr(),
+            imm.expr(),
         ))?;
 
-        // Register state.
-        let prev_rs1_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
-        let prev_rs2_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
-
-        // Register reads.
-        let (ts, lt_rs1_cfg) = circuit_builder.register_read(
-            || "read_rs1",
-            &rs1_id,
-            prev_rs1_ts.expr(),
-            cur_ts.expr(),
-            rs1_read,
+        // Branch program counter
+        let pc_offset = branch_taken_bit.clone() * imm.expr()
+            - branch_taken_bit * PC_STEP_SIZE.into()
+            + PC_STEP_SIZE.into();
+        let next_pc = vm_state.next_pc.unwrap();
+        circuit_builder.require_equal(
+            || "pc_branch",
+            next_pc.expr(),
+            vm_state.pc.expr() + pc_offset,
         )?;
-        let (_ts, lt_rs2_cfg) = circuit_builder.register_read(
-            || "read_rs2",
-            &rs2_id,
-            prev_rs2_ts.expr(),
-            ts,
-            rs2_read,
-        )?;
-
-        // State out.
-        let pc_offset = branch_taken_bit * (imm.expr() - PC_STEP_SIZE.into()) + PC_STEP_SIZE.into();
-        let next_pc = pc.expr() + pc_offset;
-        let next_ts = cur_ts.expr() + 4.into();
-        circuit_builder.state_out(next_pc, next_ts)?;
 
         Ok(BInstructionConfig {
-            pc,
-            ts: cur_ts,
-            rs1_id,
-            rs2_id,
+            vm_state,
+            rs1,
+            rs2,
             imm,
-            prev_rs1_ts,
-            prev_rs2_ts,
-            lt_rs1_cfg,
-            lt_rs2_cfg,
         })
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        // State in.
-        set_val!(instance, self.pc, step.pc().before.0 as u64);
-        set_val!(instance, self.ts, step.cycle());
+        self.vm_state.assign_instance(instance, step)?;
+        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
+        self.rs2.assign_instance(instance, lk_multiplicity, step)?;
 
-        // Register indexes and immediate.
-        set_val!(instance, self.rs1_id, step.insn().rs1() as u64);
-        set_val!(instance, self.rs2_id, step.insn().rs2() as u64);
-        set_val!(instance, self.imm, step.insn().imm_b() as u64);
+        // Immediate
+        set_val!(
+            instance,
+            self.imm,
+            InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn())
+        );
 
         // Fetch the instruction.
         lk_multiplicity.fetch(step.pc().before.0);
-
-        // Register state.
-        set_val!(
-            instance,
-            self.prev_rs1_ts,
-            step.rs1().unwrap().previous_cycle
-        );
-        set_val!(
-            instance,
-            self.prev_rs2_ts,
-            step.rs2().unwrap().previous_cycle
-        );
-
-        // Register read and write.
-        ExprLtInput {
-            lhs: step.rs1().unwrap().previous_cycle,
-            rhs: step.cycle(),
-        }
-        .assign(instance, &self.lt_rs1_cfg, lk_multiplicity);
-        ExprLtInput {
-            lhs: step.rs2().unwrap().previous_cycle,
-            rhs: step.cycle() + 1,
-        }
-        .assign(instance, &self.lt_rs2_cfg, lk_multiplicity);
 
         Ok(())
     }

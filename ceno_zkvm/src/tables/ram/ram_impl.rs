@@ -39,15 +39,15 @@ impl RamTableConfig {
 
         let init_table = cb.rlc_chip_record(vec![
             (ram_type as usize).into(),
-            Expression::Fixed(addr.clone()),
-            Expression::Fixed(init_v.clone()),
-            Expression::Fixed(init_t.clone()),
+            Expression::Fixed(addr),
+            Expression::Fixed(init_v),
+            Expression::Fixed(init_t),
         ]);
 
         let final_table = cb.rlc_chip_record(vec![
             // a v t
             (ram_type as usize).into(),
-            Expression::Fixed(addr.clone()),
+            Expression::Fixed(addr),
             final_v.expr(),
             final_t.expr(),
         ]);
