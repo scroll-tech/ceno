@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    instructions::riscv::constants::{UInt, BIT_WIDTH},
+    instructions::riscv::constants::{UInt, UINT_LIMBS},
     witness::LkMultiplicity,
     Value,
 };
@@ -32,17 +32,16 @@ impl<E: ExtensionField> DivConfig<E> {
         remainder: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            let intermediate_mul =
-                divisor.mul::<BIT_WIDTH, _, _>(|| "divisor_mul", cb, quotient, true)?;
-            let dividend = intermediate_mul.add(|| "dividend_add", cb, remainder, true)?;
+            let (dividend, intermediate_mul) =
+                divisor.mul_add(|| "", cb, quotient, remainder, true)?;
 
             // remainder range check
             let r_lt = cb.less_than(
                 || "remainder < divisor",
                 remainder.value(),
                 divisor.value(),
-                Some(true),
-                UInt::<E>::NUM_CELLS,
+                None,
+                UINT_LIMBS,
             )?;
             Ok(Self {
                 dividend,

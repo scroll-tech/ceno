@@ -3,8 +3,12 @@ use ff_ext::ExtensionField;
 
 use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsZeroConfig,
-    instructions::Instruction, uint::Value, witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    gadgets::{DivConfig, IsZeroConfig},
+    instructions::Instruction,
+    uint::Value,
+    witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 use std::marker::PhantomData;
@@ -17,7 +21,7 @@ pub struct ArithConfig<E: ExtensionField> {
     pub(crate) outcome: UInt<E>,
 
     remainder: UInt<E>,
-    inter_mul_value: UInt<E>,
+    div_config: DivConfig<E>,
     is_zero: IsZeroConfig,
 }
 
@@ -44,8 +48,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let mut outcome = UInt::new(|| "outcome", circuit_builder)?;
         let r = UInt::new(|| "remainder", circuit_builder)?;
 
-        let (dividend, inter_mul_value) =
-            divisor.mul_add(|| "dividend", circuit_builder, &mut outcome, &r, true)?;
+        let div_config = DivConfig::construct_circuit(
+            circuit_builder,
+            || "divu",
+            &mut divisor,
+            &mut outcome,
+            &r,
+        )?;
 
         // div by zero check
         let is_zero = IsZeroConfig::construct_circuit(
@@ -68,18 +77,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            dividend.register_expr(),
+            div_config.dividend.register_expr(),
             divisor.register_expr(),
             outcome.register_expr(),
         )?;
 
         Ok(ArithConfig {
             r_insn,
-            dividend,
+            dividend: div_config.dividend.clone(),
             divisor,
             outcome,
             remainder: r,
-            inter_mul_value,
+            div_config,
             is_zero,
         })
     }
@@ -113,14 +122,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             .outcome
             .assign_limbs(instance, outcome.as_u16_limbs());
 
-        let (dividend, inter_mul_value) = divisor.mul_add(&outcome, &r, lkm, true);
-
+        let (dividend, _) = divisor.mul_add(&outcome, &r, lkm, true);
         config
-            .inter_mul_value
-            .assign_mul_outcome(instance, lkm, &inter_mul_value)?;
+            .div_config
+            .assign_instance(instance, lkm, &divisor, &outcome, &r)?;
 
         config.dividend.assign_add_outcome(instance, &dividend);
-
         config.remainder.assign_limbs(instance, r.as_u16_limbs());
 
         config
@@ -157,7 +164,7 @@ mod test {
             let mut cb = CircuitBuilder::new(&mut cs);
             let config = cb
                 .namespace(
-                    || format!("divu_{name}"),
+                    || format!("divu_({name})"),
                     |cb| Ok(DivUInstruction::construct_circuit(cb)),
                 )
                 .unwrap()
@@ -206,8 +213,8 @@ mod test {
             verify("u32::MAX", u32::MAX, u32::MAX, 1);
             verify("div u32::MAX", 3, u32::MAX, 0);
             verify("u32::MAX div by 2", u32::MAX, 2, u32::MAX / 2);
+            verify("mul with carries", 1202729773, 171818539, 7);
             verify("div by zero", 10, 0, u32::MAX);
-            verify("mul carry", 1202729773, 171818539, 7);
         }
 
         #[test]
