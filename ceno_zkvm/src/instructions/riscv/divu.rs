@@ -37,11 +37,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        // outcome = dividend / divisor + remainder => dividend = divisor * outcome + r
-        // let mut divisor = UInt::new_unchecked(|| "divisor", circuit_builder)?;
-        // let mut outcome = UInt::new(|| "outcome", circuit_builder)?;
-        // let r = UInt::new(|| "remainder", circuit_builder)?;
-
         let div_config = DivConfig::construct_circuit(circuit_builder, || "divu")?;
 
         // div by zero check
