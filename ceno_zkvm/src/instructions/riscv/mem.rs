@@ -87,6 +87,7 @@ struct SBConfig<E: ExtensionField> {
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
+    // one byte per limb
     imm: UInt8<E>,
 }
 pub struct SBOp;
@@ -106,11 +107,13 @@ impl<E: ExtensionField> Instruction<E> for SBOp {
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_red", circuit_builder)?;
+        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let imm = UInt8::new_unchecked(|| "imm", circuit_builder)?;
+        // 
+        let imm_uint16 = UInt::<E>::from_u8_limbs(&imm).expect("converting to u8 limbs type failed");
 
         // TODO: fix UInt8 plus UInt issue later
-        let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
+        let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm_uint16, true)?;
 
         let s_insn = SInstructionConfig::<E>::construct_circuit(
             circuit_builder,
