@@ -109,10 +109,12 @@ impl<E: ExtensionField> Instruction<E> for SBOp {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let imm = UInt8::new_unchecked(|| "imm", circuit_builder)?;
-        // 
+        
+
         let imm_uint16 = UInt::<E>::from_u8_limbs(&imm).expect("converting to u8 limbs type failed");
 
-        // TODO: fix UInt8 plus UInt issue later
+        // TODO: make imm_uint16's first limb == imm.limbs[0] and other limbs are zeros
+        // so that take first byte of imm to calculate memory addr
         let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm_uint16, true)?;
 
         let s_insn = SInstructionConfig::<E>::construct_circuit(
