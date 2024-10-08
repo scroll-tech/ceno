@@ -68,7 +68,7 @@ impl RamTableConfig {
         &self,
         num_fixed: usize,
         init_v: &[u32],
-    ) -> (usize, RowMajorMatrix<F>) {
+    ) -> RowMajorMatrix<F> {
         // for ram in memory offline check
         let mut init_table = RowMajorMatrix::<F>::new(init_v.len(), num_fixed);
 
@@ -82,7 +82,7 @@ impl RamTableConfig {
                 set_fixed_val!(row, self.init_t, F::ZERO);
             });
 
-        (init_v.len(), init_table)
+        init_table
     }
 
     pub fn assign_instances<F: SmallField>(
@@ -90,7 +90,7 @@ impl RamTableConfig {
         num_witness: usize,
         final_v: &[u32],
         final_t: &[u32],
-    ) -> Result<(usize, RowMajorMatrix<F>), ZKVMError> {
+    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         assert_eq!(final_v.len(), final_t.len());
         let length = final_v.len();
         let mut final_table = RowMajorMatrix::<F>::new(length, num_witness);
@@ -104,6 +104,6 @@ impl RamTableConfig {
                 set_val!(row, self.final_t, final_t[i] as u64);
             });
 
-        Ok((length, final_table))
+        Ok(final_table)
     }
 }

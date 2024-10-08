@@ -50,9 +50,8 @@ impl OpTableConfig {
         &self,
         num_fixed: usize,
         content: Vec<[u64; 3]>,
-    ) -> (usize, RowMajorMatrix<F>) {
+    ) -> RowMajorMatrix<F> {
         let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
-        let length = content.len();
 
         fixed
             .par_iter_mut()
@@ -64,7 +63,7 @@ impl OpTableConfig {
                 }
             });
 
-        (length, fixed)
+        fixed
     }
 
     pub fn assign_instances<F: SmallField>(
@@ -72,7 +71,7 @@ impl OpTableConfig {
         num_witin: usize,
         multiplicity: &HashMap<u64, usize>,
         length: usize,
-    ) -> Result<(usize, RowMajorMatrix<F>), ZKVMError> {
+    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         let mut witness = RowMajorMatrix::<F>::new(length, num_witin);
 
         let mut mlts = vec![0; length];
@@ -88,6 +87,6 @@ impl OpTableConfig {
                 set_val!(row, self.mlt, F::from(mlt as u64));
             });
 
-        Ok((length, witness))
+        Ok(witness)
     }
 }

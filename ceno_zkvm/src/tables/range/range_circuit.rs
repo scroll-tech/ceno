@@ -39,21 +39,25 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         )
     }
 
-    fn generate_fixed_traces_inner(
+    fn generate_fixed_traces(
         config: &RangeTableConfig,
         num_fixed: usize,
         _input: &(),
-    ) -> (usize, RowMajorMatrix<E::BaseField>) {
-        config.generate_fixed_traces(num_fixed, RANGE::content())
+    ) -> RowMajorMatrix<E::BaseField> {
+        let mut table = config.generate_fixed_traces(num_fixed, RANGE::content());
+        Self::padding_zero(&mut table, num_fixed).expect("padding error");
+        table
     }
 
-    fn assign_instances_inner(
+    fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
-    ) -> Result<(usize, RowMajorMatrix<E::BaseField>), ZKVMError> {
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[RANGE::ROM_TYPE as usize];
-        config.assign_instances(num_witin, multiplicity, RANGE::len())
+        let mut table = config.assign_instances(num_witin, multiplicity, RANGE::len())?;
+        Self::padding_zero(&mut table, num_witin).expect("padding error");
+        Ok(table)
     }
 }

@@ -134,11 +134,11 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         Ok(ProgramTableConfig { record, mlt })
     }
 
-    fn generate_fixed_traces_inner(
+    fn generate_fixed_traces(
         config: &ProgramTableConfig,
         num_fixed: usize,
         program: &Self::FixedInput,
-    ) -> (usize, RowMajorMatrix<E::BaseField>) {
+    ) -> RowMajorMatrix<E::BaseField> {
         // TODO: get bytecode of the program.
         let num_instructions = program.len();
         let pc_start = CENO_PLATFORM.pc_start();
@@ -171,15 +171,15 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 );
             });
 
-        (num_instructions, fixed)
+        fixed
     }
 
-    fn assign_instances_inner(
+    fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         num_instructions: &usize,
-    ) -> Result<(usize, RowMajorMatrix<E::BaseField>), ZKVMError> {
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
         let mut prog_mlt = vec![0_usize; *num_instructions];
@@ -197,6 +197,6 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
-        Ok((*num_instructions, witness))
+        Ok(witness)
     }
 }

@@ -42,10 +42,9 @@ impl RangeTableConfig {
         &self,
         num_fixed: usize,
         content: Vec<u64>,
-    ) -> (usize, RowMajorMatrix<F>) {
+    ) -> RowMajorMatrix<F> {
         let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
 
-        let content_len = content.len();
         fixed
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
@@ -54,7 +53,7 @@ impl RangeTableConfig {
                 set_fixed_val!(row, self.fixed, F::from(i));
             });
 
-        (content_len, fixed)
+        fixed
     }
 
     pub fn assign_instances<F: SmallField>(
@@ -62,7 +61,7 @@ impl RangeTableConfig {
         num_witin: usize,
         multiplicity: &HashMap<u64, usize>,
         length: usize,
-    ) -> Result<(usize, RowMajorMatrix<F>), ZKVMError> {
+    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         let mut witness = RowMajorMatrix::<F>::new(length, num_witin);
 
         let mut mlts = vec![0; length];
@@ -78,6 +77,6 @@ impl RangeTableConfig {
                 set_val!(row, self.mlt, F::from(mlt as u64));
             });
 
-        Ok((length, witness))
+        Ok(witness)
     }
 }

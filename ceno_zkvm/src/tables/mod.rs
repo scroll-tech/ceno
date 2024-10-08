@@ -33,50 +33,38 @@ pub trait TableCircuit<E: ExtensionField> {
         config: &Self::TableConfig,
         num_fixed: usize,
         input: &Self::FixedInput,
-    ) -> RowMajorMatrix<E::BaseField> {
-        let (valid_len, mut table) = Self::generate_fixed_traces_inner(config, num_fixed, input);
-        // Fill the padding with zeros, if any.
-        table
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .skip(valid_len)
-            .for_each(|row| {
-                row.iter_mut()
-                    .for_each(|r| *r = MaybeUninit::new(E::BaseField::ZERO));
-            });
-        table
-    }
-
-    fn generate_fixed_traces_inner(
-        config: &Self::TableConfig,
-        num_fixed: usize,
-        input: &Self::FixedInput,
-    ) -> (usize, RowMajorMatrix<E::BaseField>);
+    ) -> RowMajorMatrix<E::BaseField>;
 
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         input: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        let (valid_len, mut table) =
-            Self::assign_instances_inner(config, num_witin, multiplicity, input)?;
-        // Fill the padding with zeros, if any.
-        table
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .skip(valid_len)
-            .for_each(|row| {
-                row.iter_mut()
-                    .for_each(|r| *r = MaybeUninit::new(E::BaseField::ZERO));
-            });
-        Ok(table)
-    }
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
 
-    fn assign_instances_inner(
-        config: &Self::TableConfig,
+    fn padding_zero(
+        table: &mut RowMajorMatrix<E::BaseField>,
         num_witin: usize,
-        multiplicity: &[HashMap<u64, usize>],
-        input: &Self::WitnessInput,
-    ) -> Result<(usize, RowMajorMatrix<E::BaseField>), ZKVMError>;
+    ) -> Result<(), ZKVMError> {
+        // Fill the padding with zeros, if any.
+        let num_padding_instances = table.num_padding_instances();
+        if num_padding_instances > 0 {
+            let nthreads =
+                std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
+            let padding_instance = vec![MaybeUninit::new(E::BaseField::ZERO); num_witin];
+            let num_padding_instance_per_batch = if num_padding_instances > 256 {
+                num_padding_instances.div_ceil(nthreads)
+            } else {
+                num_padding_instances
+            };
+            table
+                .par_batch_iter_padding_mut(num_padding_instance_per_batch)
+                .with_min_len(MIN_PAR_SIZE)
+                .for_each(|row| {
+                    row.chunks_mut(num_witin)
+                        .for_each(|instance| instance.copy_from_slice(padding_instance.as_slice()));
+                });
+        }
+        Ok(())
+    }
 }
