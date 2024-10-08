@@ -6,6 +6,7 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
+    gadgets::DivConfig,
     instructions::{
         riscv::{constants::UInt, i_insn::IInstructionConfig, RIVInstruction},
         Instruction,
@@ -19,11 +20,10 @@ pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 pub struct InstructionConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
 
-    rs1: UInt<E>,
     imm: UInt<E>,
     pub(crate) rd_written: UInt<E>,
     remainder: UInt<E>,
-    rd_imm_mul: UInt<E>,
+    div_config: DivConfig<E>,
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
@@ -43,19 +43,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         // Goal is to constrain:
         // rs1 == rd_written * imm + remainder
         let remainder = UInt::new(|| "remainder", circuit_builder)?;
-        let (rs1, rd_imm_mul) = rd_written.mul_add(
-            || "rd_written * imm +remainder ",
+        let div_config = DivConfig::construct_circuit(
             circuit_builder,
+            || "srli_div",
             &mut imm,
+            &mut rd_written,
             &remainder,
-            true,
         )?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
             &imm.value(),
-            rs1.register_expr(),
+            div_config.dividend.register_expr(),
             rd_written.register_expr(),
         )?;
 
@@ -64,8 +64,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             imm,
             rd_written,
             remainder,
-            rd_imm_mul,
-            rs1,
+            div_config,
         })
     }
 
@@ -85,13 +84,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 Value::new(imm, lk_multiplicity),
             )
         };
-
-        let (rs1, rd_imm_mul) = rd_written.mul_add(&imm, &remainder, lk_multiplicity, true);
-        config
-            .rd_imm_mul
-            .assign_mul_outcome(instance, lk_multiplicity, &rd_imm_mul)?;
-
-        config.rs1.assign_add_outcome(instance, &rs1);
+        config.div_config.assign_instance(
+            instance,
+            lk_multiplicity,
+            &imm,
+            &rd_written,
+            &remainder,
+        )?;
         config.imm.assign_value(instance, imm);
         config.rd_written.assign_value(instance, rd_written);
         config.remainder.assign_value(instance, remainder);
