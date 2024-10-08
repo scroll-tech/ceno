@@ -33,7 +33,7 @@ impl<E: ExtensionField> DivConfig<E> {
     ) -> Result<Self, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
             // quotient = dividend / divisor + remainder => dividend = divisor * quotient + r
-            let mut divisor = UInt::new_unchecked(|| "divisor", cb)?;
+            let mut divisor = UInt::new(|| "divisor", cb)?;
             let mut quotient = UInt::new(|| "quotient", cb)?;
             let remainder = UInt::new(|| "remainder", cb)?;
 

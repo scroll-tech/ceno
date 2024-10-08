@@ -129,7 +129,7 @@ mod test {
             Value,
         };
 
-        fn verify(name: &'static str, dividend: Word, divisor: Word, outcome: Word) {
+        fn verify(name: &'static str, dividend: Word, divisor: Word, exp_outcome: Word) {
             let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
             let mut cb = CircuitBuilder::new(&mut cs);
             let config = cb
@@ -140,6 +140,11 @@ mod test {
                 .unwrap()
                 .unwrap();
 
+            let outcome = if divisor == 0 {
+                u32::MAX
+            } else {
+                dividend / divisor
+            };
             // values assignment
             let (raw_witin, _) = DivUInstruction::assign_instances(
                 &config,
@@ -156,8 +161,9 @@ mod test {
             )
             .unwrap();
 
-            let expected_rd_written =
-                UInt::from_const_unchecked(Value::new_unchecked(outcome).as_u16_limbs().to_vec());
+            let expected_rd_written = UInt::from_const_unchecked(
+                Value::new_unchecked(exp_outcome).as_u16_limbs().to_vec(),
+            );
 
             config
                 .div_config

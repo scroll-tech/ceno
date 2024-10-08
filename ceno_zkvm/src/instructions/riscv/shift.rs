@@ -215,9 +215,10 @@ mod tests {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let (prefix, mock_pc, mock_program_op) = match I::INST_KIND {
-            InsnKind::SLL => ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[19]),
-            InsnKind::SRL => ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[20]),
+        let shift = rs2_read & 0b11111;
+        let (prefix, mock_pc, mock_program_op, rd_written) = match I::INST_KIND {
+            InsnKind::SLL => ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[19], rs1_read << shift),
+            InsnKind::SRL => ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[20], rs1_read >> shift),
             _ => unreachable!(),
         };
 
@@ -236,7 +237,7 @@ mod tests {
         config
             .rd_written
             .require_equal(
-                || "assert_rd_written",
+                || format!("{prefix}_({name})_assert_rd_written"),
                 &mut cb,
                 &UInt::from_const_unchecked(
                     Value::new_unchecked(expected_rd_written)
@@ -255,7 +256,7 @@ mod tests {
                 mock_program_op,
                 rs1_read,
                 rs2_read,
-                Change::new(0, expected_rd_written),
+                Change::new(0, rd_written),
                 0,
             )],
         )
