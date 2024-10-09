@@ -18,6 +18,7 @@ pub struct AuipcConfig<E: ExtensionField> {
     pub u_insn: UInstructionConfig<E>,
     pub pc_uint: UInt<E>,
     pub imm: UInt<E>,
+    pub rd_written: UInt<E>,
 }
 
 pub struct AuipcCircuit<E, I>(PhantomData<(E, I)>);
@@ -57,6 +58,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for AuipcCircuit<E, I>
             u_insn,
             pc_uint,
             imm,
+            rd_written,
         })
     }
 
@@ -69,12 +71,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for AuipcCircuit<E, I>
         let pc = Value::new(step.pc().before.0, lk_multiplicity);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
+        let (_, carries) = pc.add(&imm, lk_multiplicity, true);
+
         config
             .u_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         config.pc_uint.assign_value(instance, pc);
         config.imm.assign_value(instance, imm);
+
+        config.rd_written.assign_carries(instance, &carries);
 
         Ok(())
     }
