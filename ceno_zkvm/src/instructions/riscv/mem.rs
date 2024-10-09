@@ -10,7 +10,7 @@ use crate::{
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use std::mem::MaybeUninit;
+use std::{marker::PhantomData, mem::MaybeUninit};
 
 struct StoreConfig<E: ExtensionField> {
     s_insn: SInstructionConfig<E>,
@@ -19,17 +19,22 @@ struct StoreConfig<E: ExtensionField> {
     rs2_read: UInt<E>,
     imm: UInt<E>,
 }
+
+pub struct StoreInstruction<E, I>(PhantomData<(E, I)>);
+
 pub struct SWOp;
 
 impl RIVInstruction for SWOp {
     const INST_KIND: InsnKind = InsnKind::SW;
 }
 
-impl<E: ExtensionField> Instruction<E> for SWOp {
+pub type StoreWord<E> = StoreInstruction<E, SWOp>;
+
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E, I> {
     type InstructionConfig = StoreConfig<E>;
 
     fn name() -> String {
-        format!("{:?}", Self::INST_KIND)
+        format!("{:?}", I::INST_KIND)
     }
 
     fn construct_circuit(
@@ -44,7 +49,7 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
 
         let s_insn = SInstructionConfig::<E>::construct_circuit(
             circuit_builder,
-            Self::INST_KIND,
+            I::INST_KIND,
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.memory_expr(),
