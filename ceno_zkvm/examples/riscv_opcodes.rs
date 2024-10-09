@@ -1,9 +1,12 @@
-use std::{iter, panic, time::Instant};
+use std::{panic, time::Instant};
 
 use ceno_zkvm::{
     Value, declare_program,
-    instructions::riscv::{arith::AddInstruction, branch::BltuInstruction, jump::JalInstruction},
+    instructions::riscv::{
+        arith::AddInstruction, branch::BltuInstruction, constants::EXIT_PC, jump::JalInstruction,
+    },
     scheme::prover::ZKVMProver,
+    state::GlobalState,
     tables::{ProgramTableCircuit, RegTableCircuit},
 };
 use clap::Parser;
@@ -12,7 +15,7 @@ use const_env::from_env;
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, JAL},
-    StepRecord, VMState, WordAddr,
+    StepRecord, Tracer, VMState, WordAddr,
 };
 use ceno_zkvm::{
     instructions::riscv::ecall::HaltInstruction,
@@ -123,6 +126,7 @@ fn main() {
     let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
     let ltu_config = zkvm_cs.register_table_circuit::<LtuTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
+    zkvm_cs.register_global_state::<GlobalState>();
 
     for instance_num_vars in args.start..args.end {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
@@ -228,9 +232,15 @@ fn main() {
 
         assert_eq!(halt_records.len(), 1);
         let final_access = vm.tracer().final_accesses();
-        let end_ts = final_access.get(&CENO_PLATFORM.pc_vma().into()).unwrap();
+        let end_cycle = final_access.get(&CENO_PLATFORM.pc_vma().into()).unwrap();
         let exit_code = halt_records[0].rs2().unwrap().value;
-        let pi = PublicValues::new(exit_code, 0, *end_ts as u32);
+        let pi = PublicValues::new(
+            exit_code,
+            CENO_PLATFORM.rom_start(),
+            Tracer::SUBCYCLES_PER_INSN as u32,
+            EXIT_PC as u32,
+            *end_cycle as u32,
+        );
 
         tracing::info!(
             "tracer generated {} ADD records, {} BLTU records, {} JAL records",

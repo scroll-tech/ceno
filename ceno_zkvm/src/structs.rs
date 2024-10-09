@@ -1,7 +1,9 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
+    expression::Expression,
     instructions::Instruction,
+    state::StateCircuit,
     tables::TableCircuit,
     witness::{LkMultiplicity, RowMajorMatrix},
 };
@@ -122,9 +124,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS>
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub(crate) circuit_css: BTreeMap<String, ConstraintSystem<E>>,
+    pub(crate) state_in_expr: Expression<E>,
+    pub(crate) state_out_expr: Expression<E>,
+}
+
+impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
+    fn default() -> Self {
+        ZKVMConstraintSystem {
+            circuit_css: BTreeMap::new(),
+            state_in_expr: Expression::ZERO,
+            state_out_expr: Expression::ZERO,
+        }
+    }
 }
 
 impl<E: ExtensionField> ZKVMConstraintSystem<E> {
@@ -144,6 +158,15 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         assert!(self.circuit_css.insert(TC::name(), cs).is_none());
 
         config
+    }
+
+    pub fn register_global_state<SC: StateCircuit<E>>(&mut self) {
+        let mut cs = ConstraintSystem::new(|| "riscv_state");
+        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+        self.state_in_expr =
+            SC::state_in_expr(&mut circuit_builder).expect("global_state_in failed");
+        self.state_out_expr =
+            SC::state_out_expr(&mut circuit_builder).expect("global_state_out failed");
     }
 
     pub fn get_cs(&self, name: &String) -> Option<&ConstraintSystem<E>> {
@@ -261,6 +284,10 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub vp: PCS::VerifierParam,
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E, PCS>>,
+
+    // expression for global state in/out
+    pub state_in_expr: Expression<E>,
+    pub state_out_expr: Expression<E>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
@@ -269,6 +296,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             pp,
             vp,
             circuit_pks: BTreeMap::new(),
+            state_in_expr: Expression::ZERO,
+            state_out_expr: Expression::ZERO,
         }
     }
 }
@@ -282,13 +311,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .iter()
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
+            // expression for global state in/out
+            state_in_expr: self.state_in_expr.clone(),
+            state_out_expr: self.state_out_expr.clone(),
         }
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,
-    // pk for opcode and table circuits
+    // vk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E, PCS>>,
+    // expression for global state in/out
+    pub state_in_expr: Expression<E>,
+    pub state_out_expr: Expression<E>,
 }

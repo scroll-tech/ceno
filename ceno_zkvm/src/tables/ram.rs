@@ -11,6 +11,7 @@ impl RamTable for MemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = UINT_LIMBS + 1; // +1 including timestamp
     fn len() -> usize {
+        // TODO figure out better way to define memory size
         1 << 16
     }
 

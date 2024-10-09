@@ -20,7 +20,7 @@ use crate::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
     },
-    structs::{Point, PointAndEval, RAMType, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
+    structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{eq_eval_less_or_equal_than, get_challenge_pows, next_pow2_instance_padding},
 };
 
@@ -168,30 +168,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         logup_sum -=
             E::from(dummy_table_item_multiplicity as u64) * dummy_table_item.invert().unwrap();
 
-        // initial state (global state table,start_pc, start_ts) to prod_w
-        let initial_state = challenges[0]
-        + E::BaseField::from(RAMType::GlobalState as u64)
-        + challenges[1] * E::BaseField::from(0x2000_0000) // initial pc 0x2000_0000
-        + challenges[1] * challenges[1] * E::BaseField::from(4); // initial ts 4
-        prod_w *= initial_state;
-        // final state (end_pc, end_ts) to prod_r
-        let final_state = challenges[0]
-            + E::BaseField::from(RAMType::GlobalState as u64)
-            + challenges[1] * pi[2]
-            + challenges[1] * challenges[1] * pi[3];
-        prod_r *= final_state;
-
-        // check rw_set equality across all proofs
-        if prod_r != prod_w {
-            return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
-        }
-
         // check logup relation across all proofs
         if logup_sum != E::ZERO {
             return Err(ZKVMError::VerifyError(format!(
                 "logup_sum({:?}) != 0",
                 logup_sum
             )));
+        }
+
+        let state_in =
+            eval_by_expr_with_instance(&[], &[], pi, &challenges, &self.vk.state_in_expr);
+        prod_w *= state_in;
+        let state_out =
+            eval_by_expr_with_instance(&[], &[], pi, &challenges, &self.vk.state_out_expr);
+        prod_r *= state_out;
+        // check rw_set equality across all proofs
+        if prod_r != prod_w {
+            return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
         }
 
         Ok(true)
@@ -425,8 +418,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         if cs.assert_zero_expressions.iter().any(|expr| {
             eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr) != E::ZERO
         }) {
-            // TODO add me back
-            // return Err(ZKVMError::VerifyError("zero expression != 0"));
+            return Err(ZKVMError::VerifyError("zero expression != 0".into()));
         }
 
         tracing::debug!(
