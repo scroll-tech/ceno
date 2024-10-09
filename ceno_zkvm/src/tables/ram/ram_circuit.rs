@@ -24,7 +24,7 @@ pub struct RamTableCircuit<E, R>(PhantomData<(E, R)>);
 impl<E: ExtensionField, RAM: RamTable> TableCircuit<E> for RamTableCircuit<E, RAM> {
     type TableConfig = RamTableConfig;
     type FixedInput = Option<Vec<u32>>;
-    type WitnessInput = (Vec<u32>, Vec<u32>);
+    type WitnessInput = Vec<u32>;
 
     fn name() -> String {
         format!("RAM_{:?}", RAM::RAM_TYPE)
@@ -33,7 +33,7 @@ impl<E: ExtensionField, RAM: RamTable> TableCircuit<E> for RamTableCircuit<E, RA
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
         cb.namespace(
             || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb, RAM::RAM_TYPE, RAM::len()),
+            |cb| Self::TableConfig::construct_circuit(cb, RAM::RAM_TYPE, RAM::len(), RAM::V_LIMBS),
         )
     }
 
@@ -55,9 +55,9 @@ impl<E: ExtensionField, RAM: RamTable> TableCircuit<E> for RamTableCircuit<E, RA
         config: &Self::TableConfig,
         num_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        (final_v, final_t): &Self::WitnessInput,
+        final_v: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        let mut table = config.assign_instances(num_witin, final_v, final_t)?;
+        let mut table = config.assign_instances(num_witin, final_v)?;
         Self::padding_zero(&mut table, num_witin)?;
         Ok(table)
     }

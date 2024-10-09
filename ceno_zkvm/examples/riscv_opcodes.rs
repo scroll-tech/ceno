@@ -4,6 +4,7 @@ use ceno_zkvm::{
     instructions::riscv::{arith::AddInstruction, branch::BltuInstruction},
     scheme::prover::ZKVMProver,
     tables::{ProgramTableCircuit, RegTableCircuit},
+    Value,
 };
 use clap::Parser;
 use const_env::from_env;
@@ -133,6 +134,22 @@ fn main() {
             u16_range_config.clone(),
             &(),
         );
+        zkvm_fixed_traces.register_table_circuit::<AndTableCircuit<E>>(
+            &zkvm_cs,
+            and_config.clone(),
+            &(),
+        );
+        zkvm_fixed_traces.register_table_circuit::<LtuTableCircuit<E>>(
+            &zkvm_cs,
+            ltu_config.clone(),
+            &(),
+        );
+        zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
+            &zkvm_cs,
+            prog_config.clone(),
+            &PROGRAM_CODE,
+        );
+
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
         // vm.x4 += vm.x1
         zkvm_fixed_traces.register_table_circuit::<RegTableCircuit<E>>(
@@ -148,23 +165,16 @@ fn main() {
                 .into_iter()
                 .chain(std::iter::repeat(0u32))
                 .take(32)
+                .flat_map(|v| {
+                    Value::<u32>::new_unchecked(v)
+                        .as_u16_limbs()
+                        .iter()
+                        .map(|v| *v as u32)
+                        .chain(std::iter::once(0))
+                        .collect_vec()
+                })
                 .collect_vec(),
             ),
-        );
-        zkvm_fixed_traces.register_table_circuit::<AndTableCircuit<E>>(
-            &zkvm_cs,
-            and_config.clone(),
-            &(),
-        );
-        zkvm_fixed_traces.register_table_circuit::<LtuTableCircuit<E>>(
-            &zkvm_cs,
-            ltu_config.clone(),
-            &(),
-        );
-        zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
-            &zkvm_cs,
-            prog_config.clone(),
-            &PROGRAM_CODE,
         );
 
         let pk = zkvm_cs
@@ -206,7 +216,7 @@ fn main() {
                         halt_records.push(record);
                     }
                 }
-                _ => {}
+                i => panic!("unknown instruction {i:?}"),
             }
         });
 
@@ -251,14 +261,18 @@ fn main() {
                 &zkvm_cs,
                 &reg_config,
                 &(0..32)
-                    .map(|reg_id| {
+                    .flat_map(|reg_id| {
                         let vma: WordAddr = CENO_PLATFORM.register_vma(reg_id).into();
-                        (
-                            vm.peek_register(reg_id),                     // final value
-                            *final_access.get(&vma).unwrap_or(&0) as u32, // final cycle
-                        )
+                        let reg_value = Value::<u32>::new_unchecked(vm.peek_register(reg_id));
+                        reg_value
+                            .as_u16_limbs()
+                            .iter()
+                            .cloned()
+                            .map(|limb| limb as u32)
+                            .chain(std::iter::once(*final_access.get(&vma).unwrap_or(&0) as u32))
+                            .collect_vec()
                     })
-                    .unzip(),
+                    .collect_vec(),
             )
             .unwrap();
         zkvm_witness

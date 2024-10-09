@@ -55,9 +55,9 @@ pub enum ROMType {
 
 #[derive(Clone, Debug, Copy)]
 pub enum RAMType {
-    GlobalState,
-    Register,
-    Memory,
+    GlobalState = 0,
+    Register = 10,
+    Memory = 100,
 }
 
 /// A point is a vector of num_var length

@@ -14,7 +14,6 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
-    chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     instructions::{riscv::ecall::HaltInstruction, Instruction},
     scheme::{
@@ -167,12 +166,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             E::from(dummy_table_item_multiplicity as u64) * dummy_table_item.invert().unwrap();
 
         // initial state (global state table,start_pc, start_ts) to prod_w
-        prod_w *= challenges[0] + E::BaseField::from(RAMType::GlobalState as u64); // initial state
+        let initial_state = challenges[0]
+        + E::BaseField::from(RAMType::GlobalState as u64)
+        + challenges[1] * E::BaseField::from(0x2000_0000) // initial pc 0x2000_0000
+        + challenges[1] * challenges[1] * E::BaseField::from(4); // initial ts 4
+        prod_w *= initial_state;
         // final state (end_pc, end_ts) to prod_r
-        prod_r *= challenges[0]
+        let final_state = challenges[0]
             + E::BaseField::from(RAMType::GlobalState as u64)
             + challenges[1] * pi[2]
             + challenges[1] * challenges[1] * pi[3];
+        prod_r *= final_state;
 
         // check rw_set equality across all proofs
         if prod_r != prod_w {
