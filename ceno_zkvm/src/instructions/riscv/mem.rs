@@ -12,7 +12,7 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
-struct SWConfig<E: ExtensionField> {
+struct StoreConfig<E: ExtensionField> {
     s_insn: SInstructionConfig<E>,
 
     rs1_read: UInt<E>,
@@ -26,7 +26,7 @@ impl RIVInstruction for SWOp {
 }
 
 impl<E: ExtensionField> Instruction<E> for SWOp {
-    type InstructionConfig = SWConfig<E>;
+    type InstructionConfig = StoreConfig<E>;
 
     fn name() -> String {
         format!("{:?}", Self::INST_KIND)
@@ -45,13 +45,12 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
         let s_insn = SInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             Self::INST_KIND,
-            &imm.value(),
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.memory_expr(),
         )?;
 
-        Ok(SWConfig {
+        Ok(StoreConfig {
             s_insn,
             rs1_read,
             rs2_read,
@@ -72,8 +71,8 @@ impl<E: ExtensionField> Instruction<E> for SWOp {
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
-        config.rs1_read.assign_limbs(instance, rs1.u16_fields());
-        config.rs2_read.assign_limbs(instance, rs2.u16_fields());
+        config.rs1_read.assign_limbs(instance, rs1.as_u16_limbs());
+        config.rs2_read.assign_limbs(instance, rs2.as_u16_limbs());
         config.imm.assign_value(instance, imm);
 
         Ok(())
