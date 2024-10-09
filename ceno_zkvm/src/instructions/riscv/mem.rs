@@ -47,12 +47,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
         // TODO: feels like this is the responsibility of the s_insn
         let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
 
+        let memory_value = match I::INST_KIND {
+            InsnKind::SW => rs2_read.memory_expr(),
+            _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
+        };
+
         let s_insn = SInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.memory_expr(),
+            memory_value,
         )?;
 
         Ok(StoreConfig {

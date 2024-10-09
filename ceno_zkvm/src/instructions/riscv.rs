@@ -15,7 +15,6 @@ mod i_insn;
 mod insn_base;
 mod r_insn;
 
-// mod im_insn;
 mod mem;
 mod s_insn;
 #[cfg(test)]

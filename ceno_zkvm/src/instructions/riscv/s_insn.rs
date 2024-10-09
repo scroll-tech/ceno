@@ -33,6 +33,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
         memory_addr: MemoryExpr<E>,
+        memory_value: MemoryExpr<E>,
     ) -> Result<Self, ZKVMError> {
         // State in and out
         let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
@@ -64,7 +65,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             prev_memory_ts.expr(),
             vm_state.ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
             prev_memory_value.memory_expr(),
-            register_expr_to_memory_expr(&rs2_read),
+            memory_value,
         )?;
 
         Ok(SInstructionConfig {
