@@ -1,22 +1,17 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
+use super::{r_insn::RInstructionConfig, RIVInstruction};
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    gadgets::{DivConfig, IsZeroConfig},
-    instructions::Instruction,
-    uint::Value,
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::DivConfig,
+    instructions::Instruction, uint::Value, witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 use std::marker::PhantomData;
 
 pub struct ArithConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
-    div_config: DivConfig<E>,
-    is_zero: IsZeroConfig,
+    div_config: DivConfig<E, true>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -39,24 +34,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let div_config = DivConfig::construct_circuit(circuit_builder, || "divu")?;
 
-        // div by zero check
-        let is_zero = IsZeroConfig::construct_circuit(
-            circuit_builder,
-            || "divisor_zero_check",
-            div_config.divisor.value(),
-        )?;
-
-        let outcome_value = div_config.quotient.value();
-        circuit_builder
-            .condition_require_equal(
-                || "outcome_is_zero",
-                is_zero.expr(),
-                outcome_value.clone(),
-                ((1 << UInt::<E>::M) - 1).into(),
-                outcome_value,
-            )
-            .unwrap();
-
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
@@ -65,12 +42,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             div_config.quotient.register_expr(),
         )?;
 
-        Ok(ArithConfig {
-            r_insn,
-
-            div_config,
-            is_zero,
-        })
+        Ok(ArithConfig { r_insn, div_config })
     }
 
     fn assign_instance(
@@ -99,10 +71,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         config
             .div_config
             .assign_instance(instance, lkm, &divisor, &outcome, &r)?;
-
-        config
-            .is_zero
-            .assign_instance(instance, (rs2 as u64).into())?;
 
         Ok(())
     }

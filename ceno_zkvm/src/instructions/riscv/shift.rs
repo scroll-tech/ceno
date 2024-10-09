@@ -24,7 +24,7 @@ pub struct ShiftConfig<E: ExtensionField> {
     pow2_rs2_low5: UInt<E>,
 
     // for SRL division arithmetics
-    div_config: Option<DivConfig<E>>,
+    div_config: Option<DivConfig<E, false>>,
 }
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);

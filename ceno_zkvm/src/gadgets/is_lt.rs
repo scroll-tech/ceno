@@ -39,7 +39,7 @@ impl IsLtConfig {
     ) -> Result<Self, ZKVMError> {
         assert!(max_num_u16_limbs >= 1);
         cb.namespace(
-            || "less_than",
+            || "is_lt",
             |cb| {
                 let name = name_fn();
                 let (is_lt, is_lt_expr) = if let Some(lt) = assert_less_than {

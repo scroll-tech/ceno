@@ -341,7 +341,18 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
     {
-        IsLtConfig::construct_circuit(self, name_fn, lhs, rhs, assert_less_than, max_num_u16_limbs)
+        let lt = IsLtConfig::construct_circuit(
+            self,
+            name_fn,
+            lhs,
+            rhs,
+            assert_less_than,
+            max_num_u16_limbs,
+        )?;
+        if lt.is_lt.is_some() {
+            self.require_equal(|| "less_than", lt.expr(), Expression::from(1))?;
+        }
+        Ok(lt)
     }
 
     pub(crate) fn is_equal(

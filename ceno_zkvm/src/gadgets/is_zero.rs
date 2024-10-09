@@ -10,6 +10,7 @@ use crate::{
     set_val,
 };
 
+#[derive(Debug, Clone)]
 pub struct IsZeroConfig {
     is_zero: WitIn,
     inverse: WitIn,
