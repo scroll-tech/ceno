@@ -226,12 +226,17 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
+    instance: &[E::BaseField],
     challenges: &[E; N],
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate::<ArcMultilinearExtension<'_, E>>(
+    expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
+        &|i| {
+            let i = instance[i.0];
+            Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![i]))
+        },
         &|scalar| {
             let scalar: ArcMultilinearExtension<E> = Arc::new(
                 DenseMultilinearExtension::from_evaluations_vec(0, vec![scalar]),
@@ -239,7 +244,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
             scalar
         },
         &|challenge_id, pow, scalar, offset| {
-            // TODO cache challenge power to be aquire once for each power
+            // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
             let challenge: ArcMultilinearExtension<E> =
                 Arc::new(DenseMultilinearExtension::from_evaluations_ext_vec(
@@ -345,6 +350,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
     challenges: &[E],
@@ -353,6 +359,7 @@ pub(crate) fn eval_by_expr<E: ExtensionField>(
     eval_by_expr_with_fixed(&[], witnesses, challenges, expr)
 }
 
+#[allow(dead_code)]
 pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     fixed: &[E],
     witnesses: &[E],
@@ -362,6 +369,29 @@ pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     expr.evaluate::<E>(
         &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
+        &|scalar| scalar.into(),
+        &|challenge_id, pow, scalar, offset| {
+            // TODO cache challenge power to be acquired once for each power
+            let challenge = challenges[challenge_id as usize];
+            challenge.pow([pow as u64]) * scalar + offset
+        },
+        &|a, b| a + b,
+        &|a, b| a * b,
+        &|x, a, b| a * x + b,
+    )
+}
+
+pub(crate) fn eval_by_expr_with_instance<E: ExtensionField>(
+    fixed: &[E],
+    witnesses: &[E],
+    instance: &[E::BaseField],
+    challenges: &[E],
+    expr: &Expression<E>,
+) -> E {
+    expr.evaluate_with_instance::<E>(
+        &|f| fixed[f.0],
+        &|witness_id| witnesses[witness_id as usize],
+        &|i| E::from(instance[i.0]),
         &|scalar| scalar.into(),
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power

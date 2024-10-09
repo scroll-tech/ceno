@@ -71,7 +71,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for AuipcCircuit<E, I>
         let pc = Value::new(step.pc().before.0, lk_multiplicity);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
-        let (_, carries) = pc.add(&imm, lk_multiplicity, true);
+        let sum_pc_imm = pc.add(&imm, lk_multiplicity, true);
 
         config
             .u_insn
@@ -80,7 +80,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for AuipcCircuit<E, I>
         config.pc_uint.assign_value(instance, pc);
         config.imm.assign_value(instance, imm);
 
-        config.rd_written.assign_carries(instance, &carries);
+        config.rd_written.assign_add_outcome(instance, &sum_pc_imm);
 
         Ok(())
     }

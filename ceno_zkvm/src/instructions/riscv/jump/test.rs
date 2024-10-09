@@ -33,7 +33,7 @@ fn test_opcode_jal() {
         vec![StepRecord::new_j_instruction(
             4,
             Change::new(MOCK_PC_JAL, MOCK_PC_JAL + pc_offset),
-            MOCK_PROGRAM[18],
+            MOCK_PROGRAM[21],
             Change::new(0, (MOCK_PC_JAL + PC_STEP_SIZE).into()),
             0,
         )],
@@ -67,7 +67,7 @@ fn test_opcode_lui() {
         .unwrap()
         .unwrap();
 
-    let lui_insn = MOCK_PROGRAM[19];
+    let lui_insn = MOCK_PROGRAM[22];
     let imm = lui_insn & 0xfffff000;
     let (raw_witin, _lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
         &config,
@@ -109,7 +109,7 @@ fn test_opcode_auipc() {
         .unwrap()
         .unwrap();
 
-    let auipc_insn = MOCK_PROGRAM[20];
+    let auipc_insn = MOCK_PROGRAM[23];
     let imm = auipc_insn & 0xfffff000;
     let (raw_witin, _lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
         &config,

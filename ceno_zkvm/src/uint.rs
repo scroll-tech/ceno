@@ -105,21 +105,31 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         })
     }
 
-    /// this fn does not create new witness
-    pub fn from_witin_unchecked(limbs: &[WitIn]) -> Self {
+    /// accepts a vector of externally instantiated witnesses and carries,
+    /// delegating the responsibility for range checking to the caller.
+    pub fn from_witins_unchecked(
+        limbs: Vec<WitIn>,
+        carries: Option<Vec<WitIn>>,
+        carries_auxiliary_lt_config: Option<Vec<IsLtConfig>>,
+    ) -> Self {
         assert!(limbs.len() == Self::NUM_CELLS);
+        if let Some(carries) = &carries {
+            let diff = limbs.len() - carries.len();
+            assert!(
+                diff == 0 || diff == 1, // diff = 1 imply no overflow
+                "invalid witness: limb.len() {}, carries.len() {}",
+                limbs.len(),
+                carries.len()
+            );
+        }
         UIntLimbs {
-            limbs: UintLimb::WitIn(
-                (0..Self::NUM_CELLS)
-                    .map(|i| limbs[i])
-                    .collect::<Vec<WitIn>>(),
-            ),
-            carries: None,
-            carries_auxiliary_lt_config: None,
+            limbs: UintLimb::WitIn(limbs),
+            carries,
+            carries_auxiliary_lt_config,
         }
     }
 
-    /// this fn does not create new witness
+    /// take vector of primative type and instantiate witnesses
     pub fn from_const_unchecked<T: Into<u64>>(limbs: Vec<T>) -> Self {
         assert!(limbs.len() == Self::NUM_CELLS);
         UIntLimbs {
@@ -180,24 +190,20 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         self.assign_limbs(instance, value.as_u16_limbs())
     }
 
-    pub fn assign_limb_with_carry(
-        &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
-        (limbs, carries): &(Vec<u16>, Vec<u16>),
-    ) {
-        self.assign_limbs(instance, limbs);
-        self.assign_carries(instance, carries);
+    pub fn assign_add_outcome(&self, instance: &mut [MaybeUninit<E::BaseField>], value: &ValueAdd) {
+        self.assign_limbs(instance, &value.limbs);
+        self.assign_carries(instance, &value.carries);
     }
 
-    pub fn assign_limb_with_carry_auxiliary(
+    pub fn assign_mul_outcome(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
-        (limbs, carries, max_carry): &(Vec<u16>, Vec<u64>, u64),
+        value: &ValueMul,
     ) -> Result<(), ZKVMError> {
-        self.assign_limbs(instance, limbs);
-        self.assign_carries(instance, carries);
-        self.assign_carries_auxiliary(instance, lkm, carries, *max_carry)
+        self.assign_limbs(instance, &value.limbs);
+        self.assign_carries(instance, &value.carries);
+        self.assign_carries_auxiliary(instance, lkm, &value.carries, value.max_carry_value)
     }
 
     pub fn assign_limbs(&self, instance: &mut [MaybeUninit<E::BaseField>], limbs_values: &[u16]) {
@@ -387,13 +393,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
         with_overflow: bool,
+        num_carries: usize,
     ) -> Result<(), ZKVMError> {
         if self.carries.is_none() {
             circuit_builder.namespace(name_fn, |cb| {
                 let carries_len = if with_overflow {
-                    Self::NUM_CELLS
+                    num_carries
                 } else {
-                    Self::NUM_CELLS - 1
+                    num_carries - 1
                 };
                 self.carries = Some(
                     (0..carries_len)
@@ -511,6 +518,19 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .reduce(|sum, limb| sum * base.clone() + limb)
             .unwrap()
     }
+
+    /// split into 2 UIntLimbs with each taking half size of limbs
+    pub fn as_lo_hi<const M2: usize>(
+        &self,
+    ) -> Result<(UIntLimbs<M2, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
+        assert!(M == 2 * M2);
+        let mut self_lo = self.expr();
+        let self_hi = self_lo.split_off(self_lo.len() / 2);
+        Ok((
+            UIntLimbs::from_exprs_unchecked(self_lo)?,
+            UIntLimbs::from_exprs_unchecked(self_hi)?,
+        ))
+    }
 }
 
 /// Construct `UIntLimbs` from `Vec<CellId>`
@@ -578,6 +598,29 @@ impl<E: ExtensionField> UIntLimbs<32, 8, E> {
             })
             .collect_vec();
         u16_limbs.try_into().expect("four limbs with M=32 and C=8")
+    }
+}
+
+/// A struct holding intermediate results of arithmetic add operations from Value
+pub struct ValueAdd {
+    pub limbs: Vec<u16>,
+    pub carries: Vec<u16>,
+}
+
+/// A struct holding intermediate results of arithmetic mul operations from Value
+pub struct ValueMul {
+    pub limbs: Vec<u16>,
+    pub carries: Vec<u64>,
+    pub max_carry_value: u64,
+}
+
+impl ValueMul {
+    pub fn as_hi_value<T: Into<u64> + From<u32> + Copy + Default>(&self) -> Value<T> {
+        Value::<T>::from_limb_slice_unchecked(self.as_hi_limb_slice())
+    }
+
+    pub fn as_hi_limb_slice(&self) -> &[u16] {
+        &self.limbs[self.limbs.len() / 2..]
     }
 }
 
@@ -660,16 +703,16 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         self.val.into()
     }
 
+    /// Convert the limbs to a u32 value
+    pub fn as_u32(&self) -> u32 {
+        self.as_u64() as u32
+    }
+
     pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {
         self.limbs.iter().map(|v| F::from(*v as u64)).collect_vec()
     }
 
-    pub fn add(
-        &self,
-        rhs: &Self,
-        lkm: &mut LkMultiplicity,
-        with_overflow: bool,
-    ) -> (Vec<u16>, Vec<u16>) {
+    pub fn add(&self, rhs: &Self, lkm: &mut LkMultiplicity, with_overflow: bool) -> ValueAdd {
         let res = self.as_u16_limbs().iter().zip(rhs.as_u16_limbs()).fold(
             vec![],
             |mut acc, (a_limb, b_limb)| {
@@ -691,16 +734,15 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         if !with_overflow {
             carries.resize(carries.len() - 1, 0);
         }
-        (limbs, carries)
+        ValueAdd { limbs, carries }
     }
 
-    pub fn mul(
-        &self,
-        rhs: &Self,
-        lkm: &mut LkMultiplicity,
-        with_overflow: bool,
-    ) -> (Vec<u16>, Vec<u64>, u64) {
-        self.internal_mul(rhs, lkm, with_overflow)
+    pub fn mul(&self, rhs: &Self, lkm: &mut LkMultiplicity, with_overflow: bool) -> ValueMul {
+        self.internal_mul(rhs, lkm, with_overflow, false)
+    }
+
+    pub fn mul_hi(&self, rhs: &Self, lkm: &mut LkMultiplicity, with_overflow: bool) -> ValueMul {
+        self.internal_mul(rhs, lkm, with_overflow, true)
     }
 
     #[allow(clippy::type_complexity)]
@@ -710,10 +752,10 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         addend: &Self,
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
-    ) -> ((Vec<u16>, Vec<u16>), (Vec<u16>, Vec<u64>, u64)) {
-        let mul_result = self.internal_mul(mul, lkm, with_overflow);
+    ) -> (ValueAdd, ValueMul) {
+        let mul_result = self.internal_mul(mul, lkm, with_overflow, false);
         let add_result = addend.add(
-            &Self::from_limb_unchecked(mul_result.0.clone()),
+            &Self::from_limb_unchecked(mul_result.limbs.clone()),
             lkm,
             with_overflow,
         );
@@ -725,14 +767,18 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         mul: &Self,
         lkm: &mut LkMultiplicity,
         with_overflow: bool,
-    ) -> (Vec<u16>, Vec<u64>, u64) {
+        with_hi_limbs: bool,
+    ) -> ValueMul {
         let a_limbs = self.as_u16_limbs();
         let b_limbs = mul.as_u16_limbs();
 
-        let num_limbs = a_limbs.len();
+        let num_limbs = if !with_hi_limbs {
+            a_limbs.len()
+        } else {
+            2 * a_limbs.len()
+        };
         let mut c_limbs = vec![0u16; num_limbs];
         let mut carries = vec![0u64; num_limbs];
-        // TODO FIXME: support full size multiplication
         let mut tmp = vec![0u64; num_limbs];
         a_limbs.iter().enumerate().for_each(|(i, &a_limb)| {
             b_limbs.iter().enumerate().for_each(|(j, &b_limb)| {
@@ -754,8 +800,8 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
                 }
                 // update carry
                 carries[i] = tmp >> Self::C;
-                // update limb
-                *limb = (tmp - (carries[i] << Self::C)) as u16;
+                // update limb with only lsb 16 bit
+                *limb = tmp as u16;
             });
 
         if !with_overflow {
@@ -767,11 +813,11 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         // range check
         c_limbs.iter().for_each(|c| lkm.assert_ux::<16>(*c as u64));
 
-        (
-            c_limbs,
+        ValueMul {
+            limbs: c_limbs,
             carries,
-            max_carry_word_for_multiplication(2, Self::M, Self::C),
-        )
+            max_carry_value: max_carry_word_for_multiplication(2, Self::M, Self::C),
+        }
     }
 }
 
@@ -786,11 +832,11 @@ mod tests {
             let b = Value::new_unchecked(2u32);
             let mut lkm = LkMultiplicity::default();
 
-            let (c, carries) = a.add(&b, &mut lkm, true);
-            assert_eq!(c[0], 3);
-            assert_eq!(c[1], 0);
-            assert_eq!(carries[0], 0);
-            assert_eq!(carries[1], 0);
+            let ret = a.add(&b, &mut lkm, true);
+            assert_eq!(ret.limbs[0], 3);
+            assert_eq!(ret.limbs[1], 0);
+            assert_eq!(ret.carries[0], 0);
+            assert_eq!(ret.carries[1], 0);
         }
 
         #[test]
@@ -799,11 +845,11 @@ mod tests {
             let b = Value::new_unchecked(2u32);
             let mut lkm = LkMultiplicity::default();
 
-            let (c, carries) = a.add(&b, &mut lkm, true);
-            assert_eq!(c[0], 1);
-            assert_eq!(c[1], 1);
-            assert_eq!(carries[0], 1);
-            assert_eq!(carries[1], 0);
+            let ret = a.add(&b, &mut lkm, true);
+            assert_eq!(ret.limbs[0], 1);
+            assert_eq!(ret.limbs[1], 1);
+            assert_eq!(ret.carries[0], 1);
+            assert_eq!(ret.carries[1], 0);
         }
 
         #[test]
@@ -812,11 +858,11 @@ mod tests {
             let b = Value::new_unchecked(2u32);
             let mut lkm = LkMultiplicity::default();
 
-            let (c, carries, _) = a.mul(&b, &mut lkm, true);
-            assert_eq!(c[0], 2);
-            assert_eq!(c[1], 0);
-            assert_eq!(carries[0], 0);
-            assert_eq!(carries[1], 0);
+            let ret = a.mul(&b, &mut lkm, true);
+            assert_eq!(ret.limbs[0], 2);
+            assert_eq!(ret.limbs[1], 0);
+            assert_eq!(ret.carries[0], 0);
+            assert_eq!(ret.carries[1], 0);
         }
 
         #[test]
@@ -825,11 +871,11 @@ mod tests {
             let b = Value::new_unchecked(2u32);
             let mut lkm = LkMultiplicity::default();
 
-            let (c, carries, _) = a.mul(&b, &mut lkm, true);
-            assert_eq!(c[0], u16::MAX - 1);
-            assert_eq!(c[1], 1);
-            assert_eq!(carries[0], 1);
-            assert_eq!(carries[1], 0);
+            let ret = a.mul(&b, &mut lkm, true);
+            assert_eq!(ret.limbs[0], u16::MAX - 1);
+            assert_eq!(ret.limbs[1], 1);
+            assert_eq!(ret.carries[0], 1);
+            assert_eq!(ret.carries[1], 0);
         }
 
         #[test]
@@ -838,11 +884,11 @@ mod tests {
             let b = Value::new_unchecked(2u32);
             let mut lkm = LkMultiplicity::default();
 
-            let (c, carries, _) = a.mul(&b, &mut lkm, true);
-            assert_eq!(c[0], 0);
-            assert_eq!(c[1], 0);
-            assert_eq!(carries[0], 0);
-            assert_eq!(carries[1], 1);
+            let ret = a.mul(&b, &mut lkm, true);
+            assert_eq!(ret.limbs[0], 0);
+            assert_eq!(ret.limbs[1], 0);
+            assert_eq!(ret.carries[0], 0);
+            assert_eq!(ret.carries[1], 1);
         }
     }
 }
