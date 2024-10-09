@@ -24,6 +24,9 @@ pub trait EmuContext {
     // Handle environment call
     fn ecall(&mut self) -> Result<bool>;
 
+    // Handle halt
+    fn halt(&mut self, pc: ByteAddr);
+
     // Handle a machine return
     fn mret(&self) -> Result<bool>;
 

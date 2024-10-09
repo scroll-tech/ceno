@@ -223,6 +223,10 @@ impl Tracer {
         )
     }
 
+    pub fn store_pc(&mut self, pc: ByteAddr) {
+        self.record.pc.after = pc;
+    }
+
     pub fn halt(&mut self, pc: ByteAddr) {
         let pc_addr = CENO_PLATFORM.pc_vma().into();
         self.record.pc.after = pc;
