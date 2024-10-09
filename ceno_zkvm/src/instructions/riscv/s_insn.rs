@@ -16,7 +16,10 @@ use ceno_emul::{InsnKind, StepRecord, Tracer};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
-// TODO: add documentation
+/// This config handles the common part of S-type instructions:
+/// - PC, cycle, fetch.
+/// - Registers reads.
+/// - Memory write
 pub struct SInstructionConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     rs1: ReadRS1<E>,
