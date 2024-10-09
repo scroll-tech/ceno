@@ -311,10 +311,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8cd6604a82acf3039f1144f54b8eb34e91ffba622051189e71b781822d5ee1f5"
 
 [[package]]
+name = "ceno-examples"
+version = "0.1.0"
+
+[[package]]
 name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ceno-examples",
  "elf",
  "strum 0.25.0",
  "strum_macros 0.25.3",

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "ceno_emul",
+    "examples-builder",
     "ceno_rt",
     "gkr",
     "gkr-graph",
