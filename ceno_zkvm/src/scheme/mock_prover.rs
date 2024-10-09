@@ -282,19 +282,27 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
         let base64_encoded =
             STANDARD_NO_PAD.encode(serde_json::to_string(&challenge).unwrap().as_bytes());
         let file_path = format!("table_cache_dev_{:?}.json", base64_encoded);
-        // Check if the cache file exists
-        let table = match fs::metadata(file_path.clone()) {
-            Ok(_) => {
-                // if file exist, we deserialize from file to get table
-                let file = File::open(file_path).unwrap();
+        let table = match File::open(file_path.clone()) {
+            Ok(file) => {
                 let reader = BufReader::new(file);
                 serde_json::from_reader(reader).unwrap()
             }
             Err(e) if e.kind() == ErrorKind::NotFound => {
+                // Cached file doesn't exist, let's make a new one.
+                // And carefully avoid exposing a half-written file to other threads,
+                // or other runs of this program (in case of a crash).
+
+                let mut file = tempfile::NamedTempFile::new_in(".").unwrap();
+
                 // load new table and seserialize to file for later use
                 let table = load_tables(cb, challenge);
-                let file = File::create(file_path).unwrap();
-                serde_json::to_writer(file, &table).unwrap();
+                serde_json::to_writer(&mut file, &table).unwrap();
+                // Persist the file to the target location
+                // This is an atomic operation on Posix-like systems, so we don't have to worry
+                // about half-written files.
+                // Note, that if another process wrote to our target file in the meantime,
+                // we silently overwrite it here.  But that's fine.
+                file.persist(file_path).unwrap();
                 table
             }
             Err(e) => panic!("{:?}", e),
