@@ -16,6 +16,7 @@ members = [
     "ceno_zkvm",
     "poseidon"
 ]
+exclude = ["examples"]
 resolver = "2"
 
 [workspace.package]
