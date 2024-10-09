@@ -2,7 +2,7 @@ use crate::{
     chip_handler::{MemoryChipOperations, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{ToExpr, WitIn},
     instructions::riscv::{
         constants::UInt,
         insn_base::{ReadRS1, ReadRS2, StateInOut},
