@@ -87,13 +87,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         };
 
         let (rs1, rd_imm_mul) = rd_written.mul_add(&imm, &remainder, lk_multiplicity, true);
-        config.rd_imm_mul.assign_limb_with_carry_auxiliary(
-            instance,
-            lk_multiplicity,
-            &rd_imm_mul,
-        )?;
+        config
+            .rd_imm_mul
+            .assign_mul_outcome(instance, lk_multiplicity, &rd_imm_mul)?;
 
-        config.rs1.assign_limb_with_carry(instance, &rs1);
+        config.rs1.assign_add_outcome(instance, &rs1);
         config.imm.assign_value(instance, imm);
         config.rd_written.assign_value(instance, rd_written);
         config.remainder.assign_value(instance, remainder);

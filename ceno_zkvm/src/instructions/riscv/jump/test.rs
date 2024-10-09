@@ -33,7 +33,7 @@ fn test_opcode_jal() {
         vec![StepRecord::new_j_instruction(
             4,
             Change::new(MOCK_PC_JAL, MOCK_PC_JAL + pc_offset),
-            MOCK_PROGRAM[18],
+            MOCK_PROGRAM[21],
             Change::new(0, (MOCK_PC_JAL + PC_STEP_SIZE).into()),
             0,
         )],

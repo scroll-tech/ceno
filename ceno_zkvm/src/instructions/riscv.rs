@@ -6,8 +6,11 @@ pub mod branch;
 pub mod config;
 pub mod constants;
 pub mod divu;
+pub mod ecall;
 pub mod jump;
 pub mod logic;
+pub mod mulh;
+pub mod shift;
 pub mod shift_imm;
 pub mod sltu;
 
@@ -16,6 +19,8 @@ mod i_insn;
 mod insn_base;
 mod j_insn;
 mod r_insn;
+
+mod ecall_insn;
 
 #[cfg(test)]
 mod test;

@@ -61,10 +61,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalCircuit<E, I> {
             j_insn.vm_state.next_pc.unwrap().expr(),
         )?;
 
-        // constrain return address written to rd
-        // let return_addr = j_insn.vm_state.pc.expr() + PC_STEP_SIZE.into();
-        // circuit_builder.require_equal(|| "jump rd", rd_written.value(), return_addr)?;
-
         Ok(JalConfig {
             j_insn,
             pc_uint,
@@ -93,15 +89,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalCircuit<E, I> {
         config.pc_uint.assign_limbs(instance, pc.as_u16_limbs());
         config.imm.assign_limbs(instance, imm.as_u16_limbs());
 
-        let (result, carry) = pc.add(&imm, lk_multiplicity, true);
-        config
-            .next_pc_uint
-            .assign_limb_with_carry(instance, &(result, carry));
+        let result = pc.add(&imm, lk_multiplicity, true);
+        config.next_pc_uint.assign_add_outcome(instance, &result);
 
-        let (result, carry) = pc.add(&pc_step, lk_multiplicity, true);
-        config
-            .rd_written
-            .assign_limb_with_carry(instance, &(result, carry));
+        let result = pc.add(&pc_step, lk_multiplicity, true);
+        config.rd_written.assign_add_outcome(instance, &result);
 
         Ok(())
     }
