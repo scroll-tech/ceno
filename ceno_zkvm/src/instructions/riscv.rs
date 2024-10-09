@@ -9,6 +9,7 @@ pub mod divu;
 pub mod ecall;
 pub mod logic;
 pub mod mulh;
+pub mod shift;
 pub mod shift_imm;
 pub mod sltu;
 
