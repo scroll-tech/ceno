@@ -223,8 +223,10 @@ impl Tracer {
         )
     }
 
-    pub fn store_pc(&mut self, pc: ByteAddr) {
+    pub fn halt(&mut self, pc: ByteAddr) {
+        let pc_addr = CENO_PLATFORM.pc_vma().into();
         self.record.pc.after = pc;
+        self.track_access(pc_addr, Self::SUBCYCLES_PER_INSN);
     }
 
     pub fn fetch(&mut self, pc: WordAddr, value: Word) {
