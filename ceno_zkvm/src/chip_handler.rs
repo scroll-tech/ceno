@@ -72,13 +72,3 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 }
-
-pub fn register_expr_to_memory_expr<E: ExtensionField>(value: &RegisterExpr<E>) -> MemoryExpr<E> {
-    let expression_values = value.to_vec();
-    [expression_values[0].clone(), expression_values[1].clone()]
-}
-
-pub fn memory_expr_to_register_expr<E: ExtensionField>(value: &MemoryExpr<E>) -> RegisterExpr<E> {
-    let expression_values = value.to_vec();
-    [expression_values[0].clone(), expression_values[1].clone()]
-}
