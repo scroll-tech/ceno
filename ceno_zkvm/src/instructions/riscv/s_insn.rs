@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{register_expr_to_memory_expr, MemoryChipOperations, MemoryExpr, RegisterExpr},
+    chip_handler::{MemoryChipOperations, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
@@ -60,7 +60,6 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         let prev_memory_ts = circuit_builder.create_witin(|| "prev_memory_ts")?;
         let prev_memory_value = UInt::new_unchecked(|| "prev_memory_value", circuit_builder)?;
 
-        // TODO: refactor into something similar to ReadRS1
         // Memory state
         circuit_builder.memory_write(
             || "write_mem",

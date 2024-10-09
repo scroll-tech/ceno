@@ -44,7 +44,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
         let rs2_read = UInt::new_unchecked(|| "rs2_red", circuit_builder)?;
         let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
 
-        // TODO: feels like this is the responsibility of the s_insn
         let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
 
         let memory_value = match I::INST_KIND {
