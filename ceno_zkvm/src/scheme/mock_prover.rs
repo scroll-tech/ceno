@@ -1,6 +1,7 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    declare_program,
     expression::{fmt, Expression},
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
@@ -25,6 +26,7 @@ use std::{
     sync::OnceLock,
 };
 
+const MOCK_PROGRAM_SIZE: usize = 32;
 pub const MOCK_RS1: u32 = 2;
 pub const MOCK_RS2: u32 = 3;
 pub const MOCK_RD: u32 = 4;
@@ -35,54 +37,60 @@ pub const MOCK_IMM_NEG3: u32 = 32 - 3;
 /// TODO: Make this a parameter?
 #[allow(clippy::identity_op)]
 #[allow(clippy::unusual_byte_groupings)]
-pub const MOCK_PROGRAM: &[u32] = &[
-    // R-Type
-    // funct7 | rs2 | rs1 | funct3 | rd | opcode
-    // -----------------------------------------
-    // add x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-    // sub  x4, x2, x3
-    0x20 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-    // mul (0x01, 0x00, 0x33)
-    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-    // and x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b111 << 12 | MOCK_RD << 7 | 0x33,
-    // or x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
-    // xor x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
-    // B-Type
-    // beq x2, x3, 8
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b000 << 12 | 0x08 << 7 | 0x63,
-    // bne x2, x3, 8
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | 0x08 << 7 | 0x63,
-    // blt x2, x3, -8
-    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
-    // divu (0x01, 0x05, 0x33)
-    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
-    // srli x4, x2, 3
-    0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
-    // srli x4, x2, 31
-    0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
-    // sltu (0x00, 0x03, 0x33)
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b011 << 12 | MOCK_RD << 7 | 0x33,
-    // addi x4, x2, 3
-    0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
-    // addi x4, x2, -3
-    0b_1_111111 << 25 | MOCK_IMM_NEG3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
-    // bltu x2, x3, -8
-    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_110 << 12 | 0b_1100_1 << 7 | 0x63,
-    // bgeu x2, x3, -8
-    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_111 << 12 | 0b_1100_1 << 7 | 0x63,
-    // bge x2, x3, -8
-    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_101 << 12 | 0b_1100_1 << 7 | 0x63,
-    // mulhu (0x01, 0x00, 0x33)
-    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x3 << 12 | MOCK_RD << 7 | 0x33,
-    // sll x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | MOCK_RD << 7 | 0x33,
-    // srl x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
-];
+pub const MOCK_PROGRAM: [u32; MOCK_PROGRAM_SIZE] = {
+    let mut program: [u32; MOCK_PROGRAM_SIZE] = [0; MOCK_PROGRAM_SIZE];
+
+    declare_program!(
+        program,
+        // R-Type
+        // funct7 | rs2 | rs1 | funct3 | rd | opcode
+        // -----------------------------------------
+        // add x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+        // sub  x4, x2, x3
+        0x20 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+        // mul (0x01, 0x00, 0x33)
+        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+        // and x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b111 << 12 | MOCK_RD << 7 | 0x33,
+        // or x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
+        // xor x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
+        // B-Type
+        // beq x2, x3, 8
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b000 << 12 | 0x08 << 7 | 0x63,
+        // bne x2, x3, 8
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | 0x08 << 7 | 0x63,
+        // blt x2, x3, -8
+        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
+        // divu (0x01, 0x05, 0x33)
+        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
+        // srli x4, x2, 3
+        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
+        // srli x4, x2, 31
+        0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
+        // sltu (0x00, 0x03, 0x33)
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b011 << 12 | MOCK_RD << 7 | 0x33,
+        // addi x4, x2, 3
+        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
+        // addi x4, x2, -3
+        0b_1_111111 << 25 | MOCK_IMM_NEG3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
+        // bltu x2, x3, -8
+        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_110 << 12 | 0b_1100_1 << 7 | 0x63,
+        // bgeu x2, x3, -8
+        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_111 << 12 | 0b_1100_1 << 7 | 0x63,
+        // bge x2, x3, -8
+        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_101 << 12 | 0b_1100_1 << 7 | 0x63,
+        // mulhu (0x01, 0x00, 0x33)
+        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x3 << 12 | MOCK_RD << 7 | 0x33,
+        // sll x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | MOCK_RD << 7 | 0x33,
+        // srl x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33
+    );
+    program
+};
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
 pub const MOCK_PC_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 4);
@@ -238,9 +246,13 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     ) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = ProgramTableCircuit::construct_circuit(&mut cb).unwrap();
-        let fixed =
-            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, MOCK_PROGRAM);
+        let config =
+            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
+        let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
+            &config,
+            cs.num_fixed,
+            &MOCK_PROGRAM,
+        );
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
