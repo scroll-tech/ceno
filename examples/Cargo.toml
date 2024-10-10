@@ -1,0 +1,6 @@
+[package]
+name = "examples"
+resolver = "2"
+
+[dependencies]
+ceno_rt = { path = "../ceno_rt" }
