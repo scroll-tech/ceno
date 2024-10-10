@@ -657,7 +657,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: IsLtConfig,
+        pub lt_wtns: IsLtConfig<1>,
     }
 
     struct AssertLtCircuitInput {
@@ -670,7 +670,7 @@ mod tests {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
             let lt_wtns =
-                IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), Some(true), 1)?;
+                IsLtConfig::<1>::construct_circuit(cb, || "lt", a.expr(), b.expr(), Some(true))?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -778,7 +778,7 @@ mod tests {
     struct LtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: IsLtConfig,
+        pub lt_wtns: IsLtConfig<1>,
     }
 
     struct LtCircuitInput {
@@ -790,7 +790,8 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), None, 1)?;
+            let lt_wtns =
+                IsLtConfig::<1>::construct_circuit(cb, || "lt", a.expr(), b.expr(), None)?;
             Ok(Self { a, b, lt_wtns })
         }
 

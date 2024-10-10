@@ -28,7 +28,7 @@ pub struct ArithConfig<E: ExtensionField> {
     remainder: UInt<E>,
     inter_mul_value: UInt<E>,
     is_zero: IsZeroConfig,
-    pub remainder_lt: IsLtConfig,
+    pub remainder_lt: IsLtConfig<UINT_LIMBS>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -67,13 +67,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         )?;
 
         // remainder should be less than divisor if divisor != 0.
-        let lt = IsLtConfig::construct_circuit(
+        let lt = IsLtConfig::<UINT_LIMBS>::construct_circuit(
             cb,
             || "remainder < divisor?",
             r.value(),
             divisor.value(),
             None,
-            UINT_LIMBS,
         )?;
 
         // When divisor is zero, remainder is -1 implies "remainder > divisor" aka. lt.expr() == 0

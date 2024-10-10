@@ -24,7 +24,7 @@ pub struct ArithConfig<E: ExtensionField> {
     #[allow(dead_code)]
     rd_written: UInt<E>,
 
-    is_lt: IsLtConfig,
+    is_lt: IsLtConfig<UINT_LIMBS>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -49,13 +49,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
 
-        let lt = IsLtConfig::construct_circuit(
+        let lt = IsLtConfig::<UINT_LIMBS>::construct_circuit(
             circuit_builder,
             || "rs1 < rs2",
             rs1_read.value(),
             rs2_read.value(),
             None,
-            UINT_LIMBS,
         )?;
         let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
 

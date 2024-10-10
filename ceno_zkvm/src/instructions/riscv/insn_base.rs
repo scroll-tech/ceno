@@ -1,7 +1,7 @@
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
-use super::constants::{UInt, PC_STEP_SIZE};
+use super::constants::{UInt, PC_STEP_SIZE, UINT_LIMBS};
 use crate::{
     chip_handler::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
@@ -74,7 +74,7 @@ impl<E: ExtensionField> StateInOut<E> {
 pub struct ReadRS1<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
-    pub lt_cfg: IsLtConfig,
+    pub lt_cfg: IsLtConfig<UINT_LIMBS>,
     _field_type: PhantomData<E>,
 }
 
@@ -129,7 +129,7 @@ impl<E: ExtensionField> ReadRS1<E> {
 pub struct ReadRS2<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
-    pub lt_cfg: IsLtConfig,
+    pub lt_cfg: IsLtConfig<UINT_LIMBS>,
     _field_type: PhantomData<E>,
 }
 
@@ -185,7 +185,7 @@ pub struct WriteRD<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
     pub prev_value: UInt<E>,
-    pub lt_cfg: IsLtConfig,
+    pub lt_cfg: IsLtConfig<UINT_LIMBS>,
 }
 
 impl<E: ExtensionField> WriteRD<E> {

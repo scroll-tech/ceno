@@ -14,13 +14,12 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct IsLtConfig {
+pub struct IsLtConfig<const MAX_NUM_LIMBS: usize> {
     pub is_lt: Option<WitIn>,
     pub diff: Vec<WitIn>,
-    pub max_num_u16_limbs: usize,
 }
 
-impl IsLtConfig {
+impl<const MAX_NUM_LIMBS: usize> IsLtConfig<MAX_NUM_LIMBS> {
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
         self.is_lt.unwrap().expr()
     }
@@ -35,9 +34,7 @@ impl IsLtConfig {
         lhs: Expression<E>,
         rhs: Expression<E>,
         assert_less_than: Option<bool>,
-        max_num_u16_limbs: usize,
     ) -> Result<Self, ZKVMError> {
-        assert!(max_num_u16_limbs >= 1);
         cb.namespace(
             || "is_lt",
             |cb| {
@@ -68,7 +65,7 @@ impl IsLtConfig {
                     )
                 };
 
-                let diff = (0..max_num_u16_limbs)
+                let diff = (0..MAX_NUM_LIMBS)
                     .map(|i| witin_u16(format!("diff_{i}")))
                     .collect::<Result<Vec<WitIn>, _>>()?;
 
@@ -81,22 +78,18 @@ impl IsLtConfig {
                     .reduce(|a, b| a + b)
                     .expect("reduce error");
 
-                let range = (1u64 << (max_num_u16_limbs * u16::BITS as usize)).into();
+                let range = (1u64 << (MAX_NUM_LIMBS * u16::BITS as usize)).into();
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
-                Ok(IsLtConfig {
-                    is_lt,
-                    diff,
-                    max_num_u16_limbs,
-                })
+                Ok(IsLtConfig { is_lt, diff })
             },
         )
     }
 
-    pub fn cal_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) -> u64 {
+    pub fn cal_diff(is_lt: bool, lhs: u64, rhs: u64) -> u64 {
         (if is_lt {
-            1u64 << (u16::BITS as usize * max_num_u16_limbs)
+            1u64 << (u16::BITS as usize * MAX_NUM_LIMBS)
         } else {
             0
         } + lhs
@@ -118,7 +111,7 @@ impl IsLtConfig {
             // assert is_lt == true
             true
         };
-        let diff = Self::cal_diff(is_lt, self.max_num_u16_limbs, lhs, rhs);
+        let diff = Self::cal_diff(is_lt, lhs, rhs);
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
             let val = (diff >> (i * u16::BITS as usize)) & 0xffff;

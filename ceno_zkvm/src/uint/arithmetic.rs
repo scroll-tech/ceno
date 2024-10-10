@@ -9,7 +9,10 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::IsLtConfig,
-    instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
+    instructions::riscv::{
+        config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
+        constants::UINT_LIMBS,
+    },
 };
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
@@ -139,16 +142,18 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .iter()
             .enumerate()
             .map(|(i, carry)| {
-                IsLtConfig::construct_circuit(
+                IsLtConfig::<UINT_LIMBS>::construct_circuit(
                     circuit_builder,
                     || format!("carry_{i}_in_less_than"),
                     carry.expr(),
                     (Self::MAX_DEGREE_2_MUL_CARRY_VALUE as usize).into(),
                     Some(true),
-                    Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
+                    // Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
                 )
             })
-            .collect::<Result<Vec<IsLtConfig>, ZKVMError>>()?;
+            .collect::<Result<Vec<IsLtConfig<UINT_LIMBS>>, ZKVMError>>()?;
+
+        // println!("MAX LIMB{:?}", Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB);
 
         // creating a witness constrained as expression to reduce overall degree
         let mut swap_witin = |name: &str,
@@ -853,6 +858,7 @@ mod tests {
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             gadgets::IsLtConfig,
+            instructions::riscv::constants::UINT_LIMBS,
             scheme::mock_prover::MockProver,
             uint::UIntLimbs,
             witness::LkMultiplicity,
@@ -893,8 +899,7 @@ mod tests {
                 .flat_map(|carry| {
                     let max_carry_value = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_VALUE;
                     let max_carry_u16_limb = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_U16_LIMB;
-                    let diff =
-                        IsLtConfig::cal_diff(true, max_carry_u16_limb, carry, max_carry_value);
+                    let diff = IsLtConfig::<UINT_LIMBS>::cal_diff(true, carry, max_carry_value);
                     let mut diff_u16_limb = Value::new_unchecked(diff).as_u16_limbs().to_vec();
                     diff_u16_limb.resize(max_carry_u16_limb, 0);
                     diff_u16_limb.iter().map(|v| *v as u64).collect_vec()

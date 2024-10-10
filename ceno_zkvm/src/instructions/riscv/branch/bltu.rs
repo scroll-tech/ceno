@@ -26,7 +26,7 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub b_insn: BInstructionConfig<E>,
     pub read_rs1: UInt<E>,
     pub read_rs2: UInt<E>,
-    pub is_lt: IsLtConfig,
+    pub is_lt: IsLtConfig<UINT_LIMBS>,
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
@@ -42,13 +42,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
         let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
         let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
 
-        let is_lt = IsLtConfig::construct_circuit(
+        let is_lt = IsLtConfig::<UINT_LIMBS>::construct_circuit(
             circuit_builder,
             || "rs1<rs2",
             read_rs1.value(),
             read_rs2.value(),
             None,
-            UINT_LIMBS,
         )?;
 
         let branch_taken_bit = match I::INST_KIND {

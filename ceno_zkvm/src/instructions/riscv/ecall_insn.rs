@@ -14,11 +14,13 @@ use ceno_emul::{InsnKind::EANY, StepRecord, Tracer, CENO_PLATFORM, PC_STEP_SIZE}
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
+use super::constants::UINT_LIMBS;
+
 pub struct EcallInstructionConfig {
     pub pc: WitIn,
     pub ts: WitIn,
     prev_x5_ts: WitIn,
-    lt_x5_cfg: IsLtConfig,
+    lt_x5_cfg: IsLtConfig<UINT_LIMBS>,
 }
 
 impl EcallInstructionConfig {
