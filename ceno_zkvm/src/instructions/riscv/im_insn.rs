@@ -1,14 +1,13 @@
 use crate::{
-    chip_handler::{MemoryChipOperations, MemoryExpr, RegisterExpr},
+    chip_handler::{MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::insn_base::{ReadRS1, StateInOut, WriteRD},
-    set_val,
+    expression::{Expression, ToExpr},
+    instructions::riscv::insn_base::{ReadMEM, ReadRS1, StateInOut, WriteRD},
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind, StepRecord, Tracer};
+use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
@@ -20,8 +19,7 @@ pub struct IMInstructionConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     rs1: ReadRS1<E>,
     rd: WriteRD<E>,
-
-    prev_memory_ts: WitIn,
+    mem_read: ReadMEM<E>,
 }
 
 impl<E: ExtensionField> IMInstructionConfig<E> {
@@ -40,6 +38,10 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
         let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
         let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
 
+        // Memory
+        let mem_read =
+            ReadMEM::construct_circuit(circuit_builder, memory_addr, memory_read, vm_state.ts)?;
+
         // Fetch the instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
@@ -51,24 +53,11 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
             imm.clone(),
         ))?;
 
-        // Memory State
-        let prev_memory_ts = circuit_builder.create_witin(|| "prev_memory_ts")?;
-
-        // TODO: handle the ltsconfig
-        // TODO: refactor into RS1Read type structure
-        circuit_builder.memory_read(
-            || "read_mem",
-            &memory_addr,
-            prev_memory_ts.expr(),
-            vm_state.ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
-            memory_read,
-        )?;
-
         Ok(IMInstructionConfig {
             vm_state,
             rs1,
             rd,
-            prev_memory_ts,
+            mem_read,
         })
     }
 
@@ -80,16 +69,11 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
     ) -> Result<(), ZKVMError> {
         self.vm_state.assign_instance(instance, step)?;
         self.rs1.assign_instance(instance, lk_multiplicity, step)?;
+        self.mem_read
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
-
-        // Memory state
-        set_val!(
-            instance,
-            self.prev_memory_ts,
-            step.memory_op().unwrap().previous_cycle
-        );
 
         Ok(())
     }
