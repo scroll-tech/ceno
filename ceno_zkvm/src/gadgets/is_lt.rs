@@ -1,5 +1,6 @@
 use std::{fmt::Display, mem::MaybeUninit};
 
+use ceno_emul::SWord;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -17,7 +18,6 @@ use crate::{
 pub struct IsLtConfig {
     pub is_lt: Option<WitIn>,
     pub diff: Vec<WitIn>,
-    pub max_num_u16_limbs: usize,
 }
 
 impl IsLtConfig {
@@ -81,22 +81,22 @@ impl IsLtConfig {
                     .reduce(|a, b| a + b)
                     .expect("reduce error");
 
-                let range = (1u64 << (max_num_u16_limbs * u16::BITS as usize)).into();
+                let range = Self::range(max_num_u16_limbs).into();
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
-                Ok(IsLtConfig {
-                    is_lt,
-                    diff,
-                    max_num_u16_limbs,
-                })
+                Ok(IsLtConfig { is_lt, diff })
             },
         )
     }
 
+    fn range(max_num_u16_limbs: usize) -> u64 {
+        1u64 << (u16::BITS as usize * max_num_u16_limbs)
+    }
+
     pub fn cal_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) -> u64 {
         (if is_lt {
-            1u64 << (u16::BITS as usize * max_num_u16_limbs)
+            Self::range(max_num_u16_limbs)
         } else {
             0
         } + lhs
@@ -118,7 +118,39 @@ impl IsLtConfig {
             // assert is_lt == true
             true
         };
-        let diff = Self::cal_diff(is_lt, self.max_num_u16_limbs, lhs, rhs);
+
+        let diff = Self::cal_diff(is_lt, self.diff.len(), lhs, rhs);
+        self.diff.iter().enumerate().for_each(|(i, wit)| {
+            // extract the 16 bit limb from diff and assign to instance
+            let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
+            lkm.assert_ux::<16>(val);
+            set_val!(instance, wit, val);
+        });
+        Ok(())
+    }
+
+    // TODO: refactor with the above function
+    pub fn assign_instance_signed<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        lkm: &mut LkMultiplicity,
+        lhs: SWord,
+        rhs: SWord,
+    ) -> Result<(), ZKVMError> {
+        let is_lt = if let Some(is_lt_wit) = self.is_lt {
+            let is_lt = lhs < rhs;
+            set_val!(instance, is_lt_wit, is_lt as u64);
+            is_lt
+        } else {
+            // assert is_lt == true
+            true
+        };
+
+        let diff = if is_lt {
+            Self::range(self.diff.len()) - (rhs - lhs) as u64
+        } else {
+            (lhs - rhs) as u64
+        };
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
             let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
