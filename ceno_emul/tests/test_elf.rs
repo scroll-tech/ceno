@@ -3,7 +3,7 @@ use ceno_emul::{ByteAddr, EmuContext, InsnKind, StepRecord, VMState, CENO_PLATFO
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_mini");
+    let program_elf = ceno_examples::ceno_rt_mini;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
     Ok(())
@@ -11,7 +11,7 @@ fn test_ceno_rt_mini() -> Result<()> {
 
 #[test]
 fn test_ceno_rt_panic() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_panic");
+    let program_elf = ceno_examples::ceno_rt_panic;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let steps = run(&mut state)?;
     let last = steps.last().unwrap();
@@ -23,7 +23,7 @@ fn test_ceno_rt_panic() -> Result<()> {
 
 #[test]
 fn test_ceno_rt_mem() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_mem");
+    let program_elf = ceno_examples::ceno_rt_mem;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 
@@ -34,7 +34,7 @@ fn test_ceno_rt_mem() -> Result<()> {
 
 #[test]
 fn test_ceno_rt_alloc() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_alloc");
+    let program_elf = ceno_examples::ceno_rt_alloc;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 
@@ -59,7 +59,7 @@ fn test_ceno_rt_alloc() -> Result<()> {
 
 #[test]
 fn test_ceno_rt_io() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_io");
+    let program_elf = ceno_examples::ceno_rt_io;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 

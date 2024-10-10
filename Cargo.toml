@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "ceno_emul",
+    "examples-builder",
     "ceno_rt",
     "gkr",
     "gkr-graph",
@@ -15,6 +16,7 @@ members = [
     "ceno_zkvm",
     "poseidon"
 ]
+exclude = ["examples"]
 resolver = "2"
 
 [workspace.package]
