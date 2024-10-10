@@ -84,6 +84,11 @@ impl Platform {
         10
     }
 
+    /// Register containing the 2nd function argument. (x11, a1)
+    pub const fn reg_arg1(&self) -> RegIdx {
+        11
+    }
+
     /// The code of ecall HALT.
     pub const fn ecall_halt(&self) -> u32 {
         0
