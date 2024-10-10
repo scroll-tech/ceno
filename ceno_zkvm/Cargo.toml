@@ -21,18 +21,18 @@ ff_ext = { path = "../ff_ext" }
 ceno_emul = { path = "../ceno_emul" }
 mpcs = { path = "../mpcs" }
 
-itertools = "0.12.0"
+itertools = "0.12.1"
 strum = "0.25.0"
 strum_macros = "0.25.3"
-paste = "1.0.14"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+paste = "1.0.15"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tracing-flame = "0.2.0"
 tracing = "0.1.40"
 
 rand = "0.8"
 thread_local = "1.1.8"
 generic_static = "0.2.0"
-clap = { version = "4.5.17", features = ["derive"] }
+clap = { version = "4.5.20", features = ["derive"] }
 tempfile = "3.13.0"
 
 [dev-dependencies]
@@ -40,7 +40,7 @@ pprof = { version = "0.13", features = ["flamegraph"]}
 criterion = { version = "0.5", features = ["html_reports"] }
 cfg-if = "1.0.0"
 const_env = "0.1.2"
-serde_json = "1.0.108"
+serde_json = "1.0.128"
 base64 = "0.22.1"
 
 [build-dependencies]
