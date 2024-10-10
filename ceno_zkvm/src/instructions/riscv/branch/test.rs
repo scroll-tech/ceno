@@ -216,12 +216,11 @@ fn test_blt_circuit() -> Result<(), ZKVMError> {
     impl_blt_circuit(false, 0, 0)?;
     impl_blt_circuit(true, 0, 1)?;
 
-    // TODO: fix negative numbers
-    // impl_blt_circuit(false, 1, -10)?;
-    // impl_blt_circuit(false, -10, -10)?;
-    // impl_blt_circuit(false, -9, -10)?;
-    // impl_blt_circuit(true, -9, 1)?;
-    // impl_blt_circuit(true, -10, -9)?;
+    impl_blt_circuit(false, 1, -10)?;
+    impl_blt_circuit(false, -10, -10)?;
+    impl_blt_circuit(false, -9, -10)?;
+    impl_blt_circuit(true, -9, 1)?;
+    impl_blt_circuit(true, -10, -9)?;
     Ok(())
 }
 
@@ -268,12 +267,11 @@ fn test_bge_circuit() -> Result<(), ZKVMError> {
     impl_bge_circuit(true, 0, 0)?;
     impl_bge_circuit(false, 0, 1)?;
 
-    // TODO: fix negative numbers
-    // impl_blt_circuit(true, 1, -10)?;
-    // impl_blt_circuit(true, -10, -10)?;
-    // impl_blt_circuit(true, -9, -10)?;
-    // impl_blt_circuit(false, -9, 1)?;
-    // impl_blt_circuit(false, -10, -9)?;
+    impl_bge_circuit(true, 1, -10)?;
+    impl_bge_circuit(true, -10, -10)?;
+    impl_bge_circuit(true, -9, -10)?;
+    impl_bge_circuit(false, -9, 1)?;
+    impl_bge_circuit(false, -10, -9)?;
     Ok(())
 }
 

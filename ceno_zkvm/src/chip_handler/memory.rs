@@ -50,7 +50,8 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             cb.write_record(|| "write_record", write_record)?;
 
             // assert prev_ts < current_ts
-            let lt_cfg = cb.less_than(
+            let lt_cfg = IsLtConfig::construct_circuit(
+                cb,
                 || "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
@@ -102,7 +103,8 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             cb.read_record(|| "read_record", read_record)?;
             cb.write_record(|| "write_record", write_record)?;
 
-            let lt_cfg = cb.less_than(
+            let lt_cfg = IsLtConfig::construct_circuit(
+                cb,
                 || "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
