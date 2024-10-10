@@ -69,6 +69,7 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
     ) -> Result<(), ZKVMError> {
         self.vm_state.assign_instance(instance, step)?;
         self.rs1.assign_instance(instance, lk_multiplicity, step)?;
+        self.rd.assign_instance(instance, lk_multiplicity, step)?;
         self.mem_read
             .assign_instance(instance, lk_multiplicity, step)?;
 

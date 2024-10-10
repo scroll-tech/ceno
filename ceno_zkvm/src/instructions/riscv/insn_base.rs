@@ -242,7 +242,6 @@ impl<E: ExtensionField> WriteRD<E> {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ReadMEM<E: ExtensionField> {
     pub prev_ts: WitIn,
@@ -251,7 +250,6 @@ pub struct ReadMEM<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ReadMEM<E> {
-    #[allow(dead_code)]
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: MemoryExpr<E>,
@@ -274,7 +272,6 @@ impl<E: ExtensionField> ReadMEM<E> {
         })
     }
 
-    #[allow(dead_code)]
     pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
