@@ -59,4 +59,3 @@ jobs:
         with:
           command: run
           args: --package ceno_zkvm --example riscv_opcodes --target ${{ matrix.target }} -- --start 10 --end 11
-
