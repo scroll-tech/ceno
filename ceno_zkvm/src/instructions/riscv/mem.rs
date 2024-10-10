@@ -12,7 +12,7 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
-struct StoreConfig<E: ExtensionField> {
+pub struct StoreConfig<E: ExtensionField> {
     s_insn: SInstructionConfig<E>,
 
     rs1_read: UInt<E>,

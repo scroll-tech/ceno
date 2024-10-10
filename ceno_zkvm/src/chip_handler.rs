@@ -54,7 +54,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     fn memory_read(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
@@ -65,7 +65,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     fn memory_write(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,

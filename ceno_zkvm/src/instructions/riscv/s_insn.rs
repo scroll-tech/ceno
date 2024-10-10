@@ -63,7 +63,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         // Memory state
         circuit_builder.memory_write(
             || "write_mem",
-            &memory_addr,
+            memory_addr,
             prev_memory_ts.expr(),
             vm_state.ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
             prev_memory_value.memory_expr(),
