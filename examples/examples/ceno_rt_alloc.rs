@@ -21,6 +21,11 @@ fn main() {
     let mut v: Vec<u32> = vec![];
     v.push(0xbeef);
     black_box(&v[0]);
+
+    // Test writing to a larger vector on the heap
+    let mut v: Vec<u32> = vec![0; 128 * 1024];
+    v[999] = 0xdead_beef;
+    black_box(&v[0]);
 }
 
 /// Prevent compiler optimizations.

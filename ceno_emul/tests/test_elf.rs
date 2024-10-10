@@ -73,7 +73,9 @@ fn test_ceno_rt_io() -> Result<()> {
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
-    state.iter_until_halt().collect()
+    let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
+    eprintln!("Emulator ran for {} steps.", steps.len());
+    Ok(steps)
 }
 
 const WORD_SIZE: usize = 4;
