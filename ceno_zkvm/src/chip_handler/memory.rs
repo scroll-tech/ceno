@@ -16,7 +16,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
     fn memory_read(
         &mut self,
         name_fn: N,
-        memory_addr: MemoryExpr<E>,
+        memory_addr: &MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
@@ -67,7 +67,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
     fn memory_write(
         &mut self,
         name_fn: N,
-        memory_addr: MemoryExpr<E>,
+        memory_addr: &MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
