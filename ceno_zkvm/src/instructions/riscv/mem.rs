@@ -1,8 +1,12 @@
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
+    expression::ToExpr,
     instructions::{
-        riscv::{constants::UInt, s_insn::SInstructionConfig, RIVInstruction},
+        riscv::{
+            constants::UInt, im_insn::IMInstructionConfig, s_insn::SInstructionConfig,
+            RIVInstruction,
+        },
         Instruction,
     },
     witness::LkMultiplicity,
@@ -41,7 +45,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_red", circuit_builder)?;
+        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
 
         let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
@@ -83,6 +87,84 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs1_read.assign_limbs(instance, rs1.as_u16_limbs());
         config.rs2_read.assign_limbs(instance, rs2.as_u16_limbs());
+        config.imm.assign_value(instance, imm);
+
+        Ok(())
+    }
+}
+
+struct LoadConfig<E: ExtensionField> {
+    im_insn: IMInstructionConfig<E>,
+
+    rs1_read: UInt<E>,
+    imm: UInt<E>,
+    memory_read: UInt<E>,
+}
+
+pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
+
+pub struct LWOp;
+
+impl RIVInstruction for LWOp {
+    const INST_KIND: InsnKind = InsnKind::LW;
+}
+
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
+    type InstructionConfig = LoadConfig<E>;
+
+    fn name() -> String {
+        format!("{:?}", I::INST_KIND)
+    }
+
+    fn construct_circuit(
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+        let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
+        let memory_read = UInt::new_unchecked(|| "memory_read", circuit_builder)?;
+
+        let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
+
+        let memory_value = match I::INST_KIND {
+            InsnKind::SW => memory_read.register_expr(),
+            _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
+        };
+
+        let im_insn = IMInstructionConfig::<E>::construct_circuit(
+            circuit_builder,
+            I::INST_KIND,
+            &imm.expr(),
+            rs1_read.register_expr(),
+            memory_read.memory_expr(),
+            memory_addr.memory_expr(),
+            memory_value,
+        )?;
+
+        Ok(LoadConfig {
+            im_insn,
+            rs1_read,
+            memory_read,
+            imm,
+        })
+    }
+
+    fn assign_instance(
+        config: &Self::InstructionConfig,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
+        let memory_read = Value::new_unchecked(step.memory_op().unwrap().value.before);
+        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
+
+        config
+            .im_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
+        config.rs1_read.assign_limbs(instance, rs1.as_u16_limbs());
+        config
+            .memory_read
+            .assign_limbs(instance, memory_read.as_u16_limbs());
         config.imm.assign_value(instance, imm);
 
         Ok(())

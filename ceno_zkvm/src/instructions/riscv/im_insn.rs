@@ -2,82 +2,73 @@ use crate::{
     chip_handler::{MemoryChipOperations, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
-    instructions::riscv::{
-        constants::UInt,
-        insn_base::{ReadRS1, ReadRS2, StateInOut},
-    },
+    expression::{Expression, ToExpr, WitIn},
+    instructions::riscv::insn_base::{ReadRS1, StateInOut, WriteRD},
     set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
-    Value,
 };
 use ceno_emul::{InsnKind, StepRecord, Tracer};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
-/// This config handles the common part of S-type instructions:
-/// - PC, cycle, fetch.
-/// - Registers reads.
-/// - Memory write
-pub struct SInstructionConfig<E: ExtensionField> {
+/// This config handle the common part of I-type Instruction (memory variant)
+/// - PC, cycle, fetch
+/// - Register reads and writes
+/// - Memory writes
+pub struct IMInstructionConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     rs1: ReadRS1<E>,
-    rs2: ReadRS2<E>,
+    rd: WriteRD<E>,
 
     prev_memory_ts: WitIn,
-    prev_memory_value: UInt<E>,
 }
 
-impl<E: ExtensionField> SInstructionConfig<E> {
+impl<E: ExtensionField> IMInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
+        imm: &Expression<E>,
         rs1_read: RegisterExpr<E>,
-        rs2_read: RegisterExpr<E>,
+        memory_read: MemoryExpr<E>,
         memory_addr: MemoryExpr<E>,
-        memory_value: MemoryExpr<E>,
+        rd_written: RegisterExpr<E>,
     ) -> Result<Self, ZKVMError> {
-        // State in and out
         let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
 
         // Registers
         let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
-        let rs2 = ReadRS2::construct_circuit(circuit_builder, rs2_read, vm_state.ts)?;
+        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
 
-        // Fetch instruction
+        // Fetch the instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
             (insn_kind.codes().opcode as usize).into(),
-            0.into(),
+            rd.id.expr(),
             (insn_kind.codes().func3 as usize).into(),
             rs1.id.expr(),
-            rs2.id.expr(),
-            (insn_kind.codes().func7 as usize).into(),
+            0.into(),
+            imm.clone(),
         ))?;
 
-        // Memory state
+        // Memory State
         let prev_memory_ts = circuit_builder.create_witin(|| "prev_memory_ts")?;
-        let prev_memory_value = UInt::new_unchecked(|| "prev_memory_value", circuit_builder)?;
 
-        // Memory state
         // TODO: handle the ltsconfig
         // TODO: refactor into RS1Read type structure
-        circuit_builder.memory_write(
-            || "write_mem",
+        circuit_builder.memory_read(
+            || "read_mem",
             &memory_addr,
             prev_memory_ts.expr(),
             vm_state.ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
-            prev_memory_value.memory_expr(),
-            memory_value,
+            memory_read,
         )?;
 
-        Ok(SInstructionConfig {
+        Ok(IMInstructionConfig {
             vm_state,
             rs1,
-            rs2,
+            rd,
             prev_memory_ts,
-            prev_memory_value,
         })
     }
 
@@ -89,7 +80,6 @@ impl<E: ExtensionField> SInstructionConfig<E> {
     ) -> Result<(), ZKVMError> {
         self.vm_state.assign_instance(instance, step)?;
         self.rs1.assign_instance(instance, lk_multiplicity, step)?;
-        self.rs2.assign_instance(instance, lk_multiplicity, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
@@ -99,10 +89,6 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             instance,
             self.prev_memory_ts,
             step.memory_op().unwrap().previous_cycle
-        );
-        self.prev_memory_value.assign_limbs(
-            instance,
-            Value::new_unchecked(step.memory_op().unwrap().value.before).as_u16_limbs(),
         );
 
         Ok(())
