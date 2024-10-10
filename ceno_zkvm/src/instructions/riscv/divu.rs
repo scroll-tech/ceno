@@ -1,17 +1,34 @@
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{r_insn::RInstructionConfig, RIVInstruction};
+use super::{
+    constants::{UInt, UINT_LIMBS},
+    r_insn::RInstructionConfig,
+    RIVInstruction,
+};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::DivConfig,
-    instructions::Instruction, uint::Value, witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::Expression,
+    gadgets::{IsLtConfig, IsZeroConfig},
+    instructions::Instruction,
+    uint::Value,
+    witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 use std::marker::PhantomData;
 
 pub struct ArithConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
-    div_config: DivConfig<E, true>,
+
+    dividend: UInt<E>,
+    divisor: UInt<E>,
+    pub(crate) outcome: UInt<E>,
+
+    remainder: UInt<E>,
+    inter_mul_value: UInt<E>,
+    is_zero: IsZeroConfig,
+    pub remainder_lt: IsLtConfig,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -29,20 +46,63 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let div_config = DivConfig::construct_circuit(circuit_builder, || "divu")?;
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+        // outcome = dividend / divisor + remainder => dividend = divisor * outcome + r
+        let mut divisor = UInt::new_unchecked(|| "divisor", cb)?;
+        let mut outcome = UInt::new(|| "outcome", cb)?;
+        let r = UInt::new(|| "remainder", cb)?;
+        let (dividend, inter_mul_value) =
+            divisor.mul_add(|| "divisor * outcome + r", cb, &mut outcome, &r, true)?;
 
-        let r_insn = RInstructionConfig::<E>::construct_circuit(
-            circuit_builder,
-            I::INST_KIND,
-            div_config.dividend.register_expr(),
-            div_config.divisor.register_expr(),
-            div_config.quotient.register_expr(),
+        // div by zero check
+        let is_zero =
+            IsZeroConfig::construct_circuit(cb, || "divisor_zero_check", divisor.value())?;
+        let outcome_value = outcome.value();
+        cb.condition_require_equal(
+            || "outcome_is_zero",
+            is_zero.expr(),
+            outcome_value.clone(),
+            ((1 << UInt::<E>::M) - 1).into(),
+            outcome_value,
+        )
+        .unwrap();
+
+        // remainder should be less than divisor if divisor != 0.
+        let lt = IsLtConfig::construct_circuit(
+            cb,
+            || "remainder < divisor?",
+            r.value(),
+            divisor.value(),
+            None,
+            UINT_LIMBS,
         )?;
 
-        Ok(ArithConfig { r_insn, div_config })
+        // When divisor is zero, remainder is -1 implies "remainder > divisor" aka. lt.expr() == 0
+        // otherwise lt.expr() == 1
+        cb.require_equal(
+            || "remainder < divisor when non-zero divisor",
+            is_zero.expr() + lt.expr(),
+            Expression::from(1),
+        )?;
+
+        let r_insn = RInstructionConfig::<E>::construct_circuit(
+            cb,
+            I::INST_KIND,
+            dividend.register_expr(),
+            divisor.register_expr(),
+            outcome.register_expr(),
+        )?;
+
+        Ok(ArithConfig {
+            r_insn,
+            dividend,
+            divisor,
+            outcome,
+            remainder: r,
+            inter_mul_value,
+            is_zero,
+            remainder_lt: lt,
+        })
     }
 
     fn assign_instance(
@@ -67,10 +127,26 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         // assignment
         config.r_insn.assign_instance(instance, lkm, step)?;
-
         config
-            .div_config
-            .assign_instance(instance, lkm, &divisor, &outcome, &r)?;
+            .divisor
+            .assign_limbs(instance, divisor.as_u16_limbs());
+        config
+            .outcome
+            .assign_limbs(instance, outcome.as_u16_limbs());
+
+        let (dividend, inter_mul_value) = divisor.mul_add(&outcome, &r, lkm, true);
+        config
+            .inter_mul_value
+            .assign_mul_outcome(instance, lkm, &inter_mul_value)?;
+
+        config.dividend.assign_add_outcome(instance, &dividend);
+        config.remainder.assign_limbs(instance, r.as_u16_limbs());
+        config
+            .is_zero
+            .assign_instance(instance, divisor.as_u64().into())?;
+        config
+            .remainder_lt
+            .assign_instance(instance, lkm, r.as_u64(), divisor.as_u64())?;
 
         Ok(())
     }
@@ -134,8 +210,7 @@ mod test {
             );
 
             config
-                .div_config
-                .quotient
+                .outcome
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
 

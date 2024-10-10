@@ -24,7 +24,8 @@ pub struct ShiftConfig<E: ExtensionField> {
     pow2_rs2_low5: UInt<E>,
 
     // for SRL division arithmetics
-    div_config: Option<DivConfig<E, false>>,
+    remainder: Option<UInt<E>>,
+    div_config: Option<DivConfig<E>>,
 }
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
@@ -56,7 +57,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         // rs2 = rs2_high | rs2_low5
         let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
 
-        let (rs1_read, rd_written, div_config) = match I::INST_KIND {
+        let (rs1_read, rd_written, remainder, div_config) = match I::INST_KIND {
             InsnKind::SLL => {
                 let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
                 let rd_written = rs1_read.mul(
@@ -65,13 +66,22 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                     &mut pow2_rs2_low5,
                     true,
                 )?;
-                (rs1_read, rd_written, None)
+                (rs1_read, rd_written, None, None)
             }
             InsnKind::SRL => {
-                let div_config = DivConfig::construct_circuit(circuit_builder, || "srl_div")?;
+                let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+                let remainder = UInt::new(|| "remainder", circuit_builder)?;
+                let div_config = DivConfig::construct_circuit(
+                    circuit_builder,
+                    || "srl_div",
+                    &mut pow2_rs2_low5,
+                    &mut rd_written,
+                    &remainder,
+                )?;
                 (
                     div_config.dividend.clone(),
-                    div_config.quotient.clone(),
+                    rd_written,
+                    Some(remainder),
                     Some(div_config),
                 )
             }
@@ -103,6 +113,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rs2_low5,
             pow2_rs2_low5,
             div_config,
+            remainder,
         })
     }
 
@@ -149,6 +160,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                 )?;
 
                 config.rd_written.assign_value(instance, rd_written);
+                config
+                    .remainder
+                    .as_ref()
+                    .unwrap()
+                    .assign_value(instance, remainder);
             }
             _ => unreachable!(),
         }
