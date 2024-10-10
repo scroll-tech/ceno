@@ -112,8 +112,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rs2_high,
             rs2_low5,
             pow2_rs2_low5,
-            remainder,
             div_config,
+            remainder,
         })
     }
 
@@ -201,51 +201,46 @@ mod tests {
     use super::{ShiftLogicalInstruction, SllOp, SrlOp};
 
     #[test]
-    fn test_opcode_sll_1() {
-        verify::<SllOp>(0b_1, 3, 0b_1000);
-    }
-
-    #[test]
-    fn test_opcode_sll_2_rs2_overflow() {
+    fn test_opcode_sll() {
+        verify::<SllOp>("basic", 0b_0001, 3, 0b_1000);
         // 33 << 33 === 33 << 1
-        verify::<SllOp>(0b_1, 33, 0b_10);
+        verify::<SllOp>("rs2 over 5-bits", 0b_0001, 33, 0b_0010);
+        verify::<SllOp>("bit loss", 1 << 31 | 1, 1, 0b_0010);
+        verify::<SllOp>("zero shift", 0b_0001, 0, 0b_0001);
+        verify::<SllOp>("all zeros", 0b_0000, 0, 0b_0000);
+        verify::<SllOp>("base is zero", 0b_0000, 1, 0b_0000);
     }
 
     #[test]
-    fn test_opcode_sll_3_bit_loss() {
-        verify::<SllOp>(1 << 31 | 1, 1, 0b_10);
-    }
-
-    #[test]
-    fn test_opcode_srl_1() {
-        verify::<SrlOp>(0b_1000, 3, 0b_1);
-    }
-
-    #[test]
-    fn test_opcode_srl_2_rs2_overflow() {
+    fn test_opcode_srl() {
+        verify::<SrlOp>("basic", 0b_1000, 3, 0b_0001);
         // 33 >> 33 === 33 >> 1
-        verify::<SrlOp>(0b_1010, 33, 0b_101);
+        verify::<SrlOp>("rs2 over 5-bits", 0b_1010, 33, 0b_0101);
+        verify::<SrlOp>("bit loss", 0b_1001, 1, 0b_0100);
+        verify::<SrlOp>("zero shift", 0b_1000, 0, 0b_1000);
+        verify::<SrlOp>("all zeros", 0b_0000, 0, 0b_0000);
+        verify::<SrlOp>("base is zero", 0b_0000, 1, 0b_0000);
     }
 
-    #[test]
-    fn test_opcode_srl_3_bit_loss() {
-        // 33 >> 33 === 33 >> 1
-        verify::<SrlOp>(0b_1001, 1, 0b_100);
-    }
-
-    fn verify<I: RIVInstruction>(rs1_read: u32, rs2_read: u32, expected_rd_written: u32) {
+    fn verify<I: RIVInstruction>(
+        name: &'static str,
+        rs1_read: u32,
+        rs2_read: u32,
+        expected_rd_written: u32,
+    ) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let (name, mock_pc, mock_program_op) = match I::INST_KIND {
-            InsnKind::SLL => ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[19]),
-            InsnKind::SRL => ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[20]),
+        let shift = rs2_read & 0b11111;
+        let (prefix, mock_pc, mock_program_op, rd_written) = match I::INST_KIND {
+            InsnKind::SLL => ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[19], rs1_read << shift),
+            InsnKind::SRL => ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[20], rs1_read >> shift),
             _ => unreachable!(),
         };
 
         let config = cb
             .namespace(
-                || name,
+                || format!("{prefix}_({name})"),
                 |cb| {
                     let config =
                         ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
@@ -258,7 +253,7 @@ mod tests {
         config
             .rd_written
             .require_equal(
-                || "assert_rd_written",
+                || format!("{prefix}_({name})_assert_rd_written"),
                 &mut cb,
                 &UInt::from_const_unchecked(
                     Value::new_unchecked(expected_rd_written)
@@ -277,7 +272,7 @@ mod tests {
                 mock_program_op,
                 rs1_read,
                 rs2_read,
-                Change::new(0, expected_rd_written),
+                Change::new(0, rd_written),
                 0,
             )],
         )

@@ -318,6 +318,10 @@ name = "ceno-examples"
 version = "0.1.0"
 
 [[package]]
+name = "ceno-examples"
+version = "0.1.0"
+
+[[package]]
 name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
