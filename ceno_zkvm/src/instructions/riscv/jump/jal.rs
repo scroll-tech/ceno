@@ -17,18 +17,20 @@ use ceno_emul::PC_STEP_SIZE;
 
 pub struct JalConfig<E: ExtensionField> {
     pub j_insn: JInstructionConfig<E>,
-    pub pc_uint: UInt<E>,
-    pub next_pc_uint: UInt<E>,
-    pub imm: UInt<E>,
     pub rd_written: UInt<E>,
 }
 
 pub struct JalCircuit<E, I>(PhantomData<(E, I)>);
 
 /// JAL instruction circuit
-/// NOTE: does not validate that next_pc is aligned by 4-byte increments, which
+/// Note: does not validate that next_pc is aligned by 4-byte increments, which
 ///   should be verified by lookup argument of the next execution step against
 ///   the program table
+/// Assumption: values for valid initial program counter must lie between
+///   2^20 and 2^32 - 2^20 + 2 inclusive, probably enforced by the static
+///   program lookup table. If this assumption does not hold, then resulting
+///   value for next_pc may not correctly wrap mod 2^32 because of the use
+///   of native WitIn values for address space arithmetic.
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalCircuit<E, I> {
     type InstructionConfig = JalConfig<E>;
 
@@ -39,35 +41,27 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalCircuit<E, I> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<JalConfig<E>, ZKVMError> {
-        // TODO determine whether any of these UInt values can be constructed
-        //   using UInt::new_unchecked
-        let pc_uint = UInt::new(|| "next_pc_limbs", circuit_builder)?;
-        let imm = UInt::new(|| "imm_limbs", circuit_builder)?;
-        let next_pc_uint = pc_uint.add(|| "pc_uint + imm", circuit_builder, &imm, true)?;
-        let rd_written =
-            pc_uint.add_const(|| "rd_written", circuit_builder, PC_STEP_SIZE.into(), true)?;
+        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
         let j_insn = JInstructionConfig::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &imm.value(),
             rd_written.register_expr(),
         )?;
 
-        // constrain next_pc UInt to equal internal WitIn value
         circuit_builder.require_equal(
-            || "next_pc_limbs",
-            next_pc_uint.value(),
+            || "jal next_pc",
             j_insn.vm_state.next_pc.unwrap().expr(),
+            j_insn.vm_state.pc.expr() + j_insn.imm.expr(),
         )?;
 
-        Ok(JalConfig {
-            j_insn,
-            pc_uint,
-            next_pc_uint,
-            imm,
-            rd_written,
-        })
+        circuit_builder.require_equal(
+            || "jal rd_written",
+            rd_written.value(),
+            j_insn.vm_state.pc.expr() + PC_STEP_SIZE.into(),
+        )?;
+
+        Ok(JalConfig { j_insn, rd_written })
     }
 
     fn assign_instance(
@@ -80,20 +74,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalCircuit<E, I> {
             .j_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
-        // TODO determine whether any of these Value objects can be constructed
-        //  using Value::new_unchecked
-        let pc = Value::new(step.pc().before.0, lk_multiplicity);
-        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
-        let pc_step = Value::new_unchecked(PC_STEP_SIZE as u32);
-
-        config.pc_uint.assign_limbs(instance, pc.as_u16_limbs());
-        config.imm.assign_limbs(instance, imm.as_u16_limbs());
-
-        let result = pc.add(&imm, lk_multiplicity, true);
-        config.next_pc_uint.assign_add_outcome(instance, &result);
-
-        let result = pc.add(&pc_step, lk_multiplicity, true);
-        config.rd_written.assign_add_outcome(instance, &result);
+        let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
+        config.rd_written.assign_value(instance, rd_written);
 
         Ok(())
     }

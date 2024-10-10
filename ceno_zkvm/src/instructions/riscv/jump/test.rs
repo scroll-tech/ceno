@@ -1,4 +1,4 @@
-use ceno_emul::{Change, StepRecord, PC_STEP_SIZE};
+use ceno_emul::{ByteAddr, Change, StepRecord, PC_STEP_SIZE};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
@@ -26,13 +26,14 @@ fn test_opcode_jal() {
         .unwrap()
         .unwrap();
 
-    let pc_offset: usize = 0x10004;
+    let pc_offset: i32 = -4i32;
+    let new_pc: ByteAddr = ByteAddr(MOCK_PC_JAL.0.wrapping_add_signed(pc_offset));
     let (raw_witin, _lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_j_instruction(
             4,
-            Change::new(MOCK_PC_JAL, MOCK_PC_JAL + pc_offset),
+            Change::new(MOCK_PC_JAL, new_pc),
             MOCK_PROGRAM[21],
             Change::new(0, (MOCK_PC_JAL + PC_STEP_SIZE).into()),
             0,
