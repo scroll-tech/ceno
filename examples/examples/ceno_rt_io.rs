@@ -1,8 +1,7 @@
 #![no_main]
 #![no_std]
 
-#[allow(unused_imports)]
-use ceno_rt;
+extern crate ceno_rt;
 use ceno_rt::println;
 use core::fmt::Write;
 

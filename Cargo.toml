@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "ceno_emul",
+    "examples-builder",
     "ceno_rt",
     "gkr",
     "gkr-graph",
@@ -15,6 +16,7 @@ members = [
     "ceno_zkvm",
     "poseidon"
 ]
+exclude = ["examples"]
 resolver = "2"
 
 [workspace.package]
@@ -32,11 +34,14 @@ goldilocks = { git = "https://github.com/zhenfeizhang/Goldilocks" }
 halo2curves = "0.1.0"
 poseidon = { path = "./poseidon" }
 serde = { version = "1.0", features = ["derive"] }
-subtle = "2.2.1"
-rand_core = "0.6.0"
+subtle = "2.6.1"
+rand_core = "0.6.4"
 rand_xorshift = "0.3"
-rayon = "1.8"
+rayon = "1.10"
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
 
 [patch."https://github.com/zhenfeizhang/Goldilocks"]
 goldilocks = { git = "https://github.com/hero78119/Goldilocks" }
+
+[profile.release]
+lto = "thin"

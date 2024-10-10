@@ -123,12 +123,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         let record_exprs = {
             let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
-            fields.extend(
-                record
-                    .as_slice()
-                    .iter()
-                    .map(|f| Expression::Fixed(f.clone())),
-            );
+            fields.extend(record.as_slice().iter().map(|f| Expression::Fixed(*f)));
             cb.rlc_chip_record(fields)
         };
 
