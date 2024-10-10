@@ -85,7 +85,7 @@ impl<E: ExtensionField> Transcript<E> {
         self.append_message(label);
 
         let challenge = Challenge {
-            elements: E::from_limbs(self.permutation.squeeze().as_ref()),
+            elements: E::from_limbs(self.permutation.squeeze()),
         };
         challenge
     }
