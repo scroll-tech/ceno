@@ -181,15 +181,15 @@ fn main() {
         let mut bltu_records = Vec::new();
         let mut jal_records = Vec::new();
         let mut halt_records = Vec::new();
-        all_records.iter().for_each(|record| {
+        all_records.into_iter().for_each(|record| {
             let kind = record.insn().kind().1;
             match kind {
-                ADD => add_records.push(record.clone()),
-                BLTU => bltu_records.push(record.clone()),
-                JAL => jal_records.push(record.clone()),
+                ADD => add_records.push(record),
+                BLTU => bltu_records.push(record),
+                JAL => jal_records.push(record),
                 EANY => {
                     if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
-                        halt_records.push(record.clone());
+                        halt_records.push(record);
                     }
                 }
                 _ => {}
