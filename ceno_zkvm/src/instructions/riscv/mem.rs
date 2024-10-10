@@ -162,10 +162,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         config
             .im_insn
             .assign_instance(instance, lk_multiplicity, step)?;
-        config.rs1_read.assign_limbs(instance, rs1.as_u16_limbs());
-        config
-            .memory_read
-            .assign_limbs(instance, memory_read.as_u16_limbs());
+        config.rs1_read.assign_value(instance, rs1);
+        config.memory_read.assign_value(instance, memory_read);
         config.imm.assign_value(instance, imm);
 
         Ok(())
