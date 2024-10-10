@@ -1,3 +1,4 @@
+#![feature(strict_overflow_ops)]
 #![no_std]
 
 use core::arch::{asm, global_asm};
@@ -62,6 +63,7 @@ _start:
 /// _start_rust is called by the assembly entry point and it calls the Rust main().
 #[no_mangle]
 unsafe extern "C" fn _start_rust() -> ! {
+    allocator::init_heap();
     main();
     halt(0)
 }

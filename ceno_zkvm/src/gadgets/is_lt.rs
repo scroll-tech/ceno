@@ -5,7 +5,7 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 
 use crate::{
-    chip_handler::utils::pows_expr,
+    chip_handler::utils::power_sequence,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
@@ -72,7 +72,7 @@ impl IsLtConfig {
                     .map(|i| witin_u16(format!("diff_{i}")))
                     .collect::<Result<Vec<WitIn>, _>>()?;
 
-                let pows = pows_expr((1 << u16::BITS).into(), diff.len());
+                let pows = power_sequence((1 << u16::BITS).into(), diff.len());
 
                 let diff_expr = diff
                     .iter()
@@ -81,7 +81,7 @@ impl IsLtConfig {
                     .reduce(|a, b| a + b)
                     .expect("reduce error");
 
-                let range = (1 << (max_num_u16_limbs * u16::BITS as usize)).into();
+                let range = (1u64 << (max_num_u16_limbs * u16::BITS as usize)).into();
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
