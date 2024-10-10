@@ -40,6 +40,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: riscv32im-unknown-none-elf
       - name: Cargo cache
         uses: actions/cache@v3
         with:
@@ -49,7 +52,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: lint-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install cargo make
         run: |
