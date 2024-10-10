@@ -1,7 +1,7 @@
 use crate::{
     constants::{DIGEST_WIDTH, SPONGE_RATE, SPONGE_WIDTH},
     digest::Digest,
-    poseidon::{AdaptedField, Poseidon},
+    poseidon::Poseidon,
     poseidon_permutation::PoseidonPermutation,
 };
 
@@ -23,8 +23,7 @@ impl PoseidonHash {
         }
     }
 
-    pub fn hash_or_noop_iter<F: Poseidon, I: IntoIterator<Item = F>>(input: I) -> Digest<F> {
-        let mut input_iter = input.into_iter();
+    pub fn hash_or_noop_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(mut input_iter: I) -> Digest<F> {
         let mut initial_elements = Vec::with_capacity(DIGEST_WIDTH);
 
         for _ in 0..DIGEST_WIDTH+1 {
@@ -35,7 +34,7 @@ impl PoseidonHash {
         }
 
         if initial_elements.len() <= DIGEST_WIDTH {
-            Digest::from_partial(initial_elements.as_slice())
+            Digest::from_partial(initial_elements.into_iter().map(|v| v.clone()).collect::<Vec<F>>().as_slice())
         } else {
             let iter = initial_elements.into_iter().chain(input_iter);
             hash_n_to_m_no_pad_iter(iter, DIGEST_WIDTH).try_into().unwrap()
@@ -68,9 +67,8 @@ pub fn hash_n_to_m_no_pad<F: Poseidon>(inputs: &[F], num_outputs: usize) -> Vec<
     }
 }
 
-pub fn hash_n_to_m_no_pad_iter<F: Poseidon, I: IntoIterator<Item = F>>(inputs: I, num_outputs: usize) -> Vec<F> {
+pub fn hash_n_to_m_no_pad_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(mut input_iter: I, num_outputs: usize) -> Vec<F> {
     let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
-    let mut input_iter = inputs.into_iter();
 
     // Absorb all input chunks.
     loop {
@@ -81,7 +79,7 @@ pub fn hash_n_to_m_no_pad_iter<F: Poseidon, I: IntoIterator<Item = F>>(inputs: I
         // Overwrite the first r elements with the inputs. This differs from a standard sponge,
         // where we would xor or add in the inputs. This is a well-known variant, though,
         // sometimes called "overwrite mode".
-        perm.set_from_slice(chunk.as_slice(), 0);
+        perm.set_from_slice(chunk.into_iter().map(|v| v.clone()).collect::<Vec<F>>().as_slice(), 0);
         perm.permute();
     }
 

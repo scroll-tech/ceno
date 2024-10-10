@@ -1,7 +1,6 @@
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use poseidon::poseidon::Poseidon;
 use poseidon::poseidon_permutation::PoseidonPermutation;
 
 
