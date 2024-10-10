@@ -2,8 +2,7 @@
 #![no_std]
 use core::ptr::{addr_of, read_volatile};
 
-#[allow(unused_imports)]
-use ceno_rt;
+extern crate ceno_rt;
 
 extern crate alloc;
 use alloc::{vec, vec::Vec};

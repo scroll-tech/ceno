@@ -4,8 +4,7 @@
 // Use volatile functions to prevent compiler optimizations.
 use core::ptr::{read_volatile, write_volatile};
 
-#[allow(unused_imports)]
-use ceno_rt;
+extern crate ceno_rt;
 const OUTPUT_ADDRESS: u32 = 0x8000_0000;
 
 #[no_mangle]

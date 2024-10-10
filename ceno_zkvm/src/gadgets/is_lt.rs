@@ -39,7 +39,7 @@ impl IsLtConfig {
     ) -> Result<Self, ZKVMError> {
         assert!(max_num_u16_limbs >= 1);
         cb.namespace(
-            || "less_than",
+            || "is_lt",
             |cb| {
                 let name = name_fn();
                 let (is_lt, is_lt_expr) = if let Some(lt) = assert_less_than {
@@ -81,7 +81,7 @@ impl IsLtConfig {
                     .reduce(|a, b| a + b)
                     .expect("reduce error");
 
-                let range = (1 << (max_num_u16_limbs * u16::BITS as usize)).into();
+                let range = (1u64 << (max_num_u16_limbs * u16::BITS as usize)).into();
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
