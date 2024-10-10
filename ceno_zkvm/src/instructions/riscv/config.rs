@@ -227,11 +227,12 @@ impl SignedLtConfig {
         assert_less_than: Option<bool>,
     ) -> Result<Self, ZKVMError> {
         cb.namespace(name_fn, |cb| {
+            let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::C - 1)) - 1).into();
             // Extract the sign bit.
             let is_lhs_neg = IsLtConfig::construct_circuit(
                 cb,
                 || "lhs_msb",
-                (i16::MAX as usize).into(),
+                max_signed_limb_expr.clone(),
                 lhs.limbs.iter().last().unwrap().expr(), // msb limb
                 None,
                 1,
@@ -239,7 +240,7 @@ impl SignedLtConfig {
             let is_rhs_neg = IsLtConfig::construct_circuit(
                 cb,
                 || "rhs_msb",
-                (i16::MAX as usize).into(),
+                max_signed_limb_expr,
                 rhs.limbs.iter().last().unwrap().expr(), // msb limb
                 None,
                 1,
@@ -275,18 +276,19 @@ impl SignedLtConfig {
         lhs: Word,
         rhs: Word,
     ) -> Result<(), ZKVMError> {
+        let max_signed_limb = (1u64 << (UInt::<E>::C - 1)) - 1;
         let lhs_value = Value::new_unchecked(lhs);
         let rhs_value = Value::new_unchecked(rhs);
         self.is_lhs_neg.assign_instance(
             instance,
             lkm,
-            i16::MAX as u64,
+            max_signed_limb,
             *lhs_value.limbs.last().unwrap() as u64,
         )?;
         self.is_rhs_neg.assign_instance(
             instance,
             lkm,
-            i16::MAX as u64,
+            max_signed_limb,
             *rhs_value.limbs.last().unwrap() as u64,
         )?;
 
