@@ -17,7 +17,7 @@ use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{
     collections::HashSet,
-    fs::{self, File},
+    fs::File,
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
@@ -82,8 +82,8 @@ pub const MOCK_PROGRAM: &[u32] = &[
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | MOCK_RD << 7 | 0x33,
     // srl x4, x2, x3
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
-    // jal x4, 0x10004
-    0b_0_0000000010_0_00010000 << 12 | MOCK_RD << 7 | 0x6f,
+    // jal x4, 0xffffe
+    0b_1_1111111110_1_11111111 << 12 | MOCK_RD << 7 | 0x6f,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
