@@ -81,7 +81,7 @@ impl IsLtConfig {
                     .reduce(|a, b| a + b)
                     .expect("reduce error");
 
-                let range = (1 << (max_num_u16_limbs * u16::BITS as usize)).into();
+                let range = (1u64 << (max_num_u16_limbs * u16::BITS as usize)).into();
 
                 cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
