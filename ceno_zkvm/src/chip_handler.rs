@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{Expression, ToExpr},
     gadgets::IsLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
 };
