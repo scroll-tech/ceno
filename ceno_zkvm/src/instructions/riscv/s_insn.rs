@@ -2,7 +2,7 @@ use crate::{
     chip_handler::{MemoryChipOperations, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
+    expression::{Expression, ToExpr, WitIn},
     instructions::riscv::{
         constants::UInt,
         insn_base::{ReadRS1, ReadRS2, StateInOut},
@@ -33,6 +33,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
+        imm: &Expression<E>,
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
         memory_addr: MemoryExpr<E>,
@@ -53,7 +54,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             (insn_kind.codes().func3 as usize).into(),
             rs1.id.expr(),
             rs2.id.expr(),
-            (insn_kind.codes().func7 as usize).into(),
+            imm.clone(),
         ))?;
 
         // Memory state
@@ -98,9 +99,9 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             self.prev_memory_ts,
             step.memory_op().unwrap().previous_cycle
         );
-        self.prev_memory_value.assign_limbs(
+        self.prev_memory_value.assign_value(
             instance,
-            Value::new_unchecked(step.memory_op().unwrap().value.before).as_u16_limbs(),
+            Value::new_unchecked(step.memory_op().unwrap().value.before),
         );
 
         Ok(())

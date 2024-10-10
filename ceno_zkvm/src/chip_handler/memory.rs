@@ -2,7 +2,7 @@ use crate::{
     chip_handler::{MemoryChipOperations, MemoryExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::Expression,
     gadgets::IsLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
@@ -64,7 +64,6 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         })
     }
 
-    #[allow(dead_code)]
     fn memory_write(
         &mut self,
         name_fn: N,

@@ -54,6 +54,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
         let s_insn = SInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
+            &imm.value(),
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.memory_expr(),
@@ -81,8 +82,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
-        config.rs1_read.assign_limbs(instance, rs1.as_u16_limbs());
-        config.rs2_read.assign_limbs(instance, rs2.as_u16_limbs());
+        config.rs1_read.assign_value(instance, rs1);
+        config.rs2_read.assign_value(instance, rs2);
         config.imm.assign_value(instance, imm);
 
         Ok(())
