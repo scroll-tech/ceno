@@ -5,8 +5,9 @@ use crate::{
     chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr},
+    expression::{ToExpr, WitIn},
     instructions::riscv::insn_base::{StateInOut, WriteRD},
+    set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
@@ -23,13 +24,13 @@ use core::mem::MaybeUninit;
 pub struct JInstructionConfig<E: ExtensionField> {
     pub vm_state: StateInOut<E>,
     pub rd: WriteRD<E>,
+    pub imm: WitIn,
 }
 
 impl<E: ExtensionField> JInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        imm: &Expression<E>,
         rd_written: RegisterExpr<E>,
     ) -> Result<Self, ZKVMError> {
         // State in and out
@@ -37,6 +38,9 @@ impl<E: ExtensionField> JInstructionConfig<E> {
 
         // Registers
         let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
+
+        // Immediate
+        let imm = circuit_builder.create_witin(|| "imm")?;
 
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
@@ -46,10 +50,10 @@ impl<E: ExtensionField> JInstructionConfig<E> {
             0.into(),
             0.into(),
             0.into(),
-            imm.clone(),
+            imm.expr(),
         ))?;
 
-        Ok(JInstructionConfig { vm_state, rd })
+        Ok(JInstructionConfig { vm_state, rd, imm })
     }
 
     pub fn assign_instance(
@@ -60,6 +64,13 @@ impl<E: ExtensionField> JInstructionConfig<E> {
     ) -> Result<(), ZKVMError> {
         self.vm_state.assign_instance(instance, step)?;
         self.rd.assign_instance(instance, lk_multiplicity, step)?;
+
+        // Immediate
+        set_val!(
+            instance,
+            self.imm,
+            InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn())
+        );
 
         // Fetch the instruction.
         lk_multiplicity.fetch(step.pc().before.0);
