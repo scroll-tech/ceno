@@ -42,6 +42,8 @@ where
         in_eq_vec: &[E],
         challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
     ) -> E;
+    // TODO(Matthias, by 2024-11-01): review whether we need this function after all.
+    #[allow(dead_code)]
     fn fix_out_variables(
         &self,
         in_size: usize,

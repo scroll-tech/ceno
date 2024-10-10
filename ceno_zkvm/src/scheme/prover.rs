@@ -31,11 +31,11 @@ use crate::{
     structs::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
-    utils::{get_challenge_pows, proper_num_threads},
+    utils::{get_challenge_pows, next_pow2_instance_padding, proper_num_threads},
     virtual_polys::VirtualPolynomials,
 };
 
-use super::{ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
+use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pk: ZKVMProvingKey<E, PCS>,
@@ -50,10 +50,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     pub fn create_proof(
         &self,
         witnesses: ZKVMWitnesses<E>,
+        pi: PublicValues<u32>,
         max_threads: usize,
         mut transcript: Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
-        let mut vm_proof = ZKVMProof::empty();
+        let mut vm_proof = ZKVMProof::empty(pi);
+        let pi = &vm_proof.pv;
 
         // commit to fixed commitment
         for (_, pk) in self.pk.circuit_pks.iter() {
@@ -125,6 +127,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     pk,
                     witness.into_iter().map(|w| w.into()).collect_vec(),
                     wits_commit,
+                    pi,
                     num_instances,
                     max_threads,
                     transcript,
@@ -145,6 +148,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     pk,
                     witness.into_iter().map(|v| v.into()).collect_vec(),
                     wits_commit,
+                    pi,
                     num_instances,
                     max_threads,
                     transcript,
@@ -175,21 +179,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithData,
+        pi: &[E::BaseField],
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ZKVMOpcodeProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
-        let log2_num_instances = ceil_log2(num_instances);
-        let next_pow2_instances = 1 << log2_num_instances;
+        let next_pow2_instances = next_pow2_instance_padding(num_instances);
+        let log2_num_instances = ceil_log2(next_pow2_instances);
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);
-        assert!(witnesses.iter().all(|v| {
-            v.num_vars() == log2_num_instances && v.evaluations().len() == next_pow2_instances
-        }));
+        assert!(
+            witnesses
+                .iter()
+                .all(|v| { v.evaluations().len() == next_pow2_instances })
+        );
 
         // main constraint: read/write record witness inference
         let span = entered_span!("wit_inference::record");
@@ -200,7 +207,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .chain(cs.lk_expressions.par_iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&[], &witnesses, challenges, expr)
+                wit_infer_by_expr(&[], &witnesses, pi, challenges, expr)
             })
             .collect();
         let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
@@ -223,7 +230,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let span = entered_span!("wit_inference::tower_witness_r_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let r_records_last_layer =
-            interleaving_mles_to_mles(r_records_wit, log2_num_instances, NUM_FANIN, E::ONE);
+            interleaving_mles_to_mles(r_records_wit, num_instances, NUM_FANIN, E::ONE);
         assert_eq!(r_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
@@ -239,7 +246,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let span = entered_span!("wit_inference::tower_witness_w_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let w_records_last_layer =
-            interleaving_mles_to_mles(w_records_wit, log2_num_instances, NUM_FANIN, E::ONE);
+            interleaving_mles_to_mles(w_records_wit, num_instances, NUM_FANIN, E::ONE);
         assert_eq!(w_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
@@ -253,12 +260,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
-        let lk_records_last_layer = interleaving_mles_to_mles(
-            lk_records_wit,
-            log2_num_instances,
-            NUM_FANIN,
-            chip_record_alpha,
-        );
+        let lk_records_last_layer =
+            interleaving_mles_to_mles(lk_records_wit, num_instances, NUM_FANIN, chip_record_alpha);
         assert_eq!(lk_records_last_layer.len(), 2);
         exit_span!(span);
 
@@ -481,7 +484,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             {
                 // sanity check in debug build and output != instance index for zero check sumcheck poly
                 if cfg!(debug_assertions) {
-                    let expected_zero_poly = wit_infer_by_expr(&[], &witnesses, challenges, expr);
+                    let expected_zero_poly =
+                        wit_infer_by_expr(&[], &witnesses, pi, challenges, expr);
                     let top_100_errors = expected_zero_poly
                         .get_ext_field_vec()
                         .iter()
@@ -518,13 +522,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             r_counts_per_instance
                 + w_counts_per_instance
                 + lk_counts_per_instance
-                + 3
+                + 3 // 3 from [sel_r, sel_w, sel_lk]
                 + if cs.assert_zero_sumcheck_expressions.is_empty() {
                     0
                 } else {
                     distrinct_zerocheck_terms_set.len() + 1 // +1 from sel_non_lc_zero_sumcheck
                 }
-        ); // 3 from [sel_r, sel_w, sel_lk]
+        );
         let mut main_sel_evals_iter = main_sel_evals.into_iter();
         main_sel_evals_iter.next(); // skip sel_r
         let r_records_in_evals = (0..r_counts_per_instance)
@@ -611,6 +615,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithData,
+        pi: &[E::BaseField],
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
@@ -648,7 +653,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             )
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&fixed, &witnesses, challenges, expr)
+                wit_infer_by_expr(&fixed, &witnesses, pi, challenges, expr)
             })
             .collect();
         let (lk_d_wit, lk_n_wit) = records_wit.split_at(cs.lk_table_expressions.len());
@@ -661,9 +666,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let lk_denominator_last_layer =
-            interleaving_mles_to_mles(lk_d_wit, log2_num_instances, NUM_FANIN_LOGUP, E::ONE);
+            interleaving_mles_to_mles(lk_d_wit, num_instances, NUM_FANIN_LOGUP, E::ONE);
         let lk_numerator_last_layer =
-            interleaving_mles_to_mles(lk_n_wit, log2_num_instances, NUM_FANIN_LOGUP, E::ZERO);
+            interleaving_mles_to_mles(lk_n_wit, num_instances, NUM_FANIN_LOGUP, E::ZERO);
         assert_eq!(lk_denominator_last_layer.len(), NUM_FANIN_LOGUP);
         assert_eq!(lk_numerator_last_layer.len(), NUM_FANIN_LOGUP);
         exit_span!(span);
@@ -930,7 +935,9 @@ impl TowerProver {
                         assert!(
                             layer_polys
                                 .iter()
-                                .all(|f| f.evaluations().len() == (1 << (log_num_fanin * round)))
+                                .all(|f| {
+                                    f.evaluations().len() == (1 << (log_num_fanin * round))
+                                })
                         );
 
                         // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])

@@ -20,7 +20,7 @@ use ceno_emul::InsnKind;
 pub struct BltCircuit<I>(PhantomData<I>);
 
 pub struct InstructionConfig<E: ExtensionField> {
-    pub b_insn: BInstructionConfig,
+    pub b_insn: BInstructionConfig<E>,
     pub read_rs1: UInt<E>,
     pub read_rs2: UInt<E>,
     pub signed_lt: SignedLtConfig,
@@ -39,7 +39,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
         let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
         let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
 
-        // TODO: reduce degree.
         let is_lt = SignedLtConfig::construct_circuit(
             circuit_builder,
             || "rs1<rs2",
@@ -79,8 +78,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
     ) -> Result<(), ZKVMError> {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
-        config.read_rs1.assign_limbs(instance, rs1.u16_fields());
-        config.read_rs2.assign_limbs(instance, rs2.u16_fields());
+        config.read_rs1.assign_limbs(instance, rs1.as_u16_limbs());
+        config.read_rs2.assign_limbs(instance, rs2.as_u16_limbs());
         config.signed_lt.assign_instance::<E>(
             instance,
             lk_multiplicity,
@@ -90,7 +89,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
 
         config
             .b_insn
-            .assign_instance::<E>(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())
     }

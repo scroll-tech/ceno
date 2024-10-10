@@ -205,9 +205,9 @@ impl UIntLtInput<'_> {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct SignedLtConfig {
-    is_lt: IsLtConfig<UINT_LIMBS>,
-    is_lhs_neg: IsLtConfig<1>,
-    is_rhs_neg: IsLtConfig<1>,
+    is_lt: IsLtConfig,
+    is_lhs_neg: IsLtConfig,
+    is_rhs_neg: IsLtConfig,
 }
 
 impl SignedLtConfig {
@@ -228,19 +228,21 @@ impl SignedLtConfig {
     ) -> Result<Self, ZKVMError> {
         cb.namespace(name_fn, |cb| {
             // Extract the sign bit.
-            let is_lhs_neg = IsLtConfig::<1>::construct_circuit(
+            let is_lhs_neg = IsLtConfig::construct_circuit(
                 cb,
                 || "lhs_msb",
                 (i16::MAX as usize).into(),
                 lhs.limbs.iter().last().unwrap().expr(), // msb limb
                 None,
+                1,
             )?;
-            let is_rhs_neg = IsLtConfig::<1>::construct_circuit(
+            let is_rhs_neg = IsLtConfig::construct_circuit(
                 cb,
                 || "rhs_msb",
                 (i16::MAX as usize).into(),
                 rhs.limbs.iter().last().unwrap().expr(), // msb limb
                 None,
+                1,
             )?;
 
             // Convert two's complement representation into field arithmetic.
@@ -255,6 +257,7 @@ impl SignedLtConfig {
                 lhs_value,
                 rhs_value,
                 assert_less_than,
+                UINT_LIMBS,
             )?;
 
             Ok(SignedLtConfig {

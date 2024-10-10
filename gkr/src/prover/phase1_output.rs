@@ -3,7 +3,6 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
-    commutative_op_mle_pair,
     mle::{
         DenseMultilinearExtension, InstanceIntoIteratorMut, IntoInstanceIter, IntoInstanceIterMut,
     },

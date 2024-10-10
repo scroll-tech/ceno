@@ -384,7 +384,7 @@ where
                 .map(|(eval, coeff)| field_type_index_ext(eval, i) * *coeff)
                 .sum()
         })
-        .collect();
+        .collect::<Vec<_>>();
     end_timer!(prepare_timer);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
@@ -498,7 +498,7 @@ where
 fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     level: usize,
-    values: &Vec<E>,
+    values: &[E],
     challenge: E,
 ) -> Vec<E> {
     values
