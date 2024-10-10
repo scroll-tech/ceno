@@ -51,9 +51,6 @@ default = ["riv32"]
 riv32 = []
 riv64 = []
 
-[profile.bench]
-opt-level = 0
-
 [[bench]]
 name = "riscv_add"
 harness = false
