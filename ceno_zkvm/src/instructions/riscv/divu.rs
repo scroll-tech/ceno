@@ -64,8 +64,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             outcome_value.clone(),
             ((1u64 << UInt::<E>::M) - 1).into(),
             outcome_value,
-        )
-        .unwrap();
+        )?;
 
         // remainder should be less than divisor if divisor != 0.
         let lt = IsLtConfig::construct_circuit(
@@ -82,7 +81,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         cb.require_equal(
             || "remainder < divisor when non-zero divisor",
             is_zero.expr() + lt.expr(),
-            Expression::from(1),
+            Expression::ONE,
         )?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
