@@ -1,18 +1,13 @@
 use crate::{
-    chip_handler::{MemoryChipOperations, MemoryExpr, RegisterExpr},
+    chip_handler::{MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::{
-        constants::UInt,
-        insn_base::{ReadRS1, ReadRS2, StateInOut},
-    },
-    set_val,
+    expression::{Expression, ToExpr},
+    instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut, WriteMEM},
     tables::InsnRecord,
     witness::LkMultiplicity,
-    Value,
 };
-use ceno_emul::{InsnKind, StepRecord, Tracer};
+use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
@@ -24,9 +19,7 @@ pub struct SInstructionConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     rs1: ReadRS1<E>,
     rs2: ReadRS2<E>,
-
-    prev_memory_ts: WitIn,
-    prev_memory_value: UInt<E>,
+    mem_write: WriteMEM<E>,
 }
 
 impl<E: ExtensionField> SInstructionConfig<E> {
@@ -57,26 +50,15 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             imm.clone(),
         ))?;
 
-        // Memory state
-        let prev_memory_ts = circuit_builder.create_witin(|| "prev_memory_ts")?;
-        let prev_memory_value = UInt::new_unchecked(|| "prev_memory_value", circuit_builder)?;
-
-        // Memory state
-        circuit_builder.memory_write(
-            || "write_mem",
-            &memory_addr,
-            prev_memory_ts.expr(),
-            vm_state.ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
-            prev_memory_value.memory_expr(),
-            memory_value,
-        )?;
+        // Memory
+        let mem_write =
+            WriteMEM::construct_circuit(circuit_builder, memory_addr, memory_value, vm_state.ts)?;
 
         Ok(SInstructionConfig {
             vm_state,
             rs1,
             rs2,
-            prev_memory_ts,
-            prev_memory_value,
+            mem_write,
         })
     }
 
@@ -89,20 +71,11 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         self.vm_state.assign_instance(instance, step)?;
         self.rs1.assign_instance(instance, lk_multiplicity, step)?;
         self.rs2.assign_instance(instance, lk_multiplicity, step)?;
+        self.mem_write
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
-
-        // Memory state
-        set_val!(
-            instance,
-            self.prev_memory_ts,
-            step.memory_op().unwrap().previous_cycle
-        );
-        self.prev_memory_value.assign_value(
-            instance,
-            Value::new_unchecked(step.memory_op().unwrap().value.before),
-        );
 
         Ok(())
     }
