@@ -41,10 +41,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
-          override: false
       - name: Cargo cache
         uses: actions/cache@v3
         with:
@@ -72,4 +71,3 @@ jobs:
         with:
           command: make
           args: clippy
-
