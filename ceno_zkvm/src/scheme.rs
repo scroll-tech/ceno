@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Debug};
 use sumcheck::structs::IOPProverMessage;
 
 use crate::structs::TowerProofs;
@@ -66,18 +66,39 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub wits_opening_proof: PCS::Proof,
 }
 
+#[derive(Default, Clone, Debug)]
+pub struct PublicValues<T: Default + Clone + Debug> {
+    exit_code: T,
+    end_pc: T,
+}
+
+impl PublicValues<u32> {
+    pub fn new(exit_code: u32, end_pc: u32) -> Self {
+        Self { exit_code, end_pc }
+    }
+    pub fn to_vec<E: ExtensionField>(&self) -> Vec<E::BaseField> {
+        vec![
+            E::BaseField::from((self.exit_code & 0xffff) as u64),
+            E::BaseField::from(((self.exit_code >> 16) & 0xffff) as u64),
+            E::BaseField::from(self.end_pc as u64),
+        ]
+    }
+}
+
 /// Map circuit names to
 /// - an opcode or table proof,
 /// - an index unique across both types.
 #[derive(Clone)]
 pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    pub pv: Vec<E::BaseField>,
     opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E, PCS>)>,
     table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E, PCS>)>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
-    pub fn empty() -> Self {
+    pub fn empty(pv: PublicValues<u32>) -> Self {
         Self {
+            pv: pv.to_vec::<E>(),
             opcode_proofs: BTreeMap::new(),
             table_proofs: BTreeMap::new(),
         }

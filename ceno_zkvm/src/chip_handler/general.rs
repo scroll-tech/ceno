@@ -5,8 +5,9 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    expression::{Expression, Fixed, ToExpr, WitIn},
+    expression::{Expression, Fixed, Instance, ToExpr, WitIn},
     gadgets::IsLtConfig,
+    instructions::riscv::constants::EXIT_CODE_IDX,
     structs::ROMType,
     tables::InsnRecord,
 };
@@ -32,6 +33,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.create_fixed(name_fn)
+    }
+
+    pub fn query_exit_code(&mut self) -> Result<[Instance; 2], ZKVMError> {
+        Ok([
+            self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
+            self.cs
+                .query_instance(|| "exit_code_high", EXIT_CODE_IDX + 1)?,
+        ])
     }
 
     pub fn lk_record<NR, N>(
@@ -180,7 +189,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             16 => self.assert_u16(name_fn, expr),
             8 => self.assert_byte(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
-            _ => panic!("Unsupported bit range"),
+            c => panic!("Unsupported bit range {c}"),
         }
     }
 
@@ -243,7 +252,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn assert_bit<NR, N>(
         &mut self,
         name_fn: N,
@@ -253,7 +261,13 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.require_zero(name_fn, expr.clone() * (Expression::ONE - expr))
+        self.namespace(
+            || "assert_bit",
+            |cb| {
+                cb.cs
+                    .require_zero(name_fn, expr.clone() * (Expression::ONE - expr))
+            },
+        )
     }
 
     /// Assert `rom_type(a, b) = c` and that `a, b, c` are all bytes.
@@ -309,19 +323,25 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.logic_u8(ROMType::Ltu, a, b, c)
     }
 
+    // Assert that `2^b = c` and that `b` is a 5-bit unsigned integer.
+    pub fn lookup_pow2(&mut self, b: Expression<E>, c: Expression<E>) -> Result<(), ZKVMError> {
+        self.logic_u8(ROMType::Pow, 2.into(), b, c)
+    }
+
     /// less_than
-    pub(crate) fn less_than<N, NR, const N_LIMBS: usize>(
+    pub(crate) fn less_than<N, NR>(
         &mut self,
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
         assert_less_than: Option<bool>,
-    ) -> Result<IsLtConfig<N_LIMBS>, ZKVMError>
+        max_num_u16_limbs: usize,
+    ) -> Result<IsLtConfig, ZKVMError>
     where
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
     {
-        IsLtConfig::construct_circuit(self, name_fn, lhs, rhs, assert_less_than)
+        IsLtConfig::construct_circuit(self, name_fn, lhs, rhs, assert_less_than, max_num_u16_limbs)
     }
 
     pub(crate) fn is_equal(

@@ -43,13 +43,13 @@ pub type ChallengeId = u16;
 #[derive(Copy, Clone, Debug)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
-    U1,          // TODO: optimize it
     U8,          // 2^8 = 256
     U16,         // 2^16 = 65,536
     And,         // a & b where a, b are bytes
     Or,          // a | b where a, b are bytes
     Xor,         // a ^ b where a, b are bytes
     Ltu,         // a <(usign) b where a, b are bytes and the result is 0/1.
+    Pow,         // a ** b where a is 2 and b is 5-bit value
     Instruction, // Decoded instruction from the fixed program.
 }
 
