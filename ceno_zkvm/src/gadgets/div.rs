@@ -35,7 +35,8 @@ impl<E: ExtensionField> DivConfig<E> {
             let (dividend, intermediate_mul) =
                 divisor.mul_add(|| "divisor * outcome + r", cb, quotient, remainder, true)?;
 
-            let r_lt = cb.less_than(
+            let r_lt = IsLtConfig::construct_circuit(
+                cb,
                 || "remainder < divisor",
                 remainder.value(),
                 divisor.value(),
