@@ -59,15 +59,9 @@ jobs:
         run: |
           cargo install cargo-make || echo "cargo-make already installed"
       - name: Check code format
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: fmt
+        run: cargo make fmt
 
       - name: Run clippy
-        uses: actions-rs/cargo@v1
         env:
           TARGET: ${{ matrix.target }}
-        with:
-          command: make
-          args: clippy
+        run: cargo make clippy
