@@ -28,6 +28,7 @@ impl RIVInstruction for SWOp {
     const INST_KIND: InsnKind = InsnKind::SW;
 }
 
+#[allow(dead_code)]
 pub type StoreWord<E> = StoreInstruction<E, SWOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E, I> {
