@@ -36,7 +36,7 @@ impl PoseidonHash {
             Digest::from_partial(
                 initial_elements
                     .into_iter()
-                    .map(|v| v.clone())
+                    .copied()
                     .collect::<Vec<F>>()
                     .as_slice(),
             )
@@ -89,14 +89,7 @@ pub fn hash_n_to_m_no_pad_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(
         // Overwrite the first r elements with the inputs. This differs from a standard sponge,
         // where we would xor or add in the inputs. This is a well-known variant, though,
         // sometimes called "overwrite mode".
-        perm.set_from_slice(
-            chunk
-                .into_iter()
-                .map(|v| v.clone())
-                .collect::<Vec<F>>()
-                .as_slice(),
-            0,
-        );
+        perm.set_from_slice(chunk.into_iter().copied().collect::<Vec<F>>().as_slice(), 0);
         perm.permute();
     }
 
@@ -118,11 +111,6 @@ pub fn hash_n_to_hash_no_pad<F: Poseidon>(inputs: &[F]) -> Digest<F> {
 }
 
 pub fn compress<F: Poseidon>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
-    debug_assert!(SPONGE_RATE >= DIGEST_WIDTH);
-    debug_assert!(SPONGE_WIDTH >= 2 * DIGEST_WIDTH);
-    debug_assert_eq!(x.elements().len(), DIGEST_WIDTH);
-    debug_assert_eq!(y.elements().len(), DIGEST_WIDTH);
-
     let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
     perm.set_from_slice(x.elements(), 0);
     perm.set_from_slice(y.elements(), DIGEST_WIDTH);
