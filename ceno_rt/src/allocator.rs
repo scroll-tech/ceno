@@ -29,6 +29,10 @@ unsafe impl GlobalAlloc for SimpleAllocator {
         ptr
     }
 
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        self.alloc(layout)
+    }
+
     /// Never deallocate.
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 }
