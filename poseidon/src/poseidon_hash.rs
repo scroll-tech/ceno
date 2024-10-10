@@ -1,5 +1,5 @@
 use crate::{
-    constants::{DIGEST_WIDTH, SPONGE_RATE, SPONGE_WIDTH},
+    constants::{DIGEST_WIDTH, SPONGE_RATE},
     digest::Digest,
     poseidon::Poseidon,
     poseidon_permutation::PoseidonPermutation,
