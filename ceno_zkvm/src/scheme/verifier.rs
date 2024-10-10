@@ -15,17 +15,17 @@ use transcript::Transcript;
 
 use crate::{
     error::ZKVMError,
+    instructions::{riscv::ecall::HaltInstruction, Instruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
-        utils::eval_by_expr_with_fixed,
+        utils::eval_by_expr_with_instance,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{eq_eval_less_or_equal_than, get_challenge_pows, next_pow2_instance_padding},
 };
 
 use super::{
-    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, utils::eval_by_expr, ZKVMOpcodeProof, ZKVMProof,
-    ZKVMTableProof,
+    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof,
 };
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
@@ -46,6 +46,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
+        let pi = &vm_proof.pv;
+
+        // require ecall/halt proof to exist
+        {
+            if let Some((_, proof)) = vm_proof.opcode_proofs.get(&HaltInstruction::<E>::name()) {
+                if proof.num_instances != 1 {
+                    return Err(ZKVMError::VerifyError(
+                        "ecall/halt num_instances != 1".into(),
+                    ));
+                }
+            } else {
+                return Err(ZKVMError::VerifyError(
+                    "ecall/halt proof does not exist".into(),
+                ));
+            }
+        }
 
         // write fixed commitment to transcript
         for (_, vk) in self.vk.circuit_vks.iter() {
@@ -89,6 +105,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &opcode_proof,
+                pi,
                 transcript,
                 NUM_FANIN,
                 &point_eval,
@@ -127,6 +144,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &table_proof,
+                &vm_proof.pv,
                 transcript,
                 NUM_FANIN_LOGUP,
                 &point_eval,
@@ -165,6 +183,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMOpcodeProof<E, PCS>,
+        pi: &[E::BaseField],
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -339,7 +358,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .zip_eq(alpha_pow_iter)
                         .map(|(expr, alpha)| {
                             // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
-                            *alpha * eval_by_expr(&proof.wits_in_evals, challenges, expr)
+                            *alpha
+                                * eval_by_expr_with_instance(
+                                    &[],
+                                    &proof.wits_in_evals,
+                                    pi,
+                                    challenges,
+                                    expr,
+                                )
                         })
                         .sum::<E>()
             },
@@ -364,7 +390,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .chain(proof.lk_records_in_evals[..lk_counts_per_instance].iter()),
             )
             .any(|(expr, expected_evals)| {
-                eval_by_expr(&proof.wits_in_evals, challenges, expr) != *expected_evals
+                eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr)
+                    != *expected_evals
             })
         {
             return Err(ZKVMError::VerifyError(
@@ -373,11 +400,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
-        if cs
-            .assert_zero_expressions
-            .iter()
-            .any(|expr| eval_by_expr(&proof.wits_in_evals, challenges, expr) != E::ZERO)
-        {
+        if cs.assert_zero_expressions.iter().any(|expr| {
+            eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr) != E::ZERO
+        }) {
             // TODO add me back
             // return Err(ZKVMError::VerifyError("zero expression != 0"));
         }
@@ -408,6 +433,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMTableProof<E, PCS>,
+        pi: &[E::BaseField],
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -512,9 +538,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .chain(proof.lk_n_in_evals[..lk_counts_per_instance].iter()),
             )
             .any(|(expr, expected_evals)| {
-                eval_by_expr_with_fixed(
+                eval_by_expr_with_instance(
                     &proof.fixed_in_evals,
                     &proof.wits_in_evals,
+                    pi,
                     challenges,
                     expr,
                 ) != *expected_evals
