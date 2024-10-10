@@ -94,7 +94,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
     }
 }
 
-struct LoadConfig<E: ExtensionField> {
+pub struct LoadConfig<E: ExtensionField> {
     im_insn: IMInstructionConfig<E>,
 
     rs1_read: UInt<E>,
@@ -134,7 +134,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let im_insn = IMInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &imm.expr(),
+            &imm.value(),
             rs1_read.register_expr(),
             memory_read.memory_expr(),
             memory_addr.memory_expr(),
