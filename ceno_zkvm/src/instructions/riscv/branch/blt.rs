@@ -8,7 +8,7 @@ use crate::{
     expression::Expression,
     instructions::{
         riscv::{
-            b_insn::BInstructionConfig, config::UIntLtSignedConfig, constants::UInt, RIVInstruction,
+            b_insn::BInstructionConfig, config::SignedLtConfig, constants::UInt, RIVInstruction,
         },
         Instruction,
     },
@@ -23,7 +23,7 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub b_insn: BInstructionConfig<E>,
     pub read_rs1: UInt<E>,
     pub read_rs2: UInt<E>,
-    pub is_lt: UIntLtSignedConfig,
+    pub signed_lt: SignedLtConfig,
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
@@ -39,8 +39,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
         let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
         let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
 
-        // TODO: reduce degree.
-        let is_lt = UIntLtSignedConfig::construct_circuit(
+        let is_lt = SignedLtConfig::construct_circuit(
             circuit_builder,
             || "rs1<rs2",
             &read_rs1,
@@ -67,7 +66,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
             b_insn,
             read_rs1,
             read_rs2,
-            is_lt,
+            signed_lt: is_lt,
         })
     }
 
@@ -81,11 +80,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         config.read_rs1.assign_limbs(instance, rs1.as_u16_limbs());
         config.read_rs2.assign_limbs(instance, rs2.as_u16_limbs());
-        config.is_lt.assign_instance::<E>(
+        config.signed_lt.assign_instance::<E>(
             instance,
             lk_multiplicity,
-            step.rs1().unwrap().value as u64,
-            step.rs2().unwrap().value as u64,
+            step.rs1().unwrap().value,
+            step.rs2().unwrap().value,
         )?;
 
         config

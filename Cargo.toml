@@ -42,3 +42,6 @@ rand_chacha = { version = "0.3.1", features = ["serde1"] }
 
 [patch."https://github.com/zhenfeizhang/Goldilocks"]
 goldilocks = { git = "https://github.com/hero78119/Goldilocks" }
+
+[profile.release]
+lto = "thin"
