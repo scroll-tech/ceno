@@ -8,10 +8,7 @@ use crate::{
 pub struct PoseidonHash;
 
 impl PoseidonHash {
-    pub fn two_to_one<F: Poseidon>(
-        left: &Digest<F>,
-        right: &Digest<F>,
-    ) -> Digest<F> {
+    pub fn two_to_one<F: Poseidon>(left: &Digest<F>, right: &Digest<F>) -> Digest<F> {
         compress(left, right)
     }
 
@@ -23,21 +20,31 @@ impl PoseidonHash {
         }
     }
 
-    pub fn hash_or_noop_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(mut input_iter: I) -> Digest<F> {
+    pub fn hash_or_noop_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(
+        mut input_iter: I,
+    ) -> Digest<F> {
         let mut initial_elements = Vec::with_capacity(DIGEST_WIDTH);
 
-        for _ in 0..DIGEST_WIDTH+1 {
+        for _ in 0..DIGEST_WIDTH + 1 {
             match input_iter.next() {
                 Some(value) => initial_elements.push(value),
-                None => break
+                None => break,
             }
         }
 
         if initial_elements.len() <= DIGEST_WIDTH {
-            Digest::from_partial(initial_elements.into_iter().map(|v| v.clone()).collect::<Vec<F>>().as_slice())
+            Digest::from_partial(
+                initial_elements
+                    .into_iter()
+                    .map(|v| v.clone())
+                    .collect::<Vec<F>>()
+                    .as_slice(),
+            )
         } else {
             let iter = initial_elements.into_iter().chain(input_iter);
-            hash_n_to_m_no_pad_iter(iter, DIGEST_WIDTH).try_into().unwrap()
+            hash_n_to_m_no_pad_iter(iter, DIGEST_WIDTH)
+                .try_into()
+                .unwrap()
         }
     }
 }
@@ -67,7 +74,10 @@ pub fn hash_n_to_m_no_pad<F: Poseidon>(inputs: &[F], num_outputs: usize) -> Vec<
     }
 }
 
-pub fn hash_n_to_m_no_pad_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(mut input_iter: I, num_outputs: usize) -> Vec<F> {
+pub fn hash_n_to_m_no_pad_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(
+    mut input_iter: I,
+    num_outputs: usize,
+) -> Vec<F> {
     let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
 
     // Absorb all input chunks.
@@ -79,7 +89,14 @@ pub fn hash_n_to_m_no_pad_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(mut i
         // Overwrite the first r elements with the inputs. This differs from a standard sponge,
         // where we would xor or add in the inputs. This is a well-known variant, though,
         // sometimes called "overwrite mode".
-        perm.set_from_slice(chunk.into_iter().map(|v| v.clone()).collect::<Vec<F>>().as_slice(), 0);
+        perm.set_from_slice(
+            chunk
+                .into_iter()
+                .map(|v| v.clone())
+                .collect::<Vec<F>>()
+                .as_slice(),
+            0,
+        );
         perm.permute();
     }
 
@@ -174,7 +191,9 @@ mod tests {
             let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
             let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
+            let ceno_iter = PoseidonHash::hash_or_noop_iter(ceno_elems.iter());
             assert!(compare_hash_output(plonky_out, ceno_out));
+            assert!(compare_hash_output(plonky_out, ceno_iter));
         }
     }
 
@@ -186,7 +205,9 @@ mod tests {
             let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
             let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
+            let ceno_iter = PoseidonHash::hash_or_noop_iter(ceno_elems.iter());
             assert!(compare_hash_output(plonky_out, ceno_out));
+            assert!(compare_hash_output(plonky_out, ceno_iter));
         }
     }
 

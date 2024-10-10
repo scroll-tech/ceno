@@ -1,6 +1,6 @@
 use crate::constants::DIGEST_WIDTH;
 use goldilocks::SmallField;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Digest<F: SmallField>(pub [F; DIGEST_WIDTH]);
