@@ -17,7 +17,7 @@ use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{
     collections::HashSet,
-    fs::{self, File},
+    fs::File,
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
@@ -669,7 +669,8 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr(), Some(true), 1)?;
+            let lt_wtns =
+                IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), Some(true), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -789,7 +790,7 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr(), None, 1)?;
+            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), None, 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
