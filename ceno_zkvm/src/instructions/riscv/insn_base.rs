@@ -244,31 +244,31 @@ impl<E: ExtensionField> WriteRD<E> {
 
 #[derive(Debug)]
 pub struct ReadMEM<E: ExtensionField> {
-    pub addr: UInt<E>,
     pub prev_ts: WitIn,
     pub lt_cfg: IsLtConfig,
+    _field_type: PhantomData<E>,
 }
 
 impl<E: ExtensionField> ReadMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        mem_addr: MemoryExpr<E>,
         mem_read: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let addr = UInt::new_unchecked(|| "memory_addr", circuit_builder)?;
         let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
         let (_, lt_cfg) = circuit_builder.memory_read(
             || "read_memory",
-            &addr.memory_expr(),
+            &mem_addr,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
             mem_read,
         )?;
 
         Ok(ReadMEM {
-            addr,
             prev_ts,
             lt_cfg,
+            _field_type: PhantomData,
         })
     }
 
@@ -278,11 +278,6 @@ impl<E: ExtensionField> ReadMEM<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        self.addr.assign_value(
-            instance,
-            Value::new_unchecked(step.memory_op().unwrap().addr),
-        );
-
         // Memory state
         set_val!(
             instance,
@@ -304,7 +299,6 @@ impl<E: ExtensionField> ReadMEM<E> {
 
 #[derive(Debug)]
 pub struct WriteMEM<E: ExtensionField> {
-    pub addr: UInt<E>,
     pub prev_ts: WitIn,
     pub prev_value: UInt<E>,
     pub lt_cfg: IsLtConfig,
@@ -313,16 +307,16 @@ pub struct WriteMEM<E: ExtensionField> {
 impl<E: ExtensionField> WriteMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        mem_addr: MemoryExpr<E>,
         mem_written: MemoryExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let addr = UInt::new_unchecked(|| "memory_addr", circuit_builder)?;
         let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
         let prev_value = UInt::new_unchecked(|| "prev_memory_value", circuit_builder)?;
 
         let (_, lt_cfg) = circuit_builder.memory_write(
             || "write_memory",
-            &addr.memory_expr(),
+            &mem_addr,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_RD as usize).into(),
             prev_value.memory_expr(),
@@ -330,7 +324,6 @@ impl<E: ExtensionField> WriteMEM<E> {
         )?;
 
         Ok(WriteMEM {
-            addr,
             prev_ts,
             prev_value,
             lt_cfg,
@@ -343,10 +336,6 @@ impl<E: ExtensionField> WriteMEM<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        self.addr.assign_value(
-            instance,
-            Value::new_unchecked(step.memory_op().unwrap().addr),
-        );
         set_val!(
             instance,
             self.prev_ts,
