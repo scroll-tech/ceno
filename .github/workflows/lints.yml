@@ -57,7 +57,7 @@ jobs:
 
       - name: Install cargo make
         run: |
-          cargo install cargo-make || echo "cargo-make already installed"
+          cargo make --version || cargo install cargo-make
       - name: Check code format
         uses: actions-rs/cargo@v1
         with:
