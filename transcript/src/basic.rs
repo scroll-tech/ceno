@@ -1,27 +1,25 @@
+use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use poseidon::Poseidon;
+use poseidon::poseidon_permutation::PoseidonPermutation;
+
 
 use crate::Challenge;
 
-// temporarily using 12-4 hashes
-pub const INPUT_WIDTH: usize = 12;
-pub const OUTPUT_WIDTH: usize = 4;
-
 #[derive(Clone)]
 pub struct Transcript<E: ExtensionField> {
-    sponge_hasher: Poseidon<E::BaseField, 12, 11>,
+    permutation: PoseidonPermutation<E::BaseField>,
 }
 
 impl<E: ExtensionField> Transcript<E> {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
-        // FIXME: change me the the right parameter
-        let mut hasher = Poseidon::<E::BaseField, _, _>::new(8, 22);
+        let mut perm = PoseidonPermutation::new(core::iter::repeat(E::BaseField::ZERO));
         let label_f = E::BaseField::bytes_to_field_elements(label);
-        hasher.update(label_f.as_slice());
+        perm.set_from_slice(label_f.as_slice(), 0);
+        perm.permute();
         Self {
-            sponge_hasher: hasher,
+            permutation: perm,
         }
     }
 }
@@ -41,12 +39,14 @@ impl<E: ExtensionField> Transcript<E> {
     // Append the message to the transcript.
     pub fn append_message(&mut self, msg: &[u8]) {
         let msg_f = E::BaseField::bytes_to_field_elements(msg);
-        self.sponge_hasher.update(&msg_f);
+        self.permutation.set_from_slice(&msg_f, 0);
+        self.permutation.permute();
     }
 
     // Append the field extension element to the transcript.
     pub fn append_field_element_ext(&mut self, element: &E) {
-        self.sponge_hasher.update(element.as_bases());
+        self.permutation.set_from_slice(element.as_bases(), 0);
+        self.permutation.permute();
     }
 
     pub fn append_field_element_exts(&mut self, element: &[E]) {
@@ -57,12 +57,14 @@ impl<E: ExtensionField> Transcript<E> {
 
     // Append the field elemetn to the transcript.
     pub fn append_field_element(&mut self, element: &E::BaseField) {
-        self.sponge_hasher.update(&[*element]);
+        self.permutation.set_from_slice(&[*element], 0);
+        self.permutation.permute();
     }
 
     // Append the challenge to the transcript.
     pub fn append_challenge(&mut self, challenge: Challenge<E>) {
-        self.sponge_hasher.update(challenge.elements.as_bases())
+        self.permutation.set_from_slice(challenge.elements.as_bases(), 0);
+        self.permutation.permute();
     }
 
     // // Append the message to the transcript.
@@ -83,7 +85,7 @@ impl<E: ExtensionField> Transcript<E> {
         self.append_message(label);
 
         let challenge = Challenge {
-            elements: E::from_limbs(self.sponge_hasher.squeeze_vec().as_ref()),
+            elements: E::from_limbs(self.permutation.squeeze()),
         };
         challenge
     }
@@ -105,7 +107,7 @@ impl<E: ExtensionField> Transcript<E> {
     }
 
     pub fn read_challenge(&mut self) -> Challenge<E> {
-        let r = E::from_bases(&self.sponge_hasher.squeeze_vec()[..2]);
+        let r = E::from_bases(&self.permutation.squeeze()[..2]);
 
         Challenge { elements: r }
     }

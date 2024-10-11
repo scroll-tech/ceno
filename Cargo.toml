@@ -32,7 +32,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 ff = "0.13"
 goldilocks = { git = "https://github.com/zhenfeizhang/Goldilocks" }
 halo2curves = "0.1.0"
-poseidon = { git = "https://github.com/zhenfeizhang/poseidon" }
+poseidon = { path = "./poseidon" }
 serde = { version = "1.0", features = ["derive"] }
 subtle = "2.6.1"
 rand_core = "0.6.4"
