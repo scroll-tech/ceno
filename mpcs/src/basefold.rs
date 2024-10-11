@@ -10,7 +10,7 @@ use crate::{
         },
         expression::{Expression, Query, Rotation},
         ext_to_usize,
-        hash::{new_hasher, write_digest_to_transcript, Digest},
+        hash::{write_digest_to_transcript, Digest},
         log2_strict,
         merkle_tree::MerkleTree,
         multiply_poly,
@@ -318,14 +318,13 @@ where
         };
 
         // 2. Compute and store all the layers of the Merkle tree
-        let hasher = new_hasher::<E::BaseField>();
 
         // 1. Encode the polynomials. Simultaneously get:
         //  (1) The evaluations over the hypercube (just a clone of the input)
         //  (2) The encoding of the coefficient vector (need an interpolation)
         let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
             PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(codeword, &hasher);
+                let codeword_tree = MerkleTree::<E>::from_leaves(codeword);
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -338,7 +337,7 @@ where
                 })
             }
             PolyEvalsCodeword::TooSmall(evals) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone(), &hasher);
+                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone());
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -400,8 +399,6 @@ where
         end_timer!(encode_timer);
 
         // build merkle tree from leaves
-        let hasher = new_hasher::<E::BaseField>();
-
         let ret = match evals_codewords[0] {
             PolyEvalsCodeword::Normal(_) => {
                 let (bh_evals, codewords) = evals_codewords
@@ -416,7 +413,7 @@ where
                         }
                     })
                     .collect::<(Vec<_>, Vec<_>)>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, &hasher);
+                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords);
                 Self::CommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
@@ -436,7 +433,7 @@ where
                         }
                     })
                     .collect::<Vec<_>>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone(), &hasher);
+                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone());
                 Self::CommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
@@ -476,7 +473,6 @@ where
         _eval: &E, // Opening does not need eval, except for sanity check
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
 
         // The encoded polynomial should at least have the number of
@@ -506,7 +502,6 @@ where
             transcript,
             poly.num_vars,
             poly.num_vars - Spec::get_basecode_msg_size_log(),
-            &hasher,
         );
 
         // 2. Query phase. ---------------------------------------
@@ -558,7 +553,6 @@ where
         evals: &[Evaluation<E>],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
         let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
@@ -734,7 +728,6 @@ where
             num_vars,
             num_vars - Spec::get_basecode_msg_size_log(),
             coeffs.as_slice(),
-            &hasher,
         );
 
         let query_timer = start_timer!(|| "Basefold::batch_open query phase");
@@ -782,7 +775,6 @@ where
         evals: &[E],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys[0].num_vars();
 
@@ -832,7 +824,6 @@ where
             transcript,
             num_vars,
             num_vars - Spec::get_basecode_msg_size_log(),
-            &hasher,
         );
 
         let query_timer = start_timer!(|| "Basefold::open::query_phase");
@@ -871,11 +862,10 @@ where
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::verify");
-        let hasher = new_hasher::<E::BaseField>();
 
         if proof.is_trivial() {
             let trivial_proof = &proof.trivial_proof;
-            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), &hasher);
+            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone());
             if comm.root() == merkle_tree.root() {
                 return Ok(());
             } else {
@@ -943,7 +933,6 @@ where
             comm,
             eq.as_slice(),
             eval,
-            &hasher,
         );
         end_timer!(timer);
 
@@ -961,7 +950,6 @@ where
         let timer = start_timer!(|| "Basefold::batch_verify");
         // 	let key = "RAYON_NUM_THREADS";
         // 	env::set_var(key, "32");
-        let hasher = new_hasher::<E::BaseField>();
         let comms = comms.iter().collect_vec();
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
@@ -1073,7 +1061,6 @@ where
             &coeffs,
             eq.as_slice(),
             &new_target_sum,
-            &hasher,
         );
         end_timer!(timer);
         Ok(())
@@ -1092,11 +1079,10 @@ where
         if let Some(num_polys) = comm.num_polys {
             assert_eq!(num_polys, batch_size);
         }
-        let hasher = new_hasher::<E::BaseField>();
 
         if proof.is_trivial() {
             let trivial_proof = &proof.trivial_proof;
-            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), &hasher);
+            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone());
             if comm.root() == merkle_tree.root() {
                 return Ok(());
             } else {
@@ -1175,7 +1161,6 @@ where
             comm,
             eq.as_slice(),
             evals,
-            &hasher,
         );
         end_timer!(timer);
 

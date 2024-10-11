@@ -1,7 +1,8 @@
 use crate::constants::DIGEST_WIDTH;
 use goldilocks::SmallField;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Digest<F: SmallField>(pub [F; DIGEST_WIDTH]);
 
 impl<F: SmallField> TryFrom<Vec<F>> for Digest<F> {
