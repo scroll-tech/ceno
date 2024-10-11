@@ -14,7 +14,7 @@ use std::mem::MaybeUninit;
 /// This config handle the common part of I-type Instruction (memory variant)
 /// - PC, cycle, fetch
 /// - Register reads and writes
-/// - Memory writes
+/// - Memory reads
 pub struct IMInstructionConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     rs1: ReadRS1<E>,
