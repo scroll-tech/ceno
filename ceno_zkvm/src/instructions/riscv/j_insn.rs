@@ -5,9 +5,8 @@ use crate::{
     chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
+    expression::ToExpr,
     instructions::riscv::insn_base::{StateInOut, WriteRD},
-    set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
@@ -19,12 +18,12 @@ use core::mem::MaybeUninit;
 /// - PC, cycle, fetch
 /// - Register access
 ///
-/// It does not witness the output rd value or next_pc produced by the JAL opcode
+/// It does not witness the output rd value produced by the JAL opcode, but
+/// does constrain next_pc = pc + imm using the instruction table lookup
 #[derive(Debug)]
 pub struct JInstructionConfig<E: ExtensionField> {
     pub vm_state: StateInOut<E>,
     pub rd: WriteRD<E>,
-    pub imm: WitIn,
 }
 
 impl<E: ExtensionField> JInstructionConfig<E> {
@@ -39,9 +38,6 @@ impl<E: ExtensionField> JInstructionConfig<E> {
         // Registers
         let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
 
-        // Immediate
-        let imm = circuit_builder.create_witin(|| "imm")?;
-
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
@@ -50,10 +46,10 @@ impl<E: ExtensionField> JInstructionConfig<E> {
             0.into(),
             0.into(),
             0.into(),
-            imm.expr(),
+            vm_state.next_pc.unwrap().expr() - vm_state.pc.expr(),
         ))?;
 
-        Ok(JInstructionConfig { vm_state, rd, imm })
+        Ok(JInstructionConfig { vm_state, rd })
     }
 
     pub fn assign_instance(
@@ -64,13 +60,6 @@ impl<E: ExtensionField> JInstructionConfig<E> {
     ) -> Result<(), ZKVMError> {
         self.vm_state.assign_instance(instance, step)?;
         self.rd.assign_instance(instance, lk_multiplicity, step)?;
-
-        // Immediate
-        set_val!(
-            instance,
-            self.imm,
-            InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn())
-        );
 
         // Fetch the instruction.
         lk_multiplicity.fetch(step.pc().before.0);
