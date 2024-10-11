@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
+use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -7,7 +8,7 @@ use crate::{
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
-        riscv::{constants::UInt, u_insn::UInstructionConfig, RIVInstruction},
+        riscv::{constants::UInt, u_insn::UInstructionConfig},
         Instruction,
     },
     set_val,
@@ -22,14 +23,14 @@ pub struct AuipcConfig<E: ExtensionField> {
     pub rd_written: UInt<E>,
 }
 
-pub struct AuipcCircuit<E, I>(PhantomData<(E, I)>);
+pub struct AuipcInstruction<E>(PhantomData<E>);
 
 /// AUIPC instruction circuit
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for AuipcCircuit<E, I> {
+impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     type InstructionConfig = AuipcConfig<E>;
 
     fn name() -> String {
-        format!("{:?}", I::INST_KIND)
+        format!("{:?}", InsnKind::AUIPC)
     }
 
     fn construct_circuit(
@@ -40,7 +41,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for AuipcCircuit<E, I>
 
         let u_insn = UInstructionConfig::construct_circuit(
             circuit_builder,
-            I::INST_KIND,
+            InsnKind::AUIPC,
             &imm.expr(),
             rd_written.register_expr(),
         )?;

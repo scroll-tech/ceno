@@ -1,12 +1,13 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
+use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        riscv::{constants::UInt, u_insn::UInstructionConfig, RIVInstruction},
+        riscv::{constants::UInt, u_insn::UInstructionConfig},
         Instruction,
     },
     witness::LkMultiplicity,
@@ -18,14 +19,14 @@ pub struct LuiConfig<E: ExtensionField> {
     pub rd_written: UInt<E>,
 }
 
-pub struct LuiCircuit<E, I>(PhantomData<(E, I)>);
+pub struct LuiInstruction<E>(PhantomData<E>);
 
 /// LUI instruction circuit
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LuiCircuit<E, I> {
+impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     type InstructionConfig = LuiConfig<E>;
 
     fn name() -> String {
-        format!("{:?}", I::INST_KIND)
+        format!("{:?}", InsnKind::LUI)
     }
 
     fn construct_circuit(
@@ -37,7 +38,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LuiCircuit<E, I> {
         // table is equal to rd_written value
         let u_insn = UInstructionConfig::construct_circuit(
             circuit_builder,
-            I::INST_KIND,
+            InsnKind::LUI,
             &rd_written.value(), // instruction immediate for program table lookup
             rd_written.register_expr(),
         )?;
