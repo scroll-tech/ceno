@@ -2,7 +2,7 @@ use std::{iter, panic, time::Instant};
 
 use ceno_zkvm::{
     instructions::riscv::{arith::AddInstruction, branch::BltuInstruction},
-    scheme::prover::ZKVMProver,
+    scheme::{prover::ZKVMProver, PublicValues},
     tables::ProgramTableCircuit,
 };
 use clap::Parser;
@@ -15,12 +15,13 @@ use ceno_emul::{
 };
 use ceno_zkvm::{
     instructions::riscv::ecall::HaltInstruction,
-    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier, PublicValues},
+    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
+use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
 use tracing_flame::FlameLayer;
@@ -193,7 +194,8 @@ fn main() {
 
         assert_eq!(halt_records.len(), 1);
         let exit_code = halt_records[0].rs2().unwrap().value;
-        let pi = PublicValues::new(exit_code, 0);
+        let mut pi = PublicValues::default();
+        pi.set_exit_code([exit_code & 0xffff, (exit_code >> 16) & 0xffff]);
 
         tracing::info!(
             "tracer generated {} ADD records, {} BLTU records",

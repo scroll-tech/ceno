@@ -4,7 +4,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
-    instructions::riscv::constants::EXIT_CODE_IDX,
+    scheme::PublicValues,
     structs::ROMType,
     tables::InsnRecord,
 };
@@ -34,9 +34,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn query_exit_code(&mut self) -> Result<[Instance; 2], ZKVMError> {
         Ok([
-            self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
             self.cs
-                .query_instance(|| "exit_code_high", EXIT_CODE_IDX + 1)?,
+                .query_instance(|| "exit_code_low", PublicValues::EXIT_CODE_IDX)?,
+            self.cs
+                .query_instance(|| "exit_code_high", PublicValues::EXIT_CODE_IDX + 1)?,
         ])
     }
 

@@ -21,6 +21,7 @@ use crate::{
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
         Instruction,
     },
+    scheme::PublicValues,
     set_val,
     structs::{PointAndEval, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{ProgramTableCircuit, U16TableCircuit},
@@ -31,7 +32,6 @@ use super::{
     constants::{MAX_NUM_VARIABLES, NUM_FANIN},
     prover::ZKVMProver,
     verifier::ZKVMVerifier,
-    PublicValues,
 };
 
 struct TestConfig {
@@ -275,7 +275,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program_code.len())
         .unwrap();
 
-    let pi = PublicValues::new(0, 0);
+    let pi = PublicValues::default();
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, 1, transcript)
