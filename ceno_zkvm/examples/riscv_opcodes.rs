@@ -1,4 +1,4 @@
-use std::{iter, time::Instant};
+use std::{iter, panic, time::Instant};
 
 use ceno_zkvm::{
     instructions::riscv::{arith::AddInstruction, branch::BltuInstruction},
@@ -256,8 +256,35 @@ fn main() {
         // change public input maliciously should cause verifier to reject proof
         zkvm_proof.pv[0] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
         zkvm_proof.pv[1] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
-        verifier
-            .verify_proof(zkvm_proof, transcript)
-            .expect_err("verify proof should return with error");
+
+        // capture panic message, if have
+        let default_hook = panic::take_hook();
+        panic::set_hook(Box::new(|_info| {
+            // by default it will print msg to stdout/stderr
+            // we override it to avoid print msg since we will capture the msg by our own
+        }));
+        let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
+        panic::set_hook(default_hook);
+        match result {
+            Ok(res) => {
+                res.expect_err("verify proof should return with error");
+            }
+            Err(err) => {
+                let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
+                    message.to_string()
+                } else if let Some(message) = err.downcast_ref::<String>() {
+                    message.to_string()
+                } else if let Some(message) = err.downcast_ref::<&String>() {
+                    message.to_string()
+                } else {
+                    unreachable!()
+                };
+
+                if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+                    println!("unknown panic {msg:?}");
+                    panic::resume_unwind(err);
+                };
+            }
+        };
     }
 }
