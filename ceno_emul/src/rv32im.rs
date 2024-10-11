@@ -327,7 +327,7 @@ impl DecodedInstruction {
     /// Indicate whether the immediate is interpreted as a signed integer, and it is negative.
     pub fn imm_is_negative(&self) -> bool {
         match self.codes() {
-            InsnCodes { format: R, .. } => false,
+            InsnCodes { format: R | U, .. } => false,
             InsnCodes {
                 kind: SLLI | SRLI | SRAI | ADDI,
                 ..

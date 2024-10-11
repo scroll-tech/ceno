@@ -84,10 +84,10 @@ pub const MOCK_PROGRAM: &[u32] = &[
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
     // jal x4, 0xffffe
     0b_1_1111111110_1_11111111 << 12 | MOCK_RD << 7 | 0x6f,
-    // lui x4, 0x10004
-    0b_00010000000000000100 << 12 | MOCK_RD << 7 | 0x37,
-    // auipc x4, 0x7ffff
-    0b_01111111111111111110 << 12 | MOCK_RD << 7 | 0x17,
+    // lui x4, 0x90005
+    0x90005 << 12 | MOCK_RD << 7 | 0x37,
+    // auipc x4, 0x90005
+    0x90005 << 12 | MOCK_RD << 7 | 0x17,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
