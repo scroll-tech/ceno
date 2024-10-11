@@ -23,9 +23,11 @@ pub struct JalConfig<E: ExtensionField> {
 pub struct JalCircuit<E, I>(PhantomData<(E, I)>);
 
 /// JAL instruction circuit
+///
 /// Note: does not validate that next_pc is aligned by 4-byte increments, which
 ///   should be verified by lookup argument of the next execution step against
 ///   the program table
+///
 /// Assumption: values for valid initial program counter must lie between
 ///   2^20 and 2^32 - 2^20 + 2 inclusive, probably enforced by the static
 ///   program lookup table. If this assumption does not hold, then resulting
@@ -47,12 +49,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalCircuit<E, I> {
             circuit_builder,
             I::INST_KIND,
             rd_written.register_expr(),
-        )?;
-
-        circuit_builder.require_equal(
-            || "jal next_pc",
-            j_insn.vm_state.next_pc.unwrap().expr(),
-            j_insn.vm_state.pc.expr() + j_insn.imm.expr(),
         )?;
 
         circuit_builder.require_equal(
