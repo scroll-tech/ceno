@@ -1,7 +1,7 @@
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
-use super::constants::{UInt, PC_STEP_SIZE};
+use super::constants::{UInt, PC_STEP_SIZE, UINT_LIMBS};
 use crate::{
     chip_handler::{
         GlobalStateRegisterMachineChipOperations, MemoryChipOperations, MemoryExpr,
@@ -9,7 +9,7 @@ use crate::{
     },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
+    expression::{Expression, ToExpr, WitIn},
     gadgets::IsLtConfig,
     set_val,
     uint::Value,
@@ -255,7 +255,7 @@ impl<E: ExtensionField> ReadMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: MemoryExpr<E>,
-        mem_read: RegisterExpr<E>,
+        mem_read: [Expression<E>; UINT_LIMBS],
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
         let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
@@ -311,7 +311,7 @@ impl<E: ExtensionField> WriteMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: MemoryExpr<E>,
-        mem_written: MemoryExpr<E>,
+        mem_written: [Expression<E>; UINT_LIMBS],
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
         let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
