@@ -61,6 +61,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             &imm.value(),
             div_config.dividend.register_expr(),
             rd_written.register_expr(),
+            false,
         )?;
 
         Ok(InstructionConfig {

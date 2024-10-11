@@ -44,6 +44,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
             &imm.value(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
+            false,
         )?;
 
         Ok(InstructionConfig {
