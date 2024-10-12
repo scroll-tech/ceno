@@ -207,6 +207,16 @@ pub struct InsnCodes {
     pub func7: u32,
 }
 
+impl InsnCodes {
+    /// Get the funct3 field, or zero if the instruction does not use funct3.
+    pub fn funct3_or_zero(&self) -> u32 {
+        match self.format {
+            R | I | S | B => self.func3,
+            _ => 0,
+        }
+    }
+}
+
 impl DecodedInstruction {
     pub fn new(insn: u32) -> Self {
         Self {
@@ -271,10 +281,7 @@ impl DecodedInstruction {
 
     /// Get the funct3 field, or zero if the instruction does not use funct3.
     pub fn funct3_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.func3,
-            _ => 0,
-        }
+        self.codes().funct3_or_zero()
     }
 
     /// Get the rs1 field, regardless of the instruction format.

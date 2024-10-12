@@ -6,6 +6,7 @@ pub mod branch;
 pub mod config;
 pub mod constants;
 pub mod divu;
+pub mod dummy;
 pub mod ecall;
 pub mod jump;
 pub mod logic;
