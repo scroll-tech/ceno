@@ -1,25 +1,50 @@
 use crate::{
-    constants::{DIGEST_WIDTH, SPONGE_RATE, SPONGE_WIDTH},
+    constants::{DIGEST_WIDTH, SPONGE_RATE},
     digest::Digest,
-    poseidon::{AdaptedField, Poseidon},
+    poseidon::Poseidon,
     poseidon_permutation::PoseidonPermutation,
 };
 
 pub struct PoseidonHash;
 
 impl PoseidonHash {
-    pub fn two_to_one<F: Poseidon + AdaptedField>(
-        left: &Digest<F>,
-        right: &Digest<F>,
-    ) -> Digest<F> {
+    pub fn two_to_one<F: Poseidon>(left: &Digest<F>, right: &Digest<F>) -> Digest<F> {
         compress(left, right)
     }
 
-    pub fn hash_or_noop<F: Poseidon + AdaptedField>(inputs: &[F]) -> Digest<F> {
+    pub fn hash_or_noop<F: Poseidon>(inputs: &[F]) -> Digest<F> {
         if inputs.len() <= DIGEST_WIDTH {
             Digest::from_partial(inputs)
         } else {
             hash_n_to_hash_no_pad(inputs)
+        }
+    }
+
+    pub fn hash_or_noop_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(
+        mut input_iter: I,
+    ) -> Digest<F> {
+        let mut initial_elements = Vec::with_capacity(DIGEST_WIDTH);
+
+        for _ in 0..DIGEST_WIDTH + 1 {
+            match input_iter.next() {
+                Some(value) => initial_elements.push(value),
+                None => break,
+            }
+        }
+
+        if initial_elements.len() <= DIGEST_WIDTH {
+            Digest::from_partial(
+                initial_elements
+                    .into_iter()
+                    .copied()
+                    .collect::<Vec<F>>()
+                    .as_slice(),
+            )
+        } else {
+            let iter = initial_elements.into_iter().chain(input_iter);
+            hash_n_to_m_no_pad_iter(iter, DIGEST_WIDTH)
+                .try_into()
+                .unwrap()
         }
     }
 }
@@ -49,16 +74,43 @@ pub fn hash_n_to_m_no_pad<F: Poseidon>(inputs: &[F], num_outputs: usize) -> Vec<
     }
 }
 
+pub fn hash_n_to_m_no_pad_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(
+    mut input_iter: I,
+    num_outputs: usize,
+) -> Vec<F> {
+    let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
+
+    // Absorb all input chunks.
+    loop {
+        let chunk = input_iter.by_ref().take(SPONGE_RATE).collect::<Vec<_>>();
+        if chunk.is_empty() {
+            break;
+        }
+        // Overwrite the first r elements with the inputs. This differs from a standard sponge,
+        // where we would xor or add in the inputs. This is a well-known variant, though,
+        // sometimes called "overwrite mode".
+        perm.set_from_slice(chunk.into_iter().copied().collect::<Vec<F>>().as_slice(), 0);
+        perm.permute();
+    }
+
+    // Squeeze until we have the desired number of outputs
+    let mut outputs = Vec::with_capacity(num_outputs);
+    loop {
+        for &item in perm.squeeze() {
+            outputs.push(item);
+            if outputs.len() == num_outputs {
+                return outputs;
+            }
+        }
+        perm.permute();
+    }
+}
+
 pub fn hash_n_to_hash_no_pad<F: Poseidon>(inputs: &[F]) -> Digest<F> {
     hash_n_to_m_no_pad(inputs, DIGEST_WIDTH).try_into().unwrap()
 }
 
 pub fn compress<F: Poseidon>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
-    debug_assert!(SPONGE_RATE >= DIGEST_WIDTH);
-    debug_assert!(SPONGE_WIDTH >= 2 * DIGEST_WIDTH);
-    debug_assert_eq!(x.elements().len(), DIGEST_WIDTH);
-    debug_assert_eq!(y.elements().len(), DIGEST_WIDTH);
-
     let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
     perm.set_from_slice(x.elements(), 0);
     perm.set_from_slice(y.elements(), DIGEST_WIDTH);
@@ -127,7 +179,9 @@ mod tests {
             let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
             let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
+            let ceno_iter = PoseidonHash::hash_or_noop_iter(ceno_elems.iter());
             assert!(compare_hash_output(plonky_out, ceno_out));
+            assert!(compare_hash_output(plonky_out, ceno_iter));
         }
     }
 
@@ -139,7 +193,9 @@ mod tests {
             let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
             let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
+            let ceno_iter = PoseidonHash::hash_or_noop_iter(ceno_elems.iter());
             assert!(compare_hash_output(plonky_out, ceno_out));
+            assert!(compare_hash_output(plonky_out, ceno_iter));
         }
     }
 

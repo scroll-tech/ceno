@@ -142,6 +142,29 @@ impl StepRecord {
         }
     }
 
+    pub fn new_j_instruction(
+        cycle: Cycle,
+        pc: Change<ByteAddr>,
+        insn_code: Word,
+        rd: Change<Word>,
+        previous_cycle: Cycle,
+    ) -> StepRecord {
+        let insn = DecodedInstruction::new(insn_code);
+        StepRecord {
+            cycle,
+            pc,
+            insn_code,
+            rs1: None,
+            rs2: None,
+            rd: Some(WriteOp {
+                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
+                value: rd,
+                previous_cycle,
+            }),
+            memory_op: None,
+        }
+    }
+
     pub fn cycle(&self) -> Cycle {
         self.cycle
     }
