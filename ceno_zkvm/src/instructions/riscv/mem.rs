@@ -4,14 +4,15 @@ use crate::{
     expression::ToExpr,
     instructions::{
         riscv::{
-            // constants::UInt8 ?
-            constants::UInt, im_insn::IMInstructionConfig, s_insn::SInstructionConfig,
+            constants::{UInt, UInt8},
+            im_insn::IMInstructionConfig,
+            s_insn::SInstructionConfig,
             RIVInstruction,
         },
         Instruction,
     },
     witness::LkMultiplicity,
-    Value,
+    ROMType, Value,
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
@@ -33,17 +34,8 @@ impl RIVInstruction for SWOp {
     const INST_KIND: InsnKind = InsnKind::SW;
 }
 
-pub struct SBOp;
-
-impl RIVInstruction for SBOp {
-    const INST_KIND: InsnKind = InsnKind::SB;
-}
-
 #[allow(dead_code)]
 pub type StoreWord<E> = StoreInstruction<E, SWOp>;
-
-#[allow(dead_code)]
-pub type StoreByte<E> = StoreInstruction<E, SBOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E, I> {
     type InstructionConfig = StoreConfig<E>;
@@ -59,18 +51,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
 
-        let memory_addr = match I::INST_KIND { 
+        let memory_addr = match I::INST_KIND {
             InsnKind::SW => rs1_read.add(|| "memory_addr", circuit_builder, &imm, true),
             InsnKind::SB => {
                 // pick up low part
                 let lo = imm.as_lo_hi()?.0;
                 // convert to u8 limbs
-                let u8_limbs = UInt::to_u8_limbs(circuit_builder,lo);
+                let u8_limbs = UInt::to_u8_limbs(circuit_builder, lo);
                 let u8_extended = UInt::from_exprs_unchecked(u8_limbs.expr()[0])?;
                 rs1_read.add(|| "memory_addr", circuit_builder, &u8_extended, true)
-            },
+            }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
-        }; 
+        };
 
         // TODO: add memory_addr is divisible by 4 in the case of SW & SB
         let memory_value = match I::INST_KIND {
@@ -112,6 +104,117 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
         config.rs1_read.assign_value(instance, rs1);
         config.rs2_read.assign_value(instance, rs2);
         config.imm.assign_value(instance, imm);
+
+        Ok(())
+    }
+}
+
+// store_bytes
+pub struct StoreByteConfig<E: ExtensionField> {
+    s_insn: SInstructionConfig<E>,
+
+    rs1_read: UInt<E>,
+    rs2_read: UInt<E>,
+    imm: UInt<E>,
+    // and table config ?
+}
+
+pub struct StoreByteInstruction<E, I>(PhantomData<(E, I)>);
+
+pub struct SBOp;
+
+impl RIVInstruction for SBOp {
+    const INST_KIND: InsnKind = InsnKind::SB;
+}
+
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreByteInstruction<E, I> {
+    type InstructionConfig = StoreConfig<E>;
+
+    fn name() -> String {
+        format!("{:?}", I::INST_KIND)
+    }
+
+    fn construct_circuit(
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+        let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
+
+        let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
+        let memory_addr_u8 = UInt::to_u8_limbs(circuit_builder, memory_addr);
+        let addr_offset = UInt8::new_unchecked(|| "addr_offset", circuit_builder)?;
+        let memory_addr_limb0 = UInt::from_exprs_unchecked(memory_addr_u8.expr()[0])?;
+        let const_num_3 = UInt8::from_const_unchecked(vec![3u64, 0, 0, 0]);
+
+        let aligned_memory_addr = UInt8::new_unchecked(|| "aligned_memory_addr", circuit_builder)?;
+
+        // constrain addr_off = addr[0] & 0x03
+        UInt8::logic(
+            circuit_builder,
+            ROMType::And,
+            &memory_addr_limb0,
+            &const_num_3,
+            &addr_offset,
+        )?;
+
+        // constrain addr[0] = aligned_addr[0] + addr_off
+        let aligned_memory_addr_limb0 = UInt8::from_exprs_unchecked(aligned_memory_addr.expr()[0])?;
+
+        let addr_sum_to_check = addr_offset.add(
+            "addr_offset + aligned_addr[0]",
+            circuit_builder,
+            &aligned_memory_addr_limb0,
+            true,
+        )?;
+        memory_addr_limb0.require_equal(
+            "addr[0] = aligned_addr[0] + addr_off",
+            circuit_builder,
+            addr_sum_to_check,
+        )?;
+        
+        
+        let memory_value = match I::INST_KIND {
+            InsnKind::SB => rs2_read.memory_expr(),
+            _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
+        };
+
+        let s_insn = SInstructionConfig::<E>::construct_circuit(
+            circuit_builder,
+            I::INST_KIND,
+            &imm.value(),
+            rs1_read.register_expr(),
+            rs2_read.register_expr(),
+            memory_addr.memory_expr(),
+            memory_value,
+        )?;
+
+        Ok(StoreByteConfig {
+            s_insn,
+            rs1_read,
+            rs2_read,
+            imm,
+        })
+    }
+
+    fn assign_instance(
+        config: &Self::InstructionConfig,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
+        let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
+        let imm = Value::new_unchecked(step.insn().imm_or_funct7());
+
+        config
+            .s_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
+        config.rs1_read.assign_value(instance, rs1);
+        config.rs2_read.assign_value(instance, rs2);
+        config.imm.assign_value(instance, imm);
+
+        // TODO:assign other fields
 
         Ok(())
     }
