@@ -84,6 +84,10 @@ pub const MOCK_PROGRAM: &[u32] = &[
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
     // jal x4, 0xffffe
     0b_1_1111111110_1_11111111 << 12 | MOCK_RD << 7 | 0x6f,
+    // lui x4, 0x90005
+    0x90005 << 12 | MOCK_RD << 7 | 0x37,
+    // auipc x4, 0x90005
+    0x90005 << 12 | MOCK_RD << 7 | 0x17,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
@@ -108,6 +112,8 @@ pub const MOCK_PC_MULHU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 72);
 pub const MOCK_PC_SLL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 76);
 pub const MOCK_PC_SRL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 80);
 pub const MOCK_PC_JAL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 84);
+pub const MOCK_PC_LUI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 88);
+pub const MOCK_PC_AUIPC: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 92);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Clone)]

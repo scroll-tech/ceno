@@ -19,6 +19,7 @@ mod i_insn;
 mod insn_base;
 mod j_insn;
 mod r_insn;
+mod u_insn;
 
 mod ecall_insn;
 
