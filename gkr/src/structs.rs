@@ -5,9 +5,7 @@ use std::{
 
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use multilinear_extensions::{
-    mle::ArcDenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
-};
+use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use serde::{Deserialize, Serialize, Serializer};
 use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId};
 

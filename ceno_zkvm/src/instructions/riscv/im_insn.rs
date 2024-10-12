@@ -1,49 +1,81 @@
 use crate::{
+    chip_handler::{MemoryExpr, RegisterExpr},
+    circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    instructions::riscv::{constants::UInt, i_insn::IInstructionConfig},
+    expression::{Expression, ToExpr},
+    instructions::riscv::insn_base::{ReadMEM, ReadRS1, StateInOut, WriteRD},
+    tables::InsnRecord,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
-use goldilocks::ExtensionField;
+use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
-use crate::chip_handler::MemoryExpr;
-use crate::circuit_builder::CircuitBuilder;
 
+/// This config handle the common part of I-type Instruction (memory variant)
+/// - PC, cycle, fetch
+/// - Register reads and writes
+/// - Memory reads
 pub struct IMInstructionConfig<E: ExtensionField> {
-    i_insn: IInstructionConfig<E>,
-
-    imm: UInt<E>,
-    rs1_read: UInt<E>,
+    vm_state: StateInOut<E>,
+    rs1: ReadRS1<E>,
+    rd: WriteRD<E>,
+    mem_read: ReadMEM<E>,
 }
 
 impl<E: ExtensionField> IMInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        memory_read: MemoryExpr<E>
+        imm: &Expression<E>,
+        rs1_read: RegisterExpr<E>,
+        memory_read: MemoryExpr<E>,
+        memory_addr: MemoryExpr<E>,
+        rd_written: RegisterExpr<E>,
     ) -> Result<Self, ZKVMError> {
-        // configure i_insn
-        // compute mem_addr
-        // read memory at addr location
+        let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
 
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
+        // Registers
+        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
+        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
 
-        let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
+        // Memory
+        let mem_read =
+            ReadMEM::construct_circuit(circuit_builder, memory_addr, memory_read, vm_state.ts)?;
 
-        // Memory read
-        // what ts to use here
-        // let ()
+        // Fetch the instruction
+        circuit_builder.lk_fetch(&InsnRecord::new(
+            vm_state.pc.expr(),
+            (insn_kind.codes().opcode as usize).into(),
+            rd.id.expr(),
+            (insn_kind.codes().func3 as usize).into(),
+            rs1.id.expr(),
+            0.into(),
+            imm.clone(),
+        ))?;
 
-        todo!()
+        Ok(IMInstructionConfig {
+            vm_state,
+            rs1,
+            rd,
+            mem_read,
+        })
     }
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        todo!()
+        self.vm_state.assign_instance(instance, step)?;
+        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
+        self.rd.assign_instance(instance, lk_multiplicity, step)?;
+        self.mem_read
+            .assign_instance(instance, lk_multiplicity, step)?;
+
+        // Fetch instruction
+        lk_multiplicity.fetch(step.pc().before.0);
+
+        Ok(())
     }
 }

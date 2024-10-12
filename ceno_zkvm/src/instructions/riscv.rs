@@ -1,16 +1,24 @@
 use ceno_emul::InsnKind;
 
 pub mod arith;
-mod b_insn;
-pub mod blt;
+pub mod arith_imm;
 pub mod branch;
 pub mod config;
 pub mod constants;
 pub mod divu;
-mod i_insn;
+pub mod ecall;
 pub mod logic;
-mod r_insn;
+pub mod mulh;
+pub mod shift;
 pub mod shift_imm;
+pub mod sltu;
+
+mod b_insn;
+mod i_insn;
+mod insn_base;
+
+mod ecall_insn;
+mod r_insn;
 
 mod im_insn;
 mod mem;

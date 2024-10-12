@@ -24,6 +24,9 @@ pub trait EmuContext {
     // Handle environment call
     fn ecall(&mut self) -> Result<bool>;
 
+    // Handle halt
+    fn halt(&mut self, pc: ByteAddr);
+
     // Handle a machine return
     fn mret(&self) -> Result<bool>;
 
@@ -326,7 +329,7 @@ impl DecodedInstruction {
         match self.codes() {
             InsnCodes { format: R, .. } => false,
             InsnCodes {
-                kind: SLLI | SRLI | SRAI,
+                kind: SLLI | SRLI | SRAI | ADDI | SW | LW,
                 ..
             } => false,
             _ => self.top_bit != 0,
@@ -377,6 +380,7 @@ impl DecodedInstruction {
 
 #[cfg(test)]
 #[test]
+#[allow(clippy::identity_op)]
 fn test_decode_imm() {
     for (i, expected) in [
         // Example of I-type: ADDI.

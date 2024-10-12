@@ -2,8 +2,7 @@
 #![no_std]
 use core::ptr::{addr_of, read_volatile};
 
-#[allow(unused_imports)]
-use ceno_rt;
+extern crate ceno_rt;
 
 extern crate alloc;
 use alloc::{vec, vec::Vec};
@@ -21,6 +20,11 @@ fn main() {
     // Test writing to the heap.
     let mut v: Vec<u32> = vec![];
     v.push(0xbeef);
+    black_box(&v[0]);
+
+    // Test writing to a larger vector on the heap
+    let mut v: Vec<u32> = vec![0; 128 * 1024];
+    v[999] = 0xdead_beef;
     black_box(&v[0]);
 }
 

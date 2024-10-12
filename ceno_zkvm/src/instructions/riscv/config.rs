@@ -1,8 +1,21 @@
-use std::mem::MaybeUninit;
+use std::{fmt::Display, mem::MaybeUninit};
 
-use crate::{expression::WitIn, set_val, utils::i64_to_base, witness::LkMultiplicity};
+use crate::{
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{Expression, ToExpr, WitIn},
+    gadgets::IsLtConfig,
+    set_val,
+    utils::i64_to_base,
+    witness::LkMultiplicity,
+    Value,
+};
+use ceno_emul::{SWord, Word};
+use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
+
+use super::constants::{UInt, UINT_LIMBS};
 
 #[derive(Clone)]
 pub struct IsEqualConfig {
@@ -189,40 +202,98 @@ impl UIntLtInput<'_> {
     }
 }
 
-// TODO move ExprLtConfig to gadgets
+#[allow(dead_code)]
 #[derive(Debug)]
-pub struct ExprLtConfig {
-    pub is_lt: Option<WitIn>,
-    pub diff: Vec<WitIn>,
+pub struct SignedLtConfig {
+    is_lt: IsLtConfig,
+    is_lhs_neg: IsLtConfig,
+    is_rhs_neg: IsLtConfig,
 }
 
-pub struct ExprLtInput {
-    pub lhs: u64,
-    pub rhs: u64,
-}
+impl SignedLtConfig {
+    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+        self.is_lt.expr()
+    }
 
-impl ExprLtInput {
-    pub fn assign<F: SmallField>(
+    pub fn construct_circuit<
+        E: ExtensionField,
+        NR: Into<String> + Display + Clone,
+        N: FnOnce() -> NR,
+    >(
+        cb: &mut CircuitBuilder<E>,
+        name_fn: N,
+        lhs: &UInt<E>,
+        rhs: &UInt<E>,
+        assert_less_than: Option<bool>,
+    ) -> Result<Self, ZKVMError> {
+        cb.namespace(name_fn, |cb| {
+            let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::C - 1)) - 1).into();
+            // Extract the sign bit.
+            let is_lhs_neg = IsLtConfig::construct_circuit(
+                cb,
+                || "lhs_msb",
+                max_signed_limb_expr.clone(),
+                lhs.limbs.iter().last().unwrap().expr(), // msb limb
+                None,
+                1,
+            )?;
+            let is_rhs_neg = IsLtConfig::construct_circuit(
+                cb,
+                || "rhs_msb",
+                max_signed_limb_expr,
+                rhs.limbs.iter().last().unwrap().expr(), // msb limb
+                None,
+                1,
+            )?;
+
+            // Convert two's complement representation into field arithmetic.
+            // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
+            let neg_shift = -Expression::Constant((1_u64 << 32).into());
+            let lhs_value = lhs.value() + is_lhs_neg.expr() * neg_shift.clone();
+            let rhs_value = rhs.value() + is_rhs_neg.expr() * neg_shift;
+
+            let u_lt = IsLtConfig::construct_circuit(
+                cb,
+                || "lhs<rhs",
+                lhs_value,
+                rhs_value,
+                assert_less_than,
+                UINT_LIMBS,
+            )?;
+
+            Ok(SignedLtConfig {
+                is_lt: u_lt,
+                is_lhs_neg,
+                is_rhs_neg,
+            })
+        })
+    }
+
+    pub fn assign_instance<E: ExtensionField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
-        config: &ExprLtConfig,
+        instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
-    ) {
-        let is_lt = if let Some(is_lt_wit) = config.is_lt {
-            let is_lt = self.lhs < self.rhs;
-            set_val!(instance, is_lt_wit, is_lt as u64);
-            is_lt
-        } else {
-            // assert is_lt == true
-            true
-        };
+        lhs: Word,
+        rhs: Word,
+    ) -> Result<(), ZKVMError> {
+        let max_signed_limb = (1u64 << (UInt::<E>::C - 1)) - 1;
+        let lhs_value = Value::new_unchecked(lhs);
+        let rhs_value = Value::new_unchecked(rhs);
+        self.is_lhs_neg.assign_instance(
+            instance,
+            lkm,
+            max_signed_limb,
+            *lhs_value.limbs.last().unwrap() as u64,
+        )?;
+        self.is_rhs_neg.assign_instance(
+            instance,
+            lkm,
+            max_signed_limb,
+            *rhs_value.limbs.last().unwrap() as u64,
+        )?;
 
-        let diff = if is_lt { 1u64 << u32::BITS } else { 0 } + self.lhs - self.rhs;
-        config.diff.iter().enumerate().for_each(|(i, wit)| {
-            // extract the 16 bit limb from diff and assign to instance
-            let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
-            lkm.assert_ux::<16>(val);
-            set_val!(instance, wit, val);
-        });
+        self.is_lt
+            .assign_instance_signed(instance, lkm, lhs as SWord, rhs as SWord)?;
+        Ok(())
     }
 }

@@ -194,10 +194,6 @@ pub fn ceil_log2(x: usize) -> usize {
     usize_bits - (x - 1).leading_zeros() as usize
 }
 
-pub fn is_power_of_2(x: usize) -> bool {
-    (x != 0) && ((x & (x - 1)) == 0)
-}
-
 pub(crate) fn merge_sumcheck_polys<E: ExtensionField>(
     prover_states: &[IOPProverState<E>],
     max_thread_id: usize,

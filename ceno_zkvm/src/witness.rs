@@ -4,6 +4,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     mem::{self, MaybeUninit},
+    ops::Index,
     slice::{Chunks, ChunksMut},
     sync::Arc,
 };
@@ -21,6 +22,7 @@ use thread_local::ThreadLocal;
 use crate::{
     structs::ROMType,
     tables::{AndTable, LtuTable, OpsTable, OrTable, XorTable},
+    utils::next_pow2_instance_padding,
 };
 
 #[macro_export]
@@ -46,7 +48,7 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send> {
 
 impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize) -> Self {
-        let num_total_rows = num_rows.next_power_of_two();
+        let num_total_rows = next_pow2_instance_padding(num_rows);
         let num_padding_rows = num_total_rows - num_rows;
         RowMajorMatrix {
             values: create_uninit_vec(num_total_rows * num_col),
@@ -57,6 +59,10 @@ impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
 
     pub fn num_instances(&self) -> usize {
         self.values.len() / self.num_col - self.num_padding_rows
+    }
+
+    pub fn num_padding_instances(&self) -> usize {
+        self.num_padding_rows
     }
 
     pub fn iter_rows(&self) -> Chunks<MaybeUninit<T>> {
@@ -76,6 +82,16 @@ impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
         num_rows: usize,
     ) -> rayon::slice::ChunksMut<MaybeUninit<T>> {
         self.values.par_chunks_mut(num_rows * self.num_col)
+    }
+
+    pub fn par_batch_iter_padding_mut(
+        &mut self,
+        num_rows: usize,
+    ) -> rayon::slice::ChunksMut<'_, MaybeUninit<T>> {
+        let valid_instance = self.num_instances();
+        self.values[valid_instance * self.num_col..]
+            .as_mut()
+            .par_chunks_mut(num_rows * self.num_col)
     }
 
     pub fn de_interleaving(mut self) -> Vec<Vec<T>> {
@@ -100,6 +116,14 @@ impl<F: Field> RowMajorMatrix<F> {
     }
 }
 
+impl<F: Field> Index<usize> for RowMajorMatrix<F> {
+    type Output = [MaybeUninit<F>];
+
+    fn index(&self, idx: usize) -> &Self::Output {
+        &self.values[self.num_col * idx..][..self.num_col]
+    }
+}
+
 /// A lock-free thread safe struct to count logup multiplicity for each ROM type
 /// Lock-free by thread-local such that each thread will only have its local copy
 /// struct is cloneable, for internallly it use Arc so the clone will be low cost
@@ -118,7 +142,6 @@ impl LkMultiplicity {
             16 => self.increment(ROMType::U16, v),
             8 => self.increment(ROMType::U8, v),
             5 => self.increment(ROMType::U5, v),
-            1 => self.increment(ROMType::U1, v),
             _ => panic!("Unsupported bit range"),
         }
     }

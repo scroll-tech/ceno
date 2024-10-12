@@ -13,8 +13,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{izip, Itertools};
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLE},
-    virtual_poly_v2::ArcMultilinearExtension,
+    mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
 };
 use simple_frontend::structs::CircuitBuilder;
 use std::iter;
@@ -467,6 +466,7 @@ pub fn prove_keccak256<'a, E: ExtensionField>(
     #[cfg(test)]
     {
         use crate::structs::CircuitWitness;
+        use multilinear_extensions::mle::IntoMLE;
         let all_zero: Vec<DenseMultilinearExtension<E>> = vec![
             vec![E::BaseField::ZERO; 25 * 64],
             vec![E::BaseField::ZERO; 17 * 64],

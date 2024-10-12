@@ -1,28 +1,68 @@
 [env]
 CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
-CORE = { script = ["grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}'"] }
+CORE = { script = ["nproc"] }
 RAYON_NUM_THREADS = "${CORE}"
+CUR_TARGET = { script = ['''
+        if [ -z "${TARGET}" ]; then
+            TARGET=$(rustc -vV | grep "host" | awk '{print $2}')
+            echo "${TARGET}"
+        else
+            echo "${TARGET}"
+        fi
+        '''] }
 
 [tasks.tests]
+workspace = false
 command = "cargo"
-args = ["test", "--lib", "--release", "--target", "${TARGET}", "--workspace", "--exclude", "singer-pro", "--exclude", "ceno_rt"]
+args = [
+    "test",
+    "--lib",
+    "--release",
+    "--target",
+    "${CUR_TARGET}",
+    "--workspace",
+    "--exclude",
+    "ceno_rt",
+    "--exclude",
+    "singer-pro",
+]
 
-[tasks.fmt-check]
+[tasks.fmt-all-check]
+workspace = false
 command = "cargo"
 args = ["fmt", "--all", "--", "--check"]
 
-[tasks.fmt]
+[tasks.fmt-all]
+workspace = false
 command = "cargo"
 args = ["fmt", "--all"]
 
-[tasks.clippy]
+[tasks.clippy-all]
+workspace = false
 command = "cargo"
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
 
-[tasks.fmt-check-selected-packages]
+[tasks.fmt]
+workspace = false
 command = "cargo"
 args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
 
-[tasks.clippy-check-selected-packages]
+[tasks.clippy]
+workspace = false
 command = "cargo"
-args = ["clippy", "-p", "ceno_zkvm", "--target", "${TARGET}", "--", "-D", "warnings"]
+args = [
+    "clippy",
+    "--package",
+    "ceno_zkvm",
+    "--package",
+    "mpcs",
+    "--package",
+    "ceno_emul",
+    "--package",
+    "ceno_rt",
+    "--target",
+    "${CUR_TARGET}",
+    "--",
+    "-D",
+    "warnings",
+]
