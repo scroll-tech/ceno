@@ -20,6 +20,7 @@ mod insn_base;
 mod ecall_insn;
 mod r_insn;
 
+mod im_insn;
 mod mem;
 mod s_insn;
 #[cfg(test)]
