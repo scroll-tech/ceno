@@ -241,7 +241,6 @@ mod test {
             let mut rng = rand::thread_rng();
             let a: u32 = rng.gen();
             let b: u32 = rng.gen_range(1..u32::MAX);
-            println!("random: {} / {} = {}", a, b, a / b);
             verify("random", a, b, a / b);
         }
     }

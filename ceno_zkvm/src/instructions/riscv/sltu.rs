@@ -185,7 +185,6 @@ mod test {
         let mut rng = rand::thread_rng();
         let a: u32 = rng.gen();
         let b: u32 = rng.gen();
-        println!("random: {}, {}", a, b);
         verify("random 1", a, b, (a < b) as u32);
         verify("random 2", b, a, !(a < b) as u32);
     }
