@@ -7,20 +7,20 @@ use crate::{
     error::ZKVMError,
     expression::ToExpr,
     instructions::{
-        riscv::{constants::UInt, j_insn::JInstructionConfig, RIVInstruction},
+        riscv::{constants::UInt, j_insn::JInstructionConfig},
         Instruction,
     },
     witness::LkMultiplicity,
     Value,
 };
-use ceno_emul::PC_STEP_SIZE;
+use ceno_emul::{InsnKind, PC_STEP_SIZE};
 
 pub struct JalConfig<E: ExtensionField> {
     pub j_insn: JInstructionConfig<E>,
     pub rd_written: UInt<E>,
 }
 
-pub struct JalCircuit<E, I>(PhantomData<(E, I)>);
+pub struct JalInstruction<E>(PhantomData<E>);
 
 /// JAL instruction circuit
 ///
@@ -33,11 +33,11 @@ pub struct JalCircuit<E, I>(PhantomData<(E, I)>);
 ///   program lookup table. If this assumption does not hold, then resulting
 ///   value for next_pc may not correctly wrap mod 2^32 because of the use
 ///   of native WitIn values for address space arithmetic.
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalCircuit<E, I> {
+impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     type InstructionConfig = JalConfig<E>;
 
     fn name() -> String {
-        format!("{:?}", I::INST_KIND)
+        format!("{:?}", InsnKind::JAL)
     }
 
     fn construct_circuit(
@@ -47,7 +47,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for JalCircuit<E, I> {
 
         let j_insn = JInstructionConfig::construct_circuit(
             circuit_builder,
-            I::INST_KIND,
+            InsnKind::JAL,
             rd_written.register_expr(),
         )?;
 

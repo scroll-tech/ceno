@@ -51,20 +51,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
 
-        let memory_addr = match I::INST_KIND {
-            InsnKind::SW => rs1_read.add(|| "memory_addr", circuit_builder, &imm, true),
-            InsnKind::SB => {
-                // pick up low part
-                let lo = imm.as_lo_hi()?.0;
-                // convert to u8 limbs
-                let u8_limbs = UInt::to_u8_limbs(circuit_builder, lo);
-                let u8_extended = UInt::from_exprs_unchecked(u8_limbs.expr()[0])?;
-                rs1_read.add(|| "memory_addr", circuit_builder, &u8_extended, true)
-            }
-            _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
-        };
+        let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
 
-        // TODO: add memory_addr is divisible by 4 in the case of SW & SB
         let memory_value = match I::INST_KIND {
             InsnKind::SW => rs2_read.memory_expr(),
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
@@ -109,14 +97,21 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
     }
 }
 
-// store_bytes
+// store_byte
 pub struct StoreByteConfig<E: ExtensionField> {
     s_insn: SInstructionConfig<E>,
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
     imm: UInt<E>,
-    // and table config ?
+
+    // aligned memory word value before write
+    memory_value_old: UInt8<E>,
+    // aligned memory word value after write
+    memory_value_new: UInt8<E>,
+    // 4 selectors indicate which byte is selected to update
+    // e.g. [ 0, 1, 0, 0 ] means the second byte is updated.
+    memory_byte_selectors: UInt8<E>,
 }
 
 pub struct StoreByteInstruction<E, I>(PhantomData<(E, I)>);
@@ -128,7 +123,7 @@ impl RIVInstruction for SBOp {
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreByteInstruction<E, I> {
-    type InstructionConfig = StoreConfig<E>;
+    type InstructionConfig = StoreByteConfig<E>;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -142,9 +137,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreByteInstructi
         let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
 
         let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
-        let memory_addr_u8 = UInt::to_u8_limbs(circuit_builder, memory_addr);
+        let memory_addr_u8 = UInt::to_u8_limbs(circuit_builder, memory_addr.clone());
         let addr_offset = UInt8::new_unchecked(|| "addr_offset", circuit_builder)?;
-        let memory_addr_limb0 = UInt::from_exprs_unchecked(memory_addr_u8.expr()[0])?;
+        let memory_addr_limb0 =
+            UInt8::from_exprs_unchecked(vec![memory_addr_u8.expr()[0].clone()])?;
         let const_num_3 = UInt8::from_const_unchecked(vec![3u64, 0, 0, 0]);
 
         let aligned_memory_addr = UInt8::new_unchecked(|| "aligned_memory_addr", circuit_builder)?;
@@ -159,21 +155,66 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreByteInstructi
         )?;
 
         // constrain addr[0] = aligned_addr[0] + addr_off
-        let aligned_memory_addr_limb0 = UInt8::from_exprs_unchecked(aligned_memory_addr.expr()[0])?;
+        let aligned_memory_addr_limb0 =
+            UInt8::from_exprs_unchecked(vec![aligned_memory_addr.expr()[0].clone()])?;
 
         let addr_sum_to_check = addr_offset.add(
-            "addr_offset + aligned_addr[0]",
+            || "addr_offset + aligned_addr[0]",
             circuit_builder,
             &aligned_memory_addr_limb0,
             true,
         )?;
         memory_addr_limb0.require_equal(
-            "addr[0] = aligned_addr[0] + addr_off",
+            || "addr[0] = aligned_addr[0] + addr_off",
             circuit_builder,
-            addr_sum_to_check,
+            &addr_sum_to_check,
         )?;
-        
-        
+
+        // byte selecting indicator
+        let memory_byte_selectors =
+            UInt8::new_unchecked(|| "memory_byte_selectors", circuit_builder)?;
+        // constrain: each selector are bool
+        let byte_selectors = memory_byte_selectors.expr();
+
+        let const_num_1 = UInt8::from_const_unchecked(vec![1u64, 0, 0, 0]).expr()[0].clone();
+        let const_num_zero = UInt8::from_const_unchecked(vec![0u64, 0, 0, 0]);
+
+        let mut selectors_sum = const_num_zero.expr()[0].clone();
+        for idx in 0..4 {
+            let sel = byte_selectors[idx].clone();
+            // let sel_uint = UInt8::from_exprs_unchecked(vec![sel])?;
+            circuit_builder.require_zero(
+                || " sel * (1 - sel) = 0",
+                sel.clone() * (const_num_1.clone() - sel.clone()),
+            )?;
+            selectors_sum = selectors_sum + sel;
+        }
+
+        // constrain: sum of selectors equals 1.
+        circuit_builder.require_one(|| "selectors_sum = 1", selectors_sum)?;
+
+        // aligned memory word value before write
+        let memory_value_old = UInt8::new_unchecked(|| "memory_value_old", circuit_builder)?;
+        // aligned memory word value after write
+        let memory_value_new = UInt8::new_unchecked(|| "memory_value_old", circuit_builder)?;
+
+        // memory_value_old transition to memory_value_new by replacing one byte.
+        // memory_value_new[i] = memory_value_old[i] * (1 - byte_selectors[i]) + rs2[0] * byte_selectors[i]
+        let old_value_bytes = memory_value_old.expr();
+        let new_value_bytes = memory_value_new.expr();
+
+        let rs2_first_byte = UInt::to_u8_limbs(circuit_builder, rs2_read.clone()).expr()[0].clone();
+
+        for idx in 0..4 {
+            let sel = byte_selectors[idx].clone();
+            // calculate old_mem_value[i] * (1 - byte_selectors[i]
+            let old_mem_val = old_value_bytes[idx].clone() * (const_num_1.clone() - sel.clone());
+
+            circuit_builder.require_equal(|| "new_mem_value[i] = old_mem_value[i] * (1 - byte_selectors[i]) + rs2[0] * byte_selectors[i]", 
+            new_value_bytes[idx].clone(), 
+            old_mem_val + rs2_first_byte.clone() * sel)?;
+        }
+
         let memory_value = match I::INST_KIND {
             InsnKind::SB => rs2_read.memory_expr(),
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
@@ -194,6 +235,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreByteInstructi
             rs1_read,
             rs2_read,
             imm,
+            memory_value_old,
+            memory_value_new,
+            memory_byte_selectors,
         })
     }
 
@@ -214,7 +258,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreByteInstructi
         config.rs2_read.assign_value(instance, rs2);
         config.imm.assign_value(instance, imm);
 
-        // TODO:assign other fields
+        // TODO: assign other fields
 
         Ok(())
     }
