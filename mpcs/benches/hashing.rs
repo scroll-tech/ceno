@@ -3,10 +3,8 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use ff::Field;
 use goldilocks::Goldilocks;
 use mpcs::util::hash::{hash_two_digests, Digest};
+use poseidon::poseidon_hash::PoseidonHash;
 
-fn random_ceno_goldy() -> Goldilocks {
-    Goldilocks::random(&mut test_rng())
-}
 pub fn criterion_benchmark(c: &mut Criterion) {
     let left = Digest(
         vec![Goldilocks::random(&mut test_rng()); 4]
@@ -27,8 +25,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         .collect::<Vec<_>>();
     c.bench_function("ceno hash 60 to 1", |bencher| {
         bencher.iter(|| {
-            hasher.update(values.as_slice());
-            let result = &hasher.squeeze_vec()[0..DIGEST_WIDTH];
+            PoseidonHash::hash_or_noop(&values);
         })
     });
 }
