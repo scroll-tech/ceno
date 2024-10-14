@@ -38,22 +38,7 @@ impl<Ext: ExtensionField> GateType<Ext> {
     }
 }
 
-impl<Ext: ExtensionField> Default for CircuitBuilder<Ext> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<Ext: ExtensionField> CircuitBuilder<Ext> {
-    pub fn new() -> Self {
-        Self {
-            cells: vec![],
-            n_layers: None,
-            n_witness_in: 0,
-            n_witness_out: 0,
-        }
-    }
-
     /// Prepare the circuit. This is to assign the layers and challenge levels
     /// to the cells.
     pub fn configure(&mut self) {

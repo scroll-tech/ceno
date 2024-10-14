@@ -45,7 +45,7 @@ impl<E: ExtensionField> Instruction<E> for PopInstruction {
     const OPCODE: OpcodeType = OpcodeType::POP;
     const NAME: &'static str = "POP";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges);

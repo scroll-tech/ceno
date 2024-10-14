@@ -280,7 +280,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
     const OPCODE: OpcodeType = OpcodeType::RETURN;
     const NAME: &'static str = "RETURN";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges);
@@ -397,7 +397,7 @@ impl ReturnPublicOutLoad {
     fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (pred_wire_id, pred) = circuit_builder.create_witness_in(Self::pred_size());
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
@@ -461,7 +461,7 @@ impl ReturnRestMemLoad {
     fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges)));
@@ -511,7 +511,7 @@ impl ReturnRestMemStore {
     fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges)));
@@ -564,7 +564,7 @@ impl ReturnRestStackPop {
     fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges);

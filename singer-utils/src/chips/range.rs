@@ -13,7 +13,7 @@ use crate::{
 };
 
 fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::default();
     let cells = circuit_builder.create_counter_in(0);
 
     let mut chip_handler = ChipHandler::new(*challenges);

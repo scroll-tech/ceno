@@ -322,7 +322,7 @@ fn xor2_constant<E: ExtensionField>(
 //       - Theta use lookup
 //       - Use mul3 to make Chi less layers
 pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
-    let cb = &mut CircuitBuilder::new();
+    let cb = &mut CircuitBuilder::default();
 
     let [mut state, input] = [25 * 64, 17 * 64].map(|n| {
         cb.create_witness_in(n)

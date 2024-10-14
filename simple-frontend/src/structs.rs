@@ -121,6 +121,7 @@ impl<Ext: ExtensionField> MixedCell<Ext> {
     }
 }
 
+#[derive(Default)]
 pub struct CircuitBuilder<Ext: ExtensionField> {
     pub cells: Vec<Cell<Ext>>,
 
