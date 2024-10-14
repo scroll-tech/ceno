@@ -46,7 +46,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
+        let imm = UInt::new(|| "imm", circuit_builder)?;
 
         let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
 
@@ -121,7 +121,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
+        let imm = UInt::new(|| "imm", circuit_builder)?;
         let memory_read = UInt::new_unchecked(|| "memory_read", circuit_builder)?;
 
         let (memory_addr, memory_value) = match I::INST_KIND {
