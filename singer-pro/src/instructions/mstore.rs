@@ -16,7 +16,7 @@ use singer_utils::{
     structs::{ChipChallenges, InstOutChipType, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{collections::BTreeMap, mem, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
 
 use crate::{
     component::{
