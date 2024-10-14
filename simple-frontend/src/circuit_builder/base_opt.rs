@@ -62,7 +62,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     pub fn create_witness_out_from_cells(&mut self, cells: &[CellId]) -> WitnessId {
         self.mark_cells(
             CellType::Out(OutType::Witness(self.n_witness_out as WitnessId)),
-            &cells,
+            cells,
         );
         self.n_witness_out += 1;
         (self.n_witness_out - 1) as WitnessId
