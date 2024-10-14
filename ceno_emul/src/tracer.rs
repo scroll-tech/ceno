@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
-    CENO_PLATFORM, PC_STEP_SIZE,
+    CENO_PLATFORM, InsnKind, PC_STEP_SIZE,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     rv32im::DecodedInstruction,
 };
@@ -52,6 +52,10 @@ impl<T> MemOp<T> {
 pub type ReadOp = MemOp<Word>;
 pub type WriteOp = MemOp<Change<Word>>;
 
+const MOCK_RS1: u32 = 2;
+const MOCK_RS2: u32 = 3;
+const MOCK_RD: u32 = 4;
+
 impl StepRecord {
     pub fn new_r_instruction(
         cycle: Cycle,
@@ -67,6 +71,27 @@ impl StepRecord {
             cycle,
             pc,
             insn_code,
+            Some(rs1_read),
+            Some(rs2_read),
+            Some(rd),
+            prev_cycle,
+        )
+    }
+
+    pub fn new_r_instruction2(
+        cycle: Cycle,
+        pc: ByteAddr,
+        insn_kind: InsnKind,
+        rs1_read: Word,
+        rs2_read: Word,
+        rd: Change<Word>,
+        prev_cycle: Cycle,
+    ) -> StepRecord {
+        let pc = Change::new(pc, pc + PC_STEP_SIZE);
+        StepRecord::new_insn2(
+            cycle,
+            pc,
+            insn_kind,
             Some(rs1_read),
             Some(rs2_read),
             Some(rd),
@@ -148,6 +173,39 @@ impl StepRecord {
             cycle,
             pc,
             insn_code,
+            rs1: rs1_read.map(|rs1| ReadOp {
+                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
+                value: rs1,
+                previous_cycle,
+            }),
+            rs2: rs2_read.map(|rs2| ReadOp {
+                addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
+                value: rs2,
+                previous_cycle,
+            }),
+            rd: rd.map(|rd| WriteOp {
+                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
+                value: rd,
+                previous_cycle,
+            }),
+            memory_op: None,
+        }
+    }
+
+    fn new_insn2(
+        cycle: Cycle,
+        pc: Change<ByteAddr>,
+        insn_kind: InsnKind,
+        rs1_read: Option<Word>,
+        rs2_read: Option<Word>,
+        rd: Option<Change<Word>>,
+        previous_cycle: Cycle,
+    ) -> StepRecord {
+        let insn = DecodedInstruction::from_raw(insn_kind, MOCK_RS1, MOCK_RS2, MOCK_RD);
+        StepRecord {
+            cycle,
+            pc,
+            insn_code: insn.encoded(),
             rs1: rs1_read.map(|rs1| ReadOp {
                 addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
                 value: rs1,

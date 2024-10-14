@@ -427,7 +427,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     load_op_table::<XorTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<LtuTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<PowTable, _>(&mut table_vec, cb, challenge);
-    load_program_table(&mut table_vec, cb, challenge);
+    // load_program_table(&mut table_vec, cb, challenge);
     HashSet::from_iter(table_vec)
 }
 
@@ -436,7 +436,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
 #[allow(clippy::type_complexity)]
 fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     cb: &CircuitBuilder<E>,
-) -> ([E; 2], &'static HashSet<Vec<u64>>) {
+) -> ([E; 2], HashSet<Vec<u64>>) {
     static CACHE: OnceLock<StaticTypeMap<([Vec<u64>; 2], HashSet<Vec<u64>>)>> = OnceLock::new();
     let cache = CACHE.get_or_init(StaticTypeMap::new);
 
@@ -480,7 +480,7 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
             let ptr = repr.as_slice().as_ptr() as *const E;
             *ptr
         }),
-        table,
+        table.clone(),
     )
 }
 
@@ -491,7 +491,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: [E; 2],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], Some(challenge), lkm)
+        Self::run_maybe_challenge(cb, wits_in, &[], &[], Some(challenge), lkm)
     }
 
     pub fn run(
@@ -499,21 +499,48 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], None, lkm)
+        Self::run_maybe_challenge(cb, wits_in, &[], &[], None, lkm)
+    }
+
+    pub fn run_with_program(
+        cb: &CircuitBuilder<E>,
+        programs: &[u32],
+        wits_in: &[ArcMultilinearExtension<'a, E>],
+        lkm: Option<LkMultiplicity>,
+    ) -> Result<(), Vec<MockProverError<E>>> {
+        Self::run_maybe_challenge(cb, wits_in, programs, &[], None, lkm)
     }
 
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        programs: &[u32],
         pi: &[E::BaseField],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        let table = challenge.map(|challenge| load_tables(cb, challenge));
+        let table = challenge.map(|challenge| {
+            let mut table = load_tables(cb, challenge);
+            //
+            let mut prog_table = vec![];
+            Self::load_program_table(&mut prog_table, programs, challenge);
+            for prog in prog_table {
+                table.insert(prog);
+            }
+            table
+        });
+
         let (challenge, table) = if let Some(challenge) = challenge {
-            (challenge, table.as_ref().unwrap())
+            (challenge, table.unwrap())
         } else {
-            load_once_tables(cb)
+            let (challenge, mut table) = load_once_tables(cb);
+
+            let mut prog_table = vec![];
+            Self::load_program_table(&mut prog_table, programs, challenge);
+            for prog in prog_table {
+                table.insert(prog);
+            }
+            (challenge, table)
         };
         let mut errors = vec![];
 
@@ -733,16 +760,44 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
     }
 
+    fn load_program_table(t_vec: &mut Vec<Vec<u64>>, programs: &[u32], challenge: [E; 2]) {
+        let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = ProgramTableCircuit::construct_circuit(&mut cb).unwrap();
+        let fixed =
+            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, programs);
+        for table_expr in &cs.lk_table_expressions {
+            for row in fixed.iter_rows() {
+                // TODO: Find a better way to obtain the row content.
+                let row = row
+                    .iter()
+                    .map(|v| unsafe { (*v).assume_init() }.into())
+                    .collect::<Vec<_>>();
+                let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
+                t_vec.push(rlc_record.to_canonical_u64_vec());
+            }
+        }
+    }
+
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
+        Self::assert_satisfied_with_program(cb, wits_in, &[], challenge);
+    }
+
+    pub fn assert_satisfied_with_program(
+        cb: &CircuitBuilder<E>,
+        wits_in: &[ArcMultilinearExtension<'a, E>],
+        programs: &[u32],
+        challenge: Option<[E; 2]>,
+    ) {
         let result = if let Some(challenge) = challenge {
             Self::run_with_challenge(cb, wits_in, challenge, lkm)
         } else {
-            Self::run(cb, wits_in, lkm)
+            Self::run_with_program(cb, programs, wits_in, lkm)
         };
         match result {
             Ok(_) => {}

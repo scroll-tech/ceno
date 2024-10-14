@@ -151,7 +151,9 @@ mod test {
 
     mod divu {
 
-        use ceno_emul::{Change, StepRecord, Word};
+        use ceno_emul::{
+            ByteAddr, CENO_PLATFORM, Change, DecodedInstruction, InsnKind, StepRecord, Word,
+        };
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
@@ -164,7 +166,7 @@ mod test {
                 Instruction,
                 riscv::{constants::UInt, divu::DivUInstruction},
             },
-            scheme::mock_prover::{MOCK_PC_DIVU, MOCK_PROGRAM, MockProver},
+            scheme::mock_prover::MockProver,
         };
 
         fn verify(name: &'static str, dividend: Word, divisor: Word, exp_outcome: Word) {
@@ -184,12 +186,12 @@ mod test {
                 dividend / divisor
             };
             // values assignment
-            let (raw_witin, lkm) =
+            let (raw_witin, _) =
                 DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                    StepRecord::new_r_instruction(
+                    StepRecord::new_r_instruction2(
                         3,
-                        MOCK_PC_DIVU,
-                        MOCK_PROGRAM[9],
+                        ByteAddr(CENO_PLATFORM.pc_start()),
+                        InsnKind::DIVU,
                         dividend,
                         divisor,
                         Change::new(0, outcome),
@@ -207,14 +209,16 @@ mod test {
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
 
-            MockProver::assert_satisfied(
-                &cb,
+            let insn = DecodedInstruction::from_raw(InsnKind::DIVU, 2, 3, 4);
+            MockProver::assert_satisfied_with_program(
+                &mut cb,
                 &raw_witin
                     .de_interleaving()
                     .into_mles()
                     .into_iter()
                     .map(|v| v.into())
                     .collect_vec(),
+                &[insn.encoded()],
                 None,
                 Some(lkm),
             );
