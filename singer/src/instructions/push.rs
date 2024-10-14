@@ -150,8 +150,24 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
 
 #[cfg(test)]
 mod test {
+    #[cfg(not(debug_assertions))]
+    use crate::{
+        instructions::{InstructionGraph, SingerCircuitBuilder},
+        scheme::GKRGraphProverState,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
+    };
+    #[cfg(not(debug_assertions))]
+    use ark_std::test_rng;
+    #[cfg(not(debug_assertions))]
+    use ff::Field;
+    #[cfg(not(debug_assertions))]
+    use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use std::collections::BTreeMap;
+    #[cfg(not(debug_assertions))]
+    use std::time::Instant;
+    #[cfg(not(debug_assertions))]
+    use transcript::Transcript;
 
     use crate::instructions::{ChipChallenges, Instruction, PushInstruction};
     #[allow(deprecated)]
@@ -243,9 +259,9 @@ mod test {
                 .map(|_| {
                     (0..size)
                         .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
+                        .collect::<Vec<_>>()
                 })
-                .collect_vec()
+                .collect::<Vec<_>>()
                 .into(),
         ];
 
