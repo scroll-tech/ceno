@@ -2,9 +2,9 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{
-    constants::{UInt, UINT_LIMBS},
-    r_insn::RInstructionConfig,
     RIVInstruction,
+    constants::{UINT_LIMBS, UInt},
+    r_insn::RInstructionConfig,
 };
 use crate::{
     circuit_builder::CircuitBuilder,

@@ -8,12 +8,12 @@ use crate::{
     error::ZKVMError,
     expression::Expression,
     instructions::{
-        riscv::{
-            b_insn::BInstructionConfig, config::SignedLtConfig, constants::UInt, RIVInstruction,
-        },
         Instruction,
         riscv::{
-            RIVInstruction, b_insn::BInstructionConfig, config::UIntLtSignedConfig, constants::UInt,
+            RIVInstruction,
+            b_insn::BInstructionConfig,
+            config::{SignedLtConfig, UIntLtSignedConfig},
+            constants::UInt,
         },
     },
     witness::LkMultiplicity,

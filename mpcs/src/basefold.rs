@@ -12,7 +12,7 @@ use crate::{
         },
         expression::{Expression, Query, Rotation},
         ext_to_usize,
-        hash::{write_digest_to_transcript, Digest},
+        hash::{Digest, write_digest_to_transcript},
         log2_strict,
         merkle_tree::MerkleTree,
         multiply_poly,

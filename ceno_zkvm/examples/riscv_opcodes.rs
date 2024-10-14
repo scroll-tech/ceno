@@ -9,9 +9,9 @@ use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr,
+    ByteAddr, CENO_PLATFORM,
     InsnKind::{ADD, BLTU, EANY, JAL},
-    StepRecord, VMState, CENO_PLATFORM,
+    StepRecord, VMState,
 };
 use ceno_zkvm::{
     instructions::riscv::ecall::HaltInstruction,

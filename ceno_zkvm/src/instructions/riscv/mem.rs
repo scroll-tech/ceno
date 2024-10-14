@@ -1,15 +1,15 @@
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        riscv::{
-            constants::UInt, im_insn::IMInstructionConfig, s_insn::SInstructionConfig,
-            RIVInstruction,
-        },
         Instruction,
+        riscv::{
+            RIVInstruction, constants::UInt, im_insn::IMInstructionConfig,
+            s_insn::SInstructionConfig,
+        },
     },
     witness::LkMultiplicity,
-    Value,
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;

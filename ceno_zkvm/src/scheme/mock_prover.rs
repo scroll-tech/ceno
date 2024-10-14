@@ -5,7 +5,7 @@ use crate::{
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U16Table, U5Table, U8Table, XorTable,
+        TableCircuit, U5Table, U8Table, U16Table, XorTable,
     },
 };
 use ark_std::test_rng;
@@ -723,36 +723,33 @@ mod tests {
         let result = MockProver::run_with_challenge(&builder, &wits_in, challenge);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
-        assert_eq!(
-            err,
-            vec![MockProverError::LookupError {
-                expression: Expression::Sum(
-                    Box::new(Expression::ScaledSum(
-                        Box::new(Expression::WitIn(0)),
-                        Box::new(Expression::Challenge(
-                            1,
-                            1,
-                            GoldilocksExt2::ONE,
-                            GoldilocksExt2::ZERO,
-                        )),
-                        Box::new(Expression::Constant(
-                            <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
-                        )),
-                    )),
+        assert_eq!(err, vec![MockProverError::LookupError {
+            expression: Expression::Sum(
+                Box::new(Expression::ScaledSum(
+                    Box::new(Expression::WitIn(0)),
                     Box::new(Expression::Challenge(
                         1,
                         1,
-                        // TODO this still uses default challenge in ConstraintSystem, but challengeId
-                        // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                ),
-                evaluated: 123002.into(), // 123 * 1000 + 2
-                name: "test_lookup_error/assert_u5/assert u5".to_string(),
-                inst_id: 0,
-            }]
-        );
+                    Box::new(Expression::Constant(
+                        <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
+                    )),
+                )),
+                Box::new(Expression::Challenge(
+                    1,
+                    1,
+                    // TODO this still uses default challenge in ConstraintSystem, but challengeId
+                    // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
+                    GoldilocksExt2::ONE,
+                    GoldilocksExt2::ZERO,
+                )),
+            ),
+            evaluated: 123002.into(), // 123 * 1000 + 2
+            name: "test_lookup_error/assert_u5/assert u5".to_string(),
+            inst_id: 0,
+        }]);
         // because inst_id is not checked in our PartialEq impl
         assert_eq!(err[0].inst_id(), 0);
     }

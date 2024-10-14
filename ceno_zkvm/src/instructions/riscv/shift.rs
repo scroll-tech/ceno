@@ -4,13 +4,14 @@ use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     expression::{ToExpr, WitIn},
     gadgets::DivConfig,
     instructions::Instruction,
-    set_val, Value,
+    set_val,
 };
 
-use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
+use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 
 pub struct ShiftConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
@@ -189,13 +190,13 @@ mod tests {
     use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
+        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{
-            riscv::{constants::UInt, RIVInstruction},
             Instruction,
+            riscv::{RIVInstruction, constants::UInt},
         },
-        scheme::mock_prover::{MockProver, MOCK_PC_SLL, MOCK_PC_SRL, MOCK_PROGRAM},
-        Value,
+        scheme::mock_prover::{MOCK_PC_SLL, MOCK_PC_SRL, MOCK_PROGRAM, MockProver},
     };
 
     use super::{ShiftLogicalInstruction, SllOp, SrlOp};

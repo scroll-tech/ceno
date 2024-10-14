@@ -11,8 +11,8 @@ use rayon::{
 use crate::util::{
     Deserialize, DeserializeOwned, Serialize, field_type_index_base, field_type_index_ext,
     hash::{
-        hash_two_digests, hash_two_leaves_base, hash_two_leaves_batch_base,
-        hash_two_leaves_batch_ext, hash_two_leaves_ext, Digest,
+        Digest, hash_two_digests, hash_two_leaves_base, hash_two_leaves_batch_base,
+        hash_two_leaves_batch_ext, hash_two_leaves_ext,
     },
     log2_strict,
 };

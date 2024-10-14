@@ -3,15 +3,15 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::ToExpr,
     instructions::{
-        riscv::{constants::UInt, j_insn::JInstructionConfig},
         Instruction,
+        riscv::{constants::UInt, j_insn::JInstructionConfig},
     },
     witness::LkMultiplicity,
-    Value,
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 
