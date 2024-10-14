@@ -70,6 +70,5 @@ jobs:
           TARGET: ${{ matrix.target }}
           RUSTFLAGS: "-Dwarnings"
         run: |
-          # TODO(Matthias): check --benches as well, once they are fixed.
-          cargo check --workspace --tests --examples --exclude ceno_rt --exclude singer-pro
+          cargo check --workspace --all-targets --exclude singer-pro --exclude ceno_rt
           cargo make clippy
