@@ -3,7 +3,7 @@ use std::{fmt::Display, mem::MaybeUninit};
 use ceno_emul::SWord;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::Itertools;
+use itertools::izip;
 
 use crate::{
     chip_handler::utils::power_sequence,
@@ -151,14 +151,11 @@ impl InnerLtConfig {
             .map(|i| witin_u16(format!("diff_{i}")))
             .collect::<Result<Vec<WitIn>, _>>()?;
 
-        let pows = power_sequence((1 << u16::BITS).into(), diff.len());
+        let pows = power_sequence((1 << u16::BITS).into());
 
-        let diff_expr = diff
-            .iter()
-            .zip_eq(pows)
+        let diff_expr = izip!(&diff, pows)
             .map(|(record, beta)| beta * record.expr())
-            .reduce(|a, b| a + b)
-            .expect("reduce error");
+            .sum::<Expression<E>>();
 
         let range = Self::range(max_num_u16_limbs).into();
 
