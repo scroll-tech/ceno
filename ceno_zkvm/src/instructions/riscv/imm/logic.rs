@@ -56,7 +56,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     ) -> Result<(), ZKVMError> {
         UInt8::<E>::logic_assign::<I::OpsTable>(
             lkm,
-            step.rs1().unwrap().value as u64,
+            step.rs1().unwrap().value.into(),
             step.insn().imm_or_funct7().into(),
         );
 
@@ -118,5 +118,169 @@ impl<E: ExtensionField> LogicConfig<E> {
         self.rd_written.assign_limbs(instance, &rd_written);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, CENO_PLATFORM};
+    use goldilocks::GoldilocksExt2;
+    use itertools::Itertools;
+    use multilinear_extensions::mle::IntoMLEs;
+
+    use crate::{
+        chip_handler::test::DebugIndex,
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
+        instructions::{
+            riscv::{
+                constants::UInt8,
+                imm::{logic::LogicInstruction, AndiOp, OriOp, XoriOp},
+            },
+            Instruction,
+        },
+        scheme::mock_prover::{MockProver, MOCK_PC_ANDI, MOCK_PC_ORI, MOCK_PC_XORI, MOCK_PROGRAM},
+        utils::split_to_u8,
+        ROMType,
+    };
+
+    use super::LogicOp;
+
+    #[test]
+    fn test_opcode_andi() {
+        let pc = MOCK_PC_ANDI;
+        let prog_idx: usize = ((pc.0 - CENO_PLATFORM.pc_start()) / 4) as usize;
+        let prog = MOCK_PROGRAM[prog_idx];
+        let imm = 3;
+        verify::<AndiOp>(
+            "basic",
+            pc,
+            prog,
+            0x0000_0011,
+            0x0000_0011 & imm,
+            &[(0x0000, 3), (0x0311, 1)],
+        );
+
+        verify::<AndiOp>(
+            "zero result",
+            pc,
+            prog,
+            0x0000_0100,
+            0x0000_0100 & imm,
+            &[(0x0000, 2), (0x0001, 1), (0x0300, 1)],
+        );
+    }
+
+    #[test]
+    fn test_opcode_ori() {
+        let pc = MOCK_PC_ORI;
+        let prog_idx: usize = ((pc.0 - CENO_PLATFORM.pc_start()) / 4) as usize;
+        let prog = MOCK_PROGRAM[prog_idx];
+        let imm = 3;
+        verify::<OriOp>(
+            "basic",
+            pc,
+            prog,
+            0x0000_0011,
+            0x0000_0011 | imm,
+            &[(0x0000, 3), (0x0311, 1)],
+        );
+
+        verify::<OriOp>(
+            "basic2",
+            pc,
+            prog,
+            0x0000_0100,
+            0x0000_0100 | imm,
+            &[(0x0000, 2), (0x0001, 1), (0x0300, 1)],
+        );
+    }
+
+    #[test]
+    fn test_opcode_xori() {
+        let pc = MOCK_PC_XORI;
+        let prog_idx: usize = ((pc.0 - CENO_PLATFORM.pc_start()) / 4) as usize;
+        let prog = MOCK_PROGRAM[prog_idx];
+        let imm = 3;
+        verify::<XoriOp>(
+            "basic",
+            pc,
+            prog,
+            0x0000_0011,
+            0x0000_0011 ^ imm,
+            &[(0x0000, 3), (0x0311, 1)],
+        );
+
+        verify::<XoriOp>(
+            "non-overlap",
+            pc,
+            prog,
+            0x0000_0100,
+            0x0000_0100 ^ imm,
+            &[(0x0000, 2), (0x0001, 1), (0x0300, 1)],
+        );
+    }
+
+    fn verify<I: LogicOp>(
+        name: &'static str,
+        pc: ByteAddr,
+        program: u32,
+        rs1_read: u32,
+        expected_rd_written: u32,
+        lookups: &[(u64, usize)],
+    ) {
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+
+        let imm: u32 = 3;
+        let (prefix, rom_type, rd_written) = match I::INST_KIND {
+            InsnKind::ANDI => ("ANDI", ROMType::And, rs1_read & imm),
+            InsnKind::ORI => ("ORI", ROMType::Or, rs1_read | imm),
+            InsnKind::XORI => ("XORI", ROMType::Xor, rs1_read ^ imm),
+            _ => unreachable!(),
+        };
+
+        let config = cb
+            .namespace(
+                || format!("{prefix}_({name})"),
+                |cb| {
+                    let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
+                    Ok(config)
+                },
+            )
+            .unwrap()
+            .unwrap();
+
+        let (raw_witin, lkm) = LogicInstruction::<GoldilocksExt2, I>::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_i_instruction(
+                3,
+                pc,
+                program,
+                rs1_read,
+                Change::new(0, rd_written),
+                0,
+            )],
+        )
+        .unwrap();
+
+        let expected = UInt8::from_const_unchecked(split_to_u8::<u64>(expected_rd_written));
+        let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
+        cb.require_equal(|| "assert_rd_written", rd_written_expr, expected.value())
+            .unwrap();
+
+        let lkm = lkm.into_finalize_result()[rom_type as usize].clone();
+        assert_eq!(&lkm.into_iter().sorted().collect_vec(), lookups);
+
+        MockProver::assert_satisfied(
+            &cb,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            None,
+        );
     }
 }
