@@ -37,6 +37,7 @@ mod utils;
 /// InstOutputType, corresponding to the product of summation of the chip check
 /// records. `public_output_size` is the wire id stores the size of public
 /// output.
+#[derive(Default)]
 pub struct SingerGraphBuilder<'a, E: ExtensionField> {
     pub graph_builder: CircuitGraphBuilder<'a, E>,
     pub chip_builder: SingerChipBuilder<E>,
@@ -44,14 +45,6 @@ pub struct SingerGraphBuilder<'a, E: ExtensionField> {
 }
 
 impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
-    pub fn new() -> Self {
-        Self {
-            graph_builder: CircuitGraphBuilder::new(),
-            chip_builder: SingerChipBuilder::new(),
-            public_output_size: None,
-        }
-    }
-
     pub fn construct_graph_and_witness(
         mut self,
         circuit_builder: &SingerCircuitBuilder<E>,

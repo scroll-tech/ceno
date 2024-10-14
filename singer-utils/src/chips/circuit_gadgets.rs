@@ -34,8 +34,8 @@ pub(crate) struct LeafCircuit<E: ExtensionField> {
     pub(crate) cond_id: WitnessId,
 }
 
-impl<E: ExtensionField> ChipCircuitGadgets<E> {
-    pub(crate) fn new() -> Self {
+impl<E: ExtensionField> Default for ChipCircuitGadgets<E> {
+    fn default() -> Self {
         Self {
             inv_sum: Self::construct_inv_sum(),
             frac_sum_inner: Self::construct_frac_sum_inner(),
@@ -45,7 +45,9 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
             product_leaf: Self::construct_product_leaf(),
         }
     }
+}
 
+impl<E: ExtensionField> ChipCircuitGadgets<E> {
     /// Construct a selector for n_instances and each instance contains `num`
     /// items. `num` must be a power of 2.
     pub(crate) fn construct_prefix_selector(

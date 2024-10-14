@@ -78,7 +78,7 @@ fn bench_add(c: &mut Criterion) {
                 b.iter_with_setup(
                     || {
                         let mut rng = test_rng();
-                        let singer_builder = SingerGraphBuilder::<E>::new();
+                        let singer_builder = SingerGraphBuilder::<E>::default();
                         let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
                                 (rng, singer_builder, real_challenges)
                     },

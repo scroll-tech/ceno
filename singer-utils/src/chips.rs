@@ -34,15 +34,16 @@ pub struct SingerChipBuilder<E: ExtensionField> {
     pub output_wires_id: Vec<Vec<NodeOutputType>>,
 }
 
-impl<E: ExtensionField> SingerChipBuilder<E> {
-    pub fn new() -> Self {
-        let chip_circuit_gadgets = ChipCircuitGadgets::new();
+impl<E: ExtensionField> Default for SingerChipBuilder<E> {
+    fn default() -> Self {
         Self {
-            chip_circuit_gadgets,
+            chip_circuit_gadgets: ChipCircuitGadgets::default(),
             output_wires_id: vec![vec![]; InstOutChipType::iter().count()],
         }
     }
+}
 
+impl<E: ExtensionField> SingerChipBuilder<E> {
     /// Construct the product of frac sum circuits for to chips of each circuit
     /// and witnesses. This includes computing the LHS and RHS of the set
     /// equality check, and the input of lookup arguments.
