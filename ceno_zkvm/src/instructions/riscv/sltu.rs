@@ -16,7 +16,7 @@ use core::mem::MaybeUninit;
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]
-pub struct ArithConfig<E: ExtensionField> {
+pub struct ArithInstruction<E: ExtensionField, I: RIVInstruction> {
     r_insn: RInstructionConfig<E>,
 
     rs1_read: UInt<E>,
@@ -25,9 +25,9 @@ pub struct ArithConfig<E: ExtensionField> {
     rd_written: UInt<E>,
 
     is_lt: IsLtConfig,
-}
 
-pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
+    _phantom: PhantomData<I>,
+}
 
 pub struct SLTUOp;
 impl RIVInstruction for SLTUOp {
@@ -36,15 +36,11 @@ impl RIVInstruction for SLTUOp {
 pub type SltuInstruction<E> = ArithInstruction<E, SLTUOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
-    type InstructionConfig = ArithConfig<E>;
-
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         // If rs1_read < rs2_read, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
@@ -66,36 +62,34 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rd_written.register_expr(),
         )?;
 
-        Ok(ArithConfig {
+        Ok(Self {
             r_insn,
             rs1_read,
             rs2_read,
             rd_written,
             is_lt: lt,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        config.r_insn.assign_instance(instance, lkm, step)?;
+        self.r_insn.assign_instance(instance, lkm, step)?;
 
         let rs1 = step.rs1().unwrap().value;
         let rs2 = step.rs2().unwrap().value;
 
         let rs1_read = Value::new_unchecked(rs1);
         let rs2_read = Value::new_unchecked(rs2);
-        config
-            .rs1_read
+        self.rs1_read
             .assign_limbs(instance, rs1_read.as_u16_limbs());
-        config
-            .rs2_read
+        self.rs2_read
             .assign_limbs(instance, rs2_read.as_u16_limbs());
-        config
-            .is_lt
+        self.is_lt
             .assign_instance(instance, lkm, rs1.into(), rs2.into())?;
 
         Ok(())

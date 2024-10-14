@@ -29,6 +29,6 @@ mod s_insn;
 #[cfg(test)]
 mod test;
 
-pub trait RIVInstruction {
+pub trait RIVInstruction: Send + Sync {
     const INST_KIND: InsnKind;
 }

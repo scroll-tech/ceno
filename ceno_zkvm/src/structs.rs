@@ -127,7 +127,7 @@ pub struct ZKVMConstraintSystem<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ZKVMConstraintSystem<E> {
-    pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
+    pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let config = OC::construct_circuit(&mut circuit_builder).unwrap();
@@ -189,7 +189,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
-        config: &OC::InstructionConfig,
+        config: &OC,
         records: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());

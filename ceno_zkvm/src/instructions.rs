@@ -22,28 +22,27 @@ pub enum InstancePaddingStrategy {
     RepeatLast,
 }
 
-pub trait Instruction<E: ExtensionField> {
-    type InstructionConfig: Send + Sync;
-
+pub trait Instruction<E: ExtensionField>
+where
+    Self: Send + Sized + Sync,
+{
     fn padding_strategy() -> InstancePaddingStrategy {
         InstancePaddingStrategy::RepeatLast
     }
 
     fn name() -> String;
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError>;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError>;
 
     // assign single instance giving step from trace
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError>;
 
     fn assign_instances(
-        config: &Self::InstructionConfig,
+        &self,
         num_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
@@ -66,7 +65,7 @@ pub trait Instruction<E: ExtensionField> {
                     .chunks_mut(num_witin)
                     .zip(steps)
                     .map(|(instance, step)| {
-                        Self::assign_instance(config, instance, &mut lk_multiplicity, step)
+                        self.assign_instance(instance, &mut lk_multiplicity, step)
                     })
                     .collect::<Vec<_>>()
             })

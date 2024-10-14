@@ -16,15 +16,15 @@ use core::mem::MaybeUninit;
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]
-pub struct ArithConfig<E: ExtensionField> {
+pub struct MulhInstruction<E: ExtensionField, I: RIVInstruction> {
     r_insn: RInstructionConfig<E>,
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
     rd_written: UIntMul<E>,
-}
 
-pub struct MulhInstruction<E, I>(PhantomData<(E, I)>);
+    _phantom: PhantomData<I>,
+}
 
 pub struct MulhuOp;
 impl RIVInstruction for MulhuOp {
@@ -33,15 +33,11 @@ impl RIVInstruction for MulhuOp {
 pub type MulhuInstruction<E> = MulhInstruction<E, MulhuOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E, I> {
-    type InstructionConfig = ArithConfig<E>;
-
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let (rs1_read, rs2_read, rd_written, rd_written_reg_expr) = match I::INST_KIND {
             InsnKind::MULHU => {
                 // rs1_read * rs2_read = rd_written
@@ -69,27 +65,26 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
             rd_written_reg_expr,
         )?;
 
-        Ok(ArithConfig {
+        Ok(Self {
             r_insn,
             rs1_read,
             rs2_read,
             rd_written,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        config
-            .r_insn
+        self.r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
-        config
-            .rs2_read
+        self.rs2_read
             .assign_limbs(instance, rs2_read.as_u16_limbs());
 
         match I::INST_KIND {
@@ -97,14 +92,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
                 // rs1_read * rs2_read = rd_written
                 let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
 
-                config
-                    .rs1_read
+                self.rs1_read
                     .assign_limbs(instance, rs1_read.as_u16_limbs());
 
                 let rd_written = rs1_read.mul_hi(&rs2_read, lk_multiplicity, true);
 
-                config
-                    .rd_written
+                self.rd_written
                     .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
             }
 

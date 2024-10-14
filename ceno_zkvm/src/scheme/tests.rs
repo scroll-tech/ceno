@@ -34,21 +34,17 @@ use super::{
     PublicValues,
 };
 
-struct TestConfig {
-    pub(crate) reg_id: WitIn,
-}
 struct TestCircuit<E: ExtensionField, const RW: usize, const L: usize> {
+    pub(crate) reg_id: WitIn,
     phantom: PhantomData<E>,
 }
 
 impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for TestCircuit<E, RW, L> {
-    type InstructionConfig = TestConfig;
-
     fn name() -> String {
         "TEST".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let reg_id = cb.create_witin(|| "reg_id")?;
         (0..RW).try_for_each(|_| {
             let record = cb.rlc_chip_record(vec![
@@ -67,16 +63,19 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
         assert_eq!(cb.cs.r_expressions.len(), RW);
         assert_eq!(cb.cs.w_expressions.len(), RW);
 
-        Ok(TestConfig { reg_id })
+        Ok(Self {
+            reg_id,
+            phantom: PhantomData,
+        })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, config.reg_id, E::BaseField::ONE);
+        set_val!(instance, self.reg_id, E::BaseField::ONE);
 
         Ok(())
     }

@@ -18,7 +18,7 @@ use crate::{
 use core::mem::MaybeUninit;
 use std::marker::PhantomData;
 
-pub struct ArithConfig<E: ExtensionField> {
+pub struct ArithInstruction<E: ExtensionField, I: RIVInstruction> {
     r_insn: RInstructionConfig<E>,
 
     dividend: UInt<E>,
@@ -29,9 +29,9 @@ pub struct ArithConfig<E: ExtensionField> {
     inter_mul_value: UInt<E>,
     is_zero: IsZeroConfig,
     pub remainder_lt: IsLtConfig,
-}
 
-pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
+    _phantom: PhantomData<I>,
+}
 
 pub struct DivUOp;
 impl RIVInstruction for DivUOp {
@@ -40,13 +40,11 @@ impl RIVInstruction for DivUOp {
 pub type DivUInstruction<E> = ArithInstruction<E, DivUOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
-    type InstructionConfig = ArithConfig<E>;
-
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         // outcome = dividend / divisor + remainder => dividend = divisor * outcome + r
         let mut divisor = UInt::new_unchecked(|| "divisor", cb)?;
         let mut outcome = UInt::new(|| "outcome", cb)?;
@@ -91,7 +89,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             outcome.register_expr(),
         )?;
 
-        Ok(ArithConfig {
+        Ok(Self {
             r_insn,
             dividend,
             divisor,
@@ -100,11 +98,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             inter_mul_value,
             is_zero,
             remainder_lt: lt,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
@@ -124,26 +123,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         };
 
         // assignment
-        config.r_insn.assign_instance(instance, lkm, step)?;
-        config
-            .divisor
-            .assign_limbs(instance, divisor.as_u16_limbs());
-        config
-            .outcome
-            .assign_limbs(instance, outcome.as_u16_limbs());
+        self.r_insn.assign_instance(instance, lkm, step)?;
+        self.divisor.assign_limbs(instance, divisor.as_u16_limbs());
+        self.outcome.assign_limbs(instance, outcome.as_u16_limbs());
 
         let (dividend, inter_mul_value) = divisor.mul_add(&outcome, &r, lkm, true);
-        config
-            .inter_mul_value
+        self.inter_mul_value
             .assign_mul_outcome(instance, lkm, &inter_mul_value)?;
 
-        config.dividend.assign_add_outcome(instance, &dividend);
-        config.remainder.assign_limbs(instance, r.as_u16_limbs());
-        config
-            .is_zero
+        self.dividend.assign_add_outcome(instance, &dividend);
+        self.remainder.assign_limbs(instance, r.as_u16_limbs());
+        self.is_zero
             .assign_instance(instance, divisor.as_u64().into())?;
-        config
-            .remainder_lt
+        self.remainder_lt
             .assign_instance(instance, lkm, r.as_u64(), divisor.as_u64())?;
 
         Ok(())

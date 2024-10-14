@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::mem::MaybeUninit;
 
 use ff_ext::ExtensionField;
 
@@ -15,12 +15,10 @@ use crate::{
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 
-pub struct JalConfig<E: ExtensionField> {
+pub struct JalInstruction<E: ExtensionField> {
     pub j_insn: JInstructionConfig<E>,
     pub rd_written: UInt<E>,
 }
-
-pub struct JalInstruction<E>(PhantomData<E>);
 
 /// JAL instruction circuit
 ///
@@ -34,15 +32,11 @@ pub struct JalInstruction<E>(PhantomData<E>);
 ///   value for next_pc may not correctly wrap mod 2^32 because of the use
 ///   of native WitIn values for address space arithmetic.
 impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
-    type InstructionConfig = JalConfig<E>;
-
     fn name() -> String {
         format!("{:?}", InsnKind::JAL)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<JalConfig<E>, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
         let j_insn = JInstructionConfig::construct_circuit(
@@ -57,21 +51,20 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
             j_insn.vm_state.pc.expr() + PC_STEP_SIZE.into(),
         )?;
 
-        Ok(JalConfig { j_insn, rd_written })
+        Ok(Self { j_insn, rd_written })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
-        config
-            .j_insn
+        self.j_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-        config.rd_written.assign_value(instance, rd_written);
+        self.rd_written.assign_value(instance, rd_written);
 
         Ok(())
     }

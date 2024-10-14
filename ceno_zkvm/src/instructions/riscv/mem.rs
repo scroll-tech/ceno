@@ -15,15 +15,15 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
-pub struct StoreConfig<E: ExtensionField> {
+pub struct StoreInstruction<E: ExtensionField, I: RIVInstruction> {
     s_insn: SInstructionConfig<E>,
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
     imm: UInt<E>,
-}
 
-pub struct StoreInstruction<E, I>(PhantomData<(E, I)>);
+    _phantom: PhantomData<I>,
+}
 
 pub struct SWOp;
 
@@ -35,15 +35,11 @@ impl RIVInstruction for SWOp {
 pub type StoreWord<E> = StoreInstruction<E, SWOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E, I> {
-    type InstructionConfig = StoreConfig<E>;
-
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let imm = UInt::new(|| "imm", circuit_builder)?;
@@ -65,16 +61,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
             memory_value,
         )?;
 
-        Ok(StoreConfig {
+        Ok(Self {
             s_insn,
             rs1_read,
             rs2_read,
             imm,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -83,26 +80,25 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
-        config
-            .s_insn
+        self.s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
-        config.rs1_read.assign_value(instance, rs1);
-        config.rs2_read.assign_value(instance, rs2);
-        config.imm.assign_value(instance, imm);
+        self.rs1_read.assign_value(instance, rs1);
+        self.rs2_read.assign_value(instance, rs2);
+        self.imm.assign_value(instance, imm);
 
         Ok(())
     }
 }
 
-pub struct LoadConfig<E: ExtensionField> {
+pub struct LoadInstruction<E: ExtensionField, I: RIVInstruction> {
     im_insn: IMInstructionConfig<E>,
 
     rs1_read: UInt<E>,
     imm: UInt<E>,
     memory_read: UInt<E>,
-}
 
-pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
+    _phantom: PhantomData<I>,
+}
 
 pub struct LWOp;
 
@@ -111,15 +107,11 @@ impl RIVInstruction for LWOp {
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
-    type InstructionConfig = LoadConfig<E>;
-
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let imm = UInt::new(|| "imm", circuit_builder)?;
         let memory_read = UInt::new_unchecked(|| "memory_read", circuit_builder)?;
@@ -142,16 +134,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             memory_value,
         )?;
 
-        Ok(LoadConfig {
+        Ok(Self {
             im_insn,
             rs1_read,
             memory_read,
             imm,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -160,12 +153,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let memory_read = Value::new_unchecked(step.memory_op().unwrap().value.before);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
-        config
-            .im_insn
+        self.im_insn
             .assign_instance(instance, lk_multiplicity, step)?;
-        config.rs1_read.assign_value(instance, rs1);
-        config.memory_read.assign_value(instance, memory_read);
-        config.imm.assign_value(instance, imm);
+        self.rs1_read.assign_value(instance, rs1);
+        self.memory_read.assign_value(instance, memory_read);
+        self.imm.assign_value(instance, imm);
 
         Ok(())
     }

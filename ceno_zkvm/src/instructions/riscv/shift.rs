@@ -12,7 +12,7 @@ use crate::{
 
 use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
 
-pub struct ShiftConfig<E: ExtensionField> {
+pub struct ShiftLogicalInstruction<E: ExtensionField, I> {
     r_insn: RInstructionConfig<E>,
 
     rs1_read: UInt<E>,
@@ -26,9 +26,11 @@ pub struct ShiftConfig<E: ExtensionField> {
     // for SRL division arithmetics
     remainder: Option<UInt<E>>,
     div_config: Option<DivConfig<E>>,
+
+    _phantom: PhantomData<I>,
 }
 
-pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
+// pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
 struct SllOp;
 impl RIVInstruction for SllOp {
@@ -41,15 +43,13 @@ impl RIVInstruction for SrlOp {
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
-    type InstructionConfig = ShiftConfig<E>;
-
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
     fn construct_circuit(
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
+    ) -> Result<Self, crate::error::ZKVMError> {
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5")?;
         // pow2_rs2_low5 is unchecked because it's assignment will be constrained due it's use in lookup_pow2 below
@@ -104,7 +104,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rs2_high.value() * (1 << 5).into() + rs2_low5.expr(),
         )?;
 
-        Ok(ShiftConfig {
+        Ok(Self {
             r_insn,
             rs1_read,
             rs2_read,
@@ -114,11 +114,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             pow2_rs2_low5,
             div_config,
             remainder,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [std::mem::MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut crate::witness::LkMultiplicity,
         step: &ceno_emul::StepRecord,
@@ -135,9 +136,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             InsnKind::SLL => {
                 let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
                 let rd_written = rs1_read.mul(&pow2_rs2_low5, lk_multiplicity, true);
-                config.rs1_read.assign_value(instance, rs1_read);
-                config
-                    .rd_written
+                self.rs1_read.assign_value(instance, rs1_read);
+                self.rd_written
                     .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
             }
             InsnKind::SRL => {
@@ -151,7 +151,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                     lk_multiplicity,
                 );
 
-                config.div_config.as_ref().unwrap().assign_instance(
+                self.div_config.as_ref().unwrap().assign_instance(
                     instance,
                     lk_multiplicity,
                     &pow2_rs2_low5,
@@ -159,9 +159,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                     &remainder,
                 )?;
 
-                config.rd_written.assign_value(instance, rd_written);
-                config
-                    .remainder
+                self.rd_written.assign_value(instance, rd_written);
+                self.remainder
                     .as_ref()
                     .unwrap()
                     .assign_value(instance, remainder);
@@ -169,13 +168,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             _ => unreachable!(),
         }
 
-        config
-            .r_insn
+        self.r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
-        config.rs2_read.assign_value(instance, rs2_read);
-        set_val!(instance, config.rs2_low5, rs2_low5);
-        config.rs2_high.assign_value(instance, rs2_high);
-        config.pow2_rs2_low5.assign_value(instance, pow2_rs2_low5);
+        self.rs2_read.assign_value(instance, rs2_read);
+        set_val!(instance, self.rs2_low5, rs2_low5);
+        self.rs2_high.assign_value(instance, rs2_high);
+        self.pow2_rs2_low5.assign_value(instance, pow2_rs2_low5);
 
         Ok(())
     }

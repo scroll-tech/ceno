@@ -15,15 +15,15 @@ use core::mem::MaybeUninit;
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]
-pub struct ArithConfig<E: ExtensionField> {
+pub struct ArithInstruction<E: ExtensionField, I: RIVInstruction> {
     r_insn: RInstructionConfig<E>,
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
     rd_written: UInt<E>,
-}
 
-pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
+    _phantom: PhantomData<I>,
+}
 
 pub struct AddOp;
 impl RIVInstruction for AddOp {
@@ -44,15 +44,11 @@ impl RIVInstruction for MulOp {
 pub type MulInstruction<E> = ArithInstruction<E, MulOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
-    type InstructionConfig = ArithConfig<E>;
-
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let (rs1_read, rs2_read, rd_written) = match I::INST_KIND {
             InsnKind::ADD => {
                 // rd_written = rs1_read + rs2_read
@@ -96,48 +92,45 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rd_written.register_expr(),
         )?;
 
-        Ok(ArithConfig {
+        Ok(Self {
             r_insn,
             rs1_read,
             rs2_read,
             rd_written,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        config
-            .r_insn
+        self.r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
-        config
-            .rs2_read
+        self.rs2_read
             .assign_limbs(instance, rs2_read.as_u16_limbs());
 
         match I::INST_KIND {
             InsnKind::ADD => {
                 // rs1_read + rs2_read = rd_written
                 let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-                config
-                    .rs1_read
+                self.rs1_read
                     .assign_limbs(instance, rs1_read.as_u16_limbs());
                 let result = rs1_read.add(&rs2_read, lk_multiplicity, true);
-                config.rd_written.assign_carries(instance, &result.carries);
+                self.rd_written.assign_carries(instance, &result.carries);
             }
 
             InsnKind::SUB => {
                 // rs1_read = rd_written + rs2_read
                 let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-                config
-                    .rd_written
+                self.rd_written
                     .assign_limbs(instance, rd_written.as_u16_limbs());
                 let result = rs2_read.add(&rd_written, lk_multiplicity, true);
-                config.rs1_read.assign_carries(instance, &result.carries);
+                self.rs1_read.assign_carries(instance, &result.carries);
             }
 
             InsnKind::MUL => {
@@ -145,13 +138,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
                 let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
 
-                config
-                    .rs1_read
+                self.rs1_read
                     .assign_limbs(instance, rs1_read.as_u16_limbs());
 
                 let result = rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
-                config.rd_written.assign_mul_outcome(
+                self.rd_written.assign_mul_outcome(
                     instance,
                     lk_multiplicity,
                     &ValueMul {

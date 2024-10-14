@@ -18,22 +18,19 @@ use ceno_emul::{StepRecord, Tracer};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
-pub struct HaltConfig {
+pub struct HaltInstruction<E: ExtensionField> {
     ecall_cfg: EcallInstructionConfig,
     prev_x10_ts: WitIn,
     lt_x10_cfg: AssertLTConfig,
+    _phantom: PhantomData<E>,
 }
 
-pub struct HaltInstruction<E>(PhantomData<E>);
-
 impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
-    type InstructionConfig = HaltConfig;
-
     fn name() -> String {
         "ECALL_HALT".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let prev_x10_ts = cb.create_witin(|| "prev_x10_ts")?;
         let exit_code = {
             let exit_code = cb.query_exit_code()?;
@@ -56,15 +53,16 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             exit_code,
         )?;
 
-        Ok(HaltConfig {
+        Ok(Self {
             ecall_cfg,
             prev_x10_ts,
             lt_x10_cfg,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -83,19 +81,18 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         // the access of X10 register is stored in rs2()
         set_val!(
             instance,
-            config.prev_x10_ts,
+            self.prev_x10_ts,
             step.rs2().unwrap().previous_cycle
         );
 
-        config.lt_x10_cfg.assign_instance(
+        self.lt_x10_cfg.assign_instance(
             instance,
             lk_multiplicity,
             step.rs2().unwrap().previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RS2,
         )?;
 
-        config
-            .ecall_cfg
+        self.ecall_cfg
             .assign_instance::<E>(instance, lk_multiplicity, step)?;
 
         Ok(())

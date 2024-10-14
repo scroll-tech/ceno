@@ -16,7 +16,7 @@ use crate::{
     Value,
 };
 
-pub struct BeqConfig<E: ExtensionField> {
+pub struct BeqCircuit<E: ExtensionField, I: RIVInstruction> {
     b_insn: BInstructionConfig<E>,
 
     // TODO: Limb decomposition is not necessary. Replace with a single witness.
@@ -24,20 +24,16 @@ pub struct BeqConfig<E: ExtensionField> {
     rs2_read: UInt<E>,
 
     equal: IsEqualConfig,
+
+    _phantom: PhantomData<I>,
 }
 
-pub struct BeqCircuit<E, I>(PhantomData<(E, I)>);
-
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
-    type InstructionConfig = BeqConfig<E>;
-
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
 
@@ -62,35 +58,33 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
             branch_taken_bit,
         )?;
 
-        Ok(BeqConfig {
+        Ok(Self {
             b_insn,
             rs1_read,
             rs2_read,
             equal,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        config
-            .b_insn
+        self.b_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         let rs1_read = step.rs1().unwrap().value;
-        config
-            .rs1_read
+        self.rs1_read
             .assign_limbs(instance, Value::new_unchecked(rs1_read).as_u16_limbs());
 
         let rs2_read = step.rs2().unwrap().value;
-        config
-            .rs2_read
+        self.rs2_read
             .assign_limbs(instance, Value::new_unchecked(rs2_read).as_u16_limbs());
 
-        config.equal.assign_instance(
+        self.equal.assign_instance(
             instance,
             E::BaseField::from(rs2_read as u64),
             E::BaseField::from(rs1_read as u64),

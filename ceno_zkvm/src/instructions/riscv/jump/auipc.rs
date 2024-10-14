@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::mem::MaybeUninit;
 
 use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
@@ -16,26 +16,20 @@ use crate::{
     Value,
 };
 
-pub struct AuipcConfig<E: ExtensionField> {
+pub struct AuipcInstruction<E: ExtensionField> {
     pub u_insn: UInstructionConfig<E>,
     pub imm: WitIn,
     pub overflow_bit: WitIn,
     pub rd_written: UInt<E>,
 }
 
-pub struct AuipcInstruction<E>(PhantomData<E>);
-
 /// AUIPC instruction circuit
 impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
-    type InstructionConfig = AuipcConfig<E>;
-
     fn name() -> String {
         format!("{:?}", InsnKind::AUIPC)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<AuipcConfig<E>, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let imm = circuit_builder.create_witin(|| "imm")?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
@@ -59,7 +53,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             rd_written.value() + overflow_bit.expr() * (1u64 << 32).into(),
         )?;
 
-        Ok(AuipcConfig {
+        Ok(Self {
             u_insn,
             imm,
             overflow_bit,
@@ -68,7 +62,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
@@ -77,14 +71,13 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         let imm: u32 = step.insn().imm_or_funct7();
         let (sum, overflow) = pc.overflowing_add(imm);
 
-        set_val!(instance, config.imm, imm as u64);
-        set_val!(instance, config.overflow_bit, overflow as u64);
+        set_val!(instance, self.imm, imm as u64);
+        set_val!(instance, self.overflow_bit, overflow as u64);
 
         let sum_limbs = Value::new(sum, lk_multiplicity);
-        config.rd_written.assign_value(instance, sum_limbs);
+        self.rd_written.assign_value(instance, sum_limbs);
 
-        config
-            .u_insn
+        self.u_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())

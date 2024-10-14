@@ -105,7 +105,7 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
-    let bltu_config = zkvm_cs.register_opcode_circuit::<BltuInstruction>();
+    let bltu_config = zkvm_cs.register_opcode_circuit::<BltuInstruction<E>>();
     let jal_config = zkvm_cs.register_opcode_circuit::<JalInstruction<E>>();
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     // tables
@@ -122,7 +122,7 @@ fn main() {
         .collect();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces.register_opcode_circuit::<BltuInstruction>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<BltuInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<JalInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
 
@@ -213,7 +213,7 @@ fn main() {
             .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
             .unwrap();
         zkvm_witness
-            .assign_opcode_circuit::<BltuInstruction>(&zkvm_cs, &bltu_config, bltu_records)
+            .assign_opcode_circuit::<BltuInstruction<E>>(&zkvm_cs, &bltu_config, bltu_records)
             .unwrap();
         zkvm_witness
             .assign_opcode_circuit::<JalInstruction<E>>(&zkvm_cs, &jal_config, jal_records)

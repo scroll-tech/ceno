@@ -20,25 +20,20 @@ use crate::{
 };
 use ceno_emul::InsnKind;
 
-pub struct BltuCircuit<I>(PhantomData<I>);
-
-pub struct InstructionConfig<E: ExtensionField> {
+pub struct BltuCircuit<E: ExtensionField, I: RIVInstruction> {
     pub b_insn: BInstructionConfig<E>,
     pub read_rs1: UInt<E>,
     pub read_rs2: UInt<E>,
     pub is_lt: IsLtConfig,
+    _phantom: PhantomData<I>,
 }
 
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<E, I> {
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    type InstructionConfig = InstructionConfig<E>;
-
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<InstructionConfig<E>, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
         let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
 
@@ -65,33 +60,33 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
             branch_taken_bit,
         )?;
 
-        Ok(InstructionConfig {
+        Ok(Self {
             b_insn,
             read_rs1,
             read_rs2,
             is_lt,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [std::mem::MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
-        config.read_rs1.assign_limbs(instance, rs1.as_u16_limbs());
-        config.read_rs2.assign_limbs(instance, rs2.as_u16_limbs());
-        config.is_lt.assign_instance(
+        self.read_rs1.assign_limbs(instance, rs1.as_u16_limbs());
+        self.read_rs2.assign_limbs(instance, rs2.as_u16_limbs());
+        self.is_lt.assign_instance(
             instance,
             lk_multiplicity,
             step.rs1().unwrap().value as u64,
             step.rs2().unwrap().value as u64,
         )?;
 
-        config
-            .b_insn
+        self.b_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())

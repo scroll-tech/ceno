@@ -14,16 +14,16 @@ use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
-pub struct InstructionConfig<E: ExtensionField> {
+pub struct ShiftImmInstruction<E: ExtensionField, I: RIVInstruction> {
     i_insn: IInstructionConfig<E>,
 
     imm: UInt<E>,
     rd_written: UInt<E>,
     remainder: UInt<E>,
     div_config: DivConfig<E>,
-}
 
-pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
+    _phantom: PhantomData<I>,
+}
 
 pub struct SrliOp;
 impl RIVInstruction for SrliOp {
@@ -31,15 +31,11 @@ impl RIVInstruction for SrliOp {
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
-    type InstructionConfig = InstructionConfig<E>;
-
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let mut imm = UInt::new(|| "imm", circuit_builder)?;
         let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
@@ -63,17 +59,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             rd_written.register_expr(),
         )?;
 
-        Ok(InstructionConfig {
+        Ok(Self {
             i_insn,
             imm,
             rd_written,
             remainder,
             div_config,
+            _phantom: PhantomData,
         })
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -88,19 +85,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 Value::new(imm, lk_multiplicity),
             )
         };
-        config.div_config.assign_instance(
+        self.div_config.assign_instance(
             instance,
             lk_multiplicity,
             &imm,
             &rd_written,
             &remainder,
         )?;
-        config.imm.assign_value(instance, imm);
-        config.rd_written.assign_value(instance, rd_written);
-        config.remainder.assign_value(instance, remainder);
+        self.imm.assign_value(instance, imm);
+        self.rd_written.assign_value(instance, rd_written);
+        self.remainder.assign_value(instance, remainder);
 
-        config
-            .i_insn
+        self.i_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())

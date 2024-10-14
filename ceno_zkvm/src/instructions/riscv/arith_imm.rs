@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::mem::MaybeUninit;
 
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
@@ -10,13 +10,7 @@ use crate::{
 
 use super::{constants::UInt, i_insn::IInstructionConfig, RIVInstruction};
 
-pub struct AddiInstruction<E>(PhantomData<E>);
-
-impl<E> RIVInstruction for AddiInstruction<E> {
-    const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::ADDI;
-}
-
-pub struct InstructionConfig<E: ExtensionField> {
+pub struct AddiInstruction<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
 
     rs1_read: UInt<E>,
@@ -24,16 +18,16 @@ pub struct InstructionConfig<E: ExtensionField> {
     rd_written: UInt<E>,
 }
 
-impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
-    type InstructionConfig = InstructionConfig<E>;
+impl<E: ExtensionField> RIVInstruction for AddiInstruction<E> {
+    const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::ADDI;
+}
 
+impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     fn name() -> String {
         format!("{:?}", Self::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
         let rd_written = rs1_read.add(|| "rs1_read + imm", circuit_builder, &imm, true)?;
@@ -46,7 +40,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
             rd_written.register_expr(),
         )?;
 
-        Ok(InstructionConfig {
+        Ok(Self {
             i_insn,
             rs1_read,
             imm,
@@ -55,7 +49,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -65,13 +59,12 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
         let result = rs1_read.add(&imm, lk_multiplicity, true);
 
-        config.rs1_read.assign_value(instance, rs1_read);
-        config.imm.assign_value(instance, imm);
+        self.rs1_read.assign_value(instance, rs1_read);
+        self.imm.assign_value(instance, imm);
 
-        config.rd_written.assign_add_outcome(instance, &result);
+        self.rd_written.assign_add_outcome(instance, &result);
 
-        config
-            .i_insn
+        self.i_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())
