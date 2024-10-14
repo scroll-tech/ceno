@@ -41,6 +41,12 @@ pub enum Expression<E: ExtensionField> {
     Challenge(ChallengeId, usize, E, E), // (challenge_id, power, scalar, offset)
 }
 
+impl<E: ExtensionField> Default for Expression<E> {
+    fn default() -> Self {
+        Expression::Constant(E::BaseField::default())
+    }
+}
+
 /// this is used as finite state machine state
 /// for differentiate an expression is in monomial form or not
 enum MonomialState {
