@@ -183,6 +183,29 @@ pub fn field_type_as_ext<E: ExtensionField>(values: &FieldType<E>) -> &Vec<E> {
     }
 }
 
+pub fn field_type_iter_base<E: ExtensionField>(
+    values: &FieldType<E>,
+) -> impl Iterator<Item = &E::BaseField> + '_ {
+    match values {
+        FieldType::Ext(coeffs) => Either::Left(coeffs.iter().flat_map(|x| x.as_bases())),
+        FieldType::Base(coeffs) => Either::Right(coeffs.iter()),
+        _ => unreachable!(),
+    }
+}
+
+pub fn field_type_iter_range_base<'a, E: ExtensionField>(
+    values: &'a FieldType<E>,
+    range: impl IntoIterator<Item = usize> + 'a,
+) -> impl Iterator<Item = &E::BaseField> + 'a {
+    match values {
+        FieldType::Ext(coeffs) => {
+            Either::Left(range.into_iter().flat_map(|i| coeffs[i].as_bases()))
+        }
+        FieldType::Base(coeffs) => Either::Right(range.into_iter().map(|i| &coeffs[i])),
+        _ => unreachable!(),
+    }
+}
+
 pub fn multiply_poly<E: ExtensionField>(poly: &mut Vec<E>, scalar: &E) {
     for coeff in poly.iter_mut() {
         *coeff *= scalar;

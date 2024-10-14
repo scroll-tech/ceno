@@ -8,9 +8,7 @@ use transcript::Transcript;
 
 use crate::{
     basefold::CommitPhaseInput,
-    util::{
-        arithmetic::inner_product, field_type_index_ext, hash::new_hasher, merkle_tree::MerkleTree,
-    },
+    util::{arithmetic::inner_product, field_type_index_ext, merkle_tree::MerkleTree},
     Error,
 };
 
@@ -139,9 +137,8 @@ where
     ) -> Result<(), Error> {
         let comm = verifier_inputs.comm;
 
-        let hasher = new_hasher::<E::BaseField>();
         let trivial_proof = &proof.trivial_proof;
-        let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), 2, &hasher);
+        let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), 2);
         if comm.root() == merkle_tree.root() {
             return Ok(());
         } else {

@@ -4,10 +4,7 @@ use multilinear_extensions::{mle::FieldType, virtual_poly_v2::ArcMultilinearExte
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{
-    util::{hash::new_hasher, merkle_tree::MerkleTree},
-    Error,
-};
+use crate::{util::merkle_tree::MerkleTree, Error};
 
 use super::{
     Basefold, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec, PolyEvalsCodeword,
@@ -60,8 +57,6 @@ where
         end_timer!(encode_timer);
 
         // build merkle tree from leaves
-        let hasher = new_hasher::<E::BaseField>();
-
         let ret = match evals_codewords[0] {
             PolyEvalsCodeword::Normal(_) => {
                 let (bh_evals, codewords) = evals_codewords
@@ -76,7 +71,7 @@ where
                         }
                     })
                     .collect::<(Vec<_>, Vec<_>)>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, 2, &hasher);
+                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, 2);
                 BasefoldCommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
@@ -96,8 +91,7 @@ where
                         }
                     })
                     .collect::<Vec<_>>();
-                let codeword_tree =
-                    MerkleTree::<E>::from_batch_leaves(bh_evals.clone(), 2, &hasher);
+                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone(), 2);
                 BasefoldCommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
