@@ -101,23 +101,12 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
 
-    use crate::{
-        instructions::{
-            ChipChallenges, Instruction, InstructionGraph, JumpdestInstruction,
-            SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
-        test::test_opcode_circuit,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
-    };
+    use crate::instructions::{ChipChallenges, Instruction, JumpdestInstruction};
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
 
     #[test]
     fn test_jumpdest_construct_circuit() {
@@ -158,6 +147,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,

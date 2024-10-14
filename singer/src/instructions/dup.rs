@@ -171,24 +171,16 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for DupInstruction<N> {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
-    use gkr::structs::LayerWitness;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
 
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
     use crate::{
-        instructions::{
-            ChipChallenges, DupInstruction, Instruction, InstructionGraph, SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
-        test::{get_uint_params, test_opcode_circuit},
+        instructions::{ChipChallenges, DupInstruction, Instruction},
+        test::get_uint_params,
         utils::u64vec,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
     #[test]
@@ -269,6 +261,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,

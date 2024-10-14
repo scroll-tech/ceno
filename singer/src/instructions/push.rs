@@ -150,23 +150,12 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
-    use gkr::structs::LayerWitness;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
 
-    use crate::{
-        instructions::{
-            ChipChallenges, Instruction, InstructionGraph, PushInstruction, SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
-        test::test_opcode_circuit,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
-    };
+    use crate::instructions::{ChipChallenges, Instruction, PushInstruction};
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
 
     #[test]
     fn test_push1_construct_circuit() {
@@ -230,6 +219,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,

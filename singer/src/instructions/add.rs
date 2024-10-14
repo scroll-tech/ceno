@@ -186,26 +186,17 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
     use singer_utils::{
         constants::RANGE_CHIP_BIT_WIDTH,
         structs::{StackUInt, TSUInt},
     };
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
 
     use crate::{
-        instructions::{
-            AddInstruction, ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
+        instructions::{AddInstruction, ChipChallenges, Instruction},
         test::{get_uint_params, test_opcode_circuit_v2},
         utils::u64vec,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
     #[test]

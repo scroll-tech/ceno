@@ -107,6 +107,7 @@ fn main() {
         "wrong subclaim"
     );
 
+    #[allow(deprecated)]
     let (sumcheck_proof_v1, _) =
         IOPProverState::<E>::prove_parallel(virtual_poly.clone(), &mut prover_transcript_v1);
 
