@@ -12,3 +12,6 @@ tracing = { version = "0.1", default-features = false, features = [
     "attributes",
 ] }
 elf = { version = "0.7.4" }
+
+[dev-dependencies]
+ceno-examples = { path = "../examples-builder" }

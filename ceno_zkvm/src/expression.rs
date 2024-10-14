@@ -652,11 +652,42 @@ impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     }
 }
 
-impl<F: SmallField, E: ExtensionField<BaseField = F>> From<usize> for Expression<E> {
-    fn from(value: usize) -> Self {
-        Expression::Constant(F::from(value as u64))
+// Implement From trait for unsigned types of at most 64 bits
+macro_rules! impl_from_unsigned {
+    ($($t:ty),*) => {
+        $(
+            impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
+                fn from(value: $t) -> Self {
+                    Expression::Constant(F::from(value as u64))
+                }
+            }
+        )*
+    };
+}
+impl_from_unsigned!(u8, u16, u32, u64, usize);
+
+// Implement From trait for u128 separately since it requires explicit reduction
+impl<F: SmallField, E: ExtensionField<BaseField = F>> From<u128> for Expression<E> {
+    fn from(value: u128) -> Self {
+        let reduced = value.rem_euclid(F::MODULUS_U64 as u128) as u64;
+        Expression::Constant(F::from(reduced))
     }
 }
+
+// Implement From trait for signed types
+macro_rules! impl_from_signed {
+    ($($t:ty),*) => {
+        $(
+            impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
+                fn from(value: $t) -> Self {
+                    let reduced = (value as i128).rem_euclid(F::MODULUS_U64 as i128) as u64;
+                    Expression::Constant(F::from(reduced))
+                }
+            }
+        )*
+    };
+}
+impl_from_signed!(i8, i16, i32, i64, i128, isize);
 
 impl<E: ExtensionField> Display for Expression<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

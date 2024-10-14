@@ -1,12 +1,9 @@
-use std::fmt::Display;
-
 use ff_ext::ExtensionField;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
-    gadgets::IsLtConfig,
     instructions::riscv::constants::EXIT_CODE_IDX,
     structs::ROMType,
     tables::InsnRecord,
@@ -323,20 +320,9 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.logic_u8(ROMType::Ltu, a, b, c)
     }
 
-    /// less_than
-    pub(crate) fn less_than<N, NR>(
-        &mut self,
-        name_fn: N,
-        lhs: Expression<E>,
-        rhs: Expression<E>,
-        assert_less_than: Option<bool>,
-        max_num_u16_limbs: usize,
-    ) -> Result<IsLtConfig, ZKVMError>
-    where
-        NR: Into<String> + Display + Clone,
-        N: FnOnce() -> NR,
-    {
-        IsLtConfig::construct_circuit(self, name_fn, lhs, rhs, assert_less_than, max_num_u16_limbs)
+    // Assert that `2^b = c` and that `b` is a 5-bit unsigned integer.
+    pub fn lookup_pow2(&mut self, b: Expression<E>, c: Expression<E>) -> Result<(), ZKVMError> {
+        self.logic_u8(ROMType::Pow, 2.into(), b, c)
     }
 
     pub(crate) fn is_equal(

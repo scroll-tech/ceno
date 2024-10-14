@@ -1,6 +1,7 @@
 pub use ff;
 use ff::FromUniformBytes;
 use goldilocks::SmallField;
+use poseidon::poseidon::Poseidon;
 use serde::Serialize;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
@@ -23,7 +24,7 @@ pub trait ExtensionField:
 {
     const DEGREE: usize;
 
-    type BaseField: SmallField + FromUniformBytes<64>;
+    type BaseField: SmallField + FromUniformBytes<64> + Poseidon;
 
     fn from_bases(bases: &[Self::BaseField]) -> Self;
 

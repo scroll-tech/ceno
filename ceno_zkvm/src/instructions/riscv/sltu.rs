@@ -54,7 +54,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "rs1 < rs2",
             rs1_read.value(),
             rs2_read.value(),
-            None,
             UINT_LIMBS,
         )?;
         let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
@@ -184,7 +183,6 @@ mod test {
         let mut rng = rand::thread_rng();
         let a: u32 = rng.gen();
         let b: u32 = rng.gen();
-        println!("random: {}, {}", a, b);
         verify("random 1", a, b, (a < b) as u32);
         verify("random 2", b, a, !(a < b) as u32);
     }

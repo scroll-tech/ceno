@@ -12,8 +12,8 @@ use transcript::Transcript;
 use crate::{
     entered_span, exit_span,
     structs::{
-        Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, IOPProverStepMessage,
-        PointAndEval, SumcheckStepType,
+        Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, PointAndEval,
+        SumcheckStepType,
     },
     tracing_span,
 };

@@ -5,12 +5,12 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::AssertLTConfig,
     set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{CENO_PLATFORM, InsnKind::EANY, PC_STEP_SIZE, StepRecord};
+use ceno_emul::{InsnKind::EANY, StepRecord, Tracer, CENO_PLATFORM, PC_STEP_SIZE};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
@@ -18,7 +18,7 @@ pub struct EcallInstructionConfig {
     pub pc: WitIn,
     pub ts: WitIn,
     prev_x5_ts: WitIn,
-    lt_x5_cfg: IsLtConfig,
+    lt_x5_cfg: AssertLTConfig,
 }
 
 impl EcallInstructionConfig {
@@ -32,6 +32,10 @@ impl EcallInstructionConfig {
         let ts = cb.create_witin(|| "cur_ts")?;
 
         cb.state_in(pc.expr(), ts.expr())?;
+        cb.state_out(
+            next_pc.map_or(pc.expr() + PC_STEP_SIZE.into(), |next_pc| next_pc),
+            ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize).into(),
+        )?;
 
         cb.lk_fetch(&InsnRecord::new(
             pc.expr(),
@@ -50,14 +54,9 @@ impl EcallInstructionConfig {
             || "write x5",
             E::BaseField::from(CENO_PLATFORM.reg_ecall() as u64),
             prev_x5_ts.expr(),
-            ts.expr(),
+            ts.expr() + (Tracer::SUBCYCLE_RS1 as usize).into(),
             syscall_id.clone(),
             syscall_ret_value.map_or(syscall_id, |v| v),
-        )?;
-
-        cb.state_out(
-            next_pc.map_or(pc.expr() + PC_STEP_SIZE.into(), |next_pc| next_pc),
-            ts.expr() + 4.into(),
         )?;
 
         Ok(Self {
@@ -89,7 +88,7 @@ impl EcallInstructionConfig {
             instance,
             lk_multiplicity,
             step.rs1().unwrap().previous_cycle,
-            step.cycle(),
+            step.cycle() + Tracer::SUBCYCLE_RS1,
         )?;
 
         Ok(())

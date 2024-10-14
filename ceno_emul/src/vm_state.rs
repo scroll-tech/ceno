@@ -96,8 +96,7 @@ impl EmuContext for VMState {
             let exit_code = self.load_register(self.platform.reg_arg0())?;
             tracing::debug!("halt with exit_code={}", exit_code);
 
-            self.set_pc(ByteAddr(0));
-            self.halted = true;
+            self.halt(ByteAddr(0));
             Ok(true)
         } else {
             self.trap(TrapCause::EcallError)
@@ -125,6 +124,12 @@ impl EmuContext for VMState {
 
     fn set_pc(&mut self, after: ByteAddr) {
         self.pc = after.0;
+    }
+
+    fn halt(&mut self, pc: ByteAddr) {
+        self.pc = pc.0;
+        self.halted = true;
+        self.tracer.halt(ByteAddr(pc.0));
     }
 
     /// Load a register and record this operation.
