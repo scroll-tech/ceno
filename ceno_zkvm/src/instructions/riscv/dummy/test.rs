@@ -87,7 +87,7 @@ fn test_dummy_b() {
             .de_interleaving()
             .into_mles()
             .into_iter()
-            .map(|v| v.into())
+            .map(Into::into)
             .collect_vec(),
         None,
     );

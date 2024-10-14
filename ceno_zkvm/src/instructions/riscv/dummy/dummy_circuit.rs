@@ -190,33 +190,27 @@ impl<E: ExtensionField> DummyConfig<E> {
         if let Some((rs1_op, rs1_read)) = &self.rs1 {
             rs1_op.assign_instance(instance, lk_multiplicity, step)?;
 
-            let rs1_val = Value::new_unchecked(step.rs1().unwrap().value);
-            rs1_read.assign_limbs(instance, rs1_val.as_u16_limbs());
+            let rs1_val = Value::new_unchecked(step.rs1().expect("rs1 value").value);
+            rs1_read.assign_value(instance, rs1_val);
         }
         if let Some((rs2_op, rs2_read)) = &self.rs2 {
             rs2_op.assign_instance(instance, lk_multiplicity, step)?;
 
-            let rs2_val = Value::new_unchecked(step.rs2().unwrap().value);
-            rs2_read.assign_limbs(instance, rs2_val.as_u16_limbs());
+            let rs2_val = Value::new_unchecked(step.rs2().expect("rs2 value").value);
+            rs2_read.assign_value(instance, rs2_val);
         }
         if let Some((rd_op, rd_written)) = &self.rd {
             rd_op.assign_instance(instance, lk_multiplicity, step)?;
 
-            let rd_val = Value::new_unchecked(step.rd().unwrap().value.after);
-            rd_written.assign_limbs(instance, rd_val.as_u16_limbs());
+            let rd_val = Value::new_unchecked(step.rd().expect("rd value").value.after);
+            rd_written.assign_value(instance, rd_val);
         }
 
         // Memory
         if let Some((mem_addr, mem_val)) = &self.mem_addr_val {
-            mem_addr.assign_value(
-                instance,
-                Value::new_unchecked(step.memory_op().unwrap().addr),
-            );
-
-            mem_val.assign_value(
-                instance,
-                Value::new_unchecked(step.memory_op().unwrap().value.after),
-            );
+            let mem_op = step.memory_op().expect("memory operation");
+            mem_addr.assign_value(instance, Value::new_unchecked(mem_op.addr));
+            mem_val.assign_value(instance, Value::new_unchecked(mem_op.value.after));
         }
         if let Some(mem_read) = &self.mem_read {
             mem_read.assign_instance(instance, lk_multiplicity, step)?;
