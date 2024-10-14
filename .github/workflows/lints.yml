@@ -71,4 +71,7 @@ jobs:
           RUSTFLAGS: "-Dwarnings"
         run: |
           cargo check --workspace --all-targets --exclude ceno_rt
+          # We have a lot of code under #[cfg(not(debug_assertions))] and similar,
+          # so we need to run cargo check in release mode, too:
+          cargo check --workspace --all-targets --exclude ceno_rt --release
           cargo make clippy
