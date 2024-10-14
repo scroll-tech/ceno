@@ -63,4 +63,10 @@ jobs:
       - name: run test
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo make tests
+        run: |
+          cargo make tests
+      - name: run benchmarks
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          cargo bench --workspace --exclude ceno_rt --exclude singer-pro
