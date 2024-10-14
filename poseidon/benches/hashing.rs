@@ -84,11 +84,7 @@ pub fn hashing_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("ceno hash single", |bencher| {
-        bencher.iter_batched(
-            random_ceno_goldy,
-            ceno_hash_single,
-            BatchSize::SmallInput,
-        )
+        bencher.iter_batched(random_ceno_goldy, ceno_hash_single, BatchSize::SmallInput)
     });
 
     c.bench_function("ceno hash 2 to 1", |bencher| {

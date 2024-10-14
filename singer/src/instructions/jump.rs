@@ -50,7 +50,7 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -65,7 +65,7 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top,
             clk,
         );
@@ -97,9 +97,9 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
         GlobalStateChip::state_out(
             &mut chip_handler,
             &mut circuit_builder,
-            &next_pc,
+            next_pc,
             stack_ts.values(), // Because there is no stack push.
-            &memory_ts,
+            memory_ts,
             stack_top_expr.sub(E::BaseField::from(1)),
             clk_expr.add(E::BaseField::ONE),
         );
@@ -115,7 +115,7 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
         BytecodeChip::bytecode_with_pc_opcode(
             &mut chip_handler,
             &mut circuit_builder,
-            &next_pc,
+            next_pc,
             OpcodeType::JUMPDEST,
         );
 

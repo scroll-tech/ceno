@@ -66,7 +66,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
                 opcode,
                 &mut self.graph_builder,
                 &mut self.chip_builder,
-                &inst_circuits,
+                inst_circuits,
                 wires_in,
                 real_challenges,
                 real_n_instances,
@@ -126,7 +126,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
                 *opcode,
                 &mut self.graph_builder,
                 &mut self.chip_builder,
-                &inst_circuits,
+                inst_circuits,
                 *real_n_instances,
                 &aux_info.singer_params,
             )?;
@@ -158,7 +158,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
             rom_input: mem::take(&mut output_wires_id[InstOutputType::ROMInput as usize]),
             rom_table: table_out_node_id,
 
-            public_output_size: public_output_size,
+            public_output_size,
         };
 
         let graph = graph_builder.finalize_graph_with_targets(&singer_wire_out_id.to_vec());

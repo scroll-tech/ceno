@@ -172,7 +172,7 @@ impl RangeChip {
         let carry = PCUInt::extract_unsafe_carry_add(witness);
         PCUInt::add_const_unsafe(
             circuit_builder,
-            &pc,
+            pc,
             i64_to_base_field::<Ext>(constant),
             carry,
         )
@@ -188,7 +188,7 @@ impl RangeChip {
         TSUInt::add_const(
             circuit_builder,
             chip_handler,
-            &ts,
+            ts,
             i64_to_base_field::<Ext>(constant),
             witness,
         )

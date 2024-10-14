@@ -14,7 +14,7 @@ fn main() {
         .expect("circuit builder failed");
     let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::default();
 
-    let bytecode = [0x60 as u8, 0x01, 0x50];
+    let bytecode = [0x60_u8, 0x01, 0x50];
 
     let mut prover_transcript = Transcript::new(b"Singer");
 

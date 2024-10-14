@@ -49,7 +49,7 @@ impl GlobalStateChip {
             cell_to_mixed(pc),
             cell_to_mixed(stack_ts),
             cell_to_mixed(memory_ts),
-            vec![stack_top.into(), clk.into()],
+            vec![stack_top, clk],
         ]
         .concat();
 

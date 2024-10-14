@@ -37,8 +37,8 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
 
 /// Add bytecode table circuit and witness to the circuit graph. Return node id
 /// and lookup instance log size.
-pub(crate) fn construct_bytecode_table_and_witness<'a, E: ExtensionField>(
-    builder: &mut CircuitGraphBuilder<'a, E>,
+pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<'_, E>,
     bytecode: &[u8],
     challenges: &ChipChallenges,
     real_challenges: &[E],

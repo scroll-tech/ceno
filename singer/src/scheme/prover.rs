@@ -37,14 +37,13 @@ pub fn prove<'a, E: ExtensionField>(
             node_out_ids
                 .iter()
                 .map(|node| match node {
-                    NodeOutputType::OutputLayer(node_id) => vm_witness.0.node_witnesses
-                        [*node_id as usize]
+                    NodeOutputType::OutputLayer(node_id) => vm_witness.0.node_witnesses[*node_id]
                         .output_layer_witness_ref()
                         .clone(),
-                    NodeOutputType::WireOut(node_id, wit_id) => vm_witness.0.node_witnesses
-                        [*node_id as usize]
-                        .witness_out_ref()[*wit_id as usize]
-                        .clone(),
+                    NodeOutputType::WireOut(node_id, wit_id) => {
+                        vm_witness.0.node_witnesses[*node_id].witness_out_ref()[*wit_id as usize]
+                            .clone()
+                    }
                 })
                 .collect_vec()
         };

@@ -110,7 +110,7 @@ where
             acc + out_eq_vec[gate.idx_out]
                 * in1_eq_vec[gate.idx_in[0]]
                 * in2_eq_vec[gate.idx_in[1]]
-                * gate.scalar.eval(&challenges)
+                * gate.scalar.eval(challenges)
         })
     }
 }
@@ -159,8 +159,8 @@ impl<E: ExtensionField> EvaluateConstant<E> for ConstantType<E> {
     #[inline(always)]
     fn eval(&self, challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>) -> E::BaseField {
         match self {
-            ConstantType::Challenge(c, j) => challenges[&c][*j],
-            ConstantType::ChallengeScaled(c, j, scalar) => *scalar * challenges[&c][*j],
+            ConstantType::Challenge(c, j) => challenges[c][*j],
+            ConstantType::ChallengeScaled(c, j, scalar) => *scalar * challenges[c][*j],
             ConstantType::Field(c) => *c,
         }
     }

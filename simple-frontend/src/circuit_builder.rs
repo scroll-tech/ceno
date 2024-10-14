@@ -8,16 +8,6 @@ mod base_opt;
 mod derives;
 mod ext_opt;
 
-impl<Ext: ExtensionField> Cell<Ext> {
-    pub fn new() -> Self {
-        Self {
-            layer: None,
-            gates: vec![],
-            cell_type: None,
-        }
-    }
-}
-
 impl<Ext: ExtensionField> GateType<Ext> {
     pub(crate) fn add_const(constant: ConstantType<Ext>) -> Self {
         Self {
@@ -45,6 +35,12 @@ impl<Ext: ExtensionField> GateType<Ext> {
             idx_in: vec![in0, in1, in2],
             scalar,
         }
+    }
+}
+
+impl<Ext: ExtensionField> Default for CircuitBuilder<Ext> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -160,7 +156,7 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 8);
-        let layers = vec![1, 1, 1, 1, 1, 1, 0, 0];
+        let layers = [1, 1, 1, 1, 1, 1, 0, 0];
         for cell_id in 0..8 {
             assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
         }
@@ -187,7 +183,7 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 8);
-        let layers = vec![1, 1, 1, 1, 1, 1, 0, 0];
+        let layers = [1, 1, 1, 1, 1, 1, 0, 0];
         for cell_id in 0..8 {
             assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
         }
@@ -207,7 +203,7 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 6);
-        let layers = vec![1, 1, 1, 1, 0, 0];
+        let layers = [1, 1, 1, 1, 0, 0];
         for cell_id in 0..6 {
             assert_eq!(
                 circuit_builder.cells[cell_id].layer,
@@ -233,7 +229,7 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 7);
-        let layers = vec![2, 2, 2, 2, 1, 1, 0];
+        let layers = [2, 2, 2, 2, 1, 1, 0];
         for cell_id in 0..7 {
             assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
         }

@@ -345,12 +345,10 @@ fn poseidon_ex<E: ExtensionField>(
                 circuit_builder.add(cell, sigma_p_out[r], one);
                 circuit_builder.add_const(cell, c[(n_rounds_f / 2 + 1) * t + r]);
                 cell
+            } else if r == 0 {
+                mix_out[n_rounds_f / 2 - 1][j]
             } else {
-                if r == 0 {
-                    mix_out[n_rounds_f / 2 - 1][j]
-                } else {
-                    mix_s_out[r - 1][j]
-                }
+                mix_s_out[r - 1][j]
             });
         }
         mix_s_out[r] = mix_s(circuit_builder, &mix_s_in[r], &s, r);

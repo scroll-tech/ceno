@@ -130,7 +130,7 @@ fn bench_add(c: &mut Criterion) {
                             &graph,
                             &wit,
                             &target_evals,
-                            &mut prover_transcript,
+                            prover_transcript,
                             (1 << instance_num_vars).min(max_thread_id),
                         )
                         .expect("prove failed");

@@ -165,7 +165,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -232,7 +232,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
         RangeChip::range_check_bytes(&mut chip_handler, &mut circuit_builder, mem_bytes)?;
 
-        let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
+        let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, mem_bytes)?;
         let old_stack_ts_value = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_value()])?;
         TSUInt::assert_lt(
             &mut circuit_builder,
@@ -326,7 +326,7 @@ impl MstoreAccessory {
         // From witness.
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Compute offset, offset + 1, ..., offset + EVM_STACK_BYTE_WIDTH - 1.
         // Load previous memory bytes.
