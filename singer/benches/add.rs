@@ -123,7 +123,7 @@ fn bench_add(c: &mut Criterion) {
                         let point = vec![E::random(&mut rng), E::random(&mut rng)];
                         let target_evals = graph.target_evals(&wit, &point);
 
-                        let mut prover_transcript = &mut Transcript::new(b"Singer");
+                        let prover_transcript = &mut Transcript::new(b"Singer");
 
                         let timer = Instant::now();
                         let _ = GKRGraphProverState::prove(

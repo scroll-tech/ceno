@@ -186,7 +186,7 @@ fn main() {
     let target_evals = graph.target_evals(&wit, &point);
 
     for _ in 0..5 {
-        let mut prover_transcript = &mut Transcript::new(b"Singer");
+        let prover_transcript = &mut Transcript::new(b"Singer");
         let timer = Instant::now();
         let proof = GKRGraphProverState::prove(
             &graph,

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use ff_ext::ExtensionField;
 
-use crate::structs::{Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId};
+use crate::structs::{CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId};
 
 mod base_opt;
 mod derives;
