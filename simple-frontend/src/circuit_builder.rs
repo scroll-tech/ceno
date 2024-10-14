@@ -38,6 +38,12 @@ impl<Ext: ExtensionField> GateType<Ext> {
     }
 }
 
+impl<Ext: ExtensionField> Default for CircuitBuilder<Ext> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     /// Prepare the circuit. This is to assign the layers and challenge levels
     /// to the cells.
@@ -141,7 +147,7 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 8);
-        let layers = vec![1, 1, 1, 1, 1, 1, 0, 0];
+        let layers = [1, 1, 1, 1, 1, 1, 0, 0];
         for cell_id in 0..8 {
             assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
         }
@@ -168,7 +174,7 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 8);
-        let layers = vec![1, 1, 1, 1, 1, 1, 0, 0];
+        let layers = [1, 1, 1, 1, 1, 1, 0, 0];
         for cell_id in 0..8 {
             assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
         }
@@ -188,7 +194,7 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 6);
-        let layers = vec![1, 1, 1, 1, 0, 0];
+        let layers = [1, 1, 1, 1, 0, 0];
         for cell_id in 0..6 {
             assert_eq!(
                 circuit_builder.cells[cell_id].layer,
@@ -214,7 +220,7 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 7);
-        let layers = vec![2, 2, 2, 2, 1, 1, 0];
+        let layers = [2, 2, 2, 2, 1, 1, 0];
         for cell_id in 0..7 {
             assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
         }
@@ -240,7 +246,7 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 16);
-        let layers = vec![2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0];
+        let layers = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0];
         for cell_id in 0..0 {
             assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
         }

@@ -147,8 +147,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                         .zip(g1_j.as_slice().into_instance_iter(num_thread_instances))
                         .for_each(|(g_last, g1_j)| {
                             circuit.assert_consts.iter().for_each(|gate| {
-                                g_last[gate.idx_out as usize] =
-                                    g1_j[gate.idx_out as usize] * alpha_pow;
+                                g_last[gate.idx_out] = g1_j[gate.idx_out] * alpha_pow;
                             });
                         });
                     g_last

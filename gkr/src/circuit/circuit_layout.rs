@@ -55,19 +55,19 @@ impl LayerSubsets {
             layers[*old_layer_id as usize]
                 .copy_to
                 .entry(self.layer_id)
-                .or_insert(vec![])
+                .or_default()
                 .push(*old_wire_id);
         }
         layers[self.layer_id as usize].paste_from = paste_from;
 
-        layers[self.layer_id as usize].num_vars = ceil_log2(self.wire_id_assigner) as usize;
+        layers[self.layer_id as usize].num_vars = ceil_log2(self.wire_id_assigner);
         layers[self.layer_id as usize].max_previous_num_vars = layers[self.layer_id as usize]
             .max_previous_num_vars
             .max(ceil_log2(
                 layers[self.layer_id as usize]
                     .paste_from
-                    .iter()
-                    .map(|(_, old_wire_ids)| old_wire_ids.len())
+                    .values()
+                    .map(|old_wire_ids| old_wire_ids.len())
                     .max()
                     .unwrap_or(1),
             ));
@@ -341,12 +341,12 @@ impl<E: ExtensionField> Circuit<E> {
             ConstantType::Challenge(c, _) => {
                 challenge_exps
                     .entry(c)
-                    .or_insert(challenges[c.challenge as usize].pow(&[c.exp]));
+                    .or_insert(challenges[c.challenge as usize].pow([c.exp]));
             }
             ConstantType::ChallengeScaled(c, _, _) => {
                 challenge_exps
                     .entry(c)
-                    .or_insert(challenges[c.challenge as usize].pow(&[c.exp]));
+                    .or_insert(challenges[c.challenge as usize].pow([c.exp]));
             }
             _ => {}
         };
