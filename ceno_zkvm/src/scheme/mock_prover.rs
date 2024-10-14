@@ -419,7 +419,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &expr);
+                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
                 let expr_evaluated = expr_evaluated
                     .get_ext_field_vec_optn()
                     .map(|v| v.to_vec())
@@ -488,7 +488,6 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             Ok(_) => {}
             Err(errors) => {
                 println!("======================================================");
-                println!("Error: {} constraints not satisfied", errors.len());
 
                 println!(
                     r"Hints:
@@ -499,13 +498,98 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     "
                 );
 
-                for error in errors {
-                    error.print(wits_in, &cb.cs.witin_namespace_map);
+                // Print errors and skip consecutive duplicates errors if they are equal.
+                let mut duplicates = 0;
+                let mut prev_err = None;
+                for error in &errors {
+                    if prev_err.is_some() && error_eq(prev_err.unwrap(), error) {
+                        duplicates += 1;
+                    } else {
+                        error.print(wits_in, &cb.cs.witin_namespace_map);
+                    }
+                    prev_err = Some(error);
+                }
+
+                if duplicates > 0 {
+                    println!(
+                        "Error: {} constraints not satisfied ({} duplicates hidden)",
+                        errors.len(),
+                        duplicates
+                    );
+                } else {
+                    println!("Error: {} constraints not satisfied", errors.len());
                 }
                 println!("======================================================");
                 panic!("Constraints not satisfied");
             }
         }
+    }
+}
+
+// Compare errors based on the content, ignoring the inst_id
+fn error_eq<E: ExtensionField>(left: &MockProverError<E>, right: &MockProverError<E>) -> bool {
+    match (left, right) {
+        (
+            MockProverError::AssertZeroError {
+                expression: left_expression,
+                evaluated: left_evaluated,
+                name: left_name,
+                ..
+            },
+            MockProverError::AssertZeroError {
+                expression: right_expression,
+                evaluated: right_evaluated,
+                name: right_name,
+                ..
+            },
+        ) => {
+            left_expression == right_expression
+                && left_evaluated == right_evaluated
+                && left_name == right_name
+        }
+        (
+            MockProverError::AssertEqualError {
+                left_expression: left_left_expression,
+                right_expression: left_right_expression,
+                left: left_left,
+                right: left_right,
+                name: left_name,
+                ..
+            },
+            MockProverError::AssertEqualError {
+                left_expression: right_left_expression,
+                right_expression: right_right_expression,
+                left: right_left,
+                right: right_right,
+                name: right_name,
+                ..
+            },
+        ) => {
+            left_left_expression == right_left_expression
+                && left_right_expression == right_right_expression
+                && left_left == right_left
+                && left_right == right_right
+                && left_name == right_name
+        }
+        (
+            MockProverError::LookupError {
+                expression: left_expression,
+                evaluated: left_evaluated,
+                name: left_name,
+                ..
+            },
+            MockProverError::LookupError {
+                expression: right_expression,
+                evaluated: right_evaluated,
+                name: right_name,
+                ..
+            },
+        ) => {
+            left_expression == right_expression
+                && left_evaluated == right_evaluated
+                && left_name == right_name
+        }
+        _ => false,
     }
 }
 
