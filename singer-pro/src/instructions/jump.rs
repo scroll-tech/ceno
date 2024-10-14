@@ -25,7 +25,7 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMP;
     const NAME: &'static str = "JUMP";
     fn construct_circuit(_: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         // From predesessor instruction
         let (memory_ts_id, memory_ts) = circuit_builder.create_witness_in(TSUInt::N_OPERAND_CELLS);
         let (next_pc_id, next_pc) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);

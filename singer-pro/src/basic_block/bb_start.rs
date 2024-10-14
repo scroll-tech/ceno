@@ -44,7 +44,7 @@ impl BasicBlockStart {
         params: &BasicBlockInfo,
         challenges: ChipChallenges,
     ) -> Result<BBStartCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let stack_top_offsets = &params.bb_start_stack_top_offsets;
         let n_stack_items = stack_top_offsets.len();
 

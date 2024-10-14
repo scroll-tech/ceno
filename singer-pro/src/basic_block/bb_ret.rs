@@ -39,7 +39,7 @@ impl BasicBlockReturn {
         params: &BasicBlockInfo,
         challenges: ChipChallenges,
     ) -> Result<BBFinalCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let BasicBlockInfo {
             delta_stack_top: _,
             pc_start: _,
@@ -124,7 +124,7 @@ impl BBReturnRestMemLoad {
     pub(crate) fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<AccessoryCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
@@ -173,7 +173,7 @@ impl BBReturnRestMemStore {
     pub(crate) fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<AccessoryCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
@@ -223,7 +223,7 @@ impl BBReturnRestStackPop {
     pub(crate) fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<AccessoryCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges.clone());

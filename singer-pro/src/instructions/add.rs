@@ -41,7 +41,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
     const OPCODE: OpcodeType = OpcodeType::ADD;
     const NAME: &'static str = "ADD";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
 
         // From witness
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());

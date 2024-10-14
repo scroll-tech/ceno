@@ -124,7 +124,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
     const OPCODE: OpcodeType = OpcodeType::MSTORE;
     const NAME: &'static str = "MSTORE";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+        let mut circuit_builder = CircuitBuilder::<E>::default();
         // From witness
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
@@ -235,7 +235,7 @@ impl MstoreAccessory {
     pub fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<AccessoryCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
 
         // From predesessor circuit.
         let (pred_dup_wire_id, pred_dup) = circuit_builder.create_witness_in(Self::pred_dup_size());

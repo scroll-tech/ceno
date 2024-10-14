@@ -122,7 +122,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
     const OPCODE: OpcodeType = OpcodeType::RETURN;
     const NAME: &'static str = "RETURN";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
 
         // From public io
         let (public_io_id, public_io) = circuit_builder.create_witness_in(Self::public_io_size());

@@ -36,7 +36,7 @@ impl BasicBlockFinal {
         params: &BasicBlockInfo,
         challenges: ChipChallenges,
     ) -> Result<BBFinalCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let BasicBlockInfo {
             delta_stack_top,
             pc_start: _,

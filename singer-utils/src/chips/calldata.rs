@@ -17,7 +17,7 @@ use simple_frontend::structs::CircuitBuilder;
 use sumcheck::util::ceil_log2;
 
 fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::default();
     let (_, id_cells) = circuit_builder.create_witness_in(UInt64::N_OPERAND_CELLS);
     let (_, calldata_cells) = circuit_builder.create_witness_in(StackUInt::N_OPERAND_CELLS);
 

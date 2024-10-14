@@ -54,7 +54,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMPI;
     const NAME: &'static str = "JUMPI";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges.clone());

@@ -17,7 +17,7 @@ use crate::{
 use super::ChipCircuitGadgets;
 
 fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::default();
     let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPERAND_CELLS);
     let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
