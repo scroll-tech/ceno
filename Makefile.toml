@@ -52,14 +52,11 @@ workspace = false
 command = "cargo"
 args = [
     "clippy",
-    "--package",
-    "ceno_zkvm",
-    "--package",
-    "mpcs",
-    "--package",
-    "ceno_emul",
-    "--package",
+    "--workspace",
+    "--exclude",
     "ceno_rt",
+    "--exclude",
+    "singer-pro",
     "--target",
     "${CUR_TARGET}",
     "--",
