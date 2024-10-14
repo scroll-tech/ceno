@@ -13,8 +13,7 @@ members = [
     "sumcheck",
     "transcript",
     "ceno_zkvm",
-    "poseidon"
-]
+    "poseidon"]
 resolver = "2"
 
 [workspace.package]

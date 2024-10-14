@@ -97,6 +97,7 @@ fn main() {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     // keygen
+    println!("keygen");
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
@@ -147,10 +148,13 @@ fn main() {
     let vk = pk.get_vk();
 
     // proving
+    println!("proving");
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
     for instance_num_vars in args.start..args.end {
+        println!("\n--\nEntry: {}", instance_num_vars);
+        println!("instance_num_vars: {}", instance_num_vars);
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();

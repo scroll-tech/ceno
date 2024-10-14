@@ -89,6 +89,11 @@ fn main() {
 
     let mut transcript = Transcript::new(b"test");
     let poly_info = virtual_poly.aux_info.clone();
+    println!("claimed_sum: {:?}", asserted_sum);
+    println!("proof: {:?}", sumcheck_proof_v2);
+    println!("aux_info: {:?}", poly_info);
+    println!("transcript: {:?}", transcript);
+
     let subclaim = IOPVerifierState::<E>::verify(
         asserted_sum,
         &sumcheck_proof_v2,
@@ -106,6 +111,7 @@ fn main() {
         ) == subclaim.expected_evaluation,
         "wrong subclaim"
     );
+    println!("Challenge: {:?}", transcript.read_challenge());
 
     let (sumcheck_proof_v1, _) =
         IOPProverState::<E>::prove_parallel(virtual_poly.clone(), &mut prover_transcript_v1);

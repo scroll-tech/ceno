@@ -114,6 +114,12 @@ pub fn hashing_benchmark(c: &mut Criterion) {
 
 // bench permutation
 pub fn permutation_benchmark(c: &mut Criterion) {
+    println!("{:?}", poseidon::poseidon::Poseidon::poseidon([1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0].map(|i| Goldilocks::from(i))));
+    println!("{:?}", PoseidonHash::hash_or_noop(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map(|i| Goldilocks::from(i))));
+    let mut permutation = poseidon::poseidon_permutation::PoseidonPermutation::new(
+        core::iter::repeat(Goldilocks::ZERO),
+    );
+
     let mut plonky_permutation = PoseidonPermutation::new(core::iter::repeat(GoldilocksField(0)));
     let mut ceno_permutation = poseidon::poseidon_permutation::PoseidonPermutation::new(
         core::iter::repeat(Goldilocks::ZERO),

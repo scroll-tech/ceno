@@ -7,9 +7,9 @@ use poseidon::poseidon_permutation::PoseidonPermutation;
 
 use crate::Challenge;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Transcript<E: ExtensionField> {
-    permutation: PoseidonPermutation<E::BaseField>,
+    pub permutation: PoseidonPermutation<E::BaseField>,
 }
 
 impl<E: ExtensionField> Transcript<E> {
@@ -40,6 +40,7 @@ impl<E: ExtensionField> Transcript<E> {
     // Append the message to the transcript.
     pub fn append_message(&mut self, msg: &[u8]) {
         let msg_f = E::BaseField::bytes_to_field_elements(msg);
+        // println!("MSG: {:?}, MSG_F: {:?}", msg, msg_f);
         self.permutation.set_from_slice(&msg_f, 0);
         self.permutation.permute();
     }

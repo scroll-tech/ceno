@@ -374,6 +374,8 @@ pub fn build_eq_x_r_sequential<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinea
 
 #[tracing::instrument(skip_all, name = "multilinear_extensions::build_eq_x_r_vec_sequential")]
 pub fn build_eq_x_r_vec_sequential<E: ExtensionField>(r: &[E]) -> Vec<E> {
+    // println!("\n\n--\nBUILD_EQ_X_R");
+    // println!("R: {:?}", r);
     // avoid unnecessary allocation
     if r.is_empty() {
         return vec![E::ONE];
@@ -391,8 +393,10 @@ pub fn build_eq_x_r_vec_sequential<E: ExtensionField>(r: &[E]) -> Vec<E> {
 
     let mut evals = create_uninit_vec(1 << r.len());
     build_eq_x_r_helper_sequential(r, &mut evals, E::ONE);
-
-    unsafe { std::mem::transmute(evals) }
+    
+    let ret = unsafe { std::mem::transmute(evals) };
+    // println!("EVALS: {:?}", ret);
+    ret
 }
 
 /// A helper function to build eq(x, r)*init via dynamic programing tricks.

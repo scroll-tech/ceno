@@ -3,9 +3,9 @@ use crate::{
     poseidon::Poseidon,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PoseidonPermutation<T: Poseidon> {
-    state: [T; SPONGE_WIDTH],
+    pub state: [T; SPONGE_WIDTH],
 }
 
 impl<T: Poseidon> PoseidonPermutation<T> {

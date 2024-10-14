@@ -13,6 +13,8 @@ use multilinear_extensions::{
 use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
+use goldilocks::SmallField;
+
 use crate::{
     error::ZKVMError,
     scheme::{
@@ -586,6 +588,59 @@ impl TowerVerify {
         num_fanin: usize,
         transcript: &mut Transcript<E>,
     ) -> TowerVerifyResult<E> {
+        println!("\n\n--\nINPUT:");
+        println!("prod_spec_size: {}", prod_out_evals.len());
+        println!("logup_spec_size: {}", logup_out_evals.len());
+        print!("expected_rounds: [ ");
+        for r in &expected_rounds {
+            print!("{} ", r);
+        }
+        println!("]");
+        print!("evals_contents: [ ");
+        // prod out evals
+        for t0 in &prod_out_evals {
+            for t1 in t0 {
+                print!("{} {} ", t1.as_bases()[0].to_canonical_u64(), t1.as_bases()[1].to_canonical_u64());
+            }
+        }
+        // logup out evals
+        for t0 in &logup_out_evals {
+            for t1 in t0 {
+                print!("{} {} ", t1.as_bases()[0].to_canonical_u64(), t1.as_bases()[1].to_canonical_u64());
+            }
+        }
+        // proofs
+        for t0 in &tower_proofs.proofs {
+            for t1 in t0 {
+                for e in &t1.evaluations {
+                    print!("{} {} ", e.as_bases()[0].to_canonical_u64(), e.as_bases()[1].to_canonical_u64());
+                }
+            }
+        }
+        // prod_specs_eval
+        for t0 in &tower_proofs.prod_specs_eval {
+            for t1 in t0 {
+                for e in t1 {
+                    print!("{} {} ", e.as_bases()[0].to_canonical_u64(), e.as_bases()[1].to_canonical_u64());
+                }
+            }
+        }
+        // logup_specs_eval
+        for t0 in &tower_proofs.logup_specs_eval {
+            for t1 in t0 {
+                for e in t1 {
+                    print!("{} {} ", e.as_bases()[0].to_canonical_u64(), e.as_bases()[1].to_canonical_u64());
+                }
+            }
+        }
+        println!("]");
+        print!("transcript_state: [ ");
+        for f in &transcript.permutation.state {
+            print!("{} ", f.to_canonical_u64());
+        }
+        println!("]");
+        println!("\nWITNESS:");
+
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
         // TODO mayber give a better naming?
         assert_eq!(num_fanin, 2);
@@ -614,7 +669,12 @@ impl TowerVerify {
         // out_j[rt] := (logup_p{j}[rt])
         // out_j[rt] := (logup_q{j}[rt])
         let initial_claim = izip!(prod_out_evals, alpha_pows.iter())
-            .map(|(evals, alpha)| evals.into_mle().evaluate(&initial_rt) * alpha)
+            .map(|(evals, alpha)| {
+                // println!("\n\n--\nEVALS: {:?}", evals);
+                // println!("INIT_RT: {:?}", initial_rt);
+                // println!("EVAL: {:?}", evals.clone().into_mle().evaluate(&initial_rt));
+                evals.into_mle().evaluate(&initial_rt) * alpha
+            })
             .sum::<E>()
             + izip!(logup_out_evals, alpha_pows[num_prod_spec..].chunks(2))
                 .map(|(evals, alpha)| {
@@ -659,7 +719,7 @@ impl TowerVerify {
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
-                let expected_evaluation: E = (0..num_prod_spec)
+                let mut expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(expected_rounds.iter())
                     .map(|((spec_index, alpha), max_round)| {
@@ -669,8 +729,8 @@ impl TowerVerify {
                                 E::ZERO
                             }
                     })
-                    .sum::<E>()
-                    + (0..num_logup_spec)
+                    .sum::<E>();
+                expected_evaluation += (0..num_logup_spec)
                         .zip_eq(alpha_pows[num_prod_spec..].chunks(2))
                         .zip_eq(expected_rounds[num_prod_spec..].iter())
                         .map(|((spec_index, alpha), max_round)| {
@@ -774,6 +834,12 @@ impl TowerVerify {
             },
         )?;
 
+        println!("\nOUTPUT:");
+        println!("NEXT_RT: {:?}", next_rt.point);
+        println!("PROD_SPEC_ILE: {:?}", prod_spec_input_layer_eval);
+        println!("LOGUP_SPEC_P_ILE: {:?}", logup_spec_p_input_layer_eval);
+        println!("LOGUP_SPEC_Q_ILE: {:?}", logup_spec_q_input_layer_eval);
+        println!("--\n\n");
         Ok((
             next_rt.point,
             prod_spec_input_layer_eval,

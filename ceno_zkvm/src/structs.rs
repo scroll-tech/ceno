@@ -18,7 +18,7 @@ use sumcheck::structs::IOPProverMessage;
 
 pub struct TowerProver;
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug)]
 pub struct TowerProofs<E: ExtensionField> {
     pub proofs: Vec<Vec<IOPProverMessage<E>>>,
     // specs -> layers -> evals

@@ -129,7 +129,6 @@ pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F
 /// coefficients.
 pub(crate) fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
     let start = start_timer!(|| "sum check interpolate uni poly opt");
-
     let len = p_i.len();
     let mut evals = vec![];
     let mut prod = eval_at;
@@ -164,6 +163,11 @@ pub(crate) fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
     let mut denom_down = F::ONE;
 
     for i in (0..len).rev() {
+        let inv = format!("{:?}", (denom_up * evals[i]).invert().unwrap());
+        // Since F does not implement extension field, can't print out the basefields
+        // Instead, process the string directly
+        let str_seg: Vec<&str> = inv.split(&['(', ')']).collect();
+        println!("{} {}", str_seg[2], str_seg[4]);
         res += p_i[i] * prod * denom_down * (denom_up * evals[i]).invert().unwrap();
 
         // compute denom for the next step is current_denom * (len-i)/i
