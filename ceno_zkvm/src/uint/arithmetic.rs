@@ -8,7 +8,7 @@ use crate::{
     create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::AssertLTConfig,
     instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
 };
 
@@ -139,16 +139,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .iter()
             .enumerate()
             .map(|(i, carry)| {
-                IsLtConfig::construct_circuit(
+                AssertLTConfig::construct_circuit(
                     circuit_builder,
                     || format!("carry_{i}_in_less_than"),
                     carry.expr(),
                     (Self::MAX_DEGREE_2_MUL_CARRY_VALUE as usize).into(),
-                    Some(true),
                     Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
                 )
             })
-            .collect::<Result<Vec<IsLtConfig>, ZKVMError>>()?;
+            .collect::<Result<Vec<AssertLTConfig>, ZKVMError>>()?;
 
         // creating a witness constrained as expression to reduce overall degree
         let mut swap_witin = |name: &str,
@@ -852,7 +851,7 @@ mod tests {
     mod mul_add {
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
-            gadgets::IsLtConfig,
+            gadgets::cal_lt_diff,
             scheme::mock_prover::MockProver,
             uint::UIntLimbs,
             witness::LkMultiplicity,
@@ -893,8 +892,7 @@ mod tests {
                 .flat_map(|carry| {
                     let max_carry_value = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_VALUE;
                     let max_carry_u16_limb = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_U16_LIMB;
-                    let diff =
-                        IsLtConfig::cal_diff(true, max_carry_u16_limb, carry, max_carry_value);
+                    let diff = cal_lt_diff(true, max_carry_u16_limb, carry, max_carry_value);
                     let mut diff_u16_limb = Value::new_unchecked(diff).as_u16_limbs().to_vec();
                     diff_u16_limb.resize(max_carry_u16_limb, 0);
                     diff_u16_limb.iter().map(|v| *v as u64).collect_vec()
