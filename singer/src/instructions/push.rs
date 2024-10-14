@@ -5,15 +5,15 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip, stack::StackChip,
+        ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -150,23 +150,12 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
-    use gkr::structs::LayerWitness;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
 
-    use crate::{
-        instructions::{
-            ChipChallenges, Instruction, InstructionGraph, PushInstruction, SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
-        test::test_opcode_circuit,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
-    };
+    use crate::instructions::{ChipChallenges, Instruction, PushInstruction};
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
 
     #[test]
     fn test_push1_construct_circuit() {
@@ -230,6 +219,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,

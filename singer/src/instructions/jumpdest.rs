@@ -5,15 +5,14 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -102,23 +101,12 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
 
-    use crate::{
-        instructions::{
-            ChipChallenges, Instruction, InstructionGraph, JumpdestInstruction,
-            SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
-        test::test_opcode_circuit,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
-    };
+    use crate::instructions::{ChipChallenges, Instruction, JumpdestInstruction};
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
 
     #[test]
     fn test_jumpdest_construct_circuit() {
@@ -159,6 +147,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,

@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -7,8 +7,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip, stack::StackChip,
+        ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
@@ -137,25 +137,16 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
 
 #[cfg(test)]
 mod test {
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
     use crate::{
         instructions::{ChipChallenges, Instruction, JumpInstruction},
-        test::{get_uint_params, test_opcode_circuit},
+        test::get_uint_params,
         utils::u64vec,
     };
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
-
-    use crate::{
-        instructions::{InstructionGraph, SingerCircuitBuilder},
-        scheme::GKRGraphProverState,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
-    };
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_jump_construct_circuit() {
@@ -211,6 +202,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,

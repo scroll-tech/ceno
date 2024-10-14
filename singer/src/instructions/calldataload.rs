@@ -6,15 +6,14 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, calldata::CalldataChip, global_state::GlobalStateChip,
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
-        ChipHandler,
+        range::RangeChip, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, StackUInt, TSUInt, UInt64},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -158,24 +157,16 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
 
 #[cfg(test)]
 mod test {
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
 
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
     use crate::{
-        instructions::{
-            CalldataloadInstruction, ChipChallenges, Instruction, InstructionGraph,
-            SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
-        test::{get_uint_params, test_opcode_circuit},
+        instructions::{CalldataloadInstruction, ChipChallenges, Instruction},
+        test::get_uint_params,
         utils::u64vec,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
     #[test]
@@ -258,6 +249,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,

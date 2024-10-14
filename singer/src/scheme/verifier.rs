@@ -1,8 +1,7 @@
 use ff_ext::ExtensionField;
-use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
+use gkr::structs::PointAndEval;
 use gkr_graph::structs::TargetEvaluations;
 use itertools::{chain, Itertools};
-use multilinear_extensions::mle::MultilinearExtension;
 use transcript::Transcript;
 
 use crate::{error::ZKVMError, SingerAuxInfo, SingerCircuit, SingerWiresOutValues};

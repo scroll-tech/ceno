@@ -8,6 +8,8 @@ pub mod prover;
 pub mod verifier;
 
 pub struct CommitPhaseProof<E: ExtensionField> {
+    // TODO(Matthias): Check whether we need this field.
+    #[allow(dead_code)]
     commitments: Vec<Commitment<E>>,
 }
 
@@ -16,6 +18,8 @@ pub type GKRGraphProverState<F> = gkr_graph::structs::IOPProverState<F>;
 pub type GKRGraphVerifierState<F> = gkr_graph::structs::IOPVerifierState<F>;
 
 pub struct OpenPhaseProof<E: ExtensionField> {
+    // TODO(Matthias): Check whether we need this field.
+    #[allow(dead_code)]
     pcs_proof: BatchedPCSProof<E>,
 }
 

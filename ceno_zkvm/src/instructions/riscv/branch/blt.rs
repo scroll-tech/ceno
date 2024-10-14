@@ -15,7 +15,7 @@ use crate::{
     witness::LkMultiplicity,
     Value,
 };
-use ceno_emul::InsnKind;
+use ceno_emul::{InsnKind, SWord};
 
 pub struct BltCircuit<I>(PhantomData<I>);
 
@@ -39,13 +39,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
         let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
         let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
 
-        let is_lt = SignedLtConfig::construct_circuit(
-            circuit_builder,
-            || "rs1<rs2",
-            &read_rs1,
-            &read_rs2,
-            None,
-        )?;
+        let is_lt =
+            SignedLtConfig::construct_circuit(circuit_builder, || "rs1<rs2", &read_rs1, &read_rs2)?;
 
         let branch_taken_bit = match I::INST_KIND {
             InsnKind::BLT => is_lt.expr(),
@@ -83,8 +78,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
         config.signed_lt.assign_instance::<E>(
             instance,
             lk_multiplicity,
-            step.rs1().unwrap().value,
-            step.rs2().unwrap().value,
+            step.rs1().unwrap().value as SWord,
+            step.rs2().unwrap().value as SWord,
         )?;
 
         config

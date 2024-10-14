@@ -7,8 +7,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, global_state::GlobalStateChip, memory::MemoryChip,
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
-        ChipHandler,
+        range::RangeChip, stack::StackChip, ChipHandler,
     },
     chips::SingerChipBuilder,
     constants::{OpcodeType, EVM_STACK_BYTE_WIDTH},
@@ -16,7 +15,7 @@ use singer_utils::{
     structs::{PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
 
@@ -384,28 +383,15 @@ impl MstoreAccessory {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        instructions::InstructionGraph, scheme::GKRGraphProverState, utils::u64vec, SingerParams,
-    };
-    use ark_std::test_rng;
-    use ff::Field;
-    use ff_ext::ExtensionField;
+    use crate::utils::u64vec;
     use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
-    use multilinear_extensions::mle::DenseMultilinearExtension;
     use singer_utils::structs::ChipChallenges;
-    use std::time::Instant;
-    use transcript::Transcript;
 
-    use crate::{
-        instructions::{
-            mstore::{MstoreAccessory, MstoreInstruction},
-            Instruction, SingerCircuitBuilder,
-        },
-        CircuitWiresIn, SingerGraphBuilder,
-    };
+    use crate::instructions::{mstore::MstoreInstruction, Instruction};
 
-    use crate::test::{get_uint_params, test_opcode_circuit};
+    use crate::test::get_uint_params;
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
     use goldilocks::Goldilocks;
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
     use std::collections::BTreeMap;
@@ -495,6 +481,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,
