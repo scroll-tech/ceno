@@ -266,7 +266,7 @@ mod tests {
             )
             .unwrap();
 
-        let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
+        let (raw_witin, lkm) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_r_instruction(
@@ -290,6 +290,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 }

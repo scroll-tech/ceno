@@ -230,6 +230,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            None,
         );
     }
 
@@ -281,6 +282,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            None,
             None,
         );
     }
@@ -334,6 +336,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            None,
         );
     }
 
@@ -386,6 +389,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            None,
         );
     }
 
@@ -430,6 +434,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            None,
         );
     }
 
@@ -472,6 +477,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            None,
             None,
         );
     }
@@ -523,6 +529,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            None,
             None,
         );
     }

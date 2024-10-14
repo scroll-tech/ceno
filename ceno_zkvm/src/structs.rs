@@ -13,7 +13,10 @@ use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
 };
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    mem,
+};
 use sumcheck::structs::IOPProverMessage;
 
 pub struct TowerProver;
@@ -51,6 +54,29 @@ pub enum ROMType {
     Ltu,         // a <(usign) b where a, b are bytes and the result is 0/1.
     Pow,         // a ** b where a is 2 and b is 5-bit value
     Instruction, // Decoded instruction from the fixed program.
+}
+
+impl ROMType {
+    pub fn array() -> [ROMType; mem::variant_count::<ROMType>()] {
+        [
+            ROMType::U5,
+            ROMType::U8,
+            ROMType::U16,
+            ROMType::And,
+            ROMType::Or,
+            ROMType::Xor,
+            ROMType::Ltu,
+            ROMType::Pow,
+            ROMType::Instruction,
+        ]
+    }
+}
+
+impl From<u64> for ROMType {
+    fn from(value: u64) -> Self {
+        let romtype = ROMType::array();
+        *romtype.get(value as usize).unwrap()
+    }
 }
 
 #[derive(Clone, Debug, Copy)]

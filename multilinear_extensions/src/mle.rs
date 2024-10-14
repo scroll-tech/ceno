@@ -5,6 +5,7 @@ use ark_std::{end_timer, rand::RngCore, start_timer};
 use core::hash::Hash;
 use ff::Field;
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
@@ -70,6 +71,20 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
                 Some(&evaluations[start..][..offset])
             }
             _ => None,
+        }
+    }
+
+    fn to_canonical_u64(&self, inst_id: usize) -> u64 {
+        let b = self.get_base_field_vec_optn();
+        let e = self.get_ext_field_vec_optn();
+
+        if let Some(b) = b {
+            b[inst_id].to_canonical_u64()
+        } else if let Some(e) = e {
+            let arr = e[inst_id].to_canonical_u64_vec();
+            arr[0] + E::BaseField::MODULUS_U64 * arr[1]
+        } else {
+            unreachable!()
         }
     }
 }

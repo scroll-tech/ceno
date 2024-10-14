@@ -50,6 +50,7 @@ fn test_opcode_jal() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        None,
     );
 }
 
@@ -92,6 +93,7 @@ fn test_opcode_lui() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        None,
     );
 }
 
@@ -133,6 +135,7 @@ fn test_opcode_auipc() {
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        None,
         None,
     );
 }

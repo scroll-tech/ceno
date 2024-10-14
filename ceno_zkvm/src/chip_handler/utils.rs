@@ -5,7 +5,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 
 pub fn rlc_chip_record<E: ExtensionField>(
-    records: Vec<Expression<E>>,
+    records: &[Expression<E>],
     chip_record_alpha: Expression<E>,
     chip_record_beta: Expression<E>,
 ) -> Expression<E> {

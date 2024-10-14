@@ -66,6 +66,7 @@ fn test_opcode_and() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        None,
     );
 }
 
@@ -117,6 +118,7 @@ fn test_opcode_or() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        None,
     );
 }
 
@@ -167,6 +169,7 @@ fn test_opcode_xor() {
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        None,
         None,
     );
 }

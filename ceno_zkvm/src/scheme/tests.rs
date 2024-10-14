@@ -51,10 +51,8 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         let reg_id = cb.create_witin(|| "reg_id")?;
         (0..RW).try_for_each(|_| {
-            let record = cb.rlc_chip_record(vec![
-                Expression::<E>::Constant(E::BaseField::ONE),
-                reg_id.expr(),
-            ]);
+            let record =
+                cb.rlc_chip_record(&[Expression::<E>::Constant(E::BaseField::ONE), reg_id.expr()]);
             cb.read_record(|| "read", record.clone())?;
             cb.write_record(|| "write", record)?;
             Result::<(), ZKVMError>::Ok(())

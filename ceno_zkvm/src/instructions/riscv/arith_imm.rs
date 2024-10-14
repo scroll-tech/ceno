@@ -131,6 +131,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            None,
         );
     }
 
@@ -172,6 +173,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 10000.into()]),
+            None,
         );
     }
 }

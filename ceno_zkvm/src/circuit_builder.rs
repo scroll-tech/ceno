@@ -5,6 +5,7 @@ use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
+    chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
     structs::{ProvingKey, VerifyingKey, WitnessId},
@@ -90,6 +91,8 @@ pub struct ConstraintSystem<E: ExtensionField> {
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
     pub lk_expressions_namespace_map: Vec<String>,
+    pub lk_expressions_items_map: Vec<Vec<Expression<E>>>,
+
     pub lk_table_expressions: Vec<LogupTableExpression<E>>,
     pub lk_table_expressions_namespace_map: Vec<String>,
 
@@ -129,6 +132,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             w_expressions_namespace_map: vec![],
             lk_expressions: vec![],
             lk_expressions_namespace_map: vec![],
+            lk_expressions_items_map: vec![],
             lk_table_expressions: vec![],
             lk_table_expressions_namespace_map: vec![],
             assert_zero_expressions: vec![],
@@ -215,11 +219,20 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(i)
     }
 
+    pub fn rlc_chip_record(&self, items: &[Expression<E>]) -> Expression<E> {
+        rlc_chip_record(
+            items,
+            self.chip_record_alpha.clone(),
+            self.chip_record_beta.clone(),
+        )
+    }
+
     pub fn lk_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        items: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let rlc_record = self.rlc_chip_record(&items);
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -229,6 +242,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
+        self.lk_expressions_items_map.push(items);
         Ok(())
     }
 

@@ -60,6 +60,7 @@ fn impl_opcode_beq(equal: bool) {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        None,
     );
 }
 
@@ -105,6 +106,7 @@ fn impl_opcode_bne(equal: bool) {
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        None,
         None,
     );
 }
@@ -154,6 +156,7 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        None,
     );
     Ok(())
 }
@@ -202,6 +205,7 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        None,
         None,
     );
     Ok(())
@@ -253,6 +257,7 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        None,
     );
     Ok(())
 }
@@ -302,6 +307,7 @@ fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        None,
         None,
     );
     Ok(())
