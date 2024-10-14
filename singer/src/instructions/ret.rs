@@ -7,7 +7,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        range::RangeChip, stack::StackChip, ChipHandler,
     },
     chips::SingerChipBuilder,
     constants::OpcodeType,
@@ -441,6 +441,8 @@ impl ReturnPublicOutLoad {
         })
     }
 
+    // TODO(Matthias): Check whether we need this function.
+    #[allow(dead_code)]
     fn name() -> &'static str {
         "ReturnPublicOutLoad"
     }
@@ -462,7 +464,7 @@ impl ReturnRestMemLoad {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
+        let ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges)));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
@@ -470,7 +472,7 @@ impl ReturnRestMemLoad {
         let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()])?;
         ram_handler.borrow_mut().read_oam(
             &mut circuit_builder,
-            &offset,
+            offset,
             old_memory_ts.values(),
             &[mem_byte],
         );
@@ -490,6 +492,8 @@ impl ReturnRestMemLoad {
         })
     }
 
+    // TODO(Matthias): Check whether we need this function.
+    #[allow(dead_code)]
     fn name() -> &'static str {
         "ReturnRestMemLoad"
     }
@@ -510,7 +514,7 @@ impl ReturnRestMemStore {
         let mut circuit_builder = CircuitBuilder::new();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
+        let ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges)));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
@@ -539,6 +543,8 @@ impl ReturnRestMemStore {
         })
     }
 
+    // TODO(Matthias): Check whether we need this function.
+    #[allow(dead_code)]
     fn name() -> &'static str {
         "ReturnRestMemStore"
     }
@@ -591,6 +597,8 @@ impl ReturnRestStackPop {
         })
     }
 
+    // TODO(Matthias): Check whether we need this function.
+    #[allow(dead_code)]
     fn name() -> &'static str {
         "ReturnRestStackPop"
     }

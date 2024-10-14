@@ -4,7 +4,6 @@ use crate::{
     structs::ROMType,
 };
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
 pub struct BytecodeChip {}

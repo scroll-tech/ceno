@@ -41,9 +41,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
           components: rustfmt, clippy
+          targets: riscv32im-unknown-none-elf
+          # TODO(Matthias): see whether we can keep this in sync with rust-toolchain.toml automatically?
+          toolchain: nightly-2024-05-02
       - name: Cargo cache
         uses: actions/cache@v3
         with:
@@ -53,6 +56,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
+            examples/target/
           key: lint-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install cargo make
@@ -64,4 +68,7 @@ jobs:
       - name: Run clippy
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo make clippy
+          RUSTFLAGS: "-Dwarnings"
+        run: |
+          cargo check --workspace --exclude ceno_rt --exclude singer-pro
+          cargo make clippy

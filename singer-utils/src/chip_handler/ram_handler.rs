@@ -1,7 +1,7 @@
 use crate::structs::ChipChallenges;
 use ff::Field;
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{Cell, CellId, CircuitBuilder, ExtCellId, MixedCell, WitnessId};
+use simple_frontend::structs::{CellId, CircuitBuilder, ExtCellId, MixedCell, WitnessId};
 
 pub struct RAMHandler<Ext: ExtensionField> {
     read_records: Vec<ExtCellId<Ext>>,

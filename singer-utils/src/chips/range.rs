@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
@@ -6,7 +6,7 @@ use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use simple_frontend::structs::CircuitBuilder;
 
 use crate::{
-    chip_handler::{range::RangeChip, rom_handler::ROMHandler, ChipHandler},
+    chip_handler::{range::RangeChip, ChipHandler},
     constants::RANGE_CHIP_BIT_WIDTH,
     error::UtilError,
     structs::ChipChallenges,
