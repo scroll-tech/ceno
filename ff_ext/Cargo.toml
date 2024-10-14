@@ -10,4 +10,3 @@ license.workspace = true
 serde.workspace = true
 goldilocks.workspace = true
 ff.workspace = true
-poseidon.workspace = true

@@ -738,7 +738,6 @@ version = "0.1.0"
 dependencies = [
  "ff",
  "goldilocks",
- "poseidon",
  "serde",
 ]
 
@@ -1196,7 +1195,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "plonky2",
- "poseidon",
+ "poseidon 0.2.0",
  "rand",
  "rand_chacha",
  "rayon",
@@ -1504,6 +1503,15 @@ dependencies = [
  "rand",
  "serde",
  "unroll",
+]
+
+[[package]]
+name = "poseidon"
+version = "0.2.0"
+source = "git+https://github.com/zhenfeizhang/poseidon#e32c0c18a70a4e00644e81e86b5729fe176831c8"
+dependencies = [
+ "halo2curves 0.1.0",
+ "subtle",
 ]
 
 [[package]]
@@ -2236,7 +2244,7 @@ dependencies = [
  "ff_ext",
  "goldilocks",
  "halo2curves 0.1.0",
- "poseidon",
+ "poseidon 0.2.0",
  "rayon",
  "serde",
 ]

@@ -4,7 +4,7 @@ use crate::util::{
         interpolate_over_boolean_hypercube,
     },
     ext_to_usize, field_type_index_base, field_type_index_ext,
-    hash::Digest,
+    hash::{Digest, Hasher},
     log2_strict,
     merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree},
 };
@@ -151,6 +151,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
     eval: &E,
+    hasher: &Hasher<E::BaseField>,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -181,6 +182,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         &final_codeword,
         roots,
         comm,
+        hasher,
     );
     end_timer!(queries_timer);
 
@@ -224,6 +226,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     coeffs: &[E],
     partial_eq: &[E],
     eval: &E,
+    hasher: &Hasher<E::BaseField>,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -257,6 +260,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         roots,
         comms,
         coeffs,
+        hasher,
     );
     end_timer!(queries_timer);
 
@@ -300,6 +304,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
     evals: &[E],
+    hasher: &Hasher<E::BaseField>,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -333,6 +338,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
         &final_codeword,
         roots,
         comm,
+        hasher,
     );
     end_timer!(queries_timer);
 
@@ -642,16 +648,26 @@ impl<E: ExtensionField> CodewordSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
+    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>, hasher: &Hasher<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
         match self.query.codepoints {
             CodewordPointPair::Ext(left, right) => {
-                self.merkle_path
-                    .authenticate_leaves_root_ext(left, right, self.query.index, root);
+                self.merkle_path.authenticate_leaves_root_ext(
+                    left,
+                    right,
+                    self.query.index,
+                    root,
+                    hasher,
+                );
             }
             CodewordPointPair::Base(left, right) => {
-                self.merkle_path
-                    .authenticate_leaves_root_base(left, right, self.query.index, root);
+                self.merkle_path.authenticate_leaves_root_base(
+                    left,
+                    right,
+                    self.query.index,
+                    root,
+                    hasher,
+                );
             }
         }
         // end_timer!(timer);
@@ -791,13 +807,13 @@ where
         )
     }
 
-    fn check_merkle_paths(&self, roots: &[Digest<E::BaseField>]) {
+    fn check_merkle_paths(&self, roots: &[Digest<E::BaseField>], hasher: &Hasher<E::BaseField>) {
         // let timer = start_timer!(|| "ListQuery::Check Merkle Path");
         self.get_inner()
             .iter()
             .zip(roots.iter())
             .for_each(|(q, root)| {
-                q.check_merkle_path(root);
+                q.check_merkle_path(root, hasher);
             });
         // end_timer!(timer);
     }
@@ -858,11 +874,12 @@ where
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
         index: usize,
+        hasher: &Hasher<E::BaseField>,
     ) {
         // let timer = start_timer!(|| "Checking codeword single query");
-        self.oracle_query.check_merkle_paths(roots);
+        self.oracle_query.check_merkle_paths(roots, hasher);
         self.commitment_query
-            .check_merkle_path(&Digest(comm.root().0));
+            .check_merkle_path(&Digest(comm.root().0), hasher);
 
         let (mut curr_left, mut curr_right) = self.commitment_query.query.codepoints.as_ext();
 
@@ -958,6 +975,7 @@ where
         final_codeword: &[E],
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
+        hasher: &Hasher<E::BaseField>,
     ) {
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
@@ -971,6 +989,7 @@ where
                     roots,
                     comm,
                     *index,
+                    hasher,
                 );
             },
         );
@@ -1032,14 +1051,16 @@ where
         comms: &[&BasefoldCommitment<E>],
         coeffs: &[E],
         index: usize,
+        hasher: &Hasher<E::BaseField>,
     ) {
-        self.oracle_query.check_merkle_paths(roots);
+        self.oracle_query.check_merkle_paths(roots, hasher);
         self.commitments_query.check_merkle_paths(
             comms
                 .iter()
                 .map(|comm| comm.root())
                 .collect_vec()
                 .as_slice(),
+            hasher,
         );
         // end_timer!(commit_timer);
 
@@ -1179,6 +1200,7 @@ where
         roots: &[Digest<E::BaseField>],
         comms: &[&BasefoldCommitment<E>],
         coeffs: &[E],
+        hasher: &Hasher<E::BaseField>,
     ) {
         let timer = start_timer!(|| "BatchedQueriesResult::check");
         self.inner.par_iter().zip(indices.par_iter()).for_each(
@@ -1194,6 +1216,7 @@ where
                     comms,
                     coeffs,
                     *index,
+                    hasher,
                 );
             },
         );
@@ -1258,7 +1281,7 @@ impl<E: ExtensionField> SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
+    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>, hasher: &Hasher<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
         match &self.query.leaves {
             SimpleBatchLeavesPair::Ext(inner) => {
@@ -1267,6 +1290,7 @@ where
                     inner.iter().map(|(_, x)| *x).collect(),
                     self.query.index,
                     root,
+                    hasher,
                 );
             }
             SimpleBatchLeavesPair::Base(inner) => {
@@ -1275,6 +1299,7 @@ where
                     inner.iter().map(|(_, x)| *x).collect(),
                     self.query.index,
                     root,
+                    hasher,
                 );
             }
         }
@@ -1337,10 +1362,11 @@ where
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
         index: usize,
+        hasher: &Hasher<E::BaseField>,
     ) {
-        self.oracle_query.check_merkle_paths(roots);
+        self.oracle_query.check_merkle_paths(roots, hasher);
         self.commitment_query
-            .check_merkle_path(&Digest(comm.root().0));
+            .check_merkle_path(&Digest(comm.root().0), hasher);
 
         let (mut curr_left, mut curr_right) =
             self.commitment_query.query.leaves.batch(batch_coeffs);
@@ -1435,6 +1461,7 @@ where
         final_codeword: &[E],
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
+        hasher: &Hasher<E::BaseField>,
     ) {
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
@@ -1449,6 +1476,7 @@ where
                     roots,
                     comm,
                     *index,
+                    hasher,
                 );
             },
         );
