@@ -8,12 +8,12 @@ use crate::structs::{
 
 impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     pub fn create_cell(&mut self) -> CellId {
-        self.cells.push(Cell::new());
+        self.cells.push(Cell::default());
         self.cells.len() - 1
     }
 
     pub fn create_cells(&mut self, num: usize) -> Vec<CellId> {
-        self.cells.extend((0..num).map(|_| Cell::new()));
+        self.cells.extend((0..num).map(|_| Cell::default()));
         (self.cells.len() - num..self.cells.len()).collect()
     }
 
