@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -7,8 +7,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip, stack::StackChip,
+        ChipHandler,
     },
     constants::OpcodeType,
     register_witness,

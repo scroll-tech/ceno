@@ -1,5 +1,4 @@
-use ff_ext::ExtensionField;
-use simple_frontend::structs::{ChallengeId, ExtCellId};
+use simple_frontend::structs::ChallengeId;
 use strum_macros::EnumIter;
 use uint::UInt;
 

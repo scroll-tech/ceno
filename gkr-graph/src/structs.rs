@@ -45,6 +45,8 @@ pub enum PredType {
 #[derive(Clone, Debug)]
 pub struct CircuitNode<E: ExtensionField> {
     pub(crate) id: usize,
+    // TODO(Matthias): See whether we can remove this field.
+    #[allow(dead_code)]
     pub(crate) label: &'static str,
     pub(crate) circuit: Arc<Circuit<E>>,
     // Where does each wire in come from.

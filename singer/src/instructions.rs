@@ -185,7 +185,9 @@ pub struct InstCircuitLayout {
     pub(crate) succ_dup_wires_id: Vec<WitnessId>,
     pub(crate) succ_ooo_wires_id: Vec<WitnessId>,
 
-    // Wires in index
+    /// Wires in index
+    // TODO(Matthias): check whether we need this field.
+    #[allow(dead_code)]
     pub(crate) phases_wire_id: Vec<WitnessId>,
     // wire id fetched from pred circuit.
     pub(crate) pred_dup_wire_id: Option<WitnessId>,
