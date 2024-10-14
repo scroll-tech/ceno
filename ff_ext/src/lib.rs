@@ -1,9 +1,9 @@
 pub use ff;
 use ff::FromUniformBytes;
 use goldilocks::SmallField;
+use poseidon::poseidon::Poseidon;
 use serde::Serialize;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
-use poseidon::poseidon::Poseidon;
 
 pub trait ExtensionField:
     Serialize

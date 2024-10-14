@@ -1,6 +1,7 @@
 edition = "2024"
 version = "Two"
-style_edition = "2024"
+# TODO(Matthias): enable this once the rustfmt version is updated.
+# style_edition = "2024"
 wrap_comments = false
 comment_width = 300
 imports_granularity = "Crate"
