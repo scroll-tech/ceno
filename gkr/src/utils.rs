@@ -88,8 +88,8 @@ pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[
         }
         ans += running_product[i] * running_product2[i + 1] * a[i] * b[i];
     }
-    for i in b.len()..a.len() {
-        ans *= F::ONE - a[i];
+    for &ai in &a[b.len()..] {
+        ans *= F::ONE - ai;
     }
     ans
 }
@@ -137,8 +137,8 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
         }
         ans -= running_product[i] * running_product2[i + 1] * a[i] * b[i];
     }
-    for i in b.len()..a.len() {
-        ans *= E::ONE - a[i];
+    for &ai in &a[b.len()..] {
+        ans *= E::ONE - ai;
     }
     ans
 }

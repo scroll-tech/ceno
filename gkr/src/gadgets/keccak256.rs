@@ -144,7 +144,7 @@ fn not_lhs_and_rhs<E: ExtensionField>(cb: &mut CircuitBuilder<E>, lhs: &Word, rh
 }
 
 // (x0 + x1 + x2) - 2x0x2 - 2x1x2 - 2x0x1 + 4x0x1x2
-fn xor3<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> Word {
+fn xor3<E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> Word {
     let out = Word::new(cb);
     izip!(&out.0, &words[0].0, &words[1].0, &words[2].0).for_each(
         |(out, wire_0, wire_1, wire_2)| {
@@ -183,7 +183,7 @@ fn xor3<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) ->
 // (1-x0)*(1-x1)*(x2) + x0(1-x1)(1-x2) + x0x1(1-x2) + x0x1x2
 // = x2 - x0x2 - x1x2 + x0x1x2 + x0 - x0x1 - x0x2 + x0x1x2 + x0x1 - x0x1x2 + x0x1x2
 // = (x0 + x2) - 2x0x2 - x1x2 + 2x0x1x2
-fn chi<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> Word {
+fn chi<E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> Word {
     let out = Word::new(cb);
     izip!(&out.0, &words[0].0, &words[1].0, &words[2].0).for_each(
         |(out, wire_0, wire_1, wire_2)| {
@@ -205,7 +205,7 @@ fn chi<'a, E: ExtensionField>(cb: &mut CircuitBuilder<E>, words: &[Word; 3]) -> 
 // = c + (x0 + x2) - 2x0x2 - x1x2 + 2x0x1x2 - 2(c*x0 + c*x2 - 2c*x0*x2 - c*x1*x2 + 2*c*x0*x1*x2)
 // = x0 + x2 + c - 2*x0*x2 - x1*x2 + 2*x0*x1*x2 - 2*c*x0 - 2*c*x2 + 4*c*x0*x2 + 2*c*x1*x2 -
 // 4*c*x0*x1*x2 = x0*(1-2c) + x2*(1-2c) + c + x0*x2*(-2 + 4c) + x1*x2(-1 + 2c) + x0*x1*x2(2 - 4c)
-fn chi_and_xor_constant<'a, E: ExtensionField>(
+fn chi_and_xor_constant<E: ExtensionField>(
     cb: &mut CircuitBuilder<E>,
     words: &[Word; 3],
     constant: u64,
@@ -445,7 +445,7 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
     Circuit::new(cb)
 }
 
-pub fn prove_keccak256<'a, E: ExtensionField>(
+pub fn prove_keccak256<E: ExtensionField>(
     instance_num_vars: usize,
     circuit: &Circuit<E>,
     max_thread_id: usize,

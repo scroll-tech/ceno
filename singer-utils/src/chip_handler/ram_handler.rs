@@ -133,6 +133,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         self.write_records.push(out);
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn finalize(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

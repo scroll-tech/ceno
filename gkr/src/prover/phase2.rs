@@ -138,18 +138,18 @@ impl<E: ExtensionField> IOPProverState<E> {
             mul3s_fanin_mapping,
             |s_in, s_out, gate| {
                 eq[s_out ^ gate.idx_out]
-                    * (&next_layer_vec[s_in + gate.idx_in[1]])
-                    * (&next_layer_vec[s_in + gate.idx_in[2]])
-                    * (&gate.scalar.eval(challenges))
+                    * next_layer_vec[s_in + gate.idx_in[1]]
+                    * next_layer_vec[s_in + gate.idx_in[2]]
+                    * gate.scalar.eval(challenges)
             },
             mul2s_fanin_mapping,
             |s_in, s_out, gate| {
                 eq[s_out ^ gate.idx_out]
-                    * (&next_layer_vec[s_in + gate.idx_in[1]])
-                    * (&gate.scalar.eval(challenges))
+                    * next_layer_vec[s_in + gate.idx_in[1]]
+                    * gate.scalar.eval(challenges)
             },
             adds_fanin_mapping,
-            |_s_in, s_out, gate| eq[s_out ^ gate.idx_out] * (&gate.scalar.eval(challenges))
+            |_s_in, s_out, gate| eq[s_out ^ gate.idx_out] * gate.scalar.eval(challenges)
         );
         let g1 = DenseMultilinearExtension::from_evaluations_ext_vec(f1.num_vars(), g1).into();
         exit_span!(span);
@@ -312,14 +312,14 @@ impl<E: ExtensionField> IOPProverState<E> {
                 |s_in, s_out, gate| {
                     eq0[s_out ^ gate.idx_out]
                         * eq1[s_in ^ gate.idx_in[0]]
-                        * (&next_layer_vec[s_in + gate.idx_in[2]])
-                        * (&gate.scalar.eval(challenges))
+                        * next_layer_vec[s_in + gate.idx_in[2]]
+                        * gate.scalar.eval(challenges)
                 },
                 mul2s_fanin_mapping,
                 |s_in, s_out, gate| {
                     eq0[s_out ^ gate.idx_out]
                         * eq1[s_in ^ gate.idx_in[0]]
-                        * (&gate.scalar.eval(challenges))
+                        * gate.scalar.eval(challenges)
                 },
             );
             DenseMultilinearExtension::from_evaluations_ext_vec(f2.num_vars(), g2).into()
@@ -412,7 +412,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     eq0[s_out ^ gate.idx_out]
                         * eq1[s_in ^ gate.idx_in[0]]
                         * eq2[s_in ^ gate.idx_in[1]]
-                        * (&gate.scalar.eval(challenges))
+                        * gate.scalar.eval(challenges)
                 }
             );
             DenseMultilinearExtension::from_evaluations_ext_vec(f3.num_vars(), g3).into()

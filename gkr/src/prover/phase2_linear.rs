@@ -68,7 +68,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             let g1 = {
                 let mut g1 = vec![E::ZERO; 1 << lo_in_num_vars];
                 layer.adds.iter().for_each(|gate| {
-                    g1[gate.idx_in[0]] += eq_y_ry[gate.idx_out] * &gate.scalar.eval(challenges);
+                    g1[gate.idx_in[0]] += eq_y_ry[gate.idx_out] * gate.scalar.eval(challenges);
                 });
 
                 DenseMultilinearExtension::from_evaluations_ext_vec(lo_in_num_vars, g1)

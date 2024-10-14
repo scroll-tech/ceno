@@ -372,17 +372,17 @@ where
     ];
     let witness_in = vec![leaves.clone().into()];
 
-    let inner00: Ext = challenge_pows[0][0].1 * (&leaves[0][0])
-        + challenge_pows[0][1].1 * (&leaves[0][1])
+    let inner00: Ext = challenge_pows[0][0].1 * leaves[0][0]
+        + challenge_pows[0][1].1 * leaves[0][1]
         + challenge_pows[0][2].1;
-    let inner01: Ext = challenge_pows[1][0].1 * (&leaves[0][2])
-        + challenge_pows[1][1].1 * (&leaves[0][3])
+    let inner01: Ext = challenge_pows[1][0].1 * leaves[0][2]
+        + challenge_pows[1][1].1 * leaves[0][3]
         + challenge_pows[1][2].1;
-    let inner10: Ext = challenge_pows[0][0].1 * (&leaves[1][0])
-        + challenge_pows[0][1].1 * (&leaves[1][1])
+    let inner10: Ext = challenge_pows[0][0].1 * leaves[1][0]
+        + challenge_pows[0][1].1 * leaves[1][1]
         + challenge_pows[0][2].1;
-    let inner11: Ext = challenge_pows[1][0].1 * (&leaves[1][2])
-        + challenge_pows[1][1].1 * (&leaves[1][3])
+    let inner11: Ext = challenge_pows[1][0].1 * leaves[1][2]
+        + challenge_pows[1][1].1 * leaves[1][3]
         + challenge_pows[1][2].1;
 
     let inners = vec![

@@ -88,6 +88,7 @@ pub(crate) fn construct_instruction_circuits<E: ExtensionField>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn construct_inst_graph_and_witness<E: ExtensionField>(
     opcode: u8,
     graph_builder: &mut CircuitGraphBuilder<E>,
@@ -162,6 +163,7 @@ pub(crate) fn construct_inst_graph<E: ExtensionField>(
     )
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, EnumIter)]
 pub(crate) enum InstOutputType {
     RAMLoad,

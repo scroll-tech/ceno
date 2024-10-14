@@ -34,7 +34,7 @@ pub fn convert_decomp<E: ExtensionField>(
 
     // ensure the small cell values are in little endian form
     let small_cells = if !is_little_endian {
-        small_cells.to_vec().into_iter().rev().collect()
+        small_cells.iter().copied().rev().collect()
     } else {
         small_cells.to_vec()
     };

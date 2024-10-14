@@ -375,26 +375,23 @@ fn build_tree_graph_and_witness<E: ExtensionField>(
     instance_num_vars: usize,
 ) -> Result<NodeOutputType, UtilError> {
     let (last_pred, _) =
-        (0..=instance_num_vars).fold(Ok((first_pred, first_source)), |prev, i| {
+        (0..=instance_num_vars).try_fold((first_pred, first_source), |(pred, source), i| {
             let circuit = if i == 0 { leaf } else { inner };
-            match prev {
-                Ok((pred, source)) => graph_builder
-                    .add_node_with_witness(
-                        "tree inner node",
-                        circuit,
-                        pred,
-                        real_challenges.to_vec(),
-                        source,
-                        1 << (instance_num_vars - i),
+            graph_builder
+                .add_node_with_witness(
+                    "tree inner node",
+                    circuit,
+                    pred,
+                    real_challenges.to_vec(),
+                    source,
+                    1 << (instance_num_vars - i),
+                )
+                .map(|id| {
+                    (
+                        vec![PredType::PredWire(NodeOutputType::OutputLayer(id))],
+                        vec![DenseMultilinearExtension::default()],
                     )
-                    .map(|id| {
-                        (
-                            vec![PredType::PredWire(NodeOutputType::OutputLayer(id))],
-                            vec![DenseMultilinearExtension::default()],
-                        )
-                    }),
-                Err(err) => Err(err),
-            }
+                })
         })?;
     match last_pred[0] {
         PredType::PredWire(out) => Ok(out),
@@ -411,14 +408,11 @@ fn build_tree_graph<E: ExtensionField>(
     inner: &Arc<Circuit<E>>,
     instance_num_vars: usize,
 ) -> Result<NodeOutputType, UtilError> {
-    let last_pred = (0..=instance_num_vars).fold(Ok(first_pred), |prev, i| {
+    let last_pred = (0..=instance_num_vars).try_fold(first_pred, |pred, i| {
         let circuit = if i == 0 { leaf } else { inner };
-        match prev {
-            Ok(pred) => graph_builder
-                .add_node("tree inner node", circuit, pred)
-                .map(|id| vec![PredType::PredWire(NodeOutputType::OutputLayer(id))]),
-            Err(err) => Err(err),
-        }
+        graph_builder
+            .add_node("tree inner node", circuit, pred)
+            .map(|id| vec![PredType::PredWire(NodeOutputType::OutputLayer(id))])
     })?;
     match last_pred[0] {
         PredType::PredWire(out) => Ok(out),

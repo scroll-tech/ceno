@@ -52,6 +52,7 @@ impl<Ext: ExtensionField> ChipHandler<Ext> {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn finalize(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

@@ -134,7 +134,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
 mod tests {
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
+    use itertools::{enumerate, Itertools};
 
     use crate::structs::CircuitBuilder;
 
@@ -157,8 +157,8 @@ mod tests {
 
         assert_eq!(circuit_builder.cells.len(), 8);
         let layers = [1, 1, 1, 1, 1, 1, 0, 0];
-        for cell_id in 0..8 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        for (cell_id, layer) in enumerate(layers).take(8) {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layer));
         }
     }
 
@@ -184,8 +184,8 @@ mod tests {
 
         assert_eq!(circuit_builder.cells.len(), 8);
         let layers = [1, 1, 1, 1, 1, 1, 0, 0];
-        for cell_id in 0..8 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        for (cell_id, &layer) in layers.iter().enumerate().take(8) {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layer));
         }
     }
 
@@ -204,10 +204,10 @@ mod tests {
 
         assert_eq!(circuit_builder.cells.len(), 6);
         let layers = [1, 1, 1, 1, 0, 0];
-        for cell_id in 0..6 {
+        for (cell_id, &layer) in layers.iter().enumerate().take(6) {
             assert_eq!(
                 circuit_builder.cells[cell_id].layer,
-                Some(layers[cell_id]),
+                Some(layer),
                 "cell_id: {}",
                 cell_id
             );
@@ -230,8 +230,8 @@ mod tests {
 
         assert_eq!(circuit_builder.cells.len(), 7);
         let layers = [2, 2, 2, 2, 1, 1, 0];
-        for cell_id in 0..7 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        for (cell_id, &layer) in layers.iter().enumerate().take(7) {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layer));
         }
     }
 
@@ -256,8 +256,8 @@ mod tests {
 
         assert_eq!(circuit_builder.cells.len(), 16);
         let layers = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0];
-        for cell_id in 0..=0 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        for (cell_id, &layer) in layers.iter().enumerate() {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layer));
         }
     }
 }

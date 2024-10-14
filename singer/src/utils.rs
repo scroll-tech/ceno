@@ -30,8 +30,8 @@ pub fn u64vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
     assert!(C <= 64);
     let mut x = x;
     let mut ret = [0; W];
-    for i in 0..ret.len() {
-        ret[i] = x & ((1 << C) - 1);
+    for item in &mut ret {
+        *item = x & ((1 << C) - 1);
         x >>= C;
     }
     ret

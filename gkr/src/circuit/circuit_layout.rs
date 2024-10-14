@@ -45,7 +45,7 @@ impl LayerSubsets {
 
     /// Compute `paste_from` matrix and `max_previous_num_vars` for
     /// `self.layer_id`, as well as `copy_to` for old layers.
-    fn update_layer_info<Ext: ExtensionField>(&self, layers: &mut Vec<Layer<Ext>>) {
+    fn update_layer_info<Ext: ExtensionField>(&self, layers: &mut [Layer<Ext>]) {
         let mut paste_from = BTreeMap::new();
         for ((old_layer_id, old_wire_id), new_wire_id) in self.subsets.iter() {
             paste_from
@@ -88,9 +88,9 @@ impl<E: ExtensionField> Circuit<E> {
         let (layers_of_cell_id, wire_ids_in_layer) = {
             let mut layers_of_cell_id = vec![vec![]; n_layers as usize];
             let mut wire_ids_in_layer = vec![0; circuit_builder.cells.len()];
-            for i in 0..circuit_builder.cells.len() {
+            for (i, cell) in circuit_builder.cells.iter().enumerate() {
                 // If layer isn't assigned, then the cell is not in the circuit.
-                if let Some(layer) = circuit_builder.cells[i].layer {
+                if let Some(layer) = cell.layer {
                     wire_ids_in_layer[i] = layers_of_cell_id[layer as usize].len();
                     layers_of_cell_id[layer as usize].push(i);
                 }
@@ -607,10 +607,8 @@ mod tests {
         let mut expected_paste_from_wits_in = vec![(0, 0); 2];
         expected_paste_from_wits_in[leaf_id as usize] = (0usize, 6usize);
         expected_paste_from_wits_in[dummy_id as usize] = (6, 9);
-        let mut expected_paste_from_counter_in = vec![];
-        expected_paste_from_counter_in.push((1, (9, 11)));
-        let mut expected_paste_from_consts_in = vec![];
-        expected_paste_from_consts_in.push((1, (11, 13)));
+        let expected_paste_from_counter_in = vec![(1, (9, 11))];
+        let expected_paste_from_consts_in = vec![(1, (11, 13))];
         assert_eq!(circuit.paste_from_wits_in, expected_paste_from_wits_in);
         assert_eq!(
             circuit.paste_from_counter_in,
@@ -652,12 +650,11 @@ mod tests {
         assert_eq!(circuit.layers[0].paste_from, expected_paste_from_0);
 
         let expected_copy_to_wits_out = vec![vec![1, 2]];
-        let mut expected_assert_const = vec![];
-        expected_assert_const.push(GateCIn {
+        let expected_assert_const = vec![GateCIn {
             idx_in: [],
             idx_out: 0,
             scalar: ConstantType::Field(Goldilocks::ONE),
-        });
+        }];
 
         assert_eq!(circuit.copy_to_wits_out, expected_copy_to_wits_out);
         assert_eq!(circuit.assert_consts, expected_assert_const);

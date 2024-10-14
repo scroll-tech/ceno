@@ -120,11 +120,11 @@ impl RangeChip {
             for range_cells in range_values.chunks(n_range_cells_per_cell) {
                 // the range cells are big endian relative to the uint cell they represent
                 // hence the first n - 1 range cells should take full width
-                for i in 0..(n_range_cells_per_cell - 1) {
+                for range_cell in &range_cells[..(n_range_cells_per_cell - 1)] {
                     Self::small_range_check(
                         chip_handler,
                         circuit_builder,
-                        range_cells[i].into(),
+                        (*range_cell).into(),
                         RANGE_CHIP_BIT_WIDTH,
                     )?;
                 }

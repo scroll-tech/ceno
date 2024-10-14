@@ -66,8 +66,10 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                 let wit_in_iter: InstanceIntoIterator<E::BaseField> =
                     wit_in.into_instance_iter(n_instances);
                 for (layer_wit, wit_in) in layer_wit_iter.zip_eq(wit_in_iter) {
-                    for i in *l..*r {
-                        layer_wit[i] = wit_in[i - *l];
+                    for (layer_wit_elem, wit_in_elem) in
+                        layer_wit[*l..*r].iter_mut().zip(&wit_in[..*r - *l])
+                    {
+                        *layer_wit_elem = *wit_in_elem;
                     }
                 }
             }
@@ -75,8 +77,8 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                 let layer_wit_iter: InstanceIntoIteratorMut<E::BaseField> =
                     layer_wit.into_instance_iter_mut(n_instances);
                 for layer_wit in layer_wit_iter {
-                    for i in *l..*r {
-                        layer_wit[i] = i64_to_field(*constant);
+                    for layer_wit_elem in &mut layer_wit[*l..*r] {
+                        *layer_wit_elem = i64_to_field(*constant);
                     }
                 }
             }
@@ -84,9 +86,8 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                 let layer_wit_iter: InstanceIntoIteratorMut<E::BaseField> =
                     layer_wit.into_instance_iter_mut(n_instances);
                 for (instance_id, layer_wit) in layer_wit_iter.enumerate() {
-                    for i in *l..*r {
-                        layer_wit[i] =
-                            E::BaseField::from(((instance_id << num_vars) ^ (i - *l)) as u64)
+                    for (i, layer_wit_elem) in layer_wit[*l..*r].iter_mut().enumerate() {
+                        *layer_wit_elem = E::BaseField::from(((instance_id << num_vars) ^ i) as u64)
                     }
                 }
             }

@@ -116,7 +116,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             let (sumcheck_proof, sumcheck_prover_state) =
                                 sumcheck::structs::IOPProverStateV2::<E>::prove_batch_polys(
                                     max_thread_id,
-                                    virtual_polys.try_into().unwrap(),
+                                    virtual_polys,
                                     transcript,
                                 );
 
@@ -168,7 +168,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             let (sumcheck_proof, sumcheck_prover_state) =
                                 sumcheck::structs::IOPProverStateV2::<E>::prove_batch_polys(
                                     max_thread_id,
-                                    virtual_polys.try_into().unwrap(),
+                                    virtual_polys,
                                     transcript,
                                 );
 
@@ -239,7 +239,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 let (sumcheck_proof, sumcheck_prover_state) =
                                     sumcheck::structs::IOPProverStateV2::<E>::prove_batch_polys(
                                         max_thread_id,
-                                        virtual_polys.try_into().unwrap(),
+                                        virtual_polys,
                                         transcript,
                                     );
 

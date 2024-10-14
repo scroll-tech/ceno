@@ -347,8 +347,8 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let (target_wire_id, target) =
             circuit_builder.create_witness_out(StackUInt::N_OPERAND_CELLS);
         let length = length.values();
-        for i in 1..length.len() {
-            circuit_builder.assert_const(length[i], 0);
+        for &len in &length[1..] {
+            circuit_builder.assert_const(len, 0);
         }
         circuit_builder.add(target[0], length[0], E::BaseField::ONE);
 

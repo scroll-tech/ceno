@@ -70,11 +70,7 @@ fn prepare_input<E: ExtensionField>(
         .iter_mut()
         .zip(poly_g1.iter())
         .for_each(|(f1, g1)| f1.mul_by_mle(g1.clone(), E::BaseField::ONE));
-    (
-        asserted_sum,
-        virtual_poly_1,
-        virtual_poly_f1.try_into().unwrap(),
-    )
+    (asserted_sum, virtual_poly_1, virtual_poly_f1)
 }
 
 #[from_env]

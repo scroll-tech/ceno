@@ -146,7 +146,7 @@ where
                 * in1_eq_vec[gate.idx_in[0]]
                 * in2_eq_vec[gate.idx_in[1]]
                 * in3_eq_vec[gate.idx_in[2]]
-                * (&gate.scalar.eval(challenges))
+                * gate.scalar.eval(challenges)
         })
     }
 }
