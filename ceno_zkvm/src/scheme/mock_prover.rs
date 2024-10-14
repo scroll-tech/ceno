@@ -116,7 +116,7 @@ pub const MOCK_PC_LUI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 88);
 pub const MOCK_PC_AUIPC: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 92);
 
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum MockProverError<E: ExtensionField> {
     AssertZeroError {
         expression: Expression<E>,
@@ -141,6 +141,75 @@ pub(crate) enum MockProverError<E: ExtensionField> {
     // TODO later
     // r_expressions
     // w_expressions
+}
+
+impl<E: ExtensionField> PartialEq for MockProverError<E> {
+    // Compare errors based on the content, ignoring the inst_id
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                MockProverError::AssertZeroError {
+                    expression: left_expression,
+                    evaluated: left_evaluated,
+                    name: left_name,
+                    ..
+                },
+                MockProverError::AssertZeroError {
+                    expression: right_expression,
+                    evaluated: right_evaluated,
+                    name: right_name,
+                    ..
+                },
+            ) => {
+                left_expression == right_expression
+                    && left_evaluated == right_evaluated
+                    && left_name == right_name
+            }
+            (
+                MockProverError::AssertEqualError {
+                    left_expression: left_left_expression,
+                    right_expression: left_right_expression,
+                    left: left_left,
+                    right: left_right,
+                    name: left_name,
+                    ..
+                },
+                MockProverError::AssertEqualError {
+                    left_expression: right_left_expression,
+                    right_expression: right_right_expression,
+                    left: right_left,
+                    right: right_right,
+                    name: right_name,
+                    ..
+                },
+            ) => {
+                left_left_expression == right_left_expression
+                    && left_right_expression == right_right_expression
+                    && left_left == right_left
+                    && left_right == right_right
+                    && left_name == right_name
+            }
+            (
+                MockProverError::LookupError {
+                    expression: left_expression,
+                    evaluated: left_evaluated,
+                    name: left_name,
+                    ..
+                },
+                MockProverError::LookupError {
+                    expression: right_expression,
+                    evaluated: right_evaluated,
+                    name: right_name,
+                    ..
+                },
+            ) => {
+                left_expression == right_expression
+                    && left_evaluated == right_evaluated
+                    && left_name == right_name
+            }
+            _ => false,
+        }
+    }
 }
 
 impl<E: ExtensionField> MockProverError<E> {
@@ -201,6 +270,14 @@ impl<E: ExtensionField> MockProverError<E> {
                     Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
+        }
+    }
+
+    fn inst_id(&self) -> usize {
+        match self {
+            Self::AssertZeroError { inst_id, .. }
+            | Self::AssertEqualError { inst_id, .. }
+            | Self::LookupError { inst_id, .. } => *inst_id,
         }
     }
 }
@@ -419,7 +496,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &expr);
+                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
                 let expr_evaluated = expr_evaluated
                     .get_ext_field_vec_optn()
                     .map(|v| v.to_vec())
@@ -488,7 +565,6 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             Ok(_) => {}
             Err(errors) => {
                 println!("======================================================");
-                println!("Error: {} constraints not satisfied", errors.len());
 
                 println!(
                     r"Hints:
@@ -499,8 +575,26 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     "
                 );
 
-                for error in errors {
-                    error.print(wits_in, &cb.cs.witin_namespace_map);
+                // Print errors and skip consecutive duplicates errors if they are equal.
+                let mut duplicates = 0;
+                let mut prev_err = None;
+                for error in &errors {
+                    if prev_err.is_some() && prev_err.unwrap() == error {
+                        duplicates += 1;
+                    } else {
+                        error.print(wits_in, &cb.cs.witin_namespace_map);
+                    }
+                    prev_err = Some(error);
+                }
+
+                if duplicates > 0 {
+                    println!(
+                        "Error: {} constraints not satisfied ({} duplicates hidden)",
+                        errors.len(),
+                        duplicates
+                    );
+                } else {
+                    println!("Error: {} constraints not satisfied", errors.len());
                 }
                 println!("======================================================");
                 panic!("Constraints not satisfied");
@@ -517,7 +611,7 @@ mod tests {
     use crate::{
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        gadgets::IsLtConfig,
+        gadgets::{AssertLTConfig, IsLtConfig},
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
         ROMType::U5,
@@ -638,8 +732,6 @@ mod tests {
                         Box::new(Expression::Challenge(
                             1,
                             1,
-                            // TODO this still uses default challenge in ConstraintSystem, but challengeId
-                            // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
                             GoldilocksExt2::ONE,
                             GoldilocksExt2::ZERO,
                         )),
@@ -659,6 +751,8 @@ mod tests {
                 inst_id: 0,
             }]
         );
+        // because inst_id is not checked in our PartialEq impl
+        assert_eq!(err[0].inst_id(), 0);
     }
 
     #[allow(dead_code)]
@@ -666,7 +760,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: IsLtConfig,
+        pub lt_wtns: AssertLTConfig,
     }
 
     struct AssertLtCircuitInput {
@@ -678,8 +772,7 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns =
-                IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), Some(true), 1)?;
+            let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -799,7 +892,7 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), None, 1)?;
+            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 

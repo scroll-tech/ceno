@@ -10,7 +10,7 @@ pub fn rlc_chip_record<E: ExtensionField>(
     chip_record_beta: Expression<E>,
 ) -> Expression<E> {
     assert!(!records.is_empty());
-    let beta_pows = power_sequence(chip_record_beta, records.len());
+    let beta_pows = power_sequence(chip_record_beta);
 
     let item_rlc = beta_pows
         .into_iter()
@@ -23,7 +23,9 @@ pub fn rlc_chip_record<E: ExtensionField>(
 }
 
 /// derive power sequence [1, base, base^2, ..., base^(len-1)] of base expression
-pub fn power_sequence<E: ExtensionField>(base: Expression<E>, len: usize) -> Vec<Expression<E>> {
+pub fn power_sequence<E: ExtensionField>(
+    base: Expression<E>,
+) -> impl Iterator<Item = Expression<E>> {
     assert!(
         matches!(
             base,
@@ -31,9 +33,7 @@ pub fn power_sequence<E: ExtensionField>(base: Expression<E>, len: usize) -> Vec
         ),
         "expression must be constant or challenge"
     );
-    successors(Some(Expression::Constant(E::BaseField::ONE)), |prev| {
+    successors(Some(Expression::Constant(E::BaseField::ONE)), move |prev| {
         Some(prev.clone() * base.clone())
     })
-    .take(len)
-    .collect()
 }

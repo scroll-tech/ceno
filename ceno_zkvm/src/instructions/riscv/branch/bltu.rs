@@ -47,7 +47,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
             || "rs1<rs2",
             read_rs1.value(),
             read_rs2.value(),
-            None,
             UINT_LIMBS,
         )?;
 

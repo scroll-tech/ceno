@@ -10,13 +10,13 @@ use crate::{
     Value,
 };
 
-use super::IsLtConfig;
+use super::AssertLTConfig;
 
 /// divide gadget
 #[derive(Debug, Clone)]
 pub struct DivConfig<E: ExtensionField> {
     pub dividend: UInt<E>,
-    pub r_lt: IsLtConfig,
+    pub r_lt: AssertLTConfig,
     pub intermediate_mul: UInt<E>,
 }
 
@@ -35,12 +35,11 @@ impl<E: ExtensionField> DivConfig<E> {
             let (dividend, intermediate_mul) =
                 divisor.mul_add(|| "divisor * outcome + r", cb, quotient, remainder, true)?;
 
-            let r_lt = IsLtConfig::construct_circuit(
+            let r_lt = AssertLTConfig::construct_circuit(
                 cb,
                 || "remainder < divisor",
                 remainder.value(),
                 divisor.value(),
-                Some(true),
                 UINT_LIMBS,
             )?;
 
