@@ -322,10 +322,10 @@ mod test {
         let point = vec![E::random(&mut rng), E::random(&mut rng)];
         let target_evals = graph.target_evals(&wit, &point);
 
-        let mut prover_transcript = &mut Transcript::new(b"Singer");
+        let prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, prover_transcript, 1)
             .expect("prove failed");
         println!(
             "CalldataloadInstruction::prove, instance_num_vars = {}, time = {}",
