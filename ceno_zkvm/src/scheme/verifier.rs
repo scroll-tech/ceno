@@ -63,6 +63,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
+        // including public input to transcript
+        pi.iter().for_each(|v| transcript.append_field_element(v));
+
         // write fixed commitment to transcript
         for (_, vk) in self.vk.circuit_vks.iter() {
             if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
