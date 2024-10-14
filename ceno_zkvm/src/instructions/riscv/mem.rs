@@ -81,7 +81,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
     ) -> Result<(), ZKVMError> {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
-        let imm = Value::new_unchecked(step.insn().imm_or_funct7());
+        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
         config
             .s_insn
