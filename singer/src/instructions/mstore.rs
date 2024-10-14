@@ -383,9 +383,29 @@ impl MstoreAccessory {
 
 #[cfg(test)]
 mod test {
+    #[cfg(not(debug_assertions))]
+    use super::MstoreAccessory;
     use crate::utils::u64vec;
+    #[cfg(not(debug_assertions))]
+    use crate::{
+        instructions::{InstructionGraph, SingerCircuitBuilder},
+        scheme::GKRGraphProverState,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
+    };
+    #[cfg(not(debug_assertions))]
+    use ark_std::test_rng;
+    #[cfg(not(debug_assertions))]
+    use ff::Field;
+    #[cfg(not(debug_assertions))]
+    use ff_ext::ExtensionField;
     use goldilocks::GoldilocksExt2;
+    #[cfg(not(debug_assertions))]
+    use multilinear_extensions::mle::DenseMultilinearExtension;
     use singer_utils::structs::ChipChallenges;
+    #[cfg(not(debug_assertions))]
+    use std::time::Instant;
+    #[cfg(not(debug_assertions))]
+    use transcript::Transcript;
 
     use crate::instructions::{mstore::MstoreInstruction, Instruction};
 
@@ -505,9 +525,9 @@ mod test {
                 .map(|_| {
                     (0..inst_phase0_size)
                         .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
+                        .collect::<Vec<_>>()
                 })
-                .collect_vec()
+                .collect::<Vec<_>>()
                 .into(),
         ];
         let acc_phase0_size = MstoreAccessory::phase0_size();
@@ -518,9 +538,9 @@ mod test {
                 .map(|_| {
                     (0..acc_phase0_size)
                         .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
+                        .collect::<Vec<_>>()
                 })
-                .collect_vec()
+                .collect::<Vec<_>>()
                 .into(),
         ];
 

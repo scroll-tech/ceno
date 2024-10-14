@@ -182,6 +182,21 @@ impl<E: ExtensionField> Instruction<E> for GtInstruction {
 
 #[cfg(test)]
 mod test {
+    #[cfg(not(debug_assertions))]
+    use crate::{
+        instructions::InstructionGraph, instructions::SingerCircuitBuilder,
+        scheme::GKRGraphProverState, CircuitWiresIn, SingerGraphBuilder, SingerParams,
+    };
+    #[cfg(not(debug_assertions))]
+    use ark_std::test_rng;
+    #[cfg(not(debug_assertions))]
+    use ff::Field;
+    #[cfg(not(debug_assertions))]
+    use ff_ext::ExtensionField;
+    #[cfg(not(debug_assertions))]
+    use std::time::Instant;
+    #[cfg(not(debug_assertions))]
+    use transcript::Transcript;
 
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
@@ -309,9 +324,9 @@ mod test {
                 .map(|_| {
                     (0..size)
                         .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
+                        .collect::<Vec<_>>()
                 })
-                .collect_vec()
+                .collect::<Vec<_>>()
                 .into(),
         ];
 
