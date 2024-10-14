@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, WitIn},
+    expression::{Expression, ToExpr},
     gadgets::IsLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
 };
@@ -12,6 +12,9 @@ pub mod global_state;
 pub mod memory;
 pub mod register;
 pub mod utils;
+
+#[cfg(test)]
+pub mod test;
 
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
@@ -27,22 +30,22 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
     fn register_read(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError>;
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     fn register_write(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError>;
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 }
 
 /// The common representation of a memory value.
@@ -54,21 +57,21 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     fn memory_read(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: &MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError>;
+        value: MemoryExpr<E>,
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     fn memory_write(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: &MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: crate::chip_handler::MemoryExpr<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError>;
+        prev_values: MemoryExpr<E>,
+        value: MemoryExpr<E>,
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 }

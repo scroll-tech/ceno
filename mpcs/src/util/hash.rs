@@ -1,17 +1,14 @@
-// use std::iter::repeat;
-
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use multilinear_extensions::mle::FieldType;
-use poseidon::Poseidon;
+use poseidon::poseidon_hash::PoseidonHash;
 
-use serde::{Deserialize, Serialize};
 use transcript::Transcript;
 
-pub const DIGEST_WIDTH: usize = transcript::basic::OUTPUT_WIDTH;
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Digest<F: SmallField + Serialize>(pub [F; DIGEST_WIDTH]);
-pub type Hasher<F> = Poseidon<F, 12, 11>;
+pub use poseidon::digest::Digest;
+use poseidon::poseidon::Poseidon;
+
+use super::{field_type_iter_base, field_type_iter_range_base};
 
 pub fn write_digest_to_transcript<E: ExtensionField>(
     digest: &Digest<E::BaseField>,
@@ -23,100 +20,44 @@ pub fn write_digest_to_transcript<E: ExtensionField>(
         .for_each(|x| transcript.append_field_element(x));
 }
 
-pub fn new_hasher<F: SmallField>() -> Hasher<F> {
-    // FIXME: Change to the right parameter
-    Hasher::<F>::new(8, 22)
-}
-
-pub fn hash_two_digests<F: SmallField>(
-    a: &Digest<F>,
-    b: &Digest<F>,
-    hasher: &Hasher<F>,
-) -> Digest<F> {
-    let mut hasher = hasher.clone();
-    hasher.update(a.0.as_slice());
-    hasher.update(b.0.as_slice());
-    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
-    Digest(result)
-}
-
-pub fn hash_field_type<E: ExtensionField>(
-    field_type: &FieldType<E>,
-    hasher: &Hasher<E::BaseField>,
-) -> Digest<E::BaseField> {
-    let mut hasher = hasher.clone();
-    match field_type {
-        FieldType::Ext(ext) => {
-            ext.iter().for_each(|x| {
-                hasher.update(x.as_bases());
-            });
-        }
-        FieldType::Base(base) => {
-            hasher.update(base);
-        }
-        FieldType::Unreachable => panic!("Unreachable"),
-    };
-    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
-    Digest(result)
+pub fn hash_field_type<E: ExtensionField>(field_type: &FieldType<E>) -> Digest<E::BaseField> {
+    PoseidonHash::hash_or_noop_iter(field_type_iter_base(&field_type))
 }
 
 pub fn hash_field_type_subvector<E: ExtensionField>(
     field_type: &FieldType<E>,
     range: impl IntoIterator<Item = usize>,
-    hasher: &Hasher<E::BaseField>,
 ) -> Digest<E::BaseField> {
-    let mut hasher = hasher.clone();
-    match field_type {
-        FieldType::Ext(ext) => {
-            range.into_iter().for_each(|i| {
-                hasher.update(&ext[i].as_bases());
-            });
-        }
-        FieldType::Base(base) => {
-            for i in range {
-                hasher.update(&[base[i]]);
-            }
-        }
-        FieldType::Unreachable => panic!("Unreachable"),
-    };
-    let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
-    Digest(result)
+    PoseidonHash::hash_or_noop_iter(field_type_iter_range_base(&field_type, range))
 }
 
-#[cfg(test)]
-mod tests {
-    use ark_std::{end_timer, start_timer, test_rng};
-    use ff::Field;
-    use goldilocks::Goldilocks;
+pub fn hash_two_leaves_ext<E: ExtensionField>(a: &E, b: &E) -> Digest<E::BaseField> {
+    let input = [a.as_bases(), b.as_bases()].concat();
+    PoseidonHash::hash_or_noop(&input)
+}
 
-    use super::*;
+pub fn hash_two_leaves_base<E: ExtensionField>(
+    a: &E::BaseField,
+    b: &E::BaseField,
+) -> Digest<E::BaseField> {
+    PoseidonHash::hash_or_noop(&[*a, *b])
+}
 
-    #[test]
-    fn benchmark_hashing() {
-        let rng = test_rng();
-        let timer = start_timer!(|| "Timing hash initialization");
-        let mut hasher = new_hasher::<Goldilocks>();
-        end_timer!(timer);
+pub fn hash_two_leaves_batch_ext<E: ExtensionField>(a: &[E], b: &[E]) -> Digest<E::BaseField> {
+    let a_m_to_1_hash = PoseidonHash::hash_or_noop_iter(a.iter().flat_map(|v| v.as_bases()));
+    let b_m_to_1_hash = PoseidonHash::hash_or_noop_iter(b.iter().flat_map(|v| v.as_bases()));
+    hash_two_digests(&a_m_to_1_hash, &b_m_to_1_hash)
+}
 
-        let element = Goldilocks::random(rng);
+pub fn hash_two_leaves_batch_base<E: ExtensionField>(
+    a: &[E::BaseField],
+    b: &[E::BaseField],
+) -> Digest<E::BaseField> {
+    let a_m_to_1_hash = PoseidonHash::hash_or_noop_iter(a.iter());
+    let b_m_to_1_hash = PoseidonHash::hash_or_noop_iter(b.iter());
+    hash_two_digests(&a_m_to_1_hash, &b_m_to_1_hash)
+}
 
-        let timer = start_timer!(|| "Timing hash update");
-        for _ in 0..10000 {
-            hasher.update(&[element]);
-        }
-        end_timer!(timer);
-
-        let timer = start_timer!(|| "Timing hash squeeze");
-        for _ in 0..10000 {
-            hasher.squeeze_vec();
-        }
-        end_timer!(timer);
-
-        let timer = start_timer!(|| "Timing hash update squeeze");
-        for _ in 0..10000 {
-            hasher.update(&[element]);
-            hasher.squeeze_vec();
-        }
-        end_timer!(timer);
-    }
+pub fn hash_two_digests<F: SmallField + Poseidon>(a: &Digest<F>, b: &Digest<F>) -> Digest<F> {
+    PoseidonHash::two_to_one(a, b)
 }

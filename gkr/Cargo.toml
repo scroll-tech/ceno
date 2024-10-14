@@ -17,13 +17,13 @@ sumcheck = { path = "../sumcheck" }
 multilinear_extensions = { path = "../multilinear_extensions" }
 ff_ext = { path = "../ff_ext" }
 serde.workspace = true
-serde_json = "1.0.108"
+serde_json = "1.0.128"
 rayon.workspace = true
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tracing-flame = "0.2.0"
 tracing = "0.1.40"
 crossbeam-channel = "0.5.13"
-itertools = "0.12.0"
+itertools = "0.12.1"
 const_env = "0.1.2"
 
 [dev-dependencies]

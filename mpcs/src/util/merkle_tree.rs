@@ -1,6 +1,7 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
+use poseidon::poseidon_hash::PoseidonHash;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -10,14 +11,14 @@ use rayon::{
 
 use crate::util::{
     field_type_index_base, field_type_index_ext,
-    hash::{hash_field_type_subvector, hash_two_digests, Digest, Hasher},
+    hash::{hash_field_type_subvector, hash_two_digests, Digest},
     log2_strict, Deserialize, DeserializeOwned, Serialize,
 };
 use transcript::Transcript;
 
 use ark_std::{end_timer, start_timer};
 
-use super::hash::{hash_field_type, write_digest_to_transcript, DIGEST_WIDTH};
+use super::hash::{hash_field_type, write_digest_to_transcript};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(deserialize = "E: DeserializeOwned"))]
@@ -32,36 +33,20 @@ impl<E: ExtensionField> MerkleTreeDigests<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn from_leaves(
-        leaves: &FieldType<E>,
-        group_size: usize,
-        hasher: &Hasher<E::BaseField>,
-    ) -> Self {
-        merkelize::<E, FieldType<E>>(&[leaves], group_size, hasher)
+    pub fn from_leaves(leaves: &FieldType<E>, group_size: usize) -> Self {
+        merkelize::<E, FieldType<E>>(&[leaves], group_size)
     }
 
-    pub fn from_leaves_ext(
-        leaves: &Vec<E>,
-        group_size: usize,
-        hasher: &Hasher<E::BaseField>,
-    ) -> Self {
-        merkelize::<E, Vec<E>>(&[leaves], group_size, hasher)
+    pub fn from_leaves_ext(leaves: &Vec<E>, group_size: usize) -> Self {
+        merkelize::<E, Vec<E>>(&[leaves], group_size)
     }
 
-    pub fn from_batch_leaves(
-        leaves: &[&FieldType<E>],
-        group_size: usize,
-        hasher: &Hasher<E::BaseField>,
-    ) -> Self {
-        merkelize::<E, FieldType<E>>(leaves, group_size, hasher)
+    pub fn from_batch_leaves(leaves: &[&FieldType<E>], group_size: usize) -> Self {
+        merkelize::<E, FieldType<E>>(leaves, group_size)
     }
 
-    pub fn from_batch_leaves_ext(
-        leaves: &[&Vec<E>],
-        group_size: usize,
-        hasher: &Hasher<E::BaseField>,
-    ) -> Self {
-        merkelize::<E, Vec<E>>(leaves, group_size, hasher)
+    pub fn from_batch_leaves_ext(leaves: &[&Vec<E>], group_size: usize) -> Self {
+        merkelize::<E, Vec<E>>(leaves, group_size)
     }
 
     pub fn root(&self) -> Digest<E::BaseField> {
@@ -119,38 +104,25 @@ where
         }
     }
 
-    pub fn from_leaves(
-        leaves: FieldType<E>,
-        group_size: usize,
-        hasher: &Hasher<E::BaseField>,
-    ) -> Self {
+    pub fn from_leaves(leaves: FieldType<E>, group_size: usize) -> Self {
         Self {
-            inner: MerkleTreeDigests::<E>::from_leaves(&leaves, group_size, hasher),
+            inner: MerkleTreeDigests::<E>::from_leaves(&leaves, group_size),
             leaves: vec![leaves],
         }
     }
 
-    pub fn from_leaves_ext(
-        leaves: Vec<E>,
-        group_size: usize,
-        hasher: &Hasher<E::BaseField>,
-    ) -> Self {
+    pub fn from_leaves_ext(leaves: Vec<E>, group_size: usize) -> Self {
         Self {
-            inner: MerkleTreeDigests::<E>::from_leaves_ext(&leaves, group_size, hasher),
+            inner: MerkleTreeDigests::<E>::from_leaves_ext(&leaves, group_size),
             leaves: vec![FieldType::Ext(leaves)],
         }
     }
 
-    pub fn from_batch_leaves(
-        leaves: Vec<FieldType<E>>,
-        group_size: usize,
-        hasher: &Hasher<E::BaseField>,
-    ) -> Self {
+    pub fn from_batch_leaves(leaves: Vec<FieldType<E>>, group_size: usize) -> Self {
         Self {
             inner: MerkleTreeDigests::<E>::from_batch_leaves(
                 &leaves.iter().collect_vec(),
                 group_size,
-                hasher,
             ),
             leaves,
         }
@@ -287,15 +259,8 @@ where
         leaves: &SingleLeavesGroup<E>,
         index: usize,
         root: &Digest<E::BaseField>,
-        hasher: &Hasher<E::BaseField>,
     ) {
-        authenticate_merkle_path_root::<E>(
-            &self.inner,
-            hash_leaves_group(leaves, hasher),
-            index,
-            root,
-            hasher,
-        )
+        authenticate_merkle_path_root::<E>(&self.inner, hash_leaves_group(leaves), index, root)
     }
 
     pub fn authenticate_batch_leaves_pair(
@@ -303,14 +268,12 @@ where
         leaves_pair: &BatchLeavesPair<E>,
         index: usize,
         root: &Digest<E::BaseField>,
-        hasher: &Hasher<E::BaseField>,
     ) {
         authenticate_merkle_path_root::<E>(
             &self.inner,
-            hash_two_leaves_batch(leaves_pair, hasher),
+            hash_two_leaves_batch(leaves_pair),
             index,
             root,
-            hasher,
         )
     }
 }
@@ -320,12 +283,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     fn len(&self) -> usize;
-    fn hash_part(
-        &self,
-        start: usize,
-        end: usize,
-        hasher: &Hasher<E::BaseField>,
-    ) -> Digest<E::BaseField>;
+    fn hash_part(&self, start: usize, end: usize) -> Digest<E::BaseField>;
     fn get_leaves_pair_at(leaves: &[&Self], index: usize) -> BatchLeavesPair<E>;
 }
 
@@ -337,13 +295,8 @@ where
         FieldType::len(self)
     }
 
-    fn hash_part(
-        &self,
-        start: usize,
-        end: usize,
-        hasher: &Hasher<E::BaseField>,
-    ) -> Digest<E::BaseField> {
-        hash_field_type_subvector(self, start..end, hasher)
+    fn hash_part(&self, start: usize, end: usize) -> Digest<E::BaseField> {
+        hash_field_type_subvector(self, start..end)
     }
 
     fn get_leaves_pair_at(leaves: &[&Self], index: usize) -> BatchLeavesPair<E> {
@@ -383,18 +336,8 @@ where
         Vec::len(self)
     }
 
-    fn hash_part(
-        &self,
-        start: usize,
-        end: usize,
-        hasher: &Hasher<<E as ExtensionField>::BaseField>,
-    ) -> Digest<<E as ExtensionField>::BaseField> {
-        let mut hasher = hasher.clone();
-        (start..end).into_iter().for_each(|i| {
-            hasher.update(self[i].as_bases());
-        });
-        let result = hasher.squeeze_vec()[0..DIGEST_WIDTH].try_into().unwrap();
-        Digest(result)
+    fn hash_part(&self, start: usize, end: usize) -> Digest<<E as ExtensionField>::BaseField> {
+        PoseidonHash::hash_or_noop_iter((start..end).into_iter().flat_map(|i| self[i].as_bases()))
     }
 
     fn get_leaves_pair_at(leaves: &[&Self], index: usize) -> BatchLeavesPair<E> {
@@ -412,7 +355,6 @@ where
 fn merkelize<E: ExtensionField, DataType: Merkelizable<E>>(
     values: &[&DataType],
     group_size: usize,
-    hasher: &Hasher<E::BaseField>,
 ) -> MerkleTreeDigests<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -431,12 +373,12 @@ where
     let mut hashes = vec![Digest::default(); leaves_group_count];
     if values.len() == 1 {
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
-            *hash = values[0].hash_part(i * group_size, (i + 1) * group_size, hasher);
+            *hash = values[0].hash_part(i * group_size, (i + 1) * group_size);
         });
     } else {
         assert_eq!(group_size, 2); // For batched case, only support two leaves
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
-            *hash = hash_two_leaves_batch::<E>(&DataType::get_leaves_pair_at(values, i), hasher);
+            *hash = hash_two_leaves_batch::<E>(&DataType::get_leaves_pair_at(values, i));
         });
     }
 
@@ -445,7 +387,7 @@ where
     for i in 1..(log_v) {
         let oracle = tree[i - 1]
             .par_chunks_exact(2)
-            .map(|ys| hash_two_digests(&ys[0], &ys[1], hasher))
+            .map(|ys| hash_two_digests(&ys[0], &ys[1]))
             .collect::<Vec<_>>();
 
         tree.push(oracle);
@@ -459,7 +401,6 @@ fn authenticate_merkle_path_root<E: ExtensionField>(
     leaves_hash: Digest<E::BaseField>,
     group_index: usize,
     root: &Digest<E::BaseField>,
-    hasher: &Hasher<E::BaseField>,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -468,9 +409,9 @@ fn authenticate_merkle_path_root<E: ExtensionField>(
 
     for path_i in path.iter() {
         hash = if x_index & 1 == 0 {
-            hash_two_digests(&hash, path_i, hasher)
+            hash_two_digests(&hash, path_i)
         } else {
-            hash_two_digests(path_i, &hash, hasher)
+            hash_two_digests(path_i, &hash)
         };
         x_index >>= 1;
     }
@@ -652,35 +593,29 @@ where
 
 pub fn hash_leaves_group<E: ExtensionField>(
     leaves_group: &SingleLeavesGroup<E>,
-    hasher: &Hasher<E::BaseField>,
 ) -> Digest<E::BaseField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    hash_field_type(leaves_group.as_field_type_ref(), hasher)
+    hash_field_type(leaves_group.as_field_type_ref())
 }
 
-pub fn hash_two_leaves_batch<E: ExtensionField>(
-    leaves: &BatchLeavesPair<E>,
-    hasher: &Hasher<E::BaseField>,
-) -> Digest<E::BaseField>
+pub fn hash_two_leaves_batch<E: ExtensionField>(leaves: &BatchLeavesPair<E>) -> Digest<E::BaseField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     if let Some(leaves) = leaves.get_single() {
-        return hash_leaves_group(&leaves, hasher);
+        return hash_leaves_group(&leaves);
     }
-    let left_hash = hash_field_type(&leaves.left(), hasher);
-    let right_hash = hash_field_type(&leaves.right(), hasher);
+    let left_hash = hash_field_type(&leaves.left());
+    let right_hash = hash_field_type(&leaves.right());
 
-    hash_two_digests(&left_hash, &right_hash, hasher)
+    hash_two_digests(&left_hash, &right_hash)
 }
 
 #[cfg(test)]
 mod tests {
     use goldilocks::{Goldilocks, GoldilocksExt2};
-
-    use crate::util::hash::new_hasher;
 
     use super::*;
     type E = GoldilocksExt2;
@@ -706,7 +641,6 @@ mod tests {
 
     #[test]
     fn test_merkelize() {
-        let hasher = new_hasher();
         let leaves = FieldType::Base(vec![
             Goldilocks::from(1),
             Goldilocks::from(2),
@@ -717,7 +651,7 @@ mod tests {
             Goldilocks::from(1),
             Goldilocks::from(0),
         ]);
-        let merkle_tree = MerkleTree::<GoldilocksExt2>::from_leaves(leaves.clone(), 2, &hasher);
+        let merkle_tree = MerkleTree::<GoldilocksExt2>::from_leaves(leaves.clone(), 2);
         assert_eq!(merkle_tree.leaf_group_num(), 4);
         assert_eq!(merkle_tree.leaf_group_size(), 2);
         for i in 0..leaves.len() {
@@ -737,13 +671,13 @@ mod tests {
             let leaves_group = SingleLeavesGroup::from_all_leaves(i, 2, &leaves);
             let leaves_pair = BatchLeavesPair::from_all_leaves(i, &[&leaves]);
 
-            let leaves_group_hash = hash_leaves_group(&leaves_group, &hasher);
-            let leaves_pair_hash = hash_two_leaves_batch(&leaves_pair, &hasher);
+            let leaves_group_hash = hash_leaves_group(&leaves_group);
+            let leaves_pair_hash = hash_two_leaves_batch(&leaves_pair);
 
             assert_eq!(leaves_group_hash, leaves_pair_hash);
 
-            path.authenticate_leaves_group(&leaves_group, i, &merkle_tree.root(), &hasher);
-            path.authenticate_batch_leaves_pair(&leaves_pair, i, &merkle_tree.root(), &hasher);
+            path.authenticate_leaves_group(&leaves_group, i, &merkle_tree.root());
+            path.authenticate_batch_leaves_pair(&leaves_pair, i, &merkle_tree.root());
         }
 
         let leaves = vec![
@@ -768,8 +702,7 @@ mod tests {
                 Goldilocks::from(0),
             ]),
         ];
-        let merkle_tree =
-            MerkleTree::<GoldilocksExt2>::from_batch_leaves(leaves.clone(), 2, &hasher);
+        let merkle_tree = MerkleTree::<GoldilocksExt2>::from_batch_leaves(leaves.clone(), 2);
         assert_eq!(merkle_tree.leaf_group_num(), 4);
         assert_eq!(merkle_tree.leaf_group_size(), 2);
         for i in 0..leaves.len() {
@@ -790,7 +723,7 @@ mod tests {
                 merkle_tree.merkle_path_without_leaf_sibling_or_root((i << 1) + 1)
             );
             let leaves_pair = BatchLeavesPair::from_all_leaves(i, &leaves.iter().collect_vec());
-            path.authenticate_batch_leaves_pair(&leaves_pair, i, &merkle_tree.root(), &hasher);
+            path.authenticate_batch_leaves_pair(&leaves_pair, i, &merkle_tree.root());
         }
     }
 }

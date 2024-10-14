@@ -4,7 +4,7 @@ use crate::util::{
         interpolate_over_boolean_hypercube,
     },
     ext_to_usize,
-    hash::{Digest, Hasher},
+    hash::Digest,
     merkle_tree::{BatchLeavesPair, MerklePathWithoutLeafOrRoot, MerkleTree, SingleLeavesGroup},
 };
 use ark_std::{end_timer, start_timer};
@@ -72,7 +72,6 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>, QCS: Query
     comms: &[BasefoldCommitment<E>],
     partial_eq: &[E],
     eval: &E,
-    hasher: &Hasher<E::BaseField>,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -105,7 +104,6 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>, QCS: Query
         &final_codeword,
         roots,
         comms,
-        hasher,
     );
     end_timer!(queries_timer);
 
@@ -192,7 +190,6 @@ where
         final_codeword: &[E],
         roots: &[Digest<E::BaseField>],
         comms: &[BasefoldCommitment<E>],
-        hasher: &Hasher<E::BaseField>,
     ) {
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
@@ -208,7 +205,6 @@ where
                     roots,
                     comms,
                     *index,
-                    hasher,
                 );
             },
         );
@@ -256,13 +252,12 @@ where
         root: &Digest<E::BaseField>,
         index: usize,
         full_codeword_size: usize,
-        hasher: &Hasher<E::BaseField>,
     ) {
         let group_num = self.merkle_path.group_num();
         assert_eq!(full_codeword_size % group_num, 0);
         let group_index = index / (full_codeword_size / group_num);
         self.merkle_path
-            .authenticate_leaves_group(&self.inner, group_index, root, hasher);
+            .authenticate_leaves_group(&self.inner, group_index, root);
     }
 }
 
@@ -299,11 +294,11 @@ where
         roots: &[Digest<E::BaseField>],
         index: usize,
         full_codeword_size: usize,
-        hasher: &Hasher<E::BaseField>,
     ) {
-        self.inner.par_iter().zip(roots).for_each(|(query, root)| {
-            query.check_merkle_path(root, index, full_codeword_size, hasher)
-        });
+        self.inner
+            .par_iter()
+            .zip(roots)
+            .for_each(|(query, root)| query.check_merkle_path(root, index, full_codeword_size));
     }
 }
 
@@ -372,17 +367,12 @@ where
         comm: &BasefoldCommitment<E>,
         index: usize,
         full_codeword_size: usize,
-        hasher: &Hasher<E::BaseField>,
     ) {
         let group_num = self.merkle_path.group_num();
         assert_eq!(full_codeword_size % group_num, 0);
         let group_index = index / (full_codeword_size / group_num);
-        self.merkle_path.authenticate_batch_leaves_pair(
-            &self.inner,
-            group_index,
-            comm.root_ref(),
-            hasher,
-        );
+        self.merkle_path
+            .authenticate_batch_leaves_pair(&self.inner, group_index, comm.root_ref());
     }
 }
 
@@ -421,11 +411,11 @@ where
         comms: &[BasefoldCommitment<E>],
         index: usize,
         full_codeword_size: usize,
-        hasher: &Hasher<E::BaseField>,
     ) {
-        self.inner.par_iter().zip(comms).for_each(|(query, comm)| {
-            query.check_merkle_path(comm, index, full_codeword_size, hasher)
-        });
+        self.inner
+            .par_iter()
+            .zip(comms)
+            .for_each(|(query, comm)| query.check_merkle_path(comm, index, full_codeword_size));
     }
 }
 
@@ -546,14 +536,13 @@ where
         roots: &[Digest<E::BaseField>],
         comms: &[BasefoldCommitment<E>],
         index: usize,
-        hasher: &Hasher<E::BaseField>,
     ) {
         let full_codeword_size_log = num_vars + Spec::get_rate_log();
         let full_codeword_size = 1 << full_codeword_size_log;
         self.oracles_query_result
-            .check_merkle_paths(roots, index, full_codeword_size, hasher);
+            .check_merkle_paths(roots, index, full_codeword_size);
         self.commitments_query_result
-            .check_merkle_paths(comms, index, full_codeword_size, hasher);
+            .check_merkle_paths(comms, index, full_codeword_size);
 
         // All the query checking algorithms (batched or not) have the same
         // pattern.

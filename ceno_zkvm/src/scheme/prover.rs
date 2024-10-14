@@ -35,7 +35,7 @@ use crate::{
     virtual_polys::VirtualPolynomials,
 };
 
-use super::{ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
+use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pk: ZKVMProvingKey<E, PCS>,
@@ -50,10 +50,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     pub fn create_proof(
         &self,
         witnesses: ZKVMWitnesses<E>,
+        pi: PublicValues<u32>,
         max_threads: usize,
         mut transcript: Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
-        let mut vm_proof = ZKVMProof::empty();
+        let mut vm_proof = ZKVMProof::empty(pi);
+        let pi = &vm_proof.pv;
+
+        // including public input to transcript
+        pi.iter().for_each(|v| transcript.append_field_element(v));
 
         // commit to fixed commitment
         for (_, pk) in self.pk.circuit_pks.iter() {
@@ -125,6 +130,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     pk,
                     witness.into_iter().map(|w| w.into()).collect_vec(),
                     wits_commit,
+                    pi,
                     num_instances,
                     max_threads,
                     transcript,
@@ -145,6 +151,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     pk,
                     witness.into_iter().map(|v| v.into()).collect_vec(),
                     wits_commit,
+                    pi,
                     num_instances,
                     max_threads,
                     transcript,
@@ -175,6 +182,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithData,
+        pi: &[E::BaseField],
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
@@ -202,7 +210,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .chain(cs.lk_expressions.par_iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&[], &witnesses, challenges, expr)
+                wit_infer_by_expr(&[], &witnesses, pi, challenges, expr)
             })
             .collect();
         let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
@@ -479,7 +487,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             {
                 // sanity check in debug build and output != instance index for zero check sumcheck poly
                 if cfg!(debug_assertions) {
-                    let expected_zero_poly = wit_infer_by_expr(&[], &witnesses, challenges, expr);
+                    let expected_zero_poly =
+                        wit_infer_by_expr(&[], &witnesses, pi, challenges, expr);
                     let top_100_errors = expected_zero_poly
                         .get_ext_field_vec()
                         .iter()
@@ -609,6 +618,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithData,
+        pi: &[E::BaseField],
         num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
@@ -646,7 +656,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             )
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&fixed, &witnesses, challenges, expr)
+                wit_infer_by_expr(&fixed, &witnesses, pi, challenges, expr)
             })
             .collect();
         let (lk_d_wit, lk_n_wit) = records_wit.split_at(cs.lk_table_expressions.len());

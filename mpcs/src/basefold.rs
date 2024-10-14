@@ -6,7 +6,7 @@ use crate::{
     util::{
         arithmetic::{inner_product_three, interpolate_field_type_over_boolean_hypercube},
         ext_to_usize,
-        hash::{new_hasher, write_digest_to_transcript, Digest},
+        hash::{write_digest_to_transcript, Digest},
         log2_strict,
         merkle_tree::MerkleTree,
         plonky2_util::reverse_index_bits_in_place_field_type,
@@ -273,15 +273,12 @@ where
             _ => unreachable!(),
         };
 
-        // 2. Compute and store all the layers of the Merkle tree
-        let hasher = new_hasher::<E::BaseField>();
-
-        // 1. Encode the polynomials. Simultaneously get:
+        // Encode the polynomials. Simultaneously get:
         //  (1) The evaluations over the hypercube (just a clone of the input)
         //  (2) The encoding of the coefficient vector (need an interpolation)
         let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
             PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(codeword, 2, &hasher);
+                let codeword_tree = MerkleTree::<E>::from_leaves(codeword, 2);
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -294,7 +291,7 @@ where
                 })
             }
             PolyEvalsCodeword::TooSmall(evals) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone(), 2, &hasher);
+                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone(), 2);
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -381,7 +378,6 @@ where
             return Ok(proof);
         }
 
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
 
         let commit_phase_input =
@@ -401,7 +397,6 @@ where
             commit_phase_input.coeffs_inner.as_slice(),
             prover_inputs.comms(),
             transcript,
-            &hasher,
         );
 
         // 2. Query phase. ---------------------------------------
@@ -446,9 +441,6 @@ where
         if proof.is_trivial() {
             return Strategy::check_trivial_proof(verifier_inputs, proof, transcript);
         }
-
-        let hasher = new_hasher::<E::BaseField>();
-
         let num_vars = verifier_inputs.num_vars();
         Strategy::check_sizes(verifier_inputs);
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
@@ -515,7 +507,6 @@ where
             verifier_inputs.comms(),
             eq.as_slice(),
             &target_sum,
-            &hasher,
         );
 
         Ok(())
@@ -568,7 +559,6 @@ where
     ) -> Result<Self::CommitmentWithData, Error> {
         let timer = start_timer!(|| "Basefold::commit");
         let ret = Self::commit_inner(pp, poly);
-
         end_timer!(timer);
 
         ret

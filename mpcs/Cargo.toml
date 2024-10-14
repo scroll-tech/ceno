@@ -15,23 +15,23 @@ ff.workspace = true
 ark-std = { version = "0.4" }
 aes = "0.8"
 itertools = "0.12.1"
-num-bigint = "0.4.3"
-num-integer = "0.1.45"
+num-bigint = "0.4.6"
+num-integer = "0.1.46"
 rand = "0.8"
 bitvec = "1.0.1"
 halo2_curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", tag = "0.3.3", package = "halo2curves", features = [
     "derive_serde",
 ] }
 blake2b_simd = "1.0.2"
-sha3 = "0.10.6"
-rayon = { version = "1.5.3", optional = true }
+sha3 = "0.10.8"
+rayon = { version = "1.10.0", optional = true }
 blake2 = { version = "0.10.6" }
 poseidon.workspace = true
 rand_chacha.workspace = true
 generic-array = { version = "0.14.7", features = ["serde"] }
 multilinear_extensions = { path = "../multilinear_extensions" }
 transcript = { path = "../transcript" }
-plonky2 = "0.2.0"
+plonky2 = "0.2.2"
 
 [dev-dependencies]
 simple-frontend = { path = "../simple-frontend" }

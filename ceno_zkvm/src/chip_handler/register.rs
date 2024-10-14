@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{Expression, ToExpr},
     gadgets::IsLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
@@ -17,11 +17,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
     fn register_read(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError> {
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -51,7 +51,14 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             cb.write_record(|| "write_record", write_record)?;
 
             // assert prev_ts < current_ts
-            let lt_cfg = cb.less_than(|| "prev_ts < ts", prev_ts, ts.clone(), Some(true))?;
+            let lt_cfg = IsLtConfig::construct_circuit(
+                cb,
+                || "prev_ts < ts",
+                prev_ts,
+                ts.clone(),
+                Some(true),
+                UINT_LIMBS,
+            )?;
 
             let next_ts = ts + 1.into();
 
@@ -62,12 +69,13 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
     fn register_write(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig<UINT_LIMBS>), ZKVMError> {
+    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError> {
+        assert!(register_id.expr().degree() <= 1);
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -96,9 +104,27 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             cb.read_record(|| "read_record", read_record)?;
             cb.write_record(|| "write_record", write_record)?;
 
-            let lt_cfg = cb.less_than(|| "prev_ts < ts", prev_ts, ts.clone(), Some(true))?;
+            let lt_cfg = IsLtConfig::construct_circuit(
+                cb,
+                || "prev_ts < ts",
+                prev_ts,
+                ts.clone(),
+                Some(true),
+                UINT_LIMBS,
+            )?;
 
             let next_ts = ts + 1.into();
+
+            #[cfg(test)]
+            {
+                use crate::chip_handler::{test::DebugIndex, utils::power_sequence};
+                use itertools::izip;
+                let pow_u16 = power_sequence((1 << u16::BITS as u64).into(), value.len());
+                cb.register_debug_expr(
+                    DebugIndex::RdWrite as usize,
+                    izip!(value, pow_u16).map(|(v, pow)| v * pow).sum(),
+                );
+            }
 
             Ok((next_ts, lt_cfg))
         })

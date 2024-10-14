@@ -8,7 +8,7 @@ use crate::{
     util::{
         arithmetic::{interpolate2_weights, interpolate_over_boolean_hypercube},
         field_type_as_ext,
-        hash::{write_digest_to_transcript, Hasher},
+        hash::write_digest_to_transcript,
         log2_strict,
         merkle_tree::MerkleTree,
     },
@@ -61,7 +61,6 @@ pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>, CPS: CommitPhaseSt
     coeffs_inner: &[E],
     comms: &[BasefoldCommitmentWithData<E>],
     transcript: &mut Transcript<E>,
-    hasher: &Hasher<E::BaseField>,
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -145,11 +144,10 @@ where
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
 
             // Now commit to the current oracle
-            let tree = MerkleTree::<E>::from_leaves_ext(new_running_oracle, 2, hasher);
+            let tree = MerkleTree::<E>::from_leaves_ext(new_running_oracle, 2);
             write_digest_to_transcript(&tree.root(), transcript);
             roots.push(tree.root());
             trees.push(tree);
-
             // Now, the new running oracle still waits to be folded, but this
             // is going to be in the next round. After that, it will be moved
             // into the Merkle tree. Let's put it in the old running oracle.
