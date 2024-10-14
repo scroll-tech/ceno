@@ -72,7 +72,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "remainder < divisor?",
             r.value(),
             divisor.value(),
-            None,
             UINT_LIMBS,
         )?;
 
