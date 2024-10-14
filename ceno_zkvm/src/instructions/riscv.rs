@@ -7,6 +7,7 @@ pub mod config;
 pub mod constants;
 pub mod divu;
 pub mod ecall;
+pub mod imm;
 pub mod jump;
 pub mod logic;
 pub mod mulh;
