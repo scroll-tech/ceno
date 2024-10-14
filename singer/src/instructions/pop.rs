@@ -241,7 +241,7 @@ mod test {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
             SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
-        let mut singer_builder = SingerGraphBuilder::<E>::new();
+        let mut singer_builder = SingerGraphBuilder::<E>::default();
 
         let mut rng = test_rng();
         let size = PopInstruction::phase0_size();

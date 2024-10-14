@@ -75,3 +75,5 @@ jobs:
           # so we need to run cargo check in release mode, too:
           cargo check --workspace --all-targets --exclude ceno_rt --release
           cargo make clippy
+          # Same for clippy:
+          cargo clippy --workspace --all-targets --exclude ceno_rt --release
