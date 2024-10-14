@@ -141,8 +141,8 @@ fn main() -> Result<(), GKRGraphError> {
     // Graph construction
     // ==================
 
-    let mut prover_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
-    let mut verifier_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
+    let mut prover_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::default();
+    let mut verifier_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::default();
     let mut prover_transcript = Transcript::<GoldilocksExt2>::new(b"test");
     let challenge = vec![
         prover_transcript

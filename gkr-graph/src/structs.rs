@@ -65,6 +65,7 @@ pub struct CircuitGraphWitness<'a, E: ExtensionField> {
     pub node_witnesses: Vec<Arc<CircuitWitness<'a, E>>>,
 }
 
+#[derive(Default)]
 pub struct CircuitGraphBuilder<'a, E: ExtensionField> {
     pub(crate) graph: CircuitGraph<E>,
     pub(crate) witness: CircuitGraphWitness<'a, E>,
