@@ -86,7 +86,7 @@ pub fn hashing_benchmark(c: &mut Criterion) {
     c.bench_function("ceno hash single", |bencher| {
         bencher.iter_batched(
             random_ceno_goldy,
-            |c_a| ceno_hash_single(c_a),
+            ceno_hash_single,
             BatchSize::SmallInput,
         )
     });
