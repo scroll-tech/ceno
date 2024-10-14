@@ -13,6 +13,6 @@ ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true
 halo2curves.workspace = true
-poseidon.workspace = true
 rayon.workspace = true
 serde.workspace = true
+poseidon.workspace = true

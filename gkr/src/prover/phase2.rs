@@ -102,6 +102,8 @@ impl<E: ExtensionField> IOPProverState<E> {
                 < lo_in_num_vars
             {
                 Arc::new(
+                    // TODO(Matthias, by 2024-11-01): review whether we can redesign this API to avoid the deprecated resize_ranged
+                    #[allow(deprecated)]
                     circuit_witness.layers_ref()[layer_id as usize + 1].resize_ranged(
                         1 << hi_num_vars,
                         1 << lo_in_num_vars,

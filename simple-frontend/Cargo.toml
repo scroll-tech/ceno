@@ -12,6 +12,6 @@ ff_ext = { path = "../ff_ext" }
 ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true
-itertools = "0.12.0"
+itertools = "0.12.1"
 rayon.workspace = true
 serde.workspace = true
