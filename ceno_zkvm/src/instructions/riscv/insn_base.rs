@@ -10,7 +10,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::AssertLTConfig,
     set_val,
     uint::Value,
     witness::LkMultiplicity,
@@ -75,7 +75,7 @@ impl<E: ExtensionField> StateInOut<E> {
 pub struct ReadRS1<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
-    pub lt_cfg: IsLtConfig,
+    pub lt_cfg: AssertLTConfig,
     _field_type: PhantomData<E>,
 }
 
@@ -130,7 +130,7 @@ impl<E: ExtensionField> ReadRS1<E> {
 pub struct ReadRS2<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
-    pub lt_cfg: IsLtConfig,
+    pub lt_cfg: AssertLTConfig,
     _field_type: PhantomData<E>,
 }
 
@@ -186,7 +186,7 @@ pub struct WriteRD<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
     pub prev_value: UInt<E>,
-    pub lt_cfg: IsLtConfig,
+    pub lt_cfg: AssertLTConfig,
 }
 
 impl<E: ExtensionField> WriteRD<E> {
@@ -245,7 +245,7 @@ impl<E: ExtensionField> WriteRD<E> {
 #[derive(Debug)]
 pub struct ReadMEM<E: ExtensionField> {
     pub prev_ts: WitIn,
-    pub lt_cfg: IsLtConfig,
+    pub lt_cfg: AssertLTConfig,
     _field_type: PhantomData<E>,
 }
 
@@ -301,7 +301,7 @@ impl<E: ExtensionField> ReadMEM<E> {
 pub struct WriteMEM<E: ExtensionField> {
     pub prev_ts: WitIn,
     pub prev_value: UInt<E>,
-    pub lt_cfg: IsLtConfig,
+    pub lt_cfg: AssertLTConfig,
 }
 
 impl<E: ExtensionField> WriteMEM<E> {
