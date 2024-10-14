@@ -41,9 +41,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
           components: rustfmt, clippy
+          targets: riscv32im-unknown-none-elf
+          # TODO(Matthias): see whether we can keep this in sync with rust-toolchain.toml automatically?
+          toolchain: nightly-2024-05-02
       - name: Cargo cache
         uses: actions/cache@v3
         with:
