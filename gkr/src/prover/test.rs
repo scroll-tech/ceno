@@ -15,7 +15,7 @@ use crate::{
 };
 
 fn copy_and_paste_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
     // Layer 3
     let (_, input) = circuit_builder.create_witness_in(4);
 
@@ -88,7 +88,7 @@ fn copy_and_paste_witness<'a, Ext: ExtensionField>()
 }
 
 fn paste_from_wit_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
 
     // Layer 2
     let (_leaf_id1, leaves1) = circuit_builder.create_witness_in(3);
@@ -167,7 +167,7 @@ fn paste_from_wit_in_witness<'a, Ext: ExtensionField>()
 }
 
 fn copy_to_wit_out_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
     // Layer 2
     let (_, leaves) = circuit_builder.create_witness_in(4);
 
@@ -307,7 +307,7 @@ fn copy_to_wit_out_witness_2<'a, Ext: ExtensionField>()
 }
 
 fn rlc_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
     // Layer 2
     let (_, leaves) = circuit_builder.create_witness_in(4);
 
@@ -440,7 +440,7 @@ where
 }
 
 fn inv_sum_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
     let (_input_id, input) = circuit_builder.create_ext_witness_in(2);
     let (_cond_id, cond) = circuit_builder.create_witness_in(2);
     let (_, output) = circuit_builder.create_ext_witness_out(2);
@@ -508,7 +508,7 @@ fn inv_sum_witness_4_instances<'a, Ext: ExtensionField>() -> CircuitWitness<'a, 
 }
 
 fn lookup_inner_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
 
     // Layer 2
     let (_, input) = circuit_builder.create_ext_witness_in(4);
@@ -592,7 +592,7 @@ fn lookup_inner_witness_4_instances<'a, Ext: ExtensionField>() -> CircuitWitness
 }
 
 fn mixed_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
 
     // Layer 1
     let (_, _input) = circuit_builder.create_witness_in(5);

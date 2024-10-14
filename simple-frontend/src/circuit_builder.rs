@@ -119,20 +119,20 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
 mod tests {
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::{enumerate, Itertools};
+    use itertools::enumerate;
 
     use crate::structs::CircuitBuilder;
 
     #[test]
     fn test_cb_empty_cells() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, input_cells) = circuit_builder.create_witness_in(4);
         let zero_cells = circuit_builder.create_cells(2);
         let leaves = input_cells
             .iter()
             .chain(zero_cells.iter())
             .cloned()
-            .collect_vec();
+            .collect::<Vec<_>>();
         let inners = circuit_builder.create_cells(2);
         circuit_builder.mul3(inners[0], leaves[0], leaves[1], leaves[2], Goldilocks::ONE);
         circuit_builder.mul3(inners[1], leaves[3], leaves[4], leaves[5], Goldilocks::ONE);
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn test_cb_const_cells() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, input_cells) = circuit_builder.create_witness_in(4);
         let const_cells = circuit_builder.create_cells(2);
         circuit_builder.add_const(const_cells[0], Goldilocks::ONE);
@@ -159,7 +159,7 @@ mod tests {
             .iter()
             .chain(const_cells.iter())
             .cloned()
-            .collect_vec();
+            .collect::<Vec<_>>();
         let inners = circuit_builder.create_cells(2);
         circuit_builder.mul3(inners[0], leaves[0], leaves[1], leaves[2], Goldilocks::ONE);
         circuit_builder.mul3(inners[1], leaves[3], leaves[4], leaves[5], Goldilocks::ONE);
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_assert_cells() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, leaves) = circuit_builder.create_witness_in(4);
 
         let inners = circuit_builder.create_cells(2);
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_inner_output_cells() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, leaves) = circuit_builder.create_witness_in(4);
 
         let (_, inners) = circuit_builder.create_witness_out(2);
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn test_force_input_layer() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, leaves) = circuit_builder.create_witness_in(6);
 
         // Unused input elements should also be in the circuit.

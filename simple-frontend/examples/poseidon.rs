@@ -428,7 +428,7 @@ fn poseidon_ex<E: ExtensionField>(
     mix_last_out
 }
 fn main() {
-    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
     let n_inputs = 4;
     let (_, poseidon_ex_initial_state) = circuit_builder.create_witness_in(1);
     let (_, poseidon_ex_inputs) = circuit_builder.create_witness_in(n_inputs);

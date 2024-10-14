@@ -528,7 +528,7 @@ mod tests {
 
     #[test]
     fn test_copy_and_paste() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         // Layer 3
         let (_, input) = circuit_builder.create_witness_in(4);
 
@@ -577,7 +577,7 @@ mod tests {
 
     #[test]
     fn test_paste_from_wit_in() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
 
         // Layer 2
         let (leaf_id, leaves) = circuit_builder.create_witness_in(6);
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn test_copy_to_wit_out() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         // Layer 2
         let (_, leaves) = circuit_builder.create_witness_in(4);
 
@@ -662,7 +662,7 @@ mod tests {
 
     #[test]
     fn test_rlc_circuit() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         // Layer 2
         let (_, leaves) = circuit_builder.create_witness_in(4);
 
@@ -846,7 +846,7 @@ mod tests {
 
     #[test]
     fn test_selector_sumcheck_steps() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let _ = circuit_builder.create_constant_in(6, 1);
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
@@ -859,7 +859,7 @@ mod tests {
 
     #[test]
     fn test_lookup_inner_sumcheck_steps() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
 
         // Layer 2
         let (_, input) = circuit_builder.create_ext_witness_in(4);
@@ -914,7 +914,7 @@ mod tests {
 
     #[test]
     fn test_product_sumcheck_steps() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, input) = circuit_builder.create_witness_in(2);
         let (_, output) = circuit_builder.create_witness_out(1);
         circuit_builder.mul2(output[0], input[0], input[1], Goldilocks::ONE);
