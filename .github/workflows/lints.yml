@@ -70,5 +70,5 @@ jobs:
           TARGET: ${{ matrix.target }}
           RUSTFLAGS: "-Dwarnings"
         run: |
-          cargo check --workspace --exclude ceno_rt --exclude singer-pro
+          cargo check --workspace --tests --benches --examples --exclude ceno_rt --exclude singer-pro
           cargo make clippy
