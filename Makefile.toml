@@ -23,8 +23,6 @@ args = [
     "--workspace",
     "--exclude",
     "ceno_rt",
-    "--exclude",
-    "singer-pro",
 ]
 
 [tasks.fmt-all-check]
