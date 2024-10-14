@@ -23,8 +23,6 @@ args = [
     "--workspace",
     "--exclude",
     "ceno_rt",
-    "--exclude",
-    "singer-pro",
 ]
 
 [tasks.fmt-all-check]
@@ -53,10 +51,9 @@ command = "cargo"
 args = [
     "clippy",
     "--workspace",
+    "--all-targets",
     "--exclude",
     "ceno_rt",
-    "--exclude",
-    "singer-pro",
     "--target",
     "${CUR_TARGET}",
     "--",
