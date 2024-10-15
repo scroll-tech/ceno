@@ -41,10 +41,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
-          override: false
       - name: Cargo cache
         uses: actions/cache@v3
         with:
@@ -58,18 +57,11 @@ jobs:
 
       - name: Install cargo make
         run: |
-          cargo install cargo-make || echo "cargo-make already installed"
+          cargo make --version || cargo install cargo-make
       - name: Check code format
-        uses: actions-rs/cargo@v1
-        with:
-          command: make
-          args: fmt
+        run: cargo make fmt-all-check
 
       - name: Run clippy
-        uses: actions-rs/cargo@v1
         env:
           TARGET: ${{ matrix.target }}
-        with:
-          command: make
-          args: clippy
-
+        run: cargo make clippy

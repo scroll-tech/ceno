@@ -4,8 +4,8 @@ use crate::{
     expression::{fmt, Expression},
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
-        AndTable, LtuTable, OpsTable, OrTable, ProgramTableCircuit, RangeTable, TableCircuit,
-        U16Table, U5Table, U8Table, XorTable,
+        AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
+        TableCircuit, U16Table, U5Table, U8Table, XorTable,
     },
 };
 use ark_std::test_rng;
@@ -17,7 +17,7 @@ use itertools::Itertools;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{
     collections::HashSet,
-    fs::{self, File},
+    fs::File,
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
@@ -68,7 +68,7 @@ pub const MOCK_PROGRAM: &[u32] = &[
     0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b011 << 12 | MOCK_RD << 7 | 0x33,
     // addi x4, x2, 3
     0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
-    // addi x4, x2, -3, correc this below
+    // addi x4, x2, -3
     0b_1_111111 << 25 | MOCK_IMM_NEG3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
     // bltu x2, x3, -8
     0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_110 << 12 | 0b_1100_1 << 7 | 0x63,
@@ -76,6 +76,18 @@ pub const MOCK_PROGRAM: &[u32] = &[
     0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_111 << 12 | 0b_1100_1 << 7 | 0x63,
     // bge x2, x3, -8
     0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_101 << 12 | 0b_1100_1 << 7 | 0x63,
+    // mulhu (0x01, 0x00, 0x33)
+    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x3 << 12 | MOCK_RD << 7 | 0x33,
+    // sll x4, x2, x3
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | MOCK_RD << 7 | 0x33,
+    // srl x4, x2, x3
+    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
+    // jal x4, 0xffffe
+    0b_1_1111111110_1_11111111 << 12 | MOCK_RD << 7 | 0x6f,
+    // lui x4, 0x90005
+    0x90005 << 12 | MOCK_RD << 7 | 0x37,
+    // auipc x4, 0x90005
+    0x90005 << 12 | MOCK_RD << 7 | 0x17,
 ];
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
@@ -96,9 +108,15 @@ pub const MOCK_PC_ADDI_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 56);
 pub const MOCK_PC_BLTU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 60);
 pub const MOCK_PC_BGEU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 64);
 pub const MOCK_PC_BGE: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 68);
+pub const MOCK_PC_MULHU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 72);
+pub const MOCK_PC_SLL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 76);
+pub const MOCK_PC_SRL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 80);
+pub const MOCK_PC_JAL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 84);
+pub const MOCK_PC_LUI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 88);
+pub const MOCK_PC_AUIPC: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 92);
 
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum MockProverError<E: ExtensionField> {
     AssertZeroError {
         expression: Expression<E>,
@@ -123,6 +141,75 @@ pub(crate) enum MockProverError<E: ExtensionField> {
     // TODO later
     // r_expressions
     // w_expressions
+}
+
+impl<E: ExtensionField> PartialEq for MockProverError<E> {
+    // Compare errors based on the content, ignoring the inst_id
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                MockProverError::AssertZeroError {
+                    expression: left_expression,
+                    evaluated: left_evaluated,
+                    name: left_name,
+                    ..
+                },
+                MockProverError::AssertZeroError {
+                    expression: right_expression,
+                    evaluated: right_evaluated,
+                    name: right_name,
+                    ..
+                },
+            ) => {
+                left_expression == right_expression
+                    && left_evaluated == right_evaluated
+                    && left_name == right_name
+            }
+            (
+                MockProverError::AssertEqualError {
+                    left_expression: left_left_expression,
+                    right_expression: left_right_expression,
+                    left: left_left,
+                    right: left_right,
+                    name: left_name,
+                    ..
+                },
+                MockProverError::AssertEqualError {
+                    left_expression: right_left_expression,
+                    right_expression: right_right_expression,
+                    left: right_left,
+                    right: right_right,
+                    name: right_name,
+                    ..
+                },
+            ) => {
+                left_left_expression == right_left_expression
+                    && left_right_expression == right_right_expression
+                    && left_left == right_left
+                    && left_right == right_right
+                    && left_name == right_name
+            }
+            (
+                MockProverError::LookupError {
+                    expression: left_expression,
+                    evaluated: left_evaluated,
+                    name: left_name,
+                    ..
+                },
+                MockProverError::LookupError {
+                    expression: right_expression,
+                    evaluated: right_evaluated,
+                    name: right_name,
+                    ..
+                },
+            ) => {
+                left_expression == right_expression
+                    && left_evaluated == right_evaluated
+                    && left_name == right_name
+            }
+            _ => false,
+        }
+    }
 }
 
 impl<E: ExtensionField> MockProverError<E> {
@@ -183,6 +270,14 @@ impl<E: ExtensionField> MockProverError<E> {
                     Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
+        }
+    }
+
+    fn inst_id(&self) -> usize {
+        match self {
+            Self::AssertZeroError { inst_id, .. }
+            | Self::AssertEqualError { inst_id, .. }
+            | Self::LookupError { inst_id, .. } => *inst_id,
         }
     }
 }
@@ -253,6 +348,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     load_op_table::<OrTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<XorTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<LtuTable, _>(&mut table_vec, cb, challenge);
+    load_op_table::<PowTable, _>(&mut table_vec, cb, challenge);
     load_program_table(&mut table_vec, cb, challenge);
     HashSet::from_iter(table_vec)
 }
@@ -272,19 +368,27 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
         let base64_encoded =
             STANDARD_NO_PAD.encode(serde_json::to_string(&challenge).unwrap().as_bytes());
         let file_path = format!("table_cache_dev_{:?}.json", base64_encoded);
-        // Check if the cache file exists
-        let table = match fs::metadata(file_path.clone()) {
-            Ok(_) => {
-                // if file exist, we deserialize from file to get table
-                let file = File::open(file_path).unwrap();
+        let table = match File::open(file_path.clone()) {
+            Ok(file) => {
                 let reader = BufReader::new(file);
                 serde_json::from_reader(reader).unwrap()
             }
             Err(e) if e.kind() == ErrorKind::NotFound => {
+                // Cached file doesn't exist, let's make a new one.
+                // And carefully avoid exposing a half-written file to other threads,
+                // or other runs of this program (in case of a crash).
+
+                let mut file = tempfile::NamedTempFile::new_in(".").unwrap();
+
                 // load new table and seserialize to file for later use
                 let table = load_tables(cb, challenge);
-                let file = File::create(file_path).unwrap();
-                serde_json::to_writer(file, &table).unwrap();
+                serde_json::to_writer(&mut file, &table).unwrap();
+                // Persist the file to the target location
+                // This is an atomic operation on Posix-like systems, so we don't have to worry
+                // about half-written files.
+                // Note, that if another process wrote to our target file in the meantime,
+                // we silently overwrite it here.  But that's fine.
+                file.persist(file_path).unwrap();
                 table
             }
             Err(e) => panic!("{:?}", e),
@@ -308,19 +412,20 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: [E; 2],
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, Some(challenge))
+        Self::run_maybe_challenge(cb, wits_in, &[], Some(challenge))
     }
 
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, None)
+        Self::run_maybe_challenge(cb, wits_in, &[], None)
     }
 
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        pi: &[E::BaseField],
         challenge: Option<[E; 2]>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         let table = challenge.map(|challenge| load_tables(cb, challenge));
@@ -344,11 +449,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     .chain(&cb.cs.assert_zero_sumcheck_expressions_namespace_map),
             )
         {
-            if name.contains("require_equal") {
+            // require_equal does not always have the form of Expr::Sum as
+            // the sum of witness and constant is expressed as scaled sum
+            if name.contains("require_equal") && expr.unpack_sum().is_some() {
                 let (left, right) = expr.unpack_sum().unwrap();
                 let right = right.neg();
 
-                let left_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &left);
+                let left_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &left);
                 let left_evaluated = left_evaluated
                     .get_ext_field_vec_optn()
                     .map(|v| v.to_vec())
@@ -360,7 +467,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             .collect_vec()
                     });
 
-                let right_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &right);
+                let right_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &right);
                 let right_evaluated = right_evaluated
                     .get_ext_field_vec_optn()
                     .map(|v| v.to_vec())
@@ -389,7 +496,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, &expr);
+                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
                 let expr_evaluated = expr_evaluated
                     .get_ext_field_vec_optn()
                     .map(|v| v.to_vec())
@@ -421,7 +528,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             .iter()
             .zip_eq(cb.cs.lk_expressions_namespace_map.iter())
         {
-            let expr_evaluated = wit_infer_by_expr(&[], wits_in, &challenge, expr);
+            let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
             // Check each lookup expr exists in t vec
@@ -458,10 +565,36 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             Ok(_) => {}
             Err(errors) => {
                 println!("======================================================");
-                println!("Error: {} constraints not satisfied", errors.len());
 
-                for error in errors {
-                    error.print(wits_in, &cb.cs.witin_namespace_map);
+                println!(
+                    r"Hints:
+                        - If you encounter a constraint error that sporadically occurs in different environments
+                          (e.g., passes locally but fails in CI),
+                          this often points to unassigned witnesses during the assignment phase.
+                          Accessing these cells before they are properly written leads to undefined behavior.
+                    "
+                );
+
+                // Print errors and skip consecutive duplicates errors if they are equal.
+                let mut duplicates = 0;
+                let mut prev_err = None;
+                for error in &errors {
+                    if prev_err.is_some() && prev_err.unwrap() == error {
+                        duplicates += 1;
+                    } else {
+                        error.print(wits_in, &cb.cs.witin_namespace_map);
+                    }
+                    prev_err = Some(error);
+                }
+
+                if duplicates > 0 {
+                    println!(
+                        "Error: {} constraints not satisfied ({} duplicates hidden)",
+                        errors.len(),
+                        duplicates
+                    );
+                } else {
+                    println!("Error: {} constraints not satisfied", errors.len());
                 }
                 println!("======================================================");
                 panic!("Constraints not satisfied");
@@ -478,9 +611,10 @@ mod tests {
     use crate::{
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        gadgets::IsLtConfig,
+        gadgets::{AssertLTConfig, IsLtConfig},
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
+        ROMType::U5,
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -592,15 +726,18 @@ mod tests {
         assert_eq!(
             err,
             vec![MockProverError::LookupError {
-                expression: Expression::ScaledSum(
-                    Box::new(Expression::WitIn(0)),
-                    Box::new(Expression::Challenge(
-                        1,
-                        1,
-                        // TODO this still uses default challenge in ConstraintSystem, but challengeId
-                        // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
-                        GoldilocksExt2::ONE,
-                        GoldilocksExt2::ZERO,
+                expression: Expression::Sum(
+                    Box::new(Expression::ScaledSum(
+                        Box::new(Expression::WitIn(0)),
+                        Box::new(Expression::Challenge(
+                            1,
+                            1,
+                            GoldilocksExt2::ONE,
+                            GoldilocksExt2::ZERO,
+                        )),
+                        Box::new(Expression::Constant(
+                            <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
+                        )),
                     )),
                     Box::new(Expression::Challenge(
                         0,
@@ -614,6 +751,8 @@ mod tests {
                 inst_id: 0,
             }]
         );
+        // because inst_id is not checked in our PartialEq impl
+        assert_eq!(err[0].inst_id(), 0);
     }
 
     #[allow(dead_code)]
@@ -621,7 +760,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: IsLtConfig,
+        pub lt_wtns: AssertLTConfig,
     }
 
     struct AssertLtCircuitInput {
@@ -633,7 +772,7 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr(), Some(true), 1)?;
+            let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -753,7 +892,7 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns = cb.less_than(|| "lt", a.expr(), b.expr(), None, 1)?;
+            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
