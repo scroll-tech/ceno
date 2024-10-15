@@ -376,7 +376,6 @@ mod test {
 
     #[test]
     #[cfg(not(debug_assertions))]
-
     fn bench_add_instruction() {
         bench_add_instruction_helper::<GoldilocksExt2>(10);
     }
