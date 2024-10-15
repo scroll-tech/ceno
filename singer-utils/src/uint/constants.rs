@@ -15,8 +15,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     /// `N_OPERAND_CELLS` represent the minimum number of cells each of size `C` needed
     /// to hold `M` total bits
-    pub const N_OPERAND_CELLS: usize =
-        M.div_ceil(Self::MAX_CELL_BIT_WIDTH);
+    pub const N_OPERAND_CELLS: usize = M.div_ceil(Self::MAX_CELL_BIT_WIDTH);
 
     /// The number of `RANGE_CHIP_BIT_WIDTH` cells needed to represent one cell of size `C`
     pub const N_RANGE_CELLS_PER_CELL: usize =
