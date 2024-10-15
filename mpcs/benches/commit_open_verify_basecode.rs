@@ -170,7 +170,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             let values: Vec<E> = evals
                 .iter()
                 .map(Evaluation::value)
-                .map(|x| *x)
+                .copied()
                 .collect::<Vec<E>>();
             transcript.append_field_element_exts(values.as_slice());
             let transcript_for_bench = transcript.clone();
@@ -212,7 +212,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             let values: Vec<E> = evals
                 .iter()
                 .map(Evaluation::value)
-                .map(|x| *x)
+                .copied()
                 .collect::<Vec<E>>();
             transcript.append_field_element_exts(values.as_slice());
 

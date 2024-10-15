@@ -7,7 +7,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip, memory::MemoryChip,
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
+        range::RangeChip, stack::StackChip,
     },
     chips::SingerChipBuilder,
     constants::{EVM_STACK_BYTE_WIDTH, OpcodeType},
@@ -15,7 +15,7 @@ use singer_utils::{
     structs::{PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, mem, sync::Arc};
 
 use crate::{CircuitWiresIn, SingerParams, error::ZKVMError, utils::add_assign_each_cell};
 
@@ -162,10 +162,10 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
     const OPCODE: OpcodeType = OpcodeType::MSTORE;
     const NAME: &'static str = "MSTORE";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -232,7 +232,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
         RangeChip::range_check_bytes(&mut chip_handler, &mut circuit_builder, mem_bytes)?;
 
-        let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, &mem_bytes)?;
+        let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, mem_bytes)?;
         let old_stack_ts_value = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_value()])?;
         TSUInt::assert_lt(
             &mut circuit_builder,
@@ -317,7 +317,7 @@ impl MstoreAccessory {
     fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
 
         // From predesessor circuit.
         let (pred_dup_wire_id, pred_dup) = circuit_builder.create_witness_in(Self::pred_dup_size());
@@ -326,7 +326,7 @@ impl MstoreAccessory {
         // From witness.
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Compute offset, offset + 1, ..., offset + EVM_STACK_BYTE_WIDTH - 1.
         // Load previous memory bytes.
@@ -383,28 +383,35 @@ impl MstoreAccessory {
 
 #[cfg(test)]
 mod test {
+    #[cfg(not(debug_assertions))]
+    use super::MstoreAccessory;
+    use crate::utils::u64vec;
+    #[cfg(not(debug_assertions))]
     use crate::{
-        SingerParams, instructions::InstructionGraph, scheme::GKRGraphProverState, utils::u64vec,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
+        instructions::{InstructionGraph, SingerCircuitBuilder},
+        scheme::GKRGraphProverState,
     };
+    #[cfg(not(debug_assertions))]
     use ark_std::test_rng;
+    #[cfg(not(debug_assertions))]
     use ff::Field;
+    #[cfg(not(debug_assertions))]
     use ff_ext::ExtensionField;
     use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
+    #[cfg(not(debug_assertions))]
     use multilinear_extensions::mle::DenseMultilinearExtension;
     use singer_utils::structs::ChipChallenges;
+    #[cfg(not(debug_assertions))]
     use std::time::Instant;
+    #[cfg(not(debug_assertions))]
     use transcript::Transcript;
 
-    use crate::{
-        CircuitWiresIn, SingerGraphBuilder,
-        instructions::{
-            Instruction, SingerCircuitBuilder,
-            mstore::{MstoreAccessory, MstoreInstruction},
-        },
-    };
+    use crate::instructions::{Instruction, mstore::MstoreInstruction};
 
-    use crate::test::{get_uint_params, test_opcode_circuit};
+    use crate::test::get_uint_params;
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
     use goldilocks::Goldilocks;
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
     use std::collections::BTreeMap;
@@ -482,6 +489,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,
@@ -496,7 +504,7 @@ mod test {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
             SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
-        let mut singer_builder = SingerGraphBuilder::<E>::new();
+        let mut singer_builder = SingerGraphBuilder::<E>::default();
 
         let mut rng = test_rng();
         let inst_phase0_size = MstoreInstruction::phase0_size();
@@ -505,9 +513,9 @@ mod test {
                 .map(|_| {
                     (0..inst_phase0_size)
                         .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
+                        .collect::<Vec<_>>()
                 })
-                .collect_vec()
+                .collect::<Vec<_>>()
                 .into(),
         ];
         let acc_phase0_size = MstoreAccessory::phase0_size();
@@ -518,9 +526,9 @@ mod test {
                 .map(|_| {
                     (0..acc_phase0_size)
                         .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
+                        .collect::<Vec<_>>()
                 })
-                .collect_vec()
+                .collect::<Vec<_>>()
                 .into(),
         ];
 
@@ -550,10 +558,10 @@ mod test {
         let point = vec![E::random(&mut rng), E::random(&mut rng)];
         let target_evals = graph.target_evals(&wit, &point);
 
-        let mut prover_transcript = &mut Transcript::new(b"Singer");
+        let prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, prover_transcript, 1)
             .expect("prove failed");
         println!(
             "MstoreInstruction::prove, instance_num_vars = {}, time = {}",

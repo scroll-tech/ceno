@@ -78,7 +78,7 @@ fn bench_add(c: &mut Criterion) {
                 b.iter_with_setup(
                     || {
                         let mut rng = test_rng();
-                        let singer_builder = SingerGraphBuilder::<E>::new();
+                        let singer_builder = SingerGraphBuilder::<E>::default();
                         let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
                                 (rng, singer_builder, real_challenges)
                     },
@@ -123,14 +123,14 @@ fn bench_add(c: &mut Criterion) {
                         let point = vec![E::random(&mut rng), E::random(&mut rng)];
                         let target_evals = graph.target_evals(&wit, &point);
 
-                        let mut prover_transcript = &mut Transcript::new(b"Singer");
+                        let prover_transcript = &mut Transcript::new(b"Singer");
 
                         let timer = Instant::now();
                         let _ = GKRGraphProverState::prove(
                             &graph,
                             &wit,
                             &target_evals,
-                            &mut prover_transcript,
+                            prover_transcript,
                             (1 << instance_num_vars).min(max_thread_id),
                         )
                         .expect("prove failed");

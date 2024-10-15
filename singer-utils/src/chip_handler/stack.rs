@@ -1,10 +1,9 @@
 use crate::{
-    chip_handler::{ChipHandler, ram_handler::RAMHandler, util::cell_to_mixed},
+    chip_handler::{ChipHandler, util::cell_to_mixed},
     structs::RAMType,
 };
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
-use std::{cell::RefCell, rc::Rc};
 
 pub struct StackChip {}
 

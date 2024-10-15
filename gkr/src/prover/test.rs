@@ -15,7 +15,7 @@ use crate::{
 };
 
 fn copy_and_paste_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
     // Layer 3
     let (_, input) = circuit_builder.create_witness_in(4);
 
@@ -38,9 +38,8 @@ fn copy_and_paste_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     );
 
     circuit_builder.configure();
-    let circuit = Circuit::new(&circuit_builder);
 
-    circuit
+    Circuit::new(&circuit_builder)
 }
 
 fn copy_and_paste_witness<'a, Ext: ExtensionField>()
@@ -86,7 +85,7 @@ fn copy_and_paste_witness<'a, Ext: ExtensionField>()
 }
 
 fn paste_from_wit_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
 
     // Layer 2
     let (_leaf_id1, leaves1) = circuit_builder.create_witness_in(3);
@@ -106,8 +105,8 @@ fn paste_from_wit_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     circuit_builder.mul2(root[0], inners[0], inners[1], Ext::BaseField::ONE);
 
     circuit_builder.configure();
-    let circuit = Circuit::new(&circuit_builder);
-    circuit
+
+    Circuit::new(&circuit_builder)
 }
 
 fn paste_from_wit_in_witness<'a, Ext: ExtensionField>()
@@ -162,7 +161,7 @@ fn paste_from_wit_in_witness<'a, Ext: ExtensionField>()
 }
 
 fn copy_to_wit_out_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
     // Layer 2
     let (_, leaves) = circuit_builder.create_witness_in(4);
 
@@ -177,9 +176,8 @@ fn copy_to_wit_out_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     circuit_builder.assert_const(root, 5005);
 
     circuit_builder.configure();
-    let circuit = Circuit::new(&circuit_builder);
 
-    circuit
+    Circuit::new(&circuit_builder)
 }
 
 fn copy_to_wit_out_witness<'a, Ext: ExtensionField>()
@@ -297,7 +295,7 @@ fn copy_to_wit_out_witness_2<'a, Ext: ExtensionField>()
 }
 
 fn rlc_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
     // Layer 2
     let (_, leaves) = circuit_builder.create_witness_in(4);
 
@@ -311,9 +309,8 @@ fn rlc_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
     circuit_builder.mul2_ext(&roots[0], &inners[0], &inners[1], Ext::BaseField::ONE);
 
     circuit_builder.configure();
-    let circuit = Circuit::new(&circuit_builder);
 
-    circuit
+    Circuit::new(&circuit_builder)
 }
 
 fn rlc_witness<'a, Ext>() -> (
@@ -339,7 +336,7 @@ where
                             challenge: i as u8,
                             exp: j as u64,
                         },
-                        x.pow(&[j as u64]),
+                        x.pow([j as u64]),
                     )
                 })
                 .collect_vec()
@@ -363,17 +360,17 @@ where
     ];
     let witness_in = vec![leaves.clone().into()];
 
-    let inner00: Ext = challenge_pows[0][0].1 * (&leaves[0][0])
-        + challenge_pows[0][1].1 * (&leaves[0][1])
+    let inner00: Ext = challenge_pows[0][0].1 * leaves[0][0]
+        + challenge_pows[0][1].1 * leaves[0][1]
         + challenge_pows[0][2].1;
-    let inner01: Ext = challenge_pows[1][0].1 * (&leaves[0][2])
-        + challenge_pows[1][1].1 * (&leaves[0][3])
+    let inner01: Ext = challenge_pows[1][0].1 * leaves[0][2]
+        + challenge_pows[1][1].1 * leaves[0][3]
         + challenge_pows[1][2].1;
-    let inner10: Ext = challenge_pows[0][0].1 * (&leaves[1][0])
-        + challenge_pows[0][1].1 * (&leaves[1][1])
+    let inner10: Ext = challenge_pows[0][0].1 * leaves[1][0]
+        + challenge_pows[0][1].1 * leaves[1][1]
         + challenge_pows[0][2].1;
-    let inner11: Ext = challenge_pows[1][0].1 * (&leaves[1][2])
-        + challenge_pows[1][1].1 * (&leaves[1][3])
+    let inner11: Ext = challenge_pows[1][0].1 * leaves[1][2]
+        + challenge_pows[1][1].1 * leaves[1][3]
         + challenge_pows[1][2].1;
 
     let inners = vec![
@@ -398,8 +395,8 @@ where
     let root0 = inner00 * inner01;
     let root1 = inner10 * inner11;
     let roots = vec![
-        root0.as_bases().into_iter().cloned().collect_vec(),
-        root1.as_bases().into_iter().cloned().collect_vec(),
+        root0.as_bases().iter().cloned().collect_vec(),
+        root1.as_bases().iter().cloned().collect_vec(),
     ];
 
     let layers: Vec<DenseMultilinearExtension<Ext>> = vec![
@@ -431,7 +428,7 @@ where
 }
 
 fn inv_sum_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
     let (_input_id, input) = circuit_builder.create_ext_witness_in(2);
     let (_cond_id, cond) = circuit_builder.create_witness_in(2);
     let (_, output) = circuit_builder.create_ext_witness_out(2);
@@ -499,7 +496,7 @@ fn inv_sum_witness_4_instances<'a, Ext: ExtensionField>() -> CircuitWitness<'a, 
 }
 
 fn lookup_inner_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
 
     // Layer 2
     let (_, input) = circuit_builder.create_ext_witness_in(4);
@@ -583,7 +580,7 @@ fn lookup_inner_witness_4_instances<'a, Ext: ExtensionField>() -> CircuitWitness
 }
 
 fn mixed_in_circuit<Ext: ExtensionField>() -> Circuit<Ext> {
-    let mut circuit_builder = CircuitBuilder::<Ext>::new();
+    let mut circuit_builder = CircuitBuilder::<Ext>::default();
 
     // Layer 1
     let (_, _input) = circuit_builder.create_witness_in(5);
@@ -669,9 +666,9 @@ fn mixed_in_witness_4_instances<'a, Ext: ExtensionField>() -> CircuitWitness<'a,
     circuit_wits
 }
 
-fn prove_and_verify<'a, Ext: ExtensionField>(
+fn prove_and_verify<Ext: ExtensionField>(
     circuit: Circuit<Ext>,
-    circuit_wits: CircuitWitness<'a, Ext>,
+    circuit_wits: CircuitWitness<'_, Ext>,
     challenges: Vec<Ext>,
 ) {
     let mut rng = test_rng();

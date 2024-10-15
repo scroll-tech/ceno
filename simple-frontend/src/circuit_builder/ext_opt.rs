@@ -16,15 +16,15 @@ impl<Ext: ExtensionField> From<Vec<CellId>> for ExtCellId<Ext> {
     fn from(cells: Vec<CellId>) -> Self {
         Self {
             cells,
-            phantom: PhantomData::default(),
+            phantom: PhantomData,
         }
     }
 }
 
-impl<Ext: ExtensionField> Into<Vec<CellId>> for ExtCellId<Ext> {
+impl<Ext: ExtensionField> From<ExtCellId<Ext>> for Vec<CellId> {
     /// converting an ext cell into a vector of CellIds
-    fn into(self) -> Vec<CellId> {
-        self.cells
+    fn from(val: ExtCellId<Ext>) -> Self {
+        val.cells
     }
 }
 

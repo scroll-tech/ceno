@@ -171,7 +171,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             .partition(|(i, _)| i % 2 == 0);
         let eval_value_1 = f1.remove(0).1;
 
-        self.to_next_step_point = sumcheck_proof_1.point.clone();
+        self.to_next_step_point.clone_from(&sumcheck_proof_1.point);
         self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(
             &self.to_next_step_point,
             &eval_value_1,

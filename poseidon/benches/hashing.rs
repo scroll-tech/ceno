@@ -30,34 +30,34 @@ fn random_ceno_hash() -> Digest<Goldilocks> {
 }
 
 fn plonky_hash_single(a: GoldilocksField) {
-    let result = black_box(PlonkyPoseidonHash::hash_or_noop(&[a]));
+    let _result = black_box(PlonkyPoseidonHash::hash_or_noop(&[a]));
 }
 
 fn ceno_hash_single(a: Goldilocks) {
-    let result = black_box(PoseidonHash::hash_or_noop(&[a]));
+    let _result = black_box(PoseidonHash::hash_or_noop(&[a]));
 }
 
 fn plonky_hash_2_to_1(left: HashOut<GoldilocksField>, right: HashOut<GoldilocksField>) {
-    let result = black_box(PlonkyPoseidonHash::two_to_one(left, right));
+    let _result = black_box(PlonkyPoseidonHash::two_to_one(left, right));
 }
 
 fn ceno_hash_2_to_1(left: &Digest<Goldilocks>, right: &Digest<Goldilocks>) {
-    let result = black_box(PoseidonHash::two_to_one(left, right));
+    let _result = black_box(PoseidonHash::two_to_one(left, right));
 }
 
 fn plonky_hash_many_to_1(values: &[GoldilocksField]) {
-    let result = black_box(PlonkyPoseidonHash::hash_or_noop(values));
+    let _result = black_box(PlonkyPoseidonHash::hash_or_noop(values));
 }
 
 fn ceno_hash_many_to_1(values: &[Goldilocks]) {
-    let result = black_box(PoseidonHash::hash_or_noop(values));
+    let _result = black_box(PoseidonHash::hash_or_noop(values));
 }
 
 pub fn hashing_benchmark(c: &mut Criterion) {
     c.bench_function("plonky hash single", |bencher| {
         bencher.iter_batched(
-            || random_plonky_2_goldy(),
-            |p_a| plonky_hash_single(p_a),
+            random_plonky_2_goldy,
+            plonky_hash_single,
             BatchSize::SmallInput,
         )
     });
@@ -84,11 +84,7 @@ pub fn hashing_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("ceno hash single", |bencher| {
-        bencher.iter_batched(
-            || random_ceno_goldy(),
-            |c_a| ceno_hash_single(c_a),
-            BatchSize::SmallInput,
-        )
+        bencher.iter_batched(random_ceno_goldy, ceno_hash_single, BatchSize::SmallInput)
     });
 
     c.bench_function("ceno hash 2 to 1", |bencher| {

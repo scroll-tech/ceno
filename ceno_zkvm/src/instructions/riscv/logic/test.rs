@@ -50,7 +50,7 @@ fn test_opcode_and() {
     let lkm = lkm.into_finalize_result()[ROMType::And as usize].clone();
     assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
 
-    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>((A & B) as u32));
+    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A & B));
 
     config
         .rd_written
@@ -58,7 +58,7 @@ fn test_opcode_and() {
         .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -101,7 +101,7 @@ fn test_opcode_or() {
     let lkm = lkm.into_finalize_result()[ROMType::Or as usize].clone();
     assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
 
-    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>((A | B) as u32));
+    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A | B));
 
     config
         .rd_written
@@ -109,7 +109,7 @@ fn test_opcode_or() {
         .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -152,7 +152,7 @@ fn test_opcode_xor() {
     let lkm = lkm.into_finalize_result()[ROMType::Xor as usize].clone();
     assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
 
-    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>((A ^ B) as u32));
+    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A ^ B));
 
     config
         .rd_written
@@ -160,7 +160,7 @@ fn test_opcode_xor() {
         .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()

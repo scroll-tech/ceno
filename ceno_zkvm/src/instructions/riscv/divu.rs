@@ -212,7 +212,7 @@ mod test {
                 .unwrap();
 
             MockProver::assert_satisfied(
-                &mut cb,
+                &cb,
                 &raw_witin
                     .de_interleaving()
                     .into_mles()

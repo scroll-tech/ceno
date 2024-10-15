@@ -48,7 +48,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     let out_is_zero = Goldilocks::from(0);
 
     // build the circuit, only one cell for value, inv and value * inv etc
-    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
     let (value_wire_in_id, value) = circuit_builder.create_witness_in(1);
     let (inv_wire_in_id, inv) = circuit_builder.create_witness_in(1);
     let (is_zero, cond1, cond2) = is_zero_gadget(&mut circuit_builder, value[0], inv[0]);
@@ -109,7 +109,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];
     let instance_num_vars = 1_u32.ilog2() as usize;
-    for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
+    for wire_out_id in [cond_wire_out_id, is_zero_wire_out_id] {
         let output_mle = &wits_out[wire_out_id as usize];
         let prover_output_point = iter::repeat_with(|| {
             prover_transcript
@@ -180,7 +180,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
 
     // build the circuit, number of cells for value is UINT256_4_N_OPERAND_CELLS
     // inv is the inverse of each cell's value, if value = 0 then inv = 0
-    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
     let (value_wire_in_id, value) = circuit_builder.create_witness_in(UINT256_4_N_OPERAND_CELLS);
     let (inv_wire_in_id, inv) = circuit_builder.create_witness_in(UINT256_4_N_OPERAND_CELLS);
 
@@ -259,8 +259,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
 
     let mut prover_wires_out_evals = vec![];
     let mut verifier_wires_out_evals = vec![];
-    let instance_num_vars = 1_u32.ilog2() as usize;
-    for wire_out_id in vec![cond_wire_out_id, is_zero_wire_out_id] {
+    for wire_out_id in [cond_wire_out_id, is_zero_wire_out_id] {
         let output_mle = &wits_out[wire_out_id as usize];
         let prover_output_point = iter::repeat_with(|| {
             prover_transcript

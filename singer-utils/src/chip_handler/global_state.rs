@@ -1,11 +1,9 @@
 use crate::{
-    chip_handler::{ChipHandler, ram_handler::RAMHandler, util::cell_to_mixed},
+    chip_handler::{ChipHandler, util::cell_to_mixed},
     structs::RAMType,
 };
 use ff_ext::ExtensionField;
-use itertools::Itertools;
-use simple_frontend::structs::{Cell, CellId, CircuitBuilder, MixedCell};
-use std::{cell::RefCell, rc::Rc};
+use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
 pub struct GlobalStateChip {}
 
@@ -51,7 +49,7 @@ impl GlobalStateChip {
             cell_to_mixed(pc),
             cell_to_mixed(stack_ts),
             cell_to_mixed(memory_ts),
-            vec![stack_top.into(), clk.into()],
+            vec![stack_top, clk],
         ]
         .concat();
 
