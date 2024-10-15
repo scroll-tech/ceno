@@ -656,41 +656,43 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 ROMType::iter().zip(lkm_from_cs.iter().zip(lkm_from_assignment.iter()))
             {
                 if *cs_map != *ass_map {
-                    // lookup missing in lkm cs
-                    ass_map.iter().for_each(|(key, count)| {
-                        if !cs_map.contains_key(key) {
-                            errors.push(MockProverError::LkMultiplicityError {
-                                rom_type,
-                                key: *key,
-                                count: *count as isize,
-                                inst_id: 0,
-                            })
-                        }
+                    let cs_keys: HashSet<_> = cs_map.keys().collect();
+                    let ass_keys: HashSet<_> = ass_map.keys().collect();
+
+                    // lookup missing in lkm Constraint System.
+                    ass_keys.difference(&cs_keys).for_each(|k| {
+                        let count_ass = ass_map.get(k).unwrap();
+                        errors.push(MockProverError::LkMultiplicityError {
+                            rom_type,
+                            key: **k,
+                            count: *count_ass as isize,
+                            inst_id: 0,
+                        })
                     });
 
-                    // lookup missing in lkm assignments
-                    cs_map.iter().for_each(|(key, count)| {
-                        if !ass_map.contains_key(key) {
-                            errors.push(MockProverError::LkMultiplicityError {
-                                rom_type,
-                                key: *key,
-                                count: -(*count as isize),
-                                inst_id: 0,
-                            })
-                        }
+                    // lookup missing in lkm Assignments.
+                    cs_keys.difference(&ass_keys).for_each(|k| {
+                        let count_cs = cs_map.get(k).unwrap();
+                        errors.push(MockProverError::LkMultiplicityError {
+                            rom_type,
+                            key: **k,
+                            count: -(*count_cs as isize),
+                            inst_id: 0,
+                        })
                     });
 
                     // count of specific lookup differ lkm assignments and lkm cs
-                    cs_map.iter().for_each(|(key, count_cs)| {
-                        if let Some(count_ass) = ass_map.get(key) {
-                            if count_cs != count_ass {
-                                errors.push(MockProverError::LkMultiplicityError {
-                                    rom_type,
-                                    key: *key,
-                                    count: (*count_ass as isize) - (*count_cs as isize),
-                                    inst_id: 0,
-                                })
-                            }
+                    cs_keys.intersection(&ass_keys).for_each(|k| {
+                        let count_cs = cs_map.get(k).unwrap();
+                        let count_ass = ass_map.get(k).unwrap();
+
+                        if count_cs != count_ass {
+                            errors.push(MockProverError::LkMultiplicityError {
+                                rom_type,
+                                key: **k,
+                                count: (*count_ass as isize) - (*count_cs as isize),
+                                inst_id: 0,
+                            })
                         }
                     });
                 }
