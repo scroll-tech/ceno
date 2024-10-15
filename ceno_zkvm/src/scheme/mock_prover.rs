@@ -657,61 +657,42 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             {
                 if *cs_map != *ass_map {
                     // lookup missing in lkm cs
-                    let ass_not_cs: Vec<u64> = ass_map
-                        .keys()
-                        .filter(|key| !cs_map.contains_key(*key))
-                        .cloned()
-                        .collect();
-                    for key in ass_not_cs {
-                        let count = *ass_map.get(&key).unwrap() as isize;
-                        errors.push(MockProverError::LkMultiplicityError {
-                            rom_type,
-                            key,
-                            count,
-                            inst_id: 0,
-                        })
-                    }
+                    ass_map.iter().for_each(|(key, count)| {
+                        if !cs_map.contains_key(key) {
+                            errors.push(MockProverError::LkMultiplicityError {
+                                rom_type,
+                                key: *key,
+                                count: *count as isize,
+                                inst_id: 0,
+                            })
+                        }
+                    });
 
                     // lookup missing in lkm assignments
-                    let cs_not_ass: Vec<u64> = cs_map
-                        .keys()
-                        .filter(|key| !ass_map.contains_key(*key))
-                        .cloned()
-                        .collect();
-                    for key in cs_not_ass {
-                        let count = *cs_map.get(&key).unwrap() as isize;
-                        errors.push(MockProverError::LkMultiplicityError {
-                            rom_type,
-                            key,
-                            count: -count,
-                            inst_id: 0,
-                        })
-                    }
+                    cs_map.iter().for_each(|(key, count)| {
+                        if !ass_map.contains_key(key) {
+                            errors.push(MockProverError::LkMultiplicityError {
+                                rom_type,
+                                key: *key,
+                                count: -(*count as isize),
+                                inst_id: 0,
+                            })
+                        }
+                    });
 
                     // count of specific lookup differ lkm assignments and lkm cs
-                    let mismatched: Vec<u64> = cs_map
-                        .iter()
-                        .filter_map(|(key, value1)| {
-                            if let Some(value2) = ass_map.get(key) {
-                                if value1 != value2 {
-                                    return Some(key);
-                                }
+                    cs_map.iter().for_each(|(key, count_cs)| {
+                        if let Some(count_ass) = ass_map.get(key) {
+                            if count_cs != count_ass {
+                                errors.push(MockProverError::LkMultiplicityError {
+                                    rom_type,
+                                    key: *key,
+                                    count: (*count_ass as isize) - (*count_cs as isize),
+                                    inst_id: 0,
+                                })
                             }
-                            None
-                        })
-                        .cloned()
-                        .collect();
-                    for key in mismatched {
-                        let cs_count = *cs_map.get(&key).unwrap() as isize;
-                        let ass_count = *ass_map.get(&key).unwrap() as isize;
-
-                        errors.push(MockProverError::LkMultiplicityError {
-                            rom_type,
-                            key,
-                            count: ass_count - cs_count,
-                            inst_id: 0,
-                        });
-                    }
+                        }
+                    });
                 }
             }
         }
