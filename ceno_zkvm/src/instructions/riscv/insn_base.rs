@@ -1,4 +1,4 @@
-use ceno_emul::StepRecord;
+use ceno_emul::{StepRecord, Word};
 use ff_ext::ExtensionField;
 
 use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
@@ -17,7 +17,7 @@ use crate::{
 };
 use ceno_emul::Tracer;
 use core::mem::MaybeUninit;
-use std::marker::PhantomData;
+use std::{iter, marker::PhantomData};
 
 #[derive(Debug)]
 pub struct StateInOut<E: ExtensionField> {
@@ -357,5 +357,119 @@ impl<E: ExtensionField> WriteMEM<E> {
         )?;
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct MemAddr<E: ExtensionField> {
+    addr: UInt<E>,
+    low_bits: Vec<WitIn>,
+}
+
+impl<E: ExtensionField> MemAddr<E> {
+    const N_LOW_BITS: usize = 2;
+
+    /// An address which is range-checked, and not aligned. Bits 0 and 1 are variables.
+    pub fn construct_unaligned(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
+        Self::construct(cb, 0)
+    }
+
+    /// An address which is range-checked, and aligned to 2 bytes. Bit 0 is constant 0. Bit 1 is variable.
+    pub fn construct_align2(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
+        Self::construct(cb, 1)
+    }
+
+    /// An address which is range-checked, and aligned to 4 bytes. Bits 0 and 1 are constant 0.
+    pub fn construct_align4(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
+        Self::construct(cb, 2)
+    }
+
+    /// A UInt representing the address as u16 limbs.
+    pub fn as_uint(&self) -> &UInt<E> {
+        &self.addr
+    }
+
+    /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
+    pub fn low_bit_exprs(&self) -> Vec<Expression<E>> {
+        iter::repeat_n(Expression::ZERO, self.n_zeros())
+            .chain(self.low_bits.iter().map(|b| b.expr()))
+            .collect()
+    }
+
+    fn construct(cb: &mut CircuitBuilder<E>, n_zeros: usize) -> Result<Self, ZKVMError> {
+        // Soundness: This does not use the UInt range-check but specialized checks instead.
+        let addr = UInt::new_unchecked(|| "memory_addr", cb)?;
+
+        assert!(n_zeros <= Self::N_LOW_BITS);
+        let low_bits = (n_zeros..Self::N_LOW_BITS)
+            .map(|i| cb.create_witin(|| format!("low_bit_{}", i)))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // TODO: range check the high limb.
+        // TODO: range check the low limb together with low bits.
+
+        Ok(MemAddr { addr, low_bits })
+    }
+
+    pub fn assign_instance(
+        &self,
+        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        lkm: &mut LkMultiplicity,
+        addr: Word,
+    ) -> Result<(), ZKVMError> {
+        self.addr.assign_value(instance, Value::new_unchecked(addr));
+
+        for (i, bit) in self.low_bits.iter().enumerate() {
+            let b = ((addr >> self.n_zeros()) >> i) & 1;
+            set_val!(instance, bit, b as u64);
+        }
+
+        Ok(())
+    }
+
+    fn n_zeros(&self) -> usize {
+        Self::N_LOW_BITS - self.low_bits.len()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
+    use itertools::Itertools;
+    use multilinear_extensions::mle::IntoMLEs;
+
+    use crate::{
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
+        scheme::mock_prover::MockProver,
+        witness::{LkMultiplicity, RowMajorMatrix},
+    };
+
+    use super::MemAddr;
+
+    #[test]
+    fn test_mem_addr() {
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+
+        let mem_addr = MemAddr::construct_align2(&mut cb).unwrap();
+
+        let mut lkm = LkMultiplicity::default();
+        let mut raw_witin = RowMajorMatrix::<F>::new(1, cb.cs.num_witin as usize);
+        for instance in raw_witin.iter_mut() {
+            mem_addr
+                .assign_instance(instance, &mut lkm, 0xbead1010)
+                .unwrap();
+        }
+
+        MockProver::assert_satisfied(
+            &cb,
+            &raw_witin
+                .de_interleaving()
+                .into_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            None,
+        );
     }
 }
