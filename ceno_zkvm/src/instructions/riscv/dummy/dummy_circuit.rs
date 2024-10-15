@@ -4,9 +4,9 @@ use ceno_emul::{InsnCodes, InsnFormat, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::super::{
+    RIVInstruction,
     constants::UInt,
     insn_base::{ReadMEM, ReadRS1, ReadRS2, StateInOut, WriteMEM, WriteRD},
-    RIVInstruction,
 };
 use crate::{
     circuit_builder::CircuitBuilder,
