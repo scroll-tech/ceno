@@ -33,6 +33,7 @@ mod utils;
 // 4. (gkr graph + gkr witness) => (gkr proof + point)
 // 5. (commitments + point) => pcs proof
 
+#[allow(clippy::too_long_first_doc_paragraph)]
 /// Circuit graph builder for Singer. `output_wires_id` is indexed by
 /// InstOutputType, corresponding to the product of summation of the chip check
 /// records. `public_output_size` is the wire id stores the size of public

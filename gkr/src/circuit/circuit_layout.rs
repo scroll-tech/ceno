@@ -122,15 +122,6 @@ impl<E: ExtensionField> Circuit<E> {
         let mut input_paste_from_consts_in = Vec::new();
         let mut max_in_wit_num_vars: Option<usize> = None;
         for (ty, in_cell_ids) in in_cell_ids.iter() {
-            #[cfg(feature = "debug")]
-            in_cell_ids.iter().enumerate().map(|(i, cell_id)| {
-                // Each wire_in should be assigned with a consecutive
-                // input layer segment. Then we can use a special
-                // sumcheck protocol to prove it.
-                assert!(
-                    i == 0 || wire_ids_in_layer[*cell_id] == wire_ids_in_layer[wire_in[i - 1]] + 1
-                );
-            });
             let segment = (
                 wire_ids_in_layer[in_cell_ids[0]],
                 wire_ids_in_layer[in_cell_ids[in_cell_ids.len() - 1]] + 1, /* + 1 for exclusive

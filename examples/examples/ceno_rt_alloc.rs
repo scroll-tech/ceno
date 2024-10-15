@@ -18,8 +18,7 @@ fn main() {
     }
 
     // Test writing to the heap.
-    let mut v: Vec<u32> = vec![];
-    v.push(0xbeef);
+    let v: Vec<u32> = vec![0xbeef];
     black_box(&v[0]);
 
     // Test writing to a larger vector on the heap
