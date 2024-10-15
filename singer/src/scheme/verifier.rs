@@ -1,18 +1,17 @@
 use ff_ext::ExtensionField;
-use gkr::{structs::PointAndEval, utils::MultilinearExtensionFromVectors};
+use gkr::structs::PointAndEval;
 use gkr_graph::structs::TargetEvaluations;
 use itertools::{chain, Itertools};
-use multilinear_extensions::mle::MultilinearExtension;
 use transcript::Transcript;
 
 use crate::{error::ZKVMError, SingerAuxInfo, SingerCircuit, SingerWiresOutValues};
 
 use super::{GKRGraphVerifierState, SingerProof};
 
-pub fn verify<'a, E: ExtensionField>(
+pub fn verify<E: ExtensionField>(
     vm_circuit: &SingerCircuit<E>,
     vm_proof: SingerProof<E>,
-    singer_out_evals: SingerWiresOutValues<'a, E>,
+    singer_out_evals: SingerWiresOutValues<'_, E>,
     aux_info: &SingerAuxInfo,
     challenges: &[E],
     transcript: &mut Transcript<E>,
@@ -95,7 +94,7 @@ pub fn verify<'a, E: ExtensionField>(
 
     GKRGraphVerifierState::verify(
         &vm_circuit.0,
-        &challenges,
+        challenges,
         &target_evals,
         vm_proof.gkr_phase_proof,
         &aux_info.graph_aux_info,

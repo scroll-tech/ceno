@@ -6,15 +6,14 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, calldata::CalldataChip, global_state::GlobalStateChip,
-        ram_handler::RAMHandler, range::RangeChip, rom_handler::ROMHandler, stack::StackChip,
-        ChipHandler,
+        range::RangeChip, stack::StackChip, ChipHandler,
     },
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, StackUInt, TSUInt, UInt64},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -50,11 +49,11 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
     const OPCODE: OpcodeType = OpcodeType::CALLDATALOAD;
     const NAME: &'static str = "CALLDATALOAD";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         // instantiate memory handlers
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -69,7 +68,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top,
             clk,
         );
@@ -89,7 +88,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top_expr,
             clk_expr.add(E::BaseField::ONE),
         );
@@ -158,24 +157,32 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
 
 #[cfg(test)]
 mod test {
+    #[cfg(not(debug_assertions))]
+    use crate::{
+        instructions::{InstructionGraph, SingerCircuitBuilder},
+        scheme::GKRGraphProverState,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
+    };
+    #[cfg(not(debug_assertions))]
     use ark_std::test_rng;
+    #[cfg(not(debug_assertions))]
     use ff::Field;
+    #[cfg(not(debug_assertions))]
     use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
-    use std::{collections::BTreeMap, time::Instant};
+    use std::collections::BTreeMap;
+    #[cfg(not(debug_assertions))]
+    use std::time::Instant;
+    #[cfg(not(debug_assertions))]
     use transcript::Transcript;
 
+    #[allow(deprecated)]
+    use crate::test::test_opcode_circuit;
     use crate::{
-        instructions::{
-            CalldataloadInstruction, ChipChallenges, Instruction, InstructionGraph,
-            SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
-        test::{get_uint_params, test_opcode_circuit},
+        instructions::{CalldataloadInstruction, ChipChallenges, Instruction},
+        test::get_uint_params,
         utils::u64vec,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
     #[test]
@@ -258,6 +265,7 @@ mod test {
             GoldilocksExt2::from(2),
         ];
 
+        #[allow(deprecated)]
         let _circuit_witness = test_opcode_circuit(
             &inst_circuit,
             &phase0_idx_map,
@@ -272,7 +280,7 @@ mod test {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
             SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
-        let mut singer_builder = SingerGraphBuilder::<E>::new();
+        let mut singer_builder = SingerGraphBuilder::<E>::default();
 
         let mut rng = test_rng();
         let size = CalldataloadInstruction::phase0_size();
@@ -281,9 +289,9 @@ mod test {
                 .map(|_| {
                     (0..size)
                         .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
+                        .collect::<Vec<_>>()
                 })
-                .collect_vec()
+                .collect::<Vec<_>>()
                 .into(),
         ];
 
@@ -314,10 +322,10 @@ mod test {
         let point = vec![E::random(&mut rng), E::random(&mut rng)];
         let target_evals = graph.target_evals(&wit, &point);
 
-        let mut prover_transcript = &mut Transcript::new(b"Singer");
+        let prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, prover_transcript, 1)
             .expect("prove failed");
         println!(
             "CalldataloadInstruction::prove, instance_num_vars = {}, time = {}",

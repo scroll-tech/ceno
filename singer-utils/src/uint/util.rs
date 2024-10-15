@@ -34,7 +34,7 @@ pub fn convert_decomp<E: ExtensionField>(
 
     // ensure the small cell values are in little endian form
     let small_cells = if !is_little_endian {
-        small_cells.to_vec().into_iter().rev().collect()
+        small_cells.iter().copied().rev().collect()
     } else {
         small_cells.to_vec()
     };
@@ -85,7 +85,7 @@ pub fn add_one_to_big_num<F: SmallField>(limb_modulo: F, limbs: &[F]) -> Vec<F> 
     let mut result = vec![];
 
     for limb in limbs {
-        let mut new_limb_value = limb.clone();
+        let mut new_limb_value = *limb;
         if should_add_one {
             new_limb_value += F::ONE;
             if new_limb_value == limb_modulo {

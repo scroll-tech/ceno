@@ -68,8 +68,8 @@ pub(crate) fn test_opcode_circuit_v2<'a, Ext: ExtensionField>(
     let witness_in = witness_in.into_iter().map(|w_in| w_in.into_mle()).collect();
 
     let circuit_witness = {
-        let mut circuit_witness = CircuitWitness::new(&circuit, circuit_witness_challenges);
-        circuit_witness.add_instance(&circuit, witness_in);
+        let mut circuit_witness = CircuitWitness::new(circuit, circuit_witness_challenges);
+        circuit_witness.add_instance(circuit, witness_in);
         circuit_witness
     };
 
@@ -77,7 +77,7 @@ pub(crate) fn test_opcode_circuit_v2<'a, Ext: ExtensionField>(
     println!("{:?}", circuit_witness);
     // dbg!(&circuit_witness);
 
-    circuit_witness.check_correctness(&circuit);
+    circuit_witness.check_correctness(circuit);
 
     circuit_witness
 

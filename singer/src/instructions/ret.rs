@@ -7,7 +7,7 @@ use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
         bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        range::RangeChip, stack::StackChip, ChipHandler,
     },
     chips::SingerChipBuilder,
     constants::OpcodeType,
@@ -280,10 +280,10 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
     const OPCODE: OpcodeType = OpcodeType::RETURN;
     const NAME: &'static str = "RETURN";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -297,7 +297,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top,
             clk,
         );
@@ -326,7 +326,7 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
             &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
-            &old_stack_ts1.values(),
+            old_stack_ts1.values(),
             length.values(),
         );
 
@@ -347,8 +347,8 @@ impl<E: ExtensionField> Instruction<E> for ReturnInstruction {
         let (target_wire_id, target) =
             circuit_builder.create_witness_out(StackUInt::N_OPERAND_CELLS);
         let length = length.values();
-        for i in 1..length.len() {
-            circuit_builder.assert_const(length[i], 0);
+        for &len in &length[1..] {
+            circuit_builder.assert_const(len, 0);
         }
         circuit_builder.add(target[0], length[0], E::BaseField::ONE);
 
@@ -397,11 +397,11 @@ impl ReturnPublicOutLoad {
     fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (pred_wire_id, pred) = circuit_builder.create_witness_in(Self::pred_size());
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Compute offset + counter
         let delta = circuit_builder.create_counter_in(0);
@@ -441,6 +441,8 @@ impl ReturnPublicOutLoad {
         })
     }
 
+    // TODO(Matthias): Check whether we need this function.
+    #[allow(dead_code)]
     fn name() -> &'static str {
         "ReturnPublicOutLoad"
     }
@@ -459,10 +461,10 @@ impl ReturnRestMemLoad {
     fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
+        let ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges)));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
@@ -470,7 +472,7 @@ impl ReturnRestMemLoad {
         let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()])?;
         ram_handler.borrow_mut().read_oam(
             &mut circuit_builder,
-            &offset,
+            offset,
             old_memory_ts.values(),
             &[mem_byte],
         );
@@ -490,6 +492,8 @@ impl ReturnRestMemLoad {
         })
     }
 
+    // TODO(Matthias): Check whether we need this function.
+    #[allow(dead_code)]
     fn name() -> &'static str {
         "ReturnRestMemLoad"
     }
@@ -507,10 +511,10 @@ impl ReturnRestMemStore {
     fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges.clone())));
+        let ram_handler = Rc::new(RefCell::new(RAMHandler::new(challenges)));
 
         // Load from memory
         let offset = &phase0[Self::phase0_offset()];
@@ -539,6 +543,8 @@ impl ReturnRestMemStore {
         })
     }
 
+    // TODO(Matthias): Check whether we need this function.
+    #[allow(dead_code)]
     fn name() -> &'static str {
         "ReturnRestMemStore"
     }
@@ -558,10 +564,10 @@ impl ReturnRestStackPop {
     fn construct_circuit<E: ExtensionField>(
         challenges: ChipChallenges,
     ) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // Pop from stack
         let stack_top = circuit_builder.create_counter_in(0);
@@ -591,6 +597,8 @@ impl ReturnRestStackPop {
         })
     }
 
+    // TODO(Matthias): Check whether we need this function.
+    #[allow(dead_code)]
     fn name() -> &'static str {
         "ReturnRestStackPop"
     }

@@ -88,8 +88,8 @@ pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[
         }
         ans += running_product[i] * running_product2[i + 1] * a[i] * b[i];
     }
-    for i in b.len()..a.len() {
-        ans *= F::ONE - a[i];
+    for &ai in &a[b.len()..] {
+        ans *= F::ONE - ai;
     }
     ans
 }
@@ -98,6 +98,8 @@ pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[
 /// [0, max_idx]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})
 ///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
+// TODO(Matthias): See whether we can remove this function.
+#[allow(dead_code)]
 pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &[E], b: &[E]) -> E {
     assert!(a.len() >= b.len());
     // Compute running product of ( x_i y_i + (1 - x_i)(1 - y_i) )_{0 <= i <= n}
@@ -135,8 +137,8 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
         }
         ans -= running_product[i] * running_product2[i + 1] * a[i] * b[i];
     }
-    for i in b.len()..a.len() {
-        ans *= E::ONE - a[i];
+    for &ai in &a[b.len()..] {
+        ans *= E::ONE - ai;
     }
     ans
 }
@@ -277,6 +279,8 @@ impl<E: ExtensionField> MultilinearExtensionFromVectors<E> for &[Vec<E::BaseFiel
 
 pub(crate) trait MatrixMLEColumnFirst<E: ExtensionField> {
     fn fix_row_col_first(&self, row_point_eq: &[E], col_num_vars: usize) -> Vec<E>;
+    // TODO(Matthias): See whether we can remove this method.
+    #[allow(dead_code)]
     fn fix_row_col_first_with_scalar(
         &self,
         row_point_eq: &[E],
@@ -359,6 +363,8 @@ impl<E: ExtensionField> MatrixMLERowFirst<E> for &[usize] {
     }
 }
 
+// TODO(Matthias): See whether we can remove this trait.
+#[allow(dead_code)]
 pub(crate) trait SubsetIndices<F: SmallField> {
     fn subset_eq_with_scalar(&self, eq: &[F], scalar: &F) -> Vec<F>;
     fn subset_eq_eval(&self, eq_1: &[F]) -> F;
@@ -451,7 +457,7 @@ mod test {
         }
 
         {
-            let max_idx = 1 << (n - 1) - 1;
+            let max_idx = 1 << ((n - 1) - 1);
             let mut partial_eq_vec: Vec<_> = eq_vec[0..=max_idx].to_vec();
             partial_eq_vec.extend(vec![GoldilocksExt2::ZERO; pow_n - max_idx - 1]);
             let expected_ans =
@@ -471,7 +477,7 @@ mod test {
 
     #[test]
     fn test_counter_eval() {
-        let vec = (0..(1 << 4)).map(|x| GoldilocksExt2::from(x)).collect_vec();
+        let vec = (0..(1 << 4)).map(GoldilocksExt2::from).collect_vec();
         let point = vec![
             GoldilocksExt2::from(97),
             GoldilocksExt2::from(101),

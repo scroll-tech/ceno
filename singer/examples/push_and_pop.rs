@@ -12,9 +12,9 @@ fn main() {
     let chip_challenges = ChipChallenges::default();
     let circuit_builder = SingerCircuitBuilder::<GoldilocksExt2>::new(chip_challenges)
         .expect("circuit builder failed");
-    let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::new();
+    let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::default();
 
-    let bytecode = [0x60 as u8, 0x01, 0x50];
+    let bytecode = [0x60_u8, 0x01, 0x50];
 
     let mut prover_transcript = Transcript::new(b"Singer");
 
@@ -54,7 +54,7 @@ fn main() {
 
     // 4. Verify.
     let mut verifier_transcript = Transcript::new(b"Singer");
-    let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::new();
+    let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::default();
     let circuit = singer_builder
         .construct_graph(&circuit_builder, &singer_aux_info)
         .expect("construct failed");

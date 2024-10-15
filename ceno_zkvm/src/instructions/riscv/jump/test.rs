@@ -42,7 +42,7 @@ fn test_opcode_jal() {
     .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -84,7 +84,7 @@ fn test_opcode_lui() {
     .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -126,7 +126,7 @@ fn test_opcode_auipc() {
     .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()

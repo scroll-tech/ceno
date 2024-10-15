@@ -65,11 +65,7 @@ fn prepare_input<E: ExtensionField>(
         .iter_mut()
         .zip(poly_g1.iter())
         .for_each(|(f1, g1)| f1.mul_by_mle(g1.clone(), E::BaseField::ONE));
-    (
-        asserted_sum,
-        virtual_poly_1,
-        virtual_poly_f1.try_into().unwrap(),
-    )
+    (asserted_sum, virtual_poly_1, virtual_poly_f1)
 }
 
 #[from_env]
@@ -107,6 +103,7 @@ fn main() {
         "wrong subclaim"
     );
 
+    #[allow(deprecated)]
     let (sumcheck_proof_v1, _) =
         IOPProverState::<E>::prove_parallel(virtual_poly.clone(), &mut prover_transcript_v1);
 

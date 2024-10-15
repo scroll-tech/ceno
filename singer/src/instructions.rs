@@ -88,6 +88,7 @@ pub(crate) fn construct_instruction_circuits<E: ExtensionField>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn construct_inst_graph_and_witness<E: ExtensionField>(
     opcode: u8,
     graph_builder: &mut CircuitGraphBuilder<E>,
@@ -162,6 +163,7 @@ pub(crate) fn construct_inst_graph<E: ExtensionField>(
     )
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, EnumIter)]
 pub(crate) enum InstOutputType {
     RAMLoad,
@@ -185,7 +187,9 @@ pub struct InstCircuitLayout {
     pub(crate) succ_dup_wires_id: Vec<WitnessId>,
     pub(crate) succ_ooo_wires_id: Vec<WitnessId>,
 
-    // Wires in index
+    /// Wires in index
+    // TODO(Matthias): check whether we need this field.
+    #[allow(dead_code)]
     pub(crate) phases_wire_id: Vec<WitnessId>,
     // wire id fetched from pred circuit.
     pub(crate) pred_dup_wire_id: Option<WitnessId>,

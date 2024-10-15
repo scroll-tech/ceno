@@ -34,8 +34,8 @@ pub(crate) struct LeafCircuit<E: ExtensionField> {
     pub(crate) cond_id: WitnessId,
 }
 
-impl<E: ExtensionField> ChipCircuitGadgets<E> {
-    pub(crate) fn new() -> Self {
+impl<E: ExtensionField> Default for ChipCircuitGadgets<E> {
+    fn default() -> Self {
         Self {
             inv_sum: Self::construct_inv_sum(),
             frac_sum_inner: Self::construct_frac_sum_inner(),
@@ -45,7 +45,9 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
             product_leaf: Self::construct_product_leaf(),
         }
     }
+}
 
+impl<E: ExtensionField> ChipCircuitGadgets<E> {
     /// Construct a selector for n_instances and each instance contains `num`
     /// items. `num` must be a power of 2.
     pub(crate) fn construct_prefix_selector(
@@ -53,7 +55,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
         num: usize,
     ) -> PrefixSelectorCircuit<E> {
         assert_eq!(num, num.next_power_of_two());
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+        let mut circuit_builder = CircuitBuilder::<E>::default();
         let _ = circuit_builder.create_constant_in(n_instances * num, 1);
         circuit_builder.configure();
         PrefixSelectorCircuit {
@@ -67,7 +69,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
     /// Wire in 1: 2-bit selector.
     /// output layer: the denominator and the numerator.
     pub(crate) fn construct_inv_sum() -> LeafCircuit<E> {
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+        let mut circuit_builder = CircuitBuilder::<E>::default();
         let (input_id, input) = circuit_builder.create_ext_witness_in(2);
         let (cond_id, cond) = circuit_builder.create_witness_in(2);
         let output = circuit_builder.create_ext_cells(2);
@@ -105,7 +107,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
     /// Wire in 2: 2-bit selector.
     /// output layer: the denominator and the numerator.
     pub(crate) fn construct_frac_sum_leaf() -> LeafFracSumCircuit<E> {
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+        let mut circuit_builder = CircuitBuilder::<E>::default();
         let (input_den_id, input_den) = circuit_builder.create_ext_witness_in(2);
         let (input_num_id, input_num) = circuit_builder.create_witness_in(2);
         let (cond_id, cond) = circuit_builder.create_witness_in(2);
@@ -151,7 +153,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
     /// Wire in 1: numerators, 2 base field elements.
     /// output layer: the denominator and the numerator.
     pub(crate) fn construct_frac_sum_leaf_no_selector() -> LeafFracSumNoSelectorCircuit<E> {
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+        let mut circuit_builder = CircuitBuilder::<E>::default();
         let (input_den_id, input_den) = circuit_builder.create_ext_witness_in(2);
         let (input_num_id, input_num) = circuit_builder.create_witness_in(2);
         let output = circuit_builder.create_ext_cells(2);
@@ -192,7 +194,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
     /// Wire out 0: the denominator.
     /// Wire out 1: the numerator.
     pub(crate) fn construct_frac_sum_inner() -> Arc<Circuit<E>> {
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+        let mut circuit_builder = CircuitBuilder::<E>::default();
         let (_, input) = circuit_builder.create_ext_witness_in(4);
         let output = circuit_builder.create_ext_cells(2);
         // denominator
@@ -223,7 +225,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
 
     /// Construct a circuit to compute the product of two extension field elements.
     pub(crate) fn construct_product_leaf() -> LeafCircuit<E> {
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+        let mut circuit_builder = CircuitBuilder::<E>::default();
         let (input_id, input) = circuit_builder.create_ext_witness_in(2);
         let (cond_id, sel) = circuit_builder.create_witness_in(2);
         let output = circuit_builder.create_ext_cells(1);
@@ -249,7 +251,7 @@ impl<E: ExtensionField> ChipCircuitGadgets<E> {
 
     /// Construct a circuit to compute the product of two extension field elements.
     pub(crate) fn construct_product_inner() -> Arc<Circuit<E>> {
-        let mut circuit_builder = CircuitBuilder::<E>::new();
+        let mut circuit_builder = CircuitBuilder::<E>::default();
         let (_, input) = circuit_builder.create_ext_witness_in(2);
         let output = circuit_builder.create_ext_cells(1);
         circuit_builder.mul2_ext(&output[0], &input[0], &input[1], E::BaseField::ONE);

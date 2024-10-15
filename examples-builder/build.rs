@@ -23,7 +23,7 @@ fn build_elfs() {
 
     // Use a dummy array for clippy, since not building the elf is faster than
     // building the elf
-    if cfg!(feature = "cargo-clippy") {
+    if cfg!(feature = "cargo-clippy") || cfg!(feature = "cargo-check") {
         for example in EXAMPLES {
             writeln!(
                 dest,
