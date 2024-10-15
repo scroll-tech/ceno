@@ -26,6 +26,7 @@ use std::{
     ops::Neg,
     sync::OnceLock,
 };
+use strum::IntoEnumIterator;
 
 pub const MOCK_RS1: u32 = 2;
 pub const MOCK_RS2: u32 = 3;
@@ -637,9 +638,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             let lkm_from_assignment = lkm_from_assignment.into_finalize_result();
 
             // Compare each LK Multiplicity.
-            for (rom_type, (cs_map, ass_map)) in ROMType::array()
-                .iter()
-                .zip(lkm_from_cs.iter().zip(lkm_from_assignment.iter()))
+            for (rom_type, (cs_map, ass_map)) in
+                ROMType::iter().zip(lkm_from_cs.iter().zip(lkm_from_assignment.iter()))
             {
                 if *cs_map != *ass_map {
                     // lookup missing in lkm cs
@@ -651,7 +651,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     for key in ass_not_cs {
                         let count = *ass_map.get(&key).unwrap() as isize;
                         errors.push(MockProverError::LkMultiplicityError {
-                            rom_type: *rom_type,
+                            rom_type,
                             key,
                             count,
                             inst_id: 0,
@@ -667,7 +667,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     for key in cs_not_ass {
                         let count = *cs_map.get(&key).unwrap() as isize;
                         errors.push(MockProverError::LkMultiplicityError {
-                            rom_type: *rom_type,
+                            rom_type,
                             key,
                             count: -count,
                             inst_id: 0,
@@ -692,7 +692,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         let ass_count = *ass_map.get(&key).unwrap() as isize;
 
                         errors.push(MockProverError::LkMultiplicityError {
-                            rom_type: *rom_type,
+                            rom_type,
                             key,
                             count: ass_count - cs_count,
                             inst_id: 0,

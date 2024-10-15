@@ -13,10 +13,8 @@ use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
 };
 use serde::Serialize;
-use std::{
-    collections::{BTreeMap, HashMap},
-    mem,
-};
+use std::collections::{BTreeMap, HashMap};
+use strum_macros::EnumIter;
 use sumcheck::structs::IOPProverMessage;
 
 pub struct TowerProver;
@@ -43,7 +41,7 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, EnumIter)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256
@@ -54,22 +52,6 @@ pub enum ROMType {
     Ltu,         // a <(usign) b where a, b are bytes and the result is 0/1.
     Pow,         // a ** b where a is 2 and b is 5-bit value
     Instruction, // Decoded instruction from the fixed program.
-}
-
-impl ROMType {
-    pub fn array() -> [ROMType; mem::variant_count::<ROMType>()] {
-        [
-            ROMType::U5,
-            ROMType::U8,
-            ROMType::U16,
-            ROMType::And,
-            ROMType::Or,
-            ROMType::Xor,
-            ROMType::Ltu,
-            ROMType::Pow,
-            ROMType::Instruction,
-        ]
-    }
 }
 
 #[derive(Clone, Debug, Copy)]
