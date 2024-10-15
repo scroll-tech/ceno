@@ -1,5 +1,6 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
+    ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     expression::{Expression, fmt},
     scheme::utils::eval_by_expr_with_fixed,
@@ -8,7 +9,6 @@ use crate::{
         TableCircuit, U5Table, U8Table, U16Table, XorTable,
     },
     witness::LkMultiplicity,
-    ROMType,
 };
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
