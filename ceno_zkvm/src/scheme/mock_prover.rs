@@ -295,14 +295,28 @@ impl<E: ExtensionField> MockProverError<E> {
                 } else {
                     "assignments"
                 };
-                let (a, b) = AndTable::unpack(*key); // common for logical ops
                 let element = match rom_type {
                     ROMType::U5 | ROMType::U8 | ROMType::U16 => format!("Element: {key}"),
-                    ROMType::And => format!("Element: {a} < {b}"),
-                    ROMType::Or => format!("Element: {a} || {b}"),
-                    ROMType::Xor => format!("Element: {a} ^ {b}"),
-                    ROMType::Ltu => format!("Element: {a} < {b}"),
-                    ROMType::Pow => format!("Element: {a} ** {b}"),
+                    ROMType::And => {
+                        let (a, b) = AndTable::unpack(*key);
+                        format!("Element: {a} < {b}")
+                    }
+                    ROMType::Or => {
+                        let (a, b) = OrTable::unpack(*key);
+                        format!("Element: {a} || {b}")
+                    }
+                    ROMType::Xor => {
+                        let (a, b) = XorTable::unpack(*key);
+                        format!("Element: {a} ^ {b}")
+                    }
+                    ROMType::Ltu => {
+                        let (a, b) = LtuTable::unpack(*key);
+                        format!("Element: {a} < {b}")
+                    }
+                    ROMType::Pow => {
+                        let (a, b) = PowTable::unpack(*key);
+                        format!("Element: {a} ** {b}")
+                    }
                     ROMType::Instruction => format!("PC: {key}"),
                 };
                 println!(
