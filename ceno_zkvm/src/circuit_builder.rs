@@ -91,7 +91,6 @@ pub struct ConstraintSystem<E: ExtensionField> {
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
     pub lk_expressions_namespace_map: Vec<String>,
-    pub lk_expressions_items_map: Vec<Vec<Expression<E>>>,
 
     pub lk_table_expressions: Vec<LogupTableExpression<E>>,
     pub lk_table_expressions_namespace_map: Vec<String>,
@@ -113,6 +112,8 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     #[cfg(test)]
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
+    #[cfg(test)]
+    pub lk_expressions_items_map: Vec<Vec<Expression<E>>>,
 
     pub(crate) phantom: PhantomData<E>,
 }
@@ -132,7 +133,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             w_expressions_namespace_map: vec![],
             lk_expressions: vec![],
             lk_expressions_namespace_map: vec![],
-            lk_expressions_items_map: vec![],
             lk_table_expressions: vec![],
             lk_table_expressions_namespace_map: vec![],
             assert_zero_expressions: vec![],
@@ -145,6 +145,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
             #[cfg(test)]
             debug_map: HashMap::new(),
+            #[cfg(test)]
+            lk_expressions_items_map: vec![],
 
             phantom: std::marker::PhantomData,
         }
@@ -242,6 +244,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
+        #[cfg(test)]
         self.lk_expressions_items_map.push(items);
         Ok(())
     }
