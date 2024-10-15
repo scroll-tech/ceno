@@ -596,10 +596,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 .cs
                 .lk_expressions_items_map
                 .iter()
-                .map(|items| {
+                .map(|(rom_type, items)| {
                     (
-                        ROMType::from(items[0].to_canonical_u64()),
-                        items[1..]
+                        rom_type,
+                        items
                             .iter()
                             .map(|expr| {
                                 let e_result = wit_infer_by_expr(

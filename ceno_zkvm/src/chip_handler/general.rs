@@ -41,13 +41,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn lk_record<NR, N>(
         &mut self,
         name_fn: N,
+        rom_type: ROMType,
         items: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.lk_record(name_fn, items)
+        self.cs.lk_record(name_fn, rom_type, items)
     }
 
     pub fn lk_table_record<NR, N>(
@@ -65,10 +66,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     /// Fetch an instruction at a given PC from the Program table.
     pub fn lk_fetch(&mut self, record: &InsnRecord<Expression<E>>) -> Result<(), ZKVMError> {
-        let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
-        fields.extend_from_slice(record.as_slice());
-
-        self.lk_record(|| "fetch", fields)
+        self.lk_record(|| "fetch", ROMType::Instruction, record.as_slice().to_vec())
     }
 
     pub fn read_record<NR, N>(
@@ -188,15 +186,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         self.namespace(
             || "assert_u5",
-            |cb| {
-                cb.lk_record(
-                    name_fn,
-                    vec![
-                        Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
-                        expr,
-                    ],
-                )
-            },
+            |cb| cb.lk_record(name_fn, ROMType::U5, vec![expr]),
         )
     }
 
@@ -205,13 +195,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.lk_record(
-            name_fn,
-            vec![
-                Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
-                expr,
-            ],
-        )?;
+        self.lk_record(name_fn, ROMType::U16, vec![expr])?;
         Ok(())
     }
 
@@ -236,7 +220,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.lk_record(name_fn, vec![(ROMType::U8 as usize).into(), expr])?;
+        self.lk_record(name_fn, ROMType::U8, vec![expr])?;
         Ok(())
     }
 
@@ -266,10 +250,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         b: Expression<E>,
         c: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        self.lk_record(
-            || format!("lookup_{:?}", rom_type),
-            vec![(rom_type as usize).into(), a, b, c],
-        )
+        self.lk_record(|| format!("lookup_{:?}", rom_type), rom_type, vec![a, b, c])
     }
 
     /// Assert `a & b = c` and that `a, b, c` are all bytes.

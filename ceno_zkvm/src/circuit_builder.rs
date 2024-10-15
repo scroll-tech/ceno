@@ -10,6 +10,7 @@ use crate::{
     expression::{Expression, Fixed, Instance, WitIn},
     structs::{ProvingKey, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
+    ROMType,
 };
 
 /// namespace used for annotation, preserve meta info during circuit construction
@@ -113,7 +114,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     #[cfg(test)]
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
     #[cfg(test)]
-    pub lk_expressions_items_map: Vec<Vec<Expression<E>>>,
+    pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     pub(crate) phantom: PhantomData<E>,
 }
@@ -232,9 +233,19 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn lk_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
+        rom_type: ROMType,
         items: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
-        let rlc_record = self.rlc_chip_record(items.clone());
+        let rlc_record = self.rlc_chip_record(
+            std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
+                .chain(
+                    #[cfg(test)]
+                    items.clone(),
+                    #[cfg(not(test))]
+                    items,
+                )
+                .collect(),
+        );
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -245,7 +256,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
         #[cfg(test)]
-        self.lk_expressions_items_map.push(items);
+        self.lk_expressions_items_map.push((rom_type, items));
         Ok(())
     }
 

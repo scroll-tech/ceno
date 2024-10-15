@@ -72,13 +72,6 @@ impl ROMType {
     }
 }
 
-impl From<u64> for ROMType {
-    fn from(value: u64) -> Self {
-        let romtype = ROMType::array();
-        *romtype.get(value as usize).unwrap()
-    }
-}
-
 #[derive(Clone, Debug, Copy)]
 pub enum RAMType {
     GlobalState,

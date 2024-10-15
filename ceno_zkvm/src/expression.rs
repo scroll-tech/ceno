@@ -156,18 +156,6 @@ impl<E: ExtensionField> Expression<E> {
         }
     }
 
-    pub fn to_canonical_u64(&self) -> u64 {
-        self.evaluate(
-            &|_| panic!("Expression::to_canonical_u64: expr contains fixed"),
-            &|_| panic!("Expression::to_canonical_u64: expr contains witin"),
-            &|c| c.to_canonical_u64(),
-            &|_, _, _, _| panic!("Expression::to_canonical_u64: expr contains challenge"),
-            &|a, b| a + b,
-            &|a, b| a * b,
-            &|a, b, c| a * b + c,
-        )
-    }
-
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
             Expression::Fixed(_) => false,
