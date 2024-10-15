@@ -738,10 +738,8 @@ mod tests {
                     )),
                 )),
                 Box::new(Expression::Challenge(
+                    0,
                     1,
-                    1,
-                    // TODO this still uses default challenge in ConstraintSystem, but challengeId
-                    // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
                     GoldilocksExt2::ONE,
                     GoldilocksExt2::ZERO,
                 )),
