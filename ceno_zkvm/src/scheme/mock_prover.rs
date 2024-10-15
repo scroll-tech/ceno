@@ -290,7 +290,7 @@ impl<E: ExtensionField> MockProverError<E> {
                 } else {
                     "Lookup".to_string()
                 };
-                let missing_in = if *count > 0 {
+                let location = if *count > 0 {
                     "constraint system"
                 } else {
                     "assignments"
@@ -321,7 +321,7 @@ impl<E: ExtensionField> MockProverError<E> {
                 };
                 println!(
                     "\nLkMultiplicityError:\n\
-                    {lookups} of {rom_type:?} missing in {missing_in}\n\
+                    {lookups} of {rom_type:?} missing in {location}\n\
                     {element}\n"
                 );
             }
@@ -349,9 +349,8 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
         challenge: [E; 2],
     ) {
         for i in RANGE::content() {
-            let rlc_record = cb
-                .cs
-                .rlc_chip_record(vec![(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
+            let rlc_record =
+                cb.rlc_chip_record(vec![(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
             let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_canonical_u64_vec());
         }

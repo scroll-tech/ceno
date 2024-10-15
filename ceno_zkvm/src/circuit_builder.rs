@@ -92,7 +92,6 @@ pub struct ConstraintSystem<E: ExtensionField> {
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
     pub lk_expressions_namespace_map: Vec<String>,
-
     pub lk_table_expressions: Vec<LogupTableExpression<E>>,
     pub lk_table_expressions_namespace_map: Vec<String>,
 
