@@ -1,5 +1,5 @@
-mod logic;
-use logic::{LogicInstruction, LogicOp};
+mod logic_imm_circuit;
+use logic_imm_circuit::{LogicInstruction, LogicOp};
 
 use crate::tables::{AndTable, OrTable, XorTable};
 use ceno_emul::InsnKind;
