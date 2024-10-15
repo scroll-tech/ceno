@@ -80,8 +80,8 @@ impl<E: ExtensionField> LogicConfig<E> {
         cb: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
     ) -> Result<Self, ZKVMError> {
-        let rs1_read = UInt8::new_unchecked(|| "rs1_read", cb)?;
-        let rd_written = UInt8::new_unchecked(|| "rd_written", cb)?;
+        let rs1_read = UInt8::new(|| "rs1_read", cb)?;
+        let rd_written = UInt8::new(|| "rd_written", cb)?;
         let imm = UInt8::new(|| "imm", cb)?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
@@ -134,7 +134,7 @@ mod test {
         instructions::{
             riscv::{
                 constants::UInt8,
-                imm::{logic::LogicInstruction, AndiOp, OriOp, XoriOp},
+                logic_imm::{logic_imm_circuit::LogicInstruction, AndiOp, OriOp, XoriOp},
             },
             Instruction,
         },
