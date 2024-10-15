@@ -63,7 +63,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                 &self.eq_x1_rx1,
                 &self.challenges
             )),
-            layer.paste_from.iter().map(|(_, paste_from)| {
+            layer.paste_from.values().map(|paste_from| {
                 paste_from
                     .as_slice()
                     .eval_col_first(&self.eq_y_ry, &self.eq_x1_rx1)

@@ -1,16 +1,15 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::sync::Arc;
 
-use ff::Field;
 use ff_ext::ExtensionField;
 use gkr::structs::Circuit;
 use gkr_graph::structs::{CircuitGraphBuilder, NodeOutputType, PredType};
 use itertools::Itertools;
-use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
+use multilinear_extensions::mle::IntoMLE;
 use simple_frontend::structs::CircuitBuilder;
 use sumcheck::util::ceil_log2;
 
 use crate::{
-    chip_handler::{bytecode::BytecodeChip, rom_handler::ROMHandler, ChipHandler},
+    chip_handler::{bytecode::BytecodeChip, ChipHandler},
     error::UtilError,
     structs::{ChipChallenges, PCUInt},
 };
@@ -18,11 +17,11 @@ use crate::{
 use super::ChipCircuitGadgets;
 
 fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circuit<E>> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::default();
     let (_, pc_cells) = circuit_builder.create_witness_in(PCUInt::N_OPERAND_CELLS);
     let (_, bytecode_cells) = circuit_builder.create_witness_in(1);
 
-    let mut chip_handler = ChipHandler::new(challenges.clone());
+    let mut chip_handler = ChipHandler::new(*challenges);
 
     BytecodeChip::bytecode_with_pc_byte(
         &mut chip_handler,
@@ -38,8 +37,8 @@ fn construct_circuit<E: ExtensionField>(challenges: &ChipChallenges) -> Arc<Circ
 
 /// Add bytecode table circuit and witness to the circuit graph. Return node id
 /// and lookup instance log size.
-pub(crate) fn construct_bytecode_table_and_witness<'a, E: ExtensionField>(
-    builder: &mut CircuitGraphBuilder<'a, E>,
+pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
+    builder: &mut CircuitGraphBuilder<'_, E>,
     bytecode: &[u8],
     challenges: &ChipChallenges,
     real_challenges: &[E],
@@ -63,7 +62,6 @@ pub(crate) fn construct_bytecode_table_and_witness<'a, E: ExtensionField>(
             .collect_vec()
             .into_mle(),
         {
-            let len = bytecode.len().next_power_of_two();
             let bytecode = bytecode
                 .iter()
                 .map(|x| E::BaseField::from(*x as u64))

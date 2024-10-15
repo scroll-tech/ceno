@@ -60,14 +60,13 @@ impl<E: ExtensionField> IOPProverState<E> {
                 let mut f = vec![0.into(); 1 << (max_lo_in_num_vars + hi_num_vars)];
                 let mut g = vec![E::ZERO; 1 << max_lo_in_num_vars];
 
-                for new_wire_id in *l..*r {
-                    let subset_wire_id = new_wire_id - l;
+                for (subset_wire_id, &eq_val) in eq_y_ry[*l..*r].iter().enumerate() {
                     for s in 0..(1 << hi_num_vars) {
                         let instance_start_index = s * per_instance_size;
                         f[(s << max_lo_in_num_vars) ^ subset_wire_id] =
                             wit_in[instance_start_index + subset_wire_id];
                     }
-                    g[subset_wire_id] = eq_y_ry[new_wire_id];
+                    g[subset_wire_id] = eq_val;
                 }
 
                 (
@@ -94,13 +93,12 @@ impl<E: ExtensionField> IOPProverState<E> {
                 let mut f = vec![0.into(); 1 << (max_lo_in_num_vars + hi_num_vars)];
                 let mut g = vec![E::ZERO; 1 << max_lo_in_num_vars];
 
-                for new_wire_id in *l..*r {
-                    let subset_wire_id = new_wire_id - l;
+                for (subset_wire_id, &eq_val) in eq_y_ry[*l..*r].iter().enumerate() {
                     for s in 0..(1 << hi_num_vars) {
                         f[(s << max_lo_in_num_vars) ^ subset_wire_id] =
                             E::BaseField::from(((s << num_vars) ^ subset_wire_id) as u64);
                     }
-                    g[subset_wire_id] = eq_y_ry[new_wire_id];
+                    g[subset_wire_id] = eq_val;
                 }
                 (
                     {
@@ -108,7 +106,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             max_lo_in_num_vars + hi_num_vars,
                             f,
                         );
-                        f.fix_high_variables_in_place(&hi_point);
+                        f.fix_high_variables_in_place(hi_point);
                         f.into()
                     },
                     DenseMultilinearExtension::from_evaluations_ext_vec(max_lo_in_num_vars, g)

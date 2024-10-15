@@ -50,13 +50,9 @@ workspace = false
 command = "cargo"
 args = [
     "clippy",
-    "--package",
-    "ceno_zkvm",
-    "--package",
-    "mpcs",
-    "--package",
-    "ceno_emul",
-    "--package",
+    "--workspace",
+    "--all-targets",
+    "--exclude",
     "ceno_rt",
     "--target",
     "${CUR_TARGET}",

@@ -471,7 +471,7 @@ pub mod test_util {
 
                 let comms = polys
                     .iter()
-                    .map(|poly| Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap())
+                    .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
                     .collect_vec();
 
                 let points = (0..num_points)
@@ -495,7 +495,7 @@ pub mod test_util {
                 let values: Vec<E> = evals
                     .iter()
                     .map(Evaluation::value)
-                    .map(|x| *x)
+                    .copied()
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 
@@ -528,7 +528,7 @@ pub mod test_util {
                 let values: Vec<E> = evals
                     .iter()
                     .map(Evaluation::value)
-                    .map(|x| *x)
+                    .copied()
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 

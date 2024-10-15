@@ -192,7 +192,7 @@ mod tests {
             assert!(monomials.is_monomial_form());
 
             // Check that the two forms are equivalent (Schwartz-Zippel test).
-            let factored = eval(&factored);
+            let factored = eval(factored);
             let monomials = eval(&monomials);
             assert_eq!(monomials, factored);
         }

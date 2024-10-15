@@ -61,14 +61,14 @@ impl<E: ExtensionField> IOPProverState<E> {
             // f1(x1) = layers[i + 1](rt || x1)
             let f1: ArcMultilinearExtension<E> = Arc::new(
                 circuit_witness.layers_ref()[self.layer_id as usize + 1]
-                    .fix_high_variables(&hi_point),
+                    .fix_high_variables(hi_point),
             );
 
             // g1(x1) = add(ry, x1)
             let g1 = {
                 let mut g1 = vec![E::ZERO; 1 << lo_in_num_vars];
                 layer.adds.iter().for_each(|gate| {
-                    g1[gate.idx_in[0]] += eq_y_ry[gate.idx_out] * &gate.scalar.eval(&challenges);
+                    g1[gate.idx_in[0]] += eq_y_ry[gate.idx_out] * gate.scalar.eval(challenges);
                 });
 
                 DenseMultilinearExtension::from_evaluations_ext_vec(lo_in_num_vars, g1)
@@ -112,7 +112,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                     lo_in_num_vars + hi_num_vars,
                     f1_j,
                 );
-                f1_j.fix_high_variables_in_place(&hi_point);
+                f1_j.fix_high_variables_in_place(hi_point);
                 Arc::new(f1_j)
             });
             g1_vec.push(

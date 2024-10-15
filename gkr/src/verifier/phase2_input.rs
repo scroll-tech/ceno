@@ -45,7 +45,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                     segment_eval_greater_than(l - 1, lo_point)
                 };
                 let segment_greater_than_r_1 = segment_eval_greater_than(r - 1, lo_point);
-                (segment_greater_than_l_1 - segment_greater_than_r_1) * &c
+                (segment_greater_than_l_1 - segment_greater_than_r_1) * c
             })
             .sum::<E>();
 

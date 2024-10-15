@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{rom_handler::ROMHandler, util::cell_to_mixed, ChipHandler},
+    chip_handler::{util::cell_to_mixed, ChipHandler},
     constants::{RANGE_CHIP_BIT_WIDTH, STACK_TOP_BIT_WIDTH},
     error::UtilError,
     structs::{PCUInt, TSUInt},
@@ -8,7 +8,6 @@ use crate::{
 use ff::Field;
 use ff_ext::ExtensionField;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
-use std::{cell::RefCell, io::Read, rc::Rc};
 
 pub struct RangeChip {}
 
@@ -121,11 +120,11 @@ impl RangeChip {
             for range_cells in range_values.chunks(n_range_cells_per_cell) {
                 // the range cells are big endian relative to the uint cell they represent
                 // hence the first n - 1 range cells should take full width
-                for i in 0..(n_range_cells_per_cell - 1) {
+                for range_cell in &range_cells[..(n_range_cells_per_cell - 1)] {
                     Self::small_range_check(
                         chip_handler,
                         circuit_builder,
-                        range_cells[i].into(),
+                        (*range_cell).into(),
                         RANGE_CHIP_BIT_WIDTH,
                     )?;
                 }
@@ -173,7 +172,7 @@ impl RangeChip {
         let carry = PCUInt::extract_unsafe_carry_add(witness);
         PCUInt::add_const_unsafe(
             circuit_builder,
-            &pc,
+            pc,
             i64_to_base_field::<Ext>(constant),
             carry,
         )
@@ -189,7 +188,7 @@ impl RangeChip {
         TSUInt::add_const(
             circuit_builder,
             chip_handler,
-            &ts,
+            ts,
             i64_to_base_field::<Ext>(constant),
             witness,
         )

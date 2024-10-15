@@ -98,8 +98,8 @@ fn get_single_instance_values_map() -> BTreeMap<&'static str, Vec<Goldilocks>> {
     );
     let range_values = u64vec::<{ StackUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
     let mut wit_phase0_instruction_add: Vec<Goldilocks> = vec![];
-    for i in 0..16 {
-        wit_phase0_instruction_add.push(Goldilocks::from(range_values[i]))
+    for value in &range_values[..16] {
+        wit_phase0_instruction_add.push(Goldilocks::from(*value));
     }
     wit_phase0_instruction_add.push(Goldilocks::from(1u64)); // carry is [1, 0, ...]
     phase0_values_map.insert(
@@ -115,7 +115,7 @@ fn main() {
     let chip_challenges = ChipChallenges::default();
     let circuit_builder =
         SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
-    let mut singer_builder = SingerGraphBuilder::<E>::new();
+    let mut singer_builder = SingerGraphBuilder::<E>::default();
 
     let mut rng = test_rng();
     let size = AddInstruction::phase0_size();
@@ -186,13 +186,13 @@ fn main() {
     let target_evals = graph.target_evals(&wit, &point);
 
     for _ in 0..5 {
-        let mut prover_transcript = &mut Transcript::new(b"Singer");
+        let prover_transcript = &mut Transcript::new(b"Singer");
         let timer = Instant::now();
         let proof = GKRGraphProverState::prove(
             &graph,
             &wit,
             &target_evals,
-            &mut prover_transcript,
+            prover_transcript,
             (1 << instance_num_vars).min(max_thread_id),
         )
         .expect("prove failed");
@@ -202,7 +202,7 @@ fn main() {
             timer.elapsed().as_secs_f64()
         );
         let mut verifier_transcript = Transcript::new(b"Singer");
-        let _ = GKRGraphVerifierState::verify(
+        GKRGraphVerifierState::verify(
             &graph,
             &real_challenges,
             &target_evals,

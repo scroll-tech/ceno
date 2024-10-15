@@ -47,11 +47,12 @@ pub struct ChipHandler<Ext: ExtensionField> {
 impl<Ext: ExtensionField> ChipHandler<Ext> {
     pub fn new(challenge: ChipChallenges) -> Self {
         Self {
-            ram_handler: RAMHandler::new(challenge.clone()),
+            ram_handler: RAMHandler::new(challenge),
             rom_handler: ROMHandler::new(challenge),
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn finalize(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,

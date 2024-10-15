@@ -47,7 +47,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         let alpha_pows = {
             let mut alpha_pows = vec![E::ONE; total_length];
             for i in 0..total_length.saturating_sub(1) {
-                alpha_pows[i + 1] = alpha * &alpha_pows[i];
+                alpha_pows[i + 1] = alpha * alpha_pows[i];
             }
             alpha_pows
         };
@@ -147,8 +147,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                         .zip(g1_j.as_slice().into_instance_iter(num_thread_instances))
                         .for_each(|(g_last, g1_j)| {
                             circuit.assert_consts.iter().for_each(|gate| {
-                                g_last[gate.idx_out as usize] =
-                                    g1_j[gate.idx_out as usize] * alpha_pow;
+                                g_last[gate.idx_out] = g1_j[gate.idx_out] * alpha_pow;
                             });
                         });
                     g_last
@@ -190,7 +189,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             .partition(|(i, _)| i % 2 == 0);
         let eval_value_1 = f1.remove(0).1;
 
-        self.to_next_step_point = sumcheck_proof_1.point.clone();
+        self.to_next_step_point.clone_from(&sumcheck_proof_1.point);
         self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(
             &self.to_next_step_point,
             &eval_value_1,

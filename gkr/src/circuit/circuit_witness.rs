@@ -62,12 +62,14 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
             for (wit_id, (l, r)) in circuit.paste_from_wits_in.iter().enumerate() {
                 let layer_wit_iter: InstanceIntoIteratorMut<E::BaseField> =
                     layer_wit.into_instance_iter_mut(n_instances);
-                let wit_in = wits_in[wit_id as usize].get_base_field_vec();
+                let wit_in = wits_in[wit_id].get_base_field_vec();
                 let wit_in_iter: InstanceIntoIterator<E::BaseField> =
                     wit_in.into_instance_iter(n_instances);
                 for (layer_wit, wit_in) in layer_wit_iter.zip_eq(wit_in_iter) {
-                    for i in *l..*r {
-                        layer_wit[i] = wit_in[i - *l];
+                    for (layer_wit_elem, wit_in_elem) in
+                        layer_wit[*l..*r].iter_mut().zip(&wit_in[..*r - *l])
+                    {
+                        *layer_wit_elem = *wit_in_elem;
                     }
                 }
             }
@@ -75,8 +77,8 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                 let layer_wit_iter: InstanceIntoIteratorMut<E::BaseField> =
                     layer_wit.into_instance_iter_mut(n_instances);
                 for layer_wit in layer_wit_iter {
-                    for i in *l..*r {
-                        layer_wit[i] = i64_to_field(*constant);
+                    for layer_wit_elem in &mut layer_wit[*l..*r] {
+                        *layer_wit_elem = i64_to_field(*constant);
                     }
                 }
             }
@@ -84,9 +86,8 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                 let layer_wit_iter: InstanceIntoIteratorMut<E::BaseField> =
                     layer_wit.into_instance_iter_mut(n_instances);
                 for (instance_id, layer_wit) in layer_wit_iter.enumerate() {
-                    for i in *l..*r {
-                        layer_wit[i] =
-                            E::BaseField::from(((instance_id << num_vars) ^ (i - *l)) as u64)
+                    for (i, layer_wit_elem) in layer_wit[*l..*r].iter_mut().enumerate() {
+                        *layer_wit_elem = E::BaseField::from(((instance_id << num_vars) ^ i) as u64)
                     }
                 }
             }
@@ -124,22 +125,22 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
 
                     let last_layer_wit = layer_wits[layer_id + 1].get_base_field_vec();
                     let last_layer_instance_start_index =
-                        instance_id * circuit.layers[layer_id as usize + 1].size();
+                        instance_id * circuit.layers[layer_id + 1].size();
                     for add_const in layer.add_consts.iter() {
-                        current_layer_wit[add_const.idx_out] += add_const.scalar.eval(&challenges);
+                        current_layer_wit[add_const.idx_out] += add_const.scalar.eval(challenges);
                     }
 
                     for add in layer.adds.iter() {
                         current_layer_wit[add.idx_out] += last_layer_wit
                             [last_layer_instance_start_index + add.idx_in[0]]
-                            * add.scalar.eval(&challenges);
+                            * add.scalar.eval(challenges);
                     }
 
                     for mul2 in layer.mul2s.iter() {
                         current_layer_wit[mul2.idx_out] += last_layer_wit
                             [last_layer_instance_start_index + mul2.idx_in[0]]
                             * last_layer_wit[last_layer_instance_start_index + mul2.idx_in[1]]
-                            * mul2.scalar.eval(&challenges);
+                            * mul2.scalar.eval(challenges);
                     }
 
                     for mul3 in layer.mul3s.iter() {
@@ -147,7 +148,7 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                             [last_layer_instance_start_index + mul3.idx_in[0]]
                             * last_layer_wit[last_layer_instance_start_index + mul3.idx_in[1]]
                             * last_layer_wit[last_layer_instance_start_index + mul3.idx_in[2]]
-                            * mul3.scalar.eval(&challenges);
+                            * mul3.scalar.eval(challenges);
                     }
                 },
             );
@@ -281,7 +282,6 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
 
     pub fn check_correctness(&self, _circuit: &Circuit<E>) {
         // Check input.
-        return;
 
         // let input_layer_wits = self.layers.last().unwrap();
         // let wits_in = self.witness_in_ref();

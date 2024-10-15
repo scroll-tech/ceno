@@ -18,13 +18,6 @@ use crate::{
 };
 
 impl<'a, E: ExtensionField> CircuitGraphBuilder<'a, E> {
-    pub fn new() -> Self {
-        Self {
-            graph: Default::default(),
-            witness: Default::default(),
-        }
-    }
-
     /// Add a new node indicating the predecessors and generate the witness.
     /// Return the index of the new node. sources has the same number as the
     /// input witnesses. If some witness is not source, then the corresponding
