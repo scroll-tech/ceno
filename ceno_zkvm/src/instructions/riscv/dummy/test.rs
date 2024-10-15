@@ -6,9 +6,15 @@ use multilinear_extensions::mle::IntoMLEs;
 use super::*;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::Instruction,
+    instructions::{
+        riscv::{arith::AddOp, branch::BeqOp},
+        Instruction,
+    },
     scheme::mock_prover::{MockProver, MOCK_PC_ADD, MOCK_PC_BEQ, MOCK_PROGRAM},
 };
+
+type AddDummy<E> = DummyInstruction<E, AddOp>;
+type BeqDummy<E> = DummyInstruction<E, BeqOp>;
 
 #[test]
 fn test_dummy_r() {
@@ -46,7 +52,7 @@ fn test_dummy_r() {
             .de_interleaving()
             .into_mles()
             .into_iter()
-            .map(|v| v.into())
+            .map(Into::into)
             .collect_vec(),
         None,
     );

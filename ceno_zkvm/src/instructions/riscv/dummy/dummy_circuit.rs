@@ -80,6 +80,7 @@ impl<E: ExtensionField> DummyConfig<E> {
             InsnKind::BEQ.codes().opcode, // All branches.
             InsnKind::JAL.codes().opcode,
             InsnKind::JALR.codes().opcode,
+            InsnKind::EANY.codes().opcode,
         ]
         .contains(&codes.opcode);
 
