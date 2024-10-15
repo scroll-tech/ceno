@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ark_std::test_rng;
 use const_env::from_env;
 use criterion::*;
-use ff_ext::{ff::Field, ExtensionField};
+use ff_ext::{ExtensionField, ff::Field};
 use itertools::Itertools;
 use sumcheck::{structs::IOPProverState, util::ceil_log2};
 

@@ -6,8 +6,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, stack::StackChip, ChipHandler,
+        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip,
+        ram_handler::RAMHandler, range::RangeChip, stack::StackChip,
     },
     chips::SingerChipBuilder,
     constants::OpcodeType,
@@ -17,7 +17,7 @@ use singer_utils::{
 };
 use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
 
-use crate::{error::ZKVMError, utils::add_assign_each_cell, CircuitWiresIn, SingerParams};
+use crate::{CircuitWiresIn, SingerParams, error::ZKVMError, utils::add_assign_each_cell};
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
@@ -470,12 +470,11 @@ impl ReturnRestMemLoad {
         let offset = &phase0[Self::phase0_offset()];
         let mem_byte = phase0[Self::phase0_mem_byte().start];
         let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()])?;
-        ram_handler.borrow_mut().read_oam(
-            &mut circuit_builder,
-            offset,
-            old_memory_ts.values(),
-            &[mem_byte],
-        );
+        ram_handler
+            .borrow_mut()
+            .read_oam(&mut circuit_builder, offset, old_memory_ts.values(), &[
+                mem_byte,
+            ]);
 
         let (ram_load_id, ram_store_id) = ram_handler.borrow_mut().finalize(&mut circuit_builder);
         circuit_builder.configure();

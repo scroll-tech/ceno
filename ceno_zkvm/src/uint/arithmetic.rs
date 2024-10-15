@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 
 use super::{UIntLimbs, UintLimb};
 use crate::{
@@ -850,12 +850,12 @@ mod tests {
 
     mod mul_add {
         use crate::{
+            Value,
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             gadgets::cal_lt_diff,
             scheme::mock_prover::MockProver,
             uint::UIntLimbs,
             witness::LkMultiplicity,
-            Value,
         };
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
@@ -876,10 +876,9 @@ mod tests {
                 self.iter()
                     .map(|a| {
                         let mle: ArcMultilinearExtension<E> =
-                            DenseMultilinearExtension::from_evaluation_vec_smart(
-                                0,
-                                vec![E::BaseField::from(*a)],
-                            )
+                            DenseMultilinearExtension::from_evaluation_vec_smart(0, vec![
+                                E::BaseField::from(*a),
+                            ])
                             .into();
                         mle
                     })

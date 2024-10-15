@@ -1,7 +1,7 @@
 use ark_std::{end_timer, start_timer};
 use ff::Field;
 use ff_ext::ExtensionField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::build_eq_x_r_vec,

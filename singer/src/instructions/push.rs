@@ -5,8 +5,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip, stack::StackChip,
-        ChipHandler,
+        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip,
+        stack::StackChip,
     },
     constants::OpcodeType,
     register_witness,
@@ -152,9 +152,9 @@ impl<E: ExtensionField, const N: usize> Instruction<E> for PushInstruction<N> {
 mod test {
     #[cfg(not(debug_assertions))]
     use crate::{
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
         instructions::{InstructionGraph, SingerCircuitBuilder},
         scheme::GKRGraphProverState,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
     #[cfg(not(debug_assertions))]
     use ark_std::test_rng;
@@ -195,39 +195,32 @@ mod test {
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert(
-            "phase0_stack_top".to_string(),
-            vec![Goldilocks::from(100u64)],
-        );
+        phase0_values_map.insert("phase0_stack_top".to_string(), vec![Goldilocks::from(
+            100u64,
+        )]);
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add_i_plus_1".to_string(),
             vec![], // carry is 0, may test carry using larger values in PCUInt
         );
-        phase0_values_map.insert(
-            "phase0_stack_ts_add".to_string(),
-            vec![
-                Goldilocks::from(2u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
-                                         * range values, stack_ts + 1 = 4 */
-                Goldilocks::from(0u64),
-                Goldilocks::from(0u64),
-                Goldilocks::from(0u64),
-                // no place for carry
-            ],
-        );
-        phase0_values_map.insert(
-            "phase0_stack_bytes".to_string(),
-            vec![
-                Goldilocks::from(0u64),
-                Goldilocks::from(1u64),
-                Goldilocks::from(2u64),
-                Goldilocks::from(3u64),
-                Goldilocks::from(4u64),
-                Goldilocks::from(5u64),
-                Goldilocks::from(6u64),
-                Goldilocks::from(7u64),
-            ],
-        );
+        phase0_values_map.insert("phase0_stack_ts_add".to_string(), vec![
+            Goldilocks::from(2u64), /* first TSUInt::N_RANGE_CELLS = 1*(56/16) = 4 cells are
+                                     * range values, stack_ts + 1 = 4 */
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            // no place for carry
+        ]);
+        phase0_values_map.insert("phase0_stack_bytes".to_string(), vec![
+            Goldilocks::from(0u64),
+            Goldilocks::from(1u64),
+            Goldilocks::from(2u64),
+            Goldilocks::from(3u64),
+            Goldilocks::from(4u64),
+            Goldilocks::from(5u64),
+            Goldilocks::from(6u64),
+            Goldilocks::from(7u64),
+        ]);
 
         let circuit_witness_challenges = vec![
             GoldilocksExt2::from(2),

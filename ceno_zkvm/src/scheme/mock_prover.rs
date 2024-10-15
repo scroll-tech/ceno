@@ -1,15 +1,15 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    expression::{fmt, Expression},
+    expression::{Expression, fmt},
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U16Table, U5Table, U8Table, XorTable,
+        TableCircuit, U5Table, U8Table, U16Table, XorTable,
     },
 };
 use ark_std::test_rng;
-use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
@@ -609,12 +609,12 @@ mod tests {
 
     use super::*;
     use crate::{
+        ROMType::U5,
         error::ZKVMError,
         expression::{ToExpr, WitIn},
         gadgets::{AssertLTConfig, IsLtConfig},
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
-        ROMType::U5,
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -723,34 +723,31 @@ mod tests {
         let result = MockProver::run_with_challenge(&builder, &wits_in, challenge);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
-        assert_eq!(
-            err,
-            vec![MockProverError::LookupError {
-                expression: Expression::Sum(
-                    Box::new(Expression::ScaledSum(
-                        Box::new(Expression::WitIn(0)),
-                        Box::new(Expression::Challenge(
-                            1,
-                            1,
-                            GoldilocksExt2::ONE,
-                            GoldilocksExt2::ZERO,
-                        )),
-                        Box::new(Expression::Constant(
-                            <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
-                        )),
-                    )),
+        assert_eq!(err, vec![MockProverError::LookupError {
+            expression: Expression::Sum(
+                Box::new(Expression::ScaledSum(
+                    Box::new(Expression::WitIn(0)),
                     Box::new(Expression::Challenge(
-                        0,
+                        1,
                         1,
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                ),
-                evaluated: 123002.into(), // 123 * 1000 + 2
-                name: "test_lookup_error/assert_u5/assert u5".to_string(),
-                inst_id: 0,
-            }]
-        );
+                    Box::new(Expression::Constant(
+                        <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
+                    )),
+                )),
+                Box::new(Expression::Challenge(
+                    0,
+                    1,
+                    GoldilocksExt2::ONE,
+                    GoldilocksExt2::ZERO,
+                )),
+            ),
+            evaluated: 123002.into(), // 123 * 1000 + 2
+            name: "test_lookup_error/assert_u5/assert u5".to_string(),
+            inst_id: 0,
+        }]);
         // because inst_id is not checked in our PartialEq impl
         assert_eq!(err[0].inst_id(), 0);
     }
@@ -820,10 +817,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![
-                    AssertLtCircuitInput { a: 3, b: 5 },
-                    AssertLtCircuitInput { a: 7, b: 11 },
-                ],
+                vec![AssertLtCircuitInput { a: 3, b: 5 }, AssertLtCircuitInput {
+                    a: 7,
+                    b: 11,
+                }],
                 &mut lk_multiplicity,
             )
             .unwrap();
@@ -940,10 +937,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![
-                    LtCircuitInput { a: 3, b: 5 },
-                    LtCircuitInput { a: 7, b: 11 },
-                ],
+                vec![LtCircuitInput { a: 3, b: 5 }, LtCircuitInput {
+                    a: 7,
+                    b: 11,
+                }],
                 &mut lk_multiplicity,
             )
             .unwrap();

@@ -1,7 +1,7 @@
 use ark_std::{end_timer, iterable::Iterable, start_timer};
 use ff::Field;
 use ff_ext::ExtensionField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use multilinear_extensions::{
     mle::{
         DenseMultilinearExtension, InstanceIntoIteratorMut, IntoInstanceIter, IntoInstanceIterMut,
@@ -17,7 +17,7 @@ use crate::{
     structs::{
         Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval, SumcheckProof,
     },
-    utils::{tensor_product, MatrixMLERowFirst},
+    utils::{MatrixMLERowFirst, tensor_product},
 };
 
 // Prove the items copied from the output layer to the output witness for data parallel circuits.

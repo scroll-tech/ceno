@@ -21,38 +21,27 @@ fn build_elfs() {
     let dest_path = Path::new(&out_dir).join("vars.rs");
     let mut dest = File::create(dest_path).expect("failed to create vars.rs");
 
-    // Use a dummy array for clippy, since not building the elf is faster than
-    // building the elf
-    if cfg!(feature = "cargo-clippy") || cfg!(feature = "cargo-check") {
-        for example in EXAMPLES {
-            writeln!(
-                dest,
-                r#"#[allow(non_upper_case_globals)]
-                pub const {example}: &[u8] = &[];"#
-            )
-            .expect("failed to write vars.rs");
-        }
-    } else {
-        let output = Command::new("cargo")
-            .args(["build", "--release", "--examples"])
-            .current_dir("../examples")
-            .env_clear()
-            .envs(std::env::vars().filter(|x| !x.0.starts_with("CARGO_")))
-            .output()
-            .expect("cargo command failed to run");
-        if !output.status.success() {
-            io::stdout().write_all(&output.stdout).unwrap();
-            io::stderr().write_all(&output.stderr).unwrap();
-            panic!("cargo build of examples failed.");
-        }
-        for example in EXAMPLES {
-            writeln!(
-                dest,
-                r#"#[allow(non_upper_case_globals)]
-                pub const {example}: &[u8] =
-                    include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-unknown-none-elf/release/examples/{example}");"#
-            ).expect("failed to write vars.rs");
-        }
+    // TODO(Matthias): skip building the elfs if we are in clippy or check mode.
+    // See git history for an attempt to do this.
+    let output = Command::new("cargo")
+        .args(["build", "--release", "--examples"])
+        .current_dir("../examples")
+        .env_clear()
+        .envs(std::env::vars().filter(|x| !x.0.starts_with("CARGO_")))
+        .output()
+        .expect("cargo command failed to run");
+    if !output.status.success() {
+        io::stdout().write_all(&output.stdout).unwrap();
+        io::stderr().write_all(&output.stderr).unwrap();
+        panic!("cargo build of examples failed.");
+    }
+    for example in EXAMPLES {
+        writeln!(
+            dest,
+            r#"#[allow(non_upper_case_globals)]
+            pub const {example}: &[u8] =
+                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-unknown-none-elf/release/examples/{example}");"#
+        ).expect("failed to write vars.rs");
     }
     let input_path = "../examples/";
     let elfs_path = "../examples/target/riscv32im-unknown-none-elf/release/examples/";

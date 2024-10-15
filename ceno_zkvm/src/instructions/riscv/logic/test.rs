@@ -4,11 +4,11 @@ use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::{riscv::constants::UInt8, Instruction},
-    scheme::mock_prover::{MockProver, MOCK_PC_AND, MOCK_PC_OR, MOCK_PC_XOR, MOCK_PROGRAM},
-    utils::split_to_u8,
     ROMType,
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
+    instructions::{Instruction, riscv::constants::UInt8},
+    scheme::mock_prover::{MOCK_PC_AND, MOCK_PC_OR, MOCK_PC_XOR, MOCK_PROGRAM, MockProver},
+    utils::split_to_u8,
 };
 
 use super::*;
@@ -33,20 +33,19 @@ fn test_opcode_and() {
         .unwrap()
         .unwrap();
 
-    let (raw_witin, lkm) = AndInstruction::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_r_instruction(
-            3,
-            MOCK_PC_AND,
-            MOCK_PROGRAM[3],
-            A,
-            B,
-            Change::new(0, A & B),
-            0,
-        )],
-    )
-    .unwrap();
+    let (raw_witin, lkm) =
+        AndInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_AND,
+                MOCK_PROGRAM[3],
+                A,
+                B,
+                Change::new(0, A & B),
+                0,
+            ),
+        ])
+        .unwrap();
 
     let lkm = lkm.into_finalize_result()[ROMType::And as usize].clone();
     assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
@@ -85,20 +84,19 @@ fn test_opcode_or() {
         .unwrap()
         .unwrap();
 
-    let (raw_witin, lkm) = OrInstruction::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_r_instruction(
-            3,
-            MOCK_PC_OR,
-            MOCK_PROGRAM[4],
-            A,
-            B,
-            Change::new(0, A | B),
-            0,
-        )],
-    )
-    .unwrap();
+    let (raw_witin, lkm) =
+        OrInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_OR,
+                MOCK_PROGRAM[4],
+                A,
+                B,
+                Change::new(0, A | B),
+                0,
+            ),
+        ])
+        .unwrap();
 
     let lkm = lkm.into_finalize_result()[ROMType::Or as usize].clone();
     assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
@@ -137,20 +135,19 @@ fn test_opcode_xor() {
         .unwrap()
         .unwrap();
 
-    let (raw_witin, lkm) = XorInstruction::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_r_instruction(
-            3,
-            MOCK_PC_XOR,
-            MOCK_PROGRAM[5],
-            A,
-            B,
-            Change::new(0, A ^ B),
-            0,
-        )],
-    )
-    .unwrap();
+    let (raw_witin, lkm) =
+        XorInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_XOR,
+                MOCK_PROGRAM[5],
+                A,
+                B,
+                Change::new(0, A ^ B),
+                0,
+            ),
+        ])
+        .unwrap();
 
     let lkm = lkm.into_finalize_result()[ROMType::Xor as usize].clone();
     assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
