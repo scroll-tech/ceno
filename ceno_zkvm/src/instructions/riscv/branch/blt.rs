@@ -10,10 +10,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{
-            RIVInstruction,
-            b_insn::BInstructionConfig,
-            config::{SignedLtConfig, UIntLtSignedConfig},
-            constants::UInt,
+            RIVInstruction, b_insn::BInstructionConfig, config::SignedLtConfig, constants::UInt,
         },
     },
     witness::LkMultiplicity,

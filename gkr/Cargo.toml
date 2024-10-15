@@ -37,8 +37,8 @@ default = [ ]
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 parallel = [ ]
 non_pow2_rayon_thread = ["sumcheck/non_pow2_rayon_thread"]
+unsafe = []
 
 [[bench]]
 name = "keccak256"
 harness = false
-
