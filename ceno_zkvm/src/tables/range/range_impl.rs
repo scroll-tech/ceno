@@ -30,7 +30,7 @@ impl RangeTableConfig {
         let mlt = cb.create_witin(|| "mlt")?;
 
         let rlc_record =
-            cb.rlc_chip_record(&[(rom_type as usize).into(), Expression::Fixed(fixed)]);
+            cb.rlc_chip_record(vec![(rom_type as usize).into(), Expression::Fixed(fixed)]);
 
         cb.lk_table_record(|| "record", rlc_record, mlt.expr())?;
 

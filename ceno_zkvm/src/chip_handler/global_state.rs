@@ -14,7 +14,7 @@ impl<'a, E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for Circ
             ts,
         ];
 
-        let rlc_record = self.rlc_chip_record(&items);
+        let rlc_record = self.rlc_chip_record(items);
         self.read_record(|| "state_in", rlc_record)
     }
 
@@ -24,7 +24,7 @@ impl<'a, E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for Circ
             pc,
             ts,
         ];
-        let rlc_record = self.rlc_chip_record(&items);
+        let rlc_record = self.rlc_chip_record(items);
         self.write_record(|| "state_out", rlc_record)
     }
 }

@@ -221,7 +221,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(i)
     }
 
-    pub fn rlc_chip_record(&self, items: &[Expression<E>]) -> Expression<E> {
+    pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {
         rlc_chip_record(
             items,
             self.chip_record_alpha.clone(),
@@ -234,7 +234,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         name_fn: N,
         items: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
-        let rlc_record = self.rlc_chip_record(&items);
+        let rlc_record = self.rlc_chip_record(items.clone());
         assert_eq!(
             rlc_record.degree(),
             1,

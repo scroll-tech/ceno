@@ -25,7 +25,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
-                &[
+                vec![
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
                     ))],
@@ -37,7 +37,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             );
             // Write (a, v, t)
             let write_record = cb.rlc_chip_record(
-                &[
+                vec![
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
                     ))],
@@ -78,7 +78,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
-                &[
+                vec![
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
                     ))],
@@ -90,7 +90,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             );
             // Write (a, v, t)
             let write_record = cb.rlc_chip_record(
-                &[
+                vec![
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
                     ))],

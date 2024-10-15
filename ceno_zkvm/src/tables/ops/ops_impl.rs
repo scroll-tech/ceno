@@ -33,7 +33,7 @@ impl OpTableConfig {
         ];
         let mlt = cb.create_witin(|| "mlt")?;
 
-        let rlc_record = cb.rlc_chip_record(&[
+        let rlc_record = cb.rlc_chip_record(vec![
             (rom_type as usize).into(),
             Expression::Fixed(abc[0]),
             Expression::Fixed(abc[1]),

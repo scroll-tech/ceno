@@ -95,7 +95,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.write_record(name_fn, rlc_record)
     }
 
-    pub fn rlc_chip_record(&self, records: &[Expression<E>]) -> Expression<E> {
+    pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
         self.cs.rlc_chip_record(records)
     }
 

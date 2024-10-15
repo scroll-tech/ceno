@@ -336,7 +336,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
         for i in RANGE::content() {
             let rlc_record = cb
                 .cs
-                .rlc_chip_record(&[(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
+                .rlc_chip_record(vec![(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
             let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_canonical_u64_vec());
         }
@@ -348,7 +348,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
         challenge: [E; 2],
     ) {
         for [a, b, c] in OP::content() {
-            let rlc_record = cb.rlc_chip_record(&[
+            let rlc_record = cb.rlc_chip_record(vec![
                 (OP::ROM_TYPE as usize).into(),
                 (a as usize).into(),
                 (b as usize).into(),
