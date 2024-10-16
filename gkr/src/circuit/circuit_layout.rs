@@ -1,4 +1,4 @@
-use core::{fmt, panic};
+use core::fmt;
 use std::collections::{BTreeMap, HashMap};
 
 use ff_ext::ExtensionField;
@@ -29,7 +29,7 @@ impl LayerSubsets {
     }
 
     /// Compute the new `wire_id` after copy the cell from the old layer to the
-    /// new layer. If old layer == new layer, return the old wire_id.
+    /// new layer. If old layer == new layer, return the old `wire_id`.
     fn update_wire_id(&mut self, old_layer_id: LayerId, old_wire_id: CellId) -> CellId {
         if old_layer_id == self.layer_id {
             return old_wire_id;
@@ -47,7 +47,7 @@ impl LayerSubsets {
     /// `self.layer_id`, as well as `copy_to` for old layers.
     fn update_layer_info<Ext: ExtensionField>(&self, layers: &mut [Layer<Ext>]) {
         let mut paste_from = BTreeMap::new();
-        for ((old_layer_id, old_wire_id), new_wire_id) in self.subsets.iter() {
+        for ((old_layer_id, old_wire_id), new_wire_id) in &self.subsets {
             paste_from
                 .entry(*old_layer_id)
                 .or_insert(vec![])
@@ -67,7 +67,7 @@ impl LayerSubsets {
                 layers[self.layer_id as usize]
                     .paste_from
                     .values()
-                    .map(|old_wire_ids| old_wire_ids.len())
+                    .map(std::vec::Vec::len)
                     .max()
                     .unwrap_or(1),
             ));
@@ -76,7 +76,7 @@ impl LayerSubsets {
 
 impl<E: ExtensionField> Circuit<E> {
     /// Generate the circuit from circuit builder.
-    pub fn new(circuit_builder: &CircuitBuilder<E>) -> Self {
+    #[must_use] pub fn new(circuit_builder: &CircuitBuilder<E>) -> Self {
         assert!(circuit_builder.n_layers.is_some());
         let n_layers = circuit_builder.n_layers.unwrap();
 
@@ -121,7 +121,7 @@ impl<E: ExtensionField> Circuit<E> {
         let mut input_paste_from_counter_in = Vec::new();
         let mut input_paste_from_consts_in = Vec::new();
         let mut max_in_wit_num_vars: Option<usize> = None;
-        for (ty, in_cell_ids) in in_cell_ids.iter() {
+        for (ty, in_cell_ids) in &in_cell_ids {
             let segment = (
                 wire_ids_in_layer[in_cell_ids[0]],
                 wire_ids_in_layer[in_cell_ids[in_cell_ids.len() - 1]] + 1, /* + 1 for exclusive
@@ -163,7 +163,7 @@ impl<E: ExtensionField> Circuit<E> {
 
             for (i, cell_id) in layers_of_cell_id[layer_id as usize].iter().enumerate() {
                 let cell = &circuit_builder.cells[*cell_id];
-                for gate in cell.gates.iter() {
+                for gate in &cell.gates {
                     let idx_in = gate
                         .idx_in
                         .iter()
@@ -240,9 +240,7 @@ impl<E: ExtensionField> Circuit<E> {
         let mut output_assert_const = vec![];
         for (cell_id, cell) in circuit_builder.cells.iter().enumerate() {
             if let Some(CellType::Out(out)) = cell.cell_type {
-                if cell.layer.is_none() {
-                    panic!("Output cell: {:?} should have a layer.", (cell_id, cell));
-                }
+                assert!(cell.layer.is_some(), "Output cell: {:?} should have a layer.", (cell_id, cell));
                 let old_layer_id = cell.layer.unwrap();
                 let old_wire_id = wire_ids_in_layer[cell_id];
                 match out {
@@ -362,49 +360,49 @@ impl<E: ExtensionField> Circuit<E> {
             .collect()
     }
 
-    pub fn output_layer_ref(&self) -> &Layer<E> {
+    #[must_use] pub fn output_layer_ref(&self) -> &Layer<E> {
         self.layers.first().unwrap()
     }
 
-    pub fn first_layer_ref(&self) -> &Layer<E> {
+    #[must_use] pub fn first_layer_ref(&self) -> &Layer<E> {
         self.layers.last().unwrap()
     }
 
-    pub fn output_num_vars(&self) -> usize {
+    #[must_use] pub fn output_num_vars(&self) -> usize {
         self.output_layer_ref().num_vars
     }
 
-    pub fn output_size(&self) -> usize {
+    #[must_use] pub fn output_size(&self) -> usize {
         1 << self.output_layer_ref().num_vars
     }
 
-    pub fn is_input_layer(&self, layer_id: LayerId) -> bool {
+    #[must_use] pub fn is_input_layer(&self, layer_id: LayerId) -> bool {
         layer_id as usize == self.layers.len() - 1
     }
 
-    pub fn is_output_layer(&self, layer_id: LayerId) -> bool {
+    #[must_use] pub fn is_output_layer(&self, layer_id: LayerId) -> bool {
         layer_id == 0
     }
 }
 
 impl<E: ExtensionField> Layer<E> {
-    pub fn is_linear(&self) -> bool {
+    #[must_use] pub fn is_linear(&self) -> bool {
         self.mul2s.is_empty() && self.mul3s.is_empty()
     }
 
-    pub fn size(&self) -> usize {
+    #[must_use] pub fn size(&self) -> usize {
         1 << self.num_vars
     }
 
-    pub fn num_vars(&self) -> usize {
+    #[must_use] pub fn num_vars(&self) -> usize {
         self.num_vars
     }
 
-    pub fn max_previous_num_vars(&self) -> usize {
+    #[must_use] pub fn max_previous_num_vars(&self) -> usize {
         self.max_previous_num_vars
     }
 
-    pub fn max_previous_size(&self) -> usize {
+    #[must_use] pub fn max_previous_size(&self) -> usize {
         1 << self.max_previous_num_vars
     }
 
@@ -464,20 +462,20 @@ impl<E: ExtensionField> fmt::Debug for Layer<E> {
         writeln!(f, "  num_vars: {}", self.num_vars)?;
         writeln!(f, "  max_previous_num_vars: {}", self.max_previous_num_vars)?;
         writeln!(f, "  add_consts: ")?;
-        for add_const in self.add_consts.iter() {
-            writeln!(f, "    {:?}", add_const)?;
+        for add_const in &self.add_consts {
+            writeln!(f, "    {add_const:?}")?;
         }
         writeln!(f, "  adds: ")?;
-        for add in self.adds.iter() {
-            writeln!(f, "    {:?}", add)?;
+        for add in &self.adds {
+            writeln!(f, "    {add:?}")?;
         }
         writeln!(f, "  mul2s: ")?;
-        for mul2 in self.mul2s.iter() {
-            writeln!(f, "    {:?}", mul2)?;
+        for mul2 in &self.mul2s {
+            writeln!(f, "    {mul2:?}")?;
         }
         writeln!(f, "  mul3s: ")?;
-        for mul3 in self.mul3s.iter() {
-            writeln!(f, "    {:?}", mul3)?;
+        for mul3 in &self.mul3s {
+            writeln!(f, "    {mul3:?}")?;
         }
         writeln!(f, "  copy_to: {:?}", self.copy_to)?;
         writeln!(f, "  paste_from: {:?}", self.paste_from)?;
@@ -489,8 +487,8 @@ impl<E: ExtensionField> fmt::Debug for Circuit<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Circuit {{")?;
         writeln!(f, "  layers: ")?;
-        for layer in self.layers.iter() {
-            writeln!(f, "    {:?}", layer)?;
+        for layer in &self.layers {
+            writeln!(f, "    {layer:?}")?;
         }
         writeln!(f, "  n_witness_in: {}", self.n_witness_in)?;
         writeln!(f, "  paste_from_wits_in: {:?}", self.paste_from_wits_in)?;

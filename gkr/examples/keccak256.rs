@@ -11,7 +11,6 @@ use gkr::{
 };
 use goldilocks::GoldilocksExt2;
 use itertools::{Itertools, izip};
-use multilinear_extensions::mle::IntoMLE;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 
@@ -26,21 +25,9 @@ fn main() {
         .map(|v| str::parse::<usize>(&v).unwrap_or(1))
         .unwrap();
 
-    if !max_thread_id.is_power_of_two() {
-        #[cfg(not(feature = "non_pow2_rayon_thread"))]
-        {
-            panic!(
+    assert!(max_thread_id.is_power_of_two(), 
                 "add --features non_pow2_rayon_thread to support non pow of 2 rayon thread pool"
             );
-        }
-
-        #[cfg(feature = "non_pow2_rayon_thread")]
-        {
-            use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
-            max_thread_id = 1 << ceil_log2(max_thread_id);
-            create_local_pool_once(max_thread_id, true);
-        }
-    }
 
     let circuit = keccak256_circuit::<GoldilocksExt2>();
     // Sanity-check
@@ -50,14 +37,14 @@ fn main() {
             vec![<GoldilocksExt2 as ExtensionField>::BaseField::ZERO; 17 * 64],
         ]
         .into_iter()
-        .map(|wit_in| wit_in.into_mle())
+        .map(multilinear_extensions::mle::IntoMLE::into_mle)
         .collect();
         let all_one = vec![
             vec![<GoldilocksExt2 as ExtensionField>::BaseField::ONE; 25 * 64],
             vec![<GoldilocksExt2 as ExtensionField>::BaseField::ZERO; 17 * 64],
         ]
         .into_iter()
-        .map(|wit_in| wit_in.into_mle())
+        .map(multilinear_extensions::mle::IntoMLE::into_mle)
         .collect();
         let mut witness = CircuitWitness::new(&circuit, Vec::new());
         witness.add_instance(&circuit, all_zero);
@@ -75,7 +62,7 @@ fn main() {
                 .map(|bits| {
                     bits.iter().fold(0, |acc, bit| {
                         (acc << 1)
-                            + (*bit == <GoldilocksExt2 as ExtensionField>::BaseField::ONE) as u64
+                            + u64::from(*bit == <GoldilocksExt2 as ExtensionField>::BaseField::ONE)
                     })
                 })
                 .collect_vec();
@@ -84,7 +71,7 @@ fn main() {
                 tiny_keccak::keccakf(&mut state);
                 state[0..4].to_vec()
             };
-            assert_eq!(output, expected)
+            assert_eq!(output, expected);
         });
     }
 

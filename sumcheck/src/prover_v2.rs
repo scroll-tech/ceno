@@ -194,7 +194,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                                     Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
                                         0,
                                         mle.get_base_field_vec().to_vec(),
-                                    ))
+                                    ));
                             }
                         } else {
                             let mle = Arc::get_mut(mle).unwrap();
@@ -215,9 +215,9 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 .collect::<Vec<_>>();
             for _ in 0..max_thread_id {
                 if let Some((index, prover_msg)) = rx_prover_state.recv().unwrap() {
-                    prover_states[index] = prover_msg
+                    prover_states[index] = prover_msg;
                 } else {
-                    println!("got empty msg, which is normal if virtual poly is constant function")
+                    println!("got empty msg, which is normal if virtual poly is constant function");
                 }
             }
 
@@ -329,7 +329,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
-    pub fn prover_init_with_extrapolation_aux(
+    #[must_use] pub fn prover_init_with_extrapolation_aux(
         polynomial: VirtualPolynomialV2<'a, E>,
         extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
     ) -> Self {
@@ -574,7 +574,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     }
 
     /// collect all mle evaluation (claim) after sumcheck
-    pub fn get_mle_final_evaluations(&self) -> Vec<E> {
+    #[must_use] pub fn get_mle_final_evaluations(&self) -> Vec<E> {
         self.poly
             .flattened_ml_extensions
             .iter()
@@ -651,13 +651,13 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 .for_each(|mle| {
                     if let Some(mle) = Arc::get_mut(mle) {
                         if mle.num_vars() > 0 {
-                            mle.fix_variables_in_place(&[p.elements])
+                            mle.fix_variables_in_place(&[p.elements]);
                         }
                     } else {
                         *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
                             0,
                             mle.get_base_field_vec().to_vec(),
-                        ))
+                        ));
                     }
                 });
         };
@@ -766,7 +766,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     .for_each(|f| {
                         if let Some(f) = f {
                             if f.num_vars() > 0 {
-                                f.fix_variables_in_place_parallel(&[r.elements])
+                                f.fix_variables_in_place_parallel(&[r.elements]);
                             }
                         }
                     });

@@ -894,7 +894,7 @@ where
                 // next_index here.
                 final_codeword[next_index]
             };
-            assert_eq!(res, next_oracle_value, "Failed at round {}", i);
+            assert_eq!(res, next_oracle_value, "Failed at round {i}");
             // end_timer!(round_timer);
         }
         // end_timer!(timer);
@@ -1058,12 +1058,12 @@ where
                 .map(|(index, _)| index)
                 .collect_vec();
 
-            matching_comms.iter().for_each(|index| {
+            for index in &matching_comms {
                 let query = self.commitments_query.get_inner()[*index].query;
                 assert_eq!(query.index >> 1, left_index >> 1);
                 curr_left += query.left_ext() * coeffs[*index];
                 curr_right += query.right_ext() * coeffs[*index];
-            });
+            }
 
             let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
                 vp,
@@ -1103,7 +1103,7 @@ where
                     .map(|(index, _)| index)
                     .collect_vec();
 
-                matching_comms.iter().for_each(|index| {
+                for index in &matching_comms {
                     let query: CodewordSingleQueryResult<E> =
                         self.commitments_query.get_inner()[*index].query;
                     assert_eq!(query.index >> 1, next_index >> 1);
@@ -1112,13 +1112,13 @@ where
                     } else {
                         res += query.right_ext() * coeffs[*index];
                     }
-                });
+                }
 
                 // Note that final_codeword has been bit-reversed, so no need to bit-reverse
                 // next_index here.
                 final_codeword[next_index]
             };
-            assert_eq!(res, next_oracle_value, "Failed at round {}", i);
+            assert_eq!(res, next_oracle_value, "Failed at round {i}");
             // end_timer!(round_timer);
         }
         // end_timer!(timer);
@@ -1375,7 +1375,7 @@ where
                 // next_index here.
                 final_codeword[next_index]
             };
-            assert_eq!(res, next_oracle_value, "Failed at round {}", i);
+            assert_eq!(res, next_oracle_value, "Failed at round {i}");
             // end_timer!(round_timer);
         }
     }

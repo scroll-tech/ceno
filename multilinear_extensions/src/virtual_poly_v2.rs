@@ -17,26 +17,26 @@ pub type ArcMultilinearExtension<'a, E> =
 /// extensions:  `(coefficient, DenseMultilinearExtension)`
 ///
 /// * Number of products n = `polynomial.products.len()`,
-/// * Number of multiplicands of ith product m_i =
+/// * Number of multiplicands of ith product `m_i` =
 ///   `polynomial.products[i].1.len()`,
-/// * Coefficient of ith product c_i = `polynomial.products[i].0`
+/// * Coefficient of ith product `c_i` = `polynomial.products[i].0`
 ///
 /// The resulting polynomial is
 ///
-/// $$ \sum_{i=0}^{n} c_i \cdot \prod_{j=0}^{m_i} P_{ij} $$
+/// $$ \sum_{i=0}^{n} `c_i` \cdot \prod_{`j=0}^{m_i`} P_{ij} $$
 ///
 /// Example:
 ///  f = c0 * f0 * f1 * f2 + c1 * f3 * f4
 /// where f0 ... f4 are multilinear polynomials
 ///
-/// - flattened_ml_extensions stores the multilinear extension representation of
+/// - `flattened_ml_extensions` stores the multilinear extension representation of
 ///   f0, f1, f2, f3 and f4
 /// - products is
 ///     \[
 ///         (c0, \[0, 1, 2\]),
 ///         (c1, \[3, 4\])
 ///     \]
-/// - raw_pointers_lookup_table maps fi to i
+/// - `raw_pointers_lookup_table` maps fi to i
 ///
 #[derive(Default, Clone)]
 pub struct VirtualPolynomialV2<'a, E: ExtensionField> {
@@ -71,7 +71,7 @@ impl<E: ExtensionField> AsRef<[u8]> for VPAuxInfo<E> {
 
 impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     /// Creates an empty virtual polynomial with `max_num_variables`.
-    pub fn new(max_num_variables: usize) -> Self {
+    #[must_use] pub fn new(max_num_variables: usize) -> Self {
         VirtualPolynomialV2 {
             aux_info: VPAuxInfo {
                 max_degree: 0,
@@ -86,7 +86,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
 
     /// Creates an new virtual polynomial from a MLE and its coefficient.
     pub fn new_from_mle(mle: ArcMultilinearExtension<'a, E>, coefficient: E) -> Self {
-        let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
+        let mle_ptr: usize = Arc::as_ptr(&mle).cast::<()>() as usize;
         let mut hm = HashMap::new();
         hm.insert(mle_ptr, 0);
 
@@ -107,8 +107,8 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     /// Add a product of list of multilinear extensions to self
     /// Returns an error if the list is empty.
     ///
-    /// mle in mle_list must be in same num_vars() in same product,
-    /// while different product can have different num_vars()
+    /// mle in `mle_list` must be in same `num_vars()` in same product,
+    /// while different product can have different `num_vars()`
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
     /// `coefficient`.
@@ -131,9 +131,9 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
         self.aux_info.max_degree = max(self.aux_info.max_degree, mle_list.len());
 
         for mle in mle_list {
-            let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
+            let mle_ptr: usize = Arc::as_ptr(&mle).cast::<()>() as usize;
             if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
-                indexed_product.push(*index)
+                indexed_product.push(*index);
             } else {
                 let curr_index = self.flattened_ml_extensions.len();
                 self.flattened_ml_extensions.push(mle);
@@ -147,7 +147,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     /// in-place merge with another virtual polynomial
     pub fn merge(&mut self, other: &VirtualPolynomialV2<'a, E>) {
         let start = start_timer!(|| "virtual poly add");
-        for (coeffient, products) in other.products.iter() {
+        for (coeffient, products) in &other.products {
             let cur: Vec<_> = products
                 .iter()
                 .map(|&x| other.flattened_ml_extensions[x].clone())
@@ -174,20 +174,17 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
             self.aux_info.max_num_variables
         );
 
-        let mle_ptr = Arc::as_ptr(&mle) as *const () as usize;
+        let mle_ptr = Arc::as_ptr(&mle).cast::<()>() as usize;
 
         // check if this mle already exists in the virtual polynomial
-        let mle_index = match self.raw_pointers_lookup_table.get(&mle_ptr) {
-            Some(&p) => p,
-            None => {
-                self.raw_pointers_lookup_table
-                    .insert(mle_ptr, self.flattened_ml_extensions.len());
-                self.flattened_ml_extensions.push(mle);
-                self.flattened_ml_extensions.len() - 1
-            }
+        let mle_index = if let Some(&p) = self.raw_pointers_lookup_table.get(&mle_ptr) { p } else {
+            self.raw_pointers_lookup_table
+                .insert(mle_ptr, self.flattened_ml_extensions.len());
+            self.flattened_ml_extensions.push(mle);
+            self.flattened_ml_extensions.len() - 1
         };
 
-        for (prod_coef, indices) in self.products.iter_mut() {
+        for (prod_coef, indices) in &mut self.products {
             // - add the MLE to the MLE list;
             // - multiple each product by MLE and its coefficient.
             indices.push(mle_index);
@@ -200,7 +197,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     }
 
     /// Evaluate the virtual polynomial at point `point`.
-    /// Returns an error is point.len() does not match `num_variables`.
+    /// Returns an error is `point.len()` does not match `num_variables`.
     pub fn evaluate(&self, point: &[E]) -> E {
         let start = start_timer!(|| "evaluation");
 
@@ -228,17 +225,15 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
         res
     }
 
-    /// Print out the evaluation map for testing. Panic if the num_vars() > 5.
+    /// Print out the evaluation map for testing. Panic if the `num_vars()` > 5.
     pub fn print_evals(&self) {
-        if self.aux_info.max_num_variables > 5 {
-            panic!("this function is used for testing only. cannot print more than 5 num_vars()")
-        }
+        assert!(self.aux_info.max_num_variables <= 5, "this function is used for testing only. cannot print more than 5 num_vars()");
         for i in 0..1 << self.aux_info.max_num_variables {
             let point = bit_decompose(i, self.aux_info.max_num_variables);
-            let point_fr: Vec<E> = point.iter().map(|&x| E::from(x as u64)).collect();
-            println!("{} {:?}", i, self.evaluate(point_fr.as_ref()))
+            let point_fr: Vec<E> = point.iter().map(|&x| E::from(u64::from(x))).collect();
+            println!("{} {:?}", i, self.evaluate(point_fr.as_ref()));
         }
-        println!()
+        println!();
     }
 
     // // TODO: This seems expensive. Is there a better way to covert poly into its ext fields?

@@ -81,7 +81,7 @@ pub struct BooleanHypercube {
 }
 
 impl BooleanHypercube {
-    pub const fn new(num_vars: usize) -> Self {
+    #[must_use] pub const fn new(num_vars: usize) -> Self {
         assert!(num_vars < 32);
         Self {
             num_vars,
@@ -90,19 +90,19 @@ impl BooleanHypercube {
         }
     }
 
-    pub const fn num_vars(&self) -> usize {
+    #[must_use] pub const fn num_vars(&self) -> usize {
         self.num_vars
     }
 
-    pub const fn primitive(&self) -> usize {
+    #[must_use] pub const fn primitive(&self) -> usize {
         self.primitive
     }
 
-    pub const fn x_inv(&self) -> usize {
+    #[must_use] pub const fn x_inv(&self) -> usize {
         self.x_inv
     }
 
-    pub fn rotate(&self, mut b: usize, Rotation(rotation): Rotation) -> usize {
+    #[must_use] pub fn rotate(&self, mut b: usize, Rotation(rotation): Rotation) -> usize {
         match rotation.cmp(&0) {
             Ordering::Equal => {}
             Ordering::Less => {
@@ -127,7 +127,7 @@ impl BooleanHypercube {
             .take(1 << self.num_vars)
     }
 
-    pub fn nth_map(&self) -> Vec<usize> {
+    #[must_use] pub fn nth_map(&self) -> Vec<usize> {
         let mut nth_map = vec![0; 1 << self.num_vars];
         for (nth, b) in self.iter().enumerate() {
             nth_map[b] = nth;
@@ -135,7 +135,7 @@ impl BooleanHypercube {
         nth_map
     }
 
-    pub fn rotation_map(&self, rotation: Rotation) -> Vec<usize> {
+    #[must_use] pub fn rotation_map(&self, rotation: Rotation) -> Vec<usize> {
         par_map_collect(0..1 << self.num_vars, |b| self.rotate(b, rotation))
     }
 }
@@ -173,7 +173,7 @@ mod test {
         for num_vars in 0..18 {
             let bh = BooleanHypercube::new(num_vars);
             for (b, b_next) in bh.iter().skip(1).zip(bh.iter().skip(2).chain(Some(1))) {
-                assert_eq!(b, bh.rotate(b_next, Rotation::prev()))
+                assert_eq!(b, bh.rotate(b_next, Rotation::prev()));
             }
         }
     }

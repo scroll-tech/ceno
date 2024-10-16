@@ -437,9 +437,7 @@ mod tests {
                 assert_eq!(
                     Code::prover_folding_coeffs(&pp, level, index),
                     Code::verifier_folding_coeffs(&vp, level, index),
-                    "failed for level = {}, index = {}",
-                    level,
-                    index
+                    "failed for level = {level}, index = {index}"
                 );
             }
         }

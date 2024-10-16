@@ -35,7 +35,7 @@ mod utils;
 
 #[allow(clippy::too_long_first_doc_paragraph)]
 /// Circuit graph builder for Singer. `output_wires_id` is indexed by
-/// InstOutputType, corresponding to the product of summation of the chip check
+/// `InstOutputType`, corresponding to the product of summation of the chip check
 /// records. `public_output_size` is the wire id stores the size of public
 /// output.
 #[derive(Default)]
@@ -56,7 +56,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
         params: &SingerParams,
     ) -> Result<(SingerCircuit<E>, SingerWitness<'a, E>, SingerWiresOutID), ZKVMError> {
         // Add instruction and its extension (if any) circuits to the graph.
-        for inst_wires_in in singer_wires_in.instructions.into_iter() {
+        for inst_wires_in in singer_wires_in.instructions {
             let InstWiresIn {
                 opcode,
                 real_n_instances,
@@ -121,7 +121,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
         aux_info: &SingerAuxInfo,
     ) -> Result<SingerCircuit<E>, ZKVMError> {
         // Add instruction and its extension (if any) circuits to the graph.
-        for (opcode, real_n_instances) in aux_info.real_n_instances.iter() {
+        for (opcode, real_n_instances) in &aux_info.real_n_instances {
             let inst_circuits = &circuit_builder.insts_circuits[*opcode as usize];
             let pub_out_id = construct_inst_graph(
                 *opcode,
@@ -205,7 +205,7 @@ pub struct SingerWiresOutValues<'a, E: ExtensionField> {
 }
 
 impl SingerWiresOutID {
-    pub fn to_vec(&self) -> Vec<NodeOutputType> {
+    #[must_use] pub fn to_vec(&self) -> Vec<NodeOutputType> {
         let mut res = [
             self.ram_load.clone(),
             self.ram_store.clone(),

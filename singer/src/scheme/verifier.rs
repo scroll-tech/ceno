@@ -89,7 +89,7 @@ pub fn verify<E: ExtensionField>(
         assert_eq!(
             output.get_base_field_vec()[0],
             E::BaseField::from(aux_info.program_output_len as u64)
-        )
+        );
     }
 
     GKRGraphVerifierState::verify(

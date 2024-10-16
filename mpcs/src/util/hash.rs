@@ -30,8 +30,8 @@ pub fn hash_two_leaves_base<E: ExtensionField>(
 }
 
 pub fn hash_two_leaves_batch_ext<E: ExtensionField>(a: &[E], b: &[E]) -> Digest<E::BaseField> {
-    let a_m_to_1_hash = PoseidonHash::hash_or_noop_iter(a.iter().flat_map(|v| v.as_bases()));
-    let b_m_to_1_hash = PoseidonHash::hash_or_noop_iter(b.iter().flat_map(|v| v.as_bases()));
+    let a_m_to_1_hash = PoseidonHash::hash_or_noop_iter(a.iter().flat_map(ff_ext::ExtensionField::as_bases));
+    let b_m_to_1_hash = PoseidonHash::hash_or_noop_iter(b.iter().flat_map(ff_ext::ExtensionField::as_bases));
     hash_two_digests(&a_m_to_1_hash, &b_m_to_1_hash)
 }
 

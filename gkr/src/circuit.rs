@@ -75,7 +75,7 @@ where
         challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
     ) -> Vec<E> {
         let mut ans = vec![E::ZERO; in_size];
-        for gate in self.iter() {
+        for gate in *self {
             ans[gate.idx_in[0]] += out_eq_vec[gate.idx_out] * gate.scalar.eval(challenges);
         }
         ans

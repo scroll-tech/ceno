@@ -76,9 +76,9 @@ fn copy_and_paste_witness<'a, Ext: ExtensionField>()
     let witness_out: Vec<DenseMultilinearExtension<Ext>> = vec![outputs.into()];
 
     (witness_in.clone(), CircuitWitness {
-        layers: layers.into_iter().map(|w| w.into()).collect(),
-        witness_in: witness_in.into_iter().map(|w| w.into()).collect(),
-        witness_out: witness_out.into_iter().map(|w| w.into()).collect(),
+        layers: layers.into_iter().map(std::convert::Into::into).collect(),
+        witness_in: witness_in.into_iter().map(std::convert::Into::into).collect(),
+        witness_out: witness_out.into_iter().map(std::convert::Into::into).collect(),
         n_instances: 1,
         challenges: HashMap::new(),
     })
@@ -152,9 +152,9 @@ fn paste_from_wit_in_witness<'a, Ext: ExtensionField>()
     let witness_out: Vec<DenseMultilinearExtension<Ext>> = vec![outputs1.into(), outputs2.into()];
 
     (witness_in.clone(), CircuitWitness {
-        layers: layers.into_iter().map(|w| w.into()).collect(),
-        witness_in: witness_in.into_iter().map(|w| w.into()).collect(),
-        witness_out: witness_out.into_iter().map(|w| w.into()).collect(),
+        layers: layers.into_iter().map(std::convert::Into::into).collect(),
+        witness_in: witness_in.into_iter().map(std::convert::Into::into).collect(),
+        witness_out: witness_out.into_iter().map(std::convert::Into::into).collect(),
         n_instances: 1,
         challenges: HashMap::new(),
     })
@@ -214,9 +214,9 @@ fn copy_to_wit_out_witness<'a, Ext: ExtensionField>()
     let witness_out: Vec<DenseMultilinearExtension<Ext>> = vec![outputs.into()];
 
     (witness_in.clone(), CircuitWitness {
-        layers: layers.into_iter().map(|w| w.into()).collect(),
-        witness_in: witness_in.into_iter().map(|w| w.into()).collect(),
-        witness_out: witness_out.into_iter().map(|w| w.into()).collect(),
+        layers: layers.into_iter().map(std::convert::Into::into).collect(),
+        witness_in: witness_in.into_iter().map(std::convert::Into::into).collect(),
+        witness_out: witness_out.into_iter().map(std::convert::Into::into).collect(),
         n_instances: 1,
         challenges: HashMap::new(),
     })
@@ -286,9 +286,9 @@ fn copy_to_wit_out_witness_2<'a, Ext: ExtensionField>()
     let witness_out: Vec<DenseMultilinearExtension<Ext>> = vec![outputs.into()];
 
     (witness_in.clone(), CircuitWitness {
-        layers: layers.into_iter().map(|w| w.into()).collect(),
-        witness_in: witness_in.into_iter().map(|w| w.into()).collect(),
-        witness_out: witness_out.into_iter().map(|w| w.into()).collect(),
+        layers: layers.into_iter().map(std::convert::Into::into).collect(),
+        witness_in: witness_in.into_iter().map(std::convert::Into::into).collect(),
+        witness_out: witness_out.into_iter().map(std::convert::Into::into).collect(),
         n_instances: 2,
         challenges: HashMap::new(),
     })
@@ -395,8 +395,8 @@ where
     let root0 = inner00 * inner01;
     let root1 = inner10 * inner11;
     let roots = vec![
-        root0.as_bases().iter().cloned().collect_vec(),
-        root1.as_bases().iter().cloned().collect_vec(),
+        root0.as_bases().iter().copied().collect_vec(),
+        root1.as_bases().iter().copied().collect_vec(),
     ];
 
     let layers: Vec<DenseMultilinearExtension<Ext>> = vec![
@@ -412,14 +412,14 @@ where
     (
         witness_in.clone(),
         CircuitWitness {
-            layers: layers.into_iter().map(|w| w.into()).collect(),
-            witness_in: witness_in.into_iter().map(|w| w.into()).collect(),
-            witness_out: witness_out.into_iter().map(|w| w.into()).collect(),
+            layers: layers.into_iter().map(std::convert::Into::into).collect(),
+            witness_in: witness_in.into_iter().map(std::convert::Into::into).collect(),
+            witness_out: witness_out.into_iter().map(std::convert::Into::into).collect(),
             n_instances: 2,
             challenges: challenge_pows
                 .iter()
                 .flatten()
-                .cloned()
+                .copied()
                 .map(|(k, v)| (k, v.as_bases().to_vec()))
                 .collect::<HashMap<_, _>>(),
         },

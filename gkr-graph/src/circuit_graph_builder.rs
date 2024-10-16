@@ -121,7 +121,7 @@ impl<'a, E: ExtensionField> CircuitGraphBuilder<'a, E> {
     }
 
     /// Collect the information of `self.sources` and `self.targets`.
-    pub fn finalize_graph_and_witness(mut self) -> (CircuitGraph<E>, CircuitGraphWitness<'a, E>) {
+    #[must_use] pub fn finalize_graph_and_witness(mut self) -> (CircuitGraph<E>, CircuitGraphWitness<'a, E>) {
         // Generate all possible graph output
         let outs = self
             .graph
@@ -167,13 +167,13 @@ impl<'a, E: ExtensionField> CircuitGraphBuilder<'a, E> {
         (self.graph, self.witness)
     }
 
-    pub fn finalize_graph(self) -> CircuitGraph<E> {
+    #[must_use] pub fn finalize_graph(self) -> CircuitGraph<E> {
         let (graph, _) = self.finalize_graph_and_witness();
         graph
     }
 
     /// Collect the information of `self.sources` and `self.targets`.
-    pub fn finalize_graph_and_witness_with_targets(
+    #[must_use] pub fn finalize_graph_and_witness_with_targets(
         mut self,
         targets: &[NodeOutputType],
     ) -> (CircuitGraph<E>, CircuitGraphWitness<'a, E>) {
@@ -219,7 +219,7 @@ impl<'a, E: ExtensionField> CircuitGraphBuilder<'a, E> {
 
         assert_eq!(
             expected_target,
-            targets.iter().cloned().collect::<BTreeSet<_>>()
+            targets.iter().copied().collect::<BTreeSet<_>>()
         );
 
         self.graph.sources = sources.into_iter().collect();
@@ -228,7 +228,7 @@ impl<'a, E: ExtensionField> CircuitGraphBuilder<'a, E> {
         (self.graph, self.witness)
     }
 
-    pub fn finalize_graph_with_targets(self, targets: &[NodeOutputType]) -> CircuitGraph<E> {
+    #[must_use] pub fn finalize_graph_with_targets(self, targets: &[NodeOutputType]) -> CircuitGraph<E> {
         let (graph, _) = self.finalize_graph_and_witness_with_targets(targets);
         graph
     }

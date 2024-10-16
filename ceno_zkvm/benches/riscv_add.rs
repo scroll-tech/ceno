@@ -8,7 +8,7 @@ use ceno_zkvm::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
 use const_env::from_env;
-use criterion::*;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::ff::Field;
@@ -86,12 +86,12 @@ fn bench_add(c: &mut Criterion) {
 
     for instance_num_vars in 20..22 {
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("add_op_{}", instance_num_vars));
+        let mut group = c.benchmark_group(format!("add_op_{instance_num_vars}"));
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
         group.bench_function(
-            BenchmarkId::new("prove_add", format!("prove_add_log2_{}", instance_num_vars)),
+            BenchmarkId::new("prove_add", format!("prove_add_log2_{instance_num_vars}")),
             |b| {
                 b.iter_with_setup(
                     || {
@@ -124,7 +124,7 @@ fn bench_add(c: &mut Criterion) {
                                 "ADD",
                                 &prover.pk.pp,
                                 &circuit_pk,
-                                wits_in.into_iter().map(|mle| mle.into()).collect_vec(),
+                                wits_in.into_iter().map(std::convert::Into::into).collect_vec(),
                                 commit,
                                 &[],
                                 num_instances,

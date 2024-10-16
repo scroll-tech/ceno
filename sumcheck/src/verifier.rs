@@ -43,7 +43,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
     }
 
     /// Initialize the verifier's state.
-    pub fn verifier_init(index_info: &VPAuxInfo<E>) -> Self {
+    #[must_use] pub fn verifier_init(index_info: &VPAuxInfo<E>) -> Self {
         let start = start_timer!(|| "sum check verifier init");
         let verifier_state = Self {
             round: 1,
@@ -87,7 +87,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         let challenge = transcript.get_and_append_challenge(b"Internal round");
         self.challenges.push(challenge);
         self.polynomials_received
-            .push(prover_msg.evaluations.to_vec());
+            .push(prover_msg.evaluations.clone());
 
         if self.round == self.num_vars {
             // accept and close
@@ -111,13 +111,9 @@ impl<E: ExtensionField> IOPVerifierState<E> {
     /// Larger field size guarantees smaller soundness error.
     pub(crate) fn check_and_generate_subclaim(&self, asserted_sum: &E) -> SumCheckSubClaim<E> {
         let start = start_timer!(|| "sum check check and generate subclaim");
-        if !self.finished {
-            panic!("Incorrect verifier state: Verifier has not finished.",);
-        }
+        assert!(self.finished, "Incorrect verifier state: Verifier has not finished.",);
 
-        if self.polynomials_received.len() != self.num_vars {
-            panic!("insufficient rounds",);
-        }
+        assert!(self.polynomials_received.len() == self.num_vars, "insufficient rounds",);
 
         // the deferred check during the interactive phase:
         // 2. set `expected` to P(r)`
@@ -126,13 +122,11 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             .iter()
             .zip(self.challenges.iter())
             .map(|(evaluations, challenge)| {
-                if evaluations.len() != self.max_degree + 1 {
-                    panic!(
+                assert!(evaluations.len() == self.max_degree + 1, 
                         "incorrect number of evaluations: {} vs {}",
                         evaluations.len(),
                         self.max_degree + 1
                     );
-                }
                 interpolate_uni_poly::<E>(evaluations, challenge.elements)
             })
             .collect::<Vec<_>>();
@@ -149,14 +143,12 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         {
             // the deferred check during the interactive phase:
             // 1. check if the received 'P(0) + P(1) = expected`.
-            if evaluations[0] + evaluations[1] != expected {
-                panic!(
+            assert!(!(evaluations[0] + evaluations[1] != expected), 
                     "{}th round's prover message is not consistent with the claim. {:?} {:?}",
                     i,
                     evaluations[0] + evaluations[1],
                     expected
                 );
-            }
         }
         end_timer!(start);
         SumCheckSubClaim {

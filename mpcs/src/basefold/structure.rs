@@ -77,7 +77,7 @@ impl<E: ExtensionField> BasefoldCommitmentWithData<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn to_commitment(&self) -> BasefoldCommitment<E> {
+    #[must_use] pub fn to_commitment(&self) -> BasefoldCommitment<E> {
         BasefoldCommitment::new(
             self.codeword_tree.root(),
             self.num_vars,
@@ -86,15 +86,15 @@ where
         )
     }
 
-    pub fn get_root_ref(&self) -> &Digest<E::BaseField> {
+    #[must_use] pub fn get_root_ref(&self) -> &Digest<E::BaseField> {
         self.codeword_tree.root_ref()
     }
 
-    pub fn get_root_as(&self) -> Digest<E::BaseField> {
+    #[must_use] pub fn get_root_as(&self) -> Digest<E::BaseField> {
         Digest::<E::BaseField>(self.get_root_ref().0)
     }
 
-    pub fn get_codewords(&self) -> &Vec<FieldType<E>> {
+    #[must_use] pub fn get_codewords(&self) -> &Vec<FieldType<E>> {
         self.codeword_tree.leaves()
     }
 
@@ -102,35 +102,35 @@ where
         self.codeword_tree.batch_leaves(coeffs)
     }
 
-    pub fn codeword_size(&self) -> usize {
+    #[must_use] pub fn codeword_size(&self) -> usize {
         self.codeword_tree.size().1
     }
 
-    pub fn codeword_size_log(&self) -> usize {
+    #[must_use] pub fn codeword_size_log(&self) -> usize {
         self.codeword_tree.height()
     }
 
-    pub fn poly_size(&self) -> usize {
+    #[must_use] pub fn poly_size(&self) -> usize {
         1 << self.num_vars
     }
 
-    pub fn get_codeword_entry_base(&self, index: usize) -> Vec<E::BaseField> {
+    #[must_use] pub fn get_codeword_entry_base(&self, index: usize) -> Vec<E::BaseField> {
         self.codeword_tree.get_leaf_as_base(index)
     }
 
-    pub fn get_codeword_entry_ext(&self, index: usize) -> Vec<E> {
+    #[must_use] pub fn get_codeword_entry_ext(&self, index: usize) -> Vec<E> {
         self.codeword_tree.get_leaf_as_extension(index)
     }
 
-    pub fn is_base(&self) -> bool {
+    #[must_use] pub fn is_base(&self) -> bool {
         self.is_base
     }
 
-    pub fn trivial_num_vars<Spec: BasefoldSpec<E>>(num_vars: usize) -> bool {
+    #[must_use] pub fn trivial_num_vars<Spec: BasefoldSpec<E>>(num_vars: usize) -> bool {
         num_vars <= Spec::get_basecode_msg_size_log()
     }
 
-    pub fn is_trivial<Spec: BasefoldSpec<E>>(&self) -> bool {
+    #[must_use] pub fn is_trivial<Spec: BasefoldSpec<E>>(&self) -> bool {
         Self::trivial_num_vars::<Spec>(self.num_vars)
     }
 }
@@ -214,15 +214,15 @@ impl<E: ExtensionField> Eq for BasefoldCommitmentWithData<E> where
 pub trait BasefoldSpec<E: ExtensionField>: Debug + Clone {
     type EncodingScheme: EncodingScheme<E>;
 
-    fn get_number_queries() -> usize {
+    #[must_use] fn get_number_queries() -> usize {
         Self::EncodingScheme::get_number_queries()
     }
 
-    fn get_rate_log() -> usize {
+    #[must_use] fn get_rate_log() -> usize {
         Self::EncodingScheme::get_rate_log()
     }
 
-    fn get_basecode_msg_size_log() -> usize {
+    #[must_use] fn get_basecode_msg_size_log() -> usize {
         Self::EncodingScheme::get_basecode_msg_size_log()
     }
 }

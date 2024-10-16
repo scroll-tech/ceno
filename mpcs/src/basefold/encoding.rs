@@ -57,7 +57,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
     /// left-right, like basefold, then return true.
     fn message_is_left_and_right_folding() -> bool;
 
-    fn message_is_even_and_odd_folding() -> bool {
+    #[must_use] fn message_is_even_and_odd_folding() -> bool {
         !Self::message_is_left_and_right_folding()
     }
 
@@ -202,7 +202,7 @@ pub(crate) mod test_util {
             .zip(encoded_folded_message.iter())
             .enumerate()
         {
-            assert_eq!(a, b, "Failed at index {}", i);
+            assert_eq!(a, b, "Failed at index {i}");
         }
 
         let mut folded_codeword = FieldType::Ext(folded_codeword);
@@ -228,7 +228,7 @@ pub(crate) mod test_util {
                 .zip(encoded_folded_message.iter())
                 .enumerate()
             {
-                assert_eq!(a, b, "Failed at index {} in round {}", i, round);
+                assert_eq!(a, b, "Failed at index {i} in round {round}");
             }
             folded_codeword = FieldType::Ext(folded_codeword_vec);
         }

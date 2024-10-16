@@ -59,7 +59,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     #[cfg(debug_assertions)]
     circuit_builder.print_info();
     let circuit = Circuit::new(&circuit_builder);
-    println!("circuit: {:?}", circuit);
+    println!("circuit: {circuit:?}");
 
     // assign wire in
     let n_wits_in = circuit.n_witness_in;
@@ -72,20 +72,19 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
         circuit_witness.add_instance(&circuit, wit_in);
         circuit_witness
     };
-    println!("circuit witness: {:?}", circuit_witness);
+    println!("circuit witness: {circuit_witness:?}");
     // use of check_correctness will panic
     // circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
-    println!("layers: {:?}", layers);
+    println!("layers: {layers:?}");
 
     let wits_out = circuit_witness.witness_out_ref();
     let cond_wire_out_ref = &wits_out[cond_wire_out_id as usize];
     let is_zero_wire_out_ref = &wits_out[is_zero_wire_out_id as usize];
     println!(
-        "cond wire outs: {:?}, is zero wire out {:?}",
-        cond_wire_out_ref, is_zero_wire_out_ref
+        "cond wire outs: {cond_wire_out_ref:?}, is zero wire out {is_zero_wire_out_ref:?}"
     );
 
     // cond1 and cond2
@@ -159,8 +158,7 @@ fn test_gkr_circuit_is_zero_gadget_simple() {
     let verification_time: Duration = start.elapsed();
 
     println!(
-        "proof time: {:?}, verification time: {:?}",
-        proof_time, verification_time
+        "proof time: {proof_time:?}, verification time: {verification_time:?}"
     );
 }
 
@@ -215,7 +213,7 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     circuit_builder.print_info();
 
     let circuit = Circuit::new(&circuit_builder);
-    println!("circuit: {:?}", circuit);
+    println!("circuit: {circuit:?}");
 
     // assign wire in
     let n_wits_in = circuit.n_witness_in;
@@ -228,20 +226,19 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
         circuit_witness.add_instance(&circuit, wits_in);
         circuit_witness
     };
-    println!("circuit witness: {:?}", circuit_witness);
+    println!("circuit witness: {circuit_witness:?}");
     // use of check_correctness will panic
     // circuit_witness.check_correctness(&circuit);
 
     // check the result
     let layers = circuit_witness.layers_ref();
-    println!("layers: {:?}", layers);
+    println!("layers: {layers:?}");
 
     let wits_out = circuit_witness.witness_out_ref();
     let cond_wire_out_ref = &wits_out[cond_wire_out_id as usize];
     let is_zero_wire_out_ref = &wits_out[is_zero_wire_out_id as usize];
     println!(
-        "cond wire outs: {:?}, is zero wire out {:?}",
-        cond_wire_out_ref, is_zero_wire_out_ref
+        "cond wire outs: {cond_wire_out_ref:?}, is zero wire out {is_zero_wire_out_ref:?}"
     );
 
     // cond1 and cond2
@@ -309,5 +306,5 @@ fn test_gkr_circuit_is_zero_gadget_u256() {
     // let verification_time: Duration = start.elapsed();
     //
     // println!("proof time: {:?}, verification time: {:?}", proof_time, verification_time);
-    println!("proof time: {:?}", proof_time);
+    println!("proof time: {proof_time:?}");
 }

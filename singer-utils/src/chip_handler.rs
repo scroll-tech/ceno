@@ -25,16 +25,16 @@ impl Default for ChipChallenges {
 }
 
 impl ChipChallenges {
-    pub fn new(record_rlc: ChallengeId, record_item_rlc: ChallengeId) -> Self {
+    #[must_use] pub fn new(record_rlc: ChallengeId, record_item_rlc: ChallengeId) -> Self {
         Self {
             record_rlc,
             record_item_rlc,
         }
     }
-    pub fn record_item_rlc(&self) -> ChallengeId {
+    #[must_use] pub fn record_item_rlc(&self) -> ChallengeId {
         self.record_item_rlc
     }
-    pub fn record_rlc(&self) -> ChallengeId {
+    #[must_use] pub fn record_rlc(&self) -> ChallengeId {
         self.record_rlc
     }
 }
@@ -45,7 +45,7 @@ pub struct ChipHandler<Ext: ExtensionField> {
 }
 
 impl<Ext: ExtensionField> ChipHandler<Ext> {
-    pub fn new(challenge: ChipChallenges) -> Self {
+    #[must_use] pub fn new(challenge: ChipChallenges) -> Self {
         Self {
             ram_handler: RAMHandler::new(challenge),
             rom_handler: ROMHandler::new(challenge),

@@ -19,9 +19,9 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
 
     /// This is to mark the cells with special functionality.
     pub(crate) fn mark_cells(&mut self, cell_type: CellType, cells: &[CellId]) {
-        cells.iter().for_each(|cell| {
+        for cell in cells {
             self.cells[*cell].cell_type = Some(cell_type);
-        });
+        }
     }
 
     pub fn create_witness_in(&mut self, num: usize) -> (WitnessId, Vec<CellId>) {
@@ -41,7 +41,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         cell
     }
 
-    /// Create input cells as a counter. It should count from 0 to n_instance *
+    /// Create input cells as a counter. It should count from 0 to `n_instance` *
     /// num through the whole circuit.
     pub fn create_counter_in(&mut self, num_vars: usize) -> Vec<CellId> {
         let cell = self.create_cells(1 << num_vars);

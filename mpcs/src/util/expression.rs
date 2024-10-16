@@ -12,19 +12,19 @@ use std::{
 pub struct Rotation(pub i32);
 
 impl Rotation {
-    pub const fn cur() -> Self {
+    #[must_use] pub const fn cur() -> Self {
         Rotation(0)
     }
 
-    pub const fn prev() -> Self {
+    #[must_use] pub const fn prev() -> Self {
         Rotation(-1)
     }
 
-    pub const fn next() -> Self {
+    #[must_use] pub const fn next() -> Self {
         Rotation(1)
     }
 
-    pub const fn distance(&self) -> usize {
+    #[must_use] pub const fn distance(&self) -> usize {
         self.0.unsigned_abs() as usize
     }
 }
@@ -42,15 +42,15 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn new(poly: usize, rotation: Rotation) -> Self {
+    #[must_use] pub fn new(poly: usize, rotation: Rotation) -> Self {
         Self { poly, rotation }
     }
 
-    pub fn poly(&self) -> usize {
+    #[must_use] pub fn poly(&self) -> usize {
         self.poly
     }
 
-    pub fn rotation(&self) -> Rotation {
+    #[must_use] pub fn rotation(&self) -> Rotation {
         self.rotation
     }
 }
@@ -76,15 +76,15 @@ pub enum Expression<F> {
 }
 
 impl<F: Clone> Expression<F> {
-    pub fn identity() -> Self {
+    #[must_use] pub fn identity() -> Self {
         Expression::CommonPolynomial(CommonPolynomial::Identity)
     }
 
-    pub fn lagrange(i: i32) -> Self {
+    #[must_use] pub fn lagrange(i: i32) -> Self {
         Expression::CommonPolynomial(CommonPolynomial::Lagrange(i))
     }
 
-    pub fn eq_xy(idx: usize) -> Self {
+    #[must_use] pub fn eq_xy(idx: usize) -> Self {
         Expression::CommonPolynomial(CommonPolynomial::EqXY(idx))
     }
 
@@ -470,9 +470,7 @@ impl<F: Field> Expression<F> {
             &|poly| Case::Sum(F::ZERO, poly.into()),
             &|query| Case::Sum(F::ZERO, query.into()),
             &|challenge| {
-                challenges
-                    .map(|challenges| Case::Constant(challenges[challenge]))
-                    .unwrap_or_else(|| Case::Sum(F::ZERO, Expression::Challenge(challenge)))
+                challenges.map_or_else(|| Case::Sum(F::ZERO, Expression::Challenge(challenge)), |challenges| Case::Constant(challenges[challenge]))
             },
             &|case| -case,
             &|lhs, rhs| lhs + rhs,

@@ -227,7 +227,7 @@ where
                 *r += field_type_index_ext(
                     &comm.polynomials_bh_evals[0],
                     pos >> (num_vars - log2_strict(comm.polynomials_bh_evals[0].len())),
-                ) * coeffs[index]
+                ) * coeffs[index];
             });
     });
     end_timer!(build_oracle_timer);

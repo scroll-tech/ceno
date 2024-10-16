@@ -19,7 +19,7 @@ pub struct TranscriptSyncronized<E: ExtensionField> {
 
 impl<E: ExtensionField> TranscriptSyncronized<E> {
     /// Create a new IOP transcript.
-    pub fn new(max_thread_id: usize) -> Self {
+    #[must_use] pub fn new(max_thread_id: usize) -> Self {
         let (bf_append_tx, bf_append_rx) = array::from_fn::<_, 2, _>(|_| bounded(max_thread_id))
             .into_iter()
             .unzip::<_, _, Vec<Sender<Vec<E::BaseField>>>, Vec<Receiver<Vec<E::BaseField>>>>();
@@ -91,15 +91,15 @@ impl<E: ExtensionField> TranscriptSyncronized<E> {
         // }
     }
 
-    pub fn read_field_element_ext(&self) -> E {
+    #[must_use] pub fn read_field_element_ext(&self) -> E {
         self.ef_append_rx[self.rolling_index].recv().unwrap()[0]
     }
 
-    pub fn read_field_element_exts(&self) -> Vec<E> {
+    #[must_use] pub fn read_field_element_exts(&self) -> Vec<E> {
         self.ef_append_rx[self.rolling_index].recv().unwrap()
     }
 
-    pub fn read_field_element(&self) -> E::BaseField {
+    #[must_use] pub fn read_field_element(&self) -> E::BaseField {
         self.bf_append_rx[self.rolling_index].recv().unwrap()[0]
     }
 
@@ -114,6 +114,6 @@ impl<E: ExtensionField> TranscriptSyncronized<E> {
     }
 
     pub fn commit_rolling(&mut self) {
-        self.rolling_index = (self.rolling_index + 1) % 2
+        self.rolling_index = (self.rolling_index + 1) % 2;
     }
 }

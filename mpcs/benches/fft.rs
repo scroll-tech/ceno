@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use criterion::*;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use ff::{Field, PrimeField};
 use goldilocks::{Goldilocks, GoldilocksExt2};
 
@@ -45,7 +45,7 @@ fn bench_fft(c: &mut Criterion, is_base: bool) {
                 .collect_vec();
 
             group.bench_function(
-                BenchmarkId::new("batch_encode", format!("{}-{}", num_vars, batch_size)),
+                BenchmarkId::new("batch_encode", format!("{num_vars}-{batch_size}")),
                 |b| {
                     b.iter(|| {
                         polys.par_iter_mut().for_each(|poly| {
@@ -56,7 +56,7 @@ fn bench_fft(c: &mut Criterion, is_base: bool) {
                                 &root_table,
                             );
                         });
-                    })
+                    });
                 },
             );
         }

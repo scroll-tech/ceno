@@ -70,7 +70,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         let hi_eq_eval = eq_eval(hi_point, hi_point_sc1);
         self.eq_x1_rx1 = build_eq_x_r_vec(&claim1_point[..lo_in_num_vars]);
         let g1_values_iter = chain![
-            received_g1_values.iter().cloned(),
+            received_g1_values.iter().copied(),
             layer.paste_from.values().map(|paste_from| {
                 hi_eq_eval
                     * paste_from

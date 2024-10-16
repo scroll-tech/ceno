@@ -28,7 +28,7 @@ fn test_ceno_rt_mem() -> Result<()> {
     let _steps = run(&mut state)?;
 
     let value = state.peek_memory(CENO_PLATFORM.ram_start().into());
-    assert_eq!(value, 6765, "Expected Fibonacci 20, got {}", value);
+    assert_eq!(value, 6765, "Expected Fibonacci 20, got {value}");
     Ok(())
 }
 
@@ -101,7 +101,7 @@ fn read_message(state: &VMState, word_offset: u32) -> Vec<u8> {
     let word_len_up = byte_len.div_ceil(4);
 
     let mut info_out = Vec::with_capacity(WORD_SIZE * word_len_up as usize);
-    for i in 1..1 + word_len_up {
+    for i in 1..=word_len_up {
         let value = state.peek_memory(out_addr + i);
         info_out.extend_from_slice(&value.to_le_bytes());
     }

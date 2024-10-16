@@ -81,7 +81,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
 
         self.eq_x1_rx1 = build_eq_x_r_vec(&claim_point);
         let g_values_iter = chain![
-            circuit.paste_from_wits_in.iter().cloned(),
+            circuit.paste_from_wits_in.iter().copied(),
             circuit
                 .paste_from_counter_in
                 .iter()

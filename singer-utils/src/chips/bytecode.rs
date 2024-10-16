@@ -64,7 +64,7 @@ pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
         {
             let bytecode = bytecode
                 .iter()
-                .map(|x| E::BaseField::from(*x as u64))
+                .map(|x| E::BaseField::from(u64::from(*x)))
                 .collect_vec();
             bytecode.into_mle()
         },

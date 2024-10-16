@@ -54,7 +54,7 @@ impl<E: ExtensionField> ClassicSumCheckRoundMessage<E> for Coefficients<E> {
             .fold(self[0].double(), |acc, coeff| acc + coeff)
     }
 
-    fn evaluate(&self, _: &Self::Auxiliary, challenge: &E) -> E {
+    fn evaluate(&self, (): &Self::Auxiliary, challenge: &E) -> E {
         horner_field_type(&self.0, challenge)
     }
 }
@@ -76,11 +76,11 @@ impl<'rhs, E: ExtensionField> AddAssign<(&'rhs E, &'rhs Coefficients<E>)> for Co
                 if scalar == &E::ONE {
                     lhs.iter_mut()
                         .zip(rhs.iter())
-                        .for_each(|(lhs, rhs)| *lhs += rhs)
+                        .for_each(|(lhs, rhs)| *lhs += rhs);
                 } else if scalar != &E::ZERO {
                     lhs.iter_mut()
                         .zip(rhs.iter())
-                        .for_each(|(lhs, rhs)| *lhs += &(*scalar * rhs))
+                        .for_each(|(lhs, rhs)| *lhs += &(*scalar * rhs));
                 }
             }
             _ => panic!("Cannot add base coefficients to extension coefficients"),
@@ -90,8 +90,8 @@ impl<'rhs, E: ExtensionField> AddAssign<(&'rhs E, &'rhs Coefficients<E>)> for Co
 
 impl_index!(Coefficients, 0);
 
-/// A CoefficientsProver is represented as a polynomial of the form c + sum_i c_i poly_i, where
-/// poly_i are represented as product of polynomial expressions.
+/// A `CoefficientsProver` is represented as a polynomial of the form c + `sum_i` `c_i` `poly_i`, where
+/// `poly_i` are represented as product of polynomial expressions.
 #[derive(Clone, Debug)]
 pub struct CoefficientsProver<E: ExtensionField>(E, Vec<(E, Vec<Expression<E>>)>);
 
@@ -101,7 +101,7 @@ impl<E: ExtensionField> CoefficientsProver<E> {
         // Next, for every product of polynomials, where each product is assumed to be exactly 2
         // put this into h(X).
         if self.1.iter().all(|(_, products)| products.len() == 2) {
-            for (scalar, products) in self.1.iter() {
+            for (scalar, products) in &self.1 {
                 let [lhs, rhs] = [0, 1].map(|idx| &products[idx]);
                 match (lhs, rhs) {
                     (
@@ -119,7 +119,7 @@ impl<E: ExtensionField> CoefficientsProver<E> {
                             *v += poly_index_ext(lhs, i % lhs.evaluations.len())
                                 * poly_index_ext(rhs, i % rhs.evaluations.len())
                                 * scalar;
-                        })
+                        });
                     }
                     _ => unimplemented!(),
                 }
@@ -145,9 +145,9 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
             &|query| (E::ZERO, vec![(E::ONE, vec![Expression::Polynomial(query)])]),
             &|challenge| (state.challenges[challenge], vec![]),
             &|(constant, mut products)| {
-                products.iter_mut().for_each(|(scalar, _)| {
+                for (scalar, _) in &mut products {
                     *scalar = -*scalar;
-                });
+                }
                 (-constant, products)
             },
             &|(lhs_constnat, mut lhs_products), (rhs_constant, rhs_products)| {
@@ -165,7 +165,7 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
                             products
                                 .iter()
                                 .map(|(scalar, polys)| (constant * scalar, polys.clone())),
-                        )
+                        );
                     }
                 }
                 for ((lhs_scalar, lhs_polys), (rhs_scalar, rhs_polys)) in
@@ -183,9 +183,9 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
                 (lhs_constant * rhs_constant, outputs)
             },
             &|(constant, mut products), rhs| {
-                products.iter_mut().for_each(|(lhs, _)| {
+                for (lhs, _) in &mut products {
                     *lhs *= &rhs;
-                });
+                }
                 (constant * rhs, products)
             },
         );
@@ -200,7 +200,7 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
         // Next, for every product of polynomials, where each product is assumed to be exactly 2
         // put this into h(X).
         if self.1.iter().all(|(_, products)| products.len() == 2) {
-            for (scalar, products) in self.1.iter() {
+            for (scalar, products) in &self.1 {
                 let [lhs, rhs] = [0, 1].map(|idx| &products[idx]);
                 if cfg!(feature = "sanity-check") {
                     // When LAZY = false, coeffs[1] will also be computed during the process
@@ -294,13 +294,13 @@ impl<E: ExtensionField> CoefficientsProver<E> {
                             }
                         },
                     );
-                    partials.iter().for_each(|partial| {
+                    for partial in &partials {
                         coeffs[0] += partial[0];
                         coeffs[2] += partial[2];
                         if !LAZY {
                             coeffs[1] += partial[1];
                         }
-                    })
+                    }
                 };
             }
             _ => unimplemented!(),

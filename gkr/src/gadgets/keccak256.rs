@@ -445,7 +445,7 @@ pub fn keccak256_circuit<E: ExtensionField>() -> Circuit<E> {
     Circuit::new(cb)
 }
 
-pub fn prove_keccak256<E: ExtensionField>(
+#[must_use] pub fn prove_keccak256<E: ExtensionField>(
     instance_num_vars: usize,
     circuit: &Circuit<E>,
     max_thread_id: usize,
@@ -460,20 +460,20 @@ pub fn prove_keccak256<E: ExtensionField>(
     #[cfg(test)]
     {
         use crate::structs::CircuitWitness;
-        use multilinear_extensions::mle::IntoMLE;
+        
         let all_zero: Vec<DenseMultilinearExtension<E>> = vec![
             vec![E::BaseField::ZERO; 25 * 64],
             vec![E::BaseField::ZERO; 17 * 64],
         ]
         .into_iter()
-        .map(|wit_in| wit_in.into_mle())
+        .map(multilinear_extensions::mle::IntoMLE::into_mle)
         .collect();
         let all_one = vec![vec![E::BaseField::ONE; 25 * 64], vec![
             E::BaseField::ZERO;
             17 * 64
         ]]
         .into_iter()
-        .map(|wit_in| wit_in.into_mle())
+        .map(multilinear_extensions::mle::IntoMLE::into_mle)
         .collect();
         let mut witness = CircuitWitness::new(circuit, Vec::new());
         witness.add_instance(circuit, all_zero);
@@ -490,7 +490,7 @@ pub fn prove_keccak256<E: ExtensionField>(
                 .chunks_exact(64)
                 .map(|bits| {
                     bits.iter().fold(0, |acc, bit| {
-                        (acc << 1) + (*bit == E::BaseField::ONE) as u64
+                        (acc << 1) + u64::from(*bit == E::BaseField::ONE)
                     })
                 })
                 .collect_vec();
@@ -499,7 +499,7 @@ pub fn prove_keccak256<E: ExtensionField>(
                 tiny_keccak::keccakf(&mut state);
                 state[0..4].to_vec()
             };
-            assert_eq!(output, expected)
+            assert_eq!(output, expected);
         });
     }
 
@@ -510,7 +510,7 @@ pub fn prove_keccak256<E: ExtensionField>(
             let mut data = vec![E::BaseField::ZERO; 1 << ceil_log2(n)];
             data.iter_mut()
                 .take(n)
-                .for_each(|d| *d = E::BaseField::from(rng.gen_bool(0.5) as u64));
+                .for_each(|d| *d = E::BaseField::from(u64::from(rng.gen_bool(0.5))));
             data
         });
         witness.add_instance(circuit, vec![

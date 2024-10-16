@@ -36,7 +36,7 @@ impl<E: ExtensionField> MerkleTree<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn compute_inner(leaves: &FieldType<E>) -> Vec<Vec<Digest<E::BaseField>>> {
+    #[must_use] pub fn compute_inner(leaves: &FieldType<E>) -> Vec<Vec<Digest<E::BaseField>>> {
         merkelize::<E>(&[leaves])
     }
 
@@ -48,44 +48,44 @@ where
         merkelize_ext::<E>(&[leaves])
     }
 
-    pub fn root_from_inner(inner: &[Vec<Digest<E::BaseField>>]) -> Digest<E::BaseField> {
+    #[must_use] pub fn root_from_inner(inner: &[Vec<Digest<E::BaseField>>]) -> Digest<E::BaseField> {
         inner.last().unwrap()[0].clone()
     }
 
-    pub fn from_inner_leaves(inner: Vec<Vec<Digest<E::BaseField>>>, leaves: FieldType<E>) -> Self {
+    #[must_use] pub fn from_inner_leaves(inner: Vec<Vec<Digest<E::BaseField>>>, leaves: FieldType<E>) -> Self {
         Self {
             inner,
             leaves: vec![leaves],
         }
     }
 
-    pub fn from_leaves(leaves: FieldType<E>) -> Self {
+    #[must_use] pub fn from_leaves(leaves: FieldType<E>) -> Self {
         Self {
             inner: Self::compute_inner(&leaves),
             leaves: vec![leaves],
         }
     }
 
-    pub fn from_batch_leaves(leaves: Vec<FieldType<E>>) -> Self {
+    #[must_use] pub fn from_batch_leaves(leaves: Vec<FieldType<E>>) -> Self {
         Self {
             inner: merkelize::<E>(&leaves.iter().collect_vec()),
             leaves,
         }
     }
 
-    pub fn root(&self) -> Digest<E::BaseField> {
+    #[must_use] pub fn root(&self) -> Digest<E::BaseField> {
         Self::root_from_inner(&self.inner)
     }
 
-    pub fn root_ref(&self) -> &Digest<E::BaseField> {
+    #[must_use] pub fn root_ref(&self) -> &Digest<E::BaseField> {
         &self.inner.last().unwrap()[0]
     }
 
-    pub fn height(&self) -> usize {
+    #[must_use] pub fn height(&self) -> usize {
         self.inner.len()
     }
 
-    pub fn leaves(&self) -> &Vec<FieldType<E>> {
+    #[must_use] pub fn leaves(&self) -> &Vec<FieldType<E>> {
         &self.leaves
     }
 
@@ -102,11 +102,11 @@ where
             .collect()
     }
 
-    pub fn size(&self) -> (usize, usize) {
+    #[must_use] pub fn size(&self) -> (usize, usize) {
         (self.leaves.len(), self.leaves[0].len())
     }
 
-    pub fn get_leaf_as_base(&self, index: usize) -> Vec<E::BaseField> {
+    #[must_use] pub fn get_leaf_as_base(&self, index: usize) -> Vec<E::BaseField> {
         match &self.leaves[0] {
             FieldType::Base(_) => self
                 .leaves
@@ -120,7 +120,7 @@ where
         }
     }
 
-    pub fn get_leaf_as_extension(&self, index: usize) -> Vec<E> {
+    #[must_use] pub fn get_leaf_as_extension(&self, index: usize) -> Vec<E> {
         match &self.leaves[0] {
             FieldType::Base(_) => self
                 .leaves
@@ -136,7 +136,7 @@ where
         }
     }
 
-    pub fn merkle_path_without_leaf_sibling_or_root(
+    #[must_use] pub fn merkle_path_without_leaf_sibling_or_root(
         &self,
         leaf_index: usize,
     ) -> MerklePathWithoutLeafOrRoot<E> {
@@ -166,15 +166,15 @@ impl<E: ExtensionField> MerklePathWithoutLeafOrRoot<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn new(inner: Vec<Digest<E::BaseField>>) -> Self {
+    #[must_use] pub fn new(inner: Vec<Digest<E::BaseField>>) -> Self {
         Self { inner }
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[must_use] pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
-    pub fn len(&self) -> usize {
+    #[must_use] pub fn len(&self) -> usize {
         self.inner.len()
     }
 
@@ -200,7 +200,7 @@ where
             FieldType::Ext(vec![left, right]),
             index,
             root,
-        )
+        );
     }
 
     pub fn authenticate_leaves_root_base(
@@ -215,7 +215,7 @@ where
             FieldType::Base(vec![left, right]),
             index,
             root,
-        )
+        );
     }
 
     pub fn authenticate_batch_leaves_root_ext(
@@ -231,7 +231,7 @@ where
             FieldType::Ext(right),
             index,
             root,
-        )
+        );
     }
 
     pub fn authenticate_batch_leaves_root_base(
@@ -247,7 +247,7 @@ where
             FieldType::Base(right),
             index,
             root,
-        )
+        );
     }
 }
 
@@ -427,7 +427,7 @@ fn authenticate_merkle_path_root<E: ExtensionField>(
 
     // The lowest bit in the index is ignored. It can point to either leaves
     x_index >>= 1;
-    for path_i in path.iter() {
+    for path_i in path {
         hash = if x_index & 1 == 0 {
             hash_two_digests(&hash, path_i)
         } else {
@@ -470,7 +470,7 @@ fn authenticate_merkle_path_root_batch<E: ExtensionField>(
 
     // The lowest bit in the index is ignored. It can point to either leaves
     x_index >>= 1;
-    for path_i in path.iter() {
+    for path_i in path {
         hash = if x_index & 1 == 0 {
             hash_two_digests(&hash, path_i)
         } else {

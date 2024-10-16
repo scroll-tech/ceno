@@ -12,7 +12,7 @@ use crate::{
 };
 
 impl<Ext: ExtensionField> From<Vec<CellId>> for ExtCellId<Ext> {
-    /// converting a vector of CellIds into an ext cell
+    /// converting a vector of `CellIds` into an ext cell
     fn from(cells: Vec<CellId>) -> Self {
         Self {
             cells,
@@ -22,7 +22,7 @@ impl<Ext: ExtensionField> From<Vec<CellId>> for ExtCellId<Ext> {
 }
 
 impl<Ext: ExtensionField> From<ExtCellId<Ext>> for Vec<CellId> {
-    /// converting an ext cell into a vector of CellIds
+    /// converting an ext cell into a vector of `CellIds`
     fn from(val: ExtCellId<Ext>) -> Self {
         val.cells
     }
@@ -35,13 +35,13 @@ impl<Ext: ExtensionField> AsRef<[CellId]> for ExtCellId<Ext> {
 }
 
 impl<Ext: ExtensionField> ExtCellId<Ext> {
-    /// converting a vector of ext cells into a vector of CellIds
-    pub fn exts_to_cells(exts: &[Self]) -> Vec<CellId> {
+    /// converting a vector of ext cells into a vector of `CellIds`
+    #[must_use] pub fn exts_to_cells(exts: &[Self]) -> Vec<CellId> {
         exts.iter().flat_map(|ext| ext.cells.clone()).collect()
     }
 
     /// degree of the ext cell
-    pub fn degree(&self) -> usize {
+    #[must_use] pub fn degree(&self) -> usize {
         self.cells.len()
     }
 }
@@ -52,13 +52,13 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     // Cell creations
     // ======================================
 
-    /// Create an ExtCellId for an extension field element.
+    /// Create an `ExtCellId` for an extension field element.
     /// Note: an extension cell already consists of multiple cells.
     pub fn create_ext_cell(&mut self) -> ExtCellId<Ext> {
         self.create_cells(<Ext as ExtensionField>::DEGREE).into()
     }
 
-    /// Create a vector of ExtCells for a vector of extension field elements.
+    /// Create a vector of `ExtCells` for a vector of extension field elements.
     /// Note: an extension cell already consists of multiple cells.
     pub fn create_ext_cells(&mut self, num: usize) -> Vec<ExtCellId<Ext>> {
         let cells = self.create_cells(num * <Ext as ExtensionField>::DEGREE);
@@ -87,14 +87,14 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     /// Create input cells and assign it to be constant.
     pub fn create_ext_constant_in(&mut self, num: usize, constant: i64) -> Vec<ExtCellId<Ext>> {
         let cells = self.create_ext_cells(num);
-        cells.iter().for_each(|ext_cell| {
+        for ext_cell in &cells {
             // first base field is the constant
             self.mark_cells(CellType::In(InType::Constant(constant)), &[
                 ext_cell.cells[0]
             ]);
             // the rest fields are 0s
             self.mark_cells(CellType::In(InType::Constant(0)), &ext_cell.cells[1..]);
-        });
+        }
         cells
     }
 
@@ -129,8 +129,8 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     // Cell selections
     // ======================================
     /// Base on the condition, select
-    /// - either extension cell in_0,
-    /// - or a new extension cell from [in_1, 0, 0, 0 ...]
+    /// - either extension cell `in_0`,
+    /// - or a new extension cell from [`in_1`, 0, 0, 0 ...]
     pub fn sel_ext_and_mixed(
         &mut self,
         out: &ExtCellId<Ext>,
@@ -155,8 +155,8 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     }
 
     /// Base on the condition, select
-    /// - either a new extension cell from [in_0, 0, 0, 0 ...]
-    /// - or extension cell in_1,
+    /// - either a new extension cell from [`in_0`, 0, 0, 0 ...]
+    /// - or extension cell `in_1`,
     pub fn sel_mixed_and_ext(
         &mut self,
         out: &ExtCellId<Ext>,
@@ -180,7 +180,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
             .for_each(|(&out, (&in1, &in0))| self.sel_mixed(out, in0, in1.into(), cond));
     }
 
-    /// Base on the condition, select extension cells in_0 or in_1
+    /// Base on the condition, select extension cells `in_0` or `in_1`
     pub fn sel_ext(
         &mut self,
         out: &ExtCellId<Ext>,
@@ -201,7 +201,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     // ======================================
     // Cell arithmetics
     // ======================================
-    /// Constrain out += in_0*scalar
+    /// Constrain out += `in_0`*scalar
     pub fn add_ext(&mut self, out: &ExtCellId<Ext>, in_0: &ExtCellId<Ext>, scalar: Ext::BaseField) {
         // we only need to check one degree since the rest are
         // enforced by zip_eq
@@ -213,7 +213,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     }
 
     /// Constrain
-    /// - out[i] += in_0[i] * in_1 * scalar for i in 0..DEGREE-1
+    /// - out[i] += `in_0`[i] * `in_1` * scalar for i in 0..DEGREE-1
     pub fn mul_ext_base(
         &mut self,
         out: &ExtCellId<Ext>,
@@ -230,8 +230,8 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
 
     /// Constrain Extension field multiplications.
     /// In the case of DEGREE = 2, it is
-    /// - out[0] += (in_0[0] * in_1[0] + 7 * in_0[1] * in_1[1]) * scalar
-    /// - out[1] += (in_0[0] * in_1[1] +     in_0[1] * in_1[0]) * scalar
+    /// - out[0] += (`in_0`[0] * `in_1`[0] + 7 * `in_0`[1] * `in_1`[1]) * scalar
+    /// - out[1] += (`in_0`[0] * `in_1`[1] +     `in_0`[1] * `in_1`[0]) * scalar
     pub fn mul2_ext(
         &mut self,
         out: &ExtCellId<Ext>,
@@ -248,7 +248,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         }
     }
 
-    /// Constrain out += in_0 * c
+    /// Constrain out += `in_0` * c
     pub fn add_product_of_ext_and_challenge(
         &mut self,
         out: &ExtCellId<Ext>,
@@ -269,7 +269,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     // ======================================
 
     /// Compute the random linear combination of `in_array` by challenge.
-    /// out = (\sum_{i = 0}^{in_array.len()} challenge^i * in_array[i]) + challenge^{in_array.len()}.
+    /// out = (\sum_{i = `0}^{in_array.len()`} challenge^i * `in_array`[i]) + `challenge^{in_array.len()`}.
     pub fn rlc(&mut self, out: &ExtCellId<Ext>, in_array: &[CellId], challenge: ChallengeId) {
         assert_eq!(out.degree(), <Ext as ExtensionField>::DEGREE);
         for (i, item) in in_array.iter().enumerate() {
@@ -287,7 +287,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     }
 
     /// Compute the random linear combination of `in_array` by challenge.
-    /// out = \sum_{i = 0}^{in_array.len()} challenge^i * in_array[i] + challenge^{in_array.len()}.
+    /// out = \sum_{i = `0}^{in_array.len()`} challenge^i * `in_array`[i] + `challenge^{in_array.len()`}.
     pub fn rlc_ext(
         &mut self,
         out: &ExtCellId<Ext>,
@@ -303,7 +303,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     }
 
     /// Compute the random linear combination of `in_array` with mixed types by challenge.
-    /// out = (\sum_{i = 0}^{in_array.len()} challenge^i * (\sum_j in_array[i][j])) + challenge^{in_array.len()}.
+    /// out = (\sum_{i = `0}^{in_array.len()`} challenge^i * (\`sum_j` `in_array`[i][j])) + `challenge^{in_array.len()`}.
     pub fn rlc_mixed(
         &mut self,
         out: &ExtCellId<Ext>,
@@ -438,7 +438,7 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
     /// let c1 = a1b1 + a3b2 + a2b3;
     /// let c2 = a2b1 + a1b2 + a2b3 + a3b2 + a3b3;
     /// let c3 = a3b1 + a2b2 + a1b3 + a3b3;
-    /// GoldilocksExt3([c1, c2, c3])
+    /// `GoldilocksExt3`([c1, c2, c3])
     fn mul2_degree_3_ext_internal(
         &mut self,
         out: &[CellId],

@@ -43,7 +43,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             polys[0].aux_info.num_variables,
             polys[0].aux_info.max_degree,
         );
-        for poly in polys[1..].iter() {
+        for poly in &polys[1..] {
             assert!(poly.aux_info.num_variables == num_variables);
             assert!(poly.aux_info.max_degree == max_degree);
         }
@@ -211,9 +211,9 @@ impl<E: ExtensionField> IOPProverState<E> {
             .collect::<Vec<_>>();
         for _ in 0..max_thread_id {
             if let Some((index, prover_msg)) = rx_prover_state.recv().unwrap() {
-                prover_states[index] = prover_msg
+                prover_states[index] = prover_msg;
             } else {
-                println!("got empty msg, which is normal if virtual poly is constant function")
+                println!("got empty msg, which is normal if virtual poly is constant function");
             }
         }
 
@@ -286,7 +286,7 @@ impl<E: ExtensionField> IOPProverState<E> {
 
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
-    pub fn prover_init_with_extrapolation_aux(
+    #[must_use] pub fn prover_init_with_extrapolation_aux(
         polynomial: VirtualPolynomial<E>,
         extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
     ) -> Self {
@@ -450,7 +450,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     }
 
     /// collect all mle evaluation (claim) after sumcheck
-    pub fn get_mle_final_evaluations(&self) -> Vec<E> {
+    #[must_use] pub fn get_mle_final_evaluations(&self) -> Vec<E> {
         self.poly
             .flattened_ml_extensions
             .iter()

@@ -330,7 +330,7 @@ fn validate_input<E: ExtensionField>(
 ) -> Result<(), Error> {
     let polys = polys.iter().collect_vec();
     let points = points.iter().collect_vec();
-    for poly in polys.iter() {
+    for poly in &polys {
         if param_num_vars < poly.num_vars {
             return Err(err_too_many_variates(
                 function,
@@ -339,7 +339,7 @@ fn validate_input<E: ExtensionField>(
             ));
         }
     }
-    for point in points.iter() {
+    for point in &points {
         if param_num_vars < point.len() {
             return Err(err_too_many_variates(function, param_num_vars, point.len()));
         }
@@ -590,7 +590,7 @@ pub mod test_util {
                     &pp,
                     polys
                         .into_iter()
-                        .map(|x| x.into())
+                        .map(std::convert::Into::into)
                         .collect::<Vec<_>>()
                         .as_slice(),
                     &comm,

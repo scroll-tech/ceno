@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use criterion::*;
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use ff::Field;
 use goldilocks::GoldilocksExt2;
 
@@ -37,10 +37,10 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             let poly_size = 1 << num_vars;
             let param = Pcs::setup(poly_size).unwrap();
 
-            group.bench_function(BenchmarkId::new("setup", format!("{}", num_vars)), |b| {
+            group.bench_function(BenchmarkId::new("setup", format!("{num_vars}")), |b| {
                 b.iter(|| {
                     Pcs::setup(poly_size).unwrap();
-                })
+                });
             });
             Pcs::trim(&param, poly_size).unwrap()
         };
@@ -57,10 +57,10 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
 
         let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
 
-        group.bench_function(BenchmarkId::new("commit", format!("{}", num_vars)), |b| {
+        group.bench_function(BenchmarkId::new("commit", format!("{num_vars}")), |b| {
             b.iter(|| {
                 Pcs::commit(&pp, &poly).unwrap();
-            })
+            });
         });
 
         let point = (0..num_vars)
@@ -71,7 +71,7 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
         let transcript_for_bench = transcript.clone();
         let proof = Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
 
-        group.bench_function(BenchmarkId::new("open", format!("{}", num_vars)), |b| {
+        group.bench_function(BenchmarkId::new("open", format!("{num_vars}")), |b| {
             b.iter_batched(
                 || transcript_for_bench.clone(),
                 |mut transcript| {
@@ -90,7 +90,7 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
         transcript.append_field_element_ext(&eval);
         let transcript_for_bench = transcript.clone();
         Pcs::verify(&vp, &comm, &point, &eval, &proof, &mut transcript).unwrap();
-        group.bench_function(BenchmarkId::new("verify", format!("{}", num_vars)), |b| {
+        group.bench_function(BenchmarkId::new("verify", format!("{num_vars}")), |b| {
             b.iter_batched(
                 || transcript_for_bench.clone(),
                 |mut transcript| {
@@ -178,7 +178,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                 Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
 
             group.bench_function(
-                BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
+                BenchmarkId::new("batch_open", format!("{num_vars}-{batch_size}")),
                 |b| {
                     b.iter_batched(
                         || transcript_for_bench.clone(),
@@ -221,7 +221,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
 
             group.bench_function(
-                BenchmarkId::new("batch_verify", format!("{}-{}", num_vars, batch_size)),
+                BenchmarkId::new("batch_verify", format!("{num_vars}-{batch_size}")),
                 |b| {
                     b.iter_batched(
                         || backup_transcript.clone(),
@@ -276,11 +276,11 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
             let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
 
             group.bench_function(
-                BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
+                BenchmarkId::new("batch_commit", format!("{num_vars}-{batch_size}")),
                 |b| {
                     b.iter(|| {
                         Pcs::batch_commit(&pp, &polys).unwrap();
-                    })
+                    });
                 },
             );
 
@@ -297,7 +297,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
             let polys = polys
                 .clone()
                 .into_iter()
-                .map(|x| x.into())
+                .map(std::convert::Into::into)
                 .collect::<Vec<_>>();
             let proof = Pcs::simple_batch_open(
                 &pp,
@@ -310,7 +310,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
             .unwrap();
 
             group.bench_function(
-                BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
+                BenchmarkId::new("batch_open", format!("{num_vars}-{batch_size}")),
                 |b| {
                     b.iter_batched(
                         || transcript_for_bench.clone(),
@@ -344,7 +344,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
             Pcs::simple_batch_verify(&vp, &comm, &point, &evals, &proof, &mut transcript).unwrap();
 
             group.bench_function(
-                BenchmarkId::new("batch_verify", format!("{}-{}", num_vars, batch_size)),
+                BenchmarkId::new("batch_verify", format!("{num_vars}-{batch_size}")),
                 |b| {
                     b.iter_batched(
                         || backup_transcript.clone(),

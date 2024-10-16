@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use ark_std::test_rng;
 use const_env::from_env;
-use criterion::*;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use ff_ext::{ExtensionField, ff::Field};
 use goldilocks::GoldilocksExt2;
@@ -68,12 +68,12 @@ fn bench_add(c: &mut Criterion) {
 
     for instance_num_vars in 10..14 {
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("add_op_{}", instance_num_vars));
+        let mut group = c.benchmark_group(format!("add_op_{instance_num_vars}"));
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
         group.bench_function(
-            BenchmarkId::new("prove_add", format!("prove_add_log2_{}", instance_num_vars)),
+            BenchmarkId::new("prove_add", format!("prove_add_log2_{instance_num_vars}")),
             |b| {
                 b.iter_with_setup(
                     || {

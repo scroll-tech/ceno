@@ -48,6 +48,7 @@ fn test_output(out: u32) {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn black_box<T>(x: T) -> T {
     unsafe { read_volatile(&x) }
 }

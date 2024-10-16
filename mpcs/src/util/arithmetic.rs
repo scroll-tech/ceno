@@ -130,11 +130,11 @@ pub fn barycentric_interpolate<F: Field>(weights: &[F], points: &[F], evals: &[F
     inner_product(&coeffs, evals) * sum_inv
 }
 
-pub fn modulus<F: PrimeField>() -> BigUint {
+#[must_use] pub fn modulus<F: PrimeField>() -> BigUint {
     BigUint::from_bytes_le((-F::ONE).to_repr().as_ref()) + 1u64
 }
 
-pub fn fe_from_bool<F: Field>(value: bool) -> F {
+#[must_use] pub fn fe_from_bool<F: Field>(value: bool) -> F {
     if value { F::ONE } else { F::ZERO }
 }
 
@@ -171,17 +171,17 @@ pub fn fe_truncated<F: PrimeField>(fe: F, num_bits: usize) -> F {
     F::from_repr(repr).unwrap()
 }
 
-pub fn usize_from_bits_le(bits: &[bool]) -> usize {
+#[must_use] pub fn usize_from_bits_le(bits: &[bool]) -> usize {
     bits.iter()
         .rev()
-        .fold(0, |int, bit| (int << 1) + (*bit as usize))
+        .fold(0, |int, bit| (int << 1) + usize::from(*bit))
 }
 
-pub fn div_rem(dividend: usize, divisor: usize) -> (usize, usize) {
+#[must_use] pub fn div_rem(dividend: usize, divisor: usize) -> (usize, usize) {
     Integer::div_rem(&dividend, &divisor)
 }
 
-pub fn div_ceil(dividend: usize, divisor: usize) -> usize {
+#[must_use] pub fn div_ceil(dividend: usize, divisor: usize) -> usize {
     Integer::div_ceil(&dividend, &divisor)
 }
 
@@ -226,10 +226,10 @@ pub fn degree_2_eval<F: Field>(poly: &[F], point: F) -> F {
     poly[0] + point * poly[1] + point * point * poly[2]
 }
 
-pub fn base_from_raw_bytes<E: ExtensionField>(bytes: &[u8]) -> E::BaseField {
+#[must_use] pub fn base_from_raw_bytes<E: ExtensionField>(bytes: &[u8]) -> E::BaseField {
     let mut res = E::BaseField::ZERO;
-    bytes.iter().for_each(|b| {
+    for b in bytes {
         res += E::BaseField::from(u64::from(*b));
-    });
+    }
     res
 }

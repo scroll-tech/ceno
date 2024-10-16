@@ -1,3 +1,9 @@
+#![deny(clippy::pedantic)]
+#![deny(clippy::cargo)]
+// TODO: When things have settled a bit, and we make a big push to improve docs, we can remove these
+// exceptions:
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::missing_errors_doc)]
 #![feature(strict_overflow_ops)]
 #![no_std]
 

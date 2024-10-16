@@ -106,7 +106,7 @@ impl<E: ExtensionField> From<Vec<Vec<E::BaseField>>> for DenseMultilinearExtensi
     }
 }
 
-/// this is to avoid conflict implementation for Into of Vec<Vec<E::BaseField>>
+/// this is to avoid conflict implementation for Into of Vec<Vec<`E::BaseField`>>
 pub trait IntoMLE<T>: Sized {
     /// Converts this type into the (usually inferred) input type.
     fn into_mle(self) -> T;
@@ -128,7 +128,7 @@ impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtens
     for Vec<Vec<F>>
 {
     fn into_mles(self) -> Vec<DenseMultilinearExtension<E>> {
-        self.into_iter().map(|v| v.into_mle()).collect()
+        self.into_iter().map(IntoMLE::into_mle).collect()
     }
 }
 
@@ -143,7 +143,7 @@ pub enum FieldType<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> FieldType<E> {
-    pub fn len(&self) -> usize {
+    #[must_use] pub fn len(&self) -> usize {
         match self {
             FieldType::Base(content) => content.len(),
             FieldType::Ext(content) => content.len(),
@@ -151,7 +151,7 @@ impl<E: ExtensionField> FieldType<E> {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[must_use] pub fn is_empty(&self) -> bool {
         match self {
             FieldType::Base(content) => content.is_empty(),
             FieldType::Ext(content) => content.is_empty(),
@@ -189,15 +189,15 @@ fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
     mem::forget(vec);
 
     // Convert the pointer to the new type
-    let new_ptr = ptr as *mut B;
+    let new_ptr = ptr.cast::<B>();
 
     // Create a new vector with the same length and capacity, but different type
     unsafe { Vec::from_raw_parts(new_ptr, length, capacity) }
 }
 
 impl<E: ExtensionField> DenseMultilinearExtension<E> {
-    /// This function can tell T being Field or ExtensionField and invoke respective function
-    pub fn from_evaluation_vec_smart<T: Clone + 'static>(
+    /// This function can tell T being Field or `ExtensionField` and invoke respective function
+    #[must_use] pub fn from_evaluation_vec_smart<T: Clone + 'static>(
         num_vars: usize,
         evaluations: Vec<T>,
     ) -> Self {
@@ -222,7 +222,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// Construct a new polynomial from a list of evaluations where the index
     /// represents a point in {0,1}^`num_vars` in little endian form. For
     /// example, `0b1011` represents `P(1,1,0,1)`
-    pub fn from_evaluations_vec(num_vars: usize, evaluations: Vec<E::BaseField>) -> Self {
+    #[must_use] pub fn from_evaluations_vec(num_vars: usize, evaluations: Vec<E::BaseField>) -> Self {
         // assert that the number of variables matches the size of evaluations
         // TODO: return error.
         assert_eq!(
@@ -245,7 +245,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
 
     /// Identical to [`from_evaluations_vec`], with and exception that evaluation vector is in
     /// extension field
-    pub fn from_evaluations_ext_vec(num_vars: usize, evaluations: Vec<E>) -> Self {
+    #[must_use] pub fn from_evaluations_ext_vec(num_vars: usize, evaluations: Vec<E>) -> Self {
         // assert that the number of variables matches the size of evaluations
         // TODO: return error.
         assert_eq!(
@@ -280,17 +280,17 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         let start = start_timer!(|| "sample random mle list");
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
-            multiplicands.push(Vec::with_capacity(1 << nv))
+            multiplicands.push(Vec::with_capacity(1 << nv));
         }
         let mut sum = E::ZERO;
 
         for _ in 0..(1 << nv) {
             let mut product = E::ONE;
 
-            for e in multiplicands.iter_mut() {
+            for e in &mut multiplicands {
                 let val = E::BaseField::random(&mut rng);
                 e.push(val);
-                product *= val
+                product *= val;
             }
             sum += product;
         }
@@ -314,7 +314,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
 
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
-            multiplicands.push(Vec::with_capacity(1 << nv))
+            multiplicands.push(Vec::with_capacity(1 << nv));
         }
         for _ in 0..(1 << nv) {
             multiplicands[0].push(E::BaseField::ZERO);
@@ -336,7 +336,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         op_mle!(self, |evaluations| {
             DenseMultilinearExtension::from_evaluations_ext_vec(
                 self.num_vars(),
-                evaluations.iter().cloned().map(E::from).collect(),
+                evaluations.iter().copied().map(E::from).collect(),
             )
         })
     }
@@ -445,7 +445,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
 
         // evaluate single variable of partial point from left to right
         // `Cow` type here to skip first evaluation vector copy
-        for point in partial_point.iter() {
+        for point in partial_point {
             match &mut poly {
                 poly @ Cow::Borrowed(_) => {
                     *poly = op_mle!(self, |evaluations| {
@@ -477,7 +477,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
         );
         let nv = self.num_vars();
         // evaluate single variable of partial point from left to right
-        for point in partial_point.iter() {
+        for point in partial_point {
             // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,
             // b2,..bt, 1] in parallel
             match &mut self.evaluations {
@@ -491,7 +491,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
                 FieldType::Ext(evaluations) => {
                     (0..evaluations.len()).step_by(2).for_each(|b| {
                         evaluations[b >> 1] =
-                            evaluations[b] + (evaluations[b + 1] - evaluations[b]) * point
+                            evaluations[b] + (evaluations[b + 1] - evaluations[b]) * point;
                     });
                 }
                 FieldType::Unreachable => unreachable!(),
@@ -583,7 +583,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
             }
             FieldType::Unreachable => unreachable!(),
         }
-        self.num_vars = nv - partial_point.len()
+        self.num_vars = nv - partial_point.len();
     }
 
     /// Evaluate the MLE at a give point.
@@ -622,7 +622,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
 
         // evaluate single variable of partial point from left to right
         // `Cow` type here to skip first evaluation vector copy
-        for point in partial_point.iter() {
+        for point in partial_point {
             match &mut poly {
                 poly @ Cow::Borrowed(_) => {
                     *poly = op_mle!(self, |evaluations| {
@@ -742,8 +742,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
                 self.evaluations = b;
             }
             (a, b) => panic!(
-                "do not support merge differnt field type DME a: {:?} b: {:?}",
-                a, b
+                "do not support merge differnt field type DME a: {a:?} b: {b:?}"
             ),
         }
     }
@@ -760,8 +759,8 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
         RangedMultilinearExtension::new(self, start, offset)
     }
 
-    /// resize to new size (num_instances * new_size_per_instance / num_range)
-    /// and selected by range_index
+    /// resize to new size (`num_instances` * `new_size_per_instance` / `num_range`)
+    /// and selected by `range_index`
     /// only support resize base fields, otherwise panic
     fn resize_ranged(
         &self,
@@ -783,7 +782,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
                         .flat_map(|chunk| {
                             chunk
                                 .iter()
-                                .cloned()
+                                .copied()
                                 .chain(std::iter::repeat(E::BaseField::ZERO))
                                 .take(new_size_per_instance)
                         })
@@ -797,7 +796,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
         }
     }
 
-    /// dup to new size 1 << (self.num_vars + ceil_log2(num_dups))
+    /// dup to new size 1 << (`self.num_vars` + `ceil_log2(num_dups)`)
     fn dup(&self, num_instances: usize, num_dups: usize) -> Self {
         assert!(num_dups.is_power_of_two());
         assert!(num_instances.is_power_of_two());
@@ -812,7 +811,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
                             chunk
                                 .iter()
                                 .cycle()
-                                .cloned()
+                                .copied()
                                 .take(old_size_per_instance * num_dups)
                         })
                         .take(1 << (self.num_vars + ceil_log2(num_dups)))
@@ -833,7 +832,7 @@ pub struct RangedMultilinearExtension<'a, E: ExtensionField> {
 }
 
 impl<'a, E: ExtensionField> RangedMultilinearExtension<'a, E> {
-    pub fn new(
+    #[must_use] pub fn new(
         inner: &'a DenseMultilinearExtension<E>,
         start: usize,
         offset: usize,

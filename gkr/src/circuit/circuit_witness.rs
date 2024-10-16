@@ -22,7 +22,7 @@ use crate::{
 
 impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
     /// Initialize the structure of the circuit witness.
-    pub fn new(circuit: &Circuit<E>, challenges: Vec<E>) -> Self {
+    #[must_use] pub fn new(circuit: &Circuit<E>, challenges: Vec<E>) -> Self {
         let create_default = |size| {
             (0..size)
                 .map(|_| {
@@ -73,7 +73,7 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                     }
                 }
             }
-            for (constant, (l, r)) in circuit.paste_from_consts_in.iter() {
+            for (constant, (l, r)) in &circuit.paste_from_consts_in {
                 let layer_wit_iter: InstanceIntoIteratorMut<E::BaseField> =
                     layer_wit.into_instance_iter_mut(n_instances);
                 for layer_wit in layer_wit_iter {
@@ -82,12 +82,12 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                     }
                 }
             }
-            for (num_vars, (l, r)) in circuit.paste_from_counter_in.iter() {
+            for (num_vars, (l, r)) in &circuit.paste_from_counter_in {
                 let layer_wit_iter: InstanceIntoIteratorMut<E::BaseField> =
                     layer_wit.into_instance_iter_mut(n_instances);
                 for (instance_id, layer_wit) in layer_wit_iter.enumerate() {
                     for (i, layer_wit_elem) in layer_wit[*l..*r].iter_mut().enumerate() {
-                        *layer_wit_elem = E::BaseField::from(((instance_id << num_vars) ^ i) as u64)
+                        *layer_wit_elem = E::BaseField::from(((instance_id << num_vars) ^ i) as u64);
                     }
                 }
             }
@@ -126,24 +126,24 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                     let last_layer_wit = layer_wits[layer_id + 1].get_base_field_vec();
                     let last_layer_instance_start_index =
                         instance_id * circuit.layers[layer_id + 1].size();
-                    for add_const in layer.add_consts.iter() {
+                    for add_const in &layer.add_consts {
                         current_layer_wit[add_const.idx_out] += add_const.scalar.eval(challenges);
                     }
 
-                    for add in layer.adds.iter() {
+                    for add in &layer.adds {
                         current_layer_wit[add.idx_out] += last_layer_wit
                             [last_layer_instance_start_index + add.idx_in[0]]
                             * add.scalar.eval(challenges);
                     }
 
-                    for mul2 in layer.mul2s.iter() {
+                    for mul2 in &layer.mul2s {
                         current_layer_wit[mul2.idx_out] += last_layer_wit
                             [last_layer_instance_start_index + mul2.idx_in[0]]
                             * last_layer_wit[last_layer_instance_start_index + mul2.idx_in[1]]
                             * mul2.scalar.eval(challenges);
                     }
 
-                    for mul3 in layer.mul3s.iter() {
+                    for mul3 in &layer.mul3s {
                         current_layer_wit[mul3.idx_out] += last_layer_wit
                             [last_layer_instance_start_index + mul3.idx_in[0]]
                             * last_layer_wit[last_layer_instance_start_index + mul3.idx_in[1]]
@@ -172,7 +172,7 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
                     wit_out.iter_mut().zip(old_wire_ids.iter()).for_each(
                         |(wit_out_value, old_wire_id)| {
                             *wit_out_value =
-                                output_layer_wit[output_layer_instance_start_index + *old_wire_id]
+                                output_layer_wit[output_layer_instance_start_index + *old_wire_id];
                         },
                     );
                 }
@@ -208,9 +208,9 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
             CircuitWitness::new_instances(circuit, &new_wits_in, &self.challenges, n_instances);
 
         assert_eq!(self.layers.len(), inferred_layer_wits.len());
-        self.layers = inferred_layer_wits.into_iter().map(|n| n.into()).collect();
+        self.layers = inferred_layer_wits.into_iter().map(std::convert::Into::into).collect();
         assert_eq!(self.witness_out.len(), inferred_wits_out.len());
-        self.witness_out = inferred_wits_out.into_iter().map(|n| n.into()).collect();
+        self.witness_out = inferred_wits_out.into_iter().map(std::convert::Into::into).collect();
         assert_eq!(self.witness_in.len(), new_wits_in.len());
         self.witness_in = new_wits_in;
 
@@ -276,7 +276,7 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
         }
     }
 
-    pub fn instance_num_vars(&self) -> usize {
+    #[must_use] pub fn instance_num_vars(&self) -> usize {
         ceil_log2(self.n_instances)
     }
 
@@ -442,27 +442,27 @@ impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
 }
 
 impl<'a, E: ExtensionField> CircuitWitness<'a, E> {
-    pub fn output_layer_witness_ref(&self) -> &ArcMultilinearExtension<'a, E> {
+    #[must_use] pub fn output_layer_witness_ref(&self) -> &ArcMultilinearExtension<'a, E> {
         self.layers.first().unwrap()
     }
 
-    pub fn n_instances(&self) -> usize {
+    #[must_use] pub fn n_instances(&self) -> usize {
         self.n_instances
     }
 
-    pub fn witness_in_ref(&self) -> &[ArcMultilinearExtension<'a, E>] {
+    #[must_use] pub fn witness_in_ref(&self) -> &[ArcMultilinearExtension<'a, E>] {
         &self.witness_in
     }
 
-    pub fn witness_out_ref(&self) -> &[ArcMultilinearExtension<'a, E>] {
+    #[must_use] pub fn witness_out_ref(&self) -> &[ArcMultilinearExtension<'a, E>] {
         &self.witness_out
     }
 
-    pub fn challenges(&self) -> &HashMap<ChallengeConst, Vec<E::BaseField>> {
+    #[must_use] pub fn challenges(&self) -> &HashMap<ChallengeConst, Vec<E::BaseField>> {
         &self.challenges
     }
 
-    pub fn layers_ref(&self) -> &[ArcMultilinearExtension<'a, E>] {
+    #[must_use] pub fn layers_ref(&self) -> &[ArcMultilinearExtension<'a, E>] {
         &self.layers
     }
 }

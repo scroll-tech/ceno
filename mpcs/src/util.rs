@@ -22,8 +22,8 @@ pub fn base_to_usize<E: ExtensionField>(x: &E::BaseField) -> usize {
     x.to_canonical_u64() as usize
 }
 
-pub fn u32_to_field<E: ExtensionField>(x: u32) -> E::BaseField {
-    E::BaseField::from(x as u64)
+#[must_use] pub fn u32_to_field<E: ExtensionField>(x: u32) -> E::BaseField {
+    E::BaseField::from(u64::from(x))
 }
 
 pub trait BitIndex {
@@ -37,7 +37,7 @@ impl BitIndex for usize {
 }
 
 /// How many bytes are required to store n field elements?
-pub fn num_of_bytes<F: PrimeField>(n: usize) -> usize {
+#[must_use] pub fn num_of_bytes<F: PrimeField>(n: usize) -> usize {
     (F::NUM_BITS as usize).next_power_of_two() * n / 8
 }
 
@@ -88,7 +88,7 @@ macro_rules! impl_index {
 
 pub(crate) use impl_index;
 
-pub fn poly_index_ext<E: ExtensionField>(poly: &DenseMultilinearExtension<E>, index: usize) -> E {
+#[must_use] pub fn poly_index_ext<E: ExtensionField>(poly: &DenseMultilinearExtension<E>, index: usize) -> E {
     match &poly.evaluations {
         FieldType::Ext(coeffs) => coeffs[index],
         FieldType::Base(coeffs) => E::from(coeffs[index]),
@@ -96,7 +96,7 @@ pub fn poly_index_ext<E: ExtensionField>(poly: &DenseMultilinearExtension<E>, in
     }
 }
 
-pub fn field_type_index_base<E: ExtensionField>(poly: &FieldType<E>, index: usize) -> E::BaseField {
+#[must_use] pub fn field_type_index_base<E: ExtensionField>(poly: &FieldType<E>, index: usize) -> E::BaseField {
     match &poly {
         FieldType::Ext(_) => panic!("Cannot get base field from extension field"),
         FieldType::Base(coeffs) => coeffs[index],
@@ -104,7 +104,7 @@ pub fn field_type_index_base<E: ExtensionField>(poly: &FieldType<E>, index: usiz
     }
 }
 
-pub fn field_type_index_ext<E: ExtensionField>(poly: &FieldType<E>, index: usize) -> E {
+#[must_use] pub fn field_type_index_ext<E: ExtensionField>(poly: &FieldType<E>, index: usize) -> E {
     match &poly {
         FieldType::Ext(coeffs) => coeffs[index],
         FieldType::Base(coeffs) => E::from(coeffs[index]),
@@ -167,7 +167,7 @@ impl<'a, E: ExtensionField> Iterator for FieldTypeIterExt<'a, E> {
     }
 }
 
-pub fn poly_iter_ext<E: ExtensionField>(
+#[must_use] pub fn poly_iter_ext<E: ExtensionField>(
     poly: &DenseMultilinearExtension<E>,
 ) -> FieldTypeIterExt<E> {
     FieldTypeIterExt {
@@ -176,7 +176,7 @@ pub fn poly_iter_ext<E: ExtensionField>(
     }
 }
 
-pub fn field_type_iter_ext<E: ExtensionField>(evaluations: &FieldType<E>) -> FieldTypeIterExt<E> {
+#[must_use] pub fn field_type_iter_ext<E: ExtensionField>(evaluations: &FieldType<E>) -> FieldTypeIterExt<E> {
     FieldTypeIterExt {
         inner: evaluations,
         index: 0,
@@ -221,7 +221,7 @@ pub fn resize_num_vars<E: ExtensionField>(
         FieldType::Ext(evaluations) => {
             evaluations.resize(1 << num_vars, E::ZERO);
             (1 << poly.num_vars..1 << num_vars)
-                .for_each(|i| evaluations[i] = evaluations[i & ((1 << poly.num_vars) - 1)])
+                .for_each(|i| evaluations[i] = evaluations[i & ((1 << poly.num_vars) - 1)]);
         }
         _ => unreachable!(),
     }
@@ -321,11 +321,11 @@ pub mod test {
     };
     use std::{array, iter, ops::Range};
 
-    pub fn std_rng() -> impl RngCore + CryptoRng {
+    #[must_use] pub fn std_rng() -> impl RngCore + CryptoRng {
         StdRng::from_seed(Default::default())
     }
 
-    pub fn seeded_std_rng() -> impl RngCore + CryptoRng {
+    #[must_use] pub fn seeded_std_rng() -> impl RngCore + CryptoRng {
         StdRng::seed_from_u64(OsRng.next_u64())
     }
 

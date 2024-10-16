@@ -34,7 +34,7 @@ use query_phase::{
     prover_query_phase, simple_batch_prover_query_phase, simple_batch_verifier_query_phase,
     verifier_query_phase,
 };
-use std::{borrow::BorrowMut, ops::Deref};
+use std::borrow::BorrowMut;
 pub use structure::BasefoldSpec;
 use structure::{BasefoldProof, ProofQueriesResultWithMerklePath};
 use transcript::Transcript;
@@ -206,12 +206,12 @@ where
     }
 }
 
-/// Implement the Polynomial Commitment Scheme present in the BaseFold paper
-/// https://eprint.iacr.org/2023/1705
+/// Implement the Polynomial Commitment Scheme present in the `BaseFold` paper
+/// <https://eprint.iacr.org/2023/1705>
 ///
-/// Here is a high-level explanation of the BaseFold PCS.
+/// Here is a high-level explanation of the `BaseFold` PCS.
 ///
-/// BaseFold is the mixture of FRI and Sum-Check for proving the sum-check
+/// `BaseFold` is the mixture of FRI and Sum-Check for proving the sum-check
 /// statement
 /// y = \sum_{b\in H} f(b) eq(b, r)
 /// where
@@ -223,7 +223,7 @@ where
 /// To prove this statement, the parties execute the normal sum-check,
 /// which reduces the sum-check statement to a evaluation statement of f
 /// at random point \alpha sampled during sum-check. Unlike normal sum-check,
-/// where this final evaluation statement is delegated to a PCS, in BaseFold
+/// where this final evaluation statement is delegated to a PCS, in `BaseFold`
 /// this evaluation result is provided by FRI. This is possible because in
 /// FRI, the repeated folding of the originally committed codeword is
 /// effectively applying the even-odd folding to the message, which is
@@ -560,18 +560,18 @@ where
         let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
         assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
 
-        comms.iter().for_each(|comm| {
+        for comm in comms {
             assert!(comm.num_polys == 1);
             assert!(!comm.is_trivial::<Spec>());
-        });
+        }
 
         if cfg!(feature = "sanity-check") {
-            evals.iter().for_each(|eval| {
+            for eval in evals {
                 assert_eq!(
                     &polys[eval.poly()].evaluate(&points[eval.point()]),
                     eval.value(),
-                )
-            })
+                );
+            }
         }
 
         validate_input("batch open", pp.get_max_message_size_log(), polys, points)?;
@@ -671,7 +671,7 @@ where
             .sum();
         let sumcheck_polys: Vec<&DenseMultilinearExtension<E>> = merged_polys
             .iter()
-            .map(|(_, poly)| poly.deref())
+            .map(|(_, poly)| &**poly)
             .collect_vec();
         let virtual_poly =
             VirtualPolynomial::new(&expression, sumcheck_polys, &[], points.as_slice());
@@ -795,7 +795,7 @@ where
             evals
                 .iter()
                 .zip(polys)
-                .for_each(|(eval, poly)| assert_eq!(&poly.evaluate(point), eval))
+                .for_each(|(eval, poly)| assert_eq!(&poly.evaluate(point), eval));
         }
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
@@ -953,16 +953,16 @@ where
         // 	let key = "RAYON_NUM_THREADS";
         // 	env::set_var(key, "32");
         let comms = comms.iter().collect_vec();
-        let num_vars = points.iter().map(|point| point.len()).max().unwrap();
+        let num_vars = points.iter().map(std::vec::Vec::len).max().unwrap();
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
         validate_input("batch verify", num_vars, &[], points)?;
         let poly_num_vars = comms.iter().map(|c| c.num_vars().unwrap()).collect_vec();
-        evals.iter().for_each(|eval| {
+        for eval in evals {
             assert_eq!(
                 points[eval.point()].len(),
                 comms[eval.poly()].num_vars().unwrap()
             );
-        });
+        }
         assert!(poly_num_vars.iter().min().unwrap() >= &Spec::get_basecode_msg_size_log());
         assert!(!proof.is_trivial());
 
@@ -1005,7 +1005,7 @@ where
             .collect_vec();
         let mut coeffs = vec![E::ZERO; comms.len()];
         evals.iter().enumerate().for_each(|(i, eval)| {
-            coeffs[eval.poly()] += eq_xy_evals[eval.point()] * poly_index_ext(&eq_xt, i)
+            coeffs[eval.poly()] += eq_xy_evals[eval.point()] * poly_index_ext(&eq_xt, i);
         });
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);

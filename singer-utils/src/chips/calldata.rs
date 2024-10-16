@@ -58,7 +58,7 @@ pub(crate) fn construct_calldata_table_and_witness<E: ExtensionField>(
 
     let calldata = program_input
         .iter()
-        .map(|x| E::BaseField::from(*x as u64))
+        .map(|x| E::BaseField::from(u64::from(*x)))
         .collect_vec();
 
     let wits_in = vec![
@@ -76,7 +76,7 @@ pub(crate) fn construct_calldata_table_and_witness<E: ExtensionField>(
                 .flat_map(|i| {
                     calldata[i..(i + StackUInt::N_OPERAND_CELLS).min(calldata.len())]
                         .iter()
-                        .cloned()
+                        .copied()
                         .rev()
                         .collect_vec()
                 })

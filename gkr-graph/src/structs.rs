@@ -32,9 +32,11 @@ pub enum NodeOutputType {
     WireOut(usize, WitnessId),
 }
 
+/// The predecessor of a node
+/// 
 /// The predecessor of a node can be a source or a wire. If it is a wire, it can
-/// be one wire_out instance connected to one wire_in instance, or one wire_out
-/// connected to multiple wire_in instances.
+/// be one `wire_out` instance connected to one `wire_in` instance, or one `wire_out`
+/// connected to multiple `wire_in` instances.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PredType {
     Source,

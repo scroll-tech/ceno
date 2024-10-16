@@ -57,7 +57,7 @@ pub fn batch_inversion_and_mul<F: PrimeField>(v: &mut [F], coeff: &F) {
     });
 }
 
-/// Given a vector of field elements {v_i}, compute the vector {coeff * v_i^(-1)}.
+/// Given a vector of field elements {`v_i`}, compute the vector {coeff * v_i^(-1)}.
 /// This method is explicitly single-threaded.
 fn serial_batch_inversion_and_mul<F: PrimeField>(v: &mut [F], coeff: &F) {
     // Montgomery’s Trick and Fast Implementation of Masked AES
@@ -104,7 +104,7 @@ pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F
         let mut sum = F::ZERO;
         coeffs.iter_mut().zip(weights).for_each(|(coeff, weight)| {
             *coeff *= weight;
-            sum += *coeff
+            sum += *coeff;
         });
         let sum_inv = sum.invert().unwrap_or(F::ZERO);
         (coeffs, sum_inv)
@@ -120,7 +120,7 @@ pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F
 /// Interpolate a uni-variate degree-`p_i.len()-1` polynomial and evaluate this
 /// polynomial at `eval_at`:
 ///
-///   \sum_{i=0}^len p_i * (\prod_{j!=i} (eval_at - j)/(i-j) )
+///   \sum_{i=0}^len `p_i` * (\prod_{j!=i} (`eval_at` - j)/(i-j) )
 ///
 /// This implementation is linear in number of inputs in terms of field
 /// operations. It also has a quadratic term in primitive operations which is
@@ -187,7 +187,7 @@ fn field_factorial<F: PrimeField>(a: usize) -> F {
 }
 
 /// log2 ceil of x
-pub fn ceil_log2(x: usize) -> usize {
+#[must_use] pub fn ceil_log2(x: usize) -> usize {
     assert!(x > 0, "ceil_log2: x must be positive");
     // Calculate the number of bits in usize
     let usize_bits = std::mem::size_of::<usize>() * 8;
@@ -321,7 +321,7 @@ impl<F> DerefMut for AdditiveVec<F> {
 }
 
 impl<F: Clone + Default> AdditiveVec<F> {
-    pub fn new(len: usize) -> Self {
+    #[must_use] pub fn new(len: usize) -> Self {
         Self(vec![F::default(); len])
     }
 }

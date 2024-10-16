@@ -11,7 +11,7 @@ pub struct RAMHandler<Ext: ExtensionField> {
 
 impl<Ext: ExtensionField> RAMHandler<Ext> {
     /// Instantiate new `OAMHandler` given chip challenge
-    pub fn new(challenge: ChipChallenges) -> Self {
+    #[must_use] pub fn new(challenge: ChipChallenges) -> Self {
         Self {
             read_records: Vec::new(),
             write_records: Vec::new(),

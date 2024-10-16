@@ -53,7 +53,7 @@ impl RangeChip {
     ) -> Result<(), UtilError> {
         let bytes = cell_to_mixed(bytes);
         for byte in bytes {
-            Self::small_range_check(chip_handler, circuit_builder, byte, 8)?
+            Self::small_range_check(chip_handler, circuit_builder, byte, 8)?;
         }
         Ok(())
     }
@@ -63,12 +63,12 @@ impl RangeChip {
         circuit_builder: &mut CircuitBuilder<Ext>,
         item: CellId,
     ) {
-        chip_handler.rom_handler.read(circuit_builder, &[], &[item])
+        chip_handler.rom_handler.read(circuit_builder, &[], &[item]);
     }
 
     /// Ensures that the value represented in a `UInt<M, C>` (as field elements)
     /// matches its definition.
-    /// i.e. total_represented_value <= M and each value represented per cell <= max_cell_width
+    /// i.e. `total_represented_value` <= M and each value represented per cell <= `max_cell_width`
     pub fn range_check_uint<const M: usize, const C: usize, Ext: ExtensionField>(
         chip_handler: &mut ChipHandler<Ext>,
         circuit_builder: &mut CircuitBuilder<Ext>,

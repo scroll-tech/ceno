@@ -24,7 +24,7 @@ pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
 
     // This code implicitly assumes that coeffs has size at least 1 << n,
     // that means the size of evals should be a power of two
-    for i in 2..n + 1 {
+    for i in 2..=n {
         let chunk_size = 1 << i;
         evals.par_chunks_mut(chunk_size).for_each(|chunk| {
             let half_chunk = chunk_size >> 1;

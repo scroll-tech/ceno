@@ -35,7 +35,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         }
     }
 
-    /// Asserts that operand_0 < operand_1
+    /// Asserts that `operand_0` < `operand_1`
     pub fn assert_lt<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         chip_handler: &mut ChipHandler<E>,
@@ -48,7 +48,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         Ok(())
     }
 
-    /// Asserts that operand_0 <= operand_1
+    /// Asserts that `operand_0` <= `operand_1`
     pub fn assert_leq<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         chip_handler: &mut ChipHandler<E>,
@@ -69,7 +69,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         // then assert that the returned item = 0
 
         let diff_values = diff.values();
-        for d in diff_values.iter() {
+        for d in diff_values {
             let s = circuit_builder.create_cell();
             circuit_builder.sel_mixed(
                 s,

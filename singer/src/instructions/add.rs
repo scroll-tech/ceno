@@ -293,7 +293,7 @@ mod test {
         let range_values = u64vec::<{ StackUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
         let mut wit_phase0_instruction_add: Vec<Goldilocks> = vec![];
         for &value in &range_values[..16] {
-            wit_phase0_instruction_add.push(Goldilocks::from(value))
+            wit_phase0_instruction_add.push(Goldilocks::from(value));
         }
         wit_phase0_instruction_add.push(Goldilocks::from(1u64)); // carry is [1, 0, ...]
         phase0_values_map.insert(

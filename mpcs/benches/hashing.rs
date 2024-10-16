@@ -17,7 +17,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             .unwrap(),
     );
     c.bench_function("ceno hash 2 to 1", |bencher| {
-        bencher.iter(|| hash_two_digests(&left, &right))
+        bencher.iter(|| hash_two_digests(&left, &right));
     });
 
     let values = (0..60)
@@ -26,7 +26,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("ceno hash 60 to 1", |bencher| {
         bencher.iter(|| {
             PoseidonHash::hash_or_noop(&values);
-        })
+        });
     });
 }
 

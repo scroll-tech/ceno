@@ -110,7 +110,7 @@ impl<'a, E: ExtensionField> ProverState<'a, E> {
         });
         self.eq_xys.iter_mut().for_each(|eq_xy| {
             if eq_xy.num_vars > 0 {
-                eq_xy.fix_variables_in_place(&[*challenge])
+                eq_xy.fix_variables_in_place(&[*challenge]);
             }
         });
         if self.round == 0 {
@@ -143,12 +143,12 @@ impl<'a, E: ExtensionField> ProverState<'a, E> {
             });
         } else {
             self.polys.iter_mut().for_each(|polys| {
-                polys.iter_mut().for_each(|poly| {
+                for poly in polys.iter_mut() {
                     // If it's constant, then fixing a variable is a no-op
                     if poly.num_vars > 0 {
                         poly.to_mut().fix_variables_in_place(&[*challenge]);
                     }
-                });
+                }
             });
         }
         self.round += 1;
@@ -190,7 +190,7 @@ pub trait ClassicSumCheckRoundMessage<E: ExtensionField>: Sized + Debug {
 
     fn sum(&self) -> E;
 
-    fn auxiliary(_degree: usize) -> Self::Auxiliary {
+    #[must_use] fn auxiliary(_degree: usize) -> Self::Auxiliary {
         Default::default()
     }
 
@@ -230,7 +230,7 @@ where
     type RoundMessage = P::RoundMessage;
 
     fn prove(
-        _: &Self::ProverParam,
+        (): &Self::ProverParam,
         num_vars: usize,
         virtual_poly: VirtualPolynomial<E>,
         sum: E,
@@ -285,7 +285,7 @@ where
     }
 
     fn verify(
-        _: &Self::VerifierParam,
+        (): &Self::VerifierParam,
         num_vars: usize,
         degree: usize,
         sum: E,

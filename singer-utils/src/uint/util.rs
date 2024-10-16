@@ -69,17 +69,17 @@ pub fn pad_cells<E: ExtensionField>(
     size: usize,
 ) {
     if cells.len() < size {
-        cells.extend(circuit_builder.create_cells(size - cells.len()))
+        cells.extend(circuit_builder.create_cells(size - cells.len()));
     }
 }
 
 /// Compile time evaluated minimum function
 /// returns min(a, b)
-pub const fn const_min(a: usize, b: usize) -> usize {
+#[must_use] pub const fn const_min(a: usize, b: usize) -> usize {
     if a <= b { a } else { b }
 }
 
-/// Assumes each limb < max_value
+/// Assumes each limb < `max_value`
 /// adds 1 to the big value, while preserving the above constraint
 pub fn add_one_to_big_num<F: SmallField>(limb_modulo: F, limbs: &[F]) -> Vec<F> {
     let mut should_add_one = true;

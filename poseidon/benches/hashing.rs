@@ -59,7 +59,7 @@ pub fn hashing_benchmark(c: &mut Criterion) {
             random_plonky_2_goldy,
             plonky_hash_single,
             BatchSize::SmallInput,
-        )
+        );
     });
 
     c.bench_function("plonky hash 2 to 1", |bencher| {
@@ -72,7 +72,7 @@ pub fn hashing_benchmark(c: &mut Criterion) {
             },
             |(left, right)| plonky_hash_2_to_1(left, right),
             BatchSize::SmallInput,
-        )
+        );
     });
 
     c.bench_function("plonky hash 60 to 1", |bencher| {
@@ -80,11 +80,11 @@ pub fn hashing_benchmark(c: &mut Criterion) {
             || GoldilocksField::rand_vec(60),
             |sixty_elems| plonky_hash_many_to_1(sixty_elems.as_slice()),
             BatchSize::SmallInput,
-        )
+        );
     });
 
     c.bench_function("ceno hash single", |bencher| {
-        bencher.iter_batched(random_ceno_goldy, ceno_hash_single, BatchSize::SmallInput)
+        bencher.iter_batched(random_ceno_goldy, ceno_hash_single, BatchSize::SmallInput);
     });
 
     c.bench_function("ceno hash 2 to 1", |bencher| {
@@ -92,7 +92,7 @@ pub fn hashing_benchmark(c: &mut Criterion) {
             || (random_ceno_hash(), random_ceno_hash()),
             |(left, right)| ceno_hash_2_to_1(&left, &right),
             BatchSize::SmallInput,
-        )
+        );
     });
 
     c.bench_function("ceno hash 60 to 1", |bencher| {
@@ -104,7 +104,7 @@ pub fn hashing_benchmark(c: &mut Criterion) {
             },
             |values| ceno_hash_many_to_1(values.as_slice()),
             BatchSize::SmallInput,
-        )
+        );
     });
 }
 
@@ -116,11 +116,11 @@ pub fn permutation_benchmark(c: &mut Criterion) {
     );
 
     c.bench_function("plonky permute", |bencher| {
-        bencher.iter(|| plonky_permutation.permute())
+        bencher.iter(|| plonky_permutation.permute());
     });
 
     c.bench_function("ceno permute", |bencher| {
-        bencher.iter(|| ceno_permutation.permute())
+        bencher.iter(|| ceno_permutation.permute());
     });
 }
 

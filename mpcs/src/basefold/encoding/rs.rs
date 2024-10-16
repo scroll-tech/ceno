@@ -86,7 +86,7 @@ fn ifft<E: ExtensionField>(
         let coeffs_j = poly[i] * n_inv;
         poly[i] = coeffs_i;
         poly[j] = coeffs_j;
-    })
+    });
 }
 
 /// Core FFT implementation.
@@ -117,7 +117,7 @@ fn fft_classic_inner<E: ExtensionField>(
                     values[k + half_m + j] = u - t;
                 }
             }
-        })
+        });
     }
 }
 
@@ -137,13 +137,11 @@ pub fn fft<E: ExtensionField>(
     let n = values.len();
     let lg_n = log2_strict(n);
 
-    if root_table.len() != lg_n {
-        panic!(
+    assert!(root_table.len() == lg_n, 
             "Expected root table of length {}, but it was {}.",
             lg_n,
             root_table.len()
         );
-    }
 
     // After reverse_index_bits, the only non-zero elements of values
     // are at indices i*2^r for i = 0..n/2^r.  The loop below copies
@@ -240,8 +238,8 @@ where
 {
     /// The verifier also needs a FFT table (much smaller)
     /// for small-size encoding. It contains the same roots as the
-    /// prover's version for the first few levels (i < basecode_msg_size_log)
-    /// For the other levels (i >= basecode_msg_size_log),
+    /// prover's version for the first few levels (i < `basecode_msg_size_log`)
+    /// For the other levels (i >= `basecode_msg_size_log`),
     /// it contains only the g^(2^i).
     pub(crate) fft_root_table: FftRootTable<E::BaseField>,
     pub(crate) full_message_size_log: usize,
@@ -656,9 +654,7 @@ mod tests {
                 assert_eq!(
                     (v_x0, v_x1, v_w, p_x0, p_x1, p_w),
                     (naive_x0, naive_x1, naive_w, naive_x0, naive_x1, naive_w),
-                    "failed for level = {}, index = {}",
-                    level,
-                    index
+                    "failed for level = {level}, index = {index}"
                 );
             }
         }
@@ -705,8 +701,7 @@ mod tests {
             assert_eq!(
                 (x0 - challenge) * (b[1] - a),
                 (x1 - challenge) * (b[0] - a),
-                "failed for i = {}",
-                i
+                "failed for i = {i}"
             );
         }
     }
@@ -855,7 +850,7 @@ mod tests {
             .zip(left_right_diff.iter().zip(left_right_sum.iter()))
             .enumerate()
         {
-            assert_eq!(*c + c, *sum + b * diff, "failed for i = {}", i);
+            assert_eq!(*c + c, *sum + b * diff, "failed for i = {i}");
         }
 
         check_low_degree(&folded_codeword, "low degree check for folded");
@@ -871,10 +866,8 @@ mod tests {
             assert_eq!(
                 field_type_index_ext(&codeword, i),
                 E::ZERO,
-                "{}: zero check failed for i = {}",
-                message,
-                i
-            )
+                "{message}: zero check failed for i = {i}"
+            );
         }
         fft(&mut codeword, 0, &root_table);
         let original = match original {
@@ -890,7 +883,7 @@ mod tests {
             .zip(codeword.iter())
             .enumerate()
             .for_each(|(i, (a, b))| {
-                assert_eq!(a, b, "{}: failed for i = {}", message, i);
+                assert_eq!(a, b, "{message}: failed for i = {i}");
             });
     }
 }

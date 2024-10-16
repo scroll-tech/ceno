@@ -9,7 +9,7 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use multilinear_extensions::mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension};
 
-pub fn i64_to_field<F: SmallField>(x: i64) -> F {
+#[must_use] pub fn i64_to_field<F: SmallField>(x: i64) -> F {
     if x >= 0 {
         F::from(x as u64)
     } else {
@@ -20,7 +20,7 @@ pub fn i64_to_field<F: SmallField>(x: i64) -> F {
 /// This is to compute a segment indicator. Specifically, it is an MLE of the
 /// following vector:
 ///     segment_{\mathbf{x}}
-///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i b_i + (1 - x_i)(1 - b_i))
+///         = \sum_{\`mathbf{b}=min_idx` + 1}^{2^n - 1} \prod_{i=0}^{n-1} (`x_i` `b_i` + (1 - `x_i)(1` - `b_i`))
 pub(crate) fn segment_eval_greater_than<E: ExtensionField>(min_idx: usize, a: &[E]) -> E {
     let running_product2 = {
         let mut running_product = vec![E::ZERO; a.len() + 1];
@@ -48,9 +48,9 @@ pub(crate) fn segment_eval_greater_than<E: ExtensionField>(min_idx: usize, a: &[
 }
 
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
-/// (min_idx, 2^n]. Specifically, it is an MLE of the following vector:
-///     partial_eq_{\mathbf{x}}(\mathbf{y})
-///         = \sum_{\mathbf{b}=min_idx + 1}^{2^n - 1} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
+/// (`min_idx`, 2^n]. Specifically, it is an MLE of the following vector:
+///     `partial_eq`_{\mathbf{x}}(\mathbf{y})
+///         = \sum_{\`mathbf{b}=min_idx` + 1}^{2^n - 1} \prod_{i=0}^{n-1} (`x_i` `y_i` `b_i` + (1 - `x_i)(1` - `y_i)(1` - `b_i`))
 #[allow(dead_code)]
 pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[F]) -> F {
     assert!(a.len() >= b.len());
@@ -95,9 +95,9 @@ pub(crate) fn eq_eval_greater_than<F: SmallField>(min_idx: usize, a: &[F], b: &[
 }
 
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
-/// [0, max_idx]. Specifically, it is an MLE of the following vector:
-///     partial_eq_{\mathbf{x}}(\mathbf{y})
-///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
+/// [0, `max_idx`]. Specifically, it is an MLE of the following vector:
+///     `partial_eq`_{\mathbf{x}}(\mathbf{y})
+///         = \sum_{\`mathbf{b}=0}^{max_idx`} \prod_{i=0}^{n-1} (`x_i` `y_i` `b_i` + (1 - `x_i)(1` - `y_i)(1` - `b_i`))
 // TODO(Matthias): See whether we can remove this function.
 #[allow(dead_code)]
 pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &[E], b: &[E]) -> E {
@@ -147,7 +147,7 @@ pub fn counter_eval<E: ExtensionField>(num_vars: usize, x: &[E]) -> E {
     assert_eq!(x.len(), num_vars, "invalid size of x");
     let mut ans = E::ZERO;
     for (i, &xi) in x.iter().enumerate() {
-        ans += xi * E::from(1 << i)
+        ans += xi * E::from(1 << i);
     }
     ans
 }
@@ -225,7 +225,7 @@ impl<E: ExtensionField> MultilinearExtensionFromVectors<E> for &[Vec<E::BaseFiel
                 .flat_map(|instance| {
                     instance
                         .iter()
-                        .cloned()
+                        .copied()
                         .chain(iter::repeat(E::BaseField::ZERO))
                         .take(1 << lo_num_vars)
                 })
@@ -247,7 +247,7 @@ impl<E: ExtensionField> MultilinearExtensionFromVectors<E> for &[Vec<E::BaseFiel
                 .flat_map(|instance| {
                     instance
                         .iter()
-                        .cloned()
+                        .copied()
                         .chain(iter::repeat(E::BaseField::ZERO))
                         .take(1 << lo_num_vars)
                 })

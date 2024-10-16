@@ -10,7 +10,7 @@ pub struct ROMHandler<Ext: ExtensionField> {
 
 impl<Ext: ExtensionField> ROMHandler<Ext> {
     /// Instantiate new `ROMHandler` given chip challenge
-    pub fn new(challenge: ChipChallenges) -> Self {
+    #[must_use] pub fn new(challenge: ChipChallenges) -> Self {
         Self {
             records: Vec::new(),
             challenge,

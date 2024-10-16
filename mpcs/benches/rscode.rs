@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use criterion::*;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use ff::Field;
 use goldilocks::GoldilocksExt2;
 
@@ -57,7 +57,7 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
                 .collect_vec();
 
             group.bench_function(
-                BenchmarkId::new("batch_encode", format!("{}-{}", num_vars, batch_size)),
+                BenchmarkId::new("batch_encode", format!("{num_vars}-{batch_size}")),
                 |b| {
                     b.iter(|| {
                         polys
@@ -86,7 +86,7 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
                                 (coeffs, codeword)
                             })
                             .collect::<(Vec<FieldType<E>>, Vec<FieldType<E>>)>();
-                    })
+                    });
                 },
             );
         }

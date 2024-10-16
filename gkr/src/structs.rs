@@ -11,7 +11,7 @@ use simple_frontend::structs::{CellId, ChallengeConst, ConstantType, LayerId};
 
 pub(crate) type SumcheckProof<F> = sumcheck::structs::IOPProof<F>;
 
-/// A point is a vector of num_var length
+/// A point is a vector of `num_var` length
 pub type Point<F> = Vec<F>;
 
 /// A point and the evaluation of this point.
@@ -57,7 +57,7 @@ pub struct IOPProverState<E: ExtensionField> {
     /// Evaluations of subsets from layers __closer__ to the output.
     /// __closer__ as in the layer that the subset elements lie in has not been processed.
     ///
-    /// LayerId is the layer id of the incoming subset point and evaluation.
+    /// `LayerId` is the layer id of the incoming subset point and evaluation.
     pub(crate) subset_point_and_evals: Vec<Vec<(LayerId, PointAndEval<E>)>>,
 
     /// The point to the next step.
@@ -72,7 +72,7 @@ pub struct IOPVerifierState<E: ExtensionField> {
     pub(crate) layer_id: LayerId,
     /// Evaluations from the next layer.
     pub(crate) to_next_phase_point_and_evals: Vec<PointAndEval<E>>,
-    /// Evaluations of subsets from layers closer to the output. LayerId is the
+    /// Evaluations of subsets from layers closer to the output. `LayerId` is the
     /// layer id of the incoming subset point and evaluation.
     pub(crate) subset_point_and_evals: Vec<Vec<(LayerId, PointAndEval<E>)>>,
 
@@ -151,11 +151,11 @@ pub struct Layer<E: ExtensionField> {
 
     /// The corresponding wires copied from this layer to later layers. It is
     /// (later layer id -> current wire id to be copied). It stores the non-zero
-    /// entry of copy_to[layer_id] for each row.
+    /// entry of `copy_to`[`layer_id`] for each row.
     pub(crate) copy_to: BTreeMap<LayerId, Vec<CellId>>,
     /// The corresponding wires from previous layers pasted to this layer. It is
     /// (shallower layer id -> pasted to the current id). It stores the non-zero
-    /// entry of paste_from[layer_id] for each column. Undefined for the input.
+    /// entry of `paste_from`[`layer_id`] for each column. Undefined for the input.
     pub(crate) paste_from: BTreeMap<LayerId, Vec<CellId>>,
     /// Maximum size of the subsets pasted from the previous layers, rounded up
     /// to the next power of two. This is the logarithm of the rounded size.
@@ -226,11 +226,11 @@ impl<C, const FAN_IN: usize> Serialize for Gate<C, FAN_IN> {
 
 #[derive(Clone)]
 pub struct CircuitWitness<'a, E: ExtensionField> {
-    /// Three vectors denote 1. layer_id, 2. instance_id || wire_id.
+    /// Three vectors denote 1. `layer_id`, 2. `instance_id` || `wire_id`.
     pub(crate) layers: Vec<ArcMultilinearExtension<'a, E>>,
-    /// Three vectors denote 1. wires_in id, 2. instance_id || wire_id.
+    /// Three vectors denote 1. `wires_in` id, 2. `instance_id` || `wire_id`.
     pub(crate) witness_in: Vec<ArcMultilinearExtension<'a, E>>,
-    /// Three vectors denote 1. wires_out id, 2. instance_id || wire_id.
+    /// Three vectors denote 1. `wires_out` id, 2. `instance_id` || `wire_id`.
     pub(crate) witness_out: Vec<ArcMultilinearExtension<'a, E>>,
     /// Challenges
     pub(crate) challenges: HashMap<ChallengeConst, Vec<E::BaseField>>,

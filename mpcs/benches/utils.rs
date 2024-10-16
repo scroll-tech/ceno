@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use criterion::*;
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use ff::Field;
 use goldilocks::GoldilocksExt2;
 
@@ -22,7 +22,7 @@ fn bench_eval_hc(c: &mut Criterion) {
         let poly: Vec<_> = (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect();
         let challenge = E::random(&mut OsRng);
 
-        group.bench_function(BenchmarkId::new("eval_hc", format!("{}", num_vars)), |b| {
+        group.bench_function(BenchmarkId::new("eval_hc", format!("{num_vars}")), |b| {
             b.iter_batched(
                 || poly.clone(),
                 |mut coeffs| {
@@ -30,7 +30,7 @@ fn bench_eval_hc(c: &mut Criterion) {
                     one_level_eval_hc(&mut coeffs, challenge);
                 },
                 BatchSize::SmallInput,
-            )
+            );
         });
     }
 }
@@ -43,7 +43,7 @@ fn bench_interp_hc(c: &mut Criterion) {
         let poly: Vec<_> = (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect();
 
         group.bench_function(
-            BenchmarkId::new("interp_hc", format!("{}", num_vars)),
+            BenchmarkId::new("interp_hc", format!("{num_vars}")),
             |b| {
                 b.iter_batched(
                     || poly.clone(),
@@ -52,7 +52,7 @@ fn bench_interp_hc(c: &mut Criterion) {
                         one_level_interp_hc(&mut coeffs);
                     },
                     BatchSize::SmallInput,
-                )
+                );
             },
         );
     }

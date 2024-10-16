@@ -5,7 +5,7 @@ use itertools::Itertools;
 use crate::structs::{CircuitGraph, CircuitGraphWitness, NodeOutputType, TargetEvaluations};
 
 impl<E: ExtensionField> CircuitGraph<E> {
-    pub fn target_evals(
+    #[must_use] pub fn target_evals(
         &self,
         witness: &CircuitGraphWitness<E>,
         point: &Point<E>,

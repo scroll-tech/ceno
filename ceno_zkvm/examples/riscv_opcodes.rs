@@ -116,7 +116,7 @@ fn main() {
 
     let program_code: Vec<u32> = PROGRAM_CODE
         .iter()
-        .cloned()
+        .copied()
         .chain(iter::repeat(ECALL_HALT))
         .take(512)
         .collect();
@@ -181,7 +181,7 @@ fn main() {
         let mut bltu_records = Vec::new();
         let mut jal_records = Vec::new();
         let mut halt_records = Vec::new();
-        all_records.into_iter().for_each(|record| {
+        for record in all_records {
             let kind = record.insn().kind().1;
             match kind {
                 ADD => add_records.push(record),
@@ -194,7 +194,7 @@ fn main() {
                 }
                 _ => {}
             }
-        });
+        }
 
         assert_eq!(halt_records.len(), 1);
         let exit_code = halt_records[0].rs2().unwrap().value;
@@ -280,11 +280,11 @@ fn main() {
             }
             Err(err) => {
                 let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
-                    message.to_string()
+                    (*message).to_string()
                 } else if let Some(message) = err.downcast_ref::<String>() {
                     message.to_string()
                 } else if let Some(message) = err.downcast_ref::<&String>() {
-                    message.to_string()
+                    (*message).to_string()
                 } else {
                     unreachable!()
                 };

@@ -1,4 +1,4 @@
-pub fn num_threads() -> usize {
+#[must_use] pub fn num_threads() -> usize {
     #[cfg(feature = "parallel")]
     let nt = rayon::current_num_threads();
     if cfg!(feature = "parallel") { nt } else { 1 }
@@ -14,8 +14,8 @@ where
     rayon::scope(|scope| {
         iter.for_each(|item| {
             let f = &f;
-            scope.spawn(move |_| f(item))
-        })
+            scope.spawn(move |_| f(item));
+        });
     });
 
     #[cfg(not(feature = "parallel"))]

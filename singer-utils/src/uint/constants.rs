@@ -8,9 +8,9 @@ impl<const M: usize, const C: usize> UInt<M, C> {
 
     /// Determines the maximum number of bits that should be represented in each cell
     /// independent of the cell capacity `C`.
-    /// If M < C i.e. total bit < cell capacity, the maximum_usable_cell_capacity
+    /// If M < C i.e. total bit < cell capacity, the `maximum_usable_cell_capacity`
     /// is actually M.
-    /// but if M >= C then maximum_usable_cell_capacity = C
+    /// but if M >= C then `maximum_usable_cell_capacity` = C
     pub const MAX_CELL_BIT_WIDTH: usize = const_min(M, C);
 
     /// `N_OPERAND_CELLS` represent the minimum number of cells each of size `C` needed
@@ -32,8 +32,8 @@ pub struct AddSubConstants<UInt> {
 
 impl<const M: usize, const C: usize> AddSubConstants<UInt<M, C>> {
     /// Number of cells required to track carry information for the addition operation.
-    /// operand_0 =     a   b  c
-    /// operand_1 =     e   f  g
+    /// `operand_0` =     a   b  c
+    /// `operand_1` =     e   f  g
     ///                ----------
     /// result    =     h   i  j
     /// carry     =  k  l   m  -
@@ -42,8 +42,8 @@ impl<const M: usize, const C: usize> AddSubConstants<UInt<M, C>> {
 
     /// Number of cells required to track carry information if we assume the addition
     /// operation cannot lead to overflow.
-    /// operand_0 =     a   b  c
-    /// operand_1 =     e   f  g
+    /// `operand_0` =     a   b  c
+    /// `operand_1` =     e   f  g
     ///                ----------
     /// result    =     h   i  j
     /// carry     =     l   m  -
@@ -54,7 +54,7 @@ impl<const M: usize, const C: usize> AddSubConstants<UInt<M, C>> {
     pub const N_WITNESS_CELLS: usize = UInt::<M, C>::N_RANGE_CELLS + Self::N_CARRY_CELLS;
 
     /// The size of the witness assuming carry has no overflow
-    /// |Range_values| + |Carry - 1|
+    /// |`Range_values`| + |Carry - 1|
     pub const N_WITNESS_CELLS_NO_CARRY_OVERFLOW: usize =
         UInt::<M, C>::N_RANGE_CELLS + Self::N_CARRY_CELLS_NO_OVERFLOW;
 

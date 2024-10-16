@@ -17,12 +17,12 @@ pub struct UInt<const M: usize, const C: usize> {
 
 impl<const M: usize, const C: usize> UInt<M, C> {
     /// Return the `UInt` underlying cell id's
-    pub fn values(&self) -> &[CellId] {
+    #[must_use] pub fn values(&self) -> &[CellId] {
         &self.values
     }
 
     /// Builds a `UInt` instance from a set of cells that represent `RANGE_VALUES`
-    /// assumes range_values are represented in little endian form
+    /// assumes `range_values` are represented in little endian form
     pub fn from_range_values<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_values: &[CellId],

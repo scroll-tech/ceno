@@ -16,7 +16,7 @@ use multilinear_extensions::mle::FieldType;
 mod transpose_util;
 use transpose_util::transpose_in_place_square;
 
-pub fn bits_u64(n: u64) -> usize {
+#[must_use] pub fn bits_u64(n: u64) -> usize {
     (64 - n.leading_zeros()) as usize
 }
 
@@ -27,7 +27,7 @@ pub fn log2_ceil(n: usize) -> usize {
 }
 
 /// Computes `log_2(n)`, panicking if `n` is not a power of two.
-pub fn log2_strict(n: usize) -> usize {
+#[must_use] pub fn log2_strict(n: usize) -> usize {
     let res = n.trailing_zeros();
     assert!(n.wrapping_shr(res) == 1, "Not a power of two: {n}");
     // Tell the optimizer about the semantics of `log2_strict`. i.e. it can replace `n` with
@@ -37,7 +37,7 @@ pub fn log2_strict(n: usize) -> usize {
 }
 
 /// Returns the largest integer `i` such that `base**i <= n`.
-pub const fn log_floor(n: u64, base: u64) -> usize {
+#[must_use] pub const fn log_floor(n: u64, base: u64) -> usize {
     assert!(n > 0);
     assert!(base > 1);
     let mut i = 0;
@@ -71,7 +71,7 @@ pub fn reverse_index_bits<T: Copy>(arr: &[T]) -> Vec<T> {
 // }
 // where reverse_bits(i, n_power) computes the n_power-bit reverse. The complications are there
 // to guide the compiler to generate optimal assembly.
-pub fn reverse_bits(n: usize, num_bits: usize) -> usize {
+#[must_use] pub fn reverse_bits(n: usize, num_bits: usize) -> usize {
     // NB: The only reason we need overflowing_shr() here as opposed
     // to plain '>>' is to accommodate the case n == num_bits == 0,
     // which would become `0 >> 64`. Rust thinks that any shift of 64
@@ -272,10 +272,10 @@ pub fn assume(p: bool) {
 
 /// Try to force Rust to emit a branch. Example:
 ///     if x > 2 {
-///         y = foo();
-///         branch_hint();
+///         y = `foo()`;
+///         `branch_hint()`;
 ///     } else {
-///         y = bar();
+///         y = `bar()`;
 ///     }
 /// This function has no semantics. It is a hint only.
 #[inline(always)]
@@ -358,19 +358,19 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_log2_strict_zero() {
-        log2_strict(0);
+        let _ = log2_strict(0);
     }
 
     #[test]
     #[should_panic]
     fn test_log2_strict_nonpower_2() {
-        log2_strict(0x78c341c65ae6d262);
+        let _ = log2_strict(0x78c341c65ae6d262);
     }
 
     #[test]
     #[should_panic]
     fn test_log2_strict_usize_max() {
-        log2_strict(usize::MAX);
+        let _ = log2_strict(usize::MAX);
     }
 
     #[test]

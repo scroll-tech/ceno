@@ -33,7 +33,7 @@ fn construct_input<E: ExtensionField>(
     Arc::new(Circuit::new(&circuit_builder))
 }
 
-/// Construct a selector for n_instances and each instance contains `num`
+/// Construct a selector for `n_instances` and each instance contains `num`
 /// items. `num` must be a power of 2.
 pub(crate) fn construct_prefix_selector<E: ExtensionField>(
     n_instances: usize,

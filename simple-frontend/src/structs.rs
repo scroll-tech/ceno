@@ -22,7 +22,7 @@ pub struct ChallengeConst {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub enum ConstantType<Ext: ExtensionField> {
     Field(Ext::BaseField),
-    /// ChallengeConst is an extension field element represents a power of ChallengeId.
+    /// `ChallengeConst` is an extension field element represents a power of `ChallengeId`.
     /// The usize here denotes the `usize`-th base field element of the const.
     Challenge(ChallengeConst, usize),
     ChallengeScaled(ChallengeConst, usize, Ext::BaseField),
@@ -47,7 +47,7 @@ pub struct Cell<Ext: ExtensionField> {
     pub cell_type: Option<CellType>,
 }
 
-/// An ExtCell consists DEGREE number of cells.
+/// An `ExtCell` consists DEGREE number of cells.
 #[derive(Clone, Debug)]
 pub struct ExtCellId<Ext: ExtensionField> {
     pub cells: Vec<CellId>,
@@ -57,8 +57,8 @@ pub struct ExtCellId<Ext: ExtensionField> {
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Serialize, Ord, PartialOrd)]
 pub enum InType {
     Witness(WitnessId),
-    /// Constant(num_vars) acts like a counter (0, 1, 2, ...) through all
-    /// instances. Each instance holds 1 << num_vars of them.
+    /// `Constant(num_vars)` acts like a counter (0, 1, 2, ...) through all
+    /// instances. Each instance holds 1 << `num_vars` of them.
     Counter(usize),
     /// Constant keeps the same for all instances.
     Constant(i64),
@@ -76,7 +76,7 @@ pub enum CellType {
     Out(OutType),
 }
 
-/// A MixedCell can be a constant, a cell, or a Cell Expression
+/// A `MixedCell` can be a constant, a cell, or a Cell Expression
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
 pub enum MixedCell<Ext: ExtensionField> {
     Constant(Ext::BaseField),

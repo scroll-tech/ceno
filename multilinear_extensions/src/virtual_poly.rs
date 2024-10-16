@@ -20,26 +20,26 @@ use serde::{Deserialize, Serialize};
 /// extensions:  `(coefficient, DenseMultilinearExtension)`
 ///
 /// * Number of products n = `polynomial.products.len()`,
-/// * Number of multiplicands of ith product m_i =
+/// * Number of multiplicands of ith product `m_i` =
 ///   `polynomial.products[i].1.len()`,
-/// * Coefficient of ith product c_i = `polynomial.products[i].0`
+/// * Coefficient of ith product `c_i` = `polynomial.products[i].0`
 ///
 /// The resulting polynomial is
 ///
-/// $$ \sum_{i=0}^{n} c_i \cdot \prod_{j=0}^{m_i} P_{ij} $$
+/// $$ \sum_{i=0}^{n} `c_i` \cdot \prod_{`j=0}^{m_i`} P_{ij} $$
 ///
 /// Example:
 ///  f = c0 * f0 * f1 * f2 + c1 * f3 * f4
 /// where f0 ... f4 are multilinear polynomials
 ///
-/// - flattened_ml_extensions stores the multilinear extension representation of
+/// - `flattened_ml_extensions` stores the multilinear extension representation of
 ///   f0, f1, f2, f3 and f4
 /// - products is
 ///     \[
 ///         (c0, \[0, 1, 2\]),
 ///         (c1, \[3, 4\])
 ///     \]
-/// - raw_pointers_lookup_table maps fi to i
+/// - `raw_pointers_lookup_table` maps fi to i
 ///
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VirtualPolynomial<E: ExtensionField> {
@@ -74,7 +74,7 @@ impl<E: ExtensionField> AsRef<[u8]> for VPAuxInfo<E> {
 
 impl<E: ExtensionField> VirtualPolynomial<E> {
     /// Creates an empty virtual polynomial with `num_variables`.
-    pub fn new(num_variables: usize) -> Self {
+    #[must_use] pub fn new(num_variables: usize) -> Self {
         VirtualPolynomial {
             aux_info: VPAuxInfo {
                 max_degree: 0,
@@ -134,7 +134,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
 
             let mle_ptr: usize = Arc::as_ptr(&mle) as usize;
             if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
-                indexed_product.push(*index)
+                indexed_product.push(*index);
             } else {
                 let curr_index = self.flattened_ml_extensions.len();
                 self.flattened_ml_extensions.push(mle);
@@ -148,7 +148,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     /// in-place merge with another virtual polynomial
     pub fn merge(&mut self, other: &VirtualPolynomial<E>) {
         let start = start_timer!(|| "virtual poly add");
-        for (coeffient, products) in other.products.iter() {
+        for (coeffient, products) in &other.products {
             let cur: Vec<ArcDenseMultilinearExtension<E>> = products
                 .iter()
                 .map(|&x| other.flattened_ml_extensions[x].clone())
@@ -176,17 +176,14 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
         let mle_ptr = Arc::as_ptr(&mle) as usize;
 
         // check if this mle already exists in the virtual polynomial
-        let mle_index = match self.raw_pointers_lookup_table.get(&mle_ptr) {
-            Some(&p) => p,
-            None => {
-                self.raw_pointers_lookup_table
-                    .insert(mle_ptr, self.flattened_ml_extensions.len());
-                self.flattened_ml_extensions.push(mle);
-                self.flattened_ml_extensions.len() - 1
-            }
+        let mle_index = if let Some(&p) = self.raw_pointers_lookup_table.get(&mle_ptr) { p } else {
+            self.raw_pointers_lookup_table
+                .insert(mle_ptr, self.flattened_ml_extensions.len());
+            self.flattened_ml_extensions.push(mle);
+            self.flattened_ml_extensions.len() - 1
         };
 
-        for (prod_coef, indices) in self.products.iter_mut() {
+        for (prod_coef, indices) in &mut self.products {
             // - add the MLE to the MLE list;
             // - multiple each product by MLE and its coefficient.
             indices.push(mle_index);
@@ -199,7 +196,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     }
 
     /// Evaluate the virtual polynomial at point `point`.
-    /// Returns an error is point.len() does not match `num_variables`.
+    /// Returns an error is `point.len()` does not match `num_variables`.
     pub fn evaluate(&self, point: &[E]) -> E {
         let start = start_timer!(|| "evaluation");
 
@@ -298,27 +295,25 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
         res
     }
 
-    /// Print out the evaluation map for testing. Panic if the num_vars > 5.
+    /// Print out the evaluation map for testing. Panic if the `num_vars` > 5.
     pub fn print_evals(&self) {
-        if self.aux_info.num_variables > 5 {
-            panic!("this function is used for testing only. cannot print more than 5 num_vars")
-        }
+        assert!(self.aux_info.num_variables <= 5, "this function is used for testing only. cannot print more than 5 num_vars");
         for i in 0..1 << self.aux_info.num_variables {
             let point = bit_decompose(i, self.aux_info.num_variables);
-            let point_fr: Vec<E> = point.iter().map(|&x| E::from(x as u64)).collect();
-            println!("{} {:?}", i, self.evaluate(point_fr.as_ref()))
+            let point_fr: Vec<E> = point.iter().map(|&x| E::from(u64::from(x))).collect();
+            println!("{} {:?}", i, self.evaluate(point_fr.as_ref()));
         }
-        println!()
+        println!();
     }
 
     // TODO: This seems expensive. Is there a better way to covert poly into its ext fields?
-    pub fn to_ext_field(&self) -> VirtualPolynomial<E> {
+    #[must_use] pub fn to_ext_field(&self) -> VirtualPolynomial<E> {
         let timer = start_timer!(|| "convert VP to ext field");
         let products = self.products.iter().map(|(f, v)| (*f, v.clone())).collect();
 
         let mut flattened_ml_extensions = vec![];
         let mut hm = HashMap::new();
-        for mle in self.flattened_ml_extensions.iter() {
+        for mle in &self.flattened_ml_extensions {
             let mle_ptr = Arc::as_ptr(mle) as usize;
             let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
 
@@ -355,9 +350,9 @@ pub fn eq_eval<F: PrimeField>(x: &[F], y: &[F]) -> F {
 /// This function build the eq(x, r) polynomial for any given r.
 ///
 /// Evaluate
-///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
+///      eq(x,y) = \`prod_i=1^num_var` (`x_i` * `y_i` + (1-x_i)*(1-y_i))
 /// over r, which is
-///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
+///      eq(x,y) = \`prod_i=1^num_var` (`x_i` * `r_i` + (1-x_i)*(1-r_i))
 pub fn build_eq_x_r_sequential<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
     let evals = build_eq_x_r_vec_sequential(r);
     let mle = DenseMultilinearExtension::from_evaluations_ext_vec(r.len(), evals);
@@ -396,7 +391,7 @@ pub fn build_eq_x_r_vec_sequential<E: ExtensionField>(r: &[E]) -> Vec<E> {
 }
 
 /// A helper function to build eq(x, r)*init via dynamic programing tricks.
-/// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
+/// This function takes `2^num_var` iterations, and per iteration with 1 multiplication.
 fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut [MaybeUninit<E>], init: E) {
     buf[0] = MaybeUninit::new(init);
 
@@ -419,9 +414,9 @@ fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut [MaybeUn
 /// This function build the eq(x, r) polynomial for any given r.
 ///
 /// Evaluate
-///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
+///      eq(x,y) = \`prod_i=1^num_var` (`x_i` * `y_i` + (1-x_i)*(1-y_i))
 /// over r, which is
-///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
+///      eq(x,y) = \`prod_i=1^num_var` (`x_i` * `r_i` + (1-x_i)*(1-r_i))
 pub fn build_eq_x_r<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
     let evals = build_eq_x_r_vec(r);
     let mle = DenseMultilinearExtension::from_evaluations_ext_vec(r.len(), evals);
@@ -480,7 +475,7 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
 }
 
 /// A helper function to build eq(x, r) via dynamic programing tricks.
-/// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
+/// This function takes `2^num_var` iterations, and per iteration with 1 multiplication.
 #[allow(dead_code)]
 fn build_eq_x_r_helper<E: ExtensionField>(r: &[E], buf: &mut [Vec<E>; 2]) {
     buf[0][0] = E::ONE;

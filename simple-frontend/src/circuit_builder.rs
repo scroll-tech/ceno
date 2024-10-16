@@ -45,9 +45,9 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         // Topological sort.
         // Initialize the out degree.
         let mut degrees = vec![0; self.cells.len()];
-        for cell in self.cells.iter() {
-            for gate in cell.gates.iter() {
-                for input in gate.idx_in.iter() {
+        for cell in &self.cells {
+            for gate in &cell.gates {
+                for input in &gate.idx_in {
                     degrees[*input] += 1;
                 }
             }
@@ -74,8 +74,8 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
             max_layer_id = max_layer_id.max(curr_layer);
             cell.layer = Some(curr_layer);
 
-            for gate in cell.gates.iter() {
-                for input in gate.idx_in.iter() {
+            for gate in &cell.gates {
+                for input in &gate.idx_in {
                     degrees[*input] -= 1;
                     layers[*input] = layers[*input].max(curr_layer + 1);
                     if degrees[*input] == 0 && !visited[*input] {
@@ -96,11 +96,11 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         self.n_layers = Some(max_layer_id + 1);
     }
 
-    pub fn n_witness_in(&self) -> usize {
+    #[must_use] pub fn n_witness_in(&self) -> usize {
         self.n_witness_in
     }
 
-    pub fn n_witness_out(&self) -> usize {
+    #[must_use] pub fn n_witness_out(&self) -> usize {
         self.n_witness_out
     }
 
@@ -131,7 +131,7 @@ mod tests {
         let leaves = input_cells
             .iter()
             .chain(zero_cells.iter())
-            .cloned()
+            .copied()
             .collect::<Vec<_>>();
         let inners = circuit_builder.create_cells(2);
         circuit_builder.mul3(inners[0], leaves[0], leaves[1], leaves[2], Goldilocks::ONE);
@@ -158,7 +158,7 @@ mod tests {
         let leaves = input_cells
             .iter()
             .chain(const_cells.iter())
-            .cloned()
+            .copied()
             .collect::<Vec<_>>();
         let inners = circuit_builder.create_cells(2);
         circuit_builder.mul3(inners[0], leaves[0], leaves[1], leaves[2], Goldilocks::ONE);
@@ -193,8 +193,7 @@ mod tests {
             assert_eq!(
                 circuit_builder.cells[cell_id].layer,
                 Some(layer),
-                "cell_id: {}",
-                cell_id
+                "cell_id: {cell_id}"
             );
         }
     }

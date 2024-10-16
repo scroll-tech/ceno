@@ -48,7 +48,7 @@ impl<E: ExtensionField> Default for ChipCircuitGadgets<E> {
 }
 
 impl<E: ExtensionField> ChipCircuitGadgets<E> {
-    /// Construct a selector for n_instances and each instance contains `num`
+    /// Construct a selector for `n_instances` and each instance contains `num`
     /// items. `num` must be a power of 2.
     pub(crate) fn construct_prefix_selector(
         n_instances: usize,

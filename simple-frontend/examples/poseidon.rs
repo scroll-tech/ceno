@@ -1,4 +1,4 @@
-//! Poseidon hash function. This is modified from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom.
+//! Poseidon hash function. This is modified from <https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom>.
 
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -187,12 +187,12 @@ fn poseidon_ex<E: ExtensionField>(
     let m = poseidon_m::<E::BaseField>(t);
     let m_slices = m
         .iter()
-        .map(|row| row.as_slice())
+        .map(std::vec::Vec::as_slice)
         .collect::<Vec<&[E::BaseField]>>();
     let p = poseidon_p::<E::BaseField>(t);
     let p_slices = p
         .iter()
-        .map(|row| row.as_slice())
+        .map(std::vec::Vec::as_slice)
         .collect::<Vec<&[E::BaseField]>>();
 
     //     component ark[nRoundsF];

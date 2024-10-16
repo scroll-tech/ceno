@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use const_env::from_env;
-use criterion::*;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use gkr::gadgets::keccak256::{keccak256_circuit, prove_keccak256, verify_keccak256};
 use goldilocks::GoldilocksExt2;
@@ -67,12 +67,12 @@ fn bench_keccak256(c: &mut Criterion) {
 
     for log2_n in 0..10 {
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("keccak256_log2_{}", log2_n));
+        let mut group = c.benchmark_group(format!("keccak256_log2_{log2_n}"));
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
         group.bench_function(
-            BenchmarkId::new("prove_keccak256", format!("keccak256_log2_{}", log2_n)),
+            BenchmarkId::new("prove_keccak256", format!("keccak256_log2_{log2_n}")),
             |b| {
                 b.iter(|| {
                     assert!(

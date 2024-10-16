@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ark_std::test_rng;
 use const_env::from_env;
-use criterion::*;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use ff_ext::{ExtensionField, ff::Field};
 use itertools::Itertools;
 use sumcheck::{structs::IOPProverState, util::ceil_log2};
@@ -79,14 +79,14 @@ const RAYON_NUM_THREADS: usize = 8;
 fn sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    for nv in [13, 14, 15, 16].into_iter() {
+    for nv in [13, 14, 15, 16] {
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("sumcheck_nv_{}", nv));
+        let mut group = c.benchmark_group(format!("sumcheck_nv_{nv}"));
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
         group.bench_function(
-            BenchmarkId::new("prove_sumcheck", format!("sumcheck_nv_{}", nv)),
+            BenchmarkId::new("prove_sumcheck", format!("sumcheck_nv_{nv}")),
             |b| {
                 b.iter_with_setup(
                     || {
@@ -123,14 +123,14 @@ fn sumcheck_fn(c: &mut Criterion) {
 fn devirgo_sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    for nv in [13, 14, 15, 16].into_iter() {
+    for nv in [13, 14, 15, 16] {
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("devirgo_nv_{}", nv));
+        let mut group = c.benchmark_group(format!("devirgo_nv_{nv}"));
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
         group.bench_function(
-            BenchmarkId::new("prove_sumcheck", format!("devirgo_nv_{}", nv)),
+            BenchmarkId::new("prove_sumcheck", format!("devirgo_nv_{nv}")),
             |b| {
                 b.iter_with_setup(
                     || {
