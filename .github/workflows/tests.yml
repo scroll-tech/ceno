@@ -70,3 +70,49 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           cargo bench --workspace --exclude ceno_rt --exclude singer-pro
+
+# foo
+
+  benches:
+    needs: [skip_check]
+    if: |
+      github.event.pull_request.draft == false &&
+      (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
+    name: Run Tests
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, riscv32im-unknown-none-elf]
+        # Exclude the riscv32im-unknown-none-elf target
+        exclude:
+          - target: riscv32im-unknown-none-elf
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          targets: riscv32im-unknown-none-elf
+          # TODO(Matthias): see whether we can keep this in sync with rust-toolchain.toml automatically?
+          toolchain: nightly-2024-05-02
+      - name: Cargo cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            examples/target/
+          key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo make
+        run: |
+          cargo make --version || cargo install cargo-make
+      - name: run benchmarks
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          cargo bench --workspace --exclude ceno_rt --exclude singer-pro
