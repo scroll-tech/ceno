@@ -469,6 +469,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // TODO probably move expected_max_rounds to verifier key
         let expected_rounds = cs
+            // w_table_expression round match with r_table_expression so check any of them sufficient
             .r_table_expressions
             .iter()
             .flat_map(|r| {
@@ -503,17 +504,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         assert_eq!(
             logup_q_point_and_eval.len(),
             cs.lk_table_expressions.len(),
-            "[lk_q_record]"
+            "[lk_q_record] mismatch length"
         );
         assert_eq!(
             logup_p_point_and_eval.len(),
             cs.lk_table_expressions.len(),
-            "[lk_p_record]"
+            "[lk_p_record] mismatch length"
         );
         assert_eq!(
             prod_point_and_eval.len(),
             cs.r_table_expressions.len() + cs.w_table_expressions.len(),
-            "[lk_q_record]"
+            "[prod_record] mismatch length"
         );
 
         let (input_opening_point, in_evals) = if is_skip_same_point_sumcheck {
@@ -701,7 +702,7 @@ impl TowerVerify {
         prod_out_evals: Vec<Vec<E>>,
         logup_out_evals: Vec<Vec<E>>,
         tower_proofs: &TowerProofs<E>,
-        expected_rounds: Vec<usize>,
+        num_variables: Vec<usize>,
         num_fanin: usize,
         transcript: &mut Transcript<E>,
     ) -> TowerVerifyResult<E> {
@@ -719,7 +720,7 @@ impl TowerVerify {
         assert!(logup_out_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
         }));
-        assert_eq!(expected_rounds.len(), num_prod_spec + num_logup_spec);
+        assert_eq!(num_variables.len(), num_prod_spec + num_logup_spec);
 
         let alpha_pows = get_challenge_pows(
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
@@ -749,9 +750,9 @@ impl TowerVerify {
         let mut logup_spec_p_input_layer_eval = vec![PointAndEval::default(); num_logup_spec];
         let mut logup_spec_q_input_layer_eval = vec![PointAndEval::default(); num_logup_spec];
 
-        let expected_max_round = expected_rounds.iter().max().unwrap();
+        let max_num_variables = num_variables.iter().max().unwrap();
 
-        let (next_rt, _) = (0..(expected_max_round-1)).try_fold(
+        let (next_rt, _) = (0..(max_num_variables-1)).try_fold(
             (
                 PointAndEval {
                     point: initial_rt,
@@ -774,13 +775,13 @@ impl TowerVerify {
                     },
                     transcript,
                 );
-                tracing::debug!("verified tower proof at layer {}/{}", round + 1, expected_max_round-1);
+                tracing::debug!("verified tower proof at layer {}/{}", round + 1, max_num_variables-1);
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
                 let expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
-                    .zip(expected_rounds.iter())
+                    .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
                         eq_eval(out_rt, &rt)
                             * alpha
@@ -791,7 +792,7 @@ impl TowerVerify {
                     .sum::<E>()
                     + (0..num_logup_spec)
                         .zip_eq(alpha_pows[num_prod_spec..].chunks(2))
-                        .zip_eq(expected_rounds[num_prod_spec..].iter())
+                        .zip_eq(num_variables[num_prod_spec..].iter())
                         .map(|((spec_index, alpha), max_round)| {
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
                             eq_eval(out_rt, &rt) * if round < *max_round-1 {
@@ -827,7 +828,7 @@ impl TowerVerify {
                 let next_round = round + 1;
                 let next_prod_spec_evals = (0..num_prod_spec)
                     .zip(next_alpha_pows.iter())
-                    .zip(expected_rounds.iter())
+                    .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
                         if round < max_round -1 {
                             // merged evaluation
@@ -851,7 +852,7 @@ impl TowerVerify {
                     .sum::<E>();
                 let next_logup_spec_evals = (0..num_logup_spec)
                     .zip_eq(next_alpha_pows[num_prod_spec..].chunks(2))
-                    .zip_eq(expected_rounds[num_prod_spec..].iter())
+                    .zip_eq(num_variables[num_prod_spec..].iter())
                     .map(|((spec_index, alpha), max_round)| {
                         if round < max_round -1 {
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
