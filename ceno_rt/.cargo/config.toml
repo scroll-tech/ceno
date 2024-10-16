@@ -11,5 +11,5 @@ rustflags = [
 target = "riscv32im-unknown-none-elf"
 
 [profile.release]
-panic = "abort"
 lto = true
+panic = "abort"

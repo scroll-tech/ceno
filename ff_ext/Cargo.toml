@@ -1,17 +1,17 @@
 [package]
-name = "ff_ext"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-readme.workspace = true
-description = "Extra functionality for the ff ((finite fields) crate"
-repository.workspace = true
 categories.workspace = true
+description = "Extra functionality for the ff ((finite fields) crate"
+edition.workspace = true
 keywords.workspace = true
+license.workspace = true
+name = "ff_ext"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
 
 
 [dependencies]
-serde.workspace = true
-goldilocks.workspace = true
 ff.workspace = true
+goldilocks.workspace = true
 poseidon.workspace = true
+serde.workspace = true

@@ -4,8 +4,6 @@ CORE = { script = ["nproc"] }
 RAYON_NUM_THREADS = "${CORE}"
 
 [tasks.riscv_opcodes_flamegraph]
-env = { "RUST_LOG" = "debug", "RAYON_NUM_THREADS" = "8" }
-command = "cargo"
 args = [
   "run",
   "--package",
@@ -14,3 +12,5 @@ args = [
   "--example",
   "riscv_opcodes",
 ]
+command = "cargo"
+env = { "RUST_LOG" = "debug", "RAYON_NUM_THREADS" = "8" }

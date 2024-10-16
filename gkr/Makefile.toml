@@ -4,7 +4,6 @@ CORE = { script = ["nproc"] }
 RAYON_NUM_THREADS = "${CORE}"
 
 [tasks.gkr_bench]
-command = "cargo"
 args = [
   "bench",
   "--bench",
@@ -16,9 +15,9 @@ args = [
   "--package",
   "gkr",
 ]
+command = "cargo"
 
 [tasks.gkr_example]
-command = "cargo"
 args = [
   "run",
   "--package",
@@ -29,10 +28,9 @@ args = [
   "--example",
   "keccak256",
 ]
+command = "cargo"
 
 [tasks.gkr_example_flamegraph]
-env = { "RUST_LOG" = "debug", "RAYON_NUM_THREADS" = "1" }
-command = "cargo"
 args = [
   "run",
   "--package",
@@ -43,3 +41,5 @@ args = [
   "--example",
   "keccak256",
 ]
+command = "cargo"
+env = { "RUST_LOG" = "debug", "RAYON_NUM_THREADS" = "1" }

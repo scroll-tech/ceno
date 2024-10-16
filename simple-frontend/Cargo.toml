@@ -1,19 +1,19 @@
 
 [package]
-name = "simple-frontend"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-readme.workspace = true
-description = "Simple frontend for the Ceno framework"
-repository.workspace = true
 categories.workspace = true
+description = "Simple frontend for the Ceno framework"
+edition.workspace = true
 keywords.workspace = true
+license.workspace = true
+name = "simple-frontend"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
-ff_ext = { path = "../ff_ext" }
 ark-std.workspace = true
 ff.workspace = true
+ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
 itertools = "0.12.1"
 rayon.workspace = true

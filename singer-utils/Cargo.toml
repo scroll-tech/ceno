@@ -1,28 +1,28 @@
 [package]
-name = "singer-utils"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-readme.workspace = true
-description = "Utilities for the singer framework"
-repository.workspace = true
 categories.workspace = true
+description = "Utilities for the singer framework"
+edition.workspace = true
 keywords.workspace = true
+license.workspace = true
+name = "singer-utils"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
-ff_ext = { path = "../ff_ext" }
 ff.workspace = true
+ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
 
 gkr = { path = "../gkr", features = ["parallel"] }
-itertools = "0.12.1"
-simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
-sumcheck = { version = "0.1.0", path = "../sumcheck" }
-strum = "0.26.3"
-strum_macros = "0.26.4"
-transcript = { version = "0.1.0", path = "../transcript" }
+itertools = "0.12.1"
 multilinear_extensions = { path = "../multilinear_extensions", features = [
   "parallel",
 ] }
+simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
+strum = "0.26.3"
+strum_macros = "0.26.4"
+sumcheck = { version = "0.1.0", path = "../sumcheck" }
+transcript = { version = "0.1.0", path = "../transcript" }

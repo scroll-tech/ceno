@@ -1,4 +1,5 @@
 [workspace]
+exclude = ["examples"]
 members = [
   "ceno_emul",
   "examples-builder",
@@ -15,17 +16,16 @@ members = [
   "ceno_zkvm",
   "poseidon",
 ]
-exclude = ["examples"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/scroll-tech/ceno"
-readme = "README.md"
 categories = ["cryptography", "zk", "blockchain", "ceno"]
+edition = "2021"
 keywords = ["cryptography", "zk", "blockchain", "ceno"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/scroll-tech/ceno"
+version = "0.1.0"
 
 [workspace.dependencies]
 ark-std = { version = "0.4" }
@@ -36,12 +36,12 @@ ff = "0.13"
 goldilocks = { git = "https://github.com/zhenfeizhang/Goldilocks" }
 halo2curves = "0.1.0"
 poseidon = { path = "./poseidon" }
-serde = { version = "1.0", features = ["derive"] }
-subtle = "2.6.1"
+rand_chacha = { version = "0.3.1", features = ["serde1"] }
 rand_core = "0.6.4"
 rand_xorshift = "0.3"
 rayon = "1.10"
-rand_chacha = { version = "0.3.1", features = ["serde1"] }
+serde = { version = "1.0", features = ["derive"] }
+subtle = "2.6.1"
 
 [patch."https://github.com/zhenfeizhang/Goldilocks"]
 goldilocks = { git = "https://github.com/hero78119/Goldilocks" }

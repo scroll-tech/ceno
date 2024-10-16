@@ -1,21 +1,21 @@
 [package]
-name = "transcript"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-readme.workspace = true
-description = "Transcript generation for Ceno"
-repository.workspace = true
 categories.workspace = true
+description = "Transcript generation for Ceno"
+edition.workspace = true
 keywords.workspace = true
+license.workspace = true
+name = "transcript"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
-ff_ext = { path = "../ff_ext" }
-crossbeam-channel = "0.5.13"
 ark-std.workspace = true
+crossbeam-channel = "0.5.13"
 ff.workspace = true
+ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
 halo2curves.workspace = true
+poseidon.workspace = true
 rayon.workspace = true
 serde.workspace = true
-poseidon.workspace = true

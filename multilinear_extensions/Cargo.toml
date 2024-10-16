@@ -1,30 +1,30 @@
 [package]
-name = "multilinear_extensions"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-readme.workspace = true
-description = "Multilinear extensions for the Ceno project"
-repository.workspace = true
 categories.workspace = true
+description = "Multilinear extensions for the Ceno project"
+edition.workspace = true
 keywords.workspace = true
+license.workspace = true
+name = "multilinear_extensions"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-tracing-flame = "0.2.0"
-ff_ext = { path = "../ff_ext" }
-itertools = "0.12.1"
 ark-std.workspace = true
 ff.workspace = true
+ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
+itertools = "0.12.1"
 rayon.workspace = true
 serde.workspace = true
+tracing = "0.1.40"
+tracing-flame = "0.2.0"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-log = "0.4"
 env_logger = "0.7"
+log = "0.4"
 
 [features]
 parallel = []
