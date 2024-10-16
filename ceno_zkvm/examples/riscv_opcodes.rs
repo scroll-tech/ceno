@@ -1,8 +1,8 @@
-use std::{iter, time::Instant};
+use std::{iter, panic, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
-    instructions::riscv::{arith::AddInstruction, branch::BltuInstruction},
+    instructions::riscv::{arith::AddInstruction, branch::BltuInstruction, jump::JalInstruction},
     scheme::prover::ZKVMProver,
     tables::ProgramTableCircuit,
 };
@@ -10,13 +10,13 @@ use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr,
-    InsnKind::{ADD, BLTU, EANY},
-    StepRecord, VMState, CENO_PLATFORM,
+    ByteAddr, CENO_PLATFORM,
+    InsnKind::{ADD, BLTU, EANY, JAL},
+    StepRecord, VMState,
 };
 use ceno_zkvm::{
     instructions::riscv::ecall::HaltInstruction,
-    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier, PublicValues},
+    scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
@@ -25,7 +25,7 @@ use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
+use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
 
 #[from_env]
@@ -50,6 +50,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
         0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
         0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
         0b_1_111111_00011_00000_110_1100_1_1100011, // bltu x0, x3, -8
+        0b_0_0000000010_0_00000000_00001_1101111, // jal x1, 4
         ECALL_HALT,                               // ecall halt
     );
     program
@@ -114,6 +115,7 @@ fn main() {
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let bltu_config = zkvm_cs.register_opcode_circuit::<BltuInstruction>();
+    let jal_config = zkvm_cs.register_opcode_circuit::<JalInstruction<E>>();
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     // tables
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
@@ -130,6 +132,7 @@ fn main() {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<BltuInstruction>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<JalInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
@@ -185,12 +188,14 @@ fn main() {
             .collect::<Vec<_>>();
         let mut add_records = Vec::new();
         let mut bltu_records = Vec::new();
+        let mut jal_records = Vec::new();
         let mut halt_records = Vec::new();
         all_records.into_iter().for_each(|record| {
             let kind = record.insn().kind().1;
             match kind {
                 ADD => add_records.push(record),
                 BLTU => bltu_records.push(record),
+                JAL => jal_records.push(record),
                 EANY => {
                     if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
                         halt_records.push(record);
@@ -206,9 +211,10 @@ fn main() {
         let pi = PublicValues::new(exit_code, 0, 0);
 
         tracing::info!(
-            "tracer generated {} ADD records, {} BLTU records",
+            "tracer generated {} ADD records, {} BLTU records, {} JAL records",
             add_records.len(),
-            bltu_records.len()
+            bltu_records.len(),
+            jal_records.len(),
         );
 
         let mut zkvm_witness = ZKVMWitnesses::default();
@@ -218,6 +224,9 @@ fn main() {
             .unwrap();
         zkvm_witness
             .assign_opcode_circuit::<BltuInstruction>(&zkvm_cs, &bltu_config, bltu_records)
+            .unwrap();
+        zkvm_witness
+            .assign_opcode_circuit::<JalInstruction<E>>(&zkvm_cs, &jal_config, jal_records)
             .unwrap();
         zkvm_witness
             .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
@@ -266,8 +275,35 @@ fn main() {
         // change public input maliciously should cause verifier to reject proof
         zkvm_proof.pv[0] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
         zkvm_proof.pv[1] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
-        verifier
-            .verify_proof(zkvm_proof, transcript)
-            .expect_err("verify proof should return with error");
+
+        // capture panic message, if have
+        let default_hook = panic::take_hook();
+        panic::set_hook(Box::new(|_info| {
+            // by default it will print msg to stdout/stderr
+            // we override it to avoid print msg since we will capture the msg by our own
+        }));
+        let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
+        panic::set_hook(default_hook);
+        match result {
+            Ok(res) => {
+                res.expect_err("verify proof should return with error");
+            }
+            Err(err) => {
+                let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
+                    message.to_string()
+                } else if let Some(message) = err.downcast_ref::<String>() {
+                    message.to_string()
+                } else if let Some(message) = err.downcast_ref::<&String>() {
+                    message.to_string()
+                } else {
+                    unreachable!()
+                };
+
+                if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+                    println!("unknown panic {msg:?}");
+                    panic::resume_unwind(err);
+                };
+            }
+        };
     }
 }

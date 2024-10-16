@@ -3,20 +3,20 @@ use std::{fmt::Display, mem::MaybeUninit};
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    instructions::riscv::constants::{UInt, BIT_WIDTH},
+    instructions::riscv::constants::{UINT_LIMBS, UInt},
     witness::LkMultiplicity,
-    Value,
 };
 
-use super::IsLtConfig;
+use super::AssertLTConfig;
 
 /// divide gadget
 #[derive(Debug, Clone)]
 pub struct DivConfig<E: ExtensionField> {
     pub dividend: UInt<E>,
-    pub r_lt: IsLtConfig,
+    pub r_lt: AssertLTConfig,
     pub intermediate_mul: UInt<E>,
 }
 
@@ -32,18 +32,17 @@ impl<E: ExtensionField> DivConfig<E> {
         remainder: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            let intermediate_mul =
-                divisor.mul::<BIT_WIDTH, _, _>(|| "divisor_mul", cb, quotient, true)?;
-            let dividend = intermediate_mul.add(|| "dividend_add", cb, remainder, true)?;
+            let (dividend, intermediate_mul) =
+                divisor.mul_add(|| "divisor * outcome + r", cb, quotient, remainder, true)?;
 
-            // remainder range check
-            let r_lt = cb.less_than(
+            let r_lt = AssertLTConfig::construct_circuit(
+                cb,
                 || "remainder < divisor",
                 remainder.value(),
                 divisor.value(),
-                Some(true),
-                UInt::<E>::NUM_CELLS,
+                UINT_LIMBS,
             )?;
+
             Ok(Self {
                 dividend,
                 intermediate_mul,
@@ -61,7 +60,6 @@ impl<E: ExtensionField> DivConfig<E> {
         remainder: &Value<'a, u32>,
     ) -> Result<(), ZKVMError> {
         let (dividend, intermediate) = divisor.mul_add(quotient, remainder, lkm, true);
-
         self.r_lt
             .assign_instance(instance, lkm, remainder.as_u64(), divisor.as_u64())?;
         self.intermediate_mul

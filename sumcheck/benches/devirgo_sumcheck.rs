@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ark_std::test_rng;
 use const_env::from_env;
 use criterion::*;
-use ff_ext::{ff::Field, ExtensionField};
+use ff_ext::{ExtensionField, ff::Field};
 use itertools::Itertools;
 use sumcheck::{structs::IOPProverState, util::ceil_log2};
 
@@ -70,11 +70,7 @@ fn prepare_input<E: ExtensionField>(
         .iter_mut()
         .zip(poly_g1.iter())
         .for_each(|(f1, g1)| f1.mul_by_mle(g1.clone(), E::BaseField::ONE));
-    (
-        asserted_sum,
-        virtual_poly_1,
-        virtual_poly_f1.try_into().unwrap(),
-    )
+    (asserted_sum, virtual_poly_1, virtual_poly_f1)
 }
 
 #[from_env]
@@ -104,8 +100,14 @@ fn sumcheck_fn(c: &mut Criterion) {
                             virtual_poly_splitted,
                         )
                     },
-                    |(mut prover_transcript, asserted_sum, virtual_poly, virtual_poly_splitted)| {
-                        let (sumcheck_proof_v1, _) = IOPProverState::<E>::prove_parallel(
+                    |(
+                        mut prover_transcript,
+                        _asserted_sum,
+                        virtual_poly,
+                        _virtual_poly_splitted,
+                    )| {
+                        #[allow(deprecated)]
+                        let (_sumcheck_proof_v1, _) = IOPProverState::<E>::prove_parallel(
                             virtual_poly.clone(),
                             &mut prover_transcript,
                         );
@@ -142,8 +144,13 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                             virtual_poly_splitted,
                         )
                     },
-                    |(mut prover_transcript, asserted_sum, virtual_poly, virtual_poly_splitted)| {
-                        let (sumcheck_proof_v2, _) = IOPProverState::<E>::prove_batch_polys(
+                    |(
+                        mut prover_transcript,
+                        _asserted_sum,
+                        _virtual_poly,
+                        virtual_poly_splitted,
+                    )| {
+                        let (_sumcheck_proof_v2, _) = IOPProverState::<E>::prove_batch_polys(
                             RAYON_NUM_THREADS,
                             virtual_poly_splitted,
                             &mut prover_transcript,

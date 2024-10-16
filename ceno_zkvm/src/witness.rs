@@ -21,7 +21,7 @@ use thread_local::ThreadLocal;
 
 use crate::{
     structs::ROMType,
-    tables::{AndTable, LtuTable, OpsTable, OrTable, XorTable},
+    tables::{AndTable, LtuTable, OpsTable, OrTable, PowTable, XorTable},
     utils::next_pow2_instance_padding,
 };
 
@@ -127,7 +127,7 @@ impl<F: Field> Index<usize> for RowMajorMatrix<F> {
 /// A lock-free thread safe struct to count logup multiplicity for each ROM type
 /// Lock-free by thread-local such that each thread will only have its local copy
 /// struct is cloneable, for internallly it use Arc so the clone will be low cost
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 #[allow(clippy::type_complexity)]
 pub struct LkMultiplicity {
     multiplicity: Arc<ThreadLocal<RefCell<[HashMap<u64, usize>; mem::variant_count::<ROMType>()]>>>,
@@ -169,6 +169,10 @@ impl LkMultiplicity {
     /// lookup a < b as unsigned byte
     pub fn lookup_ltu_byte(&mut self, a: u64, b: u64) {
         self.logic_u8::<LtuTable>(a, b)
+    }
+
+    pub fn lookup_pow2(&mut self, v: u64) {
+        self.logic_u8::<PowTable>(2, v)
     }
 
     /// Fetch instruction at pc

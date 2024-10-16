@@ -1,7 +1,7 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use itertools::{chain, izip, Itertools};
-use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, VPAuxInfo};
+use itertools::{Itertools, chain, izip};
+use multilinear_extensions::virtual_poly::{VPAuxInfo, build_eq_x_r_vec};
 use std::mem;
 use sumcheck::util::ceil_log2;
 use transcript::Transcript;
@@ -45,7 +45,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                     segment_eval_greater_than(l - 1, lo_point)
                 };
                 let segment_greater_than_r_1 = segment_eval_greater_than(r - 1, lo_point);
-                (segment_greater_than_l_1 - segment_greater_than_r_1) * &c
+                (segment_greater_than_l_1 - segment_greater_than_r_1) * c
             })
             .sum::<E>();
 

@@ -3,19 +3,19 @@ use std::marker::PhantomData;
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 
-use itertools::{interleave, izip, Itertools};
+use itertools::{Itertools, interleave, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
-    virtual_poly::{build_eq_x_r_vec_sequential, eq_eval, VPAuxInfo},
+    virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
     error::ZKVMError,
-    instructions::{riscv::ecall::HaltInstruction, Instruction},
+    instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
@@ -25,7 +25,7 @@ use crate::{
 };
 
 use super::{
-    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof,
+    ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE,
 };
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
@@ -62,6 +62,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 ));
             }
         }
+
+        // including public input to transcript
+        pi.iter().for_each(|v| transcript.append_field_element(v));
 
         // write fixed commitment to transcript
         for (_, vk) in self.vk.circuit_vks.iter() {

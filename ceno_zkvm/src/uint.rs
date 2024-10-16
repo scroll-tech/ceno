@@ -4,11 +4,11 @@ mod logic;
 pub mod util;
 
 use crate::{
-    chip_handler::RegisterExpr,
+    chip_handler::{MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::AssertLTConfig,
     utils::add_one_to_big_num,
     witness::LkMultiplicity,
 };
@@ -62,7 +62,7 @@ pub struct UIntLimbs<const M: usize, const C: usize, E: ExtensionField> {
     // We don't need `overflow` witness since the last element of `carries` represents it.
     pub carries: Option<Vec<WitIn>>,
     // for carry range check using lt tricks
-    pub carries_auxiliary_lt_config: Option<Vec<IsLtConfig>>,
+    pub carries_auxiliary_lt_config: Option<Vec<AssertLTConfig>>,
 }
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
@@ -110,7 +110,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn from_witins_unchecked(
         limbs: Vec<WitIn>,
         carries: Option<Vec<WitIn>>,
-        carries_auxiliary_lt_config: Option<Vec<IsLtConfig>>,
+        carries_auxiliary_lt_config: Option<Vec<AssertLTConfig>>,
     ) -> Self {
         assert!(limbs.len() == Self::NUM_CELLS);
         if let Some(carries) = &carries {
@@ -584,6 +584,12 @@ impl<E: ExtensionField> UIntLimbs<32, 16, E> {
         let u16_limbs = self.expr();
         u16_limbs.try_into().expect("two limbs with M=32 and C=16")
     }
+
+    /// Return a value suitable for memory read/write. From [u16; 2] limbs
+    pub fn memory_expr(&self) -> MemoryExpr<E> {
+        let u16_limbs = self.expr();
+        u16_limbs.try_into().expect("two limbs with M=32 and C=16")
+    }
 }
 
 impl<E: ExtensionField> UIntLimbs<32, 8, E> {
@@ -825,7 +831,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
 mod tests {
 
     mod value {
-        use crate::{witness::LkMultiplicity, Value};
+        use crate::{Value, witness::LkMultiplicity};
         #[test]
         fn test_add() {
             let a = Value::new_unchecked(1u32);

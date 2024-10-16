@@ -11,7 +11,7 @@ use super::arith::{AddInstruction, SubInstruction};
 #[test]
 fn test_multiple_opcode() {
     type E = GoldilocksExt2;
-    type PCS = BasefoldDefault<E>;
+    type Pcs = BasefoldDefault<E>;
 
     let mut cs = ConstraintSystem::new(|| "riscv");
     let _add_config = cs.namespace(
@@ -30,7 +30,7 @@ fn test_multiple_opcode() {
             Ok(config)
         },
     );
-    let param = PCS::setup(1 << 10).unwrap();
-    let (pp, _) = PCS::trim(&param, 1 << 10).unwrap();
-    cs.key_gen::<PCS>(&pp, None);
+    let param = Pcs::setup(1 << 10).unwrap();
+    let (pp, _) = Pcs::trim(&param, 1 << 10).unwrap();
+    cs.key_gen::<Pcs>(&pp, None);
 }

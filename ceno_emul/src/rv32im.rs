@@ -14,11 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
-use super::addr::{ByteAddr, RegIdx, Word, WordAddr, WORD_SIZE};
+use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
 
 pub trait EmuContext {
     // Handle environment call
@@ -327,9 +327,9 @@ impl DecodedInstruction {
     /// Indicate whether the immediate is interpreted as a signed integer, and it is negative.
     pub fn imm_is_negative(&self) -> bool {
         match self.codes() {
-            InsnCodes { format: R, .. } => false,
+            InsnCodes { format: R | U, .. } => false,
             InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI,
+                kind: SLLI | SRLI | SRAI | ADDI | SW | LW,
                 ..
             } => false,
             _ => self.top_bit != 0,

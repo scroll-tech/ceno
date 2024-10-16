@@ -57,6 +57,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut vm_proof = ZKVMProof::empty(pi);
         let pi = &vm_proof.pv;
 
+        // including public input to transcript
+        pi.iter().for_each(|v| transcript.append_field_element(v));
+
         // commit to fixed commitment
         for (_, pk) in self.pk.circuit_pks.iter() {
             if let Some(fixed_commit) = &pk.vk.fixed_commit {

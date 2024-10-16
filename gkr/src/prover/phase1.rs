@@ -1,7 +1,7 @@
 use ark_std::{end_timer, start_timer};
 use ff::Field;
 use ff_ext::ExtensionField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     virtual_poly::build_eq_x_r_vec_sequential,
@@ -16,7 +16,7 @@ use crate::{
     structs::{
         Circuit, CircuitWitness, IOPProverState, IOPProverStepMessage, PointAndEval, SumcheckProof,
     },
-    utils::{tensor_product, MatrixMLERowFirst},
+    utils::{MatrixMLERowFirst, tensor_product},
 };
 
 // Prove the items copied from the current layer to later layers for data parallel circuits.
@@ -171,7 +171,7 @@ impl<E: ExtensionField> IOPProverState<E> {
             .partition(|(i, _)| i % 2 == 0);
         let eval_value_1 = f1.remove(0).1;
 
-        self.to_next_step_point = sumcheck_proof_1.point.clone();
+        self.to_next_step_point.clone_from(&sumcheck_proof_1.point);
         self.to_next_phase_point_and_evals = vec![PointAndEval::new_from_ref(
             &self.to_next_step_point,
             &eval_value_1,

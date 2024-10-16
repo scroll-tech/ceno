@@ -86,9 +86,9 @@ fn mix<E: ExtensionField>(
 ) -> Vec<CellId> {
     let out = circuit_builder.create_cells(in_.len());
 
-    for i in 0..in_.len() {
-        for j in 0..in_.len() {
-            circuit_builder.add(out[i], in_[j], m[j][i]);
+    for (i, out_elem) in out.iter().enumerate() {
+        for (j, in_elem) in in_.iter().enumerate() {
+            circuit_builder.add(*out_elem, *in_elem, m[j][i]);
         }
     }
 
@@ -270,7 +270,7 @@ fn poseidon_ex<E: ExtensionField>(
         }
         ark_out[r + 1] = ark(circuit_builder, &sigma_f_in[r], &c, (r + 1) * t);
 
-        mix_in[r] = ark_out[r + 1].clone();
+        mix_in[r] = std::mem::take(&mut ark_out[r + 1]);
         mix_out[r] = mix(circuit_builder, &mix_in[r], &m_slices);
     }
 
@@ -305,7 +305,7 @@ fn poseidon_ex<E: ExtensionField>(
     //         mix[nRoundsF\2-1].in[j] <== ark[nRoundsF\2].out[j];
     //     }
 
-    mix_in[n_rounds_f / 2 - 1] = ark_out[n_rounds_f / 2].clone();
+    mix_in[n_rounds_f / 2 - 1] = std::mem::take(&mut ark_out[n_rounds_f / 2]);
     mix_out[n_rounds_f / 2 - 1] = mix(circuit_builder, &mix_in[n_rounds_f / 2 - 1], &p_slices);
 
     //     for (var r = 0; r < nRoundsP; r++) {
@@ -345,12 +345,10 @@ fn poseidon_ex<E: ExtensionField>(
                 circuit_builder.add(cell, sigma_p_out[r], one);
                 circuit_builder.add_const(cell, c[(n_rounds_f / 2 + 1) * t + r]);
                 cell
+            } else if r == 0 {
+                mix_out[n_rounds_f / 2 - 1][j]
             } else {
-                if r == 0 {
-                    mix_out[n_rounds_f / 2 - 1][j]
-                } else {
-                    mix_s_out[r - 1][j]
-                }
+                mix_s_out[r - 1][j]
             });
         }
         mix_s_out[r] = mix_s(circuit_builder, &mix_s_in[r], &s, r);
@@ -399,7 +397,7 @@ fn poseidon_ex<E: ExtensionField>(
             (n_rounds_f / 2 + 1) * t + n_rounds_p + r * t,
         );
 
-        mix_in[n_rounds_f / 2 + r] = ark_out[n_rounds_f / 2 + r + 1].clone();
+        mix_in[n_rounds_f / 2 + r] = std::mem::take(&mut ark_out[n_rounds_f / 2 + r + 1]);
         mix_out[n_rounds_f / 2 + r] = mix(circuit_builder, &mix_in[n_rounds_f / 2 + r], &m_slices);
     }
 
@@ -430,7 +428,7 @@ fn poseidon_ex<E: ExtensionField>(
     mix_last_out
 }
 fn main() {
-    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
     let n_inputs = 4;
     let (_, poseidon_ex_initial_state) = circuit_builder.create_witness_in(1);
     let (_, poseidon_ex_inputs) = circuit_builder.create_witness_in(n_inputs);

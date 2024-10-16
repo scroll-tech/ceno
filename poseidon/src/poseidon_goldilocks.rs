@@ -2,7 +2,7 @@ use crate::{
     constants::N_PARTIAL_ROUNDS,
     poseidon::{AdaptedField, Poseidon},
 };
-use goldilocks::{Goldilocks, SmallField, EPSILON};
+use goldilocks::{EPSILON, Goldilocks, SmallField};
 #[cfg(target_arch = "x86_64")]
 use std::hint::unreachable_unchecked;
 

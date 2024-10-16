@@ -3,6 +3,7 @@ use crate::{
     poseidon::Poseidon,
 };
 
+#[derive(Clone)]
 pub struct PoseidonPermutation<T: Poseidon> {
     state: [T; SPONGE_WIDTH],
 }
@@ -26,7 +27,7 @@ impl<T: Poseidon> PoseidonPermutation<T> {
     /// Set state element `i` to be `elts[i] for i =
     /// start_idx..start_idx + n` where `n = min(elts.len(),
     /// WIDTH-start_idx)`. Panics if `start_idx > SPONGE_WIDTH`.
-    pub(crate) fn set_from_slice(&mut self, elts: &[T], start_idx: usize) {
+    pub fn set_from_slice(&mut self, elts: &[T], start_idx: usize) {
         let begin = start_idx;
         let end = start_idx + elts.len();
         self.state[begin..end].copy_from_slice(elts)

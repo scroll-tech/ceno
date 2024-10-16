@@ -2,8 +2,8 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    expression::{Expression, ToExpr},
+    gadgets::AssertLTConfig,
     instructions::riscv::constants::UINT_LIMBS,
 };
 
@@ -34,7 +34,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     fn register_write(
@@ -45,7 +45,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 }
 
 /// The common representation of a memory value.
@@ -57,21 +57,21 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     fn memory_read(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: &MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
+        value: MemoryExpr<E>,
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     fn memory_write(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: &MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: crate::chip_handler::MemoryExpr<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
+        prev_values: MemoryExpr<E>,
+        value: MemoryExpr<E>,
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 }

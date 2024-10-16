@@ -5,18 +5,15 @@ use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::{riscv::constants::UInt8, Instruction},
-    scheme::mock_prover::{MockProver, MOCK_PC_AND, MOCK_PC_OR, MOCK_PC_XOR, MOCK_PROGRAM},
+    instructions::{Instruction, riscv::constants::UInt8},
+    scheme::mock_prover::{MOCK_PC_AND, MOCK_PC_OR, MOCK_PC_XOR, MOCK_PROGRAM, MockProver},
     utils::split_to_u8,
-    ROMType,
 };
 
 use super::*;
 
 const A: Word = 0xbead1010;
 const B: Word = 0xef552020;
-// The pair of bytes from A and B.
-const LOOKUPS: &[(u64, usize)] = &[(0x2010, 2), (0x55ad, 1), (0xefbe, 1)];
 
 #[test]
 fn test_opcode_and() {
@@ -33,25 +30,21 @@ fn test_opcode_and() {
         .unwrap()
         .unwrap();
 
-    let (raw_witin, lkm) = AndInstruction::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_r_instruction(
-            3,
-            MOCK_PC_AND,
-            MOCK_PROGRAM[3],
-            A,
-            B,
-            Change::new(0, A & B),
-            0,
-        )],
-    )
-    .unwrap();
+    let (raw_witin, lkm) =
+        AndInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_AND,
+                MOCK_PROGRAM[3],
+                A,
+                B,
+                Change::new(0, A & B),
+                0,
+            ),
+        ])
+        .unwrap();
 
-    let lkm = lkm.into_finalize_result()[ROMType::And as usize].clone();
-    assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
-
-    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>((A & B) as u32));
+    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A & B));
 
     config
         .rd_written
@@ -59,7 +52,7 @@ fn test_opcode_and() {
         .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -67,6 +60,7 @@ fn test_opcode_and() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }
 
@@ -85,25 +79,21 @@ fn test_opcode_or() {
         .unwrap()
         .unwrap();
 
-    let (raw_witin, lkm) = OrInstruction::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_r_instruction(
-            3,
-            MOCK_PC_OR,
-            MOCK_PROGRAM[4],
-            A,
-            B,
-            Change::new(0, A | B),
-            0,
-        )],
-    )
-    .unwrap();
+    let (raw_witin, lkm) =
+        OrInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_OR,
+                MOCK_PROGRAM[4],
+                A,
+                B,
+                Change::new(0, A | B),
+                0,
+            ),
+        ])
+        .unwrap();
 
-    let lkm = lkm.into_finalize_result()[ROMType::Or as usize].clone();
-    assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
-
-    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>((A | B) as u32));
+    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A | B));
 
     config
         .rd_written
@@ -111,7 +101,7 @@ fn test_opcode_or() {
         .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -119,6 +109,7 @@ fn test_opcode_or() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }
 
@@ -137,25 +128,21 @@ fn test_opcode_xor() {
         .unwrap()
         .unwrap();
 
-    let (raw_witin, lkm) = XorInstruction::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_r_instruction(
-            3,
-            MOCK_PC_XOR,
-            MOCK_PROGRAM[5],
-            A,
-            B,
-            Change::new(0, A ^ B),
-            0,
-        )],
-    )
-    .unwrap();
+    let (raw_witin, lkm) =
+        XorInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_XOR,
+                MOCK_PROGRAM[5],
+                A,
+                B,
+                Change::new(0, A ^ B),
+                0,
+            ),
+        ])
+        .unwrap();
 
-    let lkm = lkm.into_finalize_result()[ROMType::Xor as usize].clone();
-    assert_eq!(&lkm.into_iter().sorted().collect_vec(), LOOKUPS);
-
-    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>((A ^ B) as u32));
+    let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A ^ B));
 
     config
         .rd_written
@@ -163,7 +150,7 @@ fn test_opcode_xor() {
         .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -171,5 +158,6 @@ fn test_opcode_xor() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }
