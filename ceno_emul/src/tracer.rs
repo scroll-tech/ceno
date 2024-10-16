@@ -52,10 +52,6 @@ impl<T> MemOp<T> {
 pub type ReadOp = MemOp<Word>;
 pub type WriteOp = MemOp<Change<Word>>;
 
-const MOCK_RS1: u32 = 2;
-const MOCK_RS2: u32 = 3;
-const MOCK_RD: u32 = 4;
-
 impl StepRecord {
     pub fn new_r_instruction(
         cycle: Cycle,
@@ -81,7 +77,7 @@ impl StepRecord {
     pub fn new_r_instruction2(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_kind: InsnKind,
+        insn_code: u32,
         rs1_read: Word,
         rs2_read: Word,
         rd: Change<Word>,
@@ -91,7 +87,7 @@ impl StepRecord {
         StepRecord::new_insn2(
             cycle,
             pc,
-            insn_kind,
+            insn_code,
             Some(rs1_read),
             Some(rs2_read),
             Some(rd),
@@ -195,17 +191,17 @@ impl StepRecord {
     fn new_insn2(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_kind: InsnKind,
+        insn_code: u32,
         rs1_read: Option<Word>,
         rs2_read: Option<Word>,
         rd: Option<Change<Word>>,
         previous_cycle: Cycle,
     ) -> StepRecord {
-        let insn = DecodedInstruction::from_raw(insn_kind, MOCK_RS1, MOCK_RS2, MOCK_RD);
+        let insn = DecodedInstruction::new(insn_code);
         StepRecord {
             cycle,
             pc,
-            insn_code: insn.encoded(),
+            insn_code,
             rs1: rs1_read.map(|rs1| ReadOp {
                 addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
                 value: rs1,

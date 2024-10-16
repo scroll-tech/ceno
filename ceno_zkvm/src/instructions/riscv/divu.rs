@@ -152,7 +152,8 @@ mod test {
     mod divu {
 
         use ceno_emul::{
-            ByteAddr, CENO_PLATFORM, Change, DecodedInstruction, InsnKind, StepRecord, Word,
+            ByteAddr, CENO_PLATFORM, Change, DecodedInstruction, EncodedInstruction, InsnFormat,
+            InsnKind, StepRecord, Word,
         };
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
@@ -185,13 +186,15 @@ mod test {
             } else {
                 dividend / divisor
             };
+
+            let insn_code = EncodedInstruction::encode(InsnKind::DIVU, 2, 3, 4, 0);
             // values assignment
             let (raw_witin, _) =
                 DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                     StepRecord::new_r_instruction2(
                         3,
                         ByteAddr(CENO_PLATFORM.pc_start()),
-                        InsnKind::DIVU,
+                        insn_code,
                         dividend,
                         divisor,
                         Change::new(0, outcome),
@@ -209,7 +212,6 @@ mod test {
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
 
-            let insn = DecodedInstruction::from_raw(InsnKind::DIVU, 2, 3, 4);
             MockProver::assert_satisfied_with_program(
                 &mut cb,
                 &raw_witin
@@ -218,7 +220,7 @@ mod test {
                     .into_iter()
                     .map(|v| v.into())
                     .collect_vec(),
-                &[insn.encoded()],
+                &[insn_code],
                 None,
                 Some(lkm),
             );
