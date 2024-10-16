@@ -5,7 +5,6 @@ use ark_std::{end_timer, rand::RngCore, start_timer};
 use core::hash::Hash;
 use ff::Field;
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
