@@ -104,22 +104,7 @@ impl<E: ExtensionField> Ord for Expression<E> {
             (WitIn(a), WitIn(b)) => a.cmp(b),
             (Instance(a), Instance(b)) => a.cmp(b),
             (Challenge(a, b, c, d), Challenge(e, f, g, h)) => {
-                let cmp = a.cmp(e);
-                // TODO(Matthias): use `match` instead of an if-else-chain.
-                // Is there a monoid instance for Ordering?
-                // Yes, it's called `.then`.
-                // cmp.then()
-                if cmp == Equal {
-                    let cmp = b.cmp(f);
-                    if cmp == Equal {
-                        let cmp = cmp_ext(c, g);
-                        if cmp == Equal { cmp_ext(d, h) } else { cmp }
-                    } else {
-                        cmp
-                    }
-                } else {
-                    cmp
-                }
+                (a, b, for_cmp_ext(c), for_cmp_ext(d)).cmp(&(e, f, for_cmp_ext(g), for_cmp_ext(h)))
             }
             (Fixed(_), _) => Less,
             (Instance(_), Fixed(_)) => Greater,
@@ -142,15 +127,8 @@ impl<E: ExtensionField> PartialOrd for Expression<E> {
     }
 }
 
-#[allow(dead_code)]
-fn cmp_field<F: SmallField>(a: &F, b: &F) -> Ordering {
-    a.to_canonical_u64().cmp(&b.to_canonical_u64())
-}
-
-fn cmp_ext<E: ExtensionField>(a: &E, b: &E) -> Ordering {
-    let a = a.as_bases().iter().map(|f| f.to_canonical_u64());
-    let b = b.as_bases().iter().map(|f| f.to_canonical_u64());
-    a.cmp(b)
+fn for_cmp_ext<E: ExtensionField>(a: &E) -> Vec<u64> {
+    a.as_bases().iter().map(|f| f.to_canonical_u64()).collect()
 }
 
 #[cfg(test)]
