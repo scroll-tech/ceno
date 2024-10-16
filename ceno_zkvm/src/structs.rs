@@ -14,6 +14,7 @@ use multilinear_extensions::{
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
+use strum_macros::EnumIter;
 use sumcheck::structs::IOPProverMessage;
 
 pub struct TowerProver;
@@ -40,7 +41,7 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, EnumIter)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256

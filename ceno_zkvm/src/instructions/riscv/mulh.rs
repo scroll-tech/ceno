@@ -150,7 +150,7 @@ mod test {
         let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
 
         // values assignment
-        let (raw_witin, _) =
+        let (raw_witin, lkm) =
             MulhuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
@@ -183,6 +183,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 }

@@ -5,6 +5,8 @@ use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
+    ROMType,
+    chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
     structs::{ProvingKey, VerifyingKey, WitnessId},
@@ -110,6 +112,8 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     #[cfg(test)]
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
+    #[cfg(test)]
+    pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     pub(crate) phantom: PhantomData<E>,
 }
@@ -141,6 +145,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
             #[cfg(test)]
             debug_map: HashMap::new(),
+            #[cfg(test)]
+            lk_expressions_items_map: vec![],
 
             phantom: std::marker::PhantomData,
         }
@@ -215,11 +221,30 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(i)
     }
 
+    pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {
+        rlc_chip_record(
+            items,
+            self.chip_record_alpha.clone(),
+            self.chip_record_beta.clone(),
+        )
+    }
+
     pub fn lk_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        rom_type: ROMType,
+        items: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let rlc_record = self.rlc_chip_record(
+            std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
+                .chain(
+                    #[cfg(test)]
+                    items.clone(),
+                    #[cfg(not(test))]
+                    items,
+                )
+                .collect(),
+        );
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -229,6 +254,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
+        #[cfg(test)]
+        self.lk_expressions_items_map.push((rom_type, items));
         Ok(())
     }
 

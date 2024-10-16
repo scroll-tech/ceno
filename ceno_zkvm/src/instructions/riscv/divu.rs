@@ -117,11 +117,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let divisor = Value::new_unchecked(rs2);
         let outcome = Value::new(rd, lkm);
 
-        let r = if rs2 == 0 {
-            Value::new_unchecked(0)
-        } else {
-            Value::new(rs1 % rs2, lkm)
-        };
+        let r = Value::new(if rs2 == 0 { 0 } else { rs1 % rs2 }, lkm);
 
         // assignment
         config.r_insn.assign_instance(instance, lkm, step)?;
@@ -188,7 +184,7 @@ mod test {
                 dividend / divisor
             };
             // values assignment
-            let (raw_witin, _) =
+            let (raw_witin, lkm) =
                 DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                     StepRecord::new_r_instruction(
                         3,
@@ -220,6 +216,7 @@ mod test {
                     .map(|v| v.into())
                     .collect_vec(),
                 None,
+                Some(lkm),
             );
         }
         #[test]

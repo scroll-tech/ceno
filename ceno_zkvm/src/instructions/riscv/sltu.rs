@@ -132,7 +132,7 @@ mod test {
             .unwrap();
 
         let idx = (MOCK_PC_SLTU.0 - CENO_PLATFORM.pc_start()) / 4;
-        let (raw_witin, _) =
+        let (raw_witin, lkm) =
             SltuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
@@ -163,6 +163,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
