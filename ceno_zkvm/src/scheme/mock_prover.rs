@@ -31,6 +31,8 @@ use std::{
 use strum::IntoEnumIterator;
 
 const MOCK_PROGRAM_SIZE: usize = 32;
+pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
+
 pub const MOCK_RS1: u32 = 2;
 pub const MOCK_RS2: u32 = 3;
 pub const MOCK_RD: u32 = 4;
@@ -793,6 +795,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         programs: &[u32],
         challenge: Option<[E; 2]>,
+        lkm: Option<LkMultiplicity>,
     ) {
         let result = if let Some(challenge) = challenge {
             Self::run_with_challenge(cb, wits_in, challenge, lkm)

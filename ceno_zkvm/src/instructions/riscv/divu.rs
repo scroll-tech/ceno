@@ -151,10 +151,7 @@ mod test {
 
     mod divu {
 
-        use ceno_emul::{
-            ByteAddr, CENO_PLATFORM, Change, DecodedInstruction, EncodedInstruction, InsnFormat,
-            InsnKind, StepRecord, Word,
-        };
+        use ceno_emul::{Change, EncodedInstruction, InsnKind, StepRecord, Word};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
@@ -167,7 +164,7 @@ mod test {
                 Instruction,
                 riscv::{constants::UInt, divu::DivUInstruction},
             },
-            scheme::mock_prover::MockProver,
+            scheme::mock_prover::{MOCK_PC_START, MockProver},
         };
 
         fn verify(name: &'static str, dividend: Word, divisor: Word, exp_outcome: Word) {
@@ -191,9 +188,9 @@ mod test {
             // values assignment
             let (raw_witin, _) =
                 DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                    StepRecord::new_r_instruction2(
+                    StepRecord::new_r_instruction(
                         3,
-                        ByteAddr(CENO_PLATFORM.pc_start()),
+                        MOCK_PC_START,
                         insn_code,
                         dividend,
                         divisor,

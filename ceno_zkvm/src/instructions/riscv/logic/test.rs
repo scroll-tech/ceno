@@ -1,4 +1,4 @@
-use ceno_emul::{Change, StepRecord, Word};
+use ceno_emul::{Change, EncodedInstruction, StepRecord, Word};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
@@ -6,7 +6,7 @@ use multilinear_extensions::mle::IntoMLEs;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::{Instruction, riscv::constants::UInt8},
-    scheme::mock_prover::{MOCK_PC_AND, MOCK_PC_OR, MOCK_PC_XOR, MOCK_PROGRAM, MockProver},
+    scheme::mock_prover::{MOCK_PC_START, MockProver},
     utils::split_to_u8,
 };
 
@@ -30,12 +30,13 @@ fn test_opcode_and() {
         .unwrap()
         .unwrap();
 
+    let insn_code = EncodedInstruction::encode(InsnKind::AND, 2, 3, 4, 0);
     let (raw_witin, lkm) =
         AndInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
             StepRecord::new_r_instruction(
                 3,
-                MOCK_PC_AND,
-                MOCK_PROGRAM[3],
+                MOCK_PC_START,
+                insn_code,
                 A,
                 B,
                 Change::new(0, A & B),
@@ -51,14 +52,15 @@ fn test_opcode_and() {
         .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
+    MockProver::assert_satisfied_with_program(
+        &mut cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        &[insn_code],
         None,
         Some(lkm),
     );
@@ -79,12 +81,13 @@ fn test_opcode_or() {
         .unwrap()
         .unwrap();
 
+    let insn_code = EncodedInstruction::encode(InsnKind::OR, 2, 3, 4, 0);
     let (raw_witin, lkm) =
         OrInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
             StepRecord::new_r_instruction(
                 3,
-                MOCK_PC_OR,
-                MOCK_PROGRAM[4],
+                MOCK_PC_START,
+                insn_code,
                 A,
                 B,
                 Change::new(0, A | B),
@@ -100,14 +103,15 @@ fn test_opcode_or() {
         .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
+    MockProver::assert_satisfied_with_program(
+        &mut cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        &[insn_code],
         None,
         Some(lkm),
     );
@@ -128,12 +132,13 @@ fn test_opcode_xor() {
         .unwrap()
         .unwrap();
 
+    let insn_code = EncodedInstruction::encode(InsnKind::XOR, 2, 3, 4, 0);
     let (raw_witin, lkm) =
         XorInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
             StepRecord::new_r_instruction(
                 3,
-                MOCK_PC_XOR,
-                MOCK_PROGRAM[5],
+                MOCK_PC_START,
+                insn_code,
                 A,
                 B,
                 Change::new(0, A ^ B),
@@ -149,14 +154,15 @@ fn test_opcode_xor() {
         .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
+    MockProver::assert_satisfied_with_program(
+        &mut cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        &[insn_code],
         None,
         Some(lkm),
     );

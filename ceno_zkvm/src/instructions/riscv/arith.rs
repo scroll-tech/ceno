@@ -169,7 +169,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord};
+    use ceno_emul::{Change, EncodedInstruction, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -178,7 +178,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MOCK_PC_ADD, MOCK_PC_MUL, MOCK_PC_SUB, MOCK_PROGRAM, MockProver},
+        scheme::mock_prover::{MockProver, MOCK_PC_START},
     };
 
     #[test]
@@ -196,19 +196,21 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, lkm) =
-            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_ADD,
-                    MOCK_PROGRAM[0],
-                    11,
-                    0xfffffffe,
-                    Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let insn_code = EncodedInstruction::encode(InsnKind::ADD, 2, 3, 4, 0);
+        let (raw_witin, lkm) = AddInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                11,
+                0xfffffffe,
+                Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
+                0,
+            )],
+        )
+        .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(11_u32.wrapping_add(0xfffffffe))
@@ -221,14 +223,15 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
+        MockProver::assert_satisfied_with_program(
+            &mut cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -249,19 +252,21 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, lkm) =
-            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_ADD,
-                    MOCK_PROGRAM[0],
-                    u32::MAX - 1,
-                    u32::MAX - 1,
-                    Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let insn_code = EncodedInstruction::encode(InsnKind::ADD, 2, 3, 4, 0);
+        let (raw_witin, _) = AddInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                u32::MAX - 1,
+                u32::MAX - 1,
+                Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
+                0,
+            )],
+        )
+        .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked((u32::MAX - 1).wrapping_add(u32::MAX - 1))
@@ -274,14 +279,15 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
+        MockProver::assert_satisfied_with_program(
+            &mut cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -302,19 +308,21 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, lkm) =
-            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_SUB,
-                    MOCK_PROGRAM[1],
-                    11,
-                    2,
-                    Change::new(0, 11_u32.wrapping_sub(2)),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let insn_code = EncodedInstruction::encode(InsnKind::SUB, 2, 3, 4, 0);
+        let (raw_witin, _) = SubInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                11,
+                2,
+                Change::new(0, 11_u32.wrapping_sub(2)),
+                0,
+            )],
+        )
+        .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(11_u32.wrapping_sub(2))
@@ -327,14 +335,15 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
+        MockProver::assert_satisfied_with_program(
+            &mut cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -355,19 +364,21 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) =
-            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_SUB,
-                    MOCK_PROGRAM[1],
-                    3,
-                    11,
-                    Change::new(0, 3_u32.wrapping_sub(11)),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let insn_code = EncodedInstruction::encode(InsnKind::SUB, 2, 3, 4, 0);
+        let (raw_witin, _) = SubInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                3,
+                11,
+                Change::new(0, 3_u32.wrapping_sub(11)),
+                0,
+            )],
+        )
+        .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(3_u32.wrapping_sub(11))
@@ -380,14 +391,15 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
+        MockProver::assert_satisfied_with_program(
+            &mut cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             None,
         );
@@ -403,19 +415,21 @@ mod test {
             .unwrap();
 
         // values assignment
-        let (raw_witin, lkm) =
-            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_MUL,
-                    MOCK_PROGRAM[2],
-                    11,
-                    2,
-                    Change::new(0, 22),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let insn_code = EncodedInstruction::encode(InsnKind::MUL, 2, 3, 4, 0);
+        let (raw_witin, lkm) = MulInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                11,
+                2,
+                Change::new(0, 22),
+                0,
+            )],
+        )
+        .unwrap();
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(22u32).as_u16_limbs().to_vec());
@@ -425,14 +439,15 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
+        MockProver::assert_satisfied_with_program(
+            &mut cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -448,19 +463,21 @@ mod test {
             .unwrap();
 
         // values assignment
-        let (raw_witin, lkm) =
-            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_MUL,
-                    MOCK_PROGRAM[2],
-                    u32::MAX / 2 + 1,
-                    2,
-                    Change::new(0, 0),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let insn_code = EncodedInstruction::encode(InsnKind::MUL, 2, 3, 4, 0);
+        let (raw_witin, lkm) = MulInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                u32::MAX / 2 + 1,
+                2,
+                Change::new(0, 0),
+                0,
+            )],
+        )
+        .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(vec![0u64, 0]);
 
@@ -469,14 +486,15 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
+        MockProver::assert_satisfied_with_program(
+            &mut cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -497,18 +515,17 @@ mod test {
         let c_limb = ret.limbs;
 
         // values assignment
-        let (raw_witin, lkm) =
-            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_MUL,
-                    MOCK_PROGRAM[2],
-                    a.as_u64() as u32,
-                    b.as_u64() as u32,
-                    Change::new(
-                        0,
-                        Value::<u32>::from_limb_unchecked(c_limb.clone()).as_u64() as u32,
-                    ),
+        let insn_code = EncodedInstruction::encode(InsnKind::MUL, 2, 3, 4, 0);
+        let (raw_witin, lkm) = MulInstruction::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                a.as_u64() as u32,
+                b.as_u64() as u32,
+                Change::new(
                     0,
                 ),
             ])
@@ -521,14 +538,15 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
+        MockProver::assert_satisfied_with_program(
+            &mut cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
