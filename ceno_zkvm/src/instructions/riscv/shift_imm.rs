@@ -161,7 +161,7 @@ mod test {
             )
             .unwrap();
 
-        let (raw_witin, _) = ShiftImmInstruction::<GoldilocksExt2, SrliOp>::assign_instances(
+        let (raw_witin, lkm) = ShiftImmInstruction::<GoldilocksExt2, SrliOp>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
@@ -184,6 +184,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 }
