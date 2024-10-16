@@ -7,7 +7,7 @@ use core::ptr::{read_volatile, write_volatile};
 extern crate ceno_rt;
 const OUTPUT_ADDRESS: u32 = 0x8000_0000;
 
-#[no_mangle]
+ceno_rt::entry!(main);
 #[inline(never)]
 fn main() {
     test_data_section();
