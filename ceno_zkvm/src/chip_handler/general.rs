@@ -196,12 +196,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        let items: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from(ROMType::U14 as u64)),
-            expr,
-        ];
-        let rlc_record = self.rlc_chip_record(items);
-        self.lk_record(name_fn, rlc_record)?;
+        self.lk_record(name_fn, ROMType::U14, vec![expr])?;
         Ok(())
     }
 

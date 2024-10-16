@@ -492,7 +492,8 @@ mod test {
         let mem_addr = MemAddr::construct_unaligned(&mut cb).unwrap();
 
         let mut lkm = LkMultiplicity::default();
-        let mut raw_witin = RowMajorMatrix::<F>::new(2, cb.cs.num_witin as usize);
+        let num_rows = 2;
+        let mut raw_witin = RowMajorMatrix::<F>::new(num_rows, cb.cs.num_witin as usize);
         for instance in raw_witin.iter_mut() {
             mem_addr
                 .assign_instance(instance, &mut lkm, 0xbeadbeef)
@@ -503,12 +504,12 @@ mod test {
         let lkm = lkm.into_finalize_result();
         lkm[ROMType::U14 as usize].iter().for_each(|(k, v)| {
             assert_eq!(*k as u64, 0xbeef >> 2);
-            assert_eq!(*v, raw_witin.num_instances());
+            assert_eq!(*v, num_rows);
         });
         assert_eq!(lkm[ROMType::U14 as usize].len(), 1);
         lkm[ROMType::U16 as usize].iter().for_each(|(k, v)| {
             assert_eq!(*k as u64, 0xbead);
-            assert_eq!(*v, raw_witin.num_instances());
+            assert_eq!(*v, num_rows);
         });
         assert_eq!(lkm[ROMType::U16 as usize].len(), 1);
 
@@ -520,6 +521,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            None,
             None,
         );
     }

@@ -297,7 +297,9 @@ impl<E: ExtensionField> MockProverError<E> {
                     "assignments"
                 };
                 let element = match rom_type {
-                    ROMType::U5 | ROMType::U8 | ROMType::U16 => format!("Element: {key}"),
+                    ROMType::U5 | ROMType::U8 | ROMType::U14 | ROMType::U16 => {
+                        format!("Element: {key}")
+                    }
                     ROMType::And => {
                         let (a, b) = AndTable::unpack(*key);
                         format!("Element: {a} < {b}")
@@ -639,6 +641,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     match rom_type {
                         ROMType::U5 => lkm.assert_ux::<5>(args[0]),
                         ROMType::U8 => lkm.assert_ux::<8>(args[0]),
+                        ROMType::U14 => lkm.assert_ux::<14>(args[0]),
                         ROMType::U16 => lkm.assert_ux::<16>(args[0]),
                         ROMType::And => lkm.lookup_and_byte(args[0], args[1]),
                         ROMType::Or => lkm.lookup_or_byte(args[0], args[1]),
