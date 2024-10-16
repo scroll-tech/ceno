@@ -175,13 +175,13 @@ pub trait Poseidon: AdaptedField {
         let mut d_sum = (0u128, 0u32); // u160 accumulator
         for i in 1..12 {
             if i < SPONGE_WIDTH {
-                let t = Self::FAST_PARTIAL_ROUND_W_HATS[r][i - 1] as u128;
-                let si = state[i].to_noncanonical_u64() as u128;
+                let t = u128::from(Self::FAST_PARTIAL_ROUND_W_HATS[r][i - 1]);
+                let si = u128::from(state[i].to_noncanonical_u64());
                 d_sum = add_u160_u128(d_sum, si * t);
             }
         }
-        let s0 = state[0].to_noncanonical_u64() as u128;
-        let mds0to0 = (Self::MDS_MATRIX_CIRC[0] + Self::MDS_MATRIX_DIAG[0]) as u128;
+        let s0 = u128::from(state[0].to_noncanonical_u64());
+        let mds0to0 = u128::from(Self::MDS_MATRIX_CIRC[0] + Self::MDS_MATRIX_DIAG[0]);
         d_sum = add_u160_u128(d_sum, s0 * mds0to0);
         let d = reduce_u160::<Self>(d_sum);
 
@@ -199,6 +199,7 @@ pub trait Poseidon: AdaptedField {
 
     #[inline(always)]
     #[unroll_for_loops]
+    #[must_use]
     fn mds_row_shf(r: usize, v: &[u64; SPONGE_WIDTH]) -> u128 {
         debug_assert!(r < SPONGE_WIDTH);
         // The values of `MDS_MATRIX_CIRC` and `MDS_MATRIX_DIAG` are
@@ -213,10 +214,10 @@ pub trait Poseidon: AdaptedField {
         // This is a hacky way of fully unrolling the loop.
         for i in 0..12 {
             if i < SPONGE_WIDTH {
-                res += (v[(i + r) % SPONGE_WIDTH] as u128) * (Self::MDS_MATRIX_CIRC[i] as u128);
+                res += u128::from(v[(i + r) % SPONGE_WIDTH]) * u128::from(Self::MDS_MATRIX_CIRC[i]);
             }
         }
-        res += (v[r] as u128) * (Self::MDS_MATRIX_DIAG[r] as u128);
+        res += u128::from(v[r]) * u128::from(Self::MDS_MATRIX_DIAG[r]);
 
         res
     }
@@ -234,7 +235,7 @@ fn reduce_u160<F: AdaptedField>((n_lo, n_hi): (u128, u32)) -> F {
     let n_lo_hi = (n_lo >> 64) as u64;
     let n_lo_lo = n_lo as u64;
     let reduced_hi: u64 = F::from_noncanonical_u96(n_lo_hi, n_hi).to_noncanonical_u64();
-    let reduced128: u128 = ((reduced_hi as u128) << 64) + (n_lo_lo as u128);
+    let reduced128: u128 = (u128::from(reduced_hi) << 64) + u128::from(n_lo_lo);
     F::from_noncanonical_u128(reduced128)
 }
 
@@ -249,14 +250,15 @@ pub trait AdaptedField: SmallField {
 
     /// Returns `n`. Assumes that `n` is already in canonical form, i.e. `n < Self::order()`.
     // TODO: Should probably be unsafe.
+    #[must_use]
     fn from_canonical_u64(n: u64) -> Self {
         debug_assert!(n < Self::ORDER);
         Self::from(n)
     }
 
     /// # Safety
-    /// Equivalent to *self + Self::from_canonical_u64(rhs), but may be cheaper. The caller must
-    /// ensure that 0 <= rhs < Self::ORDER. The function may return incorrect results if this
+    /// Equivalent to *self + `Self::from_canonical_u64(rhs)`, but may be cheaper. The caller must
+    /// ensure that 0 <= rhs < `Self::ORDER`. The function may return incorrect results if this
     /// precondition is not met. It is marked unsafe for this reason.
     #[inline]
     unsafe fn add_canonical_u64(&self, rhs: u64) -> Self {

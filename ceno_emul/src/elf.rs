@@ -101,7 +101,7 @@ impl Program {
                     for j in 0..len {
                         let offset = (offset + i + j) as usize;
                         let byte = input.get(offset).context("Invalid segment offset")?;
-                        word |= (*byte as u32) << (j * 8);
+                        word |= u32::from(*byte) << (j * 8);
                     }
                     image.insert(addr, word);
                 }

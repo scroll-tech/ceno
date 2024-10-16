@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cache_file = "table_cache_dev_*";
 
     // Instruct Cargo to rerun this script if the watched file changes
-    println!("cargo:rerun-if-changed={}", watched_file);
+    println!("cargo:rerun-if-changed={watched_file}");
 
     // Use the glob crate to find files matching the pattern
     for entry in glob(cache_file)? {
@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("Deleted file: {}", path.display());
                 }
             }
-            Err(e) => println!("Error reading file: {:?}", e),
+            Err(e) => println!("Error reading file: {e:?}"),
         }
     }
 

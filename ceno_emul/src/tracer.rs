@@ -53,6 +53,7 @@ pub type ReadOp = MemOp<Word>;
 pub type WriteOp = MemOp<Change<Word>>;
 
 impl StepRecord {
+    #[must_use]
     pub fn new_r_instruction(
         cycle: Cycle,
         pc: ByteAddr,
@@ -74,6 +75,7 @@ impl StepRecord {
         )
     }
 
+    #[must_use]
     pub fn new_b_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
@@ -93,6 +95,7 @@ impl StepRecord {
         )
     }
 
+    #[must_use]
     pub fn new_i_instruction(
         cycle: Cycle,
         pc: ByteAddr,
@@ -113,6 +116,7 @@ impl StepRecord {
         )
     }
 
+    #[must_use]
     pub fn new_u_instruction(
         cycle: Cycle,
         pc: ByteAddr,
@@ -124,6 +128,7 @@ impl StepRecord {
         StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
     }
 
+    #[must_use]
     pub fn new_j_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
@@ -167,40 +172,49 @@ impl StepRecord {
         }
     }
 
+    #[must_use]
     pub fn cycle(&self) -> Cycle {
         self.cycle
     }
 
+    #[must_use]
     pub fn pc(&self) -> Change<ByteAddr> {
         self.pc
     }
 
     /// The instruction as a raw code.
+    #[must_use]
     pub fn insn_code(&self) -> Word {
         self.insn_code
     }
 
     /// The instruction as a decoded structure.
+    #[must_use]
     pub fn insn(&self) -> DecodedInstruction {
         DecodedInstruction::new(self.insn_code)
     }
 
+    #[must_use]
     pub fn rs1(&self) -> Option<ReadOp> {
         self.rs1.clone()
     }
 
+    #[must_use]
     pub fn rs2(&self) -> Option<ReadOp> {
         self.rs2.clone()
     }
 
+    #[must_use]
     pub fn rd(&self) -> Option<WriteOp> {
         self.rd.clone()
     }
 
+    #[must_use]
     pub fn memory_op(&self) -> Option<WriteOp> {
         self.memory_op.clone()
     }
 
+    #[must_use]
     pub fn is_busy_loop(&self) -> bool {
         self.pc.before == self.pc.after
     }
@@ -226,6 +240,7 @@ impl Tracer {
     pub const SUBCYCLE_MEM: Cycle = 3;
     pub const SUBCYCLES_PER_INSN: Cycle = 4;
 
+    #[must_use]
     pub fn new() -> Tracer {
         Tracer {
             record: StepRecord {
@@ -322,6 +337,7 @@ impl Tracer {
     }
 
     /// Return all the addresses that were accessed and the cycle when they were last accessed.
+    #[must_use]
     pub fn final_accesses(&self) -> &HashMap<WordAddr, Cycle> {
         &self.latest_accesses
     }

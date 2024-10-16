@@ -24,6 +24,7 @@ pub struct VMState {
 }
 
 impl VMState {
+    #[must_use]
     pub fn new(platform: Platform) -> Self {
         let pc = platform.pc_start();
         Self {
@@ -39,7 +40,7 @@ impl VMState {
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
         let mut state = Self::new(platform);
         let program = Program::load_elf(elf, u32::MAX).unwrap();
-        for (addr, word) in program.image.iter() {
+        for (addr, word) in &program.image {
             let addr = ByteAddr(*addr).waddr();
             state.init_memory(addr, *word);
         }
@@ -49,10 +50,12 @@ impl VMState {
         Ok(state)
     }
 
+    #[must_use]
     pub fn halted(&self) -> bool {
         self.halted
     }
 
+    #[must_use]
     pub fn tracer(&self) -> &Tracer {
         &self.tracer
     }
@@ -158,7 +161,7 @@ impl EmuContext for VMState {
     /// Store a memory word and record this operation.
     fn store_memory(&mut self, addr: WordAddr, after: Word) -> Result<()> {
         let before = self.peek_memory(addr);
-        self.tracer.store_memory(addr, Change { after, before });
+        self.tracer.store_memory(addr, Change { before, after });
         self.memory.insert(addr, after);
         Ok(())
     }

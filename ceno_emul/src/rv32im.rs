@@ -124,7 +124,7 @@ pub enum InsnCategory {
     System,
     Invalid,
 }
-use InsnCategory::*;
+use InsnCategory::{Compute, Invalid, Load, Store, System};
 
 #[derive(Clone, Copy, Debug)]
 pub enum InsnFormat {
@@ -135,7 +135,7 @@ pub enum InsnFormat {
     U,
     J,
 }
-use InsnFormat::*;
+use InsnFormat::{B, I, J, R, S, U};
 
 #[derive(Clone, Copy, Debug, PartialEq, EnumIter)]
 #[allow(clippy::upper_case_acronyms)]
@@ -189,9 +189,14 @@ pub enum InsnKind {
     EANY,
     MRET,
 }
-use InsnKind::*;
+use InsnKind::{
+    ADD, ADDI, AND, ANDI, AUIPC, BEQ, BGE, BGEU, BLT, BLTU, BNE, DIV, DIVU, EANY, INVALID, JAL,
+    JALR, LB, LBU, LH, LHU, LUI, LW, MRET, MUL, MULH, MULHSU, MULHU, OR, ORI, REM, REMU, SB, SH,
+    SLL, SLLI, SLT, SLTI, SLTIU, SLTU, SRA, SRAI, SRL, SRLI, SUB, SW, XOR, XORI,
+};
 
 impl InsnKind {
+    #[must_use]
     pub const fn codes(self) -> InsnCodes {
         RV32IM_ISA[self as usize]
     }
@@ -208,6 +213,7 @@ pub struct InsnCodes {
 }
 
 impl DecodedInstruction {
+    #[must_use]
     pub fn new(insn: u32) -> Self {
         Self {
             insn,
@@ -222,6 +228,7 @@ impl DecodedInstruction {
     }
 
     #[allow(dead_code)]
+    #[must_use]
     pub fn from_raw(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> Self {
         // limit the range of inputs
         let rs2 = rs2 & 0x1f; // 5bits mask
@@ -243,20 +250,24 @@ impl DecodedInstruction {
         }
     }
 
+    #[must_use]
     pub fn encoded(&self) -> u32 {
         self.insn
     }
 
+    #[must_use]
     pub fn opcode(&self) -> u32 {
         self.opcode
     }
 
     /// Get the rd field, regardless of the instruction format.
+    #[must_use]
     pub fn rd(&self) -> u32 {
         self.rd
     }
 
     /// Get the register destination, or zero if the instruction does not write to a register.
+    #[must_use]
     pub fn rd_or_zero(&self) -> u32 {
         match self.codes().format {
             R | I | U | J => self.rd,
@@ -265,11 +276,13 @@ impl DecodedInstruction {
     }
 
     /// Get the funct3 field, regardless of the instruction format.
+    #[must_use]
     pub fn funct3(&self) -> u32 {
         self.func3
     }
 
     /// Get the funct3 field, or zero if the instruction does not use funct3.
+    #[must_use]
     pub fn funct3_or_zero(&self) -> u32 {
         match self.codes().format {
             R | I | S | B => self.func3,
@@ -278,11 +291,13 @@ impl DecodedInstruction {
     }
 
     /// Get the rs1 field, regardless of the instruction format.
+    #[must_use]
     pub fn rs1(&self) -> u32 {
         self.rs1
     }
 
     /// Get the register source 1, or zero if the instruction does not use rs1.
+    #[must_use]
     pub fn rs1_or_zero(&self) -> u32 {
         match self.codes().format {
             R | I | S | B => self.rs1,
@@ -291,11 +306,13 @@ impl DecodedInstruction {
     }
 
     /// Get the rs2 field, regardless of the instruction format.
+    #[must_use]
     pub fn rs2(&self) -> u32 {
         self.rs2
     }
 
     /// Get the register source 2, or zero if the instruction does not use rs2.
+    #[must_use]
     pub fn rs2_or_zero(&self) -> u32 {
         match self.codes().format {
             R | S | B => self.rs2,
@@ -304,11 +321,13 @@ impl DecodedInstruction {
     }
 
     /// Get the funct7 field, regardless of the instruction format.
+    #[must_use]
     pub fn funct7(&self) -> u32 {
         self.func7
     }
 
     /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
+    #[must_use]
     pub fn imm_or_funct7(&self) -> u32 {
         match self.codes() {
             InsnCodes { format: R, .. } => self.func7,
@@ -325,6 +344,7 @@ impl DecodedInstruction {
     }
 
     /// Indicate whether the immediate is interpreted as a signed integer, and it is negative.
+    #[must_use]
     pub fn imm_is_negative(&self) -> bool {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
@@ -336,19 +356,23 @@ impl DecodedInstruction {
         }
     }
 
+    #[must_use]
     pub fn sign_bit(&self) -> u32 {
         self.top_bit
     }
 
+    #[must_use]
     pub fn codes(&self) -> InsnCodes {
         FastDecodeTable::get().lookup(self)
     }
 
+    #[must_use]
     pub fn kind(&self) -> (InsnCategory, InsnKind) {
         let i = FastDecodeTable::get().lookup(self);
         (i.category, i.kind)
     }
 
+    #[must_use]
     pub fn imm_b(&self) -> u32 {
         (self.top_bit * 0xfffff000)
             | ((self.rd & 1) << 11)
@@ -356,14 +380,17 @@ impl DecodedInstruction {
             | (self.rd & 0x1e)
     }
 
+    #[must_use]
     pub fn imm_i(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rs2
     }
 
+    #[must_use]
     pub fn imm_s(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
     }
 
+    #[must_use]
     pub fn imm_j(&self) -> u32 {
         (self.top_bit * 0xfff00000)
             | (self.rs1 << 15)
@@ -373,6 +400,7 @@ impl DecodedInstruction {
             | (self.rs2 & 0x1e)
     }
 
+    #[must_use]
     pub fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
     }
@@ -602,7 +630,11 @@ impl Emulator {
         kind: InsnKind,
         decoded: &DecodedInstruction,
     ) -> Result<bool> {
-        use InsnKind::*;
+        use InsnKind::{
+            ADD, ADDI, AND, ANDI, AUIPC, BEQ, BGE, BGEU, BLT, BLTU, BNE, DIV, DIVU, JAL, JALR, LUI,
+            MUL, MULH, MULHSU, MULHU, OR, ORI, REM, REMU, SLL, SLLI, SLT, SLTI, SLTIU, SLTU, SRA,
+            SRAI, SRL, SRLI, SUB, XOR, XORI,
+        };
 
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
@@ -693,8 +725,10 @@ impl Emulator {
                                 (sign_extend_u32(rs1).wrapping_mul(sign_extend_u32(rs2)) >> 32)
                                     as u32
                             }
-                            MULHSU => (sign_extend_u32(rs1).wrapping_mul(rs2 as i64) >> 32) as u32,
-                            MULHU => (((rs1 as u64).wrapping_mul(rs2 as u64)) >> 32) as u32,
+                            MULHSU => {
+                                (sign_extend_u32(rs1).wrapping_mul(i64::from(rs2)) >> 32) as u32
+                            }
+                            MULHU => ((u64::from(rs1).wrapping_mul(u64::from(rs2))) >> 32) as u32,
                             DIV => {
                                 if rs2 == 0 {
                                     u32::MAX
@@ -850,5 +884,5 @@ impl Emulator {
 }
 
 fn sign_extend_u32(x: u32) -> i64 {
-    (x as i32) as i64
+    i64::from(x as i32)
 }

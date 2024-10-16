@@ -70,29 +70,34 @@ impl From<WordAddr> for u32 {
 
 impl From<WordAddr> for u64 {
     fn from(addr: WordAddr) -> Self {
-        addr.baddr().0 as u64
+        u64::from(addr.baddr().0)
     }
 }
 
 impl ByteAddr {
+    #[must_use]
     pub const fn waddr(self) -> WordAddr {
         WordAddr(self.0 / WORD_SIZE as u32)
     }
 
+    #[must_use]
     pub const fn is_aligned(&self) -> bool {
         self.0 % WORD_SIZE as u32 == 0
     }
 
+    #[must_use]
     pub const fn is_null(&self) -> bool {
         self.0 == 0
     }
 
+    #[must_use]
     pub fn wrapping_add(self, rhs: u32) -> Self {
         Self(self.0.wrapping_add(rhs))
     }
 }
 
 impl WordAddr {
+    #[must_use]
     pub const fn baddr(self) -> ByteAddr {
         ByteAddr(self.0 * WORD_SIZE as u32)
     }
@@ -172,7 +177,7 @@ impl ops::Add<u32> for ByteAddr {
 
 impl ops::AddAssign for ByteAddr {
     fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0
+        self.0 += rhs.0;
     }
 }
 

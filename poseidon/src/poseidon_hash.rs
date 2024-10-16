@@ -25,7 +25,7 @@ impl PoseidonHash {
     ) -> Digest<F> {
         let mut initial_elements = Vec::with_capacity(DIGEST_WIDTH);
 
-        for _ in 0..DIGEST_WIDTH + 1 {
+        for _ in 0..=DIGEST_WIDTH {
             match input_iter.next() {
                 Some(value) => initial_elements.push(value),
                 None => break,

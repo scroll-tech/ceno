@@ -226,7 +226,7 @@ impl AdaptedField for Goldilocks {
 
     fn multiply_accumulate(&self, x: Self, y: Self) -> Self {
         // u64 + u64 * u64 cannot overflow.
-        reduce128((self.0 as u128) + (x.0 as u128) * (y.0 as u128))
+        reduce128(u128::from(self.0) + u128::from(x.0) * u128::from(y.0))
     }
 }
 
@@ -274,7 +274,7 @@ const unsafe fn add_no_canonicalize_trashing_input(x: u64, y: u64) -> u64 {
 /// field order and `2^64`.
 #[inline]
 fn reduce96((x_lo, x_hi): (u64, u32)) -> Goldilocks {
-    let t1 = x_hi as u64 * EPSILON;
+    let t1 = u64::from(x_hi) * EPSILON;
     let t2 = unsafe { add_no_canonicalize_trashing_input(x_lo, t1) };
     Goldilocks(t2)
 }
@@ -315,10 +315,10 @@ pub fn assume(p: bool) {
 
 /// Try to force Rust to emit a branch. Example:
 ///     if x > 2 {
-///         y = foo();
-///         branch_hint();
+///         y = `foo()`;
+///         `branch_hint()`;
 ///     } else {
-///         y = bar();
+///         y = `bar()`;
 ///     }
 /// This function has no semantics. It is a hint only.
 #[inline(always)]
