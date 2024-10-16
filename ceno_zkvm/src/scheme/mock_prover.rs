@@ -15,7 +15,8 @@ use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
-use itertools::Itertools;
+use goldilocks::SmallField;
+use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{
     collections::HashSet,
@@ -616,14 +617,19 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         items
                             .iter()
                             .map(|expr| {
-                                let e_result = wit_infer_by_expr(
-                                    &[],
-                                    wits_in,
-                                    pi,
-                                    &challenge,
-                                    &expr.clone().neg().neg(),
-                                );
-                                e_result.to_canonical_u64(0)
+                                let e_result =
+                                    wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
+                                let inst_id = 0;
+                                let b = e_result.get_base_field_vec_optn();
+                                let e = e_result.get_ext_field_vec_optn();
+                                if let Some(b) = b {
+                                    b[inst_id].to_canonical_u64()
+                                } else if let Some(e) = e {
+                                    let arr = e[inst_id].to_canonical_u64_vec();
+                                    arr[0] + E::BaseField::MODULUS_U64 * arr[1]
+                                } else {
+                                    unreachable!()
+                                }
                             })
                             .collect::<Vec<u64>>(),
                     )
@@ -651,8 +657,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             let lkm_from_assignment = lkm_from_assignment.into_finalize_result();
 
             // Compare each LK Multiplicity.
-            for (rom_type, (cs_map, ass_map)) in
-                ROMType::iter().zip(lkm_from_cs.iter().zip(lkm_from_assignment.iter()))
+
+            for (rom_type, cs_map, ass_map) in
+                izip!(ROMType::iter(), &lkm_from_cs, &lkm_from_assignment)
             {
                 if *cs_map != *ass_map {
                     let cs_keys: HashSet<_> = cs_map.keys().collect();
