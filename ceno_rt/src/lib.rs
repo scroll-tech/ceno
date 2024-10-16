@@ -1,9 +1,3 @@
-#![deny(clippy::pedantic)]
-#![deny(clippy::cargo)]
-// TODO: When things have settled a bit, and we make a big push to improve docs, we can remove these
-// exceptions:
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::missing_errors_doc)]
 #![feature(strict_overflow_ops)]
 #![no_std]
 
@@ -81,7 +75,7 @@ macro_rules! entry {
     };
 }
 
-/// _start_rust is called by the assembly entry point and it calls the Rust main().
+/// _`start_rust` is called by the assembly entry point and it calls the Rust `main()`.
 #[no_mangle]
 unsafe extern "C" fn _start_rust() -> ! {
     allocator::init_heap();
@@ -89,7 +83,7 @@ unsafe extern "C" fn _start_rust() -> ! {
         extern "C" {
             fn bespoke_entrypoint();
         }
-        bespoke_entrypoint()
+        bespoke_entrypoint();
     }
     halt(0)
 }

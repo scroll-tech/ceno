@@ -3,6 +3,7 @@ use core::{cell::Cell, fmt, mem::size_of, slice};
 
 static INFO_OUT: IOWriter = IOWriter::new(INFO_OUT_ADDR);
 
+#[must_use]
 pub fn info_out() -> &'static IOWriter {
     &INFO_OUT
 }
@@ -35,7 +36,7 @@ impl IOWriter {
         self.cursor.set(unsafe { cursor.add(word_len) });
 
         // Return a slice of the allocated memory.
-        unsafe { slice::from_raw_parts_mut(cursor as *mut T, count) }
+        unsafe { slice::from_raw_parts_mut(cursor.cast::<T>(), count) }
     }
 
     pub fn write(&self, msg: &[u8]) {
@@ -48,7 +49,7 @@ impl IOWriter {
         let words: &mut [u32] = self.alloc(1 + word_len);
         words[0] = msg.len() as u32;
         let bytes =
-            unsafe { slice::from_raw_parts_mut(words[1..].as_mut_ptr() as *mut u8, msg.len()) };
+            unsafe { slice::from_raw_parts_mut(words[1..].as_mut_ptr().cast::<u8>(), msg.len()) };
         bytes.copy_from_slice(msg);
     }
 }

@@ -1,5 +1,5 @@
 //! A bump allocator.
-//! Based on https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html
+//! Based on <https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html>
 
 use core::alloc::{GlobalAlloc, Layout};
 
