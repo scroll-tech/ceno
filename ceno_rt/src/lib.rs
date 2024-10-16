@@ -64,12 +64,26 @@ _start:
 #[no_mangle]
 unsafe extern "C" fn _start_rust() -> ! {
     allocator::init_heap();
-    main();
+    {
+        extern "C" {
+            fn bespoke_entrypoint();
+        }
+        bespoke_entrypoint()
+    }
     halt(0)
 }
 
-extern "C" {
-    fn main();
+#[macro_export]
+macro_rules! entry {
+    ($path:path) => {
+        // Type check the given path
+        const CENO_ENTRY: fn() = $path;
+
+        mod ceno_generated_main {
+            #[no_mangle]
+            fn bespoke_entrypoint() { super::CENO_ENTRY(); }
+        }
+    };
 }
 
 extern "C" {
