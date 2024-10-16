@@ -4,9 +4,9 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{
+    RIVInstruction,
     constants::{UInt, UIntMul},
     r_insn::RInstructionConfig,
-    RIVInstruction,
 };
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
@@ -127,7 +127,7 @@ mod test {
         chip_handler::test::DebugIndex,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_MULHU, MOCK_PROGRAM},
+        scheme::mock_prover::{MOCK_PC_MULHU, MOCK_PROGRAM, MockProver},
     };
 
     #[test]
@@ -150,20 +150,19 @@ mod test {
         let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
 
         // values assignment
-        let (raw_witin, _) = MulhuInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MULHU,
-                MOCK_PROGRAM[18],
-                a.as_u64() as u32,
-                b.as_u64() as u32,
-                Change::new(0, value_mul.as_hi_value::<u32>().as_u32()),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            MulhuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_MULHU,
+                    MOCK_PROGRAM[18],
+                    a.as_u64() as u32,
+                    b.as_u64() as u32,
+                    Change::new(0, value_mul.as_hi_value::<u32>().as_u32()),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         // verify value write to register, which is only hi
         let expected_rd_written = UInt::from_const_unchecked(value_mul.as_hi_limb_slice().to_vec());

@@ -3,7 +3,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::Expression,
-    gadgets::IsLtConfig,
+    gadgets::AssertLTConfig,
     instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
 };
@@ -20,7 +20,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -50,12 +50,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             cb.write_record(|| "write_record", write_record)?;
 
             // assert prev_ts < current_ts
-            let lt_cfg = IsLtConfig::construct_circuit(
+            let lt_cfg = AssertLTConfig::construct_circuit(
                 cb,
                 || "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
-                Some(true),
                 UINT_LIMBS,
             )?;
 
@@ -73,7 +72,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -102,12 +101,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             cb.read_record(|| "read_record", read_record)?;
             cb.write_record(|| "write_record", write_record)?;
 
-            let lt_cfg = IsLtConfig::construct_circuit(
+            let lt_cfg = AssertLTConfig::construct_circuit(
                 cb,
                 || "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
-                Some(true),
                 UINT_LIMBS,
             )?;
 

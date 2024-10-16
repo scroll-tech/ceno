@@ -1,4 +1,5 @@
 use crate::{
+    Error,
     sum_check::classic::{ClassicSumCheckProver, ClassicSumCheckRoundMessage, ProverState},
     util::{
         arithmetic::{div_ceil, horner_field_type},
@@ -7,7 +8,6 @@ use crate::{
         parallel::{num_threads, parallelize_iter},
         poly_index_ext, poly_iter_ext,
     },
-    Error,
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -138,10 +138,9 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
         let (constant, flattened) = state.expression.evaluate(
             &|constant| (constant, vec![]),
             &|poly| {
-                (
-                    E::ZERO,
-                    vec![(E::ONE, vec![Expression::CommonPolynomial(poly)])],
-                )
+                (E::ZERO, vec![(E::ONE, vec![Expression::CommonPolynomial(
+                    poly,
+                )])])
             },
             &|query| (E::ZERO, vec![(E::ONE, vec![Expression::Polynomial(query)])]),
             &|challenge| (state.challenges[challenge], vec![]),

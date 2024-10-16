@@ -1,3 +1,4 @@
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 use error::ZKVMError;
@@ -6,7 +7,7 @@ use gkr_graph::structs::{
     CircuitGraph, CircuitGraphAuxInfo, CircuitGraphBuilder, CircuitGraphWitness, NodeOutputType,
 };
 use instructions::{
-    construct_inst_graph, construct_inst_graph_and_witness, InstOutputType, SingerCircuitBuilder,
+    InstOutputType, SingerCircuitBuilder, construct_inst_graph, construct_inst_graph_and_witness,
 };
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
@@ -32,10 +33,12 @@ mod utils;
 // 4. (gkr graph + gkr witness) => (gkr proof + point)
 // 5. (commitments + point) => pcs proof
 
+#[allow(clippy::too_long_first_doc_paragraph)]
 /// Circuit graph builder for Singer. `output_wires_id` is indexed by
 /// InstOutputType, corresponding to the product of summation of the chip check
 /// records. `public_output_size` is the wire id stores the size of public
 /// output.
+#[derive(Default)]
 pub struct SingerGraphBuilder<'a, E: ExtensionField> {
     pub graph_builder: CircuitGraphBuilder<'a, E>,
     pub chip_builder: SingerChipBuilder<E>,
@@ -43,14 +46,6 @@ pub struct SingerGraphBuilder<'a, E: ExtensionField> {
 }
 
 impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
-    pub fn new() -> Self {
-        Self {
-            graph_builder: CircuitGraphBuilder::new(),
-            chip_builder: SingerChipBuilder::new(),
-            public_output_size: None,
-        }
-    }
-
     pub fn construct_graph_and_witness(
         mut self,
         circuit_builder: &SingerCircuitBuilder<E>,
@@ -72,7 +67,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
                 opcode,
                 &mut self.graph_builder,
                 &mut self.chip_builder,
-                &inst_circuits,
+                inst_circuits,
                 wires_in,
                 real_challenges,
                 real_n_instances,
@@ -132,7 +127,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
                 *opcode,
                 &mut self.graph_builder,
                 &mut self.chip_builder,
-                &inst_circuits,
+                inst_circuits,
                 *real_n_instances,
                 &aux_info.singer_params,
             )?;
@@ -164,7 +159,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
             rom_input: mem::take(&mut output_wires_id[InstOutputType::ROMInput as usize]),
             rom_table: table_out_node_id,
 
-            public_output_size: public_output_size,
+            public_output_size,
         };
 
         let graph = graph_builder.finalize_graph_with_targets(&singer_wire_out_id.to_vec());

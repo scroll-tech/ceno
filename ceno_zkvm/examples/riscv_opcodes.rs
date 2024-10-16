@@ -9,13 +9,13 @@ use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr,
+    ByteAddr, CENO_PLATFORM,
     InsnKind::{ADD, BLTU, EANY, JAL},
-    StepRecord, VMState, CENO_PLATFORM,
+    StepRecord, VMState,
 };
 use ceno_zkvm::{
     instructions::riscv::ecall::HaltInstruction,
-    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier, PublicValues},
+    scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
@@ -24,7 +24,7 @@ use goldilocks::GoldilocksExt2;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
+use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
 
 #[from_env]

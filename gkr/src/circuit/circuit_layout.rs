@@ -10,7 +10,7 @@ use sumcheck::util::ceil_log2;
 
 use crate::{
     structs::{Circuit, Gate1In, Gate2In, Gate3In, GateCIn, Layer, SumcheckStepType},
-    utils::{i64_to_field, MatrixMLEColumnFirst, MatrixMLERowFirst},
+    utils::{MatrixMLEColumnFirst, MatrixMLERowFirst, i64_to_field},
 };
 
 struct LayerSubsets {
@@ -34,9 +34,10 @@ impl LayerSubsets {
         if old_layer_id == self.layer_id {
             return old_wire_id;
         }
-        if !self.subsets.contains_key(&(old_layer_id, old_wire_id)) {
-            self.subsets
-                .insert((old_layer_id, old_wire_id), self.wire_id_assigner);
+        if let std::collections::btree_map::Entry::Vacant(e) =
+            self.subsets.entry((old_layer_id, old_wire_id))
+        {
+            e.insert(self.wire_id_assigner);
             self.wire_id_assigner += 1;
         }
         self.subsets[&(old_layer_id, old_wire_id)]
@@ -44,7 +45,7 @@ impl LayerSubsets {
 
     /// Compute `paste_from` matrix and `max_previous_num_vars` for
     /// `self.layer_id`, as well as `copy_to` for old layers.
-    fn update_layer_info<Ext: ExtensionField>(&self, layers: &mut Vec<Layer<Ext>>) {
+    fn update_layer_info<Ext: ExtensionField>(&self, layers: &mut [Layer<Ext>]) {
         let mut paste_from = BTreeMap::new();
         for ((old_layer_id, old_wire_id), new_wire_id) in self.subsets.iter() {
             paste_from
@@ -54,19 +55,19 @@ impl LayerSubsets {
             layers[*old_layer_id as usize]
                 .copy_to
                 .entry(self.layer_id)
-                .or_insert(vec![])
+                .or_default()
                 .push(*old_wire_id);
         }
         layers[self.layer_id as usize].paste_from = paste_from;
 
-        layers[self.layer_id as usize].num_vars = ceil_log2(self.wire_id_assigner) as usize;
+        layers[self.layer_id as usize].num_vars = ceil_log2(self.wire_id_assigner);
         layers[self.layer_id as usize].max_previous_num_vars = layers[self.layer_id as usize]
             .max_previous_num_vars
             .max(ceil_log2(
                 layers[self.layer_id as usize]
                     .paste_from
-                    .iter()
-                    .map(|(_, old_wire_ids)| old_wire_ids.len())
+                    .values()
+                    .map(|old_wire_ids| old_wire_ids.len())
                     .max()
                     .unwrap_or(1),
             ));
@@ -87,9 +88,9 @@ impl<E: ExtensionField> Circuit<E> {
         let (layers_of_cell_id, wire_ids_in_layer) = {
             let mut layers_of_cell_id = vec![vec![]; n_layers as usize];
             let mut wire_ids_in_layer = vec![0; circuit_builder.cells.len()];
-            for i in 0..circuit_builder.cells.len() {
+            for (i, cell) in circuit_builder.cells.iter().enumerate() {
                 // If layer isn't assigned, then the cell is not in the circuit.
-                if let Some(layer) = circuit_builder.cells[i].layer {
+                if let Some(layer) = cell.layer {
                     wire_ids_in_layer[i] = layers_of_cell_id[layer as usize].len();
                     layers_of_cell_id[layer as usize].push(i);
                 }
@@ -121,15 +122,6 @@ impl<E: ExtensionField> Circuit<E> {
         let mut input_paste_from_consts_in = Vec::new();
         let mut max_in_wit_num_vars: Option<usize> = None;
         for (ty, in_cell_ids) in in_cell_ids.iter() {
-            #[cfg(feature = "debug")]
-            in_cell_ids.iter().enumerate().map(|(i, cell_id)| {
-                // Each wire_in should be assigned with a consecutive
-                // input layer segment. Then we can use a special
-                // sumcheck protocol to prove it.
-                assert!(
-                    i == 0 || wire_ids_in_layer[*cell_id] == wire_ids_in_layer[wire_in[i - 1]] + 1
-                );
-            });
             let segment = (
                 wire_ids_in_layer[in_cell_ids[0]],
                 wire_ids_in_layer[in_cell_ids[in_cell_ids.len() - 1]] + 1, /* + 1 for exclusive
@@ -300,21 +292,19 @@ impl<E: ExtensionField> Circuit<E> {
                 {
                     curr_sc_steps.push(SumcheckStepType::InputPhase2Step1);
                 }
+            } else if layer.is_linear() {
+                curr_sc_steps.push(SumcheckStepType::LinearPhase2Step1);
             } else {
-                if layer.is_linear() {
-                    curr_sc_steps.push(SumcheckStepType::LinearPhase2Step1);
-                } else {
-                    curr_sc_steps.push(SumcheckStepType::Phase2Step1);
-                    if !layer.mul2s.is_empty() || !layer.mul3s.is_empty() {
-                        if layer.mul3s.is_empty() {
-                            curr_sc_steps.push(SumcheckStepType::Phase2Step2NoStep3);
-                        } else {
-                            curr_sc_steps.push(SumcheckStepType::Phase2Step2);
-                        }
+                curr_sc_steps.push(SumcheckStepType::Phase2Step1);
+                if !layer.mul2s.is_empty() || !layer.mul3s.is_empty() {
+                    if layer.mul3s.is_empty() {
+                        curr_sc_steps.push(SumcheckStepType::Phase2Step2NoStep3);
+                    } else {
+                        curr_sc_steps.push(SumcheckStepType::Phase2Step2);
                     }
-                    if !layer.mul3s.is_empty() {
-                        curr_sc_steps.push(SumcheckStepType::Phase2Step3);
-                    }
+                }
+                if !layer.mul3s.is_empty() {
+                    curr_sc_steps.push(SumcheckStepType::Phase2Step3);
                 }
             }
             layers[layer_id as usize].sumcheck_steps = curr_sc_steps;
@@ -342,12 +332,12 @@ impl<E: ExtensionField> Circuit<E> {
             ConstantType::Challenge(c, _) => {
                 challenge_exps
                     .entry(c)
-                    .or_insert(challenges[c.challenge as usize].pow(&[c.exp]));
+                    .or_insert(challenges[c.challenge as usize].pow([c.exp]));
             }
             ConstantType::ChallengeScaled(c, _, _) => {
                 challenge_exps
                     .entry(c)
-                    .or_insert(challenges[c.challenge as usize].pow(&[c.exp]));
+                    .or_insert(challenges[c.challenge as usize].pow([c.exp]));
             }
             _ => {}
         };
@@ -529,7 +519,7 @@ mod tests {
 
     #[test]
     fn test_copy_and_paste() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         // Layer 3
         let (_, input) = circuit_builder.create_witness_in(4);
 
@@ -578,7 +568,7 @@ mod tests {
 
     #[test]
     fn test_paste_from_wit_in() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
 
         // Layer 2
         let (leaf_id, leaves) = circuit_builder.create_witness_in(6);
@@ -608,10 +598,8 @@ mod tests {
         let mut expected_paste_from_wits_in = vec![(0, 0); 2];
         expected_paste_from_wits_in[leaf_id as usize] = (0usize, 6usize);
         expected_paste_from_wits_in[dummy_id as usize] = (6, 9);
-        let mut expected_paste_from_counter_in = vec![];
-        expected_paste_from_counter_in.push((1, (9, 11)));
-        let mut expected_paste_from_consts_in = vec![];
-        expected_paste_from_consts_in.push((1, (11, 13)));
+        let expected_paste_from_counter_in = vec![(1, (9, 11))];
+        let expected_paste_from_consts_in = vec![(1, (11, 13))];
         assert_eq!(circuit.paste_from_wits_in, expected_paste_from_wits_in);
         assert_eq!(
             circuit.paste_from_counter_in,
@@ -622,7 +610,7 @@ mod tests {
 
     #[test]
     fn test_copy_to_wit_out() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         // Layer 2
         let (_, leaves) = circuit_builder.create_witness_in(4);
 
@@ -653,12 +641,11 @@ mod tests {
         assert_eq!(circuit.layers[0].paste_from, expected_paste_from_0);
 
         let expected_copy_to_wits_out = vec![vec![1, 2]];
-        let mut expected_assert_const = vec![];
-        expected_assert_const.push(GateCIn {
+        let expected_assert_const = vec![GateCIn {
             idx_in: [],
             idx_out: 0,
             scalar: ConstantType::Field(Goldilocks::ONE),
-        });
+        }];
 
         assert_eq!(circuit.copy_to_wits_out, expected_copy_to_wits_out);
         assert_eq!(circuit.assert_consts, expected_assert_const);
@@ -666,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_rlc_circuit() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         // Layer 2
         let (_, leaves) = circuit_builder.create_witness_in(4);
 
@@ -850,20 +837,19 @@ mod tests {
 
     #[test]
     fn test_selector_sumcheck_steps() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let _ = circuit_builder.create_constant_in(6, 1);
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
         assert_eq!(circuit.layers.len(), 1);
-        assert_eq!(
-            circuit.layers[0].sumcheck_steps,
-            vec![SumcheckStepType::InputPhase2Step1]
-        );
+        assert_eq!(circuit.layers[0].sumcheck_steps, vec![
+            SumcheckStepType::InputPhase2Step1
+        ]);
     }
 
     #[test]
     fn test_lookup_inner_sumcheck_steps() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
 
         // Layer 2
         let (_, input) = circuit_builder.create_ext_witness_in(4);
@@ -896,29 +882,24 @@ mod tests {
 
         assert_eq!(circuit.layers.len(), 3);
         // Single input witness, therefore no input phase 2 steps.
-        assert_eq!(
-            circuit.layers[2].sumcheck_steps,
-            vec![SumcheckStepType::Phase1Step1]
-        );
+        assert_eq!(circuit.layers[2].sumcheck_steps, vec![
+            SumcheckStepType::Phase1Step1
+        ]);
         // There are only one incoming evals since the last layer is linear, and
         // no subset evals. Therefore, there are no phase1 steps.
-        assert_eq!(
-            circuit.layers[1].sumcheck_steps,
-            vec![
-                SumcheckStepType::Phase2Step1,
-                SumcheckStepType::Phase2Step2NoStep3,
-            ]
-        );
+        assert_eq!(circuit.layers[1].sumcheck_steps, vec![
+            SumcheckStepType::Phase2Step1,
+            SumcheckStepType::Phase2Step2NoStep3,
+        ]);
         // Output layer, single output witness, therefore no output phase 1 steps.
-        assert_eq!(
-            circuit.layers[0].sumcheck_steps,
-            vec![SumcheckStepType::LinearPhase2Step1]
-        );
+        assert_eq!(circuit.layers[0].sumcheck_steps, vec![
+            SumcheckStepType::LinearPhase2Step1
+        ]);
     }
 
     #[test]
     fn test_product_sumcheck_steps() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, input) = circuit_builder.create_witness_in(2);
         let (_, output) = circuit_builder.create_witness_out(1);
         circuit_builder.mul2(output[0], input[0], input[1], Goldilocks::ONE);
@@ -927,17 +908,13 @@ mod tests {
 
         assert_eq!(circuit.layers.len(), 2);
         // Single input witness, therefore no input phase 2 steps.
-        assert_eq!(
-            circuit.layers[1].sumcheck_steps,
-            vec![SumcheckStepType::Phase1Step1]
-        );
+        assert_eq!(circuit.layers[1].sumcheck_steps, vec![
+            SumcheckStepType::Phase1Step1
+        ]);
         // Output layer, single output witness, therefore no output phase 1 steps.
-        assert_eq!(
-            circuit.layers[0].sumcheck_steps,
-            vec![
-                SumcheckStepType::Phase2Step1,
-                SumcheckStepType::Phase2Step2NoStep3
-            ]
-        );
+        assert_eq!(circuit.layers[0].sumcheck_steps, vec![
+            SumcheckStepType::Phase2Step1,
+            SumcheckStepType::Phase2Step2NoStep3
+        ]);
     }
 }

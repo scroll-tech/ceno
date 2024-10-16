@@ -2,9 +2,9 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{
-    constants::{UInt, UINT_LIMBS},
-    r_insn::RInstructionConfig,
     RIVInstruction,
+    constants::{UINT_LIMBS, UInt},
+    r_insn::RInstructionConfig,
 };
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -72,7 +72,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "remainder < divisor?",
             r.value(),
             divisor.value(),
-            None,
             UINT_LIMBS,
         )?;
 
@@ -163,13 +162,13 @@ mod test {
         use rand::Rng;
 
         use crate::{
+            Value,
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             instructions::{
-                riscv::{constants::UInt, divu::DivUInstruction},
                 Instruction,
+                riscv::{constants::UInt, divu::DivUInstruction},
             },
-            scheme::mock_prover::{MockProver, MOCK_PC_DIVU, MOCK_PROGRAM},
-            Value,
+            scheme::mock_prover::{MOCK_PC_DIVU, MOCK_PROGRAM, MockProver},
         };
 
         fn verify(name: &'static str, dividend: Word, divisor: Word, exp_outcome: Word) {
@@ -189,20 +188,19 @@ mod test {
                 dividend / divisor
             };
             // values assignment
-            let (raw_witin, _) = DivUInstruction::assign_instances(
-                &config,
-                cb.cs.num_witin as usize,
-                vec![StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_DIVU,
-                    MOCK_PROGRAM[9],
-                    dividend,
-                    divisor,
-                    Change::new(0, outcome),
-                    0,
-                )],
-            )
-            .unwrap();
+            let (raw_witin, _) =
+                DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                    StepRecord::new_r_instruction(
+                        3,
+                        MOCK_PC_DIVU,
+                        MOCK_PROGRAM[9],
+                        dividend,
+                        divisor,
+                        Change::new(0, outcome),
+                        0,
+                    ),
+                ])
+                .unwrap();
 
             let expected_rd_written = UInt::from_const_unchecked(
                 Value::new_unchecked(exp_outcome).as_u16_limbs().to_vec(),
@@ -214,7 +212,7 @@ mod test {
                 .unwrap();
 
             MockProver::assert_satisfied(
-                &mut cb,
+                &cb,
                 &raw_witin
                     .de_interleaving()
                     .into_mles()

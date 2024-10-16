@@ -2,15 +2,16 @@ use std::marker::PhantomData;
 
 use super::{EncodingProverParameters, EncodingScheme};
 use crate::{
+    Error,
     util::{field_type_index_mul_base, log2_strict, plonky2_util::reverse_bits},
-    vec_mut, Error,
+    vec_mut,
 };
 use ark_std::{end_timer, start_timer};
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
 

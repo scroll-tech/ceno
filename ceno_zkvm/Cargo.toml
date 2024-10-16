@@ -50,6 +50,8 @@ glob = "0.3"
 default = ["riv32"]
 riv32 = []
 riv64 = []
+non_pow2_rayon_thread = []
+flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 
 [[bench]]
 name = "riscv_add"

@@ -1,4 +1,4 @@
-use ceno_emul::{ByteAddr, Change, StepRecord, PC_STEP_SIZE};
+use ceno_emul::{ByteAddr, Change, PC_STEP_SIZE, StepRecord};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
@@ -6,7 +6,7 @@ use multilinear_extensions::mle::IntoMLEs;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
-    scheme::mock_prover::{MockProver, MOCK_PC_AUIPC, MOCK_PC_JAL, MOCK_PC_LUI, MOCK_PROGRAM},
+    scheme::mock_prover::{MOCK_PC_AUIPC, MOCK_PC_JAL, MOCK_PC_LUI, MOCK_PROGRAM, MockProver},
 };
 
 use super::{AuipcInstruction, JalInstruction, LuiInstruction};
@@ -42,7 +42,7 @@ fn test_opcode_jal() {
     .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -84,7 +84,7 @@ fn test_opcode_lui() {
     .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -126,7 +126,7 @@ fn test_opcode_auipc() {
     .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()

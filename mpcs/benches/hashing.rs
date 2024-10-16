@@ -1,8 +1,8 @@
 use ark_std::test_rng;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ff::Field;
 use goldilocks::Goldilocks;
-use mpcs::util::hash::{hash_two_digests, Digest};
+use mpcs::util::hash::{Digest, hash_two_digests};
 use poseidon::poseidon_hash::PoseidonHash;
 
 pub fn criterion_benchmark(c: &mut Criterion) {

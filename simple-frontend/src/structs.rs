@@ -37,7 +37,7 @@ pub struct GateType<Ext: ExtensionField> {
 }
 
 /// Store wire structure of the circuit.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Cell<Ext: ExtensionField> {
     /// The layer of the cell.
     pub layer: Option<LayerId>,
@@ -121,6 +121,7 @@ impl<Ext: ExtensionField> MixedCell<Ext> {
     }
 }
 
+#[derive(Default)]
 pub struct CircuitBuilder<Ext: ExtensionField> {
     pub cells: Vec<Cell<Ext>>,
 

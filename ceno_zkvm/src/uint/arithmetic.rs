@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 
 use super::{UIntLimbs, UintLimb};
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
     create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::AssertLTConfig,
     instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},
 };
 
@@ -139,16 +139,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .iter()
             .enumerate()
             .map(|(i, carry)| {
-                IsLtConfig::construct_circuit(
+                AssertLTConfig::construct_circuit(
                     circuit_builder,
                     || format!("carry_{i}_in_less_than"),
                     carry.expr(),
                     (Self::MAX_DEGREE_2_MUL_CARRY_VALUE as usize).into(),
-                    Some(true),
                     Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
                 )
             })
-            .collect::<Result<Vec<IsLtConfig>, ZKVMError>>()?;
+            .collect::<Result<Vec<AssertLTConfig>, ZKVMError>>()?;
 
         // creating a witness constrained as expression to reduce overall degree
         let mut swap_witin = |name: &str,
@@ -851,12 +850,12 @@ mod tests {
 
     mod mul_add {
         use crate::{
+            Value,
             circuit_builder::{CircuitBuilder, ConstraintSystem},
-            gadgets::IsLtConfig,
+            gadgets::cal_lt_diff,
             scheme::mock_prover::MockProver,
             uint::UIntLimbs,
             witness::LkMultiplicity,
-            Value,
         };
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
@@ -868,18 +867,18 @@ mod tests {
         type E = GoldilocksExt2; // 18446744069414584321
 
         trait ValueToArcMle<E: ExtensionField> {
+            #[allow(clippy::wrong_self_convention)]
             fn into_arc_mle<'a>(&self) -> Vec<ArcMultilinearExtension<'a, E>>;
         }
 
         impl<E: ExtensionField> ValueToArcMle<E> for Vec<u64> {
             fn into_arc_mle<'a>(&self) -> Vec<ArcMultilinearExtension<'a, E>> {
-                self.into_iter()
+                self.iter()
                     .map(|a| {
                         let mle: ArcMultilinearExtension<E> =
-                            DenseMultilinearExtension::from_evaluation_vec_smart(
-                                0,
-                                vec![E::BaseField::from(*a)],
-                            )
+                            DenseMultilinearExtension::from_evaluation_vec_smart(0, vec![
+                                E::BaseField::from(*a),
+                            ])
                             .into();
                         mle
                     })
@@ -893,8 +892,7 @@ mod tests {
                 .flat_map(|carry| {
                     let max_carry_value = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_VALUE;
                     let max_carry_u16_limb = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_U16_LIMB;
-                    let diff =
-                        IsLtConfig::cal_diff(true, max_carry_u16_limb, carry, max_carry_value);
+                    let diff = cal_lt_diff(true, max_carry_u16_limb, carry, max_carry_value);
                     let mut diff_u16_limb = Value::new_unchecked(diff).as_u16_limbs().to_vec();
                     diff_u16_limb.resize(max_carry_u16_limb, 0);
                     diff_u16_limb.iter().map(|v| *v as u64).collect_vec()
@@ -903,8 +901,7 @@ mod tests {
         }
         #[test]
         fn test_add_mul() {
-            let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
-                // alloc a = 1 + 1 * 2^16
+            let witness_values: Vec<ArcMultilinearExtension<E>> = [
                 vec![1, 1, 0, 0],
                 // alloc b = 2 + 1 * 2^16
                 vec![2, 1, 0, 0],
@@ -995,8 +992,7 @@ mod tests {
 
         #[test]
         fn test_mul_add() {
-            let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
-                // alloc a = 1 + 1 * 2^16
+            let witness_values: Vec<ArcMultilinearExtension<E>> = [
                 vec![1, 1, 0, 0],
                 // alloc b = 2 + 1 * 2^16
                 vec![2, 1, 0, 0],
@@ -1035,8 +1031,7 @@ mod tests {
 
         #[test]
         fn test_mul_add2() {
-            let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
-                // alloc a = 1 + 1 * 2^16
+            let witness_values: Vec<ArcMultilinearExtension<E>> = [
                 vec![1, 1, 0, 0],
                 // alloc b = 2 + 1 * 2^16
                 vec![2, 1, 0, 0],
@@ -1060,9 +1055,9 @@ mod tests {
 
             let mut uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
             let mut uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
-            let mut uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
+            let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
             let (uint_e, _): (_, UIntLimbs<64, 16, E>) = uint_a
-                .mul_add(|| "uint_e", &mut cb, &mut uint_b, &mut uint_d, false)
+                .mul_add(|| "uint_e", &mut cb, &mut uint_b, &uint_d, false)
                 .unwrap();
 
             let expected_e = UIntLimbs::<64, 16, E>::from_const_unchecked(vec![3u64, 4, 1, 0]);
@@ -1078,8 +1073,7 @@ mod tests {
             let a = Value::<'_, u32>::new_unchecked(u32::MAX);
             let b = Value::<'_, u32>::new_unchecked(u32::MAX);
             let ret = a.mul(&b, &mut LkMultiplicity::default(), true);
-            let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
-                // alloc a = 2^16 + (2^16 -1) * 2^16
+            let witness_values: Vec<ArcMultilinearExtension<E>> = [
                 vec![u16::MAX as u64, u16::MAX as u64],
                 // alloc b = 2^16 + (2^16 - 1) * 2^16
                 vec![u16::MAX as u64, u16::MAX as u64],
@@ -1087,7 +1081,7 @@ mod tests {
                 // alloc c [1, 0xfffe, 0xffff, 0] with lo part only
                 ret.limbs.iter().map(|v| *v as u64).collect_vec(),
                 // c carry
-                ret.carries.iter().map(|v| *v as u64).collect_vec(),
+                ret.carries.iter().copied().collect_vec(),
                 // each carry alloc with diff
                 calculate_carry_diff::<32, 16>(ret.carries.to_vec()),
             ]

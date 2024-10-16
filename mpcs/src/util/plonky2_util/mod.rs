@@ -300,7 +300,7 @@ pub fn branch_hint() {
 mod tests {
     use super::alloc::{vec, vec::Vec};
 
-    use rand::{rngs::OsRng, Rng};
+    use rand::{Rng, rngs::OsRng};
 
     use super::{log2_ceil, log2_strict};
 
