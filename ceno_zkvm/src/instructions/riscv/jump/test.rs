@@ -28,7 +28,7 @@ fn test_opcode_jal() {
 
     let pc_offset: i32 = -4i32;
     let new_pc: ByteAddr = ByteAddr(MOCK_PC_JAL.0.wrapping_add_signed(pc_offset));
-    let (raw_witin, _lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
+    let (raw_witin, lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_j_instruction(
@@ -50,6 +50,7 @@ fn test_opcode_jal() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }
 
@@ -70,7 +71,7 @@ fn test_opcode_lui() {
 
     let lui_insn = MOCK_PROGRAM[22];
     let imm = lui_insn & 0xfffff000;
-    let (raw_witin, _lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
+    let (raw_witin, lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_u_instruction(
@@ -92,6 +93,7 @@ fn test_opcode_lui() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }
 
@@ -112,7 +114,7 @@ fn test_opcode_auipc() {
 
     let auipc_insn = MOCK_PROGRAM[23];
     let imm = auipc_insn & 0xfffff000;
-    let (raw_witin, _lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
+    let (raw_witin, lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_u_instruction(
@@ -134,5 +136,6 @@ fn test_opcode_auipc() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }

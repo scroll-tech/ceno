@@ -196,7 +196,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) =
+        let (raw_witin, lkm) =
             AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
@@ -230,6 +230,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -248,7 +249,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) =
+        let (raw_witin, lkm) =
             AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
@@ -282,6 +283,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -300,7 +302,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) =
+        let (raw_witin, lkm) =
             SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
@@ -334,6 +336,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -386,6 +389,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            None,
         );
     }
 
@@ -399,7 +403,7 @@ mod test {
             .unwrap();
 
         // values assignment
-        let (raw_witin, _) =
+        let (raw_witin, lkm) =
             MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
@@ -430,6 +434,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -443,7 +448,7 @@ mod test {
             .unwrap();
 
         // values assignment
-        let (raw_witin, _) =
+        let (raw_witin, lkm) =
             MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
@@ -473,6 +478,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -491,7 +497,7 @@ mod test {
         let c_limb = ret.limbs;
 
         // values assignment
-        let (raw_witin, _) =
+        let (raw_witin, lkm) =
             MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
@@ -524,6 +530,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 }

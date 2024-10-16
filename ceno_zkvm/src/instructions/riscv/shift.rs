@@ -176,9 +176,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             .r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs2_read.assign_value(instance, rs2_read);
+
         set_val!(instance, config.rs2_low5, rs2_low5);
+        lk_multiplicity.assert_ux::<5>(rs2_low5);
+
         config.rs2_high.assign_value(instance, rs2_high);
         config.pow2_rs2_low5.assign_value(instance, pow2_rs2_low5);
+
+        lk_multiplicity.lookup_pow2(rs2_low5);
 
         Ok(())
     }
@@ -266,7 +271,7 @@ mod tests {
             )
             .unwrap();
 
-        let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
+        let (raw_witin, lkm) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_r_instruction(
@@ -290,6 +295,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 }

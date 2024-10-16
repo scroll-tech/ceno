@@ -9,7 +9,7 @@ use alloc::{vec, vec::Vec};
 
 static mut OUTPUT: u32 = 0;
 
-#[no_mangle]
+ceno_rt::entry!(main);
 fn main() {
     // Test writing to a global variable.
     unsafe {

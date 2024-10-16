@@ -38,7 +38,7 @@ fn impl_opcode_beq(equal: bool) {
         .unwrap();
 
     let pc_offset = if equal { 8 } else { PC_STEP_SIZE };
-    let (raw_witin, _lkm) =
+    let (raw_witin, lkm) =
         BeqInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
             StepRecord::new_b_instruction(
                 3,
@@ -60,6 +60,7 @@ fn impl_opcode_beq(equal: bool) {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }
 
@@ -84,7 +85,7 @@ fn impl_opcode_bne(equal: bool) {
         .unwrap();
 
     let pc_offset = if equal { PC_STEP_SIZE } else { 8 };
-    let (raw_witin, _lkm) =
+    let (raw_witin, lkm) =
         BneInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
             StepRecord::new_b_instruction(
                 3,
@@ -106,6 +107,7 @@ fn impl_opcode_bne(equal: bool) {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }
 
@@ -132,7 +134,7 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         MOCK_PC_BLTU + PC_STEP_SIZE
     };
 
-    let (raw_witin, _) =
+    let (raw_witin, lkm) =
         BltuInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
             StepRecord::new_b_instruction(
                 12,
@@ -154,6 +156,7 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
     Ok(())
 }
@@ -181,7 +184,7 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         MOCK_PC_BGEU + PC_STEP_SIZE
     };
 
-    let (raw_witin, _) =
+    let (raw_witin, lkm) =
         BgeuInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
             StepRecord::new_b_instruction(
                 12,
@@ -203,6 +206,7 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
     Ok(())
 }
@@ -231,7 +235,7 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
         MOCK_PC_BLT + PC_STEP_SIZE
     };
 
-    let (raw_witin, _) =
+    let (raw_witin, lkm) =
         BltInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
             StepRecord::new_b_instruction(
                 12,
@@ -253,6 +257,7 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
     Ok(())
 }
@@ -281,7 +286,7 @@ fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
         MOCK_PC_BGE + PC_STEP_SIZE
     };
 
-    let (raw_witin, _) =
+    let (raw_witin, lkm) =
         BgeInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
             StepRecord::new_b_instruction(
                 12,
@@ -303,6 +308,7 @@ fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
     Ok(())
 }
