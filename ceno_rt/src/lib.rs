@@ -83,7 +83,7 @@ unsafe extern "C" fn _start_rust() -> ! {
         extern "C" {
             fn bespoke_entrypoint();
         }
-        bespoke_entrypoint()
+        bespoke_entrypoint();
     }
     halt(0)
 }
