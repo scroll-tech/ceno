@@ -5,7 +5,7 @@ use crate::{
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U5Table, U8Table, U16Table, XorTable,
+        TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
     },
 };
 use ark_std::test_rng;
@@ -343,6 +343,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     let mut table_vec = vec![];
     load_range_table::<U5Table, _>(&mut table_vec, cb, challenge);
     load_range_table::<U8Table, _>(&mut table_vec, cb, challenge);
+    load_range_table::<U14Table, _>(&mut table_vec, cb, challenge);
     load_range_table::<U16Table, _>(&mut table_vec, cb, challenge);
     load_op_table::<AndTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<OrTable, _>(&mut table_vec, cb, challenge);

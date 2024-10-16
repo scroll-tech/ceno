@@ -1,5 +1,7 @@
 use ceno_emul::{StepRecord, Word};
+use ff::Field;
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 
 use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
 use crate::{
@@ -392,21 +394,45 @@ impl<E: ExtensionField> MemAddr<E> {
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
     pub fn low_bit_exprs(&self) -> Vec<Expression<E>> {
         iter::repeat_n(Expression::ZERO, self.n_zeros())
-            .chain(self.low_bits.iter().map(|b| b.expr()))
+            .chain(self.low_bits.iter().map(ToExpr::expr))
             .collect()
     }
 
     fn construct(cb: &mut CircuitBuilder<E>, n_zeros: usize) -> Result<Self, ZKVMError> {
+        assert!(n_zeros <= Self::N_LOW_BITS);
+
+        // The address as two u16 limbs.
         // Soundness: This does not use the UInt range-check but specialized checks instead.
         let addr = UInt::new_unchecked(|| "memory_addr", cb)?;
+        let limbs = addr.expr();
 
-        assert!(n_zeros <= Self::N_LOW_BITS);
+        // Witness and constrain the non-zero low bits.
         let low_bits = (n_zeros..Self::N_LOW_BITS)
-            .map(|i| cb.create_witin(|| format!("low_bit_{}", i)))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|i| {
+                let bit = cb.create_witin(|| format!("addr_bit_{}", i))?;
+                cb.assert_bit(|| format!("addr_bit_{}", i), bit.expr())?;
+                Ok(bit)
+            })
+            .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
 
-        // TODO: range check the high limb.
-        // TODO: range check the low limb together with low bits.
+        // Express the value of the low bits.
+        let low_sum = (n_zeros..Self::N_LOW_BITS)
+            .zip_eq(low_bits.iter())
+            .map(|(pos, bit)| bit.expr() * (1 << pos).into())
+            .sum();
+
+        // Range check the middle bits, that is the low limb excluding the low bits.
+        let shift_right = E::BaseField::from(1 << Self::N_LOW_BITS)
+            .invert()
+            .unwrap()
+            .expr();
+        let mid_u14 = (limbs[0].clone() - low_sum) * shift_right;
+        cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
+
+        // Range check the high limb.
+        for high_u16 in limbs.iter().skip(1) {
+            cb.assert_ux::<_, _, 16>(|| "high_u16", high_u16.clone())?;
+        }
 
         Ok(MemAddr { addr, low_bits })
     }
@@ -419,9 +445,20 @@ impl<E: ExtensionField> MemAddr<E> {
     ) -> Result<(), ZKVMError> {
         self.addr.assign_value(instance, Value::new_unchecked(addr));
 
-        for (i, bit) in self.low_bits.iter().enumerate() {
-            let b = ((addr >> self.n_zeros()) >> i) & 1;
+        // Witness the non-zero low bits.
+        for (pos, bit) in (self.n_zeros()..Self::N_LOW_BITS).zip_eq(&self.low_bits) {
+            let b = (addr >> pos) & 1;
             set_val!(instance, bit, b as u64);
+        }
+
+        // Range check the low limb besides the low bits.
+        let mid_u14 = (addr & 0xffff) >> Self::N_LOW_BITS;
+        lkm.assert_ux::<14>(mid_u14 as u64);
+
+        // Range check the high limb.
+        for i in 1..UINT_LIMBS {
+            let high_u16 = (addr >> (i * 16)) & 0xffff;
+            lkm.assert_ux::<16>(high_u16 as u64);
         }
 
         Ok(())
@@ -439,6 +476,7 @@ mod test {
     use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
+        ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         scheme::mock_prover::MockProver,
         witness::{LkMultiplicity, RowMajorMatrix},
@@ -451,15 +489,28 @@ mod test {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let mem_addr = MemAddr::construct_align2(&mut cb).unwrap();
+        let mem_addr = MemAddr::construct_unaligned(&mut cb).unwrap();
 
         let mut lkm = LkMultiplicity::default();
-        let mut raw_witin = RowMajorMatrix::<F>::new(1, cb.cs.num_witin as usize);
+        let mut raw_witin = RowMajorMatrix::<F>::new(2, cb.cs.num_witin as usize);
         for instance in raw_witin.iter_mut() {
             mem_addr
-                .assign_instance(instance, &mut lkm, 0xbead1010)
+                .assign_instance(instance, &mut lkm, 0xbeadbeef)
                 .unwrap();
         }
+
+        // Check the range lookups.
+        let lkm = lkm.into_finalize_result();
+        lkm[ROMType::U14 as usize].iter().for_each(|(k, v)| {
+            assert_eq!(*k as u64, 0xbeef >> 2);
+            assert_eq!(*v, raw_witin.num_instances());
+        });
+        assert_eq!(lkm[ROMType::U14 as usize].len(), 1);
+        lkm[ROMType::U16 as usize].iter().for_each(|(k, v)| {
+            assert_eq!(*k as u64, 0xbead);
+            assert_eq!(*v, raw_witin.num_instances());
+        });
+        assert_eq!(lkm[ROMType::U16 as usize].len(), 1);
 
         MockProver::assert_satisfied(
             &cb,

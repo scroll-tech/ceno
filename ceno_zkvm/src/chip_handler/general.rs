@@ -184,6 +184,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         match C {
             16 => self.assert_u16(name_fn, expr),
+            14 => self.assert_u14(name_fn, expr),
             8 => self.assert_byte(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
             c => panic!("Unsupported bit range {c}"),
@@ -206,6 +207,20 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                 cb.cs.lk_record(name_fn, rlc_record)
             },
         )
+    }
+
+    fn assert_u14<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        let items: Vec<Expression<E>> = vec![
+            Expression::Constant(E::BaseField::from(ROMType::U14 as u64)),
+            expr,
+        ];
+        let rlc_record = self.rlc_chip_record(items);
+        self.lk_record(name_fn, rlc_record)?;
+        Ok(())
     }
 
     fn assert_u16<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
