@@ -81,7 +81,7 @@ macro_rules! entry {
 
         mod ceno_generated_main {
             #[no_mangle]
-            fn bespoke_entrypoint() { super::CENO_ENTRY(); }
+            extern "C" fn bespoke_entrypoint() { super::CENO_ENTRY(); }
         }
     };
 }
