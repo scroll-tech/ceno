@@ -87,6 +87,7 @@ impl<E: ExtensionField> Expression<E> {
     }
 }
 
+// TODO(Matthias): What's the meaning of `Term`?  Add a doc comment.
 #[derive(Clone, Debug)]
 struct Term<E: ExtensionField> {
     coeff: Expression<E>,
@@ -104,6 +105,10 @@ impl<E: ExtensionField> Ord for Expression<E> {
             (Instance(a), Instance(b)) => a.cmp(b),
             (Challenge(a, b, c, d), Challenge(e, f, g, h)) => {
                 let cmp = a.cmp(e);
+                // TODO(Matthias): use `match` instead of an if-else-chain.
+                // Is there a monoid instance for Ordering?
+                // Yes, it's called `.then`.
+                // cmp.then()
                 if cmp == Equal {
                     let cmp = b.cmp(f);
                     if cmp == Equal {
@@ -125,6 +130,7 @@ impl<E: ExtensionField> Ord for Expression<E> {
             (Challenge(..), Fixed(_)) => Greater,
             (Challenge(..), Instance(_)) => Greater,
             (Challenge(..), WitIn(_)) => Greater,
+            // TODO(Matthias): remove this, and check whether we got all the cases.
             _ => unreachable!(),
         }
     }
