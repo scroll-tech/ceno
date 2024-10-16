@@ -3,13 +3,18 @@ name = "ceno_emul"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "A Risc-V emulator for Ceno"
+readme.workspace = true
+categories.workspace = true
+keywords.workspace = true
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
 strum = "0.25.0"
 strum_macros = "0.25.3"
 tracing = { version = "0.1", default-features = false, features = [
-    "attributes",
+  "attributes",
 ] }
 elf = { version = "0.7.4" }
 

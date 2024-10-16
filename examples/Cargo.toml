@@ -3,6 +3,7 @@ name = "examples"
 resolver = "2"
 version = "0.1.0"
 edition = "2021"
+readme = "README.md"
 
 [dependencies]
 ceno_rt = { path = "../ceno_rt" }

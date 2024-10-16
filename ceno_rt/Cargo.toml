@@ -3,6 +3,11 @@ name = "ceno_rt"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+readme = "README.md"
+repository.workspace = true
+categories.workspace = true
+keywords.workspace = true
+description = "Ceno runtime library"
 
 [dependencies]
 riscv = "0.11.1"

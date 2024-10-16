@@ -3,8 +3,11 @@ name = "ceno_zkvm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+readme.workspace = true
+description = "Ceno ZKVM"
+repository.workspace = true
+categories.workspace = true
+keywords.workspace = true
 
 [dependencies]
 ark-std.workspace = true
@@ -36,7 +39,7 @@ clap = { version = "4.5.20", features = ["derive"] }
 tempfile = "3.13.0"
 
 [dev-dependencies]
-pprof = { version = "0.13", features = ["flamegraph"]}
+pprof = { version = "0.13", features = ["flamegraph"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 cfg-if = "1.0.0"
 const_env = "0.1.2"

@@ -3,8 +3,12 @@ name = "sumcheck"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+readme.workspace = true
+description = "Sumcheck protocol implementation"
+repository.workspace = true
+categories.workspace = true
+keywords.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 ff_ext = { path = "../ff_ext" }
@@ -18,12 +22,14 @@ goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
 
-multilinear_extensions = { path = "../multilinear_extensions", features = [ "parallel"] }
+multilinear_extensions = { path = "../multilinear_extensions", features = [
+  "parallel",
+] }
 transcript = { path = "../transcript" }
 crossbeam-channel = "0.5.13"
 
 [dev-dependencies]
-pprof = { version = "0.13", features = ["flamegraph"]}
+pprof = { version = "0.13", features = ["flamegraph"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
@@ -31,4 +37,4 @@ name = "devirgo_sumcheck"
 harness = false
 
 [features]
-non_pow2_rayon_thread = [ ]
+non_pow2_rayon_thread = []

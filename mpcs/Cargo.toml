@@ -3,8 +3,12 @@ name = "mpcs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+readme.workspace = true
+description = "Multilinear Polynomial Commitment Scheme"
+repository.workspace = true
+categories.workspace = true
+keywords.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 ctr = { git = "https://github.com/RustCrypto/block-modes", rev = "78fefba" }
@@ -20,7 +24,7 @@ num-integer = "0.1.46"
 rand = "0.8"
 bitvec = "1.0.1"
 halo2_curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", tag = "0.3.3", package = "halo2curves", features = [
-    "derive_serde",
+  "derive_serde",
 ] }
 blake2b_simd = "1.0.2"
 sha3 = "0.10.8"
@@ -39,11 +43,11 @@ gkr = { path = "../gkr" }
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
-default = ["parallel"]   # Add "sanity-check" to debug
+default = ["parallel"]                # Add "sanity-check" to debug
 parallel = ["dep:rayon"]
 benchmark = ["parallel"]
 sanity-check = []
-print-trace = [ "ark-std/print-trace" ]
+print-trace = ["ark-std/print-trace"]
 
 [[bench]]
 name = "commit_open_verify_rs"

@@ -15,14 +15,14 @@ CUR_TARGET = { script = ['''
 workspace = false
 command = "cargo"
 args = [
-    "test",
-    "--lib",
-    "--release",
-    "--target",
-    "${CUR_TARGET}",
-    "--workspace",
-    "--exclude",
-    "ceno_rt",
+  "test",
+  "--lib",
+  "--release",
+  "--target",
+  "${CUR_TARGET}",
+  "--workspace",
+  "--exclude",
+  "ceno_rt",
 ]
 
 [tasks.fmt-all-check]
@@ -49,14 +49,14 @@ args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
 workspace = false
 command = "cargo"
 args = [
-    "clippy",
-    "--workspace",
-    "--all-targets",
-    "--exclude",
-    "ceno_rt",
-    "--target",
-    "${CUR_TARGET}",
-    "--",
-    "-D",
-    "warnings",
+  "clippy",
+  "--workspace",
+  "--all-targets",
+  "--exclude",
+  "ceno_rt",
+  "--target",
+  "${CUR_TARGET}",
+  "--",
+  "-D",
+  "warnings",
 ]

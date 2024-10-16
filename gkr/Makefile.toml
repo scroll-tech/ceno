@@ -5,13 +5,41 @@ RAYON_NUM_THREADS = "${CORE}"
 
 [tasks.gkr_bench]
 command = "cargo"
-args = ["bench", "--bench", "keccak256", "--features", "flamegraph", "--features", "parallel", "--package", "gkr"]
+args = [
+  "bench",
+  "--bench",
+  "keccak256",
+  "--features",
+  "flamegraph",
+  "--features",
+  "parallel",
+  "--package",
+  "gkr",
+]
 
 [tasks.gkr_example]
 command = "cargo"
-args = ["run", "--package", "gkr", "--release", "--features", "parallel", "--example", "keccak256"]
+args = [
+  "run",
+  "--package",
+  "gkr",
+  "--release",
+  "--features",
+  "parallel",
+  "--example",
+  "keccak256",
+]
 
 [tasks.gkr_example_flamegraph]
-env = { "RUST_LOG" = "debug", "RAYON_NUM_THREADS" = "1"}
+env = { "RUST_LOG" = "debug", "RAYON_NUM_THREADS" = "1" }
 command = "cargo"
-args = ["run", "--package", "gkr", "--release", "--features", "parallel", "--example", "keccak256"]
+args = [
+  "run",
+  "--package",
+  "gkr",
+  "--release",
+  "--features",
+  "parallel",
+  "--example",
+  "keccak256",
+]

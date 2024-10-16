@@ -1,19 +1,19 @@
 [workspace]
 members = [
-    "ceno_emul",
-    "examples-builder",
-    "ceno_rt",
-    "gkr",
-    "gkr-graph",
-    "mpcs",
-    "multilinear_extensions",
-    "simple-frontend",
-    "singer",
-    "singer-utils",
-    "sumcheck",
-    "transcript",
-    "ceno_zkvm",
-    "poseidon"
+  "ceno_emul",
+  "examples-builder",
+  "ceno_rt",
+  "gkr",
+  "gkr-graph",
+  "mpcs",
+  "multilinear_extensions",
+  "simple-frontend",
+  "singer",
+  "singer-utils",
+  "sumcheck",
+  "transcript",
+  "ceno_zkvm",
+  "poseidon",
 ]
 exclude = ["examples"]
 resolver = "2"
@@ -22,6 +22,10 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/scroll-tech/ceno"
+readme = "README.md"
+categories = ["cryptography", "zk", "blockchain", "ceno"]
+keywords = ["cryptography", "zk", "blockchain", "ceno"]
 
 [workspace.dependencies]
 ark-std = { version = "0.4" }

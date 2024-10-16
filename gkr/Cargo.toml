@@ -3,8 +3,11 @@ name = "gkr"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Goldwasser, Kalai, and Rothblum interactive proof protocol"
+categories.workspace = true
+keywords.workspace = true
+readme.workspace = true
+repository.workspace = true
 
 [dependencies]
 ff.workspace = true
@@ -28,14 +31,14 @@ const_env = "0.1.2"
 
 [dev-dependencies]
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
-pprof = { version = "0.13", features = ["flamegraph"]}
+pprof = { version = "0.13", features = ["flamegraph"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 cfg-if = "1.0.0"
 
 [features]
-default = [ ]
+default = []
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
-parallel = [ ]
+parallel = []
 non_pow2_rayon_thread = ["sumcheck/non_pow2_rayon_thread"]
 unsafe = []
 
