@@ -40,6 +40,8 @@ const_env = "0.1.2"
 witness-count = []
 test-dbg = []
 dbg-add-opcode = []
+non_pow2_rayon_thread = []
+flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 
 [[bench]]
 name = "add"

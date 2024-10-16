@@ -4,13 +4,14 @@ use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     expression::{ToExpr, WitIn},
     gadgets::DivConfig,
     instructions::Instruction,
-    set_val, Value,
+    set_val,
 };
 
-use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
+use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 
 pub struct ShiftConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
@@ -30,11 +31,13 @@ pub struct ShiftConfig<E: ExtensionField> {
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
+#[allow(dead_code)]
 struct SllOp;
 impl RIVInstruction for SllOp {
     const INST_KIND: InsnKind = InsnKind::SLL;
 }
 
+#[allow(dead_code)]
 struct SrlOp;
 impl RIVInstruction for SrlOp {
     const INST_KIND: InsnKind = InsnKind::SRL;
@@ -173,9 +176,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             .r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs2_read.assign_value(instance, rs2_read);
+
         set_val!(instance, config.rs2_low5, rs2_low5);
+        lk_multiplicity.assert_ux::<5>(rs2_low5);
+
         config.rs2_high.assign_value(instance, rs2_high);
         config.pow2_rs2_low5.assign_value(instance, pow2_rs2_low5);
+
+        lk_multiplicity.lookup_pow2(rs2_low5);
 
         Ok(())
     }
@@ -189,13 +197,13 @@ mod tests {
     use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
+        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{
-            riscv::{constants::UInt, RIVInstruction},
             Instruction,
+            riscv::{RIVInstruction, constants::UInt},
         },
-        scheme::mock_prover::{MockProver, MOCK_PC_SLL, MOCK_PC_SRL, MOCK_PROGRAM},
-        Value,
+        scheme::mock_prover::{MOCK_PC_SLL, MOCK_PC_SRL, MOCK_PROGRAM, MockProver},
     };
 
     use super::{ShiftLogicalInstruction, SllOp, SrlOp};
@@ -263,7 +271,7 @@ mod tests {
             )
             .unwrap();
 
-        let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
+        let (raw_witin, lkm) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_r_instruction(
@@ -287,6 +295,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 }

@@ -19,8 +19,8 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 
 use crate::addr::WORD_SIZE;
-use anyhow::{anyhow, bail, Context, Result};
-use elf::{endian::LittleEndian, file::Class, ElfBytes};
+use anyhow::{Context, Result, anyhow, bail};
+use elf::{ElfBytes, endian::LittleEndian, file::Class};
 
 /// A RISC Zero program
 pub struct Program {

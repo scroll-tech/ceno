@@ -89,10 +89,9 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         let cells = self.create_ext_cells(num);
         cells.iter().for_each(|ext_cell| {
             // first base field is the constant
-            self.mark_cells(
-                CellType::In(InType::Constant(constant)),
-                &[ext_cell.cells[0]],
-            );
+            self.mark_cells(CellType::In(InType::Constant(constant)), &[
+                ext_cell.cells[0]
+            ]);
             // the rest fields are 0s
             self.mark_cells(CellType::In(InType::Constant(0)), &ext_cell.cells[1..]);
         });

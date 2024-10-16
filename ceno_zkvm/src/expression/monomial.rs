@@ -154,7 +154,7 @@ mod tests {
     use super::*;
     use ff::Field;
     use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
-    use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+    use rand_chacha::{ChaChaRng, rand_core::SeedableRng};
 
     #[test]
     fn test_to_monomial_form() {

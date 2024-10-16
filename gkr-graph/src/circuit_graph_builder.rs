@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use ark_std::Zero;
 use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, CircuitWitness};
-use itertools::{chain, izip, Itertools};
+use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
 };

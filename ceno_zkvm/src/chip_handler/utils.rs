@@ -3,6 +3,7 @@ use std::iter::successors;
 use crate::expression::Expression;
 use ff::Field;
 use ff_ext::ExtensionField;
+use itertools::izip;
 
 pub fn rlc_chip_record<E: ExtensionField>(
     records: Vec<Expression<E>>,
@@ -12,12 +13,9 @@ pub fn rlc_chip_record<E: ExtensionField>(
     assert!(!records.is_empty());
     let beta_pows = power_sequence(chip_record_beta);
 
-    let item_rlc = beta_pows
-        .into_iter()
-        .zip(records.iter())
-        .map(|(beta, record)| beta * record.clone())
-        .reduce(|a, b| a + b)
-        .expect("reduce error");
+    let item_rlc = izip!(records, beta_pows)
+        .map(|(record, beta)| record * beta)
+        .sum::<Expression<E>>();
 
     item_rlc + chip_record_alpha.clone()
 }

@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{constants::UInt, r_insn::RInstructionConfig, RIVInstruction};
+use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -151,15 +151,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 let result = rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
-                config.rd_written.assign_mul_outcome(
-                    instance,
-                    lk_multiplicity,
-                    &ValueMul {
+                config
+                    .rd_written
+                    .assign_mul_outcome(instance, lk_multiplicity, &ValueMul {
                         limbs: rd_written.limbs.to_vec(),
                         carries: result.carries,
                         max_carry_value: result.max_carry_value,
-                    },
-                )?;
+                    })?;
             }
 
             _ => unreachable!("Unsupported instruction kind"),
@@ -180,7 +178,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_ADD, MOCK_PC_MUL, MOCK_PC_SUB, MOCK_PROGRAM},
+        scheme::mock_prover::{MOCK_PC_ADD, MOCK_PC_MUL, MOCK_PC_SUB, MOCK_PROGRAM, MockProver},
     };
 
     #[test]
@@ -198,20 +196,19 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = AddInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_ADD,
-                MOCK_PROGRAM[0],
-                11,
-                0xfffffffe,
-                Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_ADD,
+                    MOCK_PROGRAM[0],
+                    11,
+                    0xfffffffe,
+                    Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(11_u32.wrapping_add(0xfffffffe))
@@ -233,6 +230,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -251,20 +249,19 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = AddInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_ADD,
-                MOCK_PROGRAM[0],
-                u32::MAX - 1,
-                u32::MAX - 1,
-                Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_ADD,
+                    MOCK_PROGRAM[0],
+                    u32::MAX - 1,
+                    u32::MAX - 1,
+                    Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked((u32::MAX - 1).wrapping_add(u32::MAX - 1))
@@ -286,6 +283,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -304,20 +302,19 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = SubInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_SUB,
-                MOCK_PROGRAM[1],
-                11,
-                2,
-                Change::new(0, 11_u32.wrapping_sub(2)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_SUB,
+                    MOCK_PROGRAM[1],
+                    11,
+                    2,
+                    Change::new(0, 11_u32.wrapping_sub(2)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(11_u32.wrapping_sub(2))
@@ -339,6 +336,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -357,20 +355,19 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = SubInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_SUB,
-                MOCK_PROGRAM[1],
-                3,
-                11,
-                Change::new(0, 3_u32.wrapping_sub(11)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_SUB,
+                    MOCK_PROGRAM[1],
+                    3,
+                    11,
+                    Change::new(0, 3_u32.wrapping_sub(11)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(3_u32.wrapping_sub(11))
@@ -392,6 +389,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            None,
         );
     }
 
@@ -405,20 +403,19 @@ mod test {
             .unwrap();
 
         // values assignment
-        let (raw_witin, _) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MUL,
-                MOCK_PROGRAM[2],
-                11,
-                2,
-                Change::new(0, 22),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_MUL,
+                    MOCK_PROGRAM[2],
+                    11,
+                    2,
+                    Change::new(0, 22),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(22u32).as_u16_limbs().to_vec());
@@ -437,6 +434,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -450,20 +448,19 @@ mod test {
             .unwrap();
 
         // values assignment
-        let (raw_witin, _) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MUL,
-                MOCK_PROGRAM[2],
-                u32::MAX / 2 + 1,
-                2,
-                Change::new(0, 0),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_MUL,
+                    MOCK_PROGRAM[2],
+                    u32::MAX / 2 + 1,
+                    2,
+                    Change::new(0, 0),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(vec![0u64, 0]);
 
@@ -481,6 +478,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -499,23 +497,22 @@ mod test {
         let c_limb = ret.limbs;
 
         // values assignment
-        let (raw_witin, _) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MUL,
-                MOCK_PROGRAM[2],
-                a.as_u64() as u32,
-                b.as_u64() as u32,
-                Change::new(
+        let (raw_witin, lkm) =
+            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_MUL,
+                    MOCK_PROGRAM[2],
+                    a.as_u64() as u32,
+                    b.as_u64() as u32,
+                    Change::new(
+                        0,
+                        Value::<u32>::from_limb_unchecked(c_limb.clone()).as_u64() as u32,
+                    ),
                     0,
-                    Value::<u32>::from_limb_unchecked(c_limb.clone()).as_u64() as u32,
                 ),
-                0,
-            )],
-        )
-        .unwrap();
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(c_limb.clone());
 
@@ -533,6 +530,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 }

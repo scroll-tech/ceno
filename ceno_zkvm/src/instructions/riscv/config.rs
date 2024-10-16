@@ -1,6 +1,7 @@
 use std::{fmt::Display, mem::MaybeUninit};
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
@@ -8,14 +9,13 @@ use crate::{
     set_val,
     utils::i64_to_base,
     witness::LkMultiplicity,
-    Value,
 };
 use ceno_emul::{SWord, Word};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 
-use super::constants::{UInt, UINT_LIMBS};
+use super::constants::{UINT_LIMBS, UInt};
 
 #[derive(Clone)]
 pub struct IsEqualConfig {

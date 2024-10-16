@@ -5,8 +5,8 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip, stack::StackChip,
-        ChipHandler,
+        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip,
+        stack::StackChip,
     },
     constants::OpcodeType,
     register_witness,
@@ -188,8 +188,8 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
 mod test {
     #[cfg(not(debug_assertions))]
     use crate::{
-        instructions::InstructionGraph, instructions::SingerCircuitBuilder,
-        scheme::GKRGraphProverState, CircuitWiresIn, SingerGraphBuilder, SingerParams,
+        CircuitWiresIn, SingerGraphBuilder, SingerParams, instructions::InstructionGraph,
+        instructions::SingerCircuitBuilder, scheme::GKRGraphProverState,
     };
     #[cfg(not(debug_assertions))]
     use ark_std::test_rng;
@@ -235,79 +235,61 @@ mod test {
         println!("{:?}", inst_circuit);
 
         let mut phase0_values_map = BTreeMap::<&'static str, Vec<Goldilocks>>::new();
-        phase0_values_map.insert(
-            AddInstruction::phase0_pc_str(),
-            vec![Goldilocks::from(1u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_stack_ts_str(),
-            vec![Goldilocks::from(3u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_memory_ts_str(),
-            vec![Goldilocks::from(1u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_stack_top_str(),
-            vec![Goldilocks::from(100u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_clk_str(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_pc_str(), vec![Goldilocks::from(
+            1u64,
+        )]);
+        phase0_values_map.insert(AddInstruction::phase0_stack_ts_str(), vec![
+            Goldilocks::from(3u64),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_memory_ts_str(), vec![
+            Goldilocks::from(1u64),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_stack_top_str(), vec![
+            Goldilocks::from(100u64),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_clk_str(), vec![Goldilocks::from(
+            1u64,
+        )]);
         phase0_values_map.insert(
             AddInstruction::phase0_pc_add_str(),
             vec![], // carry is 0, may test carry using larger values in PCUInt
         );
-        phase0_values_map.insert(
-            AddInstruction::phase0_stack_ts_add_str(),
-            vec![
-                Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(48/16) = 3 cells are
-                                         * range values, stack_ts + 1 = 4 */
-                Goldilocks::from(0u64),
-                Goldilocks::from(0u64),
-                // no place for carry
-            ],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_old_stack_ts0_str(),
-            vec![Goldilocks::from(2u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_stack_ts_add_str(), vec![
+            Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(48/16) = 3 cells are
+                                     * range values, stack_ts + 1 = 4 */
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            // no place for carry
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_old_stack_ts0_str(), vec![
+            Goldilocks::from(2u64),
+        ]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
-        phase0_values_map.insert(
-            AddInstruction::phase0_old_stack_ts_lt0_str(),
-            vec![
-                Goldilocks::from(range_values[0]),
-                Goldilocks::from(range_values[1]),
-                Goldilocks::from(range_values[2]),
-                Goldilocks::from(1u64),
-            ],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_old_stack_ts1_str(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_old_stack_ts_lt0_str(), vec![
+            Goldilocks::from(range_values[0]),
+            Goldilocks::from(range_values[1]),
+            Goldilocks::from(range_values[2]),
+            Goldilocks::from(1u64),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_old_stack_ts1_str(), vec![
+            Goldilocks::from(1u64),
+        ]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
-        phase0_values_map.insert(
-            AddInstruction::phase0_old_stack_ts_lt1_str(),
-            vec![
-                Goldilocks::from(range_values[0]),
-                Goldilocks::from(range_values[1]),
-                Goldilocks::from(range_values[2]),
-                Goldilocks::from(1u64),
-            ],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_old_stack_ts_lt1_str(), vec![
+            Goldilocks::from(range_values[0]),
+            Goldilocks::from(range_values[1]),
+            Goldilocks::from(range_values[2]),
+            Goldilocks::from(1u64),
+        ]);
         let m: u64 = (1 << get_uint_params::<StackUInt>().1) - 1;
-        phase0_values_map.insert(
-            AddInstruction::phase0_addend_0_str(),
-            vec![Goldilocks::from(m)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_addend_1_str(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_addend_0_str(), vec![
+            Goldilocks::from(m),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_addend_1_str(), vec![
+            Goldilocks::from(1u64),
+        ]);
         let range_values = u64vec::<{ StackUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
         let mut wit_phase0_instruction_add: Vec<Goldilocks> = vec![];
         for &value in &range_values[..16] {
@@ -394,7 +376,6 @@ mod test {
 
     #[test]
     #[cfg(not(debug_assertions))]
-
     fn bench_add_instruction() {
         bench_add_instruction_helper::<GoldilocksExt2>(10);
     }
