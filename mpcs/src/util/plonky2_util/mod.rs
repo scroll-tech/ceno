@@ -1,3 +1,5 @@
+//! This module is adapted from https://github.com/0xPolygonZero/plonky2
+
 #![allow(clippy::needless_range_loop)]
 
 extern crate alloc;
