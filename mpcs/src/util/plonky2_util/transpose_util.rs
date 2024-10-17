@@ -1,3 +1,5 @@
+//! This module is adapted from https://github.com/0xPolygonZero/plonky2
+
 use core::ptr::swap;
 
 const LB_BLOCK_SIZE: usize = 3;
