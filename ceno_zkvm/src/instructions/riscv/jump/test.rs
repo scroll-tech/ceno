@@ -72,8 +72,8 @@ fn test_opcode_jalr() {
         .unwrap();
 
     let imm = -15i32;
-    let rs1_read: Word = 100u32;
-    let new_pc: ByteAddr = ByteAddr(rs1_read.wrapping_add_signed(imm) & 0xfffe);
+    let rs1_read: Word = 10u32;
+    let new_pc: ByteAddr = ByteAddr(rs1_read.wrapping_add_signed(imm) & (!1));
     let (raw_witin, lkm) = JalrInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
