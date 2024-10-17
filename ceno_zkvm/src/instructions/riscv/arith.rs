@@ -223,7 +223,7 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut cb,
+            &cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
@@ -278,7 +278,7 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut cb,
+            &cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
@@ -333,7 +333,7 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut cb,
+            &cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
@@ -388,7 +388,7 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut cb,
+            &cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
@@ -435,7 +435,7 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut cb,
+            &cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
@@ -481,7 +481,7 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut cb,
+            &cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
@@ -518,7 +518,10 @@ mod test {
                     insn_code,
                     a.as_u64() as u32,
                     b.as_u64() as u32,
-                    Change::new(0, 0),
+                    Change::new(
+                        0,
+                        Value::<u32>::from_limb_unchecked(c_limb.clone()).as_u64() as u32,
+                    ),
                     0,
                 ),
             ])
@@ -532,7 +535,7 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut cb,
+            &cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()

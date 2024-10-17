@@ -53,7 +53,7 @@ fn test_opcode_and() {
         .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -104,7 +104,7 @@ fn test_opcode_or() {
         .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -155,7 +155,7 @@ fn test_opcode_xor() {
         .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
