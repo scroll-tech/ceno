@@ -10,13 +10,14 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     scheme::constants::MIN_PAR_SIZE,
-    set_fixed_val, set_val,
+    set_val,
     structs::ROMType,
     witness::RowMajorMatrix,
 };
 
 #[derive(Clone, Debug)]
 pub struct RangeTableConfig {
+    #[allow(dead_code)]
     fixed: Fixed,
     mlt: WitIn,
 }
