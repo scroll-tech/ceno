@@ -16,8 +16,10 @@ use mpcs::{
 
 use transcript::Transcript;
 
-type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
-type PcsGoldilocksBasecode = Basefold<GoldilocksExt2, BasefoldBasecodePoseidonParams>;
+type PcsGoldilocksRSCodePoseidon = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
+type PcsGoldilocksBasecodePoseidon = Basefold<GoldilocksExt2, BasefoldBasecodePoseidonParams>;
+type PcsGoldilocksRSCodeKeccak = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
+type PcsGoldilocksBasecodeKeccak = Basefold<GoldilocksExt2, BasefoldBasecodePoseidonParams>;
 type T = Transcript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
@@ -463,73 +465,202 @@ fn bench_batch_vlop_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSchem
 }
 
 fn bench_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
-    bench_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, false, "rs");
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksRSCodePoseidon>(c, false, "rs");
 }
 
 fn bench_commit_open_verify_goldilocks_ext_basecode(c: &mut Criterion) {
-    bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, false, "basecode");
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecodePoseidon>(c, false, "basecode");
 }
 
 fn bench_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
-    bench_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, true, "rs");
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksRSCodePoseidon>(c, true, "rs");
 }
 
 fn bench_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
-    bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, true, "basecode");
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecodePoseidon>(c, true, "basecode");
 }
 
 fn bench_batch_vlmp_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
-    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, false, "rs");
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksRSCodePoseidon>(c, false, "rs");
 }
 
 fn bench_batch_vlmp_commit_open_verify_goldilocks_ext_basecode(c: &mut Criterion) {
-    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, false, "basecode");
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksBasecodePoseidon>(
+        c, false, "basecode",
+    );
 }
 
 fn bench_batch_vlmp_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
-    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, true, "rs");
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksRSCodePoseidon>(c, true, "rs");
 }
 
 fn bench_batch_vlmp_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
-    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, true, "basecode");
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksBasecodePoseidon>(
+        c, true, "basecode",
+    );
 }
 
 fn bench_simple_batch_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
-    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, false, "rs");
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCodePoseidon>(c, false, "rs");
 }
 
 fn bench_simple_batch_commit_open_verify_goldilocks_ext_basecode(c: &mut Criterion) {
-    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, false, "basecode");
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecodePoseidon>(
+        c, false, "basecode",
+    );
 }
 
 fn bench_simple_batch_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
-    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, true, "rs");
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCodePoseidon>(c, true, "rs");
 }
 
 fn bench_simple_batch_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
-    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, true, "basecode");
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecodePoseidon>(
+        c, true, "basecode",
+    );
 }
 
 fn bench_batch_vlop_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
-    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, false, "rs");
+    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksRSCodePoseidon>(c, false, "rs");
 }
 
 fn bench_batch_vlop_commit_open_verify_goldilocks_ext_basecode(c: &mut Criterion) {
-    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, false, "basecode");
+    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksBasecodePoseidon>(
+        c, false, "basecode",
+    );
 }
 
 fn bench_batch_vlop_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
-    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, true, "rs");
+    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksRSCodePoseidon>(c, true, "rs");
 }
 
 fn bench_batch_vlop_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
-    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, true, "basecode");
+    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksBasecodePoseidon>(
+        c, true, "basecode",
+    );
+}
+
+fn bench_commit_open_verify_goldilocks_ext_rs_keccak(c: &mut Criterion) {
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksRSCodeKeccak>(c, false, "rs_keccak");
+}
+
+fn bench_commit_open_verify_goldilocks_ext_basecode_keccak(c: &mut Criterion) {
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecodeKeccak>(c, false, "basecode_keccak");
+}
+
+fn bench_commit_open_verify_goldilocks_base_rs_keccak(c: &mut Criterion) {
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksRSCodeKeccak>(c, true, "rs_keccak");
+}
+
+fn bench_commit_open_verify_goldilocks_base_basecode_keccak(c: &mut Criterion) {
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecodeKeccak>(c, true, "basecode_keccak");
+}
+
+fn bench_batch_vlmp_commit_open_verify_goldilocks_ext_rs_keccak(c: &mut Criterion) {
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksRSCodeKeccak>(
+        c,
+        false,
+        "rs_keccak",
+    );
+}
+
+fn bench_batch_vlmp_commit_open_verify_goldilocks_ext_basecode_keccak(c: &mut Criterion) {
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksBasecodeKeccak>(
+        c,
+        false,
+        "basecode_keccak",
+    );
+}
+
+fn bench_batch_vlmp_commit_open_verify_goldilocks_base_rs_keccak(c: &mut Criterion) {
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksRSCodeKeccak>(
+        c,
+        true,
+        "rs_keccak",
+    );
+}
+
+fn bench_batch_vlmp_commit_open_verify_goldilocks_base_basecode_keccak(c: &mut Criterion) {
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksBasecodeKeccak>(
+        c,
+        true,
+        "basecode_keccak",
+    );
+}
+
+fn bench_simple_batch_commit_open_verify_goldilocks_ext_rs_keccak(c: &mut Criterion) {
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCodeKeccak>(
+        c,
+        false,
+        "rs_keccak",
+    );
+}
+
+fn bench_simple_batch_commit_open_verify_goldilocks_ext_basecode_keccak(c: &mut Criterion) {
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecodeKeccak>(
+        c,
+        false,
+        "basecode_keccak",
+    );
+}
+
+fn bench_simple_batch_commit_open_verify_goldilocks_base_rs_keccak(c: &mut Criterion) {
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCodeKeccak>(
+        c,
+        true,
+        "rs_keccak",
+    );
+}
+
+fn bench_simple_batch_commit_open_verify_goldilocks_base_basecode_keccak(c: &mut Criterion) {
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecodeKeccak>(
+        c,
+        true,
+        "basecode_keccak",
+    );
+}
+
+fn bench_batch_vlop_commit_open_verify_goldilocks_ext_rs_keccak(c: &mut Criterion) {
+    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksRSCodeKeccak>(
+        c,
+        false,
+        "rs_keccak",
+    );
+}
+
+fn bench_batch_vlop_commit_open_verify_goldilocks_ext_basecode_keccak(c: &mut Criterion) {
+    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksBasecodeKeccak>(
+        c,
+        false,
+        "basecode_keccak",
+    );
+}
+
+fn bench_batch_vlop_commit_open_verify_goldilocks_base_rs_keccak(c: &mut Criterion) {
+    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksRSCodeKeccak>(
+        c,
+        true,
+        "rs_keccak",
+    );
+}
+
+fn bench_batch_vlop_commit_open_verify_goldilocks_base_basecode_keccak(c: &mut Criterion) {
+    bench_batch_vlop_commit_open_verify_goldilocks::<PcsGoldilocksBasecodeKeccak>(
+        c,
+        true,
+        "basecode_keccak",
+    );
 }
 
 criterion_group! {
   name = bench_basefold;
   config = Criterion::default().warm_up_time(Duration::from_millis(3000));
   targets =
+  bench_simple_batch_commit_open_verify_goldilocks_base_rs_keccak, bench_simple_batch_commit_open_verify_goldilocks_ext_rs_keccak,
+  bench_batch_vlop_commit_open_verify_goldilocks_base_rs_keccak, bench_batch_vlop_commit_open_verify_goldilocks_ext_rs_keccak,
+  bench_batch_vlmp_commit_open_verify_goldilocks_base_rs_keccak, bench_batch_vlmp_commit_open_verify_goldilocks_ext_rs_keccak, bench_commit_open_verify_goldilocks_base_rs_keccak, bench_commit_open_verify_goldilocks_ext_rs_keccak,bench_batch_vlop_commit_open_verify_goldilocks_base_basecode_keccak, bench_batch_vlop_commit_open_verify_goldilocks_ext_basecode_keccak,
+  bench_simple_batch_commit_open_verify_goldilocks_base_basecode_keccak, bench_simple_batch_commit_open_verify_goldilocks_ext_basecode_keccak, bench_batch_vlmp_commit_open_verify_goldilocks_base_basecode_keccak, bench_batch_vlmp_commit_open_verify_goldilocks_ext_basecode_keccak, bench_commit_open_verify_goldilocks_base_basecode_keccak, bench_commit_open_verify_goldilocks_ext_basecode_keccak,
+
   bench_simple_batch_commit_open_verify_goldilocks_base_rs, bench_simple_batch_commit_open_verify_goldilocks_ext_rs,
   bench_batch_vlop_commit_open_verify_goldilocks_base_rs, bench_batch_vlop_commit_open_verify_goldilocks_ext_rs,
   bench_batch_vlmp_commit_open_verify_goldilocks_base_rs, bench_batch_vlmp_commit_open_verify_goldilocks_ext_rs, bench_commit_open_verify_goldilocks_base_rs, bench_commit_open_verify_goldilocks_ext_rs,bench_batch_vlop_commit_open_verify_goldilocks_base_basecode, bench_batch_vlop_commit_open_verify_goldilocks_ext_basecode,

@@ -3,18 +3,17 @@ use std::io::{BufReader, Read};
 use ff_ext::ExtensionField;
 
 use goldilocks::SmallField;
-use keccak_hash::{keccak_256, keccak_buffer};
-use serde::{de::DeserializeOwned, Serialize};
+use keccak_hash::{keccak_256, keccak_buffer, H256};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use transcript::Transcript;
 
 use super::Hasher;
 
-struct FRead<'a, E: ExtensionField, I: Iterator<Item = &'a E::BaseField>> {
+struct FRead<'a, F: SmallField, I: Iterator<Item = &'a F>> {
     iter: I,
-    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<'a, E: ExtensionField, I: Iterator<Item = &'a E::BaseField>> Read for FRead<'a, E, I> {
+impl<'a, F: SmallField, I: Iterator<Item = &'a F>> Read for FRead<'a, F, I> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let mut i = 0;
         while i + 8 <= buf.len() {
@@ -29,6 +28,30 @@ impl<'a, E: ExtensionField, I: Iterator<Item = &'a E::BaseField>> Read for FRead
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+pub struct KeccakDigest([u8; 32]);
+
+impl<F: SmallField> TryFrom<Vec<F>> for KeccakDigest {
+    type Error = String;
+
+    fn try_from(value: Vec<F>) -> Result<Self, Self::Error> {
+        let mut output = [0u8; 32];
+        if value.len() != 4 {
+            return Err(format!("can only create digest from 4 elements"));
+        }
+        FRead { iter: value.iter() }.read(&mut output).unwrap();
+        Ok(KeccakDigest(output))
+    }
+}
+
+impl From<H256> for KeccakDigest {
+    fn from(h: H256) -> Self {
+        let mut output = [0u8; 32];
+        output.copy_from_slice(&h.0);
+        KeccakDigest(output)
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct KeccakHasher {}
 
@@ -36,26 +59,23 @@ impl<E: ExtensionField> Hasher<E> for KeccakHasher
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    type Digest = [u8; 32];
+    type Digest = KeccakDigest;
 
     fn write_digest_to_transcript(digest: &Self::Digest, transcript: &mut Transcript<E>) {
-        transcript.append_message(digest);
+        transcript.append_message(&digest.0);
     }
 
     fn hash_iter<'a, I: Iterator<Item = &'a E::BaseField>>(iter: I) -> Self::Digest {
-        keccak_buffer(&mut BufReader::new(FRead {
-            iter,
-            _phantom: std::marker::PhantomData::<E>,
-        }))
-        .unwrap()
-        .into()
+        keccak_buffer(&mut BufReader::new(FRead { iter }))
+            .unwrap()
+            .into()
     }
 
     fn hash_two_digests(a: &Self::Digest, b: &Self::Digest) -> Self::Digest {
-        let input = a.iter().chain(b).map(|x| *x).collect::<Vec<_>>();
+        let input = a.0.iter().chain(&b.0).map(|x| *x).collect::<Vec<_>>();
         let mut output = [0u8; 32];
         keccak_256(input.as_slice(), &mut output);
-        output
+        KeccakDigest(output)
     }
 }
 

@@ -47,6 +47,10 @@ sanity-check = []
 print-trace = [ "ark-std/print-trace" ]
 
 [[bench]]
+name = "hashing"
+harness = false
+
+[[bench]]
 name = "basefold"
 harness = false
 

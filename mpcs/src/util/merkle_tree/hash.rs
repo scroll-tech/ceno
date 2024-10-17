@@ -18,7 +18,8 @@ where
         + PartialEq
         + Eq
         + Sync
-        + Send;
+        + Send
+        + TryFrom<Vec<E::BaseField>, Error: std::fmt::Debug>;
 
     fn write_digest_to_transcript(digest: &Self::Digest, transcript: &mut Transcript<E>);
 
