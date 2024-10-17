@@ -490,6 +490,7 @@ mod test {
     use crate::{
         ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
+        error::ZKVMError,
         scheme::mock_prover::MockProver,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -497,19 +498,41 @@ mod test {
     use super::MemAddr;
 
     #[test]
-    fn test_mem_addr() {
+    fn test_mem_addr() -> Result<(), ZKVMError> {
+        let aligned_1 = 0xbeadbeef;
+        let aligned_2 = 0xbeadbeee;
+        let aligned_4 = 0xbeadbeec;
+
+        impl_test_mem_addr(1, aligned_1, true)?;
+        impl_test_mem_addr(1, aligned_2, true)?;
+        impl_test_mem_addr(1, aligned_4, true)?;
+
+        impl_test_mem_addr(2, aligned_1, false)?;
+        impl_test_mem_addr(2, aligned_2, true)?;
+        impl_test_mem_addr(2, aligned_4, true)?;
+
+        impl_test_mem_addr(4, aligned_1, false)?;
+        impl_test_mem_addr(4, aligned_2, false)?;
+        impl_test_mem_addr(4, aligned_4, true)?;
+        Ok(())
+    }
+
+    fn impl_test_mem_addr(align: u32, addr: u32, is_ok: bool) -> Result<(), ZKVMError> {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let mem_addr = MemAddr::construct_unaligned(&mut cb).unwrap();
+        let mem_addr = match align {
+            1 => MemAddr::construct_unaligned(&mut cb)?,
+            2 => MemAddr::construct_align2(&mut cb)?,
+            4 => MemAddr::construct_align4(&mut cb)?,
+            _ => unreachable!(),
+        };
 
         let mut lkm = LkMultiplicity::default();
         let num_rows = 2;
         let mut raw_witin = RowMajorMatrix::<F>::new(num_rows, cb.cs.num_witin as usize);
         for instance in raw_witin.iter_mut() {
-            mem_addr
-                .assign_instance(instance, &mut lkm, 0xbeadbeef)
-                .unwrap();
+            mem_addr.assign_instance(instance, &mut lkm, addr)?;
         }
 
         // Check the range lookups.
@@ -525,7 +548,13 @@ mod test {
         });
         assert_eq!(lkm[ROMType::U16 as usize].len(), 1);
 
-        MockProver::assert_satisfied(
+        if is_ok {
+            cb.require_equal(|| "", mem_addr.expr_unaligned(), addr.into())?;
+            cb.require_equal(|| "", mem_addr.expr_align2(), (addr >> 1 << 1).into())?;
+            cb.require_equal(|| "", mem_addr.expr_align4(), (addr >> 2 << 2).into())?;
+        }
+
+        let res = MockProver::run(
             &cb,
             &raw_witin
                 .de_interleaving()
@@ -534,7 +563,8 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
-            None,
         );
+        assert_eq!(res.is_ok(), is_ok, "{:?}", res);
+        Ok(())
     }
 }
