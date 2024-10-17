@@ -387,9 +387,19 @@ impl<E: ExtensionField> MemAddr<E> {
         Self::construct(cb, 2)
     }
 
-    /// A UInt representing the address as u16 limbs.
-    pub fn as_uint(&self) -> &UInt<E> {
-        &self.addr
+    /// Represent the address as an expression.
+    pub fn expr_unaligned(&self) -> AddressExpr<E> {
+        self.addr.address_expr()
+    }
+
+    /// Represent the address aligned to 2 bytes.
+    pub fn expr_align2(&self) -> AddressExpr<E> {
+        self.addr.address_expr() // TODO
+    }
+
+    /// Represent the address aligned to 4 bytes.
+    pub fn expr_align4(&self) -> AddressExpr<E> {
+        self.addr.address_expr() // TODO
     }
 
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
