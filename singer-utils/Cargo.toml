@@ -15,7 +15,7 @@ gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
 itertools = "0.12.1"
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
 simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
-strum = "0.26.3"
-strum_macros = "0.26.4"
+strum = { workspace = true }
+strum_macros = { workspace = true }
 sumcheck = { version = "0.1.0", path = "../sumcheck" }
 transcript = { version = "0.1.0", path = "../transcript" }
