@@ -1,16 +1,12 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
+use ff::Field;
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{ToExpr, WitIn},
-    instructions::{
-        Instruction,
-        riscv::{constants::UInt, i_insn::IInstructionConfig},
-    },
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, expression::{ToExpr, WitIn}, instructions::{
+        riscv::{constants::UInt, i_insn::IInstructionConfig, insn_base::MemAddr}, Instruction
+    }, set_val, witness::LkMultiplicity, Value
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 
@@ -18,9 +14,8 @@ pub struct JalrConfig<E: ExtensionField> {
     pub i_insn: IInstructionConfig<E>,
     pub rs1_read: UInt<E>,
     pub imm: WitIn,
-    pub next_pc_uint: UInt<E>,
+    pub next_pc_addr: MemAddr<E>,
     pub overflow: WitIn,
-    pub parity: WitIn,
     pub rd_written: UInt<E>,
 }
 
@@ -40,35 +35,9 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<JalrConfig<E>, ZKVMError> {
-        let next_pc_uint = UInt::new(|| "next_pc_uint", circuit_builder)?;
         let rs1_read = UInt::new(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let imm = circuit_builder.create_witin(|| "imm")?; // signed 12-bit value
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-
-        // Next pc is obtained by rounding rs1+imm down to an even value.
-        // To implement this, check three conditions:
-        //  1. rs1 + imm = next_pc + overflow*2^32 + parity_bit
-        //  2. next_pc low limb is even 16-bits (new table of size 2^15)
-        //  3. overflow in {-1, 0, 1}, parity_bit in {0, 1}
-
-        let overflow = circuit_builder.create_witin(|| "overflow")?;
-        circuit_builder.require_zero(
-            || "overflow_0_or_pm1",
-            overflow.expr() * (overflow.expr() + (-1).into()) * (overflow.expr() + 1.into()),
-        )?;
-
-        let parity = circuit_builder.create_witin(|| "parity")?;
-        circuit_builder.assert_bit(|| "parity_is_bit", parity.expr())?;
-
-        circuit_builder.require_equal(
-            || "rs1+imm = next_pc + overflow*2^32 + parity",
-            rs1_read.value() + imm.expr(),
-            next_pc_uint.value() + overflow.expr() * (1u64 << 32).into() + parity.expr(),
-        )?;
-
-        // TODO check low order limb of next_pc_uint is even
-        //  Option 1: 1 witness limb_div_two, table lookup to restrict to u16, assert low limb = 2*limb_div_two
-        //  Option 2: new table for "even u16" values, table lookup for low limb of next_pc_uint
 
         let i_insn = IInstructionConfig::construct_circuit(
             circuit_builder,
@@ -79,10 +48,29 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             true,
         )?;
 
-        // equate next_pc witin with uint version
+        // Next pc is obtained by rounding rs1+imm down to an even value.
+        // To implement this, check three conditions:
+        //  1. rs1 + imm = next_pc_addr + overflow*2^32
+        //  2. overflow in {-1, 0, 1}
+        //  3. next_pc = next_pc_addr aligned to even value (round down)
+
+        let next_pc_addr = MemAddr::<E>::construct_unaligned(circuit_builder)?;
+        let overflow = circuit_builder.create_witin(|| "overflow")?;
+
+        circuit_builder.require_equal(
+            || "rs1+imm = next_pc_unrounded + overflow*2^32",
+            rs1_read.value() + imm.expr(),
+            next_pc_addr.address_unaligned() + overflow.expr() * (1u64 << 32).into(),
+        )?;
+
+        circuit_builder.require_zero(
+            || "overflow_0_or_pm1",
+            overflow.expr() * (overflow.expr() + (-1).into()) * (overflow.expr() + 1.into()),
+        )?;
+
         circuit_builder.require_equal(
             || "next_pc_uint = next_pc",
-            next_pc_uint.value(),
+            next_pc_addr.address_align2(),
             i_insn.vm_state.next_pc.unwrap().expr(),
         )?;
 
@@ -97,9 +85,8 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             i_insn,
             rs1_read,
             imm,
-            next_pc_uint,
+            next_pc_addr,
             overflow,
-            parity,
             rd_written,
         })
     }
@@ -110,11 +97,26 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
-        config
-            .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
 
-        // TODO
+        let rs1 = step.rs1().unwrap().value;
+        let imm: i32 = step.insn().imm_or_funct7() as i32;
+        let rd = step.rd().unwrap().value.after;
+
+        let (sum, overflowing) = rs1.overflowing_add_signed(imm);        
+
+        set_val!(instance, config.imm, imm as u64);
+        config.rs1_read.assign_value(instance, Value::new(rs1, lk_multiplicity));
+        config.rd_written.assign_value(instance, Value::new(rd, lk_multiplicity));
+
+        config.next_pc_addr.assign_instance(instance, lk_multiplicity, sum)?;        
+        let overflow: E::BaseField = match (overflowing, imm < 0) {
+            (false, _) => E::BaseField::ZERO,
+            (true, false) => E::BaseField::ONE,
+            (true, true) => -E::BaseField::ONE,
+        };
+        set_val!(instance, config.overflow, overflow);
+
+        config.i_insn.assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())
     }

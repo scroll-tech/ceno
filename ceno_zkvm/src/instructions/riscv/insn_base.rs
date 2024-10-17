@@ -399,6 +399,21 @@ impl<E: ExtensionField> MemAddr<E> {
             .collect()
     }
 
+    /// Represent the address as an expression.
+    pub fn address_unaligned(&self) -> Expression<E> {
+        self.addr.value()
+    }
+
+    /// Represent the address aligned to 2 bytes.
+    pub fn address_align2(&self) -> Expression<E> {
+        todo!()
+    }
+
+    /// Represent the address aligned to 4 bytes.
+    pub fn address_align4(&self) -> Expression<E> {
+        todo!()
+    }
+
     fn construct(cb: &mut CircuitBuilder<E>, n_zeros: usize) -> Result<Self, ZKVMError> {
         assert!(n_zeros <= Self::N_LOW_BITS);
 
