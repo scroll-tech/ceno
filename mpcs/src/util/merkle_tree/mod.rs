@@ -673,6 +673,8 @@ mod tests {
             let path = merkle_tree.merkle_path_without_leaf_sibling_or_root(i << 1);
             assert_eq!(path.len(), 2);
             assert_eq!(path.height(), 3);
+            // TODO: have no idea why this cannot compile, asking to
+            // implement PartialEq for PoseidonHasher
             // assert_eq!(
             //     path,
             //     merkle_tree.merkle_path_without_leaf_sibling_or_root((i << 1) + 1)
@@ -730,6 +732,8 @@ mod tests {
             let path = merkle_tree.merkle_path_without_leaf_sibling_or_root(i << 1);
             assert_eq!(path.len(), 2);
             assert_eq!(path.height(), 3);
+            // TODO: have no idea why this cannot compile, asking to
+            // implement PartialEq for PoseidonHasher
             // assert_eq!(
             //     path,
             //     merkle_tree.merkle_path_without_leaf_sibling_or_root((i << 1) + 1)
