@@ -11,6 +11,16 @@ use crate::{
 
 use super::{AuipcInstruction, JalInstruction, LuiInstruction};
 
+fn imm_j(imm: i32) -> u32 {
+    // imm is 21 bits in J-type
+    const IMM_MAX: i32 = 2i32.pow(21);
+    let imm = if imm.is_negative() {
+        (IMM_MAX + imm) as u32
+    } else {
+        imm as u32
+    };
+    imm
+}
 #[test]
 fn test_opcode_jal() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -26,22 +36,23 @@ fn test_opcode_jal() {
         .unwrap()
         .unwrap();
 
-    let pc_offset: i32 = -4i32;
-    let new_pc: ByteAddr = ByteAddr(MOCK_PC_JAL.0.wrapping_add_signed(pc_offset));
+    let pc_offset: i32 = -8i32;
+    let new_pc: ByteAddr = ByteAddr(MOCK_PC_START.0.wrapping_add_signed(pc_offset));
+    let insn_code = EncodedInstruction::encode(InsnKind::JAL, 0, 0, 4, imm_j(pc_offset));
     let (raw_witin, lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_j_instruction(
             4,
-            Change::new(MOCK_PC_JAL, new_pc),
-            MOCK_PROGRAM[21],
-            Change::new(0, (MOCK_PC_JAL + PC_STEP_SIZE).into()),
+            Change::new(MOCK_PC_START, new_pc),
+            insn_code,
+            Change::new(0, (MOCK_PC_START + PC_STEP_SIZE).into()),
             0,
         )],
     )
     .unwrap();
 
-    MockProver::assert_satisfied(
+    MockProver::assert_satisfied_with_program(
         &cb,
         &raw_witin
             .de_interleaving()
@@ -49,12 +60,13 @@ fn test_opcode_jal() {
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        &[insn_code],
         None,
         Some(lkm),
     );
 }
 
-fn imm(imm: u32) -> u32 {
+fn imm_u(imm: u32) -> u32 {
     // valid imm is imm[12:31] in U-type
     imm << 12
 }
@@ -73,7 +85,7 @@ fn test_opcode_lui() {
         .unwrap()
         .unwrap();
 
-    let imm_value = imm(0x90005);
+    let imm_value = imm_u(0x90005);
     let insn_code = EncodedInstruction::encode(InsnKind::LUI, 0, 0, 4, imm_value);
     let (raw_witin, lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
         &config,
@@ -117,7 +129,7 @@ fn test_opcode_auipc() {
         .unwrap()
         .unwrap();
 
-    let imm_value = imm(0x90005);
+    let imm_value = imm_u(0x90005);
     let insn_code = EncodedInstruction::encode(InsnKind::AUIPC, 0, 0, 4, imm_value);
     let (raw_witin, lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
         &config,

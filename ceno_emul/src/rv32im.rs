@@ -256,7 +256,6 @@ impl EncodedInstruction {
         let opcode = kind.codes().opcode;
         let imm_1_4 = (imm >> 1) & 0xf; // skip imm[0]
         let imm_5_10 = (imm >> 5) & 0x3f;
-        println!("{:#b}: {:#b}, {:#b}", imm, imm_1_4, imm_5_10);
         ((imm >> 12) & 1) << 31
             | imm_5_10 << 25
             | rs2 << 20
@@ -269,7 +268,7 @@ impl EncodedInstruction {
     fn encode_j(kind: InsnKind, rd: u32, imm: u32) -> u32 {
         let rd = rd & 0x1f;
         let opcode = kind.codes().opcode;
-        let imm_1_10 = (imm >> 1) & 0x03ff; // 10-bits mask
+        let imm_1_10 = (imm >> 1) & 0x03ff; // 10-bits mask, skip imm[0]
         let imm_12_19 = (imm >> 12) & 0xff;
         ((imm >> 20) & 1) << 31
             | imm_1_10 << 21
