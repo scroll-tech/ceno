@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{MemoryExpr, RegisterExpr},
+    chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr},
@@ -29,7 +29,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         imm: &Expression<E>,
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
-        memory_addr: MemoryExpr<E>,
+        memory_addr: AddressExpr<E>,
         memory_value: MemoryExpr<E>,
     ) -> Result<Self, ZKVMError> {
         // State in and out
