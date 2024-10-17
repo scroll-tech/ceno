@@ -504,12 +504,12 @@ mod test {
         // Check the range lookups.
         let lkm = lkm.into_finalize_result();
         lkm[ROMType::U14 as usize].iter().for_each(|(k, v)| {
-            assert_eq!(*k as u64, 0xbeef >> 2);
+            assert_eq!(*k, 0xbeef >> 2);
             assert_eq!(*v, num_rows);
         });
         assert_eq!(lkm[ROMType::U14 as usize].len(), 1);
         lkm[ROMType::U16 as usize].iter().for_each(|(k, v)| {
-            assert_eq!(*k as u64, 0xbead);
+            assert_eq!(*k, 0xbead);
             assert_eq!(*v, num_rows);
         });
         assert_eq!(lkm[ROMType::U16 as usize].len(), 1);
