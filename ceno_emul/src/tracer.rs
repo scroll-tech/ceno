@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
-    CENO_PLATFORM, InsnKind, PC_STEP_SIZE,
+    CENO_PLATFORM, PC_STEP_SIZE,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     rv32im::DecodedInstruction,
 };
@@ -77,12 +77,12 @@ impl StepRecord {
     pub fn new_b_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: Word,
+        insn_code: u32,
         rs1_read: Word,
         rs2_read: Word,
         prev_cycle: Cycle,
     ) -> StepRecord {
-        StepRecord::new_insn(
+        StepRecord::new_insn2(
             cycle,
             pc,
             insn_code,

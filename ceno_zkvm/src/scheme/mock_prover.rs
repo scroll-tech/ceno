@@ -787,7 +787,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
-        Self::assert_satisfied_with_program(cb, wits_in, &[], challenge);
+        Self::assert_satisfied_with_program(cb, wits_in, &[], challenge, lkm);
     }
 
     pub fn assert_satisfied_with_program(

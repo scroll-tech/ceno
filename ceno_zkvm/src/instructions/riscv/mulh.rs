@@ -151,7 +151,7 @@ mod test {
 
         // values assignment
         let insn_code = EncodedInstruction::encode(InsnKind::MULHU, 2, 3, 4, 0);
-        let (raw_witin, _) =
+        let (raw_witin, lkm) =
             MulhuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,

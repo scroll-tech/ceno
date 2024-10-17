@@ -254,8 +254,9 @@ impl EncodedInstruction {
         let rs1 = rs1 & 0x1f;
         let func3 = kind.codes().func3;
         let opcode = kind.codes().opcode;
-        let imm_1_4 = imm & 0x1e; // skip imm[0]
-        let imm_5_10 = (imm >> 5) & 0x1f;
+        let imm_1_4 = (imm >> 1) & 0xf; // skip imm[0]
+        let imm_5_10 = (imm >> 5) & 0x3f;
+        println!("{:#b}: {:#b}, {:#b}", imm, imm_1_4, imm_5_10);
         ((imm >> 12) & 1) << 31
             | imm_5_10 << 25
             | rs2 << 20

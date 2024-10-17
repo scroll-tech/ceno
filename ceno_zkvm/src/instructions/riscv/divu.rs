@@ -186,7 +186,7 @@ mod test {
 
             let insn_code = EncodedInstruction::encode(InsnKind::DIVU, 2, 3, 4, 0);
             // values assignment
-            let (raw_witin, _) =
+            let (raw_witin, lkm) =
                 DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                     StepRecord::new_r_instruction(
                         3,

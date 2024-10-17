@@ -178,7 +178,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_START},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     #[test]
@@ -197,20 +197,19 @@ mod test {
             .unwrap();
 
         let insn_code = EncodedInstruction::encode(InsnKind::ADD, 2, 3, 4, 0);
-        let (raw_witin, lkm) = AddInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                11,
-                0xfffffffe,
-                Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    11,
+                    0xfffffffe,
+                    Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(11_u32.wrapping_add(0xfffffffe))
@@ -253,20 +252,19 @@ mod test {
             .unwrap();
 
         let insn_code = EncodedInstruction::encode(InsnKind::ADD, 2, 3, 4, 0);
-        let (raw_witin, _) = AddInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                u32::MAX - 1,
-                u32::MAX - 1,
-                Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    u32::MAX - 1,
+                    u32::MAX - 1,
+                    Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked((u32::MAX - 1).wrapping_add(u32::MAX - 1))
@@ -309,20 +307,19 @@ mod test {
             .unwrap();
 
         let insn_code = EncodedInstruction::encode(InsnKind::SUB, 2, 3, 4, 0);
-        let (raw_witin, _) = SubInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                11,
-                2,
-                Change::new(0, 11_u32.wrapping_sub(2)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    11,
+                    2,
+                    Change::new(0, 11_u32.wrapping_sub(2)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(11_u32.wrapping_sub(2))
@@ -365,20 +362,19 @@ mod test {
             .unwrap();
 
         let insn_code = EncodedInstruction::encode(InsnKind::SUB, 2, 3, 4, 0);
-        let (raw_witin, _) = SubInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                3,
-                11,
-                Change::new(0, 3_u32.wrapping_sub(11)),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, _) =
+            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    3,
+                    11,
+                    Change::new(0, 3_u32.wrapping_sub(11)),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(3_u32.wrapping_sub(11))
@@ -416,20 +412,19 @@ mod test {
 
         // values assignment
         let insn_code = EncodedInstruction::encode(InsnKind::MUL, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                11,
-                2,
-                Change::new(0, 22),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    11,
+                    2,
+                    Change::new(0, 22),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(22u32).as_u16_limbs().to_vec());
@@ -464,20 +459,19 @@ mod test {
 
         // values assignment
         let insn_code = EncodedInstruction::encode(InsnKind::MUL, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                u32::MAX / 2 + 1,
-                2,
-                Change::new(0, 0),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    u32::MAX / 2 + 1,
+                    2,
+                    Change::new(0, 0),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written = UInt::from_const_unchecked(vec![0u64, 0]);
 
@@ -516,16 +510,15 @@ mod test {
 
         // values assignment
         let insn_code = EncodedInstruction::encode(InsnKind::MUL, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                a.as_u64() as u32,
-                b.as_u64() as u32,
-                Change::new(
+        let (raw_witin, lkm) =
+            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    a.as_u64() as u32,
+                    b.as_u64() as u32,
+                    Change::new(0, 0),
                     0,
                 ),
             ])
