@@ -394,12 +394,13 @@ impl<E: ExtensionField> MemAddr<E> {
 
     /// Represent the address aligned to 2 bytes.
     pub fn expr_align2(&self) -> AddressExpr<E> {
-        self.addr.address_expr() // TODO
+        self.addr.address_expr() - self.low_bit_exprs()[0].clone()
     }
 
     /// Represent the address aligned to 4 bytes.
     pub fn expr_align4(&self) -> AddressExpr<E> {
-        self.addr.address_expr() // TODO
+        let low_bits = self.low_bit_exprs();
+        self.addr.address_expr() - low_bits[1].clone() * 2.into() - low_bits[0].clone()
     }
 
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
