@@ -8,8 +8,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        riscv::{constants::UInt8, i_insn::IInstructionConfig},
         Instruction,
+        riscv::{constants::UInt8, i_insn::IInstructionConfig},
     },
     tables::OpsTable,
     utils::split_to_u8,
@@ -64,7 +64,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     }
 }
 
-/// This config implements R-Instructions that represent registers values as 4 * u8.
+/// This config implements I-Instructions that represent registers values as 4 * u8.
 /// Non-generic code shared by several circuits.
 #[derive(Debug)]
 pub struct LogicConfig<E: ExtensionField> {
@@ -80,9 +80,9 @@ impl<E: ExtensionField> LogicConfig<E> {
         cb: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
     ) -> Result<Self, ZKVMError> {
-        let rs1_read = UInt8::new(|| "rs1_read", cb)?;
-        let rd_written = UInt8::new(|| "rd_written", cb)?;
-        let imm = UInt8::new(|| "imm", cb)?;
+        let rs1_read = UInt8::new_unchecked(|| "rs1_read", cb)?;
+        let rd_written = UInt8::new_unchecked(|| "rd_written", cb)?;
+        let imm = UInt8::new_unchecked(|| "imm", cb)?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
@@ -123,7 +123,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, CENO_PLATFORM};
+    use ceno_emul::{ByteAddr, CENO_PLATFORM, Change, InsnKind, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -132,15 +132,14 @@ mod test {
         chip_handler::test::DebugIndex,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{
+            Instruction,
             riscv::{
                 constants::UInt8,
-                logic_imm::{logic_imm_circuit::LogicInstruction, AndiOp, OriOp, XoriOp},
+                logic_imm::{AndiOp, OriOp, XoriOp, logic_imm_circuit::LogicInstruction},
             },
-            Instruction,
         },
-        scheme::mock_prover::{MockProver, MOCK_PC_ANDI, MOCK_PC_ORI, MOCK_PC_XORI, MOCK_PROGRAM},
+        scheme::mock_prover::{MOCK_PC_ANDI, MOCK_PC_ORI, MOCK_PC_XORI, MOCK_PROGRAM, MockProver},
         utils::split_to_u8,
-        ROMType,
     };
 
     use super::LogicOp;
@@ -151,23 +150,8 @@ mod test {
         let prog_idx: usize = ((pc.0 - CENO_PLATFORM.pc_start()) / 4) as usize;
         let prog = MOCK_PROGRAM[prog_idx];
         let imm = 3;
-        verify::<AndiOp>(
-            "basic",
-            pc,
-            prog,
-            0x0000_0011,
-            0x0000_0011 & imm,
-            &[(0x0000, 3), (0x0311, 1)],
-        );
-
-        verify::<AndiOp>(
-            "zero result",
-            pc,
-            prog,
-            0x0000_0100,
-            0x0000_0100 & imm,
-            &[(0x0000, 2), (0x0001, 1), (0x0300, 1)],
-        );
+        verify::<AndiOp>("basic", pc, prog, 0x0000_0011, 0x0000_0011 & imm);
+        verify::<AndiOp>("zero result", pc, prog, 0x0000_0100, 0x0000_0100 & imm);
     }
 
     #[test]
@@ -176,23 +160,8 @@ mod test {
         let prog_idx: usize = ((pc.0 - CENO_PLATFORM.pc_start()) / 4) as usize;
         let prog = MOCK_PROGRAM[prog_idx];
         let imm = 3;
-        verify::<OriOp>(
-            "basic",
-            pc,
-            prog,
-            0x0000_0011,
-            0x0000_0011 | imm,
-            &[(0x0000, 3), (0x0311, 1)],
-        );
-
-        verify::<OriOp>(
-            "basic2",
-            pc,
-            prog,
-            0x0000_0100,
-            0x0000_0100 | imm,
-            &[(0x0000, 2), (0x0001, 1), (0x0300, 1)],
-        );
+        verify::<OriOp>("basic", pc, prog, 0x0000_0011, 0x0000_0011 | imm);
+        verify::<OriOp>("basic2", pc, prog, 0x0000_0100, 0x0000_0100 | imm);
     }
 
     #[test]
@@ -201,23 +170,8 @@ mod test {
         let prog_idx: usize = ((pc.0 - CENO_PLATFORM.pc_start()) / 4) as usize;
         let prog = MOCK_PROGRAM[prog_idx];
         let imm = 3;
-        verify::<XoriOp>(
-            "basic",
-            pc,
-            prog,
-            0x0000_0011,
-            0x0000_0011 ^ imm,
-            &[(0x0000, 3), (0x0311, 1)],
-        );
-
-        verify::<XoriOp>(
-            "non-overlap",
-            pc,
-            prog,
-            0x0000_0100,
-            0x0000_0100 ^ imm,
-            &[(0x0000, 2), (0x0001, 1), (0x0300, 1)],
-        );
+        verify::<XoriOp>("basic", pc, prog, 0x0000_0011, 0x0000_0011 ^ imm);
+        verify::<XoriOp>("non-overlap", pc, prog, 0x0000_0100, 0x0000_0100 ^ imm);
     }
 
     fn verify<I: LogicOp>(
@@ -226,16 +180,15 @@ mod test {
         program: u32,
         rs1_read: u32,
         expected_rd_written: u32,
-        lookups: &[(u64, usize)],
     ) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let imm: u32 = 3;
-        let (prefix, rom_type, rd_written) = match I::INST_KIND {
-            InsnKind::ANDI => ("ANDI", ROMType::And, rs1_read & imm),
-            InsnKind::ORI => ("ORI", ROMType::Or, rs1_read | imm),
-            InsnKind::XORI => ("XORI", ROMType::Xor, rs1_read ^ imm),
+        let (prefix, rd_written) = match I::INST_KIND {
+            InsnKind::ANDI => ("ANDI", rs1_read & imm),
+            InsnKind::ORI => ("ORI", rs1_read | imm),
+            InsnKind::XORI => ("XORI", rs1_read ^ imm),
             _ => unreachable!(),
         };
 
@@ -269,9 +222,6 @@ mod test {
         cb.require_equal(|| "assert_rd_written", rd_written_expr, expected.value())
             .unwrap();
 
-        let lkm = lkm.into_finalize_result()[rom_type as usize].clone();
-        assert_eq!(&lkm.into_iter().sorted().collect_vec(), lookups);
-
         MockProver::assert_satisfied(
             &cb,
             &raw_witin
@@ -281,6 +231,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 }

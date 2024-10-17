@@ -80,9 +80,9 @@ impl<E: ExtensionField> LogicConfig<E> {
         cb: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
     ) -> Result<Self, ZKVMError> {
-        let rs1_read = UInt8::new(|| "rs1_read", cb)?;
-        let rs2_read = UInt8::new(|| "rs2_read", cb)?;
-        let rd_written = UInt8::new(|| "rd_written", cb)?;
+        let rs1_read = UInt8::new_unchecked(|| "rs1_read", cb)?;
+        let rs2_read = UInt8::new_unchecked(|| "rs2_read", cb)?;
+        let rd_written = UInt8::new_unchecked(|| "rd_written", cb)?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
