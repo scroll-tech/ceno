@@ -1,7 +1,7 @@
 use ark_std::{end_timer, iterable::Iterable, start_timer};
 use ff::Field;
 use ff_ext::ExtensionField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use multilinear_extensions::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension},
     virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},

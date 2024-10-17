@@ -831,7 +831,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
 mod tests {
 
     mod value {
-        use crate::{witness::LkMultiplicity, Value};
+        use crate::{Value, witness::LkMultiplicity};
         #[test]
         fn test_add() {
             let a = Value::new_unchecked(1u32);

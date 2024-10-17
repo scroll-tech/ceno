@@ -10,7 +10,7 @@ use sumcheck::util::ceil_log2;
 
 use crate::{
     structs::{Circuit, Gate1In, Gate2In, Gate3In, GateCIn, Layer, SumcheckStepType},
-    utils::{i64_to_field, MatrixMLEColumnFirst, MatrixMLERowFirst},
+    utils::{MatrixMLEColumnFirst, MatrixMLERowFirst, i64_to_field},
 };
 
 struct LayerSubsets {
@@ -122,15 +122,6 @@ impl<E: ExtensionField> Circuit<E> {
         let mut input_paste_from_consts_in = Vec::new();
         let mut max_in_wit_num_vars: Option<usize> = None;
         for (ty, in_cell_ids) in in_cell_ids.iter() {
-            #[cfg(feature = "debug")]
-            in_cell_ids.iter().enumerate().map(|(i, cell_id)| {
-                // Each wire_in should be assigned with a consecutive
-                // input layer segment. Then we can use a special
-                // sumcheck protocol to prove it.
-                assert!(
-                    i == 0 || wire_ids_in_layer[*cell_id] == wire_ids_in_layer[wire_in[i - 1]] + 1
-                );
-            });
             let segment = (
                 wire_ids_in_layer[in_cell_ids[0]],
                 wire_ids_in_layer[in_cell_ids[in_cell_ids.len() - 1]] + 1, /* + 1 for exclusive
@@ -851,10 +842,9 @@ mod tests {
         circuit_builder.configure();
         let circuit = Circuit::new(&circuit_builder);
         assert_eq!(circuit.layers.len(), 1);
-        assert_eq!(
-            circuit.layers[0].sumcheck_steps,
-            vec![SumcheckStepType::InputPhase2Step1]
-        );
+        assert_eq!(circuit.layers[0].sumcheck_steps, vec![
+            SumcheckStepType::InputPhase2Step1
+        ]);
     }
 
     #[test]
@@ -892,24 +882,19 @@ mod tests {
 
         assert_eq!(circuit.layers.len(), 3);
         // Single input witness, therefore no input phase 2 steps.
-        assert_eq!(
-            circuit.layers[2].sumcheck_steps,
-            vec![SumcheckStepType::Phase1Step1]
-        );
+        assert_eq!(circuit.layers[2].sumcheck_steps, vec![
+            SumcheckStepType::Phase1Step1
+        ]);
         // There are only one incoming evals since the last layer is linear, and
         // no subset evals. Therefore, there are no phase1 steps.
-        assert_eq!(
-            circuit.layers[1].sumcheck_steps,
-            vec![
-                SumcheckStepType::Phase2Step1,
-                SumcheckStepType::Phase2Step2NoStep3,
-            ]
-        );
+        assert_eq!(circuit.layers[1].sumcheck_steps, vec![
+            SumcheckStepType::Phase2Step1,
+            SumcheckStepType::Phase2Step2NoStep3,
+        ]);
         // Output layer, single output witness, therefore no output phase 1 steps.
-        assert_eq!(
-            circuit.layers[0].sumcheck_steps,
-            vec![SumcheckStepType::LinearPhase2Step1]
-        );
+        assert_eq!(circuit.layers[0].sumcheck_steps, vec![
+            SumcheckStepType::LinearPhase2Step1
+        ]);
     }
 
     #[test]
@@ -923,17 +908,13 @@ mod tests {
 
         assert_eq!(circuit.layers.len(), 2);
         // Single input witness, therefore no input phase 2 steps.
-        assert_eq!(
-            circuit.layers[1].sumcheck_steps,
-            vec![SumcheckStepType::Phase1Step1]
-        );
+        assert_eq!(circuit.layers[1].sumcheck_steps, vec![
+            SumcheckStepType::Phase1Step1
+        ]);
         // Output layer, single output witness, therefore no output phase 1 steps.
-        assert_eq!(
-            circuit.layers[0].sumcheck_steps,
-            vec![
-                SumcheckStepType::Phase2Step1,
-                SumcheckStepType::Phase2Step2NoStep3
-            ]
-        );
+        assert_eq!(circuit.layers[0].sumcheck_steps, vec![
+            SumcheckStepType::Phase2Step1,
+            SumcheckStepType::Phase2Step2NoStep3
+        ]);
     }
 }

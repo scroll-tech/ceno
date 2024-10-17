@@ -5,7 +5,7 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip, ChipHandler,
+        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip,
     },
     constants::OpcodeType,
     register_witness,
@@ -103,9 +103,9 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
 mod test {
     #[cfg(not(debug_assertions))]
     use crate::{
+        CircuitWiresIn, SingerGraphBuilder, SingerParams,
         instructions::{InstructionGraph, SingerCircuitBuilder},
         scheme::GKRGraphProverState,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
     #[cfg(not(debug_assertions))]
     use ark_std::test_rng;
@@ -147,10 +147,9 @@ mod test {
         phase0_values_map.insert("phase0_pc".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_stack_ts".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert("phase0_memory_ts".to_string(), vec![Goldilocks::from(1u64)]);
-        phase0_values_map.insert(
-            "phase0_stack_top".to_string(),
-            vec![Goldilocks::from(100u64)],
-        );
+        phase0_values_map.insert("phase0_stack_top".to_string(), vec![Goldilocks::from(
+            100u64,
+        )]);
         phase0_values_map.insert("phase0_clk".to_string(), vec![Goldilocks::from(1u64)]);
         phase0_values_map.insert(
             "phase0_pc_add".to_string(),

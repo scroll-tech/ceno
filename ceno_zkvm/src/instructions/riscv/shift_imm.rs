@@ -1,14 +1,14 @@
 use super::RIVInstruction;
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     gadgets::DivConfig,
     instructions::{
-        riscv::{constants::UInt, i_insn::IInstructionConfig},
         Instruction,
+        riscv::{constants::UInt, i_insn::IInstructionConfig},
     },
     witness::LkMultiplicity,
-    Value,
 };
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
@@ -115,10 +115,10 @@ mod test {
     use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{riscv::constants::UInt, Instruction},
-        scheme::mock_prover::{MockProver, MOCK_PC_SRLI, MOCK_PC_SRLI_31, MOCK_PROGRAM},
         Value,
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
+        instructions::{Instruction, riscv::constants::UInt},
+        scheme::mock_prover::{MOCK_PC_SRLI, MOCK_PC_SRLI_31, MOCK_PROGRAM, MockProver},
     };
 
     use super::{ShiftImmInstruction, SrliOp};
@@ -161,7 +161,7 @@ mod test {
             )
             .unwrap();
 
-        let (raw_witin, _) = ShiftImmInstruction::<GoldilocksExt2, SrliOp>::assign_instances(
+        let (raw_witin, lkm) = ShiftImmInstruction::<GoldilocksExt2, SrliOp>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
@@ -184,6 +184,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 }

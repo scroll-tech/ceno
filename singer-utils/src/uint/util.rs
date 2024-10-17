@@ -4,6 +4,7 @@ use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use simple_frontend::structs::{CellId, CircuitBuilder};
 
+#[allow(clippy::too_long_first_doc_paragraph)]
 /// Given some data represented by n small cells of size s
 /// this function represents the same data in m big cells of size b
 /// where b >= s

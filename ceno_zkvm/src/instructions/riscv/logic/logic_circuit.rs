@@ -8,8 +8,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        riscv::{constants::UInt8, r_insn::RInstructionConfig},
         Instruction,
+        riscv::{constants::UInt8, r_insn::RInstructionConfig},
     },
     tables::OpsTable,
     utils::split_to_u8,

@@ -1,9 +1,9 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
+    CENO_PLATFORM, PC_STEP_SIZE,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     rv32im::DecodedInstruction,
-    CENO_PLATFORM, PC_STEP_SIZE,
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -239,13 +239,10 @@ impl Tracer {
     /// Return the completed step and advance to the next cycle.
     pub fn advance(&mut self) -> StepRecord {
         let next_cycle = self.record.cycle + Self::SUBCYCLES_PER_INSN;
-        mem::replace(
-            &mut self.record,
-            StepRecord {
-                cycle: next_cycle,
-                ..StepRecord::default()
-            },
-        )
+        mem::replace(&mut self.record, StepRecord {
+            cycle: next_cycle,
+            ..StepRecord::default()
+        })
     }
 
     pub fn store_pc(&mut self, pc: ByteAddr) {

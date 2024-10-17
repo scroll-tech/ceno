@@ -1,9 +1,9 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
 use ceno_emul::{
-    ByteAddr,
+    ByteAddr, CENO_PLATFORM,
     InsnKind::{ADD, EANY},
-    StepRecord, VMState, CENO_PLATFORM,
+    StepRecord, VMState,
 };
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -18,8 +18,8 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::{
-        riscv::{arith::AddInstruction, ecall::HaltInstruction},
         Instruction,
+        riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
     set_val,
     structs::{PointAndEval, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
@@ -28,10 +28,10 @@ use crate::{
 };
 
 use super::{
+    PublicValues,
     constants::{MAX_NUM_VARIABLES, NUM_FANIN},
     prover::ZKVMProver,
     verifier::ZKVMVerifier,
-    PublicValues,
 };
 
 struct TestConfig {

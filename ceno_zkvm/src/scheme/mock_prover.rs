@@ -1,19 +1,22 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
+    ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    expression::{fmt, Expression},
+    expression::{Expression, fmt},
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U16Table, U5Table, U8Table, XorTable,
+        TableCircuit, U5Table, U8Table, U16Table, XorTable,
     },
+    witness::LkMultiplicity,
 };
 use ark_std::test_rng;
-use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
-use itertools::Itertools;
+use goldilocks::SmallField;
+use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{
     collections::HashSet,
@@ -24,6 +27,7 @@ use std::{
     ops::Neg,
     sync::OnceLock,
 };
+use strum::IntoEnumIterator;
 
 pub const MOCK_RS1: u32 = 2;
 pub const MOCK_RS2: u32 = 3;
@@ -150,6 +154,12 @@ pub(crate) enum MockProverError<E: ExtensionField> {
     // TODO later
     // r_expressions
     // w_expressions
+    LkMultiplicityError {
+        rom_type: ROMType,
+        key: u64,
+        count: isize, // +ve => missing in cs, -ve => missing in assignments
+        inst_id: usize,
+    },
 }
 
 impl<E: ExtensionField> PartialEq for MockProverError<E> {
@@ -279,6 +289,52 @@ impl<E: ExtensionField> MockProverError<E> {
                     Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
+            Self::LkMultiplicityError {
+                rom_type,
+                key,
+                count,
+                ..
+            } => {
+                let lookups = if count.abs() > 1 {
+                    format!("{} Lookups", count.abs())
+                } else {
+                    "Lookup".to_string()
+                };
+                let location = if *count > 0 {
+                    "constraint system"
+                } else {
+                    "assignments"
+                };
+                let element = match rom_type {
+                    ROMType::U5 | ROMType::U8 | ROMType::U16 => format!("Element: {key}"),
+                    ROMType::And => {
+                        let (a, b) = AndTable::unpack(*key);
+                        format!("Element: {a} < {b}")
+                    }
+                    ROMType::Or => {
+                        let (a, b) = OrTable::unpack(*key);
+                        format!("Element: {a} || {b}")
+                    }
+                    ROMType::Xor => {
+                        let (a, b) = XorTable::unpack(*key);
+                        format!("Element: {a} ^ {b}")
+                    }
+                    ROMType::Ltu => {
+                        let (a, b) = LtuTable::unpack(*key);
+                        format!("Element: {a} < {b}")
+                    }
+                    ROMType::Pow => {
+                        let (a, b) = PowTable::unpack(*key);
+                        format!("Element: {a} ** {b}")
+                    }
+                    ROMType::Instruction => format!("PC: {key}"),
+                };
+                println!(
+                    "\nLkMultiplicityError:\n\
+                    {lookups} of {rom_type:?} missing in {location}\n\
+                    {element}\n"
+                );
+            }
         }
     }
 
@@ -286,7 +342,8 @@ impl<E: ExtensionField> MockProverError<E> {
         match self {
             Self::AssertZeroError { inst_id, .. }
             | Self::AssertEqualError { inst_id, .. }
-            | Self::LookupError { inst_id, .. } => *inst_id,
+            | Self::LookupError { inst_id, .. }
+            | Self::LkMultiplicityError { inst_id, .. } => *inst_id,
         }
     }
 }
@@ -420,15 +477,17 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: [E; 2],
+        lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], Some(challenge))
+        Self::run_maybe_challenge(cb, wits_in, &[], Some(challenge), lkm)
     }
 
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], None)
+        Self::run_maybe_challenge(cb, wits_in, &[], None, lkm)
     }
 
     fn run_maybe_challenge(
@@ -436,6 +495,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         pi: &[E::BaseField],
         challenge: Option<[E; 2]>,
+        lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         let table = challenge.map(|challenge| load_tables(cb, challenge));
         let (challenge, table) = if let Some(challenge) = challenge {
@@ -553,6 +613,107 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             }
         }
 
+        // LK Multiplicity check
+        if let Some(lkm_from_assignment) = lkm {
+            // Infer LK Multiplicity from constraint system.
+            let lkm_from_cs = cb
+                .cs
+                .lk_expressions_items_map
+                .iter()
+                .map(|(rom_type, items)| {
+                    (
+                        rom_type,
+                        items
+                            .iter()
+                            .map(|expr| {
+                                let e_result =
+                                    wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
+                                let inst_id = 0;
+                                let b = e_result.get_base_field_vec_optn();
+                                let e = e_result.get_ext_field_vec_optn();
+                                if let Some(b) = b {
+                                    b[inst_id].to_canonical_u64()
+                                } else if let Some(e) = e {
+                                    let arr = e[inst_id].to_canonical_u64_vec();
+                                    arr[0] + E::BaseField::MODULUS_U64 * arr[1]
+                                } else {
+                                    unreachable!()
+                                }
+                            })
+                            .collect::<Vec<u64>>(),
+                    )
+                })
+                .fold(LkMultiplicity::default(), |mut lkm, (rom_type, args)| {
+                    match rom_type {
+                        ROMType::U5 => lkm.assert_ux::<5>(args[0]),
+                        ROMType::U8 => lkm.assert_ux::<8>(args[0]),
+                        ROMType::U16 => lkm.assert_ux::<16>(args[0]),
+                        ROMType::And => lkm.lookup_and_byte(args[0], args[1]),
+                        ROMType::Or => lkm.lookup_or_byte(args[0], args[1]),
+                        ROMType::Xor => lkm.lookup_xor_byte(args[0], args[1]),
+                        ROMType::Ltu => lkm.lookup_ltu_byte(args[0], args[1]),
+                        ROMType::Pow => {
+                            assert_eq!(args[0], 2);
+                            lkm.lookup_pow2(args[1])
+                        }
+                        ROMType::Instruction => lkm.fetch(args[0] as u32),
+                    };
+
+                    lkm
+                });
+
+            let lkm_from_cs = lkm_from_cs.into_finalize_result();
+            let lkm_from_assignment = lkm_from_assignment.into_finalize_result();
+
+            // Compare each LK Multiplicity.
+
+            for (rom_type, cs_map, ass_map) in
+                izip!(ROMType::iter(), &lkm_from_cs, &lkm_from_assignment)
+            {
+                if *cs_map != *ass_map {
+                    let cs_keys: HashSet<_> = cs_map.keys().collect();
+                    let ass_keys: HashSet<_> = ass_map.keys().collect();
+
+                    // lookup missing in lkm Constraint System.
+                    ass_keys.difference(&cs_keys).for_each(|k| {
+                        let count_ass = ass_map.get(k).unwrap();
+                        errors.push(MockProverError::LkMultiplicityError {
+                            rom_type,
+                            key: **k,
+                            count: *count_ass as isize,
+                            inst_id: 0,
+                        })
+                    });
+
+                    // lookup missing in lkm Assignments.
+                    cs_keys.difference(&ass_keys).for_each(|k| {
+                        let count_cs = cs_map.get(k).unwrap();
+                        errors.push(MockProverError::LkMultiplicityError {
+                            rom_type,
+                            key: **k,
+                            count: -(*count_cs as isize),
+                            inst_id: 0,
+                        })
+                    });
+
+                    // count of specific lookup differ lkm assignments and lkm cs
+                    cs_keys.intersection(&ass_keys).for_each(|k| {
+                        let count_cs = cs_map.get(k).unwrap();
+                        let count_ass = ass_map.get(k).unwrap();
+
+                        if count_cs != count_ass {
+                            errors.push(MockProverError::LkMultiplicityError {
+                                rom_type,
+                                key: **k,
+                                count: (*count_ass as isize) - (*count_cs as isize),
+                                inst_id: 0,
+                            })
+                        }
+                    });
+                }
+            }
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
@@ -564,11 +725,12 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
+        lkm: Option<LkMultiplicity>,
     ) {
         let result = if let Some(challenge) = challenge {
-            Self::run_with_challenge(cb, wits_in, challenge)
+            Self::run_with_challenge(cb, wits_in, challenge, lkm)
         } else {
-            Self::run(cb, wits_in)
+            Self::run(cb, wits_in, lkm)
         };
         match result {
             Ok(_) => {}
@@ -576,11 +738,12 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 println!("======================================================");
 
                 println!(
-                    r"Hints:
-                        - If you encounter a constraint error that sporadically occurs in different environments
-                          (e.g., passes locally but fails in CI),
-                          this often points to unassigned witnesses during the assignment phase.
-                          Accessing these cells before they are properly written leads to undefined behavior.
+                    r"
+Hints:
+- If you encounter a constraint error that sporadically occurs in different environments
+    (e.g., passes locally but fails in CI),
+    this often points to unassigned witnesses during the assignment phase.
+    Accessing these cells before they are properly written leads to undefined behavior.
                     "
                 );
 
@@ -618,12 +781,12 @@ mod tests {
 
     use super::*;
     use crate::{
+        ROMType::U5,
         error::ZKVMError,
         expression::{ToExpr, WitIn},
         gadgets::{AssertLTConfig, IsLtConfig},
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
-        ROMType::U5,
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -682,7 +845,7 @@ mod tests {
                 .into(),
         ];
 
-        MockProver::assert_satisfied(&builder, &wits_in, None);
+        MockProver::assert_satisfied(&builder, &wits_in, None, None);
     }
 
     #[derive(Debug)]
@@ -715,7 +878,7 @@ mod tests {
         ];
 
         let challenge = [1.into(), 1000.into()];
-        MockProver::assert_satisfied(&builder, &wits_in, Some(challenge));
+        MockProver::assert_satisfied(&builder, &wits_in, Some(challenge), None);
     }
 
     #[test]
@@ -729,37 +892,34 @@ mod tests {
         let wits_in = vec![vec![Goldilocks::from(123)].into_mle().into()];
 
         let challenge = [2.into(), 1000.into()];
-        let result = MockProver::run_with_challenge(&builder, &wits_in, challenge);
+        let result = MockProver::run_with_challenge(&builder, &wits_in, challenge, None);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
-        assert_eq!(
-            err,
-            vec![MockProverError::LookupError {
-                expression: Expression::Sum(
-                    Box::new(Expression::ScaledSum(
-                        Box::new(Expression::WitIn(0)),
-                        Box::new(Expression::Challenge(
-                            1,
-                            1,
-                            GoldilocksExt2::ONE,
-                            GoldilocksExt2::ZERO,
-                        )),
-                        Box::new(Expression::Constant(
-                            <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
-                        )),
-                    )),
+        assert_eq!(err, vec![MockProverError::LookupError {
+            expression: Expression::Sum(
+                Box::new(Expression::ScaledSum(
+                    Box::new(Expression::WitIn(0)),
                     Box::new(Expression::Challenge(
-                        0,
+                        1,
                         1,
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                ),
-                evaluated: 123002.into(), // 123 * 1000 + 2
-                name: "test_lookup_error/assert_u5/assert u5".to_string(),
-                inst_id: 0,
-            }]
-        );
+                    Box::new(Expression::Constant(
+                        <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
+                    )),
+                )),
+                Box::new(Expression::Challenge(
+                    0,
+                    1,
+                    GoldilocksExt2::ONE,
+                    GoldilocksExt2::ZERO,
+                )),
+            ),
+            evaluated: 123002.into(), // 123 * 1000 + 2
+            name: "test_lookup_error/assert_u5/assert u5".to_string(),
+            inst_id: 0,
+        }]);
         // because inst_id is not checked in our PartialEq impl
         assert_eq!(err[0].inst_id(), 0);
     }
@@ -829,10 +989,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![
-                    AssertLtCircuitInput { a: 3, b: 5 },
-                    AssertLtCircuitInput { a: 7, b: 11 },
-                ],
+                vec![AssertLtCircuitInput { a: 3, b: 5 }, AssertLtCircuitInput {
+                    a: 7,
+                    b: 11,
+                }],
                 &mut lk_multiplicity,
             )
             .unwrap();
@@ -846,6 +1006,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 1000.into()]),
+            None,
         );
     }
 
@@ -882,6 +1043,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 1000.into()]),
+            None,
         );
     }
 
@@ -949,10 +1111,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![
-                    LtCircuitInput { a: 3, b: 5 },
-                    LtCircuitInput { a: 7, b: 11 },
-                ],
+                vec![LtCircuitInput { a: 3, b: 5 }, LtCircuitInput {
+                    a: 7,
+                    b: 11,
+                }],
                 &mut lk_multiplicity,
             )
             .unwrap();
@@ -966,6 +1128,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 1000.into()]),
+            None,
         );
     }
 
@@ -1003,6 +1166,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 1000.into()]),
+            None,
         );
     }
 }

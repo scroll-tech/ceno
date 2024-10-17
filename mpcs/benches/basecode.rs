@@ -6,15 +6,15 @@ use goldilocks::GoldilocksExt2;
 
 use itertools::Itertools;
 use mpcs::{
+    Basefold, BasefoldBasecodeParams, BasefoldSpec, EncodingScheme, PolynomialCommitmentScheme,
     util::{
         arithmetic::interpolate_field_type_over_boolean_hypercube,
         plonky2_util::reverse_index_bits_in_place_field_type,
     },
-    Basefold, BasefoldBasecodeParams, BasefoldSpec, EncodingScheme, PolynomialCommitmentScheme,
 };
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
-use rand::{rngs::OsRng, SeedableRng};
+use rand::{SeedableRng, rngs::OsRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
