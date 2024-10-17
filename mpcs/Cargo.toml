@@ -15,9 +15,6 @@ ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 generic-array = { version = "0.14.7", features = ["serde"] }
 goldilocks.workspace = true
-halo2_curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", tag = "0.3.3", package = "halo2curves", features = [
-  "derive_serde",
-] }
 itertools = "0.12.1"
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4.6"
