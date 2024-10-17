@@ -15,6 +15,7 @@ use transcript::Transcript;
 
 use crate::{
     circuit_builder::CircuitBuilder,
+    declare_program,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::{
@@ -178,16 +179,24 @@ fn test_rw_lk_expression_combination() {
     test_rw_lk_expression_combination_inner::<17, 61>();
 }
 
+const PROGRAM_SIZE: usize = 4;
 #[allow(clippy::unusual_byte_groupings)]
 const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
 #[allow(clippy::unusual_byte_groupings)]
-const PROGRAM_CODE: [u32; 4] = [
-    // func7   rs2   rs1   f3  rd    opcode
-    0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
-    ECALL_HALT,                               // ecall halt
-    ECALL_HALT,                               // ecall halt
-    ECALL_HALT,                               // ecall halt
-];
+const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
+    let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
+
+    declare_program!(
+        program,
+        // func7   rs2   rs1   f3  rd    opcode
+        0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
+        ECALL_HALT,                               // ecall halt
+        ECALL_HALT,                               // ecall halt
+        ECALL_HALT,                               // ecall halt
+    );
+    program
+};
+
 #[ignore = "this case is already tested in riscv_example as ecall_halt has only one instance"]
 #[test]
 fn test_single_add_instance_e2e() {
@@ -202,9 +211,8 @@ fn test_single_add_instance_e2e() {
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
 
-    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
+    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>();
 
-    let program_code: Vec<u32> = PROGRAM_CODE.to_vec();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
     zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
@@ -215,10 +223,10 @@ fn test_single_add_instance_e2e() {
         &(),
     );
 
-    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
+    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
         &zkvm_cs,
         prog_config.clone(),
-        &program_code,
+        &PROGRAM_CODE,
     );
 
     let pk = zkvm_cs
@@ -272,10 +280,14 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
         .unwrap();
     zkvm_witness
-        .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program_code.len())
+        .assign_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
+            &zkvm_cs,
+            &prog_config,
+            &PROGRAM_CODE.len(),
+        )
         .unwrap();
 
-    let pi = PublicValues::new(0, 0);
+    let pi = PublicValues::new(0, 0, 0);
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, 1, transcript)
