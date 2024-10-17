@@ -77,3 +77,8 @@ jobs:
           cargo make clippy
           # Same for clippy:
           cargo clippy --workspace --all-targets --exclude ceno_rt --release
+
+      - name: Install taplo
+        run: taplo --version || cargo install taplo-cli
+      - name: Run taplo
+        run: taplo fmt --check --diff
