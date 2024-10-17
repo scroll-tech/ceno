@@ -380,36 +380,25 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
+        // fix the program table
         let mut programs = [0u32; MOCK_PROGRAM_SIZE];
         for (i, &program) in input_programs.iter().enumerate() {
             programs[i] = program;
         }
 
-        let table = challenge.map(|challenge| {
-            let mut table = load_tables(cb, challenge);
-            //
-            let mut prog_table = vec![];
-            Self::load_program_table(&mut prog_table, &programs, challenge);
-            for prog in prog_table {
-                table.insert(prog);
-            }
-            table
-        });
-
-        let (challenge, table) = if let Some(challenge) = challenge {
-            (challenge, table.unwrap())
+        // load tables
+        let (challenge, mut table) = if let Some(challenge) = challenge {
+            (challenge, load_tables(cb, challenge))
         } else {
-            let (challenge, mut table) = load_once_tables(cb);
-
-            let mut prog_table = vec![];
-            Self::load_program_table(&mut prog_table, &programs, challenge);
-            for prog in prog_table {
-                table.insert(prog);
-            }
-            (challenge, table)
+            load_once_tables(cb)
         };
-        let mut errors = vec![];
+        let mut prog_table = vec![];
+        Self::load_program_table(&mut prog_table, &programs, challenge);
+        for prog in prog_table {
+            table.insert(prog);
+        }
 
+        let mut errors = vec![];
         // Assert zero expressions
         for (expr, name) in cb
             .cs
