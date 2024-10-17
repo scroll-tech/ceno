@@ -34,7 +34,10 @@ where
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct BasefoldProverParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
+pub struct BasefoldProverParams<E: ExtensionField, Spec: BasefoldSpec<E>>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
     pub encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
 }
 
@@ -52,7 +55,10 @@ where
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
+pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
     pub(super) encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
 }
 
@@ -159,16 +165,6 @@ where
 
     pub fn is_trivial(&self) -> bool {
         Self::trivial_num_vars(self.num_vars)
-    }
-}
-
-impl<E: ExtensionField, Spec: BasefoldSpec<E>> From<BasefoldCommitmentWithData<E, Spec>>
-    for Digest<E, Spec>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn from(val: BasefoldCommitmentWithData<E, Spec>) -> Self {
-        val.get_root_as()
     }
 }
 
