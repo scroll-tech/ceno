@@ -96,13 +96,13 @@ impl StepRecord {
     pub fn new_i_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: Word,
+        insn_code: u32,
         rs1_read: Word,
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
-        StepRecord::new_insn(
+        StepRecord::new_insn2(
             cycle,
             pc,
             insn_code,
