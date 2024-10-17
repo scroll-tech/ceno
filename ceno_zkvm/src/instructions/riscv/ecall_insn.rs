@@ -5,7 +5,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::AssertLTConfig,
     set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
@@ -18,7 +18,7 @@ pub struct EcallInstructionConfig {
     pub pc: WitIn,
     pub ts: WitIn,
     prev_x5_ts: WitIn,
-    lt_x5_cfg: IsLtConfig,
+    lt_x5_cfg: AssertLTConfig,
 }
 
 impl EcallInstructionConfig {

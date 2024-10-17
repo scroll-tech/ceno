@@ -1892,27 +1892,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "singer-pro"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "ff",
- "ff_ext",
- "gkr",
- "gkr-graph",
- "goldilocks",
- "itertools 0.12.1",
- "paste",
- "rayon",
- "serde",
- "simple-frontend",
- "singer-utils",
- "strum 0.25.0",
- "strum_macros 0.25.3",
- "transcript",
-]
-
-[[package]]
 name = "singer-utils"
 version = "0.1.0"
 dependencies = [
