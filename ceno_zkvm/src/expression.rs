@@ -25,7 +25,7 @@ use crate::{
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
-    /// Fixed
+    /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
     /// Public Values
     Instance(Instance),
