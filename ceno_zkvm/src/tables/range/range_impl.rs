@@ -40,20 +40,10 @@ impl RangeTableConfig {
 
     pub fn generate_fixed_traces<F: SmallField>(
         &self,
-        num_fixed: usize,
-        content: Vec<u64>,
+        _num_fixed: usize,
+        _content: Vec<u64>,
     ) -> RowMajorMatrix<F> {
-        let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
-
-        fixed
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .zip(content.into_par_iter())
-            .for_each(|(row, i)| {
-                set_fixed_val!(row, self.fixed, F::from(i));
-            });
-
-        fixed
+        unreachable!()
     }
 
     pub fn assign_instances<F: SmallField>(
