@@ -81,4 +81,4 @@ jobs:
       - name: Install taplo
         run: taplo --version || cargo install taplo-cli
       - name: Run taplo
-        run: taplo fmt --check
+        run: taplo fmt --check --diff
