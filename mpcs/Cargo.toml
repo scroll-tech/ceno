@@ -32,6 +32,7 @@ generic-array = { version = "0.14.7", features = ["serde"] }
 multilinear_extensions = { path = "../multilinear_extensions" }
 transcript = { path = "../transcript" }
 plonky2 = "0.2.2"
+keccak-hash = "0.11.0"
 
 [dev-dependencies]
 simple-frontend = { path = "../simple-frontend" }

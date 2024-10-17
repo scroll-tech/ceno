@@ -20,6 +20,8 @@ mod hash;
 pub use hash::Hasher;
 mod poseidon;
 pub use poseidon::PoseidonHasher;
+mod keccak;
+pub use keccak::KeccakHasher;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "", deserialize = ""))]
