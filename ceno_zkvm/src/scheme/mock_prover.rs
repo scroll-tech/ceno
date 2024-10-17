@@ -516,16 +516,21 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[u32],
+        input_programs: &[u32],
         pi: &[E::BaseField],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
+        let mut programs = [0u32; MOCK_PROGRAM_SIZE];
+        for (i, &program) in input_programs.iter().enumerate() {
+            programs[i] = program;
+        }
+
         let table = challenge.map(|challenge| {
             let mut table = load_tables(cb, challenge);
             //
             let mut prog_table = vec![];
-            Self::load_program_table(&mut prog_table, programs, challenge);
+            Self::load_program_table(&mut prog_table, &programs, challenge);
             for prog in prog_table {
                 table.insert(prog);
             }
@@ -538,7 +543,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             let (challenge, mut table) = load_once_tables(cb);
 
             let mut prog_table = vec![];
-            Self::load_program_table(&mut prog_table, programs, challenge);
+            Self::load_program_table(&mut prog_table, &programs, challenge);
             for prog in prog_table {
                 table.insert(prog);
             }
@@ -762,12 +767,20 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
     }
 
-    fn load_program_table(t_vec: &mut Vec<Vec<u64>>, programs: &[u32], challenge: [E; 2]) {
+    fn load_program_table(
+        t_vec: &mut Vec<Vec<u64>>,
+        programs: &[u32; MOCK_PROGRAM_SIZE],
+        challenge: [E; 2],
+    ) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = ProgramTableCircuit::construct_circuit(&mut cb).unwrap();
-        let fixed =
-            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, programs);
+        let config =
+            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
+        let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
+            &config,
+            cs.num_fixed,
+            programs,
+        );
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.

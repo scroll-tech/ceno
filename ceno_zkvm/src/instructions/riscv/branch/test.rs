@@ -1,5 +1,3 @@
-use std::ops::Neg;
-
 use ceno_emul::{ByteAddr, Change, EncodedInstruction, PC_STEP_SIZE, StepRecord, Word};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
