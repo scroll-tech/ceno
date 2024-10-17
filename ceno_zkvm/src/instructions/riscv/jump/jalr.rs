@@ -4,9 +4,16 @@ use ff::Field;
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, expression::{ToExpr, WitIn}, instructions::{
-        riscv::{constants::UInt, i_insn::IInstructionConfig, insn_base::MemAddr}, Instruction
-    }, set_val, witness::LkMultiplicity, Value
+    Value,
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{ToExpr, WitIn},
+    instructions::{
+        Instruction,
+        riscv::{constants::UInt, i_insn::IInstructionConfig, insn_base::MemAddr},
+    },
+    set_val,
+    witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 
@@ -97,18 +104,23 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
-
         let rs1 = step.rs1().unwrap().value;
         let imm: i32 = step.insn().imm_or_funct7() as i32;
         let rd = step.rd().unwrap().value.after;
 
-        let (sum, overflowing) = rs1.overflowing_add_signed(imm);        
+        let (sum, overflowing) = rs1.overflowing_add_signed(imm);
 
         set_val!(instance, config.imm, imm as u64);
-        config.rs1_read.assign_value(instance, Value::new(rs1, lk_multiplicity));
-        config.rd_written.assign_value(instance, Value::new(rd, lk_multiplicity));
+        config
+            .rs1_read
+            .assign_value(instance, Value::new(rs1, lk_multiplicity));
+        config
+            .rd_written
+            .assign_value(instance, Value::new(rd, lk_multiplicity));
 
-        config.next_pc_addr.assign_instance(instance, lk_multiplicity, sum)?;        
+        config
+            .next_pc_addr
+            .assign_instance(instance, lk_multiplicity, sum)?;
         let overflow: E::BaseField = match (overflowing, imm < 0) {
             (false, _) => E::BaseField::ZERO,
             (true, false) => E::BaseField::ONE,
@@ -116,7 +128,9 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         };
         set_val!(instance, config.overflow, overflow);
 
-        config.i_insn.assign_instance(instance, lk_multiplicity, step)?;
+        config
+            .i_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())
     }
