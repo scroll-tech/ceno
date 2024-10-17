@@ -1,7 +1,6 @@
 [env]
 CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 CORE = { script = ["nproc"] }
-RAYON_NUM_THREADS = "${CORE}"
 CUR_TARGET = { script = ['''
         if [ -z "${TARGET}" ]; then
             TARGET=$(rustc -vV | grep "host" | awk '{print $2}')
@@ -10,53 +9,54 @@ CUR_TARGET = { script = ['''
             echo "${TARGET}"
         fi
         '''] }
+RAYON_NUM_THREADS = "${CORE}"
 
 [tasks.tests]
-workspace = false
-command = "cargo"
 args = [
-    "test",
-    "--lib",
-    "--release",
-    "--target",
-    "${CUR_TARGET}",
-    "--workspace",
-    "--exclude",
-    "ceno_rt",
+  "test",
+  "--lib",
+  "--release",
+  "--target",
+  "${CUR_TARGET}",
+  "--workspace",
+  "--exclude",
+  "ceno_rt",
 ]
+command = "cargo"
+workspace = false
 
 [tasks.fmt-all-check]
-workspace = false
-command = "cargo"
 args = ["fmt", "--all", "--", "--check"]
+command = "cargo"
+workspace = false
 
 [tasks.fmt-all]
-workspace = false
-command = "cargo"
 args = ["fmt", "--all"]
+command = "cargo"
+workspace = false
 
 [tasks.clippy-all]
-workspace = false
-command = "cargo"
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
+command = "cargo"
+workspace = false
 
 [tasks.fmt]
-workspace = false
-command = "cargo"
 args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
+command = "cargo"
+workspace = false
 
 [tasks.clippy]
-workspace = false
-command = "cargo"
 args = [
-    "clippy",
-    "--workspace",
-    "--all-targets",
-    "--exclude",
-    "ceno_rt",
-    "--target",
-    "${CUR_TARGET}",
-    "--",
-    "-D",
-    "warnings",
+  "clippy",
+  "--workspace",
+  "--all-targets",
+  "--exclude",
+  "ceno_rt",
+  "--target",
+  "${CUR_TARGET}",
+  "--",
+  "-D",
+  "warnings",
 ]
+command = "cargo"
+workspace = false

@@ -12,14 +12,14 @@ use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
 use sumcheck::structs::IOPProverMessage;
 
 pub struct TowerProver;
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TowerProofs<E: ExtensionField> {
     pub proofs: Vec<Vec<IOPProverMessage<E>>>,
     // specs -> layers -> evals
@@ -142,7 +142,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let config = TC::construct_circuit(&mut circuit_builder).unwrap();
-        assert!(self.circuit_css.insert(TC::name(), cs.clone()).is_none());
+        assert!(self.circuit_css.insert(TC::name(), cs).is_none());
 
         config
     }

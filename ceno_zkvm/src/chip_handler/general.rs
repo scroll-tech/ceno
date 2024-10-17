@@ -54,6 +54,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn lk_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        table_len: usize,
         rlc_record: Expression<E>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
@@ -61,7 +62,34 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.lk_table_record(name_fn, rlc_record, multiplicity)
+        self.cs
+            .lk_table_record(name_fn, table_len, rlc_record, multiplicity)
+    }
+
+    pub fn r_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_len: usize,
+        rlc_record: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.r_table_record(name_fn, table_len, rlc_record)
+    }
+
+    pub fn w_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_len: usize,
+        rlc_record: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.w_table_record(name_fn, table_len, rlc_record)
     }
 
     /// Fetch an instruction at a given PC from the Program table.
