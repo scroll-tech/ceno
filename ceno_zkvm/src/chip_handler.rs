@@ -49,7 +49,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
 }
 
 /// The common representation of a memory address.
-pub type AddressExpr<E> = [Expression<E>; UINT_LIMBS];
+pub type AddressExpr<E> = Expression<E>;
 
 /// The common representation of a memory value.
 /// Format: `[u16; UINT_LIMBS]`, least-significant-first.

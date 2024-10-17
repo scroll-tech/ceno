@@ -587,7 +587,7 @@ impl<E: ExtensionField> UIntLimbs<32, 16, E> {
 
     /// Interpret this UInt as a memory address.
     pub fn memory_address(&self) -> AddressExpr<E> {
-        self.memory_expr()
+        self.value()
     }
 
     /// Return a value suitable for memory read/write. From [u16; 2] limbs
