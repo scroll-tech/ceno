@@ -6,7 +6,7 @@ use crate::{
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U5Table, U8Table, U16Table, XorTable,
+        TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
     },
     witness::LkMultiplicity,
 };
@@ -210,7 +210,9 @@ impl<E: ExtensionField> MockProverError<E> {
                     "assignments"
                 };
                 let element = match rom_type {
-                    ROMType::U5 | ROMType::U8 | ROMType::U16 => format!("Element: {key}"),
+                    ROMType::U5 | ROMType::U8 | ROMType::U14 | ROMType::U16 => {
+                        format!("Element: {key}")
+                    }
                     ROMType::And => {
                         let (a, b) = AndTable::unpack(*key);
                         format!("Element: {a} < {b}")
@@ -290,6 +292,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     let mut table_vec = vec![];
     load_range_table::<U5Table, _>(&mut table_vec, cb, challenge);
     load_range_table::<U8Table, _>(&mut table_vec, cb, challenge);
+    load_range_table::<U14Table, _>(&mut table_vec, cb, challenge);
     load_range_table::<U16Table, _>(&mut table_vec, cb, challenge);
     load_op_table::<AndTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<OrTable, _>(&mut table_vec, cb, challenge);
@@ -541,6 +544,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     match rom_type {
                         ROMType::U5 => lkm.assert_ux::<5>(args[0]),
                         ROMType::U8 => lkm.assert_ux::<8>(args[0]),
+                        ROMType::U14 => lkm.assert_ux::<14>(args[0]),
                         ROMType::U16 => lkm.assert_ux::<16>(args[0]),
                         ROMType::And => lkm.lookup_and_byte(args[0], args[1]),
                         ROMType::Or => lkm.lookup_or_byte(args[0], args[1]),

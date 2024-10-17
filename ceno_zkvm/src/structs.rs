@@ -45,6 +45,7 @@ pub type ChallengeId = u16;
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256
+    U14,         // 2^14 = 16,384
     U16,         // 2^16 = 65,536
     And,         // a & b where a, b are bytes
     Or,          // a | b where a, b are bytes
