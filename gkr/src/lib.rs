@@ -1,3 +1,4 @@
+#![deny(clippy::cargo)]
 #![feature(associated_const_equality)]
 
 mod circuit;
