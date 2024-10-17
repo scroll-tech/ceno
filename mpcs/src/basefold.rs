@@ -42,9 +42,9 @@ type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 
 mod structure;
 pub use structure::{
-    Basefold, BasefoldBasecodePoseidonParams, BasefoldCommitment, BasefoldCommitmentWithData,
-    BasefoldDefault, BasefoldParams, BasefoldProverParams, BasefoldRSPoseidonParams,
-    BasefoldVerifierParams,
+    Basefold, BasefoldBasecodeKeccakParams, BasefoldBasecodePoseidonParams, BasefoldCommitment,
+    BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams, BasefoldProverParams,
+    BasefoldRSKeccakParams, BasefoldRSPoseidonParams, BasefoldVerifierParams,
 };
 mod commit_phase;
 use commit_phase::{commit_phase, CommitPhaseStrategy};
@@ -770,10 +770,8 @@ mod test {
     };
     use goldilocks::GoldilocksExt2;
 
-    use super::{
-        structure::{
-            BasefoldBasecodeKeccakParams, BasefoldBasecodePoseidonParams, BasefoldRSKeccakParams,
-        },
+    use super::structure::{
+        BasefoldBasecodeKeccakParams, BasefoldBasecodePoseidonParams, BasefoldRSKeccakParams,
         BasefoldRSPoseidonParams,
     };
 

@@ -10,16 +10,16 @@ use mpcs::{
         get_points_from_challenge, setup_pcs, vecs_as_slices,
     },
     util::plonky2_util::log2_ceil,
-    Basefold, BasefoldBasecodePoseidonParams, BasefoldRSPoseidonParams, Evaluation,
-    PolynomialCommitmentScheme,
+    Basefold, BasefoldBasecodeKeccakParams, BasefoldBasecodePoseidonParams, BasefoldRSKeccakParams,
+    BasefoldRSPoseidonParams, Evaluation, PolynomialCommitmentScheme,
 };
 
 use transcript::Transcript;
 
 type PcsGoldilocksRSCodePoseidon = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
 type PcsGoldilocksBasecodePoseidon = Basefold<GoldilocksExt2, BasefoldBasecodePoseidonParams>;
-type PcsGoldilocksRSCodeKeccak = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
-type PcsGoldilocksBasecodeKeccak = Basefold<GoldilocksExt2, BasefoldBasecodePoseidonParams>;
+type PcsGoldilocksRSCodeKeccak = Basefold<GoldilocksExt2, BasefoldRSKeccakParams>;
+type PcsGoldilocksBasecodeKeccak = Basefold<GoldilocksExt2, BasefoldBasecodeKeccakParams>;
 type T = Transcript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
