@@ -19,6 +19,10 @@ pub fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) -> u32
     }
 }
 
+// R-Type
+//        25    20    15       12   7       0
+// +------+-----+-----+--------+----+-------+
+// funct7 | rs2 | rs1 | funct3 | rd | opcode
 fn encode_r(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> u32 {
     let rs2 = rs2 & MASK_5_BITS; // 5-bits mask
     let rs1 = rs1 & MASK_5_BITS;
@@ -29,6 +33,10 @@ fn encode_r(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> u32 {
     func7 << 25 | rs2 << 20 | rs1 << 15 | func3 << 12 | rd << 7 | opcode
 }
 
+// I-Type
+//           20    15       12   7       0
+// +---------+-----+--------+----+-------+
+// imm[0:11] | rs1 | funct3 | rd | opcode
 fn encode_i(kind: InsnKind, rs1: u32, rd: u32, imm: u32) -> u32 {
     let rs1 = rs1 & MASK_5_BITS;
     let rd = rd & MASK_5_BITS;
@@ -38,6 +46,10 @@ fn encode_i(kind: InsnKind, rs1: u32, rd: u32, imm: u32) -> u32 {
     imm << 20 | rs1 << 15 | func3 << 12 | rd << 7 | opcode
 }
 
+// S-Type
+//           25    20    15       12         7       0
+// +---------+-----+-----+--------+----------+-------+
+// imm[5:11] | rs2 | rs1 | funct3 | imm[0:4] | opcode
 fn encode_s(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
     let rs2 = rs2 & MASK_5_BITS;
     let rs1 = rs1 & MASK_5_BITS;
@@ -48,6 +60,10 @@ fn encode_s(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
     imm_hi << 25 | rs2 << 20 | rs1 << 15 | func3 << 12 | imm_lo << 7 | opcode
 }
 
+// B-Type
+//         31          25    20    15       12         8         7       0
+// +-------+-----------+-----+-----+--------+----------+---------+-------+
+// imm[12] | imm[5:10] | rs2 | rs1 | funct3 | imm[1:4] | imm[11] | opcode
 fn encode_b(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
     let rs2 = rs2 & MASK_5_BITS;
     let rs1 = rs1 & MASK_5_BITS;
@@ -64,6 +80,11 @@ fn encode_b(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
         | ((imm >> 11) & 1) << 7
         | opcode
 }
+
+// J-Type
+//         31          21        20           12   7       0
+// +-------+-----------+---------+------------+----+-------+
+// imm[20] | imm[1:10] | imm[11] | imm[12:19] | rd | opcode
 fn encode_j(kind: InsnKind, rd: u32, imm: u32) -> u32 {
     let rd = rd & MASK_5_BITS;
     let opcode = kind.codes().opcode;
@@ -76,6 +97,11 @@ fn encode_j(kind: InsnKind, rd: u32, imm: u32) -> u32 {
         | rd << 7
         | opcode
 }
+
+// U-Type
+//            12   7        0
+// +----------+----+--------+
+// imm[12:31] | rd | opcode
 fn encode_u(kind: InsnKind, rd: u32, imm: u32) -> u32 {
     (imm >> 12) << 12 | (rd & MASK_5_BITS) << 7 | kind.codes().opcode
 }
