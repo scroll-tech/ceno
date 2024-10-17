@@ -1,10 +1,8 @@
 [package]
-name = "singer"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = "singer"
+version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
@@ -13,36 +11,36 @@ goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
 
+ff_ext = { path = "../ff_ext" }
 gkr = { path = "../gkr", features = ["parallel"] }
-transcript = { path = "../transcript" }
-mpcs = { path = "../mpcs" }
 gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
+mpcs = { path = "../mpcs" }
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
 simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 singer-utils = { version = "0.1.0", path = "../singer-utils" }
-multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
-ff_ext = { path = "../ff_ext" }
+transcript = { path = "../transcript" }
 
 itertools = "0.12.1"
+paste = "1.0.15"
 strum = "0.25.0"
 strum_macros = "0.25.3"
-paste = "1.0.15"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-tracing-flame = "0.2.0"
 tracing = "0.1.40"
+tracing-flame = "0.2.0"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [dev-dependencies]
-pprof = { version = "0.13", features = ["flamegraph"]}
-criterion = { version = "0.5", features = ["html_reports"] }
 cfg-if = "1.0.0"
 const_env = "0.1.2"
+criterion = { version = "0.5", features = ["html_reports"] }
+pprof = { version = "0.13", features = ["flamegraph"] }
 
 [features]
-witness-count = []
-test-dbg = []
 dbg-add-opcode = []
-non_pow2_rayon_thread = []
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
+non_pow2_rayon_thread = []
+test-dbg = []
+witness-count = []
 
 [[bench]]
-name = "add"
 harness = false
+name = "add"

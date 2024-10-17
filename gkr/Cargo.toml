@@ -1,44 +1,42 @@
 [package]
-name = "gkr"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = "gkr"
+version.workspace = true
 
 [dependencies]
-ff.workspace = true
 ark-std.workspace = true
+ff.workspace = true
 goldilocks.workspace = true
 
-simple-frontend = { path = "../simple-frontend" }
-transcript = { path = "../transcript" }
-sumcheck = { path = "../sumcheck" }
-multilinear_extensions = { path = "../multilinear_extensions" }
+const_env = "0.1.2"
+crossbeam-channel = "0.5.13"
 ff_ext = { path = "../ff_ext" }
+itertools = "0.12.1"
+multilinear_extensions = { path = "../multilinear_extensions" }
+rayon.workspace = true
 serde.workspace = true
 serde_json = "1.0.128"
-rayon.workspace = true
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-tracing-flame = "0.2.0"
+simple-frontend = { path = "../simple-frontend" }
+sumcheck = { path = "../sumcheck" }
 tracing = "0.1.40"
-crossbeam-channel = "0.5.13"
-itertools = "0.12.1"
-const_env = "0.1.2"
+tracing-flame = "0.2.0"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+transcript = { path = "../transcript" }
 
 [dev-dependencies]
-tiny-keccak = { version = "2.0.2", features = ["keccak"] }
-pprof = { version = "0.13", features = ["flamegraph"]}
-criterion = { version = "0.5", features = ["html_reports"] }
 cfg-if = "1.0.0"
+criterion = { version = "0.5", features = ["html_reports"] }
+pprof = { version = "0.13", features = ["flamegraph"] }
+tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 
 [features]
-default = [ ]
+default = []
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
-parallel = [ ]
 non_pow2_rayon_thread = ["sumcheck/non_pow2_rayon_thread"]
+parallel = []
 unsafe = []
 
 [[bench]]
-name = "keccak256"
 harness = false
+name = "keccak256"

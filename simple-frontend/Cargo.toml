@@ -1,16 +1,14 @@
 
 [package]
-name = "simple-frontend"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = "simple-frontend"
+version.workspace = true
 
 [dependencies]
-ff_ext = { path = "../ff_ext" }
 ark-std.workspace = true
 ff.workspace = true
+ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
 itertools = "0.12.1"
 rayon.workspace = true
