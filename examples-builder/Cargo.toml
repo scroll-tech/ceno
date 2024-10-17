@@ -1,5 +1,5 @@
 [package]
-name = "ceno-examples"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
+name = "ceno-examples"
+version.workspace = true

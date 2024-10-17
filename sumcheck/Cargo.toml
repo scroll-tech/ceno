@@ -1,34 +1,32 @@
 [package]
-name = "sumcheck"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = "sumcheck"
+version.workspace = true
 
 [dependencies]
-ff_ext = { path = "../ff_ext" }
 ark-ff = "0.4.2"
-tracing = "0.1.40"
-const_env = "0.1.2"
-itertools = "0.12.1"
 ark-std.workspace = true
+const_env = "0.1.2"
 ff.workspace = true
+ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
+itertools = "0.12.1"
 rayon.workspace = true
 serde.workspace = true
+tracing = "0.1.40"
 
-multilinear_extensions = { path = "../multilinear_extensions", features = [ "parallel"] }
-transcript = { path = "../transcript" }
 crossbeam-channel = "0.5.13"
+multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
+transcript = { path = "../transcript" }
 
 [dev-dependencies]
-pprof = { version = "0.13", features = ["flamegraph"]}
 criterion = { version = "0.5", features = ["html_reports"] }
+pprof = { version = "0.13", features = ["flamegraph"] }
 
 [[bench]]
-name = "devirgo_sumcheck"
 harness = false
+name = "devirgo_sumcheck"
 
 [features]
-non_pow2_rayon_thread = [ ]
+non_pow2_rayon_thread = []

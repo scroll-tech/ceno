@@ -1,18 +1,16 @@
 [package]
-name = "transcript"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = "transcript"
+version.workspace = true
 
 [dependencies]
-ff_ext = { path = "../ff_ext" }
-crossbeam-channel = "0.5.13"
 ark-std.workspace = true
+crossbeam-channel = "0.5.13"
 ff.workspace = true
+ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
 halo2curves.workspace = true
+poseidon.workspace = true
 rayon.workspace = true
 serde.workspace = true
-poseidon.workspace = true
