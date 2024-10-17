@@ -5,11 +5,11 @@ name = "ceno_emul"
 version.workspace = true
 
 [dependencies]
-anyhow = { version = "1.0", default-features = false }
+anyhow = { version = "1", default-features = false }
 elf = { version = "0" }
 strum = "0"
 strum_macros = "0"
-tracing = { version = "0.1", default-features = false, features = [
+tracing = { version = "0", default-features = false, features = [
   "attributes",
 ] }
 

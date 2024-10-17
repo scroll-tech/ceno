@@ -26,8 +26,8 @@ transcript = { path = "../transcript" }
 
 [dev-dependencies]
 cfg-if = "1"
-criterion = { version = "0.5", features = ["html_reports"] }
-pprof = { version = "0.13", features = ["flamegraph"] }
+criterion = { version = "0", features = ["html_reports"] }
+pprof = { version = "0", features = ["flamegraph"] }
 tiny-keccak = { version = "2", features = ["keccak"] }
 
 [features]

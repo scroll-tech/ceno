@@ -17,9 +17,9 @@ tracing-flame = "0"
 tracing-subscriber = { version = "0", features = ["env-filter"] }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-env_logger = "0.7"
-log = "0.4"
+criterion = { version = "0", features = ["html_reports"] }
+env_logger = "0"
+log = "0"
 
 [features]
 parallel = []

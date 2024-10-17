@@ -5,8 +5,8 @@ name = "mpcs"
 version.workspace = true
 
 [dependencies]
-aes = "0.8"
-ark-std = { version = "0.4" }
+aes = "0"
+ark-std = { version = "0" }
 bitvec = "1"
 blake2 = { version = "0" }
 blake2b_simd = "1"
@@ -21,7 +21,7 @@ num-bigint = "0"
 num-integer = "0"
 plonky2 = "0"
 poseidon.workspace = true
-rand = "0.8"
+rand = "0"
 rand_chacha.workspace = true
 rayon = { version = "1", optional = true }
 serde.workspace = true
@@ -29,7 +29,7 @@ sha3 = "0"
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0", features = ["html_reports"] }
 gkr = { path = "../gkr" }
 simple-frontend = { path = "../simple-frontend" }
 

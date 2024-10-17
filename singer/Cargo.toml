@@ -31,8 +31,8 @@ tracing-subscriber = { version = "0", features = ["env-filter"] }
 [dev-dependencies]
 cfg-if = "1"
 const_env = "0"
-criterion = { version = "0.5", features = ["html_reports"] }
-pprof = { version = "0.13", features = ["flamegraph"] }
+criterion = { version = "0", features = ["html_reports"] }
+pprof = { version = "0", features = ["flamegraph"] }
 
 [features]
 dbg-add-opcode = []
