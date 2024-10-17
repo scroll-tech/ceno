@@ -8,5 +8,4 @@ allowed-duplicate-crates = [
   "regex-syntax",
   "itertools",
   "halo2curves",
-  "heck",
 ]
