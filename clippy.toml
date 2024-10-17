@@ -9,4 +9,6 @@ allowed-duplicate-crates = [
   "itertools",
   "halo2curves",
   "heck",
+  "strum",
+  "strum_macros",
 ]
