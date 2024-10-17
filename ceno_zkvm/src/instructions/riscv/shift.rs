@@ -191,7 +191,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
 #[cfg(test)]
 mod tests {
-    use ceno_emul::{Change, EncodedInstruction, InsnKind, StepRecord};
+    use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -243,12 +243,12 @@ mod tests {
         let (prefix, insn_code, rd_written) = match I::INST_KIND {
             InsnKind::SLL => (
                 "SLL",
-                EncodedInstruction::encode(InsnKind::SLL, 2, 3, 4, 0),
+                encode_rv32(InsnKind::SLL, 2, 3, 4, 0),
                 rs1_read << shift,
             ),
             InsnKind::SRL => (
                 "SRL",
-                EncodedInstruction::encode(InsnKind::SRL, 2, 3, 4, 0),
+                encode_rv32(InsnKind::SRL, 2, 3, 4, 0),
                 rs1_read >> shift,
             ),
             _ => unreachable!(),

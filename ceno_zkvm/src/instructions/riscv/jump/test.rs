@@ -1,4 +1,4 @@
-use ceno_emul::{ByteAddr, Change, EncodedInstruction, InsnKind, PC_STEP_SIZE, StepRecord};
+use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
@@ -38,7 +38,7 @@ fn test_opcode_jal() {
 
     let pc_offset: i32 = -8i32;
     let new_pc: ByteAddr = ByteAddr(MOCK_PC_START.0.wrapping_add_signed(pc_offset));
-    let insn_code = EncodedInstruction::encode(InsnKind::JAL, 0, 0, 4, imm_j(pc_offset));
+    let insn_code = encode_rv32(InsnKind::JAL, 0, 0, 4, imm_j(pc_offset));
     let (raw_witin, lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
@@ -86,7 +86,7 @@ fn test_opcode_lui() {
         .unwrap();
 
     let imm_value = imm_u(0x90005);
-    let insn_code = EncodedInstruction::encode(InsnKind::LUI, 0, 0, 4, imm_value);
+    let insn_code = encode_rv32(InsnKind::LUI, 0, 0, 4, imm_value);
     let (raw_witin, lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
@@ -130,7 +130,7 @@ fn test_opcode_auipc() {
         .unwrap();
 
     let imm_value = imm_u(0x90005);
-    let insn_code = EncodedInstruction::encode(InsnKind::AUIPC, 0, 0, 4, imm_value);
+    let insn_code = encode_rv32(InsnKind::AUIPC, 0, 0, 4, imm_value);
     let (raw_witin, lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,

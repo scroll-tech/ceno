@@ -151,7 +151,7 @@ mod test {
 
     mod divu {
 
-        use ceno_emul::{Change, EncodedInstruction, InsnKind, StepRecord, Word};
+        use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
@@ -184,7 +184,7 @@ mod test {
                 dividend / divisor
             };
 
-            let insn_code = EncodedInstruction::encode(InsnKind::DIVU, 2, 3, 4, 0);
+            let insn_code = encode_rv32(InsnKind::DIVU, 2, 3, 4, 0);
             // values assignment
             let (raw_witin, lkm) =
                 DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![

@@ -109,7 +109,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, EncodedInstruction, InsnKind, StepRecord};
+    use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -161,7 +161,7 @@ mod test {
             )
             .unwrap();
 
-        let insn_code = EncodedInstruction::encode(InsnKind::SRLI, 2, 0, 4, imm);
+        let insn_code = encode_rv32(InsnKind::SRLI, 2, 0, 4, imm);
         let (raw_witin, lkm) = ShiftImmInstruction::<GoldilocksExt2, SrliOp>::assign_instances(
             &config,
             cb.cs.num_witin as usize,

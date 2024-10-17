@@ -104,7 +104,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, EncodedInstruction, StepRecord, Word};
+    use ceno_emul::{Change, StepRecord, Word, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -131,7 +131,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = EncodedInstruction::encode(InsnKind::SLTU, 2, 3, 4, 0);
+        let insn_code = encode_rv32(InsnKind::SLTU, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             SltuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(

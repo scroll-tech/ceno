@@ -117,7 +117,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, EncodedInstruction, StepRecord};
+    use ceno_emul::{Change, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -150,7 +150,7 @@ mod test {
         let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
 
         // values assignment
-        let insn_code = EncodedInstruction::encode(InsnKind::MULHU, 2, 3, 4, 0);
+        let insn_code = encode_rv32(InsnKind::MULHU, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             MulhuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(

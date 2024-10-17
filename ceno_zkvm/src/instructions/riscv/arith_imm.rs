@@ -80,7 +80,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, EncodedInstruction, InsnKind, StepRecord};
+    use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -117,7 +117,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = EncodedInstruction::encode(InsnKind::ADDI, 2, 0, 4, imm(3));
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
@@ -161,7 +161,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = EncodedInstruction::encode(InsnKind::ADDI, 2, 0, 4, imm(-3));
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(-3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,

@@ -169,7 +169,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, EncodedInstruction, StepRecord};
+    use ceno_emul::{Change, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -196,7 +196,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = EncodedInstruction::encode(InsnKind::ADD, 2, 3, 4, 0);
+        let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
@@ -251,7 +251,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = EncodedInstruction::encode(InsnKind::ADD, 2, 3, 4, 0);
+        let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
@@ -306,7 +306,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = EncodedInstruction::encode(InsnKind::SUB, 2, 3, 4, 0);
+        let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
@@ -361,7 +361,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = EncodedInstruction::encode(InsnKind::SUB, 2, 3, 4, 0);
+        let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
         let (raw_witin, _) =
             SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
@@ -411,7 +411,7 @@ mod test {
             .unwrap();
 
         // values assignment
-        let insn_code = EncodedInstruction::encode(InsnKind::MUL, 2, 3, 4, 0);
+        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
@@ -458,7 +458,7 @@ mod test {
             .unwrap();
 
         // values assignment
-        let insn_code = EncodedInstruction::encode(InsnKind::MUL, 2, 3, 4, 0);
+        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
@@ -509,7 +509,7 @@ mod test {
         let c_limb = ret.limbs;
 
         // values assignment
-        let insn_code = EncodedInstruction::encode(InsnKind::MUL, 2, 3, 4, 0);
+        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
