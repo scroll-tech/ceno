@@ -1,6 +1,5 @@
 pub mod arithmetic;
 pub mod expression;
-pub mod hash;
 pub mod parallel;
 pub mod plonky2_util;
 use ff::{Field, PrimeField};

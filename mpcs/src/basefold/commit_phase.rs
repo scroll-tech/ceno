@@ -7,10 +7,8 @@ use crate::{
     basefold::sumcheck::sum_check_first_round,
     util::{
         arithmetic::{interpolate2_weights, interpolate_over_boolean_hypercube},
-        field_type_as_ext,
-        hash::write_digest_to_transcript,
-        log2_strict,
-        merkle_tree::MerkleTree,
+        field_type_as_ext, log2_strict,
+        merkle_tree::{Hasher, MerkleTree},
     },
 };
 use ark_std::{end_timer, start_timer};
@@ -32,20 +30,20 @@ pub trait CommitPhaseStrategy<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn initial_running_oracle(
-        comms: &[BasefoldCommitmentWithData<E>],
+    fn initial_running_oracle<Spec: BasefoldSpec<E>>(
+        comms: &[BasefoldCommitmentWithData<E, Spec>],
         coeffs_outer: &[E],
         coeffs_inner: &[E],
     ) -> Vec<E>;
 
-    fn initial_running_evals(
-        comms: &[BasefoldCommitmentWithData<E>],
+    fn initial_running_evals<Spec: BasefoldSpec<E>>(
+        comms: &[BasefoldCommitmentWithData<E, Spec>],
         coeffs_outer: &[E],
         coeffs_inner: &[E],
     ) -> Vec<E>;
 
-    fn update_running_oracle(
-        comms: &[BasefoldCommitmentWithData<E>],
+    fn update_running_oracle<Spec: BasefoldSpec<E>>(
+        comms: &[BasefoldCommitmentWithData<E, Spec>],
         running_oracle_len: usize,
         index: usize,
         coeffs_outer: &[E],
@@ -59,9 +57,12 @@ pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>, CPS: CommitPhaseSt
     point: &[E],
     coeffs_outer: &[E],
     coeffs_inner: &[E],
-    comms: &[BasefoldCommitmentWithData<E>],
+    comms: &[BasefoldCommitmentWithData<E, Spec>],
     transcript: &mut Transcript<E>,
-) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
+) -> (
+    Vec<MerkleTree<E, Spec::Hasher>>,
+    BasefoldCommitPhaseProof<E, Spec>,
+)
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -144,8 +145,8 @@ where
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
 
             // Now commit to the current oracle
-            let tree = MerkleTree::<E>::from_leaves_ext(new_running_oracle, 2);
-            write_digest_to_transcript(&tree.root(), transcript);
+            let tree = MerkleTree::<E, Spec::Hasher>::from_leaves_ext(new_running_oracle, 2);
+            <Spec::Hasher as Hasher<E>>::write_digest_to_transcript(&tree.root(), transcript);
             roots.push(tree.root());
             trees.push(tree);
             // Now, the new running oracle still waits to be folded, but this
@@ -235,7 +236,10 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
     values: &Vec<E>,
     additional_values: impl Fn(usize) -> E + Sync,
     challenge: E,
-) -> Vec<E> {
+) -> Vec<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
     values
         .par_chunks_exact(2)
         .enumerate()

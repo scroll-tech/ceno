@@ -5,13 +5,11 @@ use crate::{
     },
     util::{
         arithmetic::{inner_product_three, interpolate_field_type_over_boolean_hypercube},
-        ext_to_usize,
-        hash::{write_digest_to_transcript, Digest},
-        log2_strict,
-        merkle_tree::MerkleTree,
+        ext_to_usize, log2_strict,
+        merkle_tree::{Hasher, MerkleTree},
         plonky2_util::reverse_index_bits_in_place_field_type,
     },
-    Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
+    Error, Evaluation, PolynomialCommitmentScheme,
 };
 use ark_std::{end_timer, start_timer};
 use basic::BasicBasefoldStrategy;
@@ -70,18 +68,18 @@ enum PolyEvalsCodeword<E: ExtensionField> {
     TooBig(usize),
 }
 
-pub(crate) trait ProverInputs<E: ExtensionField>
+pub(crate) trait ProverInputs<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn comms(&self) -> &[BasefoldCommitmentWithData<E>];
+    fn comms(&self) -> &[BasefoldCommitmentWithData<E, Spec>];
 }
 
-pub(crate) trait VerifierInputs<E: ExtensionField>
+pub(crate) trait VerifierInputs<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn comms(&self) -> &[BasefoldCommitment<E>];
+    fn comms(&self) -> &[BasefoldCommitment<E, Spec>];
     fn num_vars(&self) -> usize;
 }
 
@@ -100,12 +98,16 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     type CommitPhaseStrategy: CommitPhaseStrategy<E>;
-    type QueryCheckStrategy: QueryCheckStrategy<E>;
-    type ProverInputs<'a>: ProverInputs<E>;
-    type VerifierInputs<'a>: VerifierInputs<E>;
+    type QueryCheckStrategy: QueryCheckStrategy<E, Spec>;
+    type ProverInputs<'a>: ProverInputs<E, Spec>
+    where
+        Spec: 'a;
+    type VerifierInputs<'a>: VerifierInputs<E, Spec>
+    where
+        Spec: 'a;
 
     /// Decide if the proof is trivial, and if so, output it.
-    fn trivial_proof<'a>(prover_inputs: &Self::ProverInputs<'a>) -> Option<BasefoldProof<E>>;
+    fn trivial_proof<'a>(prover_inputs: &Self::ProverInputs<'a>) -> Option<BasefoldProof<E, Spec>>;
 
     /// Generate:
     /// 1. the point to open (not necessarily the same as the original point)
@@ -120,7 +122,7 @@ where
 
     fn check_trivial_proof<'a>(
         verifier_inputs: &Self::VerifierInputs<'a>,
-        proof: &BasefoldProof<E>,
+        proof: &BasefoldProof<E, Spec>,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
 
@@ -129,7 +131,7 @@ where
     fn prepare_sumcheck_target_and_point_batching_coeffs<'a>(
         vp: &BasefoldVerifierParams<E, Spec>,
         verifier_inputs: &Self::VerifierInputs<'a>,
-        proof: &BasefoldProof<E>,
+        proof: &BasefoldProof<E, Spec>,
         transcript: &mut Transcript<E>,
     ) -> Result<(E, Vec<E>, Vec<E>, Vec<E>), Error>;
 }
@@ -262,7 +264,7 @@ where
     pub(crate) fn commit_inner(
         pp: &BasefoldProverParams<E, Spec>,
         poly: &ArcMultilinearExtension<E>,
-    ) -> Result<BasefoldCommitmentWithData<E>, Error>
+    ) -> Result<BasefoldCommitmentWithData<E, Spec>, Error>
     where
         E: Serialize + DeserializeOwned,
         E::BaseField: Serialize + DeserializeOwned,
@@ -278,7 +280,7 @@ where
         //  (2) The encoding of the coefficient vector (need an interpolation)
         let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
             PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(codeword, 2);
+                let codeword_tree = MerkleTree::<E, Spec::Hasher>::from_leaves(codeword, 2);
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -291,7 +293,7 @@ where
                 })
             }
             PolyEvalsCodeword::TooSmall(evals) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone(), 2);
+                let codeword_tree = MerkleTree::<E, Spec::Hasher>::from_leaves(evals.clone(), 2);
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -373,7 +375,7 @@ where
         pp: &BasefoldProverParams<E, Spec>,
         prover_inputs: &Strategy::ProverInputs<'a>,
         transcript: &mut Transcript<E>,
-    ) -> Result<BasefoldProof<E>, Error> {
+    ) -> Result<BasefoldProof<E, Spec>, Error> {
         if let Some(proof) = Strategy::trivial_proof(prover_inputs) {
             return Ok(proof);
         }
@@ -435,7 +437,7 @@ where
     fn verify_inner<'a, Strategy: BasefoldStrategy<E, Spec>>(
         vp: &BasefoldVerifierParams<E, Spec>,
         verifier_inputs: &Strategy::VerifierInputs<'a>,
-        proof: &BasefoldProof<E>,
+        proof: &BasefoldProof<E, Spec>,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         if proof.is_trivial() {
@@ -464,7 +466,7 @@ where
                     .elements,
             );
             if i < num_rounds - 1 {
-                write_digest_to_transcript(&roots[i], transcript);
+                <Spec::Hasher as Hasher<E>>::write_digest_to_transcript(&roots[i], transcript);
             }
         }
 
@@ -521,10 +523,10 @@ where
     type Param = BasefoldParams<E, Spec>;
     type ProverParam = BasefoldProverParams<E, Spec>;
     type VerifierParam = BasefoldVerifierParams<E, Spec>;
-    type CommitmentWithData = BasefoldCommitmentWithData<E>;
-    type Commitment = BasefoldCommitment<E>;
-    type CommitmentChunk = Digest<E::BaseField>;
-    type Proof = BasefoldProof<E>;
+    type CommitmentWithData = BasefoldCommitmentWithData<E, Spec>;
+    type Commitment = BasefoldCommitment<E, Spec>;
+    type CommitmentChunk = <Spec::Hasher as Hasher<E>>::Digest;
+    type Proof = BasefoldProof<E, Spec>;
     type Rng = ChaCha8Rng;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error> {
@@ -575,7 +577,7 @@ where
         comm: &Self::Commitment,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
-        write_digest_to_transcript(&comm.root(), transcript);
+        Spec::Hasher::write_digest_to_transcript(&comm.root(), transcript);
         Ok(())
     }
 
@@ -755,13 +757,6 @@ where
         };
         Self::verify_inner::<BatchVLOPBasefoldStrategy>(vp, &verifier_inputs, proof, transcript)
     }
-}
-
-impl<E: ExtensionField, Spec: BasefoldSpec<E>> NoninteractivePCS<E> for Basefold<E, Spec>
-where
-    E: Serialize + DeserializeOwned,
-    E::BaseField: Serialize + DeserializeOwned,
-{
 }
 
 #[cfg(test)]

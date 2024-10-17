@@ -4,8 +4,9 @@ use crate::util::{
         interpolate_over_boolean_hypercube,
     },
     ext_to_usize,
-    hash::Digest,
-    merkle_tree::{BatchLeavesPair, MerklePathWithoutLeafOrRoot, MerkleTree, SingleLeavesGroup},
+    merkle_tree::{
+        BatchLeavesPair, Hasher, MerklePathWithoutLeafOrRoot, MerkleTree, SingleLeavesGroup,
+    },
 };
 use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
@@ -28,12 +29,14 @@ use super::{
     structure::{BasefoldCommitment, BasefoldCommitmentWithData, BasefoldSpec},
 };
 
+type Digest<E, Spec> = <<Spec as BasefoldSpec<E>>::Hasher as Hasher<E>>::Digest;
+
 pub fn prover_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     transcript: &mut Transcript<E>,
-    comms: &[BasefoldCommitmentWithData<E>],
-    trees: &[MerkleTree<E>],
+    comms: &[BasefoldCommitmentWithData<E, Spec>],
+    trees: &[MerkleTree<E, Spec::Hasher>],
     num_verifier_queries: usize,
-) -> BasefoldQueriesResult<E>
+) -> BasefoldQueriesResult<E, Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -57,10 +60,14 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>, QCS: QueryCheckStrategy<E>>(
+pub fn verifier_query_phase<
+    E: ExtensionField,
+    Spec: BasefoldSpec<E>,
+    QCS: QueryCheckStrategy<E, Spec>,
+>(
     indices: &[usize],
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-    queries: &BasefoldQueriesResult<E>,
+    queries: &BasefoldQueriesResult<E, Spec>,
     sumcheck_messages: &[Vec<E>],
     fold_challenges: &[E],
     coeffs_outer: &[E],
@@ -68,8 +75,8 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>, QCS: Query
     num_rounds: usize,
     num_vars: usize,
     final_message: &[E],
-    roots: &[Digest<E::BaseField>],
-    comms: &[BasefoldCommitment<E>],
+    roots: &[Digest<E, Spec>],
+    comms: &[BasefoldCommitment<E, Spec>],
     partial_eq: &[E],
     eval: &E,
 ) where
@@ -93,7 +100,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>, QCS: Query
     end_timer!(encode_timer);
 
     let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
-    queries.check::<Spec, QCS>(
+    queries.check::<QCS>(
         indices,
         vp,
         fold_challenges,
@@ -134,25 +141,26 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>, QCS: Query
 
 //////// -------------------------------------------------
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct BasefoldQueriesResult<E: ExtensionField>
+#[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
+pub(crate) struct BasefoldQueriesResult<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    inner: Vec<(usize, BasefoldQueryResult<E>)>,
+    inner: Vec<(usize, BasefoldQueryResult<E, Spec>)>,
     _marker: PhantomData<E>,
 }
 
-impl<E: ExtensionField> BasefoldQueriesResult<E>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldQueriesResult<E, Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     fn get_queries_result(
         indices: &[usize],
-        comms: &[BasefoldCommitmentWithData<E>],
-        trees: &[MerkleTree<E>],
+        comms: &[BasefoldCommitmentWithData<E, Spec>],
+        trees: &[MerkleTree<E, Spec::Hasher>],
         codeword_size: usize,
     ) -> Self {
-        BasefoldQueriesResult::<E> {
+        BasefoldQueriesResult::<E, Spec> {
             inner: indices
                 .par_iter()
                 .map(|x_index| {
@@ -178,7 +186,7 @@ where
         }
     }
 
-    pub fn check<Spec: BasefoldSpec<E>, QCS: QueryCheckStrategy<E>>(
+    pub fn check<QCS: QueryCheckStrategy<E, Spec>>(
         &self,
         indices: &[usize],
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
@@ -188,13 +196,13 @@ where
         num_rounds: usize,
         num_vars: usize,
         final_codeword: &[E],
-        roots: &[Digest<E::BaseField>],
-        comms: &[BasefoldCommitment<E>],
+        roots: &[Digest<E, Spec>],
+        comms: &[BasefoldCommitment<E, Spec>],
     ) {
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
                 assert_eq!(index_in_proof, index);
-                query.check::<Spec, QCS>(
+                query.check::<QCS>(
                     vp,
                     fold_challenges,
                     coeffs_outer,
@@ -212,20 +220,21 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct OracleQueryResult<E: ExtensionField>
+#[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
+pub(crate) struct OracleQueryResult<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     inner: SingleLeavesGroup<E>,
-    merkle_path: MerklePathWithoutLeafOrRoot<E>,
+    merkle_path: MerklePathWithoutLeafOrRoot<E, Spec::Hasher>,
 }
 
-impl<E: ExtensionField> OracleQueryResult<E>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> OracleQueryResult<E, Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn get_query_result(
-        tree: &MerkleTree<E>,
+        tree: &MerkleTree<E, Spec::Hasher>,
         x_index: usize,
         full_codeword_size: usize,
     ) -> Self {
@@ -241,7 +250,7 @@ where
             assert_eq!(group_size * group_num, leaves_num);
         }
 
-        OracleQueryResult::<E> {
+        OracleQueryResult::<E, Spec> {
             inner: SingleLeavesGroup::from_all_leaves(group_index, group_size, &tree.leaves()[0]),
             merkle_path: tree.merkle_path_without_leaf_sibling_or_root(leaf_index),
         }
@@ -249,7 +258,7 @@ where
 
     pub fn check_merkle_path(
         &self,
-        root: &Digest<E::BaseField>,
+        root: &Digest<E, Spec>,
         index: usize,
         full_codeword_size: usize,
     ) {
@@ -262,19 +271,20 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct OraclesQueryResult<E: ExtensionField>
+#[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
+pub(crate) struct OraclesQueryResult<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    inner: Vec<OracleQueryResult<E>>,
+    inner: Vec<OracleQueryResult<E, Spec>>,
 }
 
-impl<E: ExtensionField> OraclesQueryResult<E>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> OraclesQueryResult<E, Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn get_query_result(
-        trees: &[MerkleTree<E>],
+        trees: &[MerkleTree<E, Spec::Hasher>],
         full_codeword_size: usize,
         x_index: usize,
     ) -> Self {
@@ -291,7 +301,7 @@ where
 
     pub fn check_merkle_paths(
         &self,
-        roots: &[Digest<E::BaseField>],
+        roots: &[Digest<E, Spec>],
         index: usize,
         full_codeword_size: usize,
     ) {
@@ -303,15 +313,15 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct CommitmentQueryResult<E: ExtensionField>
+pub(crate) struct CommitmentQueryResult<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     inner: BatchLeavesPair<E>,
-    merkle_path: MerklePathWithoutLeafOrRoot<E>,
+    merkle_path: MerklePathWithoutLeafOrRoot<E, Spec::Hasher>,
 }
 
-impl<E: ExtensionField> CommitmentQueryResult<E>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> CommitmentQueryResult<E, Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -336,7 +346,7 @@ where
     }
 
     pub fn get_query_result(
-        comm: &BasefoldCommitmentWithData<E>,
+        comm: &BasefoldCommitmentWithData<E, Spec>,
         x_index: usize,
         full_codeword_size: usize,
     ) -> Self {
@@ -364,7 +374,7 @@ where
 
     pub fn check_merkle_path(
         &self,
-        comm: &BasefoldCommitment<E>,
+        comm: &BasefoldCommitment<E, Spec>,
         index: usize,
         full_codeword_size: usize,
     ) {
@@ -377,19 +387,20 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct CommitmentsQueryResult<E: ExtensionField>
+#[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
+pub(crate) struct CommitmentsQueryResult<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    inner: Vec<CommitmentQueryResult<E>>,
+    inner: Vec<CommitmentQueryResult<E, Spec>>,
 }
 
-impl<E: ExtensionField> CommitmentsQueryResult<E>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> CommitmentsQueryResult<E, Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn get_query_result(
-        comms: &[BasefoldCommitmentWithData<E>],
+        comms: &[BasefoldCommitmentWithData<E, Spec>],
         full_codeword_size: usize,
         x_index: usize,
     ) -> Self {
@@ -408,7 +419,7 @@ where
 
     pub fn check_merkle_paths(
         &self,
-        comms: &[BasefoldCommitment<E>],
+        comms: &[BasefoldCommitment<E, Spec>],
         index: usize,
         full_codeword_size: usize,
     ) {
@@ -419,18 +430,18 @@ where
     }
 }
 
-pub(crate) trait QueryCheckStrategy<E: ExtensionField>
+pub(crate) trait QueryCheckStrategy<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     fn initial_values(
-        query_result: &BasefoldQueryResult<E>,
+        query_result: &BasefoldQueryResult<E, Spec>,
         coeffs_outer: &[E],
         coeffs_inner: &[E],
     ) -> Vec<E>;
 
     fn pre_update_values(
-        query_result: &BasefoldQueryResult<E>,
+        query_result: &BasefoldQueryResult<E, Spec>,
         coeffs_outer: &[E],
         coeffs_inner: &[E],
         codeword_size_log: usize,
@@ -442,15 +453,16 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct BasefoldQueryResult<E: ExtensionField>
+#[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
+pub(crate) struct BasefoldQueryResult<E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    oracles_query_result: OraclesQueryResult<E>,
-    commitments_query_result: CommitmentsQueryResult<E>,
+    oracles_query_result: OraclesQueryResult<E, Spec>,
+    commitments_query_result: CommitmentsQueryResult<E, Spec>,
 }
 
-impl<E: ExtensionField> BasefoldQueryResult<E>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldQueryResult<E, Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -505,8 +517,8 @@ where
     }
 
     pub fn get_query_result(
-        comms: &[BasefoldCommitmentWithData<E>],
-        trees: &[MerkleTree<E>],
+        comms: &[BasefoldCommitmentWithData<E, Spec>],
+        trees: &[MerkleTree<E, Spec::Hasher>],
         codeword_size: usize,
         x_index: usize,
     ) -> Self {
@@ -524,7 +536,7 @@ where
         }
     }
 
-    pub fn check<Spec: BasefoldSpec<E>, QCS: QueryCheckStrategy<E>>(
+    pub fn check<QCS: QueryCheckStrategy<E, Spec>>(
         &self,
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
         fold_challenges: &[E],
@@ -533,8 +545,8 @@ where
         num_rounds: usize,
         num_vars: usize,
         final_codeword: &[E],
-        roots: &[Digest<E::BaseField>],
-        comms: &[BasefoldCommitment<E>],
+        roots: &[Digest<E, Spec>],
+        comms: &[BasefoldCommitment<E, Spec>],
         index: usize,
     ) {
         let full_codeword_size_log = num_vars + Spec::get_rate_log();

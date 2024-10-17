@@ -3,7 +3,6 @@ use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Debug;
 use transcript::Transcript;
-use util::hash::Digest;
 
 pub mod sum_check;
 pub mod util;
@@ -255,59 +254,6 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
-}
-
-pub trait NoninteractivePCS<E: ExtensionField>:
-    PolynomialCommitmentScheme<E, CommitmentChunk = Digest<E::BaseField>>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn ni_open(
-        pp: &Self::ProverParam,
-        poly: &ArcMultilinearExtension<E>,
-        comm: &Self::CommitmentWithData,
-        point: &[E],
-        eval: &E,
-    ) -> Result<Self::Proof, Error> {
-        let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::open(pp, poly, comm, point, eval, &mut transcript)
-    }
-
-    fn ni_batch_open(
-        pp: &Self::ProverParam,
-        polys: &[ArcMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithData],
-        points: &[&[E]],
-        evals: &[Evaluation<E>],
-    ) -> Result<Self::Proof, Error> {
-        let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::batch_open_vlmp(pp, polys, comms, points, evals, &mut transcript)
-    }
-
-    fn ni_verify(
-        vp: &Self::VerifierParam,
-        comm: &Self::Commitment,
-        point: &[E],
-        eval: &E,
-        proof: &Self::Proof,
-    ) -> Result<(), Error> {
-        let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::verify(vp, comm, point, eval, proof, &mut transcript)
-    }
-
-    fn ni_batch_verify<'a>(
-        vp: &Self::VerifierParam,
-        comms: &[Self::Commitment],
-        points: &[&[E]],
-        evals: &[Evaluation<E>],
-        proof: &Self::Proof,
-    ) -> Result<(), Error>
-    where
-        Self::Commitment: 'a,
-    {
-        let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::batch_verify_vlmp(vp, comms, points, evals, proof, &mut transcript)
-    }
 }
 
 #[derive(Clone, Debug)]

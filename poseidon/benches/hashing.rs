@@ -30,27 +30,27 @@ fn random_ceno_hash() -> Digest<Goldilocks> {
 }
 
 fn plonky_hash_single(a: GoldilocksField) {
-    let result = black_box(PlonkyPoseidonHash::hash_or_noop(&[a]));
+    let _result = black_box(PlonkyPoseidonHash::hash_or_noop(&[a]));
 }
 
 fn ceno_hash_single(a: Goldilocks) {
-    let result = black_box(PoseidonHash::hash_or_noop(&[a]));
+    let _result = black_box(PoseidonHash::hash_or_noop(&[a]));
 }
 
 fn plonky_hash_2_to_1(left: HashOut<GoldilocksField>, right: HashOut<GoldilocksField>) {
-    let result = black_box(PlonkyPoseidonHash::two_to_one(left, right));
+    let _result = black_box(PlonkyPoseidonHash::two_to_one(left, right));
 }
 
 fn ceno_hash_2_to_1(left: &Digest<Goldilocks>, right: &Digest<Goldilocks>) {
-    let result = black_box(PoseidonHash::two_to_one(left, right));
+    let _result = black_box(PoseidonHash::two_to_one(left, right));
 }
 
 fn plonky_hash_many_to_1(values: &[GoldilocksField]) {
-    let result = black_box(PlonkyPoseidonHash::hash_or_noop(values));
+    let _result = black_box(PlonkyPoseidonHash::hash_or_noop(values));
 }
 
 fn ceno_hash_many_to_1(values: &[Goldilocks]) {
-    let result = black_box(PoseidonHash::hash_or_noop(values));
+    let _result = black_box(PoseidonHash::hash_or_noop(values));
 }
 
 pub fn hashing_benchmark(c: &mut Criterion) {

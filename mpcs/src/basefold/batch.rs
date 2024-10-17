@@ -18,7 +18,7 @@ where
     pub(crate) fn batch_commit_inner(
         pp: &BasefoldProverParams<E, Spec>,
         polys: &[ArcMultilinearExtension<E>],
-    ) -> Result<BasefoldCommitmentWithData<E>, Error> {
+    ) -> Result<BasefoldCommitmentWithData<E, Spec>, Error> {
         // assumptions
         // 1. there must be at least one polynomial
         // 2. all polynomials must exist in the same field type
@@ -71,7 +71,7 @@ where
                         }
                     })
                     .collect::<(Vec<_>, Vec<_>)>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, 2);
+                let codeword_tree = MerkleTree::<E, Spec::Hasher>::from_batch_leaves(codewords, 2);
                 BasefoldCommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
@@ -91,7 +91,8 @@ where
                         }
                     })
                     .collect::<Vec<_>>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone(), 2);
+                let codeword_tree =
+                    MerkleTree::<E, Spec::Hasher>::from_batch_leaves(bh_evals.clone(), 2);
                 BasefoldCommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,

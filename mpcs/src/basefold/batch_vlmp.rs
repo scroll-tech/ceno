@@ -29,40 +29,42 @@ use super::{
     BasefoldSpec, BasefoldStrategy, BasefoldVerifierParams, SumCheck,
 };
 
-pub(crate) struct ProverInputs<'a, E: ExtensionField>
+pub(crate) struct ProverInputs<'a, E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) polys: &'a [ArcMultilinearExtension<'a, E>],
-    pub(crate) comms: &'a [BasefoldCommitmentWithData<E>],
+    pub(crate) comms: &'a [BasefoldCommitmentWithData<E, Spec>],
     pub(crate) points: &'a [&'a [E]],
     pub(crate) evals: &'a [Evaluation<E>],
 }
 
-impl<'a, E: ExtensionField> super::ProverInputs<E> for ProverInputs<'a, E>
+impl<'a, E: ExtensionField, Spec: BasefoldSpec<E>> super::ProverInputs<E, Spec>
+    for ProverInputs<'a, E, Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn comms(&self) -> &[BasefoldCommitmentWithData<E>] {
+    fn comms(&self) -> &[BasefoldCommitmentWithData<E, Spec>] {
         self.comms
     }
 }
 
-pub(crate) struct VerifierInputs<'a, E: ExtensionField>
+pub(crate) struct VerifierInputs<'a, E: ExtensionField, Spec: BasefoldSpec<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) comms: &'a [BasefoldCommitment<E>],
+    pub(crate) comms: &'a [BasefoldCommitment<E, Spec>],
     pub(crate) points: &'a [&'a [E]],
     pub(crate) num_vars: usize,
     pub(crate) evals: &'a [Evaluation<E>],
 }
 
-impl<'a, E: ExtensionField> super::VerifierInputs<E> for VerifierInputs<'a, E>
+impl<'a, E: ExtensionField, Spec: BasefoldSpec<E>> super::VerifierInputs<E, Spec>
+    for VerifierInputs<'a, E, Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn comms(&self) -> &[BasefoldCommitment<E>] {
+    fn comms(&self) -> &[BasefoldCommitment<E, Spec>] {
         self.comms
     }
 
@@ -79,10 +81,10 @@ where
 {
     type CommitPhaseStrategy = BatchVLMPCommitPhaseStrategy;
     type QueryCheckStrategy = BatchVLMPQueryCheckStrategy;
-    type ProverInputs<'a> = ProverInputs<'a, E>;
-    type VerifierInputs<'a> = VerifierInputs<'a, E>;
+    type ProverInputs<'a> = ProverInputs<'a, E, Spec> where Spec: 'a;
+    type VerifierInputs<'a> = VerifierInputs<'a, E, Spec> where Spec: 'a;
 
-    fn trivial_proof(prover_inputs: &ProverInputs<'_, E>) -> Option<BasefoldProof<E>> {
+    fn trivial_proof(prover_inputs: &ProverInputs<'_, E, Spec>) -> Option<BasefoldProof<E, Spec>> {
         // The encoded polynomial should at least have the number of
         // variables of the basecode, i.e., the size of the message
         // when the protocol stops. If the polynomial is smaller
@@ -90,14 +92,14 @@ where
         // In the current implementation, the batch vlmp case simply
         // ignores this case and crashes on trivial proof.
         prover_inputs.comms.iter().for_each(|comm| {
-            assert!(!comm.is_trivial::<Spec>());
+            assert!(!comm.is_trivial());
         });
         None
     }
 
     fn prepare_commit_phase_input(
         pp: &BasefoldProverParams<E, Spec>,
-        prover_inputs: &ProverInputs<'_, E>,
+        prover_inputs: &ProverInputs<'_, E, Spec>,
         transcript: &mut Transcript<E>,
     ) -> Result<CommitPhaseInput<E>, Error> {
         let comms = prover_inputs.comms;
@@ -108,7 +110,7 @@ where
 
         comms.iter().for_each(|comm| {
             assert!(comm.num_polys == 1);
-            assert!(!comm.is_trivial::<Spec>());
+            assert!(!comm.is_trivial());
         });
 
         validate_input(
@@ -293,8 +295,8 @@ where
     }
 
     fn check_trivial_proof(
-        _verifier_inputs: &VerifierInputs<'_, E>,
-        proof: &BasefoldProof<E>,
+        _verifier_inputs: &VerifierInputs<'_, E, Spec>,
+        proof: &BasefoldProof<E, Spec>,
         _transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         assert!(!proof.is_trivial());
@@ -302,7 +304,7 @@ where
         Ok(())
     }
 
-    fn check_sizes(verifier_inputs: &VerifierInputs<'_, E>) {
+    fn check_sizes(verifier_inputs: &VerifierInputs<'_, E, Spec>) {
         let comms = verifier_inputs.comms;
         let poly_num_vars = comms.iter().map(|c| c.num_vars().unwrap()).collect_vec();
         verifier_inputs.evals.iter().for_each(|eval| {
@@ -316,8 +318,8 @@ where
 
     fn prepare_sumcheck_target_and_point_batching_coeffs(
         _vp: &BasefoldVerifierParams<E, Spec>,
-        verifier_inputs: &VerifierInputs<'_, E>,
-        proof: &BasefoldProof<E>,
+        verifier_inputs: &VerifierInputs<'_, E, Spec>,
+        proof: &BasefoldProof<E, Spec>,
         transcript: &mut Transcript<E>,
     ) -> Result<(E, Vec<E>, Vec<E>, Vec<E>), Error> {
         let sumcheck_timer = start_timer!(|| "Basefold::batch_verify::initial sumcheck");
@@ -383,8 +385,8 @@ impl<E: ExtensionField> CommitPhaseStrategy<E> for BatchVLMPCommitPhaseStrategy
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn initial_running_oracle(
-        comms: &[BasefoldCommitmentWithData<E>],
+    fn initial_running_oracle<Spec: BasefoldSpec<E>>(
+        comms: &[BasefoldCommitmentWithData<E, Spec>],
         _coeffs_outer: &[E],
         _coeffs_inner: &[E],
     ) -> Vec<E> {
@@ -395,8 +397,8 @@ where
         vec![E::ZERO; codeword_size]
     }
 
-    fn initial_running_evals(
-        comms: &[BasefoldCommitmentWithData<E>],
+    fn initial_running_evals<Spec: BasefoldSpec<E>>(
+        comms: &[BasefoldCommitmentWithData<E, Spec>],
         coeffs_outer: &[E],
         _coeffs_inner: &[E],
     ) -> Vec<E> {
@@ -426,8 +428,8 @@ where
         sum_of_all_evals_for_sumcheck
     }
 
-    fn update_running_oracle(
-        comms: &[BasefoldCommitmentWithData<E>],
+    fn update_running_oracle<Spec: BasefoldSpec<E>>(
+        comms: &[BasefoldCommitmentWithData<E, Spec>],
         running_oracle_len: usize,
         index: usize,
         coeffs_outer: &[E],
@@ -445,12 +447,13 @@ where
 }
 
 pub(crate) struct BatchVLMPQueryCheckStrategy;
-impl<E: ExtensionField> QueryCheckStrategy<E> for BatchVLMPQueryCheckStrategy
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> QueryCheckStrategy<E, Spec>
+    for BatchVLMPQueryCheckStrategy
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     fn initial_values(
-        _query_result: &super::query_phase::BasefoldQueryResult<E>,
+        _query_result: &super::query_phase::BasefoldQueryResult<E, Spec>,
         _coeffs_outer: &[E],
         _coeffs_inner: &[E],
     ) -> Vec<E> {
@@ -460,7 +463,7 @@ where
     }
 
     fn pre_update_values(
-        query_result: &super::query_phase::BasefoldQueryResult<E>,
+        query_result: &super::query_phase::BasefoldQueryResult<E, Spec>,
         coeffs_outer: &[E],
         _coeffs_inner: &[E],
         codeword_size_log: usize,
