@@ -6,7 +6,7 @@ use itertools::Itertools;
 use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
 use crate::{
     chip_handler::{
-        GlobalStateRegisterMachineChipOperations, MemoryChipOperations, MemoryExpr,
+        AddressExpr, GlobalStateRegisterMachineChipOperations, MemoryChipOperations,
         RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
@@ -254,7 +254,7 @@ pub struct ReadMEM<E: ExtensionField> {
 impl<E: ExtensionField> ReadMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
-        mem_addr: MemoryExpr<E>,
+        mem_addr: AddressExpr<E>,
         mem_read: [Expression<E>; UINT_LIMBS],
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
@@ -309,7 +309,7 @@ pub struct WriteMEM<E: ExtensionField> {
 impl<E: ExtensionField> WriteMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
-        mem_addr: MemoryExpr<E>,
+        mem_addr: AddressExpr<E>,
         mem_written: [Expression<E>; UINT_LIMBS],
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
@@ -387,9 +387,20 @@ impl<E: ExtensionField> MemAddr<E> {
         Self::construct(cb, 2)
     }
 
-    /// A UInt representing the address as u16 limbs.
-    pub fn as_uint(&self) -> &UInt<E> {
-        &self.addr
+    /// Represent the address as an expression.
+    pub fn expr_unaligned(&self) -> AddressExpr<E> {
+        self.addr.address_expr()
+    }
+
+    /// Represent the address aligned to 2 bytes.
+    pub fn expr_align2(&self) -> AddressExpr<E> {
+        self.addr.address_expr() - self.low_bit_exprs()[0].clone()
+    }
+
+    /// Represent the address aligned to 4 bytes.
+    pub fn expr_align4(&self) -> AddressExpr<E> {
+        let low_bits = self.low_bit_exprs();
+        self.addr.address_expr() - low_bits[1].clone() * 2.into() - low_bits[0].clone()
     }
 
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
