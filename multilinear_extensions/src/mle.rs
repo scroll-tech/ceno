@@ -44,32 +44,22 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     fn name(&self) -> &'static str;
 
     fn get_ext_field_vec(&self) -> &[E] {
-        self.get_ext_field_vec_optn()
-            .unwrap_or_else(|| unreachable!())
-    }
-
-    fn get_base_field_vec(&self) -> &[E::BaseField] {
-        self.get_base_field_vec_optn()
-            .unwrap_or_else(|| unreachable!())
-    }
-
-    fn get_ext_field_vec_optn(&self) -> Option<&[E]> {
         match &self.evaluations() {
             FieldType::Ext(evaluations) => {
                 let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                Some(&evaluations[start..][..offset])
+                &evaluations[start..][..offset]
             }
-            _ => None,
+            _ => panic!("evaluation not in extension field"),
         }
     }
 
-    fn get_base_field_vec_optn(&self) -> Option<&[E::BaseField]> {
+    fn get_base_field_vec(&self) -> &[E::BaseField] {
         match &self.evaluations() {
             FieldType::Base(evaluations) => {
                 let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                Some(&evaluations[start..][..offset])
+                &evaluations[start..][..offset]
             }
-            _ => None,
+            _ => panic!("evaluation not in base field"),
         }
     }
 }
@@ -156,6 +146,14 @@ impl<E: ExtensionField> FieldType<E> {
             FieldType::Base(content) => content.is_empty(),
             FieldType::Ext(content) => content.is_empty(),
             FieldType::Unreachable => true,
+        }
+    }
+
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            FieldType::Base(_) => "Base",
+            FieldType::Ext(_) => "Ext",
+            FieldType::Unreachable => "Unreachable",
         }
     }
 }
@@ -1031,9 +1029,217 @@ macro_rules! op_mle {
     };
 }
 
+/// deal with a * x + b
 #[macro_export]
-macro_rules! op_mle_3 {
+macro_rules! op_mle_ax_b {
     (|$f1:ident, $f2:ident, $f3:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
+        match (&$f1.evaluations(), &$f2.evaluations(), &$f3.evaluations()) {
+            (
+                $crate::mle::FieldType::Base(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                let $bb_out = $op;
+                $op_bb_out
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Base(f2),
+                $crate::mle::FieldType::Ext(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            (
+                $crate::mle::FieldType::Base(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                let tmp = $f1;
+                let $f1 = $f2;
+                let $f2 = tmp;
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Ext(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            (
+                $crate::mle::FieldType::Ext(f1),
+                $crate::mle::FieldType::Ext(f2),
+                $crate::mle::FieldType::Base(f3),
+            ) => {
+                let $f1 = if let Some((start, offset)) = $f1.evaluations_range() {
+                    &f1[start..][..offset]
+                } else {
+                    &f1[..]
+                };
+                let $f2 = if let Some((start, offset)) = $f2.evaluations_range() {
+                    &f2[start..][..offset]
+                } else {
+                    &f2[..]
+                };
+                let $f3 = if let Some((start, offset)) = $f3.evaluations_range() {
+                    &f3[start..][..offset]
+                } else {
+                    &f3[..]
+                };
+                $op
+            }
+            (a, b, c) => unreachable!(
+                "unmatched pattern {:?} {:?} {:?}",
+                a.variant_name(),
+                b.variant_name(),
+                c.variant_name()
+            ),
+        }
+    };
+    (|$f1:ident, $f2:ident, $f3:ident| $op:expr) => {
+        op_mle_ax_b!(|$f1, $f2, $f3| $op, |out| out)
+    };
+}
+
+/// deal with a * b * c
+#[macro_export]
+macro_rules! op_mle_product_3 {
+    (|$f1:ident, $f2:ident, $f3:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
+        match (&$f1.evaluations(), &$f2.evaluations(), &$f3.evaluations()) {
+            (
+                $crate::mle::FieldType::Base(_),
+                $crate::mle::FieldType::Base(_),
+                $crate::mle::FieldType::Base(_),
+            ) => {
+                op_mle_product_3!(@internal |$f1, $f2, $f3| $op, |$bb_out| $op_bb_out)
+            },
+            (
+                $crate::mle::FieldType::Ext(_),
+                $crate::mle::FieldType::Base(_),
+                $crate::mle::FieldType::Base(_),
+            ) => {
+                op_mle_product_3!(@internal |$f1, $f2, $f3| $op, |$bb_out| $op_bb_out)
+            }
+            (
+                $crate::mle::FieldType::Ext(_),
+                $crate::mle::FieldType::Ext(_),
+                $crate::mle::FieldType::Base(_),
+            ) => {
+                op_mle_product_3!(@internal |$f1, $f2, $f3| $op, |$bb_out| $op_bb_out)
+            }
+            (
+                $crate::mle::FieldType::Ext(_),
+                $crate::mle::FieldType::Ext(_),
+                $crate::mle::FieldType::Ext(_),
+            ) => {
+                op_mle_product_3!(@internal |$f1, $f2, $f3| $op, |$bb_out| $op_bb_out)
+            },
+            (
+                $crate::mle::FieldType::Ext(_),
+                $crate::mle::FieldType::Base(_),
+                $crate::mle::FieldType::Ext(_),
+            ) => {
+                op_mle_product_3!(@internal |$f1, $f3, $f2| {
+                    let tmp = $f3;
+                    let $f3 = $f2;
+                    let $f2 = tmp;
+                    $op
+                }, |$bb_out| $op_bb_out)
+            }
+            /// add more matching to support specific permutation
+            /// and convert to canonical form: Ext comes first follow by Base
+            /// E.g. (Base, Ext, Ext) => (Ext, Ext, Base)
+            (a, b, c) => unreachable!(
+                "unmatched pattern ??? {:?} {:?} {:?}",
+                a.variant_name(),
+                b.variant_name(),
+                c.variant_name()
+            ),
+        }
+    };
+    (@internal |$f1:ident, $f2:ident, $f3:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$f1.evaluations(), &$f2.evaluations(), &$f3.evaluations()) {
             (
                 $crate::mle::FieldType::Base(f1),
@@ -1124,8 +1330,16 @@ macro_rules! op_mle_3 {
                 };
                 $op
             }
-            _ => unreachable!(),
+            (a, b, c) => unreachable!(
+                "unmatched pattern {:?} {:?} {:?}",
+                a.variant_name(),
+                b.variant_name(),
+                c.variant_name()
+            ),
         }
+    };
+    (|$f1:ident, $f2:ident, $f3:ident| $op:expr) => {
+        op_mle_product_3!(|$f1, $f2, $f3| $op, |out| out)
     };
 }
 

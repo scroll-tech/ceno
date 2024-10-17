@@ -728,7 +728,9 @@ pub mod fmt {
                     s
                 }
             }
-            Expression::Constant(constant) => base_field::<E>(constant, true).to_string(),
+            Expression::Constant(constant) => {
+                base_field::<E::BaseField>(constant, true).to_string()
+            }
             Expression::Fixed(fixed) => format!("{:?}", fixed),
             Expression::Instance(i) => format!("{:?}", i),
             Expression::Sum(left, right) => {
@@ -757,7 +759,7 @@ pub mod fmt {
         let data = field
             .as_bases()
             .iter()
-            .map(|b| base_field::<E>(b, false))
+            .map(|b| base_field::<E::BaseField>(b, false))
             .collect::<Vec<String>>();
         let only_one_limb = field.as_bases()[1..].iter().all(|&x| x == 0.into());
 
@@ -768,21 +770,18 @@ pub mod fmt {
         }
     }
 
-    pub fn base_field<E: ExtensionField>(base_field: &E::BaseField, add_prn: bool) -> String {
+    pub fn base_field<F: SmallField>(base_field: &F, add_prn: bool) -> String {
         let value = base_field.to_canonical_u64();
 
-        if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
+        if value > F::MODULUS_U64 - u16::MAX as u64 {
             // beautiful format for negative number > -65536
-            prn(format!("-{}", E::BaseField::MODULUS_U64 - value), add_prn)
+            prn(format!("-{}", F::MODULUS_U64 - value), add_prn)
         } else if value < u16::MAX as u64 {
             format!("{value}")
         } else {
             // hex
-            if value > E::BaseField::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
-                prn(
-                    format!("-{:#x}", E::BaseField::MODULUS_U64 - value),
-                    add_prn,
-                )
+            if value > F::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
+                prn(format!("-{:#x}", F::MODULUS_U64 - value), add_prn)
             } else {
                 format!("{value:#x}")
             }
@@ -801,18 +800,17 @@ pub mod fmt {
         wits_in_name: &[String],
     ) -> String {
         use itertools::Itertools;
+        use multilinear_extensions::mle::FieldType;
 
         wtns.iter()
             .sorted()
             .map(|wt_id| {
                 let wit = &wits_in[*wt_id as usize];
                 let name = &wits_in_name[*wt_id as usize];
-                let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
-                    field(&e[inst_id])
-                } else if let Some(bf) = wit.get_base_field_vec_optn() {
-                    base_field::<E>(&bf[inst_id], true)
-                } else {
-                    "Unknown".to_string()
+                let value_fmt = match wit.evaluations() {
+                    FieldType::Base(vec) => base_field::<E::BaseField>(&vec[inst_id], true),
+                    FieldType::Ext(vec) => field(&vec[inst_id]),
+                    FieldType::Unreachable => unreachable!(),
                 };
                 format!("  WitIn({wt_id})={value_fmt} {name:?}")
             })
