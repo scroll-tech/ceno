@@ -63,7 +63,7 @@ impl StepRecord {
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
-        StepRecord::new_insn2(
+        StepRecord::new_insn(
             cycle,
             pc,
             insn_code,
@@ -82,7 +82,7 @@ impl StepRecord {
         rs2_read: Word,
         prev_cycle: Cycle,
     ) -> StepRecord {
-        StepRecord::new_insn2(
+        StepRecord::new_insn(
             cycle,
             pc,
             insn_code,
@@ -102,7 +102,7 @@ impl StepRecord {
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
-        StepRecord::new_insn2(
+        StepRecord::new_insn(
             cycle,
             pc,
             insn_code,
@@ -121,7 +121,7 @@ impl StepRecord {
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
-        StepRecord::new_insn2(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
+        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
     }
 
     pub fn new_j_instruction(
@@ -131,43 +131,10 @@ impl StepRecord {
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
-        StepRecord::new_insn2(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
+        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
     }
 
     fn new_insn(
-        cycle: Cycle,
-        pc: Change<ByteAddr>,
-        insn_code: Word,
-        rs1_read: Option<Word>,
-        rs2_read: Option<Word>,
-        rd: Option<Change<Word>>,
-        previous_cycle: Cycle,
-    ) -> StepRecord {
-        let insn = DecodedInstruction::new(insn_code);
-        StepRecord {
-            cycle,
-            pc,
-            insn_code,
-            rs1: rs1_read.map(|rs1| ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
-                value: rs1,
-                previous_cycle,
-            }),
-            rs2: rs2_read.map(|rs2| ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
-                value: rs2,
-                previous_cycle,
-            }),
-            rd: rd.map(|rd| WriteOp {
-                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
-                value: rd,
-                previous_cycle,
-            }),
-            memory_op: None,
-        }
-    }
-
-    fn new_insn2(
         cycle: Cycle,
         pc: Change<ByteAddr>,
         insn_code: u32,

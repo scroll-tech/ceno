@@ -59,7 +59,7 @@ fn impl_opcode_beq(equal: bool) {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &mut cb,
         &raw_witin
             .de_interleaving()
@@ -108,7 +108,7 @@ fn impl_opcode_bne(equal: bool) {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &mut cb,
         &raw_witin
             .de_interleaving()
@@ -160,7 +160,7 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &mut circuit_builder,
         &raw_witin
             .de_interleaving()
@@ -212,7 +212,7 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &mut circuit_builder,
         &raw_witin
             .de_interleaving()
@@ -265,7 +265,7 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &mut circuit_builder,
         &raw_witin
             .de_interleaving()
@@ -318,7 +318,7 @@ fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &mut circuit_builder,
         &raw_witin
             .de_interleaving()

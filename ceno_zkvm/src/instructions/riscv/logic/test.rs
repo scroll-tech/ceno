@@ -52,7 +52,7 @@ fn test_opcode_and() {
         .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &mut cb,
         &raw_witin
             .de_interleaving()
@@ -103,7 +103,7 @@ fn test_opcode_or() {
         .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &mut cb,
         &raw_witin
             .de_interleaving()
@@ -154,7 +154,7 @@ fn test_opcode_xor() {
         .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &mut cb,
         &raw_witin
             .de_interleaving()

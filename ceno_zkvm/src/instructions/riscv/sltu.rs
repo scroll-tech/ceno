@@ -154,7 +154,7 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied_with_program(
+        MockProver::assert_satisfied(
             &mut cb,
             &raw_witin
                 .de_interleaving()

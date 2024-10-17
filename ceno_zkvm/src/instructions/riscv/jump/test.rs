@@ -6,7 +6,7 @@ use multilinear_extensions::mle::IntoMLEs;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
-    scheme::mock_prover::{MOCK_PC_JAL, MOCK_PC_START, MOCK_PROGRAM, MockProver},
+    scheme::mock_prover::{MOCK_PC_START, MockProver},
 };
 
 use super::{AuipcInstruction, JalInstruction, LuiInstruction};
@@ -52,7 +52,7 @@ fn test_opcode_jal() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &cb,
         &raw_witin
             .de_interleaving()
@@ -100,7 +100,7 @@ fn test_opcode_lui() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &cb,
         &raw_witin
             .de_interleaving()
@@ -144,7 +144,7 @@ fn test_opcode_auipc() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied_with_program(
+    MockProver::assert_satisfied(
         &cb,
         &raw_witin
             .de_interleaving()

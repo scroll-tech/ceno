@@ -294,7 +294,7 @@ mod tests {
         )
         .unwrap();
 
-        MockProver::assert_satisfied_with_program(
+        MockProver::assert_satisfied(
             &cb,
             &raw_witin
                 .de_interleaving()
