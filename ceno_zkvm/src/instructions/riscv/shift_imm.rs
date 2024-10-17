@@ -110,7 +110,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{ByteAddr, Change, StepRecord};
+    use ceno_emul::{ByteAddr, Change, PC_STEP_SIZE, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -167,7 +167,7 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                pc,
+                Change::new(pc, pc + PC_STEP_SIZE),
                 program,
                 rs1_read,
                 Change::new(0, expected_rd_written),

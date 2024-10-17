@@ -13,6 +13,7 @@ use crate::{
         riscv::{constants::UInt, i_insn::IInstructionConfig, insn_base::MemAddr},
     },
     set_val,
+    tables::InsnRecord,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
@@ -76,7 +77,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         )?;
 
         circuit_builder.require_equal(
-            || "next_pc_uint = next_pc",
+            || "next_pc_addr = next_pc",
             next_pc_addr.expr_align2(),
             i_insn.vm_state.next_pc.unwrap().expr(),
         )?;
@@ -104,19 +105,23 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
+        let insn = step.insn();
+
         let rs1 = step.rs1().unwrap().value;
-        let imm: i32 = step.insn().imm_or_funct7() as i32;
+        let imm: i32 = insn.imm_or_funct7() as i32;
         let rd = step.rd().unwrap().value.after;
 
         let (sum, overflowing) = rs1.overflowing_add_signed(imm);
 
-        set_val!(instance, config.imm, imm as u64);
         config
             .rs1_read
             .assign_value(instance, Value::new(rs1, lk_multiplicity));
         config
             .rd_written
             .assign_value(instance, Value::new(rd, lk_multiplicity));
+
+        let imm_field = InsnRecord::imm_or_funct7_field::<E::BaseField>(&insn);
+        set_val!(instance, config.imm, imm_field);
 
         config
             .next_pc_addr

@@ -104,6 +104,8 @@ pub const MOCK_PROGRAM: [u32; MOCK_PROGRAM_SIZE] = {
         0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x13,
         // xori x4, x2, 3
         0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x13,
+        // jalr x4, x2, -15
+        0xff1 << 20 | MOCK_RS1 << 15 | 0b000 << 12 | MOCK_RD << 7 | 0x67,
     );
     program
 };
@@ -135,6 +137,7 @@ pub const MOCK_PC_AUIPC: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 92);
 pub const MOCK_PC_ANDI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 96);
 pub const MOCK_PC_ORI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 100);
 pub const MOCK_PC_XORI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 104);
+pub const MOCK_PC_JALR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 108);
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]

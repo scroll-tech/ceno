@@ -81,7 +81,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord};
+    use ceno_emul::{Change, PC_STEP_SIZE, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -114,7 +114,7 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                MOCK_PC_ADDI,
+                Change::new(MOCK_PC_ADDI, MOCK_PC_ADDI + PC_STEP_SIZE),
                 MOCK_PROGRAM[13],
                 1000,
                 Change::new(0, 1003),
@@ -156,7 +156,7 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                MOCK_PC_ADDI_SUB,
+                Change::new(MOCK_PC_ADDI_SUB, MOCK_PC_ADDI_SUB + PC_STEP_SIZE),
                 MOCK_PROGRAM[14],
                 1000,
                 Change::new(0, 997),

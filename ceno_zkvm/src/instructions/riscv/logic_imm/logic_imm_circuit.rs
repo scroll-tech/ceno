@@ -124,7 +124,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{ByteAddr, CENO_PLATFORM, Change, InsnKind, StepRecord};
+    use ceno_emul::{ByteAddr, CENO_PLATFORM, Change, InsnKind, PC_STEP_SIZE, StepRecord};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -209,7 +209,7 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                pc,
+                Change::new(pc, pc + PC_STEP_SIZE),
                 program,
                 rs1_read,
                 Change::new(0, rd_written),
