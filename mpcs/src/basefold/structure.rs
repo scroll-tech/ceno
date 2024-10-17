@@ -1,6 +1,6 @@
 use crate::{
     sum_check::classic::{Coefficients, SumcheckProof},
-    util::merkle_tree::{Hasher as MerkleTreeHasher, MerkleTree, PoseidonHasher},
+    util::merkle_tree::{Hasher as MerkleTreeHasher, KeccakHasher, MerkleTree, PoseidonHasher},
 };
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
@@ -256,9 +256,9 @@ where
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct BasefoldBasecodeParams;
+pub struct BasefoldBasecodePoseidonParams;
 
-impl<E: ExtensionField> BasefoldSpec<E> for BasefoldBasecodeParams
+impl<E: ExtensionField> BasefoldSpec<E> for BasefoldBasecodePoseidonParams
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -267,9 +267,9 @@ where
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct BasefoldRSParams;
+pub struct BasefoldRSPoseidonParams;
 
-impl<E: ExtensionField> BasefoldSpec<E> for BasefoldRSParams
+impl<E: ExtensionField> BasefoldSpec<E> for BasefoldRSPoseidonParams
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -277,12 +277,34 @@ where
     type Hasher = PoseidonHasher;
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct BasefoldBasecodeKeccakParams;
+
+impl<E: ExtensionField> BasefoldSpec<E> for BasefoldBasecodeKeccakParams
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    type EncodingScheme = Basecode<BasecodeDefaultSpec>;
+    type Hasher = KeccakHasher;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BasefoldRSKeccakParams;
+
+impl<E: ExtensionField> BasefoldSpec<E> for BasefoldRSKeccakParams
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    type EncodingScheme = RSCode<RSCodeDefaultSpec>;
+    type Hasher = KeccakHasher;
+}
+
 #[derive(Debug)]
 pub struct Basefold<E: ExtensionField, Spec: BasefoldSpec<E>>(PhantomData<(E, Spec)>)
 where
     E::BaseField: Serialize + DeserializeOwned;
 
-pub type BasefoldDefault<F> = Basefold<F, BasefoldRSParams>;
+pub type BasefoldDefault<F> = Basefold<F, BasefoldRSPoseidonParams>;
 
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec>
 where

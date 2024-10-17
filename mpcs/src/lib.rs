@@ -298,9 +298,9 @@ pub enum Error {
 mod basefold;
 pub use basefold::{
     coset_fft, fft, fft_root_table, one_level_eval_hc, one_level_interp_hc, Basecode,
-    BasecodeDefaultSpec, Basefold, BasefoldBasecodeParams, BasefoldCommitment,
-    BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams, BasefoldRSParams, BasefoldSpec,
-    EncodingScheme, RSCode, RSCodeDefaultSpec,
+    BasecodeDefaultSpec, Basefold, BasefoldBasecodePoseidonParams, BasefoldCommitment,
+    BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams, BasefoldRSPoseidonParams,
+    BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,
 };
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 

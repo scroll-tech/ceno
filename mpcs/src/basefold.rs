@@ -42,8 +42,8 @@ type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 
 mod structure;
 pub use structure::{
-    Basefold, BasefoldBasecodeParams, BasefoldCommitment, BasefoldCommitmentWithData,
-    BasefoldDefault, BasefoldParams, BasefoldProverParams, BasefoldRSParams,
+    Basefold, BasefoldBasecodePoseidonParams, BasefoldCommitment, BasefoldCommitmentWithData,
+    BasefoldDefault, BasefoldParams, BasefoldProverParams, BasefoldRSPoseidonParams,
     BasefoldVerifierParams,
 };
 mod commit_phase;
@@ -770,22 +770,38 @@ mod test {
     };
     use goldilocks::GoldilocksExt2;
 
-    use super::{structure::BasefoldBasecodeParams, BasefoldRSParams};
+    use super::{
+        structure::{
+            BasefoldBasecodeKeccakParams, BasefoldBasecodePoseidonParams, BasefoldRSKeccakParams,
+        },
+        BasefoldRSPoseidonParams,
+    };
 
-    type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
-    type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
+    type PcsGoldilocksRSCodePoseidon = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
+    type PcsGoldilocksBaseCodePoseidon = Basefold<GoldilocksExt2, BasefoldBasecodePoseidonParams>;
+    type PcsGoldilocksRSCodeKeccak = Basefold<GoldilocksExt2, BasefoldRSKeccakParams>;
+    type PcsGoldilocksBaseCodeKeccak = Basefold<GoldilocksExt2, BasefoldBasecodeKeccakParams>;
 
     #[test]
     fn commit_open_verify_goldilocks() {
         for base in [true, false].into_iter() {
             // Challenge is over extension field, poly over the base field
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(base, 10, 11);
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodePoseidon>(base, 10, 11);
             // Test trivial proof with small num vars
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(base, 4, 6);
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodePoseidon>(base, 4, 6);
             // Challenge is over extension field, poly over the base field
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(base, 10, 11);
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodePoseidon>(base, 10, 11);
             // Test trivial proof with small num vars
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(base, 4, 6);
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodePoseidon>(base, 4, 6);
+
+            // Challenge is over extension field, poly over the base field
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(base, 10, 11);
+            // Test trivial proof with small num vars
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(base, 4, 6);
+            // Challenge is over extension field, poly over the base field
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodeKeccak>(base, 10, 11);
+            // Test trivial proof with small num vars
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodeKeccak>(base, 4, 6);
         }
     }
 
@@ -793,25 +809,48 @@ mod test {
     fn simple_batch_commit_open_verify_goldilocks() {
         for base in [true, false].into_iter() {
             // Both challenge and poly are over base field
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodePoseidon>(
                 base, 10, 11, 1,
             );
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodePoseidon>(
                 base, 10, 11, 4,
             );
             // Test trivial proof with small num vars
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodePoseidon>(
                 base, 4, 6, 4,
             );
             // Both challenge and poly are over base field
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodePoseidon>(
                 base, 10, 11, 1,
             );
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodePoseidon>(
                 base, 10, 11, 4,
             );
             // Test trivial proof with small num vars
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodePoseidon>(
+                base, 4, 6, 4,
+            );
+
+            // Both challenge and poly are over base field
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(
+                base, 10, 11, 1,
+            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(
+                base, 10, 11, 4,
+            );
+            // Test trivial proof with small num vars
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(
+                base, 4, 6, 4,
+            );
+            // Both challenge and poly are over base field
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodeKeccak>(
+                base, 10, 11, 1,
+            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodeKeccak>(
+                base, 10, 11, 4,
+            );
+            // Test trivial proof with small num vars
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodeKeccak>(
                 base, 4, 6, 4,
             );
         }
@@ -821,10 +860,20 @@ mod test {
     fn batch_vlmp_commit_open_verify() {
         for base in [true, false].iter() {
             // Both challenge and poly are over base field
-            run_batch_vlmp_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            run_batch_vlmp_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodePoseidon>(
                 *base, 10, 11,
             );
-            run_batch_vlmp_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(*base, 10, 11);
+            run_batch_vlmp_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodePoseidon>(
+                *base, 10, 11,
+            );
+
+            // Both challenge and poly are over base field
+            run_batch_vlmp_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(
+                *base, 10, 11,
+            );
+            run_batch_vlmp_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(
+                *base, 10, 11,
+            );
         }
     }
 
@@ -833,28 +882,58 @@ mod test {
         for batch_inner in 1..4 {
             for batch_outer in 1..2 {
                 // Both challenge and poly are over base field
-                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodePoseidon>(
                     true,
                     8,
                     9,
                     batch_outer,
                     batch_inner,
                 );
-                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodePoseidon>(
                     true,
                     8,
                     9,
                     batch_outer,
                     batch_inner,
                 );
-                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodePoseidon>(
                     false,
                     8,
                     9,
                     batch_outer,
                     batch_inner,
                 );
-                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCodePoseidon>(
+                    false,
+                    8,
+                    9,
+                    batch_outer,
+                    batch_inner,
+                );
+
+                // Both challenge and poly are over base field
+                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(
+                    true,
+                    8,
+                    9,
+                    batch_outer,
+                    batch_inner,
+                );
+                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(
+                    true,
+                    8,
+                    9,
+                    batch_outer,
+                    batch_inner,
+                );
+                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(
+                    false,
+                    8,
+                    9,
+                    batch_outer,
+                    batch_inner,
+                );
+                run_batch_vlop_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCodeKeccak>(
                     false,
                     8,
                     9,

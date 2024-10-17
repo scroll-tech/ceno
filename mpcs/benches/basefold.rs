@@ -10,13 +10,14 @@ use mpcs::{
         get_points_from_challenge, setup_pcs, vecs_as_slices,
     },
     util::plonky2_util::log2_ceil,
-    Basefold, BasefoldBasecodeParams, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
+    Basefold, BasefoldBasecodePoseidonParams, BasefoldRSPoseidonParams, Evaluation,
+    PolynomialCommitmentScheme,
 };
 
 use transcript::Transcript;
 
-type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
-type PcsGoldilocksBasecode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
+type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
+type PcsGoldilocksBasecode = Basefold<GoldilocksExt2, BasefoldBasecodePoseidonParams>;
 type T = Transcript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 

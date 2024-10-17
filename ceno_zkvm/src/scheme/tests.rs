@@ -9,7 +9,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
-use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::{Basefold, BasefoldDefault, BasefoldRSPoseidonParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
 use transcript::Transcript;
 
@@ -192,7 +192,7 @@ const PROGRAM_CODE: [u32; 4] = [
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams, ChaCha8Rng>;
 
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
