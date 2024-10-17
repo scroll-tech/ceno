@@ -17,9 +17,9 @@ goldilocks.workspace = true
 itertools = "0.12.1"
 rayon.workspace = true
 serde.workspace = true
-tracing = "0.1.40"
-tracing-flame = "0.2.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-flame = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

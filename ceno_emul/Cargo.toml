@@ -14,7 +14,7 @@ anyhow = { version = "1.0", default-features = false }
 elf = { version = "0.7.4" }
 strum = { workspace = true }
 strum_macros = { workspace = true }
-tracing = { version = "0.1", default-features = false, features = [
+tracing = { workspace = true, features = [
   "attributes",
 ] }
 

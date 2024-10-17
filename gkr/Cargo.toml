@@ -24,9 +24,9 @@ serde.workspace = true
 serde_json = "1.0.128"
 simple-frontend = { path = "../simple-frontend" }
 sumcheck = { path = "../sumcheck" }
-tracing = "0.1.40"
-tracing-flame = "0.2.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-flame = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 transcript = { path = "../transcript" }
 
 [dev-dependencies]

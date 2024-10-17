@@ -5,7 +5,7 @@ allowed-duplicate-crates = [
   "syn",
   "windows-sys",
   "regex-automata",
-  "regex-syntax",
+  # "regex-syntax",
   "itertools",
   "halo2curves",
 ]

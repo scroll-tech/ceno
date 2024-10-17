@@ -20,7 +20,7 @@ goldilocks.workspace = true
 itertools = "0.12.1"
 rayon.workspace = true
 serde.workspace = true
-tracing = "0.1.40"
+tracing = { workspace = true }
 
 crossbeam-channel = "0.5.13"
 multilinear_extensions = { path = "../multilinear_extensions", features = [

@@ -44,6 +44,9 @@ serde = { version = "1.0", features = ["derive"] }
 strum = "0"
 strum_macros = "0"
 subtle = "2.6.1"
+tracing = { version = "0", default-features = false }
+tracing-flame = "0"
+tracing-subscriber = "0"
 
 [patch."https://github.com/zhenfeizhang/Goldilocks"]
 goldilocks = { git = "https://github.com/hero78119/Goldilocks" }
