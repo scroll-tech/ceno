@@ -14,12 +14,11 @@ use super::{AuipcInstruction, JalInstruction, LuiInstruction};
 fn imm_j(imm: i32) -> u32 {
     // imm is 21 bits in J-type
     const IMM_MAX: i32 = 2i32.pow(21);
-    let imm = if imm.is_negative() {
+    if imm.is_negative() {
         (IMM_MAX + imm) as u32
     } else {
         imm as u32
-    };
-    imm
+    }
 }
 #[test]
 fn test_opcode_jal() {
