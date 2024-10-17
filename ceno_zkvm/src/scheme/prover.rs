@@ -110,7 +110,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let wits_commit = commitments.remove(circuit_name).unwrap();
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
-            let is_opcode_circuit = cs.lk_table_expressions.is_empty();
+            let is_opcode_circuit = cs.lk_table_expressions.is_empty()
+                && cs.r_table_expressions.is_empty()
+                && cs.w_table_expressions.is_empty();
 
             if is_opcode_circuit {
                 tracing::debug!(
@@ -152,7 +154,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     witness.into_iter().map(|v| v.into()).collect_vec(),
                     wits_commit,
                     pi,
-                    num_instances,
                     max_threads,
                     transcript,
                     &challenges,
@@ -611,6 +612,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// support batch prove for logup + product arguments each with different num_vars()
+    /// side effect: concurrency will be determine based on min(thread, num_vars()),
+    /// so suggest dont batch too small table (size < threads) with large table together
     pub fn create_table_proof(
         &self,
         name: &str,
@@ -619,7 +623,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithData,
         pi: &[E::BaseField],
-        num_instances: usize,
         max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
@@ -632,163 +635,359 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .iter()
             .map(|f| -> ArcMultilinearExtension<E> { Arc::new(f.get_ranged_mle(1, 0)) })
             .collect::<Vec<ArcMultilinearExtension<E>>>();
-        let log2_num_instances = ceil_log2(num_instances);
-        let next_pow2_instances = 1 << log2_num_instances;
 
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);
         assert_eq!(fixed.len(), cs.num_fixed);
-        assert!(witnesses.iter().all(|v| {
-            v.num_vars() == log2_num_instances && v.evaluations().len() == next_pow2_instances
-        }));
-        assert!(!cs.lk_table_expressions.is_empty());
+        // check all witness size are power of 2
+        assert!(
+            witnesses
+                .iter()
+                .all(|v| { v.evaluations().len().is_power_of_two() })
+        );
+        assert!(
+            !cs.r_table_expressions.is_empty()
+                || !cs.w_table_expressions.is_empty()
+                || !cs.lk_table_expressions.is_empty()
+        );
+        assert!(
+            cs.r_table_expressions
+                .iter()
+                .zip_eq(cs.w_table_expressions.iter())
+                .all(|(r, w)| r.table_len == w.table_len)
+        );
 
         // main constraint: lookup denominator and numerator record witness inference
         let span = entered_span!("wit_inference::record");
-        let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
-            .lk_table_expressions
+        let mut records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
+            .r_table_expressions
             .par_iter()
-            .map(|lk| &lk.values)
+            .map(|r| &r.values)
+            .chain(cs.w_table_expressions.par_iter().map(|w| &w.values))
             .chain(
                 cs.lk_table_expressions
                     .par_iter()
                     .map(|lk| &lk.multiplicity),
             )
+            .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
                 wit_infer_by_expr(&fixed, &witnesses, pi, challenges, expr)
             })
             .collect();
-        let (lk_d_wit, lk_n_wit) = records_wit.split_at(cs.lk_table_expressions.len());
-        exit_span!(span);
+        let max_log2_num_instance = records_wit.iter().map(|mle| mle.num_vars()).max().unwrap();
+        let min_log2_num_instance = records_wit.iter().map(|mle| mle.num_vars()).min().unwrap();
+        let (r_set_wit, remains) = records_wit.split_at_mut(cs.r_table_expressions.len());
+        let (w_set_wit, remains) = remains.split_at_mut(cs.w_table_expressions.len());
+        let (lk_n_wit, remains) = remains.split_at_mut(cs.lk_table_expressions.len());
+        let (lk_d_wit, _empty) = remains.split_at_mut(cs.lk_table_expressions.len());
+        assert!(_empty.is_empty());
 
-        let lk_counts_per_instance = cs.lk_table_expressions.len();
-        let log2_lk_count = ceil_log2(lk_counts_per_instance);
+        exit_span!(span);
 
         // infer all tower witness after last layer
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
-        // TODO optimize last layer to avoid alloc new vector to save memory
-        let lk_denominator_last_layer =
-            interleaving_mles_to_mles(lk_d_wit, num_instances, NUM_FANIN_LOGUP, E::ONE);
-        let lk_numerator_last_layer =
-            interleaving_mles_to_mles(lk_n_wit, num_instances, NUM_FANIN_LOGUP, E::ZERO);
-        assert_eq!(lk_denominator_last_layer.len(), NUM_FANIN_LOGUP);
-        assert_eq!(lk_numerator_last_layer.len(), NUM_FANIN_LOGUP);
+        let mut r_set_last_layer = r_set_wit
+            .iter()
+            .chain(w_set_wit.iter())
+            .map(|wit| {
+                let (first, second) = wit
+                    .get_ext_field_vec()
+                    .split_at(wit.evaluations().len() / 2);
+                let res = vec![
+                    first.to_vec().into_mle().into(),
+                    second.to_vec().into_mle().into(),
+                ];
+                assert_eq!(res.len(), NUM_FANIN_LOGUP);
+                res
+            })
+            .collect::<Vec<_>>();
+        let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
+
+        let lk_numerator_last_layer = lk_n_wit
+            .iter()
+            .map(|wit| {
+                let (first, second) = wit
+                    .get_base_field_vec()
+                    .split_at(wit.evaluations().len() / 2);
+                // TODO keep in base field and convert to Ext as late as possible
+                let res = vec![
+                    first
+                        .iter()
+                        .cloned()
+                        .map(E::from)
+                        .collect_vec()
+                        .into_mle()
+                        .into(),
+                    second
+                        .iter()
+                        .cloned()
+                        .map(E::from)
+                        .collect_vec()
+                        .into_mle()
+                        .into(),
+                ];
+                assert_eq!(res.len(), NUM_FANIN_LOGUP);
+                res
+            })
+            .collect::<Vec<_>>();
+        let lk_denominator_last_layer = lk_d_wit
+            .iter_mut()
+            .map(|wit| {
+                let (first, second) = wit
+                    .get_ext_field_vec()
+                    .split_at(wit.evaluations().len() / 2);
+                let res = vec![
+                    first.to_vec().into_mle().into(),
+                    second.to_vec().into_mle().into(),
+                ];
+                assert_eq!(res.len(), NUM_FANIN_LOGUP);
+                res
+            })
+            .collect::<Vec<_>>();
         exit_span!(span);
 
         let span = entered_span!("wit_inference::tower_witness_lk_layers");
-        let lk_wit_layers =
-            infer_tower_logup_witness(Some(lk_numerator_last_layer), lk_denominator_last_layer);
+        let r_wit_layers = r_set_last_layer
+            .into_iter()
+            .zip(r_set_wit.iter())
+            .map(|(last_layer, origin_mle)| {
+                infer_tower_product_witness(origin_mle.num_vars(), last_layer, NUM_FANIN)
+            })
+            .collect_vec();
+        let w_wit_layers = w_set_last_layer
+            .into_iter()
+            .zip(w_set_wit.iter())
+            .map(|(last_layer, origin_mle)| {
+                infer_tower_product_witness(origin_mle.num_vars(), last_layer, NUM_FANIN)
+            })
+            .collect_vec();
+        let lk_wit_layers = lk_numerator_last_layer
+            .into_iter()
+            .zip(lk_denominator_last_layer)
+            .map(|(lk_n, lk_d)| infer_tower_logup_witness(Some(lk_n), lk_d))
+            .collect_vec();
         exit_span!(span);
 
         if cfg!(test) {
             // sanity check
-            assert_eq!(lk_wit_layers.len(), log2_num_instances + log2_lk_count);
-            assert!(lk_wit_layers.iter().enumerate().all(|(i, w)| {
-                let expected_size = 1 << i;
-                let (p1, p2, q1, q2) = (&w[0], &w[1], &w[2], &w[3]);
-                p1.evaluations().len() == expected_size
-                    && p2.evaluations().len() == expected_size
-                    && q1.evaluations().len() == expected_size
-                    && q2.evaluations().len() == expected_size
+            assert_eq!(r_wit_layers.len(), cs.r_table_expressions.len());
+            assert!(
+                r_wit_layers
+                    .iter()
+                    .zip(r_set_wit.iter()) // depth equals to num_vars
+                    .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
+            );
+            assert!(r_wit_layers.iter().all(|layers| {
+                layers.iter().enumerate().all(|(i, w)| {
+                    let expected_size = 1 << i;
+                    w[0].evaluations().len() == expected_size
+                        && w[1].evaluations().len() == expected_size
+                })
+            }));
+
+            assert_eq!(w_wit_layers.len(), cs.w_table_expressions.len());
+            assert!(
+                w_wit_layers
+                    .iter()
+                    .zip(w_set_wit.iter()) // depth equals to num_vars
+                    .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
+            );
+            assert!(w_wit_layers.iter().all(|layers| {
+                layers.iter().enumerate().all(|(i, w)| {
+                    let expected_size = 1 << i;
+                    w[0].evaluations().len() == expected_size
+                        && w[1].evaluations().len() == expected_size
+                })
+            }));
+
+            assert_eq!(lk_wit_layers.len(), cs.lk_table_expressions.len());
+            assert!(
+                lk_wit_layers
+                    .iter()
+                    .zip(lk_n_wit.iter()) // depth equals to num_vars
+                    .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
+            );
+            assert!(lk_wit_layers.iter().all(|layers| {
+                layers.iter().enumerate().all(|(i, w)| {
+                    let expected_size = 1 << i;
+                    let (p1, p2, q1, q2) = (&w[0], &w[1], &w[2], &w[3]);
+                    p1.evaluations().len() == expected_size
+                        && p2.evaluations().len() == expected_size
+                        && q1.evaluations().len() == expected_size
+                        && q2.evaluations().len() == expected_size
+                })
             }));
         }
 
         // product constraint tower sumcheck
         let span = entered_span!("sumcheck::tower");
         // final evals for verifier
-        let lk_p1_out_eval = lk_wit_layers[0][0].get_ext_field_vec()[0];
-        let lk_p2_out_eval = lk_wit_layers[0][1].get_ext_field_vec()[0];
-        let lk_q1_out_eval = lk_wit_layers[0][2].get_ext_field_vec()[0];
-        let lk_q2_out_eval = lk_wit_layers[0][3].get_ext_field_vec()[0];
+        let r_out_evals = r_wit_layers
+            .iter()
+            .map(|r_wit_layers| {
+                [
+                    r_wit_layers[0][0].get_ext_field_vec()[0],
+                    r_wit_layers[0][1].get_ext_field_vec()[0],
+                ]
+            })
+            .collect_vec();
+        let w_out_evals = w_wit_layers
+            .iter()
+            .map(|w_wit_layers| {
+                [
+                    w_wit_layers[0][0].get_ext_field_vec()[0],
+                    w_wit_layers[0][1].get_ext_field_vec()[0],
+                ]
+            })
+            .collect_vec();
+        let lk_out_evals = lk_wit_layers
+            .iter()
+            .map(|lk_wit_layers| {
+                [
+                    // p1, p2, q1, q2
+                    lk_wit_layers[0][0].get_ext_field_vec()[0],
+                    lk_wit_layers[0][1].get_ext_field_vec()[0],
+                    lk_wit_layers[0][2].get_ext_field_vec()[0],
+                    lk_wit_layers[0][3].get_ext_field_vec()[0],
+                ]
+            })
+            .collect_vec();
+
         let (rt_tower, tower_proof) = TowerProver::create_proof(
             max_threads,
-            vec![],
-            vec![TowerProverSpec {
-                witness: lk_wit_layers,
-            }],
+            // pattern [r1, w1, r2, w2, ...] same pair are chain together
+            r_wit_layers
+                .into_iter()
+                .zip(w_wit_layers)
+                .flat_map(|(r, w)| {
+                    vec![TowerProverSpec { witness: r }, TowerProverSpec {
+                        witness: w,
+                    }]
+                })
+                .collect_vec(),
+            lk_wit_layers
+                .into_iter()
+                .map(|lk_wit_layers| TowerProverSpec {
+                    witness: lk_wit_layers,
+                })
+                .collect_vec(),
             NUM_FANIN_LOGUP,
             transcript,
         );
-        assert_eq!(rt_tower.len(), log2_num_instances + log2_lk_count);
-        exit_span!(span);
-
-        // selector layer sumcheck
-        let span = entered_span!("sumcheck::main_sel");
-        let rt_lk: Vec<E> = tower_proof.logup_specs_points[0]
-            .last()
-            .expect("error getting rt_lk")
-            .to_vec();
-
-        let num_threads = proper_num_threads(log2_num_instances, max_threads);
-        // 2 for denominator and numerator
-        let alpha_pow = get_challenge_pows(2, transcript);
-        let mut alpha_pow_iter = alpha_pow.iter();
-        let (alpha_lk_d, alpha_lk_n) = (
-            alpha_pow_iter.next().unwrap(),
-            alpha_pow_iter.next().unwrap(),
-        );
-        // create selector: all ONE, but padding ZERO to ceil_log2
-        let sel_lk: ArcMultilinearExtension<E> = {
-            let mut sel_lk = build_eq_x_r_vec(&rt_lk[log2_lk_count..]);
-            if num_instances < sel_lk.len() {
-                sel_lk.splice(
-                    num_instances..sel_lk.len(),
-                    std::iter::repeat(E::ZERO).take(sel_lk.len() - num_instances),
-                );
-            }
-            sel_lk.into_mle().into()
-        };
-
-        let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, log2_num_instances);
-
-        let eq_lk = build_eq_x_r_vec(&rt_lk[..log2_lk_count]);
-        // lk denominator
-        // rt := rt || rs
-        for i in 0..lk_counts_per_instance {
-            // \sum_t (sel(rt, t) * (\sum_i alpha_lk_d * eq(rs, i) * lk_d_record[i]))
-            virtual_polys.add_mle_list(vec![&sel_lk, &lk_d_wit[i]], eq_lk[i] * alpha_lk_d);
-        }
-        // \sum_t alpha_lk_d * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
-        virtual_polys.add_mle_list(
-            vec![&sel_lk],
-            *alpha_lk_d * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE),
-        );
-
-        // lk numerator
-        for i in 0..lk_counts_per_instance {
-            // \sum_t (sel(rt, t) * (\sum_i alpha_lk_n * eq(rs, i) * lk_n_record[i]))
-            virtual_polys.add_mle_list(vec![&sel_lk, &lk_n_wit[i]], eq_lk[i] * alpha_lk_n);
-        }
-
-        let (sel_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
-            num_threads,
-            virtual_polys.get_batched_polys(),
-            transcript,
-        );
-        let sel_evals = state.get_mle_final_evaluations();
         assert_eq!(
-            sel_evals.len(),
-            lk_counts_per_instance * 2 + 1 // 1 for sel_lk
+            rt_tower.len(), // num var length should equal to max_num_instance
+            max_log2_num_instance
         );
-        let mut sel_evals_iter = sel_evals.into_iter();
-        sel_evals_iter.next(); // skip sel_lk
-        let lk_d_in_evals = (0..lk_counts_per_instance)
-            .map(|_| sel_evals_iter.next().unwrap())
-            .collect_vec();
-        let lk_n_in_evals = (0..lk_counts_per_instance)
-            .map(|_| sel_evals_iter.next().unwrap())
-            .collect_vec();
-        assert!(sel_evals_iter.count() == 0);
-        let input_open_point = sel_sumcheck_proofs.point.clone();
-        assert!(input_open_point.len() == log2_num_instances);
         exit_span!(span);
+
+        // same point sumcheck is optional when all witin + fixed are in same num_vars
+        let is_skip_same_point_sumcheck = witnesses
+            .iter()
+            .chain(fixed.iter())
+            .map(|v| v.num_vars())
+            .all_equal();
+
+        let (input_open_point, same_r_sumcheck_proofs, rw_in_evals, lk_in_evals) =
+            if is_skip_same_point_sumcheck {
+                (rt_tower, None, vec![], vec![])
+            } else {
+                // one sumcheck to make them opening on same point r (with different prefix)
+                // If all table length are the same, we can skip this sumcheck
+                let span = entered_span!("sumcheck::opening_same_point");
+                // NOTE: max concurrency will be dominated by smallest table since it will blo
+                let num_threads = proper_num_threads(min_log2_num_instance, max_threads);
+                let alpha_pow = get_challenge_pows(
+                    cs.r_table_expressions.len()
+                        + cs.w_table_expressions.len()
+                        + cs.lk_table_expressions.len() * 2,
+                    transcript,
+                );
+                let mut alpha_pow_iter = alpha_pow.iter();
+
+                // create eq
+                // TODO same size rt lead to same identical poly eq which can be merged together
+                let eq = tower_proof
+                    .prod_specs_points
+                    .iter()
+                    .step_by(2) // r,w are in same length therefore share same point
+                    .chain(tower_proof.logup_specs_points.iter())
+                    .map(|layer_points| {
+                        let rt = layer_points.last().unwrap();
+                        build_eq_x_r_vec(rt).into_mle().into()
+                    })
+                    .collect::<Vec<ArcMultilinearExtension<E>>>();
+
+                let (eq_rw, eq_lk) = eq.split_at(cs.r_table_expressions.len());
+
+                let mut virtual_polys =
+                    VirtualPolynomials::<E>::new(num_threads, max_log2_num_instance);
+
+                // alpha_r{i} * eq(rt_{i}, s) * r(s) + alpha_w{i} * eq(rt_{i}, s) * w(s)
+                for ((r_set_wit, w_set_wit), eq) in r_set_wit
+                    .iter()
+                    .zip_eq(w_set_wit.iter())
+                    .zip_eq(eq_rw.iter())
+                {
+                    let alpha = alpha_pow_iter.next().unwrap();
+                    virtual_polys.add_mle_list(vec![eq, r_set_wit], *alpha);
+                    let alpha = alpha_pow_iter.next().unwrap();
+                    virtual_polys.add_mle_list(vec![eq, w_set_wit], *alpha);
+                }
+
+                // alpha_lkn{i} * eq(rt_{i}, s) * lk_n(s) + alpha_lkd{i} * eq(rt_{i}, s) * lk_d(s)
+                for ((lk_n_wit, lk_d_wit), eq) in
+                    lk_n_wit.iter().zip_eq(lk_d_wit.iter()).zip_eq(eq_lk.iter())
+                {
+                    let alpha = alpha_pow_iter.next().unwrap();
+                    virtual_polys.add_mle_list(vec![eq, lk_n_wit], *alpha);
+                    let alpha = alpha_pow_iter.next().unwrap();
+                    virtual_polys.add_mle_list(vec![eq, lk_d_wit], *alpha);
+                }
+
+                let (same_r_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
+                    num_threads,
+                    virtual_polys.get_batched_polys(),
+                    transcript,
+                );
+                let evals = state.get_mle_final_evaluations();
+                let mut evals_iter = evals.into_iter();
+                let rw_in_evals = cs
+                    // r, w table len are identical
+                    .r_table_expressions
+                    .iter()
+                    .flat_map(|_table| {
+                        let _eq = evals_iter.next().unwrap(); // skip eq
+                        [evals_iter.next().unwrap(), evals_iter.next().unwrap()] // r, w
+                    })
+                    .collect_vec();
+                let lk_in_evals = cs
+                    .lk_table_expressions
+                    .iter()
+                    .flat_map(|_table| {
+                        let _eq = evals_iter.next().unwrap(); // skip eq
+                        [evals_iter.next().unwrap(), evals_iter.next().unwrap()] // n, d
+                    })
+                    .collect_vec();
+                assert_eq!(evals_iter.count(), 0);
+
+                let input_open_point = same_r_sumcheck_proofs.point.clone();
+                assert_eq!(input_open_point.len(), max_log2_num_instance);
+                exit_span!(span);
+
+                (
+                    input_open_point,
+                    Some(same_r_sumcheck_proofs.proofs),
+                    rw_in_evals,
+                    lk_in_evals,
+                )
+            };
 
         let span = entered_span!("fixed::evals + witin::evals");
         let mut evals = witnesses
             .par_iter()
             .chain(fixed.par_iter())
-            .map(|poly| poly.evaluate(&input_open_point))
+            .map(|poly| poly.evaluate(&input_open_point[..poly.num_vars()]))
             .collect::<Vec<_>>();
         let fixed_in_evals = evals.split_off(witnesses.len());
         let wits_in_evals = evals;
@@ -834,15 +1033,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
 
         Ok(ZKVMTableProof {
-            num_instances,
-            lk_p1_out_eval,
-            lk_p2_out_eval,
-            lk_q1_out_eval,
-            lk_q2_out_eval,
+            r_out_evals,
+            w_out_evals,
+            lk_out_evals,
+            same_r_sumcheck_proofs,
+            rw_in_evals,
+            lk_in_evals,
             tower_proof,
-            sel_sumcheck_proofs: sel_sumcheck_proofs.proofs,
-            lk_d_in_evals,
-            lk_n_in_evals,
             fixed_in_evals,
             fixed_opening_proof,
             wits_in_evals,

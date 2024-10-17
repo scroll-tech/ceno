@@ -7,8 +7,8 @@ use crate::{
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
-        riscv::{constants::UInt, i_insn::IInstructionConfig},
         Instruction,
+        riscv::{constants::UInt, i_insn::IInstructionConfig},
     },
     witness::LkMultiplicity,
 };

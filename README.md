@@ -45,8 +45,3 @@ option 1
 option 2
 - use F_q^2/3 extension field, do not repeat
 - rule of thumb: n rounds, soundness ~ (64-n) bits
-
-
-
-
- 

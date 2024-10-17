@@ -9,6 +9,7 @@ pub mod divu;
 pub mod ecall;
 pub mod jump;
 pub mod logic;
+pub mod logic_imm;
 pub mod mulh;
 pub mod shift;
 pub mod shift_imm;
@@ -23,6 +24,9 @@ mod u_insn;
 
 mod ecall_insn;
 
+mod im_insn;
+mod mem;
+mod s_insn;
 #[cfg(test)]
 mod test;
 

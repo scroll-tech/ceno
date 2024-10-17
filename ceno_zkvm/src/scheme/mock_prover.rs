@@ -1,19 +1,23 @@
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
+    ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    expression::{fmt, Expression},
+    declare_program,
+    expression::{Expression, fmt},
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U16Table, U5Table, U8Table, XorTable,
+        TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
     },
+    witness::LkMultiplicity,
 };
 use ark_std::test_rng;
-use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
-use itertools::Itertools;
+use goldilocks::SmallField;
+use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{
     collections::HashSet,
@@ -24,7 +28,9 @@ use std::{
     ops::Neg,
     sync::OnceLock,
 };
+use strum::IntoEnumIterator;
 
+const MOCK_PROGRAM_SIZE: usize = 32;
 pub const MOCK_RS1: u32 = 2;
 pub const MOCK_RS2: u32 = 3;
 pub const MOCK_RD: u32 = 4;
@@ -35,60 +41,72 @@ pub const MOCK_IMM_NEG3: u32 = 32 - 3;
 /// TODO: Make this a parameter?
 #[allow(clippy::identity_op)]
 #[allow(clippy::unusual_byte_groupings)]
-pub const MOCK_PROGRAM: &[u32] = &[
-    // R-Type
-    // funct7 | rs2 | rs1 | funct3 | rd | opcode
-    // -----------------------------------------
-    // add x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-    // sub  x4, x2, x3
-    0x20 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-    // mul (0x01, 0x00, 0x33)
-    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-    // and x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b111 << 12 | MOCK_RD << 7 | 0x33,
-    // or x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
-    // xor x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
-    // B-Type
-    // beq x2, x3, 8
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b000 << 12 | 0x08 << 7 | 0x63,
-    // bne x2, x3, 8
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | 0x08 << 7 | 0x63,
-    // blt x2, x3, -8
-    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
-    // divu (0x01, 0x05, 0x33)
-    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
-    // srli x4, x2, 3
-    0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
-    // srli x4, x2, 31
-    0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
-    // sltu (0x00, 0x03, 0x33)
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b011 << 12 | MOCK_RD << 7 | 0x33,
-    // addi x4, x2, 3
-    0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
-    // addi x4, x2, -3
-    0b_1_111111 << 25 | MOCK_IMM_NEG3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
-    // bltu x2, x3, -8
-    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_110 << 12 | 0b_1100_1 << 7 | 0x63,
-    // bgeu x2, x3, -8
-    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_111 << 12 | 0b_1100_1 << 7 | 0x63,
-    // bge x2, x3, -8
-    0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_101 << 12 | 0b_1100_1 << 7 | 0x63,
-    // mulhu (0x01, 0x00, 0x33)
-    0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x3 << 12 | MOCK_RD << 7 | 0x33,
-    // sll x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | MOCK_RD << 7 | 0x33,
-    // srl x4, x2, x3
-    0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
-    // jal x4, 0xffffe
-    0b_1_1111111110_1_11111111 << 12 | MOCK_RD << 7 | 0x6f,
-    // lui x4, 0x90005
-    0x90005 << 12 | MOCK_RD << 7 | 0x37,
-    // auipc x4, 0x90005
-    0x90005 << 12 | MOCK_RD << 7 | 0x17,
-];
+pub const MOCK_PROGRAM: [u32; MOCK_PROGRAM_SIZE] = {
+    let mut program: [u32; MOCK_PROGRAM_SIZE] = [0; MOCK_PROGRAM_SIZE];
+
+    declare_program!(
+        program,
+        // R-Type
+        // funct7 | rs2 | rs1 | funct3 | rd | opcode
+        // -----------------------------------------
+        // add x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+        // sub  x4, x2, x3
+        0x20 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+        // mul (0x01, 0x00, 0x33)
+        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
+        // and x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b111 << 12 | MOCK_RD << 7 | 0x33,
+        // or x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
+        // xor x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
+        // B-Type
+        // beq x2, x3, 8
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b000 << 12 | 0x08 << 7 | 0x63,
+        // bne x2, x3, 8
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | 0x08 << 7 | 0x63,
+        // blt x2, x3, -8
+        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
+        // divu (0x01, 0x05, 0x33)
+        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
+        // srli x4, x2, 3
+        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
+        // srli x4, x2, 31
+        0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
+        // sltu (0x00, 0x03, 0x33)
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b011 << 12 | MOCK_RD << 7 | 0x33,
+        // addi x4, x2, 3
+        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
+        // addi x4, x2, -3
+        0b_1_111111 << 25 | MOCK_IMM_NEG3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
+        // bltu x2, x3, -8
+        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_110 << 12 | 0b_1100_1 << 7 | 0x63,
+        // bgeu x2, x3, -8
+        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_111 << 12 | 0b_1100_1 << 7 | 0x63,
+        // bge x2, x3, -8
+        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_101 << 12 | 0b_1100_1 << 7 | 0x63,
+        // mulhu (0x01, 0x00, 0x33)
+        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x3 << 12 | MOCK_RD << 7 | 0x33,
+        // sll x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | MOCK_RD << 7 | 0x33,
+        // srl x4, x2, x3
+        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
+        // jal x4, 0xffffe
+        0b_1_1111111110_1_11111111 << 12 | MOCK_RD << 7 | 0x6f,
+        // lui x4, 0x90005
+        0x90005 << 12 | MOCK_RD << 7 | 0x37,
+        // auipc x4, 0x90005
+        0x90005 << 12 | MOCK_RD << 7 | 0x17,
+        // andi x4, x2, 3
+        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0b111 << 12 | MOCK_RD << 7 | 0x13,
+        // ori x4, x2, 3
+        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x13,
+        // xori x4, x2, 3
+        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x13,
+    );
+    program
+};
 // Addresses of particular instructions in the mock program.
 pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
 pub const MOCK_PC_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 4);
@@ -114,9 +132,12 @@ pub const MOCK_PC_SRL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 80);
 pub const MOCK_PC_JAL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 84);
 pub const MOCK_PC_LUI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 88);
 pub const MOCK_PC_AUIPC: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 92);
+pub const MOCK_PC_ANDI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 96);
+pub const MOCK_PC_ORI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 100);
+pub const MOCK_PC_XORI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 104);
 
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum MockProverError<E: ExtensionField> {
     AssertZeroError {
         expression: Expression<E>,
@@ -141,6 +162,81 @@ pub(crate) enum MockProverError<E: ExtensionField> {
     // TODO later
     // r_expressions
     // w_expressions
+    LkMultiplicityError {
+        rom_type: ROMType,
+        key: u64,
+        count: isize, // +ve => missing in cs, -ve => missing in assignments
+        inst_id: usize,
+    },
+}
+
+impl<E: ExtensionField> PartialEq for MockProverError<E> {
+    // Compare errors based on the content, ignoring the inst_id
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                MockProverError::AssertZeroError {
+                    expression: left_expression,
+                    evaluated: left_evaluated,
+                    name: left_name,
+                    ..
+                },
+                MockProverError::AssertZeroError {
+                    expression: right_expression,
+                    evaluated: right_evaluated,
+                    name: right_name,
+                    ..
+                },
+            ) => {
+                left_expression == right_expression
+                    && left_evaluated == right_evaluated
+                    && left_name == right_name
+            }
+            (
+                MockProverError::AssertEqualError {
+                    left_expression: left_left_expression,
+                    right_expression: left_right_expression,
+                    left: left_left,
+                    right: left_right,
+                    name: left_name,
+                    ..
+                },
+                MockProverError::AssertEqualError {
+                    left_expression: right_left_expression,
+                    right_expression: right_right_expression,
+                    left: right_left,
+                    right: right_right,
+                    name: right_name,
+                    ..
+                },
+            ) => {
+                left_left_expression == right_left_expression
+                    && left_right_expression == right_right_expression
+                    && left_left == right_left
+                    && left_right == right_right
+                    && left_name == right_name
+            }
+            (
+                MockProverError::LookupError {
+                    expression: left_expression,
+                    evaluated: left_evaluated,
+                    name: left_name,
+                    ..
+                },
+                MockProverError::LookupError {
+                    expression: right_expression,
+                    evaluated: right_evaluated,
+                    name: right_name,
+                    ..
+                },
+            ) => {
+                left_expression == right_expression
+                    && left_evaluated == right_evaluated
+                    && left_name == right_name
+            }
+            _ => false,
+        }
+    }
 }
 
 impl<E: ExtensionField> MockProverError<E> {
@@ -201,6 +297,63 @@ impl<E: ExtensionField> MockProverError<E> {
                     Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
+            Self::LkMultiplicityError {
+                rom_type,
+                key,
+                count,
+                ..
+            } => {
+                let lookups = if count.abs() > 1 {
+                    format!("{} Lookups", count.abs())
+                } else {
+                    "Lookup".to_string()
+                };
+                let location = if *count > 0 {
+                    "constraint system"
+                } else {
+                    "assignments"
+                };
+                let element = match rom_type {
+                    ROMType::U5 | ROMType::U8 | ROMType::U14 | ROMType::U16 => {
+                        format!("Element: {key}")
+                    }
+                    ROMType::And => {
+                        let (a, b) = AndTable::unpack(*key);
+                        format!("Element: {a} < {b}")
+                    }
+                    ROMType::Or => {
+                        let (a, b) = OrTable::unpack(*key);
+                        format!("Element: {a} || {b}")
+                    }
+                    ROMType::Xor => {
+                        let (a, b) = XorTable::unpack(*key);
+                        format!("Element: {a} ^ {b}")
+                    }
+                    ROMType::Ltu => {
+                        let (a, b) = LtuTable::unpack(*key);
+                        format!("Element: {a} < {b}")
+                    }
+                    ROMType::Pow => {
+                        let (a, b) = PowTable::unpack(*key);
+                        format!("Element: {a} ** {b}")
+                    }
+                    ROMType::Instruction => format!("PC: {key}"),
+                };
+                println!(
+                    "\nLkMultiplicityError:\n\
+                    {lookups} of {rom_type:?} missing in {location}\n\
+                    {element}\n"
+                );
+            }
+        }
+    }
+
+    fn inst_id(&self) -> usize {
+        match self {
+            Self::AssertZeroError { inst_id, .. }
+            | Self::AssertEqualError { inst_id, .. }
+            | Self::LookupError { inst_id, .. }
+            | Self::LkMultiplicityError { inst_id, .. } => *inst_id,
         }
     }
 }
@@ -247,9 +400,13 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     ) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = ProgramTableCircuit::construct_circuit(&mut cb).unwrap();
-        let fixed =
-            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, MOCK_PROGRAM);
+        let config =
+            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
+        let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
+            &config,
+            cs.num_fixed,
+            &MOCK_PROGRAM,
+        );
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
@@ -266,6 +423,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
     let mut table_vec = vec![];
     load_range_table::<U5Table, _>(&mut table_vec, cb, challenge);
     load_range_table::<U8Table, _>(&mut table_vec, cb, challenge);
+    load_range_table::<U14Table, _>(&mut table_vec, cb, challenge);
     load_range_table::<U16Table, _>(&mut table_vec, cb, challenge);
     load_op_table::<AndTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<OrTable, _>(&mut table_vec, cb, challenge);
@@ -334,15 +492,17 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: [E; 2],
+        lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], Some(challenge))
+        Self::run_maybe_challenge(cb, wits_in, &[], Some(challenge), lkm)
     }
 
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], None)
+        Self::run_maybe_challenge(cb, wits_in, &[], None, lkm)
     }
 
     fn run_maybe_challenge(
@@ -350,6 +510,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         pi: &[E::BaseField],
         challenge: Option<[E; 2]>,
+        lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         let table = challenge.map(|challenge| load_tables(cb, challenge));
         let (challenge, table) = if let Some(challenge) = challenge {
@@ -419,7 +580,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &expr);
+                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
                 let expr_evaluated = expr_evaluated
                     .get_ext_field_vec_optn()
                     .map(|v| v.to_vec())
@@ -467,6 +628,108 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             }
         }
 
+        // LK Multiplicity check
+        if let Some(lkm_from_assignment) = lkm {
+            // Infer LK Multiplicity from constraint system.
+            let lkm_from_cs = cb
+                .cs
+                .lk_expressions_items_map
+                .iter()
+                .map(|(rom_type, items)| {
+                    (
+                        rom_type,
+                        items
+                            .iter()
+                            .map(|expr| {
+                                let e_result =
+                                    wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
+                                let inst_id = 0;
+                                let b = e_result.get_base_field_vec_optn();
+                                let e = e_result.get_ext_field_vec_optn();
+                                if let Some(b) = b {
+                                    b[inst_id].to_canonical_u64()
+                                } else if let Some(e) = e {
+                                    let arr = e[inst_id].to_canonical_u64_vec();
+                                    arr[0] + E::BaseField::MODULUS_U64 * arr[1]
+                                } else {
+                                    unreachable!()
+                                }
+                            })
+                            .collect::<Vec<u64>>(),
+                    )
+                })
+                .fold(LkMultiplicity::default(), |mut lkm, (rom_type, args)| {
+                    match rom_type {
+                        ROMType::U5 => lkm.assert_ux::<5>(args[0]),
+                        ROMType::U8 => lkm.assert_ux::<8>(args[0]),
+                        ROMType::U14 => lkm.assert_ux::<14>(args[0]),
+                        ROMType::U16 => lkm.assert_ux::<16>(args[0]),
+                        ROMType::And => lkm.lookup_and_byte(args[0], args[1]),
+                        ROMType::Or => lkm.lookup_or_byte(args[0], args[1]),
+                        ROMType::Xor => lkm.lookup_xor_byte(args[0], args[1]),
+                        ROMType::Ltu => lkm.lookup_ltu_byte(args[0], args[1]),
+                        ROMType::Pow => {
+                            assert_eq!(args[0], 2);
+                            lkm.lookup_pow2(args[1])
+                        }
+                        ROMType::Instruction => lkm.fetch(args[0] as u32),
+                    };
+
+                    lkm
+                });
+
+            let lkm_from_cs = lkm_from_cs.into_finalize_result();
+            let lkm_from_assignment = lkm_from_assignment.into_finalize_result();
+
+            // Compare each LK Multiplicity.
+
+            for (rom_type, cs_map, ass_map) in
+                izip!(ROMType::iter(), &lkm_from_cs, &lkm_from_assignment)
+            {
+                if *cs_map != *ass_map {
+                    let cs_keys: HashSet<_> = cs_map.keys().collect();
+                    let ass_keys: HashSet<_> = ass_map.keys().collect();
+
+                    // lookup missing in lkm Constraint System.
+                    ass_keys.difference(&cs_keys).for_each(|k| {
+                        let count_ass = ass_map.get(k).unwrap();
+                        errors.push(MockProverError::LkMultiplicityError {
+                            rom_type,
+                            key: **k,
+                            count: *count_ass as isize,
+                            inst_id: 0,
+                        })
+                    });
+
+                    // lookup missing in lkm Assignments.
+                    cs_keys.difference(&ass_keys).for_each(|k| {
+                        let count_cs = cs_map.get(k).unwrap();
+                        errors.push(MockProverError::LkMultiplicityError {
+                            rom_type,
+                            key: **k,
+                            count: -(*count_cs as isize),
+                            inst_id: 0,
+                        })
+                    });
+
+                    // count of specific lookup differ lkm assignments and lkm cs
+                    cs_keys.intersection(&ass_keys).for_each(|k| {
+                        let count_cs = cs_map.get(k).unwrap();
+                        let count_ass = ass_map.get(k).unwrap();
+
+                        if count_cs != count_ass {
+                            errors.push(MockProverError::LkMultiplicityError {
+                                rom_type,
+                                key: **k,
+                                count: (*count_ass as isize) - (*count_cs as isize),
+                                inst_id: 0,
+                            })
+                        }
+                    });
+                }
+            }
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
@@ -478,29 +741,48 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
+        lkm: Option<LkMultiplicity>,
     ) {
         let result = if let Some(challenge) = challenge {
-            Self::run_with_challenge(cb, wits_in, challenge)
+            Self::run_with_challenge(cb, wits_in, challenge, lkm)
         } else {
-            Self::run(cb, wits_in)
+            Self::run(cb, wits_in, lkm)
         };
         match result {
             Ok(_) => {}
             Err(errors) => {
                 println!("======================================================");
-                println!("Error: {} constraints not satisfied", errors.len());
 
                 println!(
-                    r"Hints:
-                        - If you encounter a constraint error that sporadically occurs in different environments
-                          (e.g., passes locally but fails in CI),
-                          this often points to unassigned witnesses during the assignment phase.
-                          Accessing these cells before they are properly written leads to undefined behavior.
+                    r"
+Hints:
+- If you encounter a constraint error that sporadically occurs in different environments
+    (e.g., passes locally but fails in CI),
+    this often points to unassigned witnesses during the assignment phase.
+    Accessing these cells before they are properly written leads to undefined behavior.
                     "
                 );
 
-                for error in errors {
-                    error.print(wits_in, &cb.cs.witin_namespace_map);
+                // Print errors and skip consecutive duplicates errors if they are equal.
+                let mut duplicates = 0;
+                let mut prev_err = None;
+                for error in &errors {
+                    if prev_err.is_some() && prev_err.unwrap() == error {
+                        duplicates += 1;
+                    } else {
+                        error.print(wits_in, &cb.cs.witin_namespace_map);
+                    }
+                    prev_err = Some(error);
+                }
+
+                if duplicates > 0 {
+                    println!(
+                        "Error: {} constraints not satisfied ({} duplicates hidden)",
+                        errors.len(),
+                        duplicates
+                    );
+                } else {
+                    println!("Error: {} constraints not satisfied", errors.len());
                 }
                 println!("======================================================");
                 panic!("Constraints not satisfied");
@@ -515,12 +797,12 @@ mod tests {
 
     use super::*;
     use crate::{
+        ROMType::U5,
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        gadgets::IsLtConfig,
+        gadgets::{AssertLTConfig, IsLtConfig},
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
-        ROMType::U5,
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -579,7 +861,7 @@ mod tests {
                 .into(),
         ];
 
-        MockProver::assert_satisfied(&builder, &wits_in, None);
+        MockProver::assert_satisfied(&builder, &wits_in, None, None);
     }
 
     #[derive(Debug)]
@@ -612,7 +894,7 @@ mod tests {
         ];
 
         let challenge = [1.into(), 1000.into()];
-        MockProver::assert_satisfied(&builder, &wits_in, Some(challenge));
+        MockProver::assert_satisfied(&builder, &wits_in, Some(challenge), None);
     }
 
     #[test]
@@ -626,39 +908,36 @@ mod tests {
         let wits_in = vec![vec![Goldilocks::from(123)].into_mle().into()];
 
         let challenge = [2.into(), 1000.into()];
-        let result = MockProver::run_with_challenge(&builder, &wits_in, challenge);
+        let result = MockProver::run_with_challenge(&builder, &wits_in, challenge, None);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
-        assert_eq!(
-            err,
-            vec![MockProverError::LookupError {
-                expression: Expression::Sum(
-                    Box::new(Expression::ScaledSum(
-                        Box::new(Expression::WitIn(0)),
-                        Box::new(Expression::Challenge(
-                            1,
-                            1,
-                            // TODO this still uses default challenge in ConstraintSystem, but challengeId
-                            // helps to evaluate the expression correctly. Shoudl challenge be just challengeId?
-                            GoldilocksExt2::ONE,
-                            GoldilocksExt2::ZERO,
-                        )),
-                        Box::new(Expression::Constant(
-                            <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
-                        )),
-                    )),
+        assert_eq!(err, vec![MockProverError::LookupError {
+            expression: Expression::Sum(
+                Box::new(Expression::ScaledSum(
+                    Box::new(Expression::WitIn(0)),
                     Box::new(Expression::Challenge(
-                        0,
+                        1,
                         1,
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                ),
-                evaluated: 123002.into(), // 123 * 1000 + 2
-                name: "test_lookup_error/assert_u5/assert u5".to_string(),
-                inst_id: 0,
-            }]
-        );
+                    Box::new(Expression::Constant(
+                        <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
+                    )),
+                )),
+                Box::new(Expression::Challenge(
+                    0,
+                    1,
+                    GoldilocksExt2::ONE,
+                    GoldilocksExt2::ZERO,
+                )),
+            ),
+            evaluated: 123002.into(), // 123 * 1000 + 2
+            name: "test_lookup_error/assert_u5/assert u5".to_string(),
+            inst_id: 0,
+        }]);
+        // because inst_id is not checked in our PartialEq impl
+        assert_eq!(err[0].inst_id(), 0);
     }
 
     #[allow(dead_code)]
@@ -666,7 +945,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: IsLtConfig,
+        pub lt_wtns: AssertLTConfig,
     }
 
     struct AssertLtCircuitInput {
@@ -678,8 +957,7 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns =
-                IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), Some(true), 1)?;
+            let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -727,10 +1005,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![
-                    AssertLtCircuitInput { a: 3, b: 5 },
-                    AssertLtCircuitInput { a: 7, b: 11 },
-                ],
+                vec![AssertLtCircuitInput { a: 3, b: 5 }, AssertLtCircuitInput {
+                    a: 7,
+                    b: 11,
+                }],
                 &mut lk_multiplicity,
             )
             .unwrap();
@@ -744,6 +1022,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 1000.into()]),
+            None,
         );
     }
 
@@ -780,6 +1059,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 1000.into()]),
+            None,
         );
     }
 
@@ -799,7 +1079,7 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
-            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), None, 1)?;
+            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -847,10 +1127,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![
-                    LtCircuitInput { a: 3, b: 5 },
-                    LtCircuitInput { a: 7, b: 11 },
-                ],
+                vec![LtCircuitInput { a: 3, b: 5 }, LtCircuitInput {
+                    a: 7,
+                    b: 11,
+                }],
                 &mut lk_multiplicity,
             )
             .unwrap();
@@ -864,6 +1144,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 1000.into()]),
+            None,
         );
     }
 
@@ -901,6 +1182,7 @@ mod tests {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 1000.into()]),
+            None,
         );
     }
 }

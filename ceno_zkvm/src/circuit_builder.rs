@@ -5,6 +5,8 @@ use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
+    ROMType,
+    chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
     structs::{ProvingKey, VerifyingKey, WitnessId},
@@ -67,6 +69,13 @@ impl NameSpace {
 pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
+    pub table_len: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetTableExpression<E: ExtensionField> {
+    pub values: Expression<E>,
+    pub table_len: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -86,6 +95,12 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub w_expressions: Vec<Expression<E>>,
     pub w_expressions_namespace_map: Vec<String>,
+
+    /// init/final ram expression
+    pub r_table_expressions: Vec<SetTableExpression<E>>,
+    pub r_table_expressions_namespace_map: Vec<String>,
+    pub w_table_expressions: Vec<SetTableExpression<E>>,
+    pub w_table_expressions_namespace_map: Vec<String>,
 
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
@@ -110,6 +125,8 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     #[cfg(test)]
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
+    #[cfg(test)]
+    pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     pub(crate) phantom: PhantomData<E>,
 }
@@ -127,6 +144,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             r_expressions_namespace_map: vec![],
             w_expressions: vec![],
             w_expressions_namespace_map: vec![],
+            r_table_expressions: vec![],
+            r_table_expressions_namespace_map: vec![],
+            w_table_expressions: vec![],
+            w_table_expressions_namespace_map: vec![],
             lk_expressions: vec![],
             lk_expressions_namespace_map: vec![],
             lk_table_expressions: vec![],
@@ -141,6 +162,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
             #[cfg(test)]
             debug_map: HashMap::new(),
+            #[cfg(test)]
+            lk_expressions_items_map: vec![],
 
             phantom: std::marker::PhantomData,
         }
@@ -215,11 +238,30 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(i)
     }
 
+    pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {
+        rlc_chip_record(
+            items,
+            self.chip_record_alpha.clone(),
+            self.chip_record_beta.clone(),
+        )
+    }
+
     pub fn lk_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        rom_type: ROMType,
+        items: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let rlc_record = self.rlc_chip_record(
+            std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
+                .chain(
+                    #[cfg(test)]
+                    items.clone(),
+                    #[cfg(not(test))]
+                    items,
+                )
+                .collect(),
+        );
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -229,12 +271,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
+        #[cfg(test)]
+        self.lk_expressions_items_map.push((rom_type, items));
         Ok(())
     }
 
     pub fn lk_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        table_len: usize,
         rlc_record: Expression<E>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
@@ -251,9 +296,62 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
             multiplicity,
+            table_len,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.lk_table_expressions_namespace_map.push(path);
+
+        Ok(())
+    }
+
+    pub fn r_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_len: usize,
+        rlc_record: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc record degree {} != 1",
+            rlc_record.degree()
+        );
+        self.r_table_expressions.push(SetTableExpression {
+            values: rlc_record,
+            table_len,
+        });
+        let path = self.ns.compute_path(name_fn().into());
+        self.r_table_expressions_namespace_map.push(path);
+
+        Ok(())
+    }
+
+    pub fn w_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_len: usize,
+        rlc_record: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc record degree {} != 1",
+            rlc_record.degree()
+        );
+        self.w_table_expressions.push(SetTableExpression {
+            values: rlc_record,
+            table_len,
+        });
+        let path = self.ns.compute_path(name_fn().into());
+        self.w_table_expressions_namespace_map.push(path);
 
         Ok(())
     }

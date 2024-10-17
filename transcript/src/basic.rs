@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use poseidon::poseidon_permutation::PoseidonPermutation;
 
-
 use crate::Challenge;
 
 #[derive(Clone)]
@@ -18,9 +17,7 @@ impl<E: ExtensionField> Transcript<E> {
         let label_f = E::BaseField::bytes_to_field_elements(label);
         perm.set_from_slice(label_f.as_slice(), 0);
         perm.permute();
-        Self {
-            permutation: perm,
-        }
+        Self { permutation: perm }
     }
 }
 
@@ -63,7 +60,8 @@ impl<E: ExtensionField> Transcript<E> {
 
     // Append the challenge to the transcript.
     pub fn append_challenge(&mut self, challenge: Challenge<E>) {
-        self.permutation.set_from_slice(challenge.elements.as_bases(), 0);
+        self.permutation
+            .set_from_slice(challenge.elements.as_bases(), 0);
         self.permutation.permute();
     }
 

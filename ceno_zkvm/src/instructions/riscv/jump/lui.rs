@@ -4,14 +4,14 @@ use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        riscv::{constants::UInt, u_insn::UInstructionConfig},
         Instruction,
+        riscv::{constants::UInt, u_insn::UInstructionConfig},
     },
     witness::LkMultiplicity,
-    Value,
 };
 
 pub struct LuiConfig<E: ExtensionField> {

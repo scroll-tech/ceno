@@ -12,11 +12,11 @@ use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-pub use rs::{coset_fft, fft, fft_root_table, RSCode, RSCodeDefaultSpec};
+pub use rs::{RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table};
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
-use crate::{util::arithmetic::interpolate2_weights, Error};
+use crate::{Error, util::arithmetic::interpolate2_weights};
 
 pub trait EncodingProverParameters {
     fn get_max_message_size_log(&self) -> usize;

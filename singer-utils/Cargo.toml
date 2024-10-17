@@ -1,23 +1,21 @@
 [package]
-name = "singer-utils"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = "singer-utils"
+version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
-ff_ext = { path = "../ff_ext" }
 ff.workspace = true
+ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
 
 gkr = { path = "../gkr", features = ["parallel"] }
-itertools = "0.12.1"
-simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
-sumcheck = { version = "0.1.0", path = "../sumcheck" }
+itertools = "0.12.1"
+multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
+simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 strum = "0.26.3"
 strum_macros = "0.26.4"
+sumcheck = { version = "0.1.0", path = "../sumcheck" }
 transcript = { version = "0.1.0", path = "../transcript" }
-multilinear_extensions = { path = "../multilinear_extensions", features = [ "parallel"] }

@@ -3,13 +3,13 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::AssertLTConfig,
     instructions::{
+        Instruction,
         riscv::{
             constants::{ECALL_HALT_OPCODE, EXIT_PC},
             ecall_insn::EcallInstructionConfig,
         },
-        Instruction,
     },
     set_val,
     witness::LkMultiplicity,
@@ -21,7 +21,7 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
     prev_x10_ts: WitIn,
-    lt_x10_cfg: IsLtConfig,
+    lt_x10_cfg: AssertLTConfig,
 }
 
 pub struct HaltInstruction<E>(PhantomData<E>);

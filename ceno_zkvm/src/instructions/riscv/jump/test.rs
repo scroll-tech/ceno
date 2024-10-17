@@ -1,4 +1,4 @@
-use ceno_emul::{ByteAddr, Change, StepRecord, PC_STEP_SIZE};
+use ceno_emul::{ByteAddr, Change, PC_STEP_SIZE, StepRecord};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
@@ -6,7 +6,7 @@ use multilinear_extensions::mle::IntoMLEs;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
-    scheme::mock_prover::{MockProver, MOCK_PC_AUIPC, MOCK_PC_JAL, MOCK_PC_LUI, MOCK_PROGRAM},
+    scheme::mock_prover::{MOCK_PC_AUIPC, MOCK_PC_JAL, MOCK_PC_LUI, MOCK_PROGRAM, MockProver},
 };
 
 use super::{AuipcInstruction, JalInstruction, LuiInstruction};
@@ -28,7 +28,7 @@ fn test_opcode_jal() {
 
     let pc_offset: i32 = -4i32;
     let new_pc: ByteAddr = ByteAddr(MOCK_PC_JAL.0.wrapping_add_signed(pc_offset));
-    let (raw_witin, _lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
+    let (raw_witin, lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_j_instruction(
@@ -42,7 +42,7 @@ fn test_opcode_jal() {
     .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -50,6 +50,7 @@ fn test_opcode_jal() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }
 
@@ -70,7 +71,7 @@ fn test_opcode_lui() {
 
     let lui_insn = MOCK_PROGRAM[22];
     let imm = lui_insn & 0xfffff000;
-    let (raw_witin, _lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
+    let (raw_witin, lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_u_instruction(
@@ -84,7 +85,7 @@ fn test_opcode_lui() {
     .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -92,6 +93,7 @@ fn test_opcode_lui() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }
 
@@ -112,7 +114,7 @@ fn test_opcode_auipc() {
 
     let auipc_insn = MOCK_PROGRAM[23];
     let imm = auipc_insn & 0xfffff000;
-    let (raw_witin, _lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
+    let (raw_witin, lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_u_instruction(
@@ -126,7 +128,7 @@ fn test_opcode_auipc() {
     .unwrap();
 
     MockProver::assert_satisfied(
-        &mut cb,
+        &cb,
         &raw_witin
             .de_interleaving()
             .into_mles()
@@ -134,5 +136,6 @@ fn test_opcode_auipc() {
             .map(|v| v.into())
             .collect_vec(),
         None,
+        Some(lkm),
     );
 }

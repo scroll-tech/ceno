@@ -4,11 +4,11 @@ use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    witness::LkMultiplicity, Value,
+    Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
+    witness::LkMultiplicity,
 };
 
-use super::{constants::UInt, i_insn::IInstructionConfig, RIVInstruction};
+use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};
 
 pub struct AddiInstruction<E>(PhantomData<E>);
 
@@ -35,7 +35,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
+        let imm = UInt::new(|| "imm", circuit_builder)?;
         let rd_written = rs1_read.add(|| "rs1_read + imm", circuit_builder, &imm, true)?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
@@ -89,7 +89,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_ADDI, MOCK_PC_ADDI_SUB, MOCK_PROGRAM},
+        scheme::mock_prover::{MOCK_PC_ADDI, MOCK_PC_ADDI_SUB, MOCK_PROGRAM, MockProver},
     };
 
     use super::AddiInstruction;
@@ -109,7 +109,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = AddiInstruction::<GoldilocksExt2>::assign_instances(
+        let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
@@ -132,6 +132,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             None,
+            Some(lkm),
         );
     }
 
@@ -150,7 +151,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = AddiInstruction::<GoldilocksExt2>::assign_instances(
+        let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
@@ -173,6 +174,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             Some([1.into(), 10000.into()]),
+            Some(lkm),
         );
     }
 }

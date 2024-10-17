@@ -21,7 +21,7 @@ fn construct_input<E: ExtensionField>(
     input_size: usize,
     challenge: ChallengeId,
 ) -> Arc<Circuit<E>> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::default();
     let (_, inputs) = circuit_builder.create_witness_in(input_size);
     let (_, lookup_inputs) = circuit_builder.create_ext_witness_out(input_size);
 
@@ -40,7 +40,7 @@ pub(crate) fn construct_prefix_selector<E: ExtensionField>(
     num: usize,
 ) -> Arc<Circuit<E>> {
     assert_eq!(num, num.next_power_of_two());
-    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::default();
     let _ = circuit_builder.create_constant_in(n_instances * num, 1);
     circuit_builder.configure();
     Arc::new(Circuit::new(&circuit_builder))
@@ -52,7 +52,7 @@ pub(crate) fn construct_prefix_selector<E: ExtensionField>(
 /// Wire in 1: 2-bit selector.
 /// output layer: the denominator and the numerator.
 pub(crate) fn construct_inv_sum<E: ExtensionField>() -> Arc<Circuit<E>> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::default();
     let (_input_id, input) = circuit_builder.create_ext_witness_in(2);
     let (_cond_id, cond) = circuit_builder.create_witness_in(2);
     let (_, output) = circuit_builder.create_ext_witness_out(2);
@@ -85,7 +85,7 @@ pub(crate) fn construct_inv_sum<E: ExtensionField>() -> Arc<Circuit<E>> {
 /// Wire out 0: the denominator.
 /// Wire out 1: the numerator.
 pub(crate) fn construct_frac_sum_inner<E: ExtensionField>() -> Arc<Circuit<E>> {
-    let mut circuit_builder = CircuitBuilder::<E>::new();
+    let mut circuit_builder = CircuitBuilder::<E>::default();
     let (_, input) = circuit_builder.create_ext_witness_in(4);
     let (_, output) = circuit_builder.create_ext_witness_out(2);
     // denominator
@@ -141,8 +141,8 @@ fn main() -> Result<(), GKRGraphError> {
     // Graph construction
     // ==================
 
-    let mut prover_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
-    let mut verifier_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::new();
+    let mut prover_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::default();
+    let mut verifier_graph_builder = CircuitGraphBuilder::<GoldilocksExt2>::default();
     let mut prover_transcript = Transcript::<GoldilocksExt2>::new(b"test");
     let challenge = vec![
         prover_transcript
