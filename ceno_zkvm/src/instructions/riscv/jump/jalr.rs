@@ -67,7 +67,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         circuit_builder.require_equal(
             || "rs1+imm = next_pc_unrounded + overflow*2^32",
             rs1_read.value() + imm.expr(),
-            next_pc_addr.address_unaligned() + overflow.expr() * (1u64 << 32).into(),
+            next_pc_addr.expr_unaligned() + overflow.expr() * (1u64 << 32).into(),
         )?;
 
         circuit_builder.require_zero(
@@ -77,7 +77,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
         circuit_builder.require_equal(
             || "next_pc_uint = next_pc",
-            next_pc_addr.address_align2(),
+            next_pc_addr.expr_align2(),
             i_insn.vm_state.next_pc.unwrap().expr(),
         )?;
 
