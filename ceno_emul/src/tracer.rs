@@ -116,12 +116,12 @@ impl StepRecord {
     pub fn new_u_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: Word,
+        insn_code: u32,
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
-        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
+        StepRecord::new_insn2(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
     }
 
     pub fn new_j_instruction(
