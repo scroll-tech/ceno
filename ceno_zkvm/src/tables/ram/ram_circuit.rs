@@ -9,7 +9,7 @@ use crate::{
 
 use super::ram_impl::RamTableConfig;
 
-/// Use this trait as parameter to MemoryCircuit.
+/// Impl trait as parameter to RamTableCircuit.
 pub trait RamTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
@@ -17,12 +17,19 @@ pub trait RamTable {
     fn len() -> usize;
 
     fn init_state() -> Vec<u32>;
+
+    #[inline(always)]
+    fn addr(entry_index: usize) -> u32 {
+        entry_index as u32
+    }
 }
 
 pub struct RamTableCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, RAM: RamTable> TableCircuit<E> for RamTableCircuit<E, RAM> {
-    type TableConfig = RamTableConfig;
+impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
+    for RamTableCircuit<E, RAM>
+{
+    type TableConfig = RamTableConfig<RAM>;
     type FixedInput = Option<Vec<u32>>;
     type WitnessInput = Vec<u32>;
 
@@ -33,12 +40,12 @@ impl<E: ExtensionField, RAM: RamTable> TableCircuit<E> for RamTableCircuit<E, RA
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
         cb.namespace(
             || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb, RAM::RAM_TYPE, RAM::len(), RAM::V_LIMBS),
+            |cb| Self::TableConfig::construct_circuit(cb),
         )
     }
 
     fn generate_fixed_traces(
-        config: &RamTableConfig,
+        config: &Self::TableConfig,
         num_fixed: usize,
         input: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
