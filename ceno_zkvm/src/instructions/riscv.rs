@@ -1,7 +1,7 @@
 use ceno_emul::InsnKind;
 
-mod all_circuits;
-pub use all_circuits::Rv32imConfig;
+mod rv32im;
+pub use rv32im::Rv32imConfig;
 
 pub mod arith;
 pub mod arith_imm;
