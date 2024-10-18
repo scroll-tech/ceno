@@ -1770,6 +1770,7 @@ dependencies = [
  "singer-utils",
  "strum",
  "strum_macros",
+ "tracing",
  "tracing-flame",
  "tracing-subscriber",
  "transcript",
