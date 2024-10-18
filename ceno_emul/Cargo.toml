@@ -9,9 +9,7 @@ anyhow = { version = "1", default-features = false }
 elf = "0.7"
 strum.workspace = true
 strum_macros.workspace = true
-tracing = { version = "0", default-features = false, features = [
-  "attributes",
-] }
+tracing.workspace = true
 
 [dev-dependencies]
 ceno-examples = { path = "../examples-builder" }

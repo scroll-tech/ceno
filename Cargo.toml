@@ -43,7 +43,9 @@ serde = { version = "1", features = ["derive"] }
 strum = "0.26"
 strum_macros = "0.26"
 subtle = "2"
-tracing = "0.1"
+tracing = { version = "0.1", features = [
+  "attributes",
+] }
 tracing-flame = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
