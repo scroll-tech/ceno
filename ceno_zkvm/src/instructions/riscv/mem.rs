@@ -61,7 +61,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
             &imm.value(),
             rs1_read.register_expr(),
             rs2_read.register_expr(),
-            memory_addr.memory_expr(),
+            memory_addr.address_expr(),
             memory_value,
         )?;
 
@@ -138,7 +138,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             &imm.value(),
             rs1_read.register_expr(),
             memory_read.memory_expr(),
-            memory_addr.memory_expr(),
+            memory_addr.address_expr(),
             memory_value,
         )?;
 

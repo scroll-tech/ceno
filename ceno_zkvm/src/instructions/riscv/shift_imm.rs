@@ -109,7 +109,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{ByteAddr, Change, StepRecord};
+    use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -118,7 +118,7 @@ mod test {
         Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{Instruction, riscv::constants::UInt},
-        scheme::mock_prover::{MOCK_PC_SRLI, MOCK_PC_SRLI_31, MOCK_PROGRAM, MockProver},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     use super::{ShiftImmInstruction, SrliOp};
@@ -126,14 +126,14 @@ mod test {
     #[test]
     fn test_opcode_srli() {
         // imm = 3
-        verify_srli(MOCK_PC_SRLI, MOCK_PROGRAM[10], 32, 32 >> 3);
-        verify_srli(MOCK_PC_SRLI, MOCK_PROGRAM[10], 33, 33 >> 3);
+        verify_srli(3, 32, 32 >> 3);
+        verify_srli(3, 33, 33 >> 3);
         // imm = 31
-        verify_srli(MOCK_PC_SRLI_31, MOCK_PROGRAM[11], 32, 32 >> 31);
-        verify_srli(MOCK_PC_SRLI_31, MOCK_PROGRAM[11], 33, 33 >> 31);
+        verify_srli(31, 32, 32 >> 31);
+        verify_srli(31, 33, 33 >> 31);
     }
 
-    fn verify_srli(pc: ByteAddr, program: u32, rs1_read: u32, expected_rd_written: u32) {
+    fn verify_srli(imm: u32, rs1_read: u32, expected_rd_written: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
@@ -161,19 +161,30 @@ mod test {
             )
             .unwrap();
 
+        let insn_code = encode_rv32(InsnKind::SRLI, 2, 0, 4, imm);
         let (raw_witin, lkm) = ShiftImmInstruction::<GoldilocksExt2, SrliOp>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                pc,
-                program,
+                MOCK_PC_START,
+                insn_code,
                 rs1_read,
-                Change::new(0, expected_rd_written),
+                Change::new(0, rs1_read >> imm),
                 0,
             )],
         )
         .unwrap();
+
+        let expected_rd_written = UInt::from_const_unchecked(
+            Value::new_unchecked(expected_rd_written)
+                .as_u16_limbs()
+                .to_vec(),
+        );
+        config
+            .rd_written
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .unwrap();
 
         MockProver::assert_satisfied(
             &cb,
@@ -183,6 +194,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
