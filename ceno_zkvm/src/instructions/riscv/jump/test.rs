@@ -1,4 +1,4 @@
-use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
+use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
@@ -9,7 +9,7 @@ use crate::{
     scheme::mock_prover::{MOCK_PC_START, MockProver},
 };
 
-use super::{AuipcInstruction, JalInstruction, LuiInstruction};
+use super::{AuipcInstruction, JalInstruction, JalrInstruction, LuiInstruction};
 
 fn imm_j(imm: i32) -> u32 {
     // imm is 21 bits in J-type
@@ -45,6 +45,54 @@ fn test_opcode_jal() {
             4,
             Change::new(MOCK_PC_START, new_pc),
             insn_code,
+            Change::new(0, (MOCK_PC_START + PC_STEP_SIZE).into()),
+            0,
+        )],
+    )
+    .unwrap();
+
+    MockProver::assert_satisfied(
+        &cb,
+        &raw_witin
+            .de_interleaving()
+            .into_mles()
+            .into_iter()
+            .map(|v| v.into())
+            .collect_vec(),
+        &[insn_code],
+        None,
+        Some(lkm),
+    );
+}
+
+#[test]
+fn test_opcode_jalr() {
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cb = CircuitBuilder::new(&mut cs);
+    let config = cb
+        .namespace(
+            || "jalr",
+            |cb| {
+                let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                Ok(config)
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+    let imm = -15i32;
+    let rs1_read: Word = 10u32;
+    let new_pc: ByteAddr = ByteAddr(rs1_read.wrapping_add_signed(imm) & (!1));
+    let insn_code = encode_rv32(InsnKind::JALR, 2, 0, 4, imm as u32);
+
+    let (raw_witin, lkm) = JalrInstruction::<GoldilocksExt2>::assign_instances(
+        &config,
+        cb.cs.num_witin as usize,
+        vec![StepRecord::new_i_instruction(
+            4,
+            Change::new(MOCK_PC_START, new_pc),
+            insn_code,
+            rs1_read,
             Change::new(0, (MOCK_PC_START + PC_STEP_SIZE).into()),
             0,
         )],
