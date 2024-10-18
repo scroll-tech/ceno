@@ -5,7 +5,6 @@ name = "sumcheck"
 version.workspace = true
 
 [dependencies]
-ark-ff = "0"
 ark-std.workspace = true
 const_env.workspace = true
 ff.workspace = true
