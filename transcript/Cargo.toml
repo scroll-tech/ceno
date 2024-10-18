@@ -10,7 +10,6 @@ crossbeam-channel = "0"
 ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
-halo2curves.workspace = true
 poseidon.workspace = true
 rayon.workspace = true
 serde.workspace = true
