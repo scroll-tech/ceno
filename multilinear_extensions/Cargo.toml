@@ -18,8 +18,8 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
-env_logger = "0"
-log = "0"
+env_logger = "0.11"
+log = "0.4"
 
 [features]
 parallel = []
