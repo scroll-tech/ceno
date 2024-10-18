@@ -14,7 +14,11 @@ RAYON_NUM_THREADS = "${CORE}"
 [tasks.tests]
 args = [
   "test",
+  # Run everything but 'benches'.
   "--lib",
+  "--bins",
+  "--tests",
+  "--examples",
   "--release",
   "--target",
   "${CUR_TARGET}",

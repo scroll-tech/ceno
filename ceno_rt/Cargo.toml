@@ -5,5 +5,5 @@ name = "ceno_rt"
 version.workspace = true
 
 [dependencies]
-riscv = "0.11.1"
-riscv-rt = "0.12.2"
+riscv = "0.11"
+riscv-rt = "0.12"

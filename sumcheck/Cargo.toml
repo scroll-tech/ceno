@@ -5,24 +5,24 @@ name = "sumcheck"
 version.workspace = true
 
 [dependencies]
-ark-ff = "0.4.2"
 ark-std.workspace = true
-const_env = "0.1.2"
+const_env.workspace = true
 ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
-itertools = "0.12.1"
+itertools.workspace = true
 rayon.workspace = true
 serde.workspace = true
-tracing = "0.1.40"
+tracing.workspace = true
+tracing-flame.workspace = true
 
-crossbeam-channel = "0.5.13"
+crossbeam-channel.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-pprof = { version = "0.13", features = ["flamegraph"] }
+criterion.workspace = true
+pprof.workspace = true
 
 [[bench]]
 harness = false

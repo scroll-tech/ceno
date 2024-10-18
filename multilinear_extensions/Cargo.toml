@@ -9,16 +9,16 @@ ark-std.workspace = true
 ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
-itertools = "0.12.1"
+itertools.workspace = true
 rayon.workspace = true
 serde.workspace = true
-tracing = "0.1.40"
-tracing-flame = "0.2.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing.workspace = true
+tracing-flame.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-env_logger = "0.7"
+criterion.workspace = true
+env_logger = "0.11"
 log = "0.4"
 
 [features]
