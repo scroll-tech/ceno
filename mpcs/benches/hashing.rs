@@ -3,7 +3,6 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use mpcs::util::merkle_tree::{Hasher, KeccakHasher, PoseidonHasher};
-use poseidon::poseidon_hash::PoseidonHash;
 
 fn random_ceno_goldy() -> Goldilocks {
     Goldilocks::random(&mut test_rng())
