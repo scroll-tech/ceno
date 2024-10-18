@@ -2,9 +2,7 @@ use std::{panic, time::Instant};
 
 use ceno_zkvm::{
     Value, declare_program,
-    instructions::riscv::{
-        arith::AddInstruction, branch::BltuInstruction, constants::EXIT_PC, jump::JalInstruction,
-    },
+    instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
     tables::{ProgramTableCircuit, RegTableCircuit},
@@ -13,15 +11,11 @@ use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext,
-    InsnKind::{ADD, BLTU, EANY, JAL},
-    StepRecord, Tracer, VMState, WordAddr,
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, StepRecord, Tracer, VMState, WordAddr,
 };
 use ceno_zkvm::{
-    instructions::riscv::ecall::HaltInstruction,
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
@@ -115,16 +109,9 @@ fn main() {
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
-    // opcode circuits
-    let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
-    let bltu_config = zkvm_cs.register_opcode_circuit::<BltuInstruction>();
-    let jal_config = zkvm_cs.register_opcode_circuit::<JalInstruction<E>>();
-    let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
-    // tables
-    let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
+
+    let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let reg_config = zkvm_cs.register_table_circuit::<RegTableCircuit<E>>();
-    let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
-    let ltu_config = zkvm_cs.register_table_circuit::<LtuTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
@@ -132,26 +119,8 @@ fn main() {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
 
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-        zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-        zkvm_fixed_traces.register_opcode_circuit::<BltuInstruction>(&zkvm_cs);
-        zkvm_fixed_traces.register_opcode_circuit::<JalInstruction<E>>(&zkvm_cs);
-        zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
+        config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
-        zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
-            &zkvm_cs,
-            u16_range_config.clone(),
-            &(),
-        );
-        zkvm_fixed_traces.register_table_circuit::<AndTableCircuit<E>>(
-            &zkvm_cs,
-            and_config.clone(),
-            &(),
-        );
-        zkvm_fixed_traces.register_table_circuit::<LtuTableCircuit<E>>(
-            &zkvm_cs,
-            ltu_config.clone(),
-            &(),
-        );
         zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
             &zkvm_cs,
             prog_config.clone(),
@@ -211,29 +180,19 @@ fn main() {
             .expect("vm exec failed")
             .into_iter()
             .collect::<Vec<_>>();
-        let mut add_records = Vec::new();
-        let mut bltu_records = Vec::new();
-        let mut jal_records = Vec::new();
-        let mut halt_records = Vec::new();
-        all_records.into_iter().for_each(|record| {
-            let kind = record.insn().kind().1;
-            match kind {
-                ADD => add_records.push(record),
-                BLTU => bltu_records.push(record),
-                JAL => jal_records.push(record),
-                EANY => {
-                    if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
-                        halt_records.push(record);
-                    }
-                }
-                i => panic!("unknown instruction {i:?}"),
-            }
-        });
 
-        assert_eq!(halt_records.len(), 1);
+        let halt_record = all_records
+            .iter()
+            .rev()
+            .find(|record| {
+                record.insn().codes().kind == EANY
+                    && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
+            })
+            .expect("halt record not found");
+
         let final_access = vm.tracer().final_accesses();
         let end_cycle = final_access.get(&CENO_PLATFORM.pc_vma().into()).unwrap();
-        let exit_code = halt_records[0].rs2().unwrap().value;
+        let exit_code = halt_record.rs2().unwrap().value;
         let pi = PublicValues::new(
             exit_code,
             CENO_PLATFORM.rom_start(),
@@ -242,38 +201,15 @@ fn main() {
             *end_cycle as u32,
         );
 
-        tracing::info!(
-            "tracer generated {} ADD records, {} BLTU records, {} JAL records",
-            add_records.len(),
-            bltu_records.len(),
-            jal_records.len(),
-        );
-
         let mut zkvm_witness = ZKVMWitnesses::default();
         // assign opcode circuits
-        zkvm_witness
-            .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
+        config
+            .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
             .unwrap();
-        zkvm_witness
-            .assign_opcode_circuit::<BltuInstruction>(&zkvm_cs, &bltu_config, bltu_records)
-            .unwrap();
-        zkvm_witness
-            .assign_opcode_circuit::<JalInstruction<E>>(&zkvm_cs, &jal_config, jal_records)
-            .unwrap();
-        zkvm_witness
-            .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
-            .unwrap();
-
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
-        zkvm_witness
-            .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
-            .unwrap();
-        zkvm_witness
-            .assign_table_circuit::<AndTableCircuit<E>>(&zkvm_cs, &and_config, &())
-            .unwrap();
-        zkvm_witness
-            .assign_table_circuit::<LtuTableCircuit<E>>(&zkvm_cs, &ltu_config, &())
+        config
+            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
             .unwrap();
         // assign cpu register circuit
         zkvm_witness
@@ -295,6 +231,7 @@ fn main() {
                     .collect_vec(),
             )
             .unwrap();
+        // assign program circuit
         zkvm_witness
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
                 &zkvm_cs,
