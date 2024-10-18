@@ -177,9 +177,7 @@ fn main() {
         let all_records = vm
             .iter_until_halt()
             .collect::<Result<Vec<StepRecord>, _>>()
-            .expect("vm exec failed")
-            .into_iter()
-            .collect::<Vec<_>>();
+            .expect("vm exec failed");
 
         let halt_record = all_records
             .iter()
@@ -191,14 +189,15 @@ fn main() {
             .expect("halt record not found");
 
         let final_access = vm.tracer().final_accesses();
-        let end_cycle = final_access.get(&CENO_PLATFORM.pc_vma().into()).unwrap();
+
+        let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
         let exit_code = halt_record.rs2().unwrap().value;
         let pi = PublicValues::new(
             exit_code,
             CENO_PLATFORM.rom_start(),
             Tracer::SUBCYCLES_PER_INSN as u32,
             EXIT_PC as u32,
-            *end_cycle as u32,
+            end_cycle,
         );
 
         let mut zkvm_witness = ZKVMWitnesses::default();
