@@ -712,8 +712,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .get_base_field_vec()
                     .split_at(wit.evaluations().len() / 2);
                 let res = vec![
-                    first.iter().cloned().collect_vec().into_mle().into(),
-                    second.iter().cloned().collect_vec().into_mle().into(),
+                    first.to_vec().into_mle().into(),
+                    second.to_vec().into_mle().into(),
                 ];
                 assert_eq!(res.len(), NUM_FANIN_LOGUP);
                 res

@@ -6,7 +6,7 @@ use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
-    op_mle_ax_b,
+    op_mle_xa_b,
     util::ceil_log2,
     virtual_poly_v2::ArcMultilinearExtension,
 };
@@ -336,11 +336,10 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
             })
         },
         &|x, a, b| {
-            op_mle_ax_b!(|a, x, b| {
+            op_mle_xa_b!(|x, a, b| {
                 assert_eq!(a.len(), 1);
                 assert_eq!(b.len(), 1);
-                let a = a[0];
-                let b = b[0];
+                let (a, b) = (a[0], b[0]);
                 Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
                     ceil_log2(x.len()),
                     x.par_iter()
