@@ -203,6 +203,11 @@ impl StepRecord {
     pub fn is_busy_loop(&self) -> bool {
         self.pc.before == self.pc.after
     }
+
+    /// Return the cycle when the next instruction would start.
+    pub fn next_cycle(steps: &[Self]) -> u64 {
+        steps.last().map(|s| s.cycle()).unwrap_or(0) + Tracer::SUBCYCLES_PER_INSN
+    }
 }
 
 #[derive(Debug)]
@@ -246,12 +251,6 @@ impl Tracer {
 
     pub fn store_pc(&mut self, pc: ByteAddr) {
         self.record.pc.after = pc;
-    }
-
-    pub fn halt(&mut self, pc: ByteAddr) {
-        let pc_addr = CENO_PLATFORM.pc_vma().into();
-        self.record.pc.after = pc;
-        self.track_access(pc_addr, Self::SUBCYCLES_PER_INSN);
     }
 
     pub fn fetch(&mut self, pc: WordAddr, value: Word) {
