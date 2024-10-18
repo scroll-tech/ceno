@@ -27,7 +27,7 @@ pub fn criterion_benchmark<H: Hasher<GoldilocksExt2>>(c: &mut Criterion, id: &st
 
     let values = (0..60).map(|_| random_ceno_goldy()).collect::<Vec<_>>();
     group.bench_function("hash 60 to 1", |bencher| {
-        bencher.iter(|| PoseidonHash::hash_or_noop(&values))
+        bencher.iter(|| H::hash_slice_base(&values))
     });
 }
 

@@ -28,6 +28,10 @@ where
         PoseidonHash::hash_or_noop_iter(iter)
     }
 
+    fn hash_slice_base(vec: &[E::BaseField]) -> Self::Digest {
+        PoseidonHash::hash_or_noop(vec)
+    }
+
     fn hash_two_digests(a: &Self::Digest, b: &Self::Digest) -> Self::Digest {
         PoseidonHash::two_to_one(a, b)
     }
