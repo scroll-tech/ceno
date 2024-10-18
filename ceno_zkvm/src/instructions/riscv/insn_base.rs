@@ -562,6 +562,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[],
             None,
         );
         assert_eq!(res.is_ok(), is_ok, "{:?}", res);

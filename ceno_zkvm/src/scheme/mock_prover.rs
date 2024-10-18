@@ -368,8 +368,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
     pub fn run(
         cb: &CircuitBuilder<E>,
-        programs: &[u32],
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        programs: &[u32],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         Self::run_maybe_challenge(cb, wits_in, programs, &[], None, lkm)
@@ -656,7 +656,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let result = if let Some(challenge) = challenge {
             Self::run_with_challenge(cb, wits_in, challenge, lkm)
         } else {
-            Self::run(cb, programs, wits_in, lkm)
+            Self::run(cb, wits_in, programs, lkm)
         };
         match result {
             Ok(_) => {}
