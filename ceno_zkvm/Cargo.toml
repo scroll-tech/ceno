@@ -35,7 +35,7 @@ thread_local = "1.1"
 
 [dev-dependencies]
 base64 = "0.22"
-cfg-if = "1.0"
+cfg-if.workspace = true
 const_env.workspace = true
 criterion.workspace = true
 pprof.workspace = true

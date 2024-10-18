@@ -28,7 +28,7 @@ tracing-flame.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-cfg-if = "1"
+cfg-if.workspace = true
 const_env.workspace = true
 criterion.workspace = true
 pprof.workspace = true

@@ -25,7 +25,7 @@ tracing-subscriber.workspace = true
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
-cfg-if = "1"
+cfg-if.workspace = true
 criterion.workspace = true
 pprof.workspace = true
 tiny-keccak = { version = "2", features = ["keccak"] }
