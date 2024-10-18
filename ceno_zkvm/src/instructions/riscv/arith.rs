@@ -169,7 +169,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord};
+    use ceno_emul::{Change, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -178,7 +178,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MOCK_PC_ADD, MOCK_PC_MUL, MOCK_PC_SUB, MOCK_PROGRAM, MockProver},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     #[test]
@@ -196,12 +196,13 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
-                    MOCK_PC_ADD,
-                    MOCK_PROGRAM[0],
+                    MOCK_PC_START,
+                    insn_code,
                     11,
                     0xfffffffe,
                     Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
@@ -229,6 +230,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -249,12 +251,13 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
-                    MOCK_PC_ADD,
-                    MOCK_PROGRAM[0],
+                    MOCK_PC_START,
+                    insn_code,
                     u32::MAX - 1,
                     u32::MAX - 1,
                     Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
@@ -282,6 +285,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -302,12 +306,13 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
-                    MOCK_PC_SUB,
-                    MOCK_PROGRAM[1],
+                    MOCK_PC_START,
+                    insn_code,
                     11,
                     2,
                     Change::new(0, 11_u32.wrapping_sub(2)),
@@ -335,6 +340,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -355,12 +361,13 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
         let (raw_witin, _) =
             SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
-                    MOCK_PC_SUB,
-                    MOCK_PROGRAM[1],
+                    MOCK_PC_START,
+                    insn_code,
                     3,
                     11,
                     Change::new(0, 3_u32.wrapping_sub(11)),
@@ -388,6 +395,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             None,
         );
@@ -403,12 +411,13 @@ mod test {
             .unwrap();
 
         // values assignment
+        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
-                    MOCK_PC_MUL,
-                    MOCK_PROGRAM[2],
+                    MOCK_PC_START,
+                    insn_code,
                     11,
                     2,
                     Change::new(0, 22),
@@ -433,6 +442,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -448,12 +458,13 @@ mod test {
             .unwrap();
 
         // values assignment
+        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
-                    MOCK_PC_MUL,
-                    MOCK_PROGRAM[2],
+                    MOCK_PC_START,
+                    insn_code,
                     u32::MAX / 2 + 1,
                     2,
                     Change::new(0, 0),
@@ -477,6 +488,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -497,12 +509,13 @@ mod test {
         let c_limb = ret.limbs;
 
         // values assignment
+        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
-                    MOCK_PC_MUL,
-                    MOCK_PROGRAM[2],
+                    MOCK_PC_START,
+                    insn_code,
                     a.as_u64() as u32,
                     b.as_u64() as u32,
                     Change::new(
@@ -529,6 +542,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );

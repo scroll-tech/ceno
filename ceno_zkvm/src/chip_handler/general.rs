@@ -143,17 +143,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn require_equal<NR, N>(
         &mut self,
         name_fn: N,
-        target: Expression<E>,
-        rlc_record: Expression<E>,
+        a: Expression<E>,
+        b: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.namespace(
-            || "require_equal",
-            |cb| cb.cs.require_zero(name_fn, target - rlc_record),
-        )
+        self.namespace(|| "require_equal", |cb| cb.cs.require_zero(name_fn, a - b))
     }
 
     pub fn require_one<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>

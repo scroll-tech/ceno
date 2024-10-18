@@ -81,7 +81,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, PC_STEP_SIZE, StepRecord};
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -89,11 +89,20 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MOCK_PC_ADDI, MOCK_PC_ADDI_SUB, MOCK_PROGRAM, MockProver},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     use super::AddiInstruction;
 
+    fn imm(imm: i32) -> u32 {
+        // imm is 12 bits in B-type
+        const IMM_MAX: i32 = 2i32.pow(12);
+        if imm.is_negative() {
+            (IMM_MAX + imm) as u32
+        } else {
+            imm as u32
+        }
+    }
     #[test]
     fn test_opcode_addi() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -109,13 +118,14 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                Change::new(MOCK_PC_ADDI, MOCK_PC_ADDI + PC_STEP_SIZE),
-                MOCK_PROGRAM[13],
+                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
+                insn_code,
                 1000,
                 Change::new(0, 1003),
                 0,
@@ -131,6 +141,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -151,13 +162,14 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(-3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                Change::new(MOCK_PC_ADDI_SUB, MOCK_PC_ADDI_SUB + PC_STEP_SIZE),
-                MOCK_PROGRAM[14],
+                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
+                insn_code,
                 1000,
                 Change::new(0, 997),
                 0,
@@ -173,7 +185,8 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            Some([1.into(), 10000.into()]),
+            &[insn_code],
+            None,
             Some(lkm),
         );
     }
