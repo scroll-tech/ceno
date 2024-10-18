@@ -703,7 +703,7 @@ pub mod fmt {
     pub fn expr<E: ExtensionField>(
         expression: &Expression<E>,
         wtns: &mut Vec<WitnessId>,
-        add_prn_sum: bool,
+        add_parens_sum: bool,
     ) -> String {
         match expression {
             Expression::WitIn(wit_in) => {
@@ -735,7 +735,11 @@ pub mod fmt {
             Expression::Instance(i) => format!("{:?}", i),
             Expression::Sum(left, right) => {
                 let s = format!("{} + {}", expr(left, wtns, false), expr(right, wtns, false));
-                if add_prn_sum { format!("({})", s) } else { s }
+                if add_parens_sum {
+                    format!("({})", s)
+                } else {
+                    s
+                }
             }
             Expression::Product(left, right) => {
                 format!("{} * {}", expr(left, wtns, true), expr(right, wtns, true))
@@ -747,7 +751,11 @@ pub mod fmt {
                     expr(x, wtns, true),
                     expr(b, wtns, false)
                 );
-                if add_prn_sum { format!("({})", s) } else { s }
+                if add_parens_sum {
+                    format!("({})", s)
+                } else {
+                    s
+                }
             }
         }
     }
@@ -770,26 +778,26 @@ pub mod fmt {
         }
     }
 
-    pub fn base_field<F: SmallField>(base_field: &F, add_prn: bool) -> String {
+    pub fn base_field<F: SmallField>(base_field: &F, add_parens: bool) -> String {
         let value = base_field.to_canonical_u64();
 
         if value > F::MODULUS_U64 - u16::MAX as u64 {
             // beautiful format for negative number > -65536
-            prn(format!("-{}", F::MODULUS_U64 - value), add_prn)
+            parens(format!("-{}", F::MODULUS_U64 - value), add_parens)
         } else if value < u16::MAX as u64 {
             format!("{value}")
         } else {
             // hex
             if value > F::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
-                prn(format!("-{:#x}", F::MODULUS_U64 - value), add_prn)
+                parens(format!("-{:#x}", F::MODULUS_U64 - value), add_parens)
             } else {
                 format!("{value:#x}")
             }
         }
     }
 
-    pub fn prn(s: String, add_prn: bool) -> String {
-        if add_prn { format!("({})", s) } else { s }
+    pub fn parens(s: String, add_parens: bool) -> String {
+        if add_parens { format!("({})", s) } else { s }
     }
 
     #[cfg(test)]
