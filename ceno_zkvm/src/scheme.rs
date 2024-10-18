@@ -64,6 +64,24 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub wits_opening_proof: PCS::Proof,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ZKVMMemProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    // tower evaluation at layer 1
+    pub r_out_evals: Vec<[E; 2]>,
+    pub w_out_evals: Vec<[E; 2]>,
+
+    pub tower_proof: TowerProofs<E>,
+
+    // tower leafs layer witin
+    pub rw_in_evals: Vec<E>,
+
+    pub fixed_in_evals: Vec<E>,
+    pub fixed_opening_proof: PCS::Proof,
+    pub wits_commit: PCS::Commitment,
+    pub wits_in_evals: Vec<E>,
+    pub wits_opening_proof: PCS::Proof,
+}
+
 #[derive(Default, Clone, Debug)]
 pub struct PublicValues<T: Default + Clone + Debug> {
     exit_code: T,
