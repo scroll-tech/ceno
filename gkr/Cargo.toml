@@ -28,7 +28,7 @@ transcript = { path = "../transcript" }
 cfg-if.workspace = true
 criterion.workspace = true
 pprof.workspace = true
-tiny-keccak = { version = "2", features = ["keccak"] }
+tiny-keccak = { version = "2.0", features = ["keccak"] }
 
 [features]
 default = []
