@@ -14,7 +14,7 @@ unroll = "0"
 [dev-dependencies]
 ark-std.workspace = true
 plonky2 = "0"
-rand = "0"
+rand.workspace = true
 
 [[bench]]
 harness = false

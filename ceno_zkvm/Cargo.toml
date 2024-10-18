@@ -29,7 +29,7 @@ tracing-subscriber.workspace = true
 
 clap = { version = "4", features = ["derive"] }
 generic_static = "0"
-rand = "0"
+rand.workspace = true
 tempfile = "3"
 thread_local = "1"
 
