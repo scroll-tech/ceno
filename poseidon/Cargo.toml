@@ -9,7 +9,7 @@ criterion.workspace = true
 ff.workspace = true
 goldilocks.workspace = true
 serde.workspace = true
-unroll = "0"
+unroll = "0.1"
 
 [dev-dependencies]
 ark-std.workspace = true
