@@ -190,7 +190,7 @@ fn main() {
 
         let final_access = vm.tracer().final_accesses();
 
-        let end_cycle: u32 = StepRecord::next_cycle(&all_records).try_into().unwrap();
+        let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
         let exit_code = halt_record.rs2().unwrap().value;
         let pi = PublicValues::new(
             exit_code,

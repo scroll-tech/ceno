@@ -203,11 +203,6 @@ impl StepRecord {
     pub fn is_busy_loop(&self) -> bool {
         self.pc.before == self.pc.after
     }
-
-    /// Return the cycle when the next instruction would start.
-    pub fn next_cycle(steps: &[Self]) -> u64 {
-        steps.last().map(|s| s.cycle()).unwrap_or(0) + Tracer::SUBCYCLES_PER_INSN
-    }
 }
 
 #[derive(Debug)]
@@ -322,6 +317,11 @@ impl Tracer {
     /// Return all the addresses that were accessed and the cycle when they were last accessed.
     pub fn final_accesses(&self) -> &HashMap<WordAddr, Cycle> {
         &self.latest_accesses
+    }
+
+    /// Return the cycle of the pending instruction (after the last completed step).
+    pub fn cycle(&self) -> Cycle {
+        self.record.cycle
     }
 }
 
