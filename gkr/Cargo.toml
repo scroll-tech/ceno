@@ -10,7 +10,7 @@ ff.workspace = true
 goldilocks.workspace = true
 
 const_env.workspace = true
-crossbeam-channel = "0.5"
+crossbeam-channel.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }

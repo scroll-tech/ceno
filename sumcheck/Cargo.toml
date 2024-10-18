@@ -16,7 +16,7 @@ serde.workspace = true
 tracing.workspace = true
 tracing-flame.workspace = true
 
-crossbeam-channel = "0"
+crossbeam-channel.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
 transcript = { path = "../transcript" }
 
