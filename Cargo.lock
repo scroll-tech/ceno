@@ -621,7 +621,8 @@ dependencies = [
 [[package]]
 name = "ctr"
 version = "0.9.2"
-source = "git+https://github.com/RustCrypto/block-modes?rev=78fefba#78fefba5a80f3d788fd8ba7c4483625148f5dc18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
 dependencies = [
  "cipher",
 ]

@@ -5,25 +5,26 @@ name = "mpcs"
 version.workspace = true
 
 [dependencies]
-aes = "0"
-ark-std = { version = "0" }
-bitvec = "1"
-blake2 = { version = "0" }
-blake2b_simd = "1"
-ctr = { git = "https://github.com/RustCrypto/block-modes", rev = "78fefba" }
+aes = "0.8"
+ark-std.workspace = true
+bitvec = "1.0"
+blake2 = "0.10"
+blake2b_simd = "1.0"
+ctr = "0.9"
 ff.workspace = true
 ff_ext = { path = "../ff_ext" }
-generic-array = { version = "0", features = ["serde"] }
+# TODO: move to version 1, once our dependencies are updated
+generic-array = { version = "0.14", features = ["serde"] }
 goldilocks.workspace = true
 itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
-num-bigint = "0"
-num-integer = "0"
+num-bigint = "0.4"
+num-integer = "0.1"
 plonky2.workspace = true
 poseidon.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
-rayon = { version = "1", optional = true }
+rayon = { workspace = true, optional = true }
 serde.workspace = true
 sha3 = "0.10"
 transcript = { path = "../transcript" }
