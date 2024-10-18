@@ -7,7 +7,7 @@ use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, MultilinearExtension},
-    op_mle, op_mle_3,
+    op_mle, op_mle_product_3, op_mle3_range,
     util::largest_even_below,
     virtual_poly_v2::VirtualPolynomialV2,
 };
@@ -507,7 +507,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             &self.poly.flattened_ml_extensions[products[1]],
                             &self.poly.flattened_ml_extensions[products[2]],
                         );
-                        op_mle_3!(
+                        op_mle_product_3!(
                             |f1, f2, f3| {
                                 let res = (0..largest_even_below(f1.len()))
                                     .step_by(2)
@@ -863,7 +863,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                                 &self.poly.flattened_ml_extensions[products[1]],
                                 &self.poly.flattened_ml_extensions[products[2]],
                             );
-                            op_mle_3!(
+                            op_mle_product_3!(
                                 |f1, f2, f3| {
                                     let res = (0..largest_even_below(f1.len()))
                                     .step_by(2)
