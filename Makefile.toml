@@ -14,7 +14,7 @@ RAYON_NUM_THREADS = "${CORE}"
 [tasks.tests]
 args = [
   "test",
-  "--lib",
+  "--all-targets",
   "--release",
   "--target",
   "${CUR_TARGET}",
