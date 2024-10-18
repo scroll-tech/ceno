@@ -10,7 +10,7 @@ ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 gkr = { path = "../gkr", features = ["parallel"] }
 goldilocks.workspace = true
-itertools = "0"
+itertools.workspace = true
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 simple-frontend = { version = "0", path = "../simple-frontend" }
 sumcheck = { version = "0", path = "../sumcheck" }

@@ -15,7 +15,7 @@ ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 generic-array = { version = "0", features = ["serde"] }
 goldilocks.workspace = true
-itertools = "0"
+itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0"
 num-integer = "0"

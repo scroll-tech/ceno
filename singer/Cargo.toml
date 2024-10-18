@@ -20,10 +20,10 @@ simple-frontend = { version = "0", path = "../simple-frontend" }
 singer-utils = { version = "0", path = "../singer-utils" }
 transcript = { path = "../transcript" }
 
-itertools = "0"
+itertools.workspace = true
 paste = "1"
-strum = "0"
-strum_macros = "0"
+strum.workspace = true
+strum_macros.workspace = true
 tracing = "0"
 tracing-flame = "0"
 tracing-subscriber = { version = "0", features = ["env-filter"] }
