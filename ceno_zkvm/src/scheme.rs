@@ -67,24 +67,30 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 #[derive(Default, Clone, Debug)]
 pub struct PublicValues<T: Default + Clone + Debug> {
     exit_code: T,
+    init_pc: T,
+    init_cycle: T,
     end_pc: T,
-    end_ts: T,
+    end_cycle: T,
 }
 
 impl PublicValues<u32> {
-    pub fn new(exit_code: u32, end_pc: u32, end_ts: u32) -> Self {
+    pub fn new(exit_code: u32, init_pc: u32, init_cycle: u32, end_pc: u32, end_cycle: u32) -> Self {
         Self {
             exit_code,
+            init_pc,
+            init_cycle,
             end_pc,
-            end_ts,
+            end_cycle,
         }
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<E::BaseField> {
         vec![
             E::BaseField::from((self.exit_code & 0xffff) as u64),
             E::BaseField::from(((self.exit_code >> 16) & 0xffff) as u64),
+            E::BaseField::from(self.init_pc as u64),
+            E::BaseField::from(self.init_cycle as u64),
             E::BaseField::from(self.end_pc as u64),
-            E::BaseField::from(self.end_ts as u64),
+            E::BaseField::from(self.end_cycle as u64),
         ]
     }
 }

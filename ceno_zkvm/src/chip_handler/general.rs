@@ -4,7 +4,9 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
-    instructions::riscv::constants::EXIT_CODE_IDX,
+    instructions::riscv::constants::{
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
+    },
     structs::ROMType,
     tables::InsnRecord,
 };
@@ -36,6 +38,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             self.cs
                 .query_instance(|| "exit_code_high", EXIT_CODE_IDX + 1)?,
         ])
+    }
+
+    pub fn query_init_pc(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "init_pc", INIT_PC_IDX)
+    }
+
+    pub fn query_init_cycle(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "init_cycle", INIT_CYCLE_IDX)
+    }
+
+    pub fn query_end_pc(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "end_pc", END_PC_IDX)
+    }
+
+    pub fn query_end_cycle(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "end_cycle", END_CYCLE_IDX)
     }
 
     pub fn lk_record<NR, N>(

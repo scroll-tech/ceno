@@ -1,19 +1,25 @@
-use std::{iter, panic, time::Instant};
+use std::{panic, time::Instant};
 
 use ceno_zkvm::{
-    declare_program, instructions::riscv::Rv32imConfig, scheme::prover::ZKVMProver,
-    tables::ProgramTableCircuit,
+    Value, declare_program,
+    instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
+    scheme::prover::ZKVMProver,
+    state::GlobalState,
+    tables::{ProgramTableCircuit, RegTableCircuit},
 };
 use clap::Parser;
 use const_env::from_env;
 
-use ceno_emul::{ByteAddr, CENO_PLATFORM, InsnKind::EANY, StepRecord, VMState};
+use ceno_emul::{
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, StepRecord, Tracer, VMState, WordAddr,
+};
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
+use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
 use tracing_flame::FlameLayer;
@@ -35,7 +41,6 @@ const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
 #[allow(clippy::unusual_byte_groupings)]
 const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
-
     declare_program!(
         program,
         // func7   rs2   rs1   f3  rd    opcode
@@ -106,44 +111,66 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let reg_config = zkvm_cs.register_table_circuit::<RegTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
-
-    let program_code: Vec<u32> = PROGRAM_CODE
-        .iter()
-        .cloned()
-        .chain(iter::repeat(ECALL_HALT))
-        .take(512)
-        .collect();
-
-    let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
-    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
-        &zkvm_cs,
-        prog_config.clone(),
-        &PROGRAM_CODE,
-    );
-
-    let pk = zkvm_cs
-        .clone()
-        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
-        .expect("keygen failed");
-    let vk = pk.get_vk();
-
-    // proving
-    let prover = ZKVMProver::new(pk);
-    let verifier = ZKVMVerifier::new(vk);
+    zkvm_cs.register_global_state::<GlobalState>();
 
     for instance_num_vars in args.start..args.end {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
+
+        let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
+        config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
+
+        zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
+            &zkvm_cs,
+            prog_config.clone(),
+            &PROGRAM_CODE,
+        );
+
+        // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
+        // vm.x4 += vm.x1
+        zkvm_fixed_traces.register_table_circuit::<RegTableCircuit<E>>(
+            &zkvm_cs,
+            reg_config.clone(),
+            &Some(
+                vec![
+                    0,         // x0
+                    1,         // x1
+                    u32::MAX,  // x2
+                    step_loop, // x3
+                ]
+                .into_iter()
+                .chain(std::iter::repeat(0u32))
+                .take(32)
+                .flat_map(|v| {
+                    Value::<u32>::new_unchecked(v)
+                        .as_u16_limbs()
+                        .iter()
+                        .map(|v| *v as u32)
+                        .chain(std::iter::once(0))
+                        .collect_vec()
+                })
+                .collect_vec(),
+            ),
+        );
+
+        let pk = zkvm_cs
+            .clone()
+            .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces)
+            .expect("keygen failed");
+        let vk = pk.get_vk();
+
+        // proving
+        let prover = ZKVMProver::new(pk);
+        let verifier = ZKVMVerifier::new(vk);
+
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
 
-        // init vm.x1 = 1, vm.x2 = -1, vm.x3 = num_instances
-        // vm.x4 += vm.x1
         vm.init_register_unsafe(1usize, 1);
         vm.init_register_unsafe(2usize, u32::MAX); // -1 in two's complement
-        vm.init_register_unsafe(3usize, step_loop as u32);
-        for (i, inst) in program_code.iter().enumerate() {
+        vm.init_register_unsafe(3usize, step_loop);
+        for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
 
@@ -163,9 +190,16 @@ fn main() {
             })
             .expect("halt record not found");
 
+        let final_access = vm.tracer().final_accesses();
+        let end_cycle = final_access.get(&CENO_PLATFORM.pc_vma().into()).unwrap();
         let exit_code = halt_record.rs2().unwrap().value;
-        // TODO set correct end_ts
-        let pi = PublicValues::new(exit_code, 0, 0);
+        let pi = PublicValues::new(
+            exit_code,
+            CENO_PLATFORM.rom_start(),
+            Tracer::SUBCYCLES_PER_INSN as u32,
+            EXIT_PC as u32,
+            *end_cycle as u32,
+        );
 
         let mut zkvm_witness = ZKVMWitnesses::default();
         // assign opcode circuits
@@ -177,12 +211,32 @@ fn main() {
         config
             .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
             .unwrap();
+        // assign cpu register circuit
+        zkvm_witness
+            .assign_table_circuit::<RegTableCircuit<E>>(
+                &zkvm_cs,
+                &reg_config,
+                &(0..32)
+                    .flat_map(|reg_id| {
+                        let vma: WordAddr = CENO_PLATFORM.register_vma(reg_id).into();
+                        let reg_value = Value::<u32>::new_unchecked(vm.peek_register(reg_id));
+                        reg_value
+                            .as_u16_limbs()
+                            .iter()
+                            .cloned()
+                            .map(|limb| limb as u32)
+                            .chain(std::iter::once(*final_access.get(&vma).unwrap_or(&0) as u32))
+                            .collect_vec()
+                    })
+                    .collect_vec(),
+            )
+            .unwrap();
         // assign program circuit
         zkvm_witness
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
                 &zkvm_cs,
                 &prog_config,
-                &program_code.len(),
+                &PROGRAM_CODE.len(),
             )
             .unwrap();
 

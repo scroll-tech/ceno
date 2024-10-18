@@ -82,12 +82,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 ADD => add_records.push(record),
                 BLTU => bltu_records.push(record),
                 JAL => jal_records.push(record),
-                EANY => {
-                    if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
-                        halt_records.push(record);
-                    }
+                EANY if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() => {
+                    halt_records.push(record);
                 }
-                _ => {}
+                i => unimplemented!("instruction {i:?}"),
             });
 
         tracing::info!(
