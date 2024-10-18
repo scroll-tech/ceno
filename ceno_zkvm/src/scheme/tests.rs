@@ -287,7 +287,7 @@ fn test_single_add_instance_e2e() {
         )
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0);
+    let pi = PublicValues::new(0, 0, 0, 0, 0);
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, 1, transcript)

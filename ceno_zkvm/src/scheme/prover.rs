@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use ff::Field;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
@@ -491,10 +492,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     let expected_zero_poly =
                         wit_infer_by_expr(&[], &witnesses, pi, challenges, expr);
                     let top_100_errors = expected_zero_poly
-                        .get_ext_field_vec()
+                        .get_base_field_vec()
                         .iter()
                         .enumerate()
-                        .filter(|(_, v)| **v != E::ZERO)
+                        .filter(|(_, v)| **v != E::BaseField::ZERO)
                         .take(100)
                         .collect_vec();
                     if !top_100_errors.is_empty() {
@@ -710,22 +711,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 let (first, second) = wit
                     .get_base_field_vec()
                     .split_at(wit.evaluations().len() / 2);
-                // TODO keep in base field and convert to Ext as late as possible
                 let res = vec![
-                    first
-                        .iter()
-                        .cloned()
-                        .map(E::from)
-                        .collect_vec()
-                        .into_mle()
-                        .into(),
-                    second
-                        .iter()
-                        .cloned()
-                        .map(E::from)
-                        .collect_vec()
-                        .into_mle()
-                        .into(),
+                    first.to_vec().into_mle().into(),
+                    second.to_vec().into_mle().into(),
                 ];
                 assert_eq!(res.len(), NUM_FANIN_LOGUP);
                 res
