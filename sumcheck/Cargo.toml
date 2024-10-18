@@ -7,7 +7,7 @@ version.workspace = true
 [dependencies]
 ark-ff = "0"
 ark-std.workspace = true
-const_env = "0"
+const_env.workspace = true
 ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
