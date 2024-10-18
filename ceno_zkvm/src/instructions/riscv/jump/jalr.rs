@@ -43,7 +43,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<JalrConfig<E>, ZKVMError> {
-        let rs1_read = UInt::new(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let imm = circuit_builder.create_witin(|| "imm")?; // signed 12-bit value
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
@@ -115,7 +115,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
         config
             .rs1_read
-            .assign_value(instance, Value::new(rs1, lk_multiplicity));
+            .assign_value(instance, Value::new_unchecked(rs1));
         config
             .rd_written
             .assign_value(instance, Value::new(rd, lk_multiplicity));
