@@ -126,6 +126,10 @@ fn expected_final_accesses_fibonacci_20() -> HashMap<WordAddr, Cycle> {
     // Now at the final ECALL cycle.
     accesses.insert(x(CENO_PLATFORM.reg_ecall()), cycle + Tracer::SUBCYCLE_RS1);
     accesses.insert(x(CENO_PLATFORM.reg_arg0()), cycle + Tracer::SUBCYCLE_RS2);
+    accesses.insert(
+        WordAddr::from(CENO_PLATFORM.pc_vma()),
+        cycle + Tracer::SUBCYCLES_PER_INSN,
+    );
 
     accesses
 }
