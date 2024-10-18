@@ -106,7 +106,7 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
     pub fn assign_instances<F: SmallField>(
         &self,
         num_witness: usize,
-        final_v: &[MemFinalRecord], // value limb are concated into 1d slice
+        final_v: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         assert_eq!(final_v.len(), RAM::len());
         let mut final_table = RowMajorMatrix::<F>::new(RAM::len(), num_witness);

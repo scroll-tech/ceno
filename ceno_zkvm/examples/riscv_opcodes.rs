@@ -5,7 +5,7 @@ use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
-    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, RegTableCircuit},
+    tables::{MemFinalRecord, ProgramTableCircuit, RamTable, RegTable, RegTableCircuit},
 };
 use clap::Parser;
 use const_env::from_env;
@@ -129,21 +129,13 @@ fn main() {
 
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
         // vm.x4 += vm.x1
-        let reg_init = vec![
-            0,         // x0
-            1,         // x1
-            u32::MAX,  // x2
-            step_loop, // x3
-        ]
-        .into_iter()
-        .chain(std::iter::repeat(0u32))
-        .take(32)
-        .enumerate()
-        .map(|(index, value)| MemInitRecord {
-            addr: index as u32,
-            value,
-        })
-        .collect_vec();
+        let reg_init = {
+            let mut reg_init = RegTable::init_state();
+            reg_init[1].value = 1;
+            reg_init[2].value = u32::MAX;
+            reg_init[3].value = step_loop;
+            reg_init
+        };
 
         zkvm_fixed_traces.register_table_circuit::<RegTableCircuit<E>>(
             &zkvm_cs,

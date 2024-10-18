@@ -1,10 +1,10 @@
-use ram_circuit::{RamTable, RamTableCircuit};
+use ram_circuit::RamTableCircuit;
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
 
 mod ram_circuit;
 mod ram_impl;
-pub use ram_circuit::{MemFinalRecord, MemInitRecord};
+pub use ram_circuit::{MemFinalRecord, MemInitRecord, RamTable};
 
 pub struct MemTable;
 
