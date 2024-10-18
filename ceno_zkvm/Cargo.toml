@@ -39,7 +39,7 @@ cfg-if = "1.0.0"
 const_env = "0.1.2"
 criterion = { version = "0.5", features = ["html_reports"] }
 pprof = { version = "0.13", features = ["flamegraph"] }
-serde_json = "1.0.128"
+serde_json = "1.0.129"
 
 [build-dependencies]
 glob = "0.3"
