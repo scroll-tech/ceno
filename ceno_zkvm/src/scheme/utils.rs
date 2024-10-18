@@ -6,7 +6,7 @@ use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
-    op_mle_xa_b,
+    op_mle_xa_b, op_mle3_range,
     util::ceil_log2,
     virtual_poly_v2::ArcMultilinearExtension,
 };

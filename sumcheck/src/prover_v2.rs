@@ -7,7 +7,7 @@ use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, MultilinearExtension},
-    op_mle, op_mle_product_3,
+    op_mle, op_mle_product_3, op_mle3_range,
     util::largest_even_below,
     virtual_poly_v2::VirtualPolynomialV2,
 };
