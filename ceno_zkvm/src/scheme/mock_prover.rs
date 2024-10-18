@@ -2,18 +2,18 @@ use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    declare_program,
     expression::{Expression, fmt},
     scheme::utils::eval_by_expr_with_fixed,
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U5Table, U8Table, U16Table, XorTable,
+        TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
     },
     witness::LkMultiplicity,
 };
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
+use ff::Field;
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
@@ -31,125 +31,22 @@ use std::{
 use strum::IntoEnumIterator;
 
 const MOCK_PROGRAM_SIZE: usize = 32;
-pub const MOCK_RS1: u32 = 2;
-pub const MOCK_RS2: u32 = 3;
-pub const MOCK_RD: u32 = 4;
-pub const MOCK_IMM_3: u32 = 3;
-pub const MOCK_IMM_31: u32 = 31;
-pub const MOCK_IMM_NEG3: u32 = 32 - 3;
-/// The program baked in the MockProver.
-/// TODO: Make this a parameter?
-#[allow(clippy::identity_op)]
-#[allow(clippy::unusual_byte_groupings)]
-pub const MOCK_PROGRAM: [u32; MOCK_PROGRAM_SIZE] = {
-    let mut program: [u32; MOCK_PROGRAM_SIZE] = [0; MOCK_PROGRAM_SIZE];
-
-    declare_program!(
-        program,
-        // R-Type
-        // funct7 | rs2 | rs1 | funct3 | rd | opcode
-        // -----------------------------------------
-        // add x4, x2, x3
-        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-        // sub  x4, x2, x3
-        0x20 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-        // mul (0x01, 0x00, 0x33)
-        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x33,
-        // and x4, x2, x3
-        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b111 << 12 | MOCK_RD << 7 | 0x33,
-        // or x4, x2, x3
-        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x33,
-        // xor x4, x2, x3
-        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x33,
-        // B-Type
-        // beq x2, x3, 8
-        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b000 << 12 | 0x08 << 7 | 0x63,
-        // bne x2, x3, 8
-        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | 0x08 << 7 | 0x63,
-        // blt x2, x3, -8
-        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_100 << 12 | 0b_1100_1 << 7 | 0x63,
-        // divu (0x01, 0x05, 0x33)
-        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
-        // srli x4, x2, 3
-        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
-        // srli x4, x2, 31
-        0x00 << 25 | MOCK_IMM_31 << 20 | MOCK_RS1 << 15 | 0x05 << 12 | MOCK_RD << 7 | 0x13,
-        // sltu (0x00, 0x03, 0x33)
-        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b011 << 12 | MOCK_RD << 7 | 0x33,
-        // addi x4, x2, 3
-        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
-        // addi x4, x2, -3
-        0b_1_111111 << 25 | MOCK_IMM_NEG3 << 20 | MOCK_RS1 << 15 | 0x00 << 12 | MOCK_RD << 7 | 0x13,
-        // bltu x2, x3, -8
-        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_110 << 12 | 0b_1100_1 << 7 | 0x63,
-        // bgeu x2, x3, -8
-        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_111 << 12 | 0b_1100_1 << 7 | 0x63,
-        // bge x2, x3, -8
-        0b_1_111111 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b_101 << 12 | 0b_1100_1 << 7 | 0x63,
-        // mulhu (0x01, 0x00, 0x33)
-        0x01 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0x3 << 12 | MOCK_RD << 7 | 0x33,
-        // sll x4, x2, x3
-        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b001 << 12 | MOCK_RD << 7 | 0x33,
-        // srl x4, x2, x3
-        0x00 << 25 | MOCK_RS2 << 20 | MOCK_RS1 << 15 | 0b101 << 12 | MOCK_RD << 7 | 0x33,
-        // jal x4, 0xffffe
-        0b_1_1111111110_1_11111111 << 12 | MOCK_RD << 7 | 0x6f,
-        // lui x4, 0x90005
-        0x90005 << 12 | MOCK_RD << 7 | 0x37,
-        // auipc x4, 0x90005
-        0x90005 << 12 | MOCK_RD << 7 | 0x17,
-        // andi x4, x2, 3
-        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0b111 << 12 | MOCK_RD << 7 | 0x13,
-        // ori x4, x2, 3
-        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0b110 << 12 | MOCK_RD << 7 | 0x13,
-        // xori x4, x2, 3
-        0x00 << 25 | MOCK_IMM_3 << 20 | MOCK_RS1 << 15 | 0b100 << 12 | MOCK_RD << 7 | 0x13,
-    );
-    program
-};
-// Addresses of particular instructions in the mock program.
-pub const MOCK_PC_ADD: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
-pub const MOCK_PC_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 4);
-pub const MOCK_PC_MUL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 8);
-pub const MOCK_PC_AND: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 12);
-pub const MOCK_PC_OR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 16);
-pub const MOCK_PC_XOR: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 20);
-pub const MOCK_PC_BEQ: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 24);
-pub const MOCK_PC_BNE: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 28);
-pub const MOCK_PC_BLT: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 32);
-pub const MOCK_PC_DIVU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 36);
-pub const MOCK_PC_SRLI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 40);
-pub const MOCK_PC_SRLI_31: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 44);
-pub const MOCK_PC_SLTU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 48);
-pub const MOCK_PC_ADDI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 52);
-pub const MOCK_PC_ADDI_SUB: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 56);
-pub const MOCK_PC_BLTU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 60);
-pub const MOCK_PC_BGEU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 64);
-pub const MOCK_PC_BGE: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 68);
-pub const MOCK_PC_MULHU: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 72);
-pub const MOCK_PC_SLL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 76);
-pub const MOCK_PC_SRL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 80);
-pub const MOCK_PC_JAL: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 84);
-pub const MOCK_PC_LUI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 88);
-pub const MOCK_PC_AUIPC: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 92);
-pub const MOCK_PC_ANDI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 96);
-pub const MOCK_PC_ORI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 100);
-pub const MOCK_PC_XORI: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start() + 104);
+pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 pub(crate) enum MockProverError<E: ExtensionField> {
     AssertZeroError {
         expression: Expression<E>,
-        evaluated: E,
+        evaluated: E::BaseField,
         name: String,
         inst_id: usize,
     },
     AssertEqualError {
         left_expression: Expression<E>,
         right_expression: Expression<E>,
-        left: E,
-        right: E,
+        left: E::BaseField,
+        right: E::BaseField,
         name: String,
         inst_id: usize,
     },
@@ -252,7 +149,7 @@ impl<E: ExtensionField> MockProverError<E> {
             } => {
                 let expression_fmt = fmt::expr(expression, &mut wtns, false);
                 let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
-                let eval_fmt = fmt::field(evaluated);
+                let eval_fmt = fmt::base_field(evaluated, false);
                 println!(
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
                     Expression: {expression_fmt}\n\
@@ -271,8 +168,8 @@ impl<E: ExtensionField> MockProverError<E> {
                 let left_expression_fmt = fmt::expr(left_expression, &mut wtns, false);
                 let right_expression_fmt = fmt::expr(right_expression, &mut wtns, false);
                 let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
-                let left_eval_fmt = fmt::field(left);
-                let right_eval_fmt = fmt::field(right);
+                let left_eval_fmt = fmt::base_field(left, false);
+                let right_eval_fmt = fmt::base_field(right, false);
                 println!(
                     "\nAssertEqualError {name:?}\n\
                     Left: {left_eval_fmt} != Right: {right_eval_fmt}\n\
@@ -314,7 +211,9 @@ impl<E: ExtensionField> MockProverError<E> {
                     "assignments"
                 };
                 let element = match rom_type {
-                    ROMType::U5 | ROMType::U8 | ROMType::U16 => format!("Element: {key}"),
+                    ROMType::U5 | ROMType::U8 | ROMType::U14 | ROMType::U16 => {
+                        format!("Element: {key}")
+                    }
                     ROMType::And => {
                         let (a, b) = AndTable::unpack(*key);
                         format!("Element: {a} < {b}")
@@ -391,43 +290,17 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
         }
     }
 
-    fn load_program_table<E: ExtensionField>(
-        t_vec: &mut Vec<Vec<u64>>,
-        _cb: &CircuitBuilder<E>,
-        challenge: [E; 2],
-    ) {
-        let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
-        let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
-            &config,
-            cs.num_fixed,
-            &MOCK_PROGRAM,
-        );
-        for table_expr in &cs.lk_table_expressions {
-            for row in fixed.iter_rows() {
-                // TODO: Find a better way to obtain the row content.
-                let row = row
-                    .iter()
-                    .map(|v| unsafe { (*v).assume_init() }.into())
-                    .collect::<Vec<_>>();
-                let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
-                t_vec.push(rlc_record.to_canonical_u64_vec());
-            }
-        }
-    }
-
     let mut table_vec = vec![];
     load_range_table::<U5Table, _>(&mut table_vec, cb, challenge);
     load_range_table::<U8Table, _>(&mut table_vec, cb, challenge);
+    load_range_table::<U14Table, _>(&mut table_vec, cb, challenge);
     load_range_table::<U16Table, _>(&mut table_vec, cb, challenge);
     load_op_table::<AndTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<OrTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<XorTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<LtuTable, _>(&mut table_vec, cb, challenge);
     load_op_table::<PowTable, _>(&mut table_vec, cb, challenge);
-    load_program_table(&mut table_vec, cb, challenge);
+
     HashSet::from_iter(table_vec)
 }
 
@@ -436,7 +309,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
 #[allow(clippy::type_complexity)]
 fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     cb: &CircuitBuilder<E>,
-) -> ([E; 2], &'static HashSet<Vec<u64>>) {
+) -> ([E; 2], HashSet<Vec<u64>>) {
     static CACHE: OnceLock<StaticTypeMap<([Vec<u64>; 2], HashSet<Vec<u64>>)>> = OnceLock::new();
     let cache = CACHE.get_or_init(StaticTypeMap::new);
 
@@ -480,7 +353,7 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
             let ptr = repr.as_slice().as_ptr() as *const E;
             *ptr
         }),
-        table,
+        table.clone(),
     )
 }
 
@@ -491,32 +364,45 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: [E; 2],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], Some(challenge), lkm)
+        Self::run_maybe_challenge(cb, wits_in, &[], &[], Some(challenge), lkm)
     }
 
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        programs: &[u32],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], None, lkm)
+        Self::run_maybe_challenge(cb, wits_in, programs, &[], None, lkm)
     }
 
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        input_programs: &[u32],
         pi: &[E::BaseField],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        let table = challenge.map(|challenge| load_tables(cb, challenge));
-        let (challenge, table) = if let Some(challenge) = challenge {
-            (challenge, table.as_ref().unwrap())
+        // fix the program table
+        let mut programs = [0u32; MOCK_PROGRAM_SIZE];
+        for (i, &program) in input_programs.iter().enumerate() {
+            programs[i] = program;
+        }
+
+        // load tables
+        let (challenge, mut table) = if let Some(challenge) = challenge {
+            (challenge, load_tables(cb, challenge))
         } else {
             load_once_tables(cb)
         };
-        let mut errors = vec![];
+        let mut prog_table = vec![];
+        Self::load_program_table(&mut prog_table, &programs, challenge);
+        for prog in prog_table {
+            table.insert(prog);
+        }
 
+        let mut errors = vec![];
         // Assert zero expressions
         for (expr, name) in cb
             .cs
@@ -537,39 +423,21 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let right = right.neg();
 
                 let left_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &left);
-                let left_evaluated = left_evaluated
-                    .get_ext_field_vec_optn()
-                    .map(|v| v.to_vec())
-                    .unwrap_or_else(|| {
-                        left_evaluated
-                            .get_base_field_vec()
-                            .iter()
-                            .map(|v| E::from(*v))
-                            .collect_vec()
-                    });
+                let left_evaluated = left_evaluated.get_base_field_vec();
 
                 let right_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &right);
-                let right_evaluated = right_evaluated
-                    .get_ext_field_vec_optn()
-                    .map(|v| v.to_vec())
-                    .unwrap_or_else(|| {
-                        right_evaluated
-                            .get_base_field_vec()
-                            .iter()
-                            .map(|v| E::from(*v))
-                            .collect_vec()
-                    });
+                let right_evaluated = right_evaluated.get_base_field_vec();
 
                 // left_evaluated.len() ?= right_evaluated.len() due to padding instance
                 for (inst_id, (left_element, right_element)) in
-                    left_evaluated.into_iter().zip(right_evaluated).enumerate()
+                    izip!(left_evaluated, right_evaluated).enumerate()
                 {
                     if left_element != right_element {
                         errors.push(MockProverError::AssertEqualError {
                             left_expression: left.clone(),
                             right_expression: right.clone(),
-                            left: left_element,
-                            right: right_element,
+                            left: *left_element,
+                            right: *right_element,
                             name: name.clone(),
                             inst_id,
                         });
@@ -578,19 +446,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             } else {
                 // contains require_zero
                 let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
-                let expr_evaluated = expr_evaluated
-                    .get_ext_field_vec_optn()
-                    .map(|v| v.to_vec())
-                    .unwrap_or_else(|| {
-                        expr_evaluated
-                            .get_base_field_vec()
-                            .iter()
-                            .map(|v| E::from(*v))
-                            .collect_vec()
-                    });
+                let expr_evaluated = expr_evaluated.get_base_field_vec();
 
                 for (inst_id, element) in expr_evaluated.iter().enumerate() {
-                    if *element != E::ZERO {
+                    if *element != E::BaseField::ZERO {
                         errors.push(MockProverError::AssertZeroError {
                             expression: expr.clone(),
                             evaluated: *element,
@@ -638,19 +497,11 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         items
                             .iter()
                             .map(|expr| {
-                                let e_result =
-                                    wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
+                                // TODO generalized to all inst_id
                                 let inst_id = 0;
-                                let b = e_result.get_base_field_vec_optn();
-                                let e = e_result.get_ext_field_vec_optn();
-                                if let Some(b) = b {
-                                    b[inst_id].to_canonical_u64()
-                                } else if let Some(e) = e {
-                                    let arr = e[inst_id].to_canonical_u64_vec();
-                                    arr[0] + E::BaseField::MODULUS_U64 * arr[1]
-                                } else {
-                                    unreachable!()
-                                }
+                                wit_infer_by_expr(&[], wits_in, pi, &challenge, expr)
+                                    .get_base_field_vec()[inst_id]
+                                    .to_canonical_u64()
                             })
                             .collect::<Vec<u64>>(),
                     )
@@ -659,6 +510,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     match rom_type {
                         ROMType::U5 => lkm.assert_ux::<5>(args[0]),
                         ROMType::U8 => lkm.assert_ux::<8>(args[0]),
+                        ROMType::U14 => lkm.assert_ux::<14>(args[0]),
                         ROMType::U16 => lkm.assert_ux::<16>(args[0]),
                         ROMType::And => lkm.lookup_and_byte(args[0], args[1]),
                         ROMType::Or => lkm.lookup_or_byte(args[0], args[1]),
@@ -733,16 +585,44 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
     }
 
+    fn load_program_table(
+        t_vec: &mut Vec<Vec<u64>>,
+        programs: &[u32; MOCK_PROGRAM_SIZE],
+        challenge: [E; 2],
+    ) {
+        let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config =
+            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
+        let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
+            &config,
+            cs.num_fixed,
+            programs,
+        );
+        for table_expr in &cs.lk_table_expressions {
+            for row in fixed.iter_rows() {
+                // TODO: Find a better way to obtain the row content.
+                let row = row
+                    .iter()
+                    .map(|v| unsafe { (*v).assume_init() }.into())
+                    .collect::<Vec<_>>();
+                let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
+                t_vec.push(rlc_record.to_canonical_u64_vec());
+            }
+        }
+    }
+
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        programs: &[u32],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
         let result = if let Some(challenge) = challenge {
             Self::run_with_challenge(cb, wits_in, challenge, lkm)
         } else {
-            Self::run(cb, wits_in, lkm)
+            Self::run(cb, wits_in, programs, lkm)
         };
         match result {
             Ok(_) => {}
@@ -857,7 +737,7 @@ mod tests {
                 .into(),
         ];
 
-        MockProver::assert_satisfied(&builder, &wits_in, None, None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], None, None);
     }
 
     #[derive(Debug)]
@@ -890,7 +770,7 @@ mod tests {
         ];
 
         let challenge = [1.into(), 1000.into()];
-        MockProver::assert_satisfied(&builder, &wits_in, Some(challenge), None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], Some(challenge), None);
     }
 
     #[test]
@@ -1017,6 +897,7 @@ mod tests {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[],
             Some([1.into(), 1000.into()]),
             None,
         );
@@ -1054,6 +935,7 @@ mod tests {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[],
             Some([1.into(), 1000.into()]),
             None,
         );
@@ -1139,6 +1021,7 @@ mod tests {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[],
             Some([1.into(), 1000.into()]),
             None,
         );
@@ -1177,6 +1060,7 @@ mod tests {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[],
             Some([1.into(), 1000.into()]),
             None,
         );

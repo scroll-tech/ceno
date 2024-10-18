@@ -56,7 +56,7 @@ impl StepRecord {
     pub fn new_r_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: Word,
+        insn_code: u32,
         rs1_read: Word,
         rs2_read: Word,
         rd: Change<Word>,
@@ -77,7 +77,7 @@ impl StepRecord {
     pub fn new_b_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: Word,
+        insn_code: u32,
         rs1_read: Word,
         rs2_read: Word,
         prev_cycle: Cycle,
@@ -95,13 +95,12 @@ impl StepRecord {
 
     pub fn new_i_instruction(
         cycle: Cycle,
-        pc: ByteAddr,
-        insn_code: Word,
+        pc: Change<ByteAddr>,
+        insn_code: u32,
         rs1_read: Word,
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
-        let pc = Change::new(pc, pc + PC_STEP_SIZE);
         StepRecord::new_insn(
             cycle,
             pc,
@@ -116,7 +115,7 @@ impl StepRecord {
     pub fn new_u_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: Word,
+        insn_code: u32,
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
@@ -127,7 +126,7 @@ impl StepRecord {
     pub fn new_j_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: Word,
+        insn_code: u32,
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
@@ -137,7 +136,7 @@ impl StepRecord {
     fn new_insn(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: Word,
+        insn_code: u32,
         rs1_read: Option<Word>,
         rs2_read: Option<Word>,
         rd: Option<Change<Word>>,
