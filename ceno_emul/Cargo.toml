@@ -5,7 +5,7 @@ name = "ceno_emul"
 version.workspace = true
 
 [dependencies]
-anyhow = { version = "1", default-features = false }
+anyhow = { version = "1.0", default-features = false }
 elf = "0.7"
 strum.workspace = true
 strum_macros.workspace = true

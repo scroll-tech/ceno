@@ -10,13 +10,13 @@ ff.workspace = true
 goldilocks.workspace = true
 
 const_env.workspace = true
-crossbeam-channel = "0"
+crossbeam-channel = "0.5"
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 rayon.workspace = true
 serde.workspace = true
-serde_json = "1"
+serde_json.workspace = true
 simple-frontend = { path = "../simple-frontend" }
 sumcheck = { path = "../sumcheck" }
 tracing.workspace = true
