@@ -5,7 +5,10 @@ use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
-    tables::{MemFinalRecord, ProgramTableCircuit, RamTable, RegTable, RegTableCircuit},
+    tables::{
+        MemFinalRecord, MemInitRecord, MemTable, MemTableCircuit, ProgramTableCircuit, RamTable,
+        RegTable, RegTableCircuit,
+    },
 };
 use clap::Parser;
 use const_env::from_env;
@@ -52,6 +55,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     );
     program
 };
+const PROGRAM_DATA: &[u32] = &[];
 type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
 
 /// Simple program to greet a person
@@ -112,6 +116,7 @@ fn main() {
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let reg_config = zkvm_cs.register_table_circuit::<RegTableCircuit<E>>();
+    let mem_config = zkvm_cs.register_table_circuit::<MemTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
@@ -141,6 +146,19 @@ fn main() {
             &zkvm_cs,
             reg_config.clone(),
             &Some(reg_init.clone()),
+        );
+
+        let mem_init = (0..MemTable::len())
+            .map(|i| MemInitRecord {
+                addr: CENO_PLATFORM.ram_start() + i as u32,
+                value: *PROGRAM_DATA.get(i).unwrap_or(&0),
+            })
+            .collect_vec();
+
+        zkvm_fixed_traces.register_table_circuit::<MemTableCircuit<E>>(
+            &zkvm_cs,
+            mem_config.clone(),
+            &Some(mem_init.clone()),
         );
 
         let pk = zkvm_cs
@@ -213,9 +231,25 @@ fn main() {
             })
             .collect_vec();
 
+        // Find the final memory values and cycles.
+        let mem_final = mem_init
+            .iter()
+            .map(|rec| {
+                let vma: WordAddr = rec.addr.into();
+                MemFinalRecord {
+                    value: vm.peek_memory(vma),
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec();
+
         // assign register finalization.
         zkvm_witness
             .assign_table_circuit::<RegTableCircuit<E>>(&zkvm_cs, &reg_config, &reg_final)
+            .unwrap();
+        // assign memory finalization.
+        zkvm_witness
+            .assign_table_circuit::<MemTableCircuit<E>>(&zkvm_cs, &mem_config, &mem_final)
             .unwrap();
         // assign program circuit
         zkvm_witness

@@ -6,6 +6,7 @@ mod ram_circuit;
 mod ram_impl;
 pub use ram_circuit::{MemFinalRecord, MemInitRecord, RamTable};
 
+#[derive(Clone)]
 pub struct MemTable;
 
 impl MemTable {
@@ -17,7 +18,7 @@ impl RamTable for MemTable {
     const V_LIMBS: usize = UINT_LIMBS; // See `MemoryExpr`.
     fn len() -> usize {
         // TODO figure out better way to define memory entry count
-        1 << 21
+        1 << 10
     }
 
     #[inline(always)]
