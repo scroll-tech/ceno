@@ -24,8 +24,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             assert!(vm_pk.circuit_pks.insert(c_name, circuit_pk).is_none());
         }
 
-        vm_pk.state_in_expr = self.state_in_expr;
-        vm_pk.state_out_expr = self.state_out_expr;
+        vm_pk.initial_global_state_expr = self.initial_global_state_expr;
+        vm_pk.finalize_global_state_expr = self.finalize_global_state_expr;
 
         Ok(vm_pk)
     }

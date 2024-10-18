@@ -8,14 +8,18 @@ use crate::{
 };
 
 pub trait StateCircuit<E: ExtensionField> {
-    fn state_in_expr(circuit_builder: &mut CircuitBuilder<E>) -> Result<Expression<E>, ZKVMError>;
-    fn state_out_expr(circuit_builder: &mut CircuitBuilder<E>) -> Result<Expression<E>, ZKVMError>;
+    fn initial_global_state(
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<Expression<E>, ZKVMError>;
+    fn finalize_global_state(
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<Expression<E>, ZKVMError>;
 }
 
 pub struct GlobalState;
 
 impl<E: ExtensionField> StateCircuit<E> for GlobalState {
-    fn state_in_expr(
+    fn initial_global_state(
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<Expression<E>, ZKVMError> {
         let states: Vec<Expression<E>> = vec![
@@ -27,7 +31,7 @@ impl<E: ExtensionField> StateCircuit<E> for GlobalState {
         Ok(circuit_builder.rlc_chip_record(states))
     }
 
-    fn state_out_expr(
+    fn finalize_global_state(
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<crate::expression::Expression<E>, crate::error::ZKVMError> {
         let states: Vec<Expression<E>> = vec![

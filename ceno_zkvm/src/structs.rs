@@ -127,16 +127,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS>
 #[derive(Clone)]
 pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub(crate) circuit_css: BTreeMap<String, ConstraintSystem<E>>,
-    pub(crate) state_in_expr: Expression<E>,
-    pub(crate) state_out_expr: Expression<E>,
+    pub(crate) initial_global_state_expr: Expression<E>,
+    pub(crate) finalize_global_state_expr: Expression<E>,
 }
 
 impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
     fn default() -> Self {
         ZKVMConstraintSystem {
             circuit_css: BTreeMap::new(),
-            state_in_expr: Expression::ZERO,
-            state_out_expr: Expression::ZERO,
+            initial_global_state_expr: Expression::ZERO,
+            finalize_global_state_expr: Expression::ZERO,
         }
     }
 }
@@ -163,10 +163,10 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_global_state<SC: StateCircuit<E>>(&mut self) {
         let mut cs = ConstraintSystem::new(|| "riscv_state");
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        self.state_in_expr =
-            SC::state_in_expr(&mut circuit_builder).expect("global_state_in failed");
-        self.state_out_expr =
-            SC::state_out_expr(&mut circuit_builder).expect("global_state_out failed");
+        self.initial_global_state_expr =
+            SC::initial_global_state(&mut circuit_builder).expect("global_state_in failed");
+        self.finalize_global_state_expr =
+            SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
     }
 
     pub fn get_cs(&self, name: &String) -> Option<&ConstraintSystem<E>> {
@@ -286,8 +286,8 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub circuit_pks: BTreeMap<String, ProvingKey<E, PCS>>,
 
     // expression for global state in/out
-    pub state_in_expr: Expression<E>,
-    pub state_out_expr: Expression<E>,
+    pub initial_global_state_expr: Expression<E>,
+    pub finalize_global_state_expr: Expression<E>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
@@ -296,8 +296,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             pp,
             vp,
             circuit_pks: BTreeMap::new(),
-            state_in_expr: Expression::ZERO,
-            state_out_expr: Expression::ZERO,
+            initial_global_state_expr: Expression::ZERO,
+            finalize_global_state_expr: Expression::ZERO,
         }
     }
 }
@@ -312,8 +312,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
             // expression for global state in/out
-            state_in_expr: self.state_in_expr.clone(),
-            state_out_expr: self.state_out_expr.clone(),
+            initial_global_state_expr: self.initial_global_state_expr.clone(),
+            finalize_global_state_expr: self.finalize_global_state_expr.clone(),
         }
     }
 }
@@ -324,6 +324,6 @@ pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
     // vk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E, PCS>>,
     // expression for global state in/out
-    pub state_in_expr: Expression<E>,
-    pub state_out_expr: Expression<E>,
+    pub initial_global_state_expr: Expression<E>,
+    pub finalize_global_state_expr: Expression<E>,
 }

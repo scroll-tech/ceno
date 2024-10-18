@@ -176,12 +176,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             )));
         }
 
-        let state_in =
-            eval_by_expr_with_instance(&[], &[], pi, &challenges, &self.vk.state_in_expr);
-        prod_w *= state_in;
-        let state_out =
-            eval_by_expr_with_instance(&[], &[], pi, &challenges, &self.vk.state_out_expr);
-        prod_r *= state_out;
+        let initial_global_state = eval_by_expr_with_instance(
+            &[],
+            &[],
+            pi,
+            &challenges,
+            &self.vk.initial_global_state_expr,
+        );
+        prod_w *= initial_global_state;
+        let finalize_global_state = eval_by_expr_with_instance(
+            &[],
+            &[],
+            pi,
+            &challenges,
+            &self.vk.finalize_global_state_expr,
+        );
+        prod_r *= finalize_global_state;
         // check rw_set equality across all proofs
         if prod_r != prod_w {
             return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
