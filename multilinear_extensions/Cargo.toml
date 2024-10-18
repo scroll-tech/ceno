@@ -17,7 +17,7 @@ tracing-flame.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-criterion = { version = "0", features = ["html_reports"] }
+criterion.workspace = true
 env_logger = "0"
 log = "0"
 

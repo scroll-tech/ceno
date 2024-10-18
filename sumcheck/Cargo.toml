@@ -22,8 +22,8 @@ multilinear_extensions = { path = "../multilinear_extensions", features = ["para
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
-criterion = { version = "0", features = ["html_reports"] }
-pprof = { version = "0", features = ["flamegraph"] }
+criterion.workspace = true
+pprof.workspace = true
 
 [[bench]]
 harness = false

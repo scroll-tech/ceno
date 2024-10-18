@@ -29,7 +29,7 @@ sha3 = "0"
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
-criterion = { version = "0", features = ["html_reports"] }
+criterion.workspace = true
 gkr = { path = "../gkr" }
 simple-frontend = { path = "../simple-frontend" }
 
