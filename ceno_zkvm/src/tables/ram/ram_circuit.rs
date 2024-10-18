@@ -1,5 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
+use ceno_emul::{Cycle, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -9,6 +10,17 @@ use crate::{
 
 use super::ram_impl::RamTableConfig;
 
+#[derive(Clone, Debug)]
+pub struct MemInitRecord {
+    pub addr: Word,
+    pub value: Word,
+}
+
+pub struct MemFinalRecord {
+    pub cycle: Cycle,
+    pub value: Word,
+}
+
 /// Impl trait as parameter to RamTableCircuit.
 pub trait RamTable {
     const RAM_TYPE: RAMType;
@@ -16,8 +28,13 @@ pub trait RamTable {
 
     fn len() -> usize;
 
-    fn init_state() -> Vec<u32> {
-        vec![0; Self::len() * Self::V_LIMBS]
+    fn init_state() -> Vec<MemInitRecord> {
+        (0..Self::len())
+            .map(|i| MemInitRecord {
+                addr: i as u32,
+                value: 0,
+            })
+            .collect()
     }
 
     #[inline(always)]
@@ -32,8 +49,8 @@ impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
     for RamTableCircuit<E, RAM>
 {
     type TableConfig = RamTableConfig<RAM>;
-    type FixedInput = Option<Vec<u32>>;
-    type WitnessInput = Vec<u32>;
+    type FixedInput = Option<Vec<MemInitRecord>>;
+    type WitnessInput = Vec<MemFinalRecord>;
 
     fn name() -> String {
         format!("RAM_{:?}", RAM::RAM_TYPE)

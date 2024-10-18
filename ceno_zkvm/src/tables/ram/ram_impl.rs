@@ -14,7 +14,10 @@ use crate::{
     witness::RowMajorMatrix,
 };
 
-use super::ram_circuit::RamTable;
+use super::{
+    MemInitRecord,
+    ram_circuit::{MemFinalRecord, RamTable},
+};
 
 #[derive(Clone, Debug)]
 pub struct RamTableConfig<RAM: RamTable + Send + Sync + Clone> {
@@ -22,6 +25,8 @@ pub struct RamTableConfig<RAM: RamTable + Send + Sync + Clone> {
     addr: Fixed,
 
     final_v: Vec<WitIn>,
+    final_cycle: WitIn,
+
     phantom: PhantomData<RAM>,
 }
 
@@ -37,12 +42,14 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
         let final_v = (0..RAM::V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
+        let final_cycle = cb.create_witin(|| "final_cycle")?;
 
         let init_table = cb.rlc_chip_record(
             [
                 vec![(RAM::RAM_TYPE as usize).into()],
                 vec![Expression::Fixed(addr)],
                 init_v.iter().map(|v| v.expr()).collect_vec(),
+                vec![Expression::ZERO], // Initial cycle.
             ]
             .concat(),
         );
@@ -53,6 +60,7 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
                 vec![(RAM::RAM_TYPE as usize).into()],
                 vec![Expression::Fixed(addr)],
                 final_v.iter().map(|v| v.expr()).collect_vec(),
+                vec![final_cycle.expr()],
             ]
             .concat(),
         );
@@ -64,58 +72,56 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
             init_v,
             addr,
             final_v,
+            final_cycle,
             phantom: PhantomData,
         })
     }
 
-    /// TODO consider taking RowMajorMatrix from externally, since both pattern are 1D vector
-    /// with that, we can save one allocation cost
     pub fn gen_init_state<F: SmallField>(
         &self,
         num_fixed: usize,
-        init_v: &[u32], // value limb are concated into 1d slice
+        init_v: &[MemInitRecord],
     ) -> RowMajorMatrix<F> {
-        assert_eq!(num_fixed, RAM::V_LIMBS + 1); // +1 for addr
-        assert_eq!(init_v.len() % RAM::V_LIMBS, 0);
-        assert_eq!(init_v.len() / RAM::V_LIMBS, RAM::len());
+        assert_eq!(init_v.len(), RAM::len());
         // for ram in memory offline check
         let mut init_table = RowMajorMatrix::<F>::new(RAM::len(), num_fixed);
 
         init_table
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
-            .zip(init_v.into_par_iter().chunks(RAM::V_LIMBS))
-            .enumerate()
-            .for_each(|(i, (row, v))| {
-                self.init_v.iter().zip(v).for_each(|(c, v)| {
-                    set_fixed_val!(row, c, (*v as u64).into());
+            .zip(init_v.into_par_iter())
+            .for_each(|(row, rec)| {
+                // Assign value limbs.
+                self.init_v.iter().enumerate().for_each(|(l, limb)| {
+                    let val = (rec.value >> (l * 16)) & 0xFFFF;
+                    set_fixed_val!(row, limb, (val as u64).into());
                 });
-                set_fixed_val!(row, self.addr, (RAM::addr(i) as u64).into());
+                set_fixed_val!(row, self.addr, (rec.addr as u64).into());
             });
 
         init_table
     }
 
-    /// TODO consider taking RowMajorMatrix from externally, since both pattern are 1D vector
-    /// with that, we can save one allocation cost
+    /// TODO consider taking RowMajorMatrix as argument to save allocations.
     pub fn assign_instances<F: SmallField>(
         &self,
         num_witness: usize,
-        final_v: &[u32], // value limb are concated into 1d slice
+        final_v: &[MemFinalRecord], // value limb are concated into 1d slice
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert_eq!(num_witness, RAM::V_LIMBS);
-        assert_eq!(final_v.len() % RAM::V_LIMBS, 0);
-        assert_eq!(final_v.len() / RAM::V_LIMBS, RAM::len());
-        let mut final_table = RowMajorMatrix::<F>::new(RAM::len(), RAM::V_LIMBS);
+        assert_eq!(final_v.len(), RAM::len());
+        let mut final_table = RowMajorMatrix::<F>::new(RAM::len(), num_witness);
 
         final_table
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
-            .zip(final_v.into_par_iter().chunks(RAM::V_LIMBS))
-            .for_each(|(row, v)| {
-                self.final_v.iter().zip(v).for_each(|(c, v)| {
-                    set_val!(row, c, *v as u64);
+            .zip(final_v.into_par_iter())
+            .for_each(|(row, rec)| {
+                // Assign value limbs.
+                self.final_v.iter().enumerate().for_each(|(l, limb)| {
+                    let val = (rec.value >> (l * 16)) & 0xFFFF;
+                    set_val!(row, limb, val as u64);
                 });
+                set_val!(row, self.final_cycle, rec.cycle);
             });
 
         Ok(final_table)

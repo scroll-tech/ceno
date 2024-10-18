@@ -368,7 +368,6 @@ pub struct MemAddr<E: ExtensionField> {
     low_bits: Vec<WitIn>,
 }
 
-#[allow(dead_code)] // TODO: remove after using gadget.
 impl<E: ExtensionField> MemAddr<E> {
     const N_LOW_BITS: usize = 2;
 
