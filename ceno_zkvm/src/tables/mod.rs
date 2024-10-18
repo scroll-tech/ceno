@@ -15,6 +15,9 @@ pub use ops::*;
 mod program;
 pub use program::{InsnRecord, ProgramTableCircuit};
 
+mod ram;
+pub use ram::*;
+
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;
     type FixedInput: Send + Sync + ?Sized;

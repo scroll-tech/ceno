@@ -12,6 +12,7 @@ pub mod circuit_builder;
 pub mod expression;
 pub mod gadgets;
 mod keygen;
+pub mod state;
 pub mod structs;
 mod uint;
 mod utils;

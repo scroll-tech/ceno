@@ -638,6 +638,20 @@ impl<E: ExtensionField> ToExpr<E> for &WitIn {
     }
 }
 
+impl<E: ExtensionField> ToExpr<E> for Fixed {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::Fixed(*self)
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for &Fixed {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::Fixed(**self)
+    }
+}
+
 impl<E: ExtensionField> ToExpr<E> for Instance {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
