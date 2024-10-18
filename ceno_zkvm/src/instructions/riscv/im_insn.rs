@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{MemoryExpr, RegisterExpr},
+    chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr},
@@ -29,7 +29,7 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
         imm: &Expression<E>,
         rs1_read: RegisterExpr<E>,
         memory_read: MemoryExpr<E>,
-        memory_addr: MemoryExpr<E>,
+        memory_addr: AddressExpr<E>,
         rd_written: RegisterExpr<E>,
     ) -> Result<Self, ZKVMError> {
         let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;

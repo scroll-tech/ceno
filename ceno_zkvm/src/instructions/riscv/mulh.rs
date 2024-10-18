@@ -117,7 +117,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord};
+    use ceno_emul::{Change, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -127,7 +127,7 @@ mod test {
         chip_handler::test::DebugIndex,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MOCK_PC_MULHU, MOCK_PROGRAM, MockProver},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     #[test]
@@ -150,12 +150,13 @@ mod test {
         let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
 
         // values assignment
+        let insn_code = encode_rv32(InsnKind::MULHU, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             MulhuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
-                    MOCK_PC_MULHU,
-                    MOCK_PROGRAM[18],
+                    MOCK_PC_START,
+                    insn_code,
                     a.as_u64() as u32,
                     b.as_u64() as u32,
                     Change::new(0, value_mul.as_hi_value::<u32>().as_u32()),
@@ -182,6 +183,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );

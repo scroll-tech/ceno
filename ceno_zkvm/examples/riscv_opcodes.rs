@@ -1,6 +1,7 @@
 use std::{iter, panic, time::Instant};
 
 use ceno_zkvm::{
+    declare_program,
     instructions::riscv::{arith::AddInstruction, branch::BltuInstruction, jump::JalInstruction},
     scheme::prover::ZKVMProver,
     tables::ProgramTableCircuit,
@@ -30,6 +31,7 @@ use transcript::Transcript;
 #[from_env]
 const RAYON_NUM_THREADS: usize = 8;
 
+const PROGRAM_SIZE: usize = 512;
 // For now, we assume registers
 //  - x0 is not touched,
 //  - x1 is initialized to 1,
@@ -39,14 +41,21 @@ const RAYON_NUM_THREADS: usize = 8;
 #[allow(clippy::unusual_byte_groupings)]
 const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
 #[allow(clippy::unusual_byte_groupings)]
-const PROGRAM_CODE: [u32; 5] = [
-    // func7   rs2   rs1   f3  rd    opcode
-    0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
-    0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
-    0b_1_111111_00011_00000_110_1100_1_1100011, // bltu x0, x3, -8
-    0b_0_0000000010_0_00000000_00001_1101111, // jal x1, 4
-    ECALL_HALT,                               // ecall halt
-];
+const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
+    let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
+
+    declare_program!(
+        program,
+        // func7   rs2   rs1   f3  rd    opcode
+        0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
+        0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
+        0b_1_111111_00011_00000_110_1100_1_1100011, // bltu x0, x3, -8
+        0b_0_0000000010_0_00000000_00001_1101111, // jal x1, 4
+        ECALL_HALT,                               // ecall halt
+    );
+    program
+};
+type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -112,7 +121,7 @@ fn main() {
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
     let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
     let ltu_config = zkvm_cs.register_table_circuit::<LtuTableCircuit<E>>();
-    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
+    let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
 
     let program_code: Vec<u32> = PROGRAM_CODE
         .iter()
@@ -141,10 +150,10 @@ fn main() {
         ltu_config.clone(),
         &(),
     );
-    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
+    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
         &zkvm_cs,
         prog_config.clone(),
-        &program_code,
+        &PROGRAM_CODE,
     );
 
     let pk = zkvm_cs
@@ -198,7 +207,8 @@ fn main() {
 
         assert_eq!(halt_records.len(), 1);
         let exit_code = halt_records[0].rs2().unwrap().value;
-        let pi = PublicValues::new(exit_code, 0);
+        // TODO set correct end_ts
+        let pi = PublicValues::new(exit_code, 0, 0);
 
         tracing::info!(
             "tracer generated {} ADD records, {} BLTU records, {} JAL records",
@@ -234,7 +244,7 @@ fn main() {
             .assign_table_circuit::<LtuTableCircuit<E>>(&zkvm_cs, &ltu_config, &())
             .unwrap();
         zkvm_witness
-            .assign_table_circuit::<ProgramTableCircuit<E>>(
+            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
                 &zkvm_cs,
                 &prog_config,
                 &program_code.len(),
