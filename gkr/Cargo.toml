@@ -12,7 +12,7 @@ goldilocks.workspace = true
 const_env = "0.1.2"
 crossbeam-channel = "0.5.13"
 ff_ext = { path = "../ff_ext" }
-itertools = "0.12.1"
+itertools = "0.13.0"
 multilinear_extensions = { path = "../multilinear_extensions" }
 rayon.workspace = true
 serde.workspace = true

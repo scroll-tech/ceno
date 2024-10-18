@@ -18,7 +18,7 @@ goldilocks.workspace = true
 halo2_curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", tag = "0.3.3", package = "halo2curves", features = [
   "derive_serde",
 ] }
-itertools = "0.12.1"
+itertools = "0.13.0"
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4.6"
 num-integer = "0.1.46"

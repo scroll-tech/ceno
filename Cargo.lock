@@ -342,7 +342,7 @@ dependencies = [
  "generic_static",
  "glob",
  "goldilocks",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "mpcs",
  "multilinear_extensions",
  "paste",
@@ -819,7 +819,7 @@ dependencies = [
  "ff",
  "ff_ext",
  "goldilocks",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "multilinear_extensions",
  "pprof",
  "rayon",
@@ -843,7 +843,7 @@ dependencies = [
  "ff_ext",
  "gkr",
  "goldilocks",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "multilinear_extensions",
  "simple-frontend",
  "sumcheck",
@@ -1058,6 +1058,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1178,7 +1187,7 @@ dependencies = [
  "gkr",
  "goldilocks",
  "halo2curves 0.3.3",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "multilinear_extensions",
  "num-bigint",
  "num-integer",
@@ -1203,7 +1212,7 @@ dependencies = [
  "ff",
  "ff_ext",
  "goldilocks",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "log",
  "rayon",
  "serde",
@@ -1837,7 +1846,7 @@ dependencies = [
  "ff",
  "ff_ext",
  "goldilocks",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "rayon",
  "serde",
 ]
@@ -1855,7 +1864,7 @@ dependencies = [
  "gkr",
  "gkr-graph",
  "goldilocks",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "mpcs",
  "multilinear_extensions",
  "paste",
@@ -1882,7 +1891,7 @@ dependencies = [
  "gkr",
  "gkr-graph",
  "goldilocks",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "multilinear_extensions",
  "simple-frontend",
  "strum 0.26.3",
@@ -1983,7 +1992,7 @@ dependencies = [
  "ff",
  "ff_ext",
  "goldilocks",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "multilinear_extensions",
  "pprof",
  "rayon",

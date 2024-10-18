@@ -12,7 +12,7 @@ goldilocks.workspace = true
 
 gkr = { path = "../gkr", features = ["parallel"] }
 gkr-graph = { version = "0.1.0", path = "../gkr-graph" }
-itertools = "0.12.1"
+itertools = "0.13.0"
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
 simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 strum = "0.26.3"

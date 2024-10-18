@@ -20,7 +20,7 @@ simple-frontend = { version = "0.1.0", path = "../simple-frontend" }
 singer-utils = { version = "0.1.0", path = "../singer-utils" }
 transcript = { path = "../transcript" }
 
-itertools = "0.12.1"
+itertools = "0.13.0"
 paste = "1.0.15"
 strum = "0.25.0"
 strum_macros = "0.25.3"
