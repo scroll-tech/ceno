@@ -16,11 +16,7 @@ impl RamTable for MemTable {
     const V_LIMBS: usize = UINT_LIMBS + 1; // +1 including timestamp
     fn len() -> usize {
         // TODO figure out better way to define memory entry count
-        1 << 16
-    }
-
-    fn init_state() -> Vec<u32> {
-        vec![0; Self::len()]
+        1 << 21
     }
 
     #[inline(always)]
@@ -38,11 +34,6 @@ impl RamTable for RegTable {
     const V_LIMBS: usize = UINT_LIMBS + 1; // +1 including timestamp
     fn len() -> usize {
         32 // register size 32
-    }
-
-    fn init_state() -> Vec<u32> {
-        // hardcode special initial value for register
-        vec![0; Self::len()]
     }
 }
 

@@ -16,7 +16,9 @@ pub trait RamTable {
 
     fn len() -> usize;
 
-    fn init_state() -> Vec<u32>;
+    fn init_state() -> Vec<u32> {
+        vec![0; Self::len() * Self::V_LIMBS]
+    }
 
     #[inline(always)]
     fn addr(entry_index: usize) -> u32 {
