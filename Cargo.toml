@@ -30,6 +30,7 @@ ff = "0.13"
 goldilocks = { git = "https://github.com/zhenfeizhang/Goldilocks" }
 halo2curves = "0.7"
 itertools = "0.13"
+paste = "1"
 poseidon = { path = "./poseidon" }
 rand_chacha = { version = "0.3", features = ["serde1"] }
 rand_core = "0.6"
@@ -39,6 +40,9 @@ serde = { version = "1", features = ["derive"] }
 strum = "0.26"
 strum_macros = "0.26"
 subtle = "2"
+tracing = "0.1"
+tracing-flame = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [patch."https://github.com/zhenfeizhang/Goldilocks"]
 goldilocks = { git = "https://github.com/hero78119/Goldilocks" }

@@ -1910,7 +1910,6 @@ dependencies = [
  "singer-utils",
  "strum",
  "strum_macros",
- "tracing",
  "tracing-flame",
  "tracing-subscriber",
  "transcript",
@@ -2014,6 +2013,7 @@ dependencies = [
  "rayon",
  "serde",
  "tracing",
+ "tracing-flame",
  "transcript",
 ]
 

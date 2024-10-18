@@ -14,7 +14,8 @@ goldilocks.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 serde.workspace = true
-tracing = "0"
+tracing.workspace = true
+tracing-flame.workspace = true
 
 crossbeam-channel = "0"
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }

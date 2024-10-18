@@ -21,12 +21,11 @@ singer-utils = { version = "0", path = "../singer-utils" }
 transcript = { path = "../transcript" }
 
 itertools.workspace = true
-paste = "1"
+paste.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
-tracing = "0"
-tracing-flame = "0"
-tracing-subscriber = { version = "0", features = ["env-filter"] }
+tracing-flame.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 cfg-if = "1"
