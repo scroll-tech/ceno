@@ -13,6 +13,7 @@ use crate::{
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM};
+use ff::Field;
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
@@ -37,15 +38,15 @@ pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
 pub(crate) enum MockProverError<E: ExtensionField> {
     AssertZeroError {
         expression: Expression<E>,
-        evaluated: E,
+        evaluated: E::BaseField,
         name: String,
         inst_id: usize,
     },
     AssertEqualError {
         left_expression: Expression<E>,
         right_expression: Expression<E>,
-        left: E,
-        right: E,
+        left: E::BaseField,
+        right: E::BaseField,
         name: String,
         inst_id: usize,
     },
@@ -148,7 +149,7 @@ impl<E: ExtensionField> MockProverError<E> {
             } => {
                 let expression_fmt = fmt::expr(expression, &mut wtns, false);
                 let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
-                let eval_fmt = fmt::field(evaluated);
+                let eval_fmt = fmt::base_field(evaluated, false);
                 println!(
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
                     Expression: {expression_fmt}\n\
@@ -167,8 +168,8 @@ impl<E: ExtensionField> MockProverError<E> {
                 let left_expression_fmt = fmt::expr(left_expression, &mut wtns, false);
                 let right_expression_fmt = fmt::expr(right_expression, &mut wtns, false);
                 let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
-                let left_eval_fmt = fmt::field(left);
-                let right_eval_fmt = fmt::field(right);
+                let left_eval_fmt = fmt::base_field(left, false);
+                let right_eval_fmt = fmt::base_field(right, false);
                 println!(
                     "\nAssertEqualError {name:?}\n\
                     Left: {left_eval_fmt} != Right: {right_eval_fmt}\n\
@@ -422,39 +423,21 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let right = right.neg();
 
                 let left_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &left);
-                let left_evaluated = left_evaluated
-                    .get_ext_field_vec_optn()
-                    .map(|v| v.to_vec())
-                    .unwrap_or_else(|| {
-                        left_evaluated
-                            .get_base_field_vec()
-                            .iter()
-                            .map(|v| E::from(*v))
-                            .collect_vec()
-                    });
+                let left_evaluated = left_evaluated.get_base_field_vec();
 
                 let right_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &right);
-                let right_evaluated = right_evaluated
-                    .get_ext_field_vec_optn()
-                    .map(|v| v.to_vec())
-                    .unwrap_or_else(|| {
-                        right_evaluated
-                            .get_base_field_vec()
-                            .iter()
-                            .map(|v| E::from(*v))
-                            .collect_vec()
-                    });
+                let right_evaluated = right_evaluated.get_base_field_vec();
 
                 // left_evaluated.len() ?= right_evaluated.len() due to padding instance
                 for (inst_id, (left_element, right_element)) in
-                    left_evaluated.into_iter().zip(right_evaluated).enumerate()
+                    izip!(left_evaluated, right_evaluated).enumerate()
                 {
                     if left_element != right_element {
                         errors.push(MockProverError::AssertEqualError {
                             left_expression: left.clone(),
                             right_expression: right.clone(),
-                            left: left_element,
-                            right: right_element,
+                            left: *left_element,
+                            right: *right_element,
                             name: name.clone(),
                             inst_id,
                         });
@@ -463,19 +446,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             } else {
                 // contains require_zero
                 let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
-                let expr_evaluated = expr_evaluated
-                    .get_ext_field_vec_optn()
-                    .map(|v| v.to_vec())
-                    .unwrap_or_else(|| {
-                        expr_evaluated
-                            .get_base_field_vec()
-                            .iter()
-                            .map(|v| E::from(*v))
-                            .collect_vec()
-                    });
+                let expr_evaluated = expr_evaluated.get_base_field_vec();
 
                 for (inst_id, element) in expr_evaluated.iter().enumerate() {
-                    if *element != E::ZERO {
+                    if *element != E::BaseField::ZERO {
                         errors.push(MockProverError::AssertZeroError {
                             expression: expr.clone(),
                             evaluated: *element,
@@ -523,19 +497,11 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         items
                             .iter()
                             .map(|expr| {
-                                let e_result =
-                                    wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
+                                // TODO generalized to all inst_id
                                 let inst_id = 0;
-                                let b = e_result.get_base_field_vec_optn();
-                                let e = e_result.get_ext_field_vec_optn();
-                                if let Some(b) = b {
-                                    b[inst_id].to_canonical_u64()
-                                } else if let Some(e) = e {
-                                    let arr = e[inst_id].to_canonical_u64_vec();
-                                    arr[0] + E::BaseField::MODULUS_U64 * arr[1]
-                                } else {
-                                    unreachable!()
-                                }
+                                wit_infer_by_expr(&[], wits_in, pi, &challenge, expr)
+                                    .get_base_field_vec()[inst_id]
+                                    .to_canonical_u64()
                             })
                             .collect::<Vec<u64>>(),
                     )

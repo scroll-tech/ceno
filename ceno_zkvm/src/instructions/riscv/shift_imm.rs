@@ -61,6 +61,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             &imm.value(),
             div_config.dividend.register_expr(),
             rd_written.register_expr(),
+            false,
         )?;
 
         Ok(InstructionConfig {
@@ -109,7 +110,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -167,7 +168,7 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                MOCK_PC_START,
+                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                 insn_code,
                 rs1_read,
                 Change::new(0, rs1_read >> imm),

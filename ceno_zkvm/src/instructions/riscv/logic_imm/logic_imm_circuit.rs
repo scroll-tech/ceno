@@ -90,6 +90,7 @@ impl<E: ExtensionField> LogicConfig<E> {
             &imm.value(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
+            false,
         )?;
 
         Ok(Self {
@@ -123,7 +124,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -190,7 +191,7 @@ mod test {
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                MOCK_PC_START,
+                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                 insn_code,
                 rs1_read,
                 Change::new(0, rd_written),
