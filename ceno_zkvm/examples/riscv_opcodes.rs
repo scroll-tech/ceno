@@ -173,12 +173,16 @@ fn main() {
 
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
+        let ram_start = ByteAddr(CENO_PLATFORM.ram_start()).waddr();
 
         vm.init_register_unsafe(1usize, 1);
         vm.init_register_unsafe(2usize, u32::MAX); // -1 in two's complement
         vm.init_register_unsafe(3usize, step_loop);
         for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
+        }
+        for (i, data) in PROGRAM_DATA.iter().enumerate() {
+            vm.init_memory(ram_start + i as u32, *data);
         }
 
         let all_records = vm
