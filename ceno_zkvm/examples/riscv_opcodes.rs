@@ -5,10 +5,7 @@ use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
-    tables::{
-        MemFinalRecord, MemInitRecord, MemTable, MemTableCircuit, ProgramTableCircuit, RamTable,
-        RegTable, RegTableCircuit,
-    },
+    tables::{MemFinalRecord, MemInitRecord, MemTable, ProgramTableCircuit, RamTable, RegTable},
 };
 use clap::Parser;
 use const_env::from_env;
@@ -115,8 +112,6 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
-    let reg_config = zkvm_cs.register_table_circuit::<RegTableCircuit<E>>();
-    let mem_config = zkvm_cs.register_table_circuit::<MemTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
@@ -124,7 +119,6 @@ fn main() {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
 
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-        config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
         zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
             &zkvm_cs,
@@ -142,12 +136,6 @@ fn main() {
             reg_init
         };
 
-        zkvm_fixed_traces.register_table_circuit::<RegTableCircuit<E>>(
-            &zkvm_cs,
-            reg_config.clone(),
-            &Some(reg_init.clone()),
-        );
-
         let mem_init = (0..MemTable::len())
             .map(|i| MemInitRecord {
                 addr: CENO_PLATFORM.ram_start() + i as u32,
@@ -155,10 +143,11 @@ fn main() {
             })
             .collect_vec();
 
-        zkvm_fixed_traces.register_table_circuit::<MemTableCircuit<E>>(
+        config.generate_fixed_traces(
             &zkvm_cs,
-            mem_config.clone(),
-            &Some(mem_init.clone()),
+            &mut zkvm_fixed_traces,
+            reg_init.clone(),
+            mem_init.clone(),
         );
 
         let pk = zkvm_cs
@@ -217,10 +206,6 @@ fn main() {
             .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
             .unwrap();
         zkvm_witness.finalize_lk_multiplicities();
-        // assign table circuits
-        config
-            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
-            .unwrap();
 
         // Find the final register values and cycles.
         let reg_final = reg_init
@@ -247,14 +232,11 @@ fn main() {
             })
             .collect_vec();
 
-        // assign register finalization.
-        zkvm_witness
-            .assign_table_circuit::<RegTableCircuit<E>>(&zkvm_cs, &reg_config, &reg_final)
+        // assign table circuits
+        config
+            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final)
             .unwrap();
-        // assign memory finalization.
-        zkvm_witness
-            .assign_table_circuit::<MemTableCircuit<E>>(&zkvm_cs, &mem_config, &mem_final)
-            .unwrap();
+
         // assign program circuit
         zkvm_witness
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
