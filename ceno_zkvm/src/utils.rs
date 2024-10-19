@@ -20,7 +20,7 @@ pub fn i64_to_base<F: SmallField>(x: i64) -> F {
 }
 
 /// This is helper function to convert witness of u8 limb into u16 limb
-/// TODO: need a better way to keep consistency of VALUE_BIT_WIDTH
+/// TODO: need a better way to keep consistency of LIMB_BITS
 #[allow(dead_code)]
 pub fn limb_u8_to_u16(input: &[u8]) -> Vec<u16> {
     input
