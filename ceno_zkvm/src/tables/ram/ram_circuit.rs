@@ -34,6 +34,7 @@ impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
     type TableConfig = RamTableConfig<RAM>;
     type FixedInput = Option<Vec<u32>>;
     type WitnessInput = Vec<u32>;
+    type FixedOutput = RowMajorMatrix<E::BaseField>;
 
     fn name() -> String {
         format!("RAM_{:?}", RAM::RAM_TYPE)

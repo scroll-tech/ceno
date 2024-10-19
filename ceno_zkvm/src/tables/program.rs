@@ -118,6 +118,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
 {
     type TableConfig = ProgramTableConfig;
     type FixedInput = [u32; PROGRAM_SIZE];
+    type FixedOutput = RowMajorMatrix<E::BaseField>;
     type WitnessInput = usize;
 
     fn name() -> String {

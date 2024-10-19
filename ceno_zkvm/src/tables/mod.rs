@@ -18,10 +18,14 @@ pub use program::{InsnRecord, ProgramTableCircuit};
 mod ram;
 pub use ram::*;
 
+mod mem;
+pub use mem::*;
+
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;
     type FixedInput: Send + Sync + ?Sized;
     type WitnessInput: Send + Sync + ?Sized;
+    type FixedOutput: Send + Sync + ?Sized;
 
     fn name() -> String;
 
@@ -33,7 +37,7 @@ pub trait TableCircuit<E: ExtensionField> {
         config: &Self::TableConfig,
         num_fixed: usize,
         input: &Self::FixedInput,
-    ) -> RowMajorMatrix<E::BaseField>;
+    ) -> Self::FixedOutput;
 
     fn assign_instances(
         config: &Self::TableConfig,

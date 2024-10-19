@@ -27,6 +27,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
     type TableConfig = RangeTableConfig;
     type FixedInput = ();
     type WitnessInput = ();
+    type FixedOutput = RowMajorMatrix<E::BaseField>;
 
     fn name() -> String {
         format!("RANGE_{:?}", RANGE::ROM_TYPE)

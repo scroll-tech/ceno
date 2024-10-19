@@ -185,7 +185,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
         assert!(self.circuit_fixed_traces.insert(OC::name(), None).is_none());
     }
 
-    pub fn register_table_circuit<TC: TableCircuit<E>>(
+    pub fn register_table_circuit<TC: TableCircuit<E, FixedOutput = RowMajorMatrix<E::BaseField>>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: TC::TableConfig,

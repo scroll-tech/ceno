@@ -34,6 +34,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
     type TableConfig = OpTableConfig;
     type FixedInput = ();
     type WitnessInput = ();
+    type FixedOutput = RowMajorMatrix<E::BaseField>;
 
     fn name() -> String {
         format!("OPS_{:?}", OP::ROM_TYPE)
