@@ -11,7 +11,9 @@ use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, StepRecord, Tracer, VMState, WordAddr,
+    ByteAddr, CENO_PLATFORM, EmuContext,
+    InsnKind::{EANY, LUI, LW},
+    StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -43,6 +45,10 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
     declare_program!(
         program,
+        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.ram_start()), // lui x10, program_data
+        // encode_rv32(LW, 10, 0, 1, 0),                         // lw x1, 0(x10)
+        // encode_rv32(LW, 10, 0, 2, 4),                         // lw x2, 4(x10)
+        // encode_rv32(LW, 10, 0, 3, 8),                         // lw x3, 8(x10)
         // func7   rs2   rs1   f3  rd    opcode
         0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
         0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
@@ -52,7 +58,6 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     );
     program
 };
-const PROGRAM_DATA: &[u32] = &[];
 type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
 
 /// Simple program to greet a person
@@ -118,6 +123,9 @@ fn main() {
     for instance_num_vars in args.start..args.end {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
 
+        // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
+        let program_data: &[u32] = &[1, u32::MAX, step_loop];
+
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
 
         zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
@@ -126,8 +134,6 @@ fn main() {
             &PROGRAM_CODE,
         );
 
-        // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
-        // vm.x4 += vm.x1
         let reg_init = {
             let mut reg_init = RegTable::init_state();
             reg_init[1].value = 1;
@@ -138,7 +144,7 @@ fn main() {
 
         let mem_init = {
             let mut mem_init = MemTable::init_state();
-            for (i, value) in PROGRAM_DATA.iter().enumerate() {
+            for (i, value) in program_data.iter().enumerate() {
                 mem_init[i].value = *value;
             }
             mem_init
@@ -166,7 +172,7 @@ fn main() {
         for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
-        for (i, data) in PROGRAM_DATA.iter().enumerate() {
+        for (i, data) in program_data.iter().enumerate() {
             vm.init_memory(ram_start + i as u32, *data);
         }
 

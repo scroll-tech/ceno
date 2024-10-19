@@ -105,10 +105,10 @@ pub struct LoadConfig<E: ExtensionField> {
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
 
 pub struct LWOp;
-
 impl RIVInstruction for LWOp {
     const INST_KIND: InsnKind = InsnKind::LW;
 }
+pub type LoadWord<E> = LoadInstruction<E, LWOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
     type InstructionConfig = LoadConfig<E>;
