@@ -52,7 +52,6 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     );
     program
 };
-const PROGRAM_DATA: &[u32] = &[];
 type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
 
 /// Simple program to greet a person
@@ -118,6 +117,8 @@ fn main() {
     for instance_num_vars in args.start..args.end {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
 
+        let program_data: &[u32] = &[];
+
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
 
         zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
@@ -138,7 +139,7 @@ fn main() {
 
         let mem_init = {
             let mut mem_init = MemTable::init_state();
-            for (i, value) in PROGRAM_DATA.iter().enumerate() {
+            for (i, value) in program_data.iter().enumerate() {
                 mem_init[i].value = *value;
             }
             mem_init
@@ -166,7 +167,7 @@ fn main() {
         for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
-        for (i, data) in PROGRAM_DATA.iter().enumerate() {
+        for (i, data) in program_data.iter().enumerate() {
             vm.init_memory(ram_start + i as u32, *data);
         }
 
