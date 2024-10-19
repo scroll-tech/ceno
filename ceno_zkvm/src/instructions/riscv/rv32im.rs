@@ -26,7 +26,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub and_config: <AndTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub ltu_config: <LtuTableCircuit<E> as TableCircuit<E>>::TableConfig,
 
-    // Memories.
+    // RW tables.
     pub reg_config: <RegTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub mem_config: <MemTableCircuit<E> as TableCircuit<E>>::TableConfig,
 }
@@ -44,7 +44,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let and_config = cs.register_table_circuit::<AndTableCircuit<E>>();
         let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
 
-        // memories
+        // RW tables
         let reg_config = cs.register_table_circuit::<RegTableCircuit<E>>();
         let mem_config = cs.register_table_circuit::<MemTableCircuit<E>>();
 
@@ -67,8 +67,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         &self,
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
-        reg_init: Vec<MemInitRecord>,
-        mem_init: Vec<MemInitRecord>,
+        reg_init: &Vec<MemInitRecord>,
+        mem_init: &Vec<MemInitRecord>,
     ) {
         fixed.register_opcode_circuit::<AddInstruction<E>>(cs);
         fixed.register_opcode_circuit::<BltuInstruction>(cs);
@@ -79,17 +79,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<AndTableCircuit<E>>(cs, self.and_config.clone(), &());
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, self.ltu_config.clone(), &());
 
-        fixed.register_table_circuit::<RegTableCircuit<E>>(
-            cs,
-            self.reg_config.clone(),
-            &Some(reg_init),
-        );
-
-        fixed.register_table_circuit::<MemTableCircuit<E>>(
-            cs,
-            self.mem_config.clone(),
-            &Some(mem_init),
-        );
+        fixed.register_table_circuit::<RegTableCircuit<E>>(cs, self.reg_config.clone(), reg_init);
+        fixed.register_table_circuit::<MemTableCircuit<E>>(cs, self.mem_config.clone(), mem_init);
     }
 
     pub fn assign_opcode_circuit(

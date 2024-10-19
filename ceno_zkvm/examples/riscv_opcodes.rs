@@ -5,7 +5,7 @@ use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
-    tables::{MemFinalRecord, MemInitRecord, MemTable, ProgramTableCircuit, RamTable, RegTable},
+    tables::{MemFinalRecord, MemTable, ProgramTableCircuit, RamTable, RegTable},
 };
 use clap::Parser;
 use const_env::from_env;
@@ -136,19 +136,15 @@ fn main() {
             reg_init
         };
 
-        let mem_init = (0..MemTable::len())
-            .map(|i| MemInitRecord {
-                addr: CENO_PLATFORM.ram_start() + i as u32,
-                value: *PROGRAM_DATA.get(i).unwrap_or(&0),
-            })
-            .collect_vec();
+        let mem_init = {
+            let mut mem_init = MemTable::init_state();
+            for (i, value) in PROGRAM_DATA.iter().enumerate() {
+                mem_init[i].value = *value;
+            }
+            mem_init
+        };
 
-        config.generate_fixed_traces(
-            &zkvm_cs,
-            &mut zkvm_fixed_traces,
-            reg_init.clone(),
-            mem_init.clone(),
-        );
+        config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &mem_init);
 
         let pk = zkvm_cs
             .clone()
