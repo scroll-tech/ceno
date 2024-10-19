@@ -67,8 +67,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         &self,
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
-        reg_init: &Vec<MemInitRecord>,
-        mem_init: &Vec<MemInitRecord>,
+        reg_init: &[MemInitRecord],
+        mem_init: &[MemInitRecord],
     ) {
         fixed.register_opcode_circuit::<AddInstruction<E>>(cs);
         fixed.register_opcode_circuit::<BltuInstruction>(cs);
@@ -126,8 +126,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         &self,
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
-        reg_final: &Vec<MemFinalRecord>,
-        mem_final: &Vec<MemFinalRecord>,
+        reg_final: &[MemFinalRecord],
+        mem_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
         witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_config, &())?;
