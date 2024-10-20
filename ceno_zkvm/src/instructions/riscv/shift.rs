@@ -176,9 +176,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             .r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs2_read.assign_value(instance, rs2_read);
+
         set_val!(instance, config.rs2_low5, rs2_low5);
+        lk_multiplicity.assert_ux::<5>(rs2_low5);
+
         config.rs2_high.assign_value(instance, rs2_high);
         config.pow2_rs2_low5.assign_value(instance, pow2_rs2_low5);
+
+        lk_multiplicity.lookup_pow2(rs2_low5);
 
         Ok(())
     }
@@ -186,7 +191,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
 #[cfg(test)]
 mod tests {
-    use ceno_emul::{Change, InsnKind, StepRecord};
+    use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -198,7 +203,7 @@ mod tests {
             Instruction,
             riscv::{RIVInstruction, constants::UInt},
         },
-        scheme::mock_prover::{MOCK_PC_SLL, MOCK_PC_SRL, MOCK_PROGRAM, MockProver},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     use super::{ShiftLogicalInstruction, SllOp, SrlOp};
@@ -235,9 +240,17 @@ mod tests {
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let shift = rs2_read & 0b11111;
-        let (prefix, mock_pc, mock_program_op, rd_written) = match I::INST_KIND {
-            InsnKind::SLL => ("SLL", MOCK_PC_SLL, MOCK_PROGRAM[19], rs1_read << shift),
-            InsnKind::SRL => ("SRL", MOCK_PC_SRL, MOCK_PROGRAM[20], rs1_read >> shift),
+        let (prefix, insn_code, rd_written) = match I::INST_KIND {
+            InsnKind::SLL => (
+                "SLL",
+                encode_rv32(InsnKind::SLL, 2, 3, 4, 0),
+                rs1_read << shift,
+            ),
+            InsnKind::SRL => (
+                "SRL",
+                encode_rv32(InsnKind::SRL, 2, 3, 4, 0),
+                rs1_read >> shift,
+            ),
             _ => unreachable!(),
         };
 
@@ -266,13 +279,13 @@ mod tests {
             )
             .unwrap();
 
-        let (raw_witin, _) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
+        let (raw_witin, lkm) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_r_instruction(
                 3,
-                mock_pc,
-                mock_program_op,
+                MOCK_PC_START,
+                insn_code,
                 rs1_read,
                 rs2_read,
                 Change::new(0, rd_written),
@@ -289,7 +302,9 @@ mod tests {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
+            Some(lkm),
         );
     }
 }

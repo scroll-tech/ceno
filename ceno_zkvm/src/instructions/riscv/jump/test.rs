@@ -1,4 +1,4 @@
-use ceno_emul::{ByteAddr, Change, PC_STEP_SIZE, StepRecord};
+use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
@@ -6,11 +6,20 @@ use multilinear_extensions::mle::IntoMLEs;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
-    scheme::mock_prover::{MOCK_PC_AUIPC, MOCK_PC_JAL, MOCK_PC_LUI, MOCK_PROGRAM, MockProver},
+    scheme::mock_prover::{MOCK_PC_START, MockProver},
 };
 
-use super::{AuipcInstruction, JalInstruction, LuiInstruction};
+use super::{AuipcInstruction, JalInstruction, JalrInstruction, LuiInstruction};
 
+fn imm_j(imm: i32) -> u32 {
+    // imm is 21 bits in J-type
+    const IMM_MAX: i32 = 2i32.pow(21);
+    if imm.is_negative() {
+        (IMM_MAX + imm) as u32
+    } else {
+        imm as u32
+    }
+}
 #[test]
 fn test_opcode_jal() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -26,16 +35,17 @@ fn test_opcode_jal() {
         .unwrap()
         .unwrap();
 
-    let pc_offset: i32 = -4i32;
-    let new_pc: ByteAddr = ByteAddr(MOCK_PC_JAL.0.wrapping_add_signed(pc_offset));
-    let (raw_witin, _lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
+    let pc_offset: i32 = -8i32;
+    let new_pc: ByteAddr = ByteAddr(MOCK_PC_START.0.wrapping_add_signed(pc_offset));
+    let insn_code = encode_rv32(InsnKind::JAL, 0, 0, 4, imm_j(pc_offset));
+    let (raw_witin, lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_j_instruction(
             4,
-            Change::new(MOCK_PC_JAL, new_pc),
-            MOCK_PROGRAM[21],
-            Change::new(0, (MOCK_PC_JAL + PC_STEP_SIZE).into()),
+            Change::new(MOCK_PC_START, new_pc),
+            insn_code,
+            Change::new(0, (MOCK_PC_START + PC_STEP_SIZE).into()),
             0,
         )],
     )
@@ -49,10 +59,64 @@ fn test_opcode_jal() {
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        &[insn_code],
         None,
+        Some(lkm),
     );
 }
 
+#[test]
+fn test_opcode_jalr() {
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cb = CircuitBuilder::new(&mut cs);
+    let config = cb
+        .namespace(
+            || "jalr",
+            |cb| {
+                let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                Ok(config)
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+    let imm = -15i32;
+    let rs1_read: Word = 10u32;
+    let new_pc: ByteAddr = ByteAddr(rs1_read.wrapping_add_signed(imm) & (!1));
+    let insn_code = encode_rv32(InsnKind::JALR, 2, 0, 4, imm as u32);
+
+    let (raw_witin, lkm) = JalrInstruction::<GoldilocksExt2>::assign_instances(
+        &config,
+        cb.cs.num_witin as usize,
+        vec![StepRecord::new_i_instruction(
+            4,
+            Change::new(MOCK_PC_START, new_pc),
+            insn_code,
+            rs1_read,
+            Change::new(0, (MOCK_PC_START + PC_STEP_SIZE).into()),
+            0,
+        )],
+    )
+    .unwrap();
+
+    MockProver::assert_satisfied(
+        &cb,
+        &raw_witin
+            .de_interleaving()
+            .into_mles()
+            .into_iter()
+            .map(|v| v.into())
+            .collect_vec(),
+        &[insn_code],
+        None,
+        Some(lkm),
+    );
+}
+
+fn imm_u(imm: u32) -> u32 {
+    // valid imm is imm[12:31] in U-type
+    imm << 12
+}
 #[test]
 fn test_opcode_lui() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -68,16 +132,16 @@ fn test_opcode_lui() {
         .unwrap()
         .unwrap();
 
-    let lui_insn = MOCK_PROGRAM[22];
-    let imm = lui_insn & 0xfffff000;
-    let (raw_witin, _lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
+    let imm_value = imm_u(0x90005);
+    let insn_code = encode_rv32(InsnKind::LUI, 0, 0, 4, imm_value);
+    let (raw_witin, lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_u_instruction(
             4,
-            MOCK_PC_LUI,
-            lui_insn,
-            Change::new(0, imm),
+            MOCK_PC_START,
+            insn_code,
+            Change::new(0, imm_value),
             0,
         )],
     )
@@ -91,7 +155,9 @@ fn test_opcode_lui() {
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        &[insn_code],
         None,
+        Some(lkm),
     );
 }
 
@@ -110,16 +176,16 @@ fn test_opcode_auipc() {
         .unwrap()
         .unwrap();
 
-    let auipc_insn = MOCK_PROGRAM[23];
-    let imm = auipc_insn & 0xfffff000;
-    let (raw_witin, _lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
+    let imm_value = imm_u(0x90005);
+    let insn_code = encode_rv32(InsnKind::AUIPC, 0, 0, 4, imm_value);
+    let (raw_witin, lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
         vec![StepRecord::new_u_instruction(
             4,
-            MOCK_PC_AUIPC,
-            auipc_insn,
-            Change::new(0, MOCK_PC_AUIPC.0.wrapping_add(imm)),
+            MOCK_PC_START,
+            insn_code,
+            Change::new(0, MOCK_PC_START.0.wrapping_add(imm_value)),
             0,
         )],
     )
@@ -133,6 +199,8 @@ fn test_opcode_auipc() {
             .into_iter()
             .map(|v| v.into())
             .collect_vec(),
+        &[insn_code],
         None,
+        Some(lkm),
     );
 }

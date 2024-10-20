@@ -25,6 +25,7 @@ impl RangeTableConfig {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         rom_type: ROMType,
+        table_len: usize,
     ) -> Result<Self, ZKVMError> {
         let fixed = cb.create_fixed(|| "fixed")?;
         let mlt = cb.create_witin(|| "mlt")?;
@@ -32,7 +33,7 @@ impl RangeTableConfig {
         let rlc_record =
             cb.rlc_chip_record(vec![(rom_type as usize).into(), Expression::Fixed(fixed)]);
 
-        cb.lk_table_record(|| "record", rlc_record, mlt.expr())?;
+        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr())?;
 
         Ok(Self { fixed, mlt })
     }
@@ -43,11 +44,6 @@ impl RangeTableConfig {
         content: Vec<u64>,
     ) -> RowMajorMatrix<F> {
         let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
-
-        // Fill the padding with zeros, if any.
-        fixed.par_iter_mut().skip(content.len()).for_each(|row| {
-            set_fixed_val!(row, self.fixed, F::ZERO);
-        });
 
         fixed
             .par_iter_mut()
@@ -72,11 +68,6 @@ impl RangeTableConfig {
         for (idx, mlt) in multiplicity {
             mlts[*idx as usize] = *mlt;
         }
-
-        // Fill the padding with zeros, if any.
-        witness.par_iter_mut().skip(length).for_each(|row| {
-            set_val!(row, self.mlt, F::ZERO);
-        });
 
         witness
             .par_iter_mut()

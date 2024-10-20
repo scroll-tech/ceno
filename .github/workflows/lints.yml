@@ -10,7 +10,7 @@ on:
 
 jobs:
   skip_check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
     steps:
@@ -30,7 +30,7 @@ jobs:
 
     name: Various lints
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
@@ -77,3 +77,8 @@ jobs:
           cargo make clippy
           # Same for clippy:
           cargo clippy --workspace --all-targets --exclude ceno_rt --release
+
+      - name: Install taplo
+        run: taplo --version || cargo install taplo-cli
+      - name: Run taplo
+        run: taplo fmt --check --diff

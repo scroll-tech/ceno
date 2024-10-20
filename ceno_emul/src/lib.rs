@@ -15,3 +15,6 @@ pub use rv32im::{DecodedInstruction, EmuContext, InsnCategory, InsnCodes, InsnFo
 
 mod elf;
 pub use elf::Program;
+
+mod rv32im_encode;
+pub use rv32im_encode::encode_rv32;

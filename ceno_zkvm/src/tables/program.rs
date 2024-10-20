@@ -10,11 +10,25 @@ use crate::{
     tables::TableCircuit,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{CENO_PLATFORM, DecodedInstruction, PC_STEP_SIZE, WORD_SIZE, Word};
+use ceno_emul::{CENO_PLATFORM, DecodedInstruction, PC_STEP_SIZE, WORD_SIZE};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+
+#[macro_export]
+macro_rules! declare_program {
+    ($program:ident, $($instr:expr),* $(,)?) => {
+
+        {
+            let mut _i = 0;
+            $(
+                $program[_i] = $instr;
+                _i += 1;
+            )*
+        }
+    };
+}
 
 #[derive(Clone, Debug)]
 pub struct InsnRecord<T>([T; 7]);
@@ -97,11 +111,13 @@ pub struct ProgramTableConfig {
     mlt: WitIn,
 }
 
-pub struct ProgramTableCircuit<E>(PhantomData<E>);
+pub struct ProgramTableCircuit<E, const PROGRAM_SIZE: usize>(PhantomData<E>);
 
-impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
+impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
+    for ProgramTableCircuit<E, PROGRAM_SIZE>
+{
     type TableConfig = ProgramTableConfig;
-    type FixedInput = [u32];
+    type FixedInput = [u32; PROGRAM_SIZE];
     type WitnessInput = usize;
 
     fn name() -> String {
@@ -127,7 +143,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             cb.rlc_chip_record(fields)
         };
 
-        cb.lk_table_record(|| "prog table", record_exprs, mlt.expr())?;
+        cb.lk_table_record(|| "prog table", PROGRAM_SIZE, record_exprs, mlt.expr())?;
 
         Ok(ProgramTableConfig { record, mlt })
     }
@@ -135,7 +151,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     fn generate_fixed_traces(
         config: &ProgramTableConfig,
         num_fixed: usize,
-        program: &[Word],
+        program: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
         // TODO: get bytecode of the program.
         let num_instructions = program.len();
