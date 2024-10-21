@@ -263,7 +263,7 @@ impl<E: ExtensionField> MockProverError<E> {
         }
     }
 
-    fn contains(&self, constraint_name: Option<&str>) -> bool {
+    fn contains(&self, constraint_name: &Option<&str>) -> bool {
         if let Some(name) = constraint_name {
             self.name().contains(name)
         } else {
@@ -630,11 +630,11 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     }
 
     /// assertion there are errors in the circuit, and panic once all success.
-    pub fn assert_unsatisfied(
+    pub fn assert_with_expected_errors(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         programs: &[u32],
-        constraint_name: Option<&str>,
+        constraint_names: &[Option<&str>],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
@@ -644,42 +644,64 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             Self::run(cb, wits_in, programs, lkm)
         };
 
-        match result {
-            Ok(_) => {
-                println!("======================================================");
-                println!("Constraints are all satisfied!!");
-                println!("======================================================");
-                panic!();
-            }
-            Err(errors) => {
-                let mut duplicates = 0;
-                let mut unexpected_errors: Vec<MockProverError<E>> = vec![];
-                for error in errors {
-                    if error.contains(constraint_name) {
-                        duplicates += 1;
-                    } else {
-                        unexpected_errors.push(error);
-                    }
-                }
-
-                // if un-expected errors happen
-                if !unexpected_errors.is_empty() {
-                    println!("======================================================");
-                    for error in unexpected_errors {
-                        println!("Error: {} constraint not satisfied", error.name());
-                    }
-                    println!("======================================================");
-                    panic!("Constraints not satisfied");
-                }
-
-                // if expected error doesn't happen
-                if duplicates == 0 {
-                    println!("======================================================");
-                    println!("Error: {} constraint satisfied", constraint_name.unwrap());
-                    println!("======================================================");
-                    panic!("Constraints satisfied");
+        let errors = result.err().unwrap_or_default();
+        let groups = errors.into_iter().into_group_map_by(|error| {
+            for constraint_name in constraint_names {
+                if error.contains(constraint_name) {
+                    return *constraint_name;
                 }
             }
+            None
+        });
+        // Unexpected errors
+        if let Some(errors) = groups.get(&None) {
+            println!("======================================================");
+
+            println!(
+                r"
+Hints:
+- If you encounter a constraint error that sporadically occurs in different environments
+    (e.g., passes locally but fails in CI),
+    this often points to unassigned witnesses during the assignment phase.
+    Accessing these cells before they are properly written leads to undefined behavior.
+                    "
+            );
+
+            // Print errors and skip consecutive duplicates errors if they are equal.
+            let mut duplicates = 0;
+            let mut prev_err = None;
+            for error in errors {
+                if prev_err.is_some() && prev_err.unwrap() == error {
+                    duplicates += 1;
+                } else {
+                    error.print(wits_in, &cb.cs.witin_namespace_map);
+                }
+                prev_err = Some(error);
+            }
+
+            if duplicates > 0 {
+                println!(
+                    "Error: {} constraints not satisfied ({} duplicates hidden)",
+                    errors.len(),
+                    duplicates
+                );
+            } else {
+                println!("Error: {} constraints not satisfied", errors.len());
+            }
+            println!("======================================================");
+            panic!("(Unexpected) Constraints not satisfied");
+        }
+        for constraint_name in constraint_names {
+            // Expected errors didn't happen:
+            groups.get(&constraint_name).unwrap_or_else(|| {
+                println!("======================================================");
+                println!(
+                    "Error: {} constraint satisfied",
+                    constraint_name.unwrap_or("[all]")
+                );
+                println!("======================================================");
+                panic!("Constraints unexpectedly satisfied");
+            });
         }
     }
 
@@ -690,51 +712,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
-        let result = if let Some(challenge) = challenge {
-            Self::run_with_challenge(cb, wits_in, challenge, lkm)
-        } else {
-            Self::run(cb, wits_in, programs, lkm)
-        };
-        match result {
-            Ok(_) => {}
-            Err(errors) => {
-                println!("======================================================");
-
-                println!(
-                    r"
-Hints:
-- If you encounter a constraint error that sporadically occurs in different environments
-    (e.g., passes locally but fails in CI),
-    this often points to unassigned witnesses during the assignment phase.
-    Accessing these cells before they are properly written leads to undefined behavior.
-                    "
-                );
-
-                // Print errors and skip consecutive duplicates errors if they are equal.
-                let mut duplicates = 0;
-                let mut prev_err = None;
-                for error in &errors {
-                    if prev_err.is_some() && prev_err.unwrap() == error {
-                        duplicates += 1;
-                    } else {
-                        error.print(wits_in, &cb.cs.witin_namespace_map);
-                    }
-                    prev_err = Some(error);
-                }
-
-                if duplicates > 0 {
-                    println!(
-                        "Error: {} constraints not satisfied ({} duplicates hidden)",
-                        errors.len(),
-                        duplicates
-                    );
-                } else {
-                    println!("Error: {} constraints not satisfied", errors.len());
-                }
-                println!("======================================================");
-                panic!("Constraints not satisfied");
-            }
-        }
+        Self::assert_with_expected_errors(cb, wits_in, programs, &[], challenge, lkm);
     }
 }
 

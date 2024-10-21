@@ -213,35 +213,20 @@ mod test {
                 .outcome
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
-
-            if is_ok {
-                MockProver::assert_satisfied(
-                    &cb,
-                    &raw_witin
-                        .de_interleaving()
-                        .into_mles()
-                        .into_iter()
-                        .map(|v| v.into())
-                        .collect_vec(),
-                    &[insn_code],
-                    None,
-                    Some(lkm),
-                );
-            } else {
-                MockProver::assert_unsatisfied(
-                    &cb,
-                    &raw_witin
-                        .de_interleaving()
-                        .into_mles()
-                        .into_iter()
-                        .map(|v| v.into())
-                        .collect_vec(),
-                    &[insn_code],
-                    Some(name),
-                    None,
-                    Some(lkm),
-                );
-            }
+            let expected_errors: &[_] = if is_ok { &[] } else { &[Some(name)] };
+            MockProver::assert_with_expected_errors(
+                &cb,
+                &raw_witin
+                    .de_interleaving()
+                    .into_mles()
+                    .into_iter()
+                    .map(|v| v.into())
+                    .collect_vec(),
+                &[insn_code],
+                expected_errors,
+                None,
+                Some(lkm),
+            );
         }
 
         #[test]
