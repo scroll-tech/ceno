@@ -13,11 +13,8 @@ itertools.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tracing.workspace = true
-tracing-flame.workspace = true
-tracing-subscriber.workspace = true
 
 [dev-dependencies]
-criterion.workspace = true
 env_logger = "0.11"
 log = "0.4"
 

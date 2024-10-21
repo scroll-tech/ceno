@@ -14,7 +14,6 @@ itertools.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tracing.workspace = true
-tracing-flame.workspace = true
 
 crossbeam-channel.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
@@ -22,7 +21,6 @@ transcript = { path = "../transcript" }
 
 [dev-dependencies]
 criterion.workspace = true
-pprof.workspace = true
 
 [[bench]]
 harness = false
