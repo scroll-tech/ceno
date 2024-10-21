@@ -6,4 +6,3 @@ version.workspace = true
 
 [dependencies]
 riscv = "0.12"
-riscv-rt = "0.12"
