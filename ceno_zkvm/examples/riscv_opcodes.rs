@@ -138,7 +138,7 @@ fn main() {
             reg_init
         };
 
-        let mem_init = initial_memory(&program_data);
+        let mem_init = initial_memory(program_data);
 
         config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &mem_init);
 
