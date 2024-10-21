@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use ark_std::test_rng;
 use ceno_zkvm::{
     self,
-    instructions::{riscv::arith::AddInstruction, Instruction},
+    instructions::{Instruction, riscv::arith::AddInstruction},
     scheme::prover::ZKVMProver,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
@@ -40,14 +40,10 @@ const NUM_SAMPLES: usize = 10;
 #[from_env]
 const RAYON_NUM_THREADS: usize = 8;
 
-pub fn is_power_of_2(x: usize) -> bool {
-    (x != 0) && ((x & (x - 1)) == 0)
-}
-
 fn bench_add(c: &mut Criterion) {
     type Pcs = BasefoldDefault<E>;
     let max_threads = {
-        if !is_power_of_2(RAYON_NUM_THREADS) {
+        if !RAYON_NUM_THREADS.is_power_of_two() {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
             {
                 panic!(
@@ -130,6 +126,7 @@ fn bench_add(c: &mut Criterion) {
                                 &circuit_pk,
                                 wits_in.into_iter().map(|mle| mle.into()).collect_vec(),
                                 commit,
+                                &[],
                                 num_instances,
                                 max_threads,
                                 &mut transcript,

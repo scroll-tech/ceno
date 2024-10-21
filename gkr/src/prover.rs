@@ -12,8 +12,8 @@ use transcript::Transcript;
 use crate::{
     entered_span, exit_span,
     structs::{
-        Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, IOPProverStepMessage,
-        PointAndEval, SumcheckStepType,
+        Circuit, CircuitWitness, GKRInputClaims, IOPProof, IOPProverState, PointAndEval,
+        SumcheckStepType,
     },
     tracing_span,
 };
@@ -56,7 +56,7 @@ impl<E: ExtensionField> IOPProverState<E> {
         });
 
         let sumcheck_proofs = (0..circuit.layers.len() as LayerId)
-            .map(|layer_id| {
+            .flat_map(|layer_id| {
                 let timer = start_timer!(|| format!("Prove layer {}", layer_id));
 
                 prover_state.layer_id = layer_id;
@@ -116,7 +116,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             let (sumcheck_proof, sumcheck_prover_state) =
                                 sumcheck::structs::IOPProverStateV2::<E>::prove_batch_polys(
                                     max_thread_id,
-                                    virtual_polys.try_into().unwrap(),
+                                    virtual_polys,
                                     transcript,
                                 );
 
@@ -168,7 +168,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                             let (sumcheck_proof, sumcheck_prover_state) =
                                 sumcheck::structs::IOPProverStateV2::<E>::prove_batch_polys(
                                     max_thread_id,
-                                    virtual_polys.try_into().unwrap(),
+                                    virtual_polys,
                                     transcript,
                                 );
 
@@ -239,7 +239,7 @@ impl<E: ExtensionField> IOPProverState<E> {
                                 let (sumcheck_proof, sumcheck_prover_state) =
                                     sumcheck::structs::IOPProverStateV2::<E>::prove_batch_polys(
                                         max_thread_id,
-                                        virtual_polys.try_into().unwrap(),
+                                        virtual_polys,
                                         transcript,
                                     );
 
@@ -294,17 +294,13 @@ impl<E: ExtensionField> IOPProverState<E> {
 
                 proofs
             })
-            .flatten()
             .collect_vec();
         end_timer!(timer);
         exit_span!(span);
 
-        (
-            IOPProof { sumcheck_proofs },
-            GKRInputClaims {
-                point_and_evals: prover_state.to_next_phase_point_and_evals,
-            },
-        )
+        (IOPProof { sumcheck_proofs }, GKRInputClaims {
+            point_and_evals: prover_state.to_next_phase_point_and_evals,
+        })
     }
 
     /// Initialize proving state for data parallel circuits.

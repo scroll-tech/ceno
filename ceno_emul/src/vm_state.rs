@@ -2,13 +2,13 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
+    Program,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
     tracer::{Change, StepRecord, Tracer},
-    Program,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::iter::from_fn;
 
 /// An implementation of the machine state and of the side-effects of operations.
@@ -86,6 +86,11 @@ impl VMState {
     pub fn init_register_unsafe(&mut self, idx: RegIdx, value: Word) {
         self.registers[idx] = value;
     }
+
+    fn halt(&mut self) {
+        self.set_pc(0.into());
+        self.halted = true;
+    }
 }
 
 impl EmuContext for VMState {
@@ -93,8 +98,10 @@ impl EmuContext for VMState {
     fn ecall(&mut self) -> Result<bool> {
         let function = self.load_register(self.platform.reg_ecall())?;
         if function == self.platform.ecall_halt() {
-            let _exit_code = self.load_register(self.platform.reg_arg0())?;
-            self.halted = true;
+            let exit_code = self.load_register(self.platform.reg_arg0())?;
+            tracing::debug!("halt with exit_code={}", exit_code);
+
+            self.halt();
             Ok(true)
         } else {
             self.trap(TrapCause::EcallError)

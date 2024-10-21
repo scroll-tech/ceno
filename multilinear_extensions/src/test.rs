@@ -8,7 +8,7 @@ type E = GoldilocksExt2;
 use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
     util::bit_decompose,
-    virtual_poly::{build_eq_x_r, VirtualPolynomial},
+    virtual_poly::{VirtualPolynomial, build_eq_x_r},
 };
 
 #[test]
@@ -69,9 +69,8 @@ fn test_eq_xr() {
 
 #[test]
 fn test_fix_high_variables() {
-    let poly: DenseMultilinearExtension<E> = DenseMultilinearExtension::from_evaluations_vec(
-        3,
-        vec![
+    let poly: DenseMultilinearExtension<E> =
+        DenseMultilinearExtension::from_evaluations_vec(3, vec![
             <E as ExtensionField>::BaseField::from(13),
             <E as ExtensionField>::BaseField::from(97),
             <E as ExtensionField>::BaseField::from(11),
@@ -80,15 +79,16 @@ fn test_fix_high_variables() {
             <E as ExtensionField>::BaseField::from(103),
             <E as ExtensionField>::BaseField::from(5),
             <E as ExtensionField>::BaseField::from(107),
-        ],
-    );
+        ]);
 
     let partial_point = vec![E::from(3), E::from(5)];
 
-    let expected1 = DenseMultilinearExtension::from_evaluations_ext_vec(
-        2,
-        vec![-E::from(17), E::from(127), -E::from(19), E::from(131)],
-    );
+    let expected1 = DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
+        -E::from(17),
+        E::from(127),
+        -E::from(19),
+        E::from(131),
+    ]);
     let result1 = poly.fix_high_variables(&partial_point[1..]);
     assert_eq!(result1, expected1);
 

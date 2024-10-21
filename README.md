@@ -1,3 +1,7 @@
+# Ceno: Non-uniform, Segment and Parallel Zero-knowledge Virtual Machine
+
+Please see [the paper](https://eprint.iacr.org/2024/387) for an introduction to Ceno.
+
 # MVP
 step 1
 - non-uniform prover end to end
@@ -41,8 +45,3 @@ option 1
 option 2
 - use F_q^2/3 extension field, do not repeat
 - rule of thumb: n rounds, soundness ~ (64-n) bits
-
-
-
-
- 

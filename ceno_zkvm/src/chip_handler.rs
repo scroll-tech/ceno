@@ -2,8 +2,8 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, WitIn},
-    gadgets::IsLtConfig,
+    expression::{Expression, ToExpr},
+    gadgets::AssertLTConfig,
     instructions::riscv::constants::UINT_LIMBS,
 };
 
@@ -12,6 +12,9 @@ pub mod global_state;
 pub mod memory;
 pub mod register;
 pub mod utils;
+
+#[cfg(test)]
+pub mod test;
 
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
@@ -27,23 +30,26 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
     fn register_read(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     fn register_write(
         &mut self,
         name_fn: N,
-        register_id: &WitIn,
+        register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 }
+
+/// The common representation of a memory address.
+pub type AddressExpr<E> = Expression<E>;
 
 /// The common representation of a memory value.
 /// Format: `[u16; UINT_LIMBS]`, least-significant-first.
@@ -54,21 +60,21 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     fn memory_read(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
+        value: MemoryExpr<E>,
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     fn memory_write(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: crate::chip_handler::MemoryExpr<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
-    ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
+        prev_values: MemoryExpr<E>,
+        value: MemoryExpr<E>,
+    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 }

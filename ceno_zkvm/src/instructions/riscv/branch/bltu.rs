@@ -3,20 +3,20 @@ use std::marker::PhantomData;
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::Expression,
     gadgets::IsLtConfig,
     instructions::{
-        riscv::{
-            b_insn::BInstructionConfig,
-            constants::{UInt, UINT_LIMBS},
-            RIVInstruction,
-        },
         Instruction,
+        riscv::{
+            RIVInstruction,
+            b_insn::BInstructionConfig,
+            constants::{UINT_LIMBS, UInt},
+        },
     },
     witness::LkMultiplicity,
-    Value,
 };
 use ceno_emul::InsnKind;
 
@@ -47,7 +47,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
             || "rs1<rs2",
             read_rs1.value(),
             read_rs2.value(),
-            None,
             UINT_LIMBS,
         )?;
 

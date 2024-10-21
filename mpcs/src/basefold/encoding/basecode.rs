@@ -1,11 +1,12 @@
 use std::marker::PhantomData;
 
-use super::{concatenate_field_types, EncodingProverParameters, EncodingScheme};
+use super::{EncodingProverParameters, EncodingScheme, concatenate_field_types};
 use crate::{
+    Error,
     util::{
         arithmetic::base_from_raw_bytes, log2_strict, num_of_bytes, plonky2_util::reverse_bits,
     },
-    vec_mut, Error,
+    vec_mut,
 };
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use ark_std::{end_timer, start_timer};
@@ -17,10 +18,10 @@ use rand::SeedableRng;
 use rayon::prelude::{ParallelIterator, ParallelSlice, ParallelSliceMut};
 
 use itertools::Itertools;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rand_chacha::{rand_core::RngCore, ChaCha8Rng};
+use rand_chacha::{ChaCha8Rng, rand_core::RngCore};
 use rayon::prelude::IntoParallelRefIterator;
 
 use crate::util::arithmetic::{horner, steps};
@@ -239,7 +240,7 @@ fn encode_field_type_rs_basecode<E: ExtensionField>(
 // Split the input into chunks of message size, encode each message, and return the codewords
 // FIXME: It is expensive for now because it is using naive FFT (although it is
 // over a small domain)
-fn get_basecode<F: Field>(poly: &Vec<F>, rate: usize, message_size: usize) -> Vec<Vec<F>> {
+fn get_basecode<F: Field>(poly: &[F], rate: usize, message_size: usize) -> Vec<Vec<F>> {
     let timer = start_timer!(|| "Encode basecode");
     // The domain is just counting 1, 2, 3, ... , domain_size
     let domain: Vec<F> = steps(F::ONE).take(message_size * rate).collect();

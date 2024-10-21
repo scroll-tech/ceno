@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::Transcript;
 use util::hash::Digest;
@@ -315,10 +315,10 @@ pub enum Error {
 
 mod basefold;
 pub use basefold::{
-    coset_fft, fft, fft_root_table, one_level_eval_hc, one_level_interp_hc, Basecode,
-    BasecodeDefaultSpec, Basefold, BasefoldBasecodeParams, BasefoldCommitment,
+    Basecode, BasecodeDefaultSpec, Basefold, BasefoldBasecodeParams, BasefoldCommitment,
     BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams, BasefoldRSParams, BasefoldSpec,
-    EncodingScheme, RSCode, RSCodeDefaultSpec,
+    EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
+    one_level_interp_hc,
 };
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 
@@ -364,7 +364,7 @@ pub mod test_util {
 
     use crate::{Evaluation, PolynomialCommitmentScheme};
     use ff_ext::ExtensionField;
-    use itertools::{chain, Itertools};
+    use itertools::{Itertools, chain};
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
     use rand::{prelude::*, rngs::OsRng};
     use rand_chacha::ChaCha8Rng;
@@ -471,7 +471,7 @@ pub mod test_util {
 
                 let comms = polys
                     .iter()
-                    .map(|poly| Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap())
+                    .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
                     .collect_vec();
 
                 let points = (0..num_points)
@@ -495,7 +495,7 @@ pub mod test_util {
                 let values: Vec<E> = evals
                     .iter()
                     .map(Evaluation::value)
-                    .map(|x| *x)
+                    .copied()
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 
@@ -528,7 +528,7 @@ pub mod test_util {
                 let values: Vec<E> = evals
                     .iter()
                     .map(Evaluation::value)
-                    .map(|x| *x)
+                    .copied()
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 

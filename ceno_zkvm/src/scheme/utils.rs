@@ -6,7 +6,7 @@ use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
-    op_mle,
+    op_mle_xa_b, op_mle3_range,
     util::ceil_log2,
     virtual_poly_v2::ArcMultilinearExtension,
 };
@@ -89,6 +89,23 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
         .collect::<Vec<ArcMultilinearExtension<E>>>()
 }
 
+macro_rules! tower_mle_4 {
+    ($p1:ident, $p2:ident, $q1:ident, $q2:ident, $acc_p:ident, $acc_q:ident, $start_index:ident, $cur_len:ident) => {
+        $q1[$start_index..][..$cur_len]
+            .par_iter()
+            .zip($q2[$start_index..][..$cur_len].par_iter())
+            .zip($p1[$start_index..][..$cur_len].par_iter())
+            .zip($p2[$start_index..][..$cur_len].par_iter())
+            .zip($acc_p.par_iter_mut())
+            .zip($acc_q.par_iter_mut())
+            .with_min_len(MIN_PAR_SIZE)
+            .for_each(|(((((q1, q2), p1), p2), p_eval), q_eval)| {
+                *p_eval = *q1 * p2 + *q2 * p1;
+                *q_eval = *q1 * q2;
+            })
+    };
+}
+
 /// infer logup witness from last layer
 /// return is the ([p1,p2], [q1,q2]) for each layer
 pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
@@ -128,18 +145,13 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
                             FieldType::Ext(p2),
                             FieldType::Ext(q1),
                             FieldType::Ext(q2),
-                        ) => q1[start_index..][..cur_len]
-                            .par_iter()
-                            .zip(q2[start_index..][..cur_len].par_iter())
-                            .zip(p1[start_index..][..cur_len].par_iter())
-                            .zip(p2[start_index..][..cur_len].par_iter())
-                            .zip(p_evals.par_iter_mut())
-                            .zip(q_evals.par_iter_mut())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .for_each(|(((((q1, q2), p1), p2), p_eval), q_eval)| {
-                                *p_eval = *p2 * q1 + *p1 * q2;
-                                *q_eval = *q1 * q2;
-                            }),
+                        ) => tower_mle_4!(p1, p2, q1, q2, p_evals, q_evals, start_index, cur_len),
+                        (
+                            FieldType::Base(p1),
+                            FieldType::Base(p2),
+                            FieldType::Ext(q1),
+                            FieldType::Ext(q2),
+                        ) => tower_mle_4!(p1, p2, q1, q2, p_evals, q_evals, start_index, cur_len),
                         _ => unreachable!(),
                     };
                 } else {
@@ -226,26 +238,32 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
+    instance: &[E::BaseField],
     challenges: &[E; N],
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate::<ArcMultilinearExtension<'_, E>>(
+    expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
+        &|i| {
+            let i = instance[i.0];
+            Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![i]))
+        },
         &|scalar| {
-            let scalar: ArcMultilinearExtension<E> = Arc::new(
-                DenseMultilinearExtension::from_evaluations_vec(0, vec![scalar]),
-            );
+            let scalar: ArcMultilinearExtension<E> =
+                Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![
+                    scalar,
+                ]));
             scalar
         },
         &|challenge_id, pow, scalar, offset| {
-            // TODO cache challenge power to be aquire once for each power
+            // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
-            let challenge: ArcMultilinearExtension<E> =
-                Arc::new(DenseMultilinearExtension::from_evaluations_ext_vec(
-                    0,
-                    vec![challenge.pow([pow as u64]) * scalar + offset],
-                ));
+            let challenge: ArcMultilinearExtension<E> = Arc::new(
+                DenseMultilinearExtension::from_evaluations_ext_vec(0, vec![
+                    challenge.pow([pow as u64]) * scalar + offset,
+                ]),
+            );
             challenge
         },
         &|a, b| {
@@ -318,21 +336,10 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
             })
         },
         &|x, a, b| {
-            let a = op_mle!(
-                |a| {
-                    assert_eq!(a.len(), 1);
-                    a[0]
-                },
-                |a| a.into()
-            );
-            let b = op_mle!(
-                |b| {
-                    assert_eq!(b.len(), 1);
-                    b[0]
-                },
-                |b| b.into()
-            );
-            op_mle!(|x| {
+            op_mle_xa_b!(|x, a, b| {
+                assert_eq!(a.len(), 1);
+                assert_eq!(b.len(), 1);
+                let (a, b) = (a[0], b[0]);
                 Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
                     ceil_log2(x.len()),
                     x.par_iter()
@@ -345,6 +352,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
     challenges: &[E],
@@ -353,6 +361,7 @@ pub(crate) fn eval_by_expr<E: ExtensionField>(
     eval_by_expr_with_fixed(&[], witnesses, challenges, expr)
 }
 
+#[allow(dead_code)]
 pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     fixed: &[E],
     witnesses: &[E],
@@ -362,6 +371,29 @@ pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     expr.evaluate::<E>(
         &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
+        &|scalar| scalar.into(),
+        &|challenge_id, pow, scalar, offset| {
+            // TODO cache challenge power to be acquired once for each power
+            let challenge = challenges[challenge_id as usize];
+            challenge.pow([pow as u64]) * scalar + offset
+        },
+        &|a, b| a + b,
+        &|a, b| a * b,
+        &|x, a, b| a * x + b,
+    )
+}
+
+pub(crate) fn eval_by_expr_with_instance<E: ExtensionField>(
+    fixed: &[E],
+    witnesses: &[E],
+    instance: &[E::BaseField],
+    challenges: &[E],
+    expr: &Expression<E>,
+) -> E {
+    expr.evaluate_with_instance::<E>(
+        &|f| fixed[f.0],
+        &|witness_id| witnesses[witness_id as usize],
+        &|i| E::from(instance[i.0]),
         &|scalar| scalar.into(),
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
@@ -386,9 +418,15 @@ mod tests {
         virtual_poly_v2::ArcMultilinearExtension,
     };
 
-    use crate::scheme::utils::{
-        infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+    use crate::{
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
+        expression::{Expression, ToExpr},
+        scheme::utils::{
+            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+        },
     };
+
+    use super::wit_infer_by_expr;
 
     #[test]
     fn test_infer_tower_witness() {
@@ -436,14 +474,18 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ONE);
         // [[1, 3, 5, 7], [2, 4, 6, 8]]
-        assert_eq!(
-            res[0].get_ext_field_vec(),
-            vec![E::ONE, E::from(3u64), E::from(5u64), E::from(7u64)],
-        );
-        assert_eq!(
-            res[1].get_ext_field_vec(),
-            vec![E::from(2u64), E::from(4u64), E::from(6u64), E::from(8u64)],
-        );
+        assert_eq!(res[0].get_ext_field_vec(), vec![
+            E::ONE,
+            E::from(3u64),
+            E::from(5u64),
+            E::from(7u64)
+        ],);
+        assert_eq!(res[1].get_ext_field_vec(), vec![
+            E::from(2u64),
+            E::from(4u64),
+            E::from(6u64),
+            E::from(8u64)
+        ],);
     }
 
     #[test]
@@ -460,14 +502,18 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ZERO);
         // [[1, 3, 5, 0], [2, 4, 6, 0]]
-        assert_eq!(
-            res[0].get_ext_field_vec(),
-            vec![E::ONE, E::from(3u64), E::from(5u64), E::from(0u64)],
-        );
-        assert_eq!(
-            res[1].get_ext_field_vec(),
-            vec![E::from(2u64), E::from(4u64), E::from(6u64), E::from(0u64)],
-        );
+        assert_eq!(res[0].get_ext_field_vec(), vec![
+            E::ONE,
+            E::from(3u64),
+            E::from(5u64),
+            E::from(0u64)
+        ],);
+        assert_eq!(res[1].get_ext_field_vec(), vec![
+            E::from(2u64),
+            E::from(4u64),
+            E::from(6u64),
+            E::from(0u64)
+        ],);
 
         // case 2: test instance level padding
         // [[1,0],[3,0],[5,0]]]
@@ -478,10 +524,12 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[1, 3, 5, 1], [1, 1, 1, 1]]
-        assert_eq!(
-            res[0].get_ext_field_vec(),
-            vec![E::ONE, E::from(3u64), E::from(5u64), E::ONE],
-        );
+        assert_eq!(res[0].get_ext_field_vec(), vec![
+            E::ONE,
+            E::from(3u64),
+            E::from(5u64),
+            E::ONE
+        ],);
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE; 4],);
     }
 
@@ -496,10 +544,10 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[2, 3], [1, 1]]
-        assert_eq!(
-            res[0].get_ext_field_vec(),
-            vec![E::from(2u64), E::from(3u64)],
-        );
+        assert_eq!(res[0].get_ext_field_vec(), vec![
+            E::from(2u64),
+            E::from(3u64)
+        ],);
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE, E::ONE],);
     }
 
@@ -617,5 +665,62 @@ mod tests {
                 vec![(4 * 8) * (2 * 6)].into_iter().map(E::from).sum::<E>(),
             ])
         );
+    }
+
+    #[test]
+    fn test_wit_infer_by_expr_base_field() {
+        type E = goldilocks::GoldilocksExt2;
+        type B = goldilocks::Goldilocks;
+        let mut cs = ConstraintSystem::<E>::new(|| "test");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let a = cb.create_witin(|| "a").unwrap();
+        let b = cb.create_witin(|| "b").unwrap();
+        let c = cb.create_witin(|| "c").unwrap();
+
+        let expr: Expression<E> =
+            a.expr() + b.expr() + a.expr() * b.expr() + (c.expr() * 3.into() + 2.into());
+
+        let res = wit_infer_by_expr(
+            &[],
+            &[
+                vec![B::from(1)].into_mle().into(),
+                vec![B::from(2)].into_mle().into(),
+                vec![B::from(3)].into_mle().into(),
+            ],
+            &[],
+            &[],
+            &expr,
+        );
+        res.get_base_field_vec();
+    }
+
+    #[test]
+    fn test_wit_infer_by_expr_ext_field() {
+        type E = goldilocks::GoldilocksExt2;
+        type B = goldilocks::Goldilocks;
+        let mut cs = ConstraintSystem::<E>::new(|| "test");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let a = cb.create_witin(|| "a").unwrap();
+        let b = cb.create_witin(|| "b").unwrap();
+        let c = cb.create_witin(|| "c").unwrap();
+
+        let expr: Expression<E> = a.expr()
+            + b.expr()
+            + a.expr() * b.expr()
+            + (c.expr() * 3.into() + 2.into())
+            + Expression::Challenge(0, 1, E::ONE, E::ONE);
+
+        let res = wit_infer_by_expr(
+            &[],
+            &[
+                vec![B::from(1)].into_mle().into(),
+                vec![B::from(2)].into_mle().into(),
+                vec![B::from(3)].into_mle().into(),
+            ],
+            &[],
+            &[E::ONE],
+            &expr,
+        );
+        res.get_ext_field_vec();
     }
 }

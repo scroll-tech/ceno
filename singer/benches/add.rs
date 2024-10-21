@@ -7,7 +7,7 @@ use ark_std::test_rng;
 use const_env::from_env;
 use criterion::*;
 
-use ff_ext::{ff::Field, ExtensionField};
+use ff_ext::{ExtensionField, ff::Field};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 
@@ -34,20 +34,16 @@ const NUM_SAMPLES: usize = 10;
 const RAYON_NUM_THREADS: usize = 8;
 
 use singer::{
-    instructions::{add::AddInstruction, Instruction, InstructionGraph, SingerCircuitBuilder},
-    scheme::GKRGraphProverState,
     CircuitWiresIn, SingerGraphBuilder, SingerParams,
+    instructions::{Instruction, InstructionGraph, SingerCircuitBuilder, add::AddInstruction},
+    scheme::GKRGraphProverState,
 };
 use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;
 
-pub fn is_power_of_2(x: usize) -> bool {
-    (x != 0) && ((x & (x - 1)) == 0)
-}
-
 fn bench_add(c: &mut Criterion) {
     let max_thread_id = {
-        if !is_power_of_2(RAYON_NUM_THREADS) {
+        if !RAYON_NUM_THREADS.is_power_of_two() {
             #[cfg(not(feature = "non_pow2_rayon_thread"))]
             {
                 panic!(
@@ -82,7 +78,7 @@ fn bench_add(c: &mut Criterion) {
                 b.iter_with_setup(
                     || {
                         let mut rng = test_rng();
-                        let singer_builder = SingerGraphBuilder::<E>::new();
+                        let singer_builder = SingerGraphBuilder::<E>::default();
                         let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
                                 (rng, singer_builder, real_challenges)
                     },
@@ -127,14 +123,14 @@ fn bench_add(c: &mut Criterion) {
                         let point = vec![E::random(&mut rng), E::random(&mut rng)];
                         let target_evals = graph.target_evals(&wit, &point);
 
-                        let mut prover_transcript = &mut Transcript::new(b"Singer");
+                        let prover_transcript = &mut Transcript::new(b"Singer");
 
                         let timer = Instant::now();
                         let _ = GKRGraphProverState::prove(
                             &graph,
                             &wit,
                             &target_evals,
-                            &mut prover_transcript,
+                            prover_transcript,
                             (1 << instance_num_vars).min(max_thread_id),
                         )
                         .expect("prove failed");
