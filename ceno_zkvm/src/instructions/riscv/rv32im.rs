@@ -25,7 +25,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub jal_config: <JalInstruction<E> as Instruction<E>>::InstructionConfig,
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     pub lui_config: <LuiInstruction<E> as Instruction<E>>::InstructionConfig,
-    // pub lw_config: <LoadWord<E> as Instruction<E>>::InstructionConfig,
+    pub lw_config: <LoadWord<E> as Instruction<E>>::InstructionConfig,
 
     // Tables.
     pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
@@ -45,7 +45,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let jal_config = cs.register_opcode_circuit::<JalInstruction<E>>();
         let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
         let lui_config = cs.register_opcode_circuit::<LuiInstruction<E>>();
-        // let lw_config = cs.register_opcode_circuit::<LoadWord<E>>();
+        let lw_config = cs.register_opcode_circuit::<LoadWord<E>>();
 
         // tables
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
@@ -62,7 +62,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             jal_config,
             halt_config,
             lui_config,
-            // lw_config,
+            lw_config,
             u16_range_config,
             and_config,
             ltu_config,
@@ -84,7 +84,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<JalInstruction<E>>(cs);
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs);
         fixed.register_opcode_circuit::<LuiInstruction<E>>(cs);
-        // fixed.register_opcode_circuit::<LoadWord<E>>(cs);
+        fixed.register_opcode_circuit::<LoadWord<E>>(cs);
 
         fixed.register_table_circuit::<U16TableCircuit<E>>(cs, self.u16_range_config.clone(), &());
         fixed.register_table_circuit::<AndTableCircuit<E>>(cs, self.and_config.clone(), &());
@@ -135,7 +135,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness.assign_opcode_circuit::<JalInstruction<E>>(cs, &self.jal_config, jal_records)?;
         witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
         witness.assign_opcode_circuit::<LuiInstruction<E>>(cs, &self.lui_config, lui_records)?;
-        // witness.assign_opcode_circuit::<LoadWord<E>>(cs, &self.lw_config, lw_records)?;
+        witness.assign_opcode_circuit::<LoadWord<E>>(cs, &self.lw_config, lw_records)?;
         Ok(())
     }
 
