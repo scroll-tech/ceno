@@ -9,6 +9,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
+    instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     witness::RowMajorMatrix,
@@ -93,7 +94,7 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
             .for_each(|(row, rec)| {
                 // Assign value limbs.
                 self.init_v.iter().enumerate().for_each(|(l, limb)| {
-                    let val = (rec.value >> (l * 16)) & 0xFFFF;
+                    let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
                     set_fixed_val!(row, limb, (val as u64).into());
                 });
                 set_fixed_val!(row, self.addr, (rec.addr as u64).into());
@@ -118,7 +119,7 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
             .for_each(|(row, rec)| {
                 // Assign value limbs.
                 self.final_v.iter().enumerate().for_each(|(l, limb)| {
-                    let val = (rec.value >> (l * 16)) & 0xFFFF;
+                    let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
                     set_val!(row, limb, val as u64);
                 });
                 set_val!(row, self.final_cycle, rec.cycle);
