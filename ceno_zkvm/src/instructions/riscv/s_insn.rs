@@ -23,6 +23,7 @@ pub struct SInstructionConfig<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> SInstructionConfig<E> {
+    #[allow(clippy::too_many_arguments)]
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,

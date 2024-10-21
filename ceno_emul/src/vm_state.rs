@@ -148,16 +148,17 @@ impl EmuContext for VMState {
     }
 
     /// Load a memory word and record this operation.
-    fn load_memory(&mut self, addr: WordAddr) -> Result<Word> {
+    fn load_memory(&mut self, addr: WordAddr, shift: u32) -> Result<Word> {
         let value = self.peek_memory(addr);
-        self.tracer.load_memory(addr, value);
+        self.tracer.load_memory(addr, shift, value);
         Ok(value)
     }
 
     /// Store a memory word and record this operation.
-    fn store_memory(&mut self, addr: WordAddr, after: Word) -> Result<()> {
+    fn store_memory(&mut self, addr: WordAddr, shift: u32, after: Word) -> Result<()> {
         let before = self.peek_memory(addr);
-        self.tracer.store_memory(addr, Change { after, before });
+        self.tracer
+            .store_memory(addr, shift, Change { after, before });
         self.memory.insert(addr, after);
         Ok(())
     }

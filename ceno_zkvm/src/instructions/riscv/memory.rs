@@ -27,6 +27,7 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     rs2_read: UInt<E>,
     imm: WitIn,
 
+    memory_addr: MemAddr<E>,
     word_change: Option<MemWordChange<N_ZEROS>>,
 }
 
@@ -41,18 +42,23 @@ impl RIVInstruction for SWOp {
 #[allow(dead_code)]
 pub type StoreWord<E> = StoreInstruction<E, SWOp, 2>;
 
-pub struct SBOp;
-impl RIVInstruction for SBOp {
-    const INST_KIND: InsnKind = InsnKind::SB;
-}
-pub type StoreByte<E> = StoreInstruction<E, SBOp, 0>;
-
 pub struct SHOp;
 
 impl RIVInstruction for SHOp {
     const INST_KIND: InsnKind = InsnKind::SH;
 }
+
+#[allow(dead_code)]
 pub type StoreHalf<E> = StoreInstruction<E, SHOp, 1>;
+
+pub struct SBOp;
+
+impl RIVInstruction for SBOp {
+    const INST_KIND: InsnKind = InsnKind::SB;
+}
+
+#[allow(dead_code)]
+pub type StoreByte<E> = StoreInstruction<E, SBOp, 0>;
 
 impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     for StoreInstruction<E, I, N_ZEROS>
@@ -113,6 +119,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             rs1_read,
             rs2_read,
             imm,
+            memory_addr,
             word_change,
         })
     }
@@ -125,6 +132,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     ) -> Result<(), ZKVMError> {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
+        let memory_op = step.memory_op().unwrap();
         let imm: E::BaseField = InsnRecord::imm_or_funct7_field(&step.insn());
 
         config
@@ -133,6 +141,14 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         config.rs1_read.assign_value(instance, rs1);
         config.rs2_read.assign_value(instance, rs2);
         set_val!(instance, config.imm, imm);
+
+        let addr_unaligned = memory_op.addr.baddr().0 + memory_op.shift;
+        config
+            .memory_addr
+            .assign_instance(instance, lk_multiplicity, addr_unaligned)?;
+        if let Some(change) = config.word_change.as_ref() {
+            change.assign_instance::<E>(instance, lk_multiplicity, step)?;
+        }
 
         Ok(())
     }
