@@ -8,15 +8,15 @@ use ff_ext::ExtensionField;
 
 pub struct MemWordChange<const N_ZEROS: usize> {
     // decompose limb into bytes iff N_ZEROS == 0
-    old_limb_bytes: Vec<WitIn>,
+    prev_limb_bytes: Vec<WitIn>,
     rs2_limb_bytes: Vec<WitIn>,
 
     // its length + N_ZEROS equals to 2
     expected_changes: Vec<WitIn>,
 }
 
-impl<E: ExtensionField, const N_ZEROS: usize> MemWordChange<N_ZEROS> {
-    pub(crate) fn construct_circuit(
+impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
+    pub(crate) fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         addr: &MemAddr<E>,
         prev_word: &UInt<E>,
@@ -24,12 +24,13 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordChange<N_ZEROS> {
     ) -> Result<Self, ZKVMError> {
         let select =
             |bit: &Expression<E>, when_true: &Expression<E>, when_false: &Expression<E>| {
-                bit.clone() * when_true.clone() + (1 - bit.clone()) * when_false.clone()
+                bit.clone() * when_true.clone()
+                    + (E::BaseField::from(1).expr() - bit.clone()) * when_false.clone()
             };
 
-        let decompose_limb = |limb_anno: &str,
-                              limb: &Expression<E>,
-                              num_bytes: usize|
+        let mut decompose_limb = |limb_anno: &str,
+                                  limb: &Expression<E>,
+                                  num_bytes: usize|
          -> Result<Vec<WitIn>, ZKVMError> {
             let bytes = (0..num_bytes)
                 .into_iter()
@@ -43,7 +44,7 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     .iter()
                     .enumerate()
                     .fold(Expression::ZERO, |acc, (idx, byte)| {
-                        acc + E::BaseField::from(1 << (idx * 8)) * byte.expr()
+                        acc + E::BaseField::from(1 << (idx * 8)).expr() * byte.expr()
                     }),
             )?;
 
@@ -72,10 +73,10 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     // degree 2 expression
                     select(
                         &low_bits[0],
-                        E::BaseField::from(1 << 8)
-                            * (rs2_limb_bytes[1].expr() - prev_limb_bytes[1].expr()),
-                        E::BaseField::from(1)
-                            * (rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr()),
+                        &(E::BaseField::from(1 << 8).expr()
+                            * (rs2_limb_bytes[1].expr() - prev_limb_bytes[1].expr())),
+                        &(E::BaseField::from(1).expr()
+                            * (rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr())),
                     ),
                     expected_limb_change.expr(),
                 )?;
@@ -86,14 +87,14 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     // degree 2 expression
                     select(
                         &low_bits[1],
-                        E::BaseField::from(1 << 16) * expected_limb_change.expr(),
-                        E::BaseField::from(1) * expected_limb_change.expr(),
+                        &(E::BaseField::from(1 << 16).expr() * expected_limb_change.expr()),
+                        &(E::BaseField::from(1).expr() * expected_limb_change.expr()),
                     ),
                     expected_change.expr(),
                 )?;
 
                 Ok(MemWordChange {
-                    old_limb_bytes: prev_limb_bytes,
+                    prev_limb_bytes: prev_limb_bytes,
                     rs2_limb_bytes,
                     expected_changes: vec![expected_limb_change, expected_change],
                 })
@@ -113,15 +114,16 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     // degree 2 expression
                     select(
                         &low_bits[1],
-                        &E::BaseField::from(1 << 16)
-                            * (rs2_limbs[1].clone() - prev_limbs[1].clone()),
-                        &E::BaseField::from(1) * (rs2_limbs[1].clone() - prev_limbs[0].clone()),
+                        &(E::BaseField::from(1 << 16).expr()
+                            * (rs2_limbs[1].clone() - prev_limbs[1].clone())),
+                        &(E::BaseField::from(1).expr()
+                            * (rs2_limbs[1].clone() - prev_limbs[0].clone())),
                     ),
                     expected_change.expr(),
                 )?;
 
                 Ok(MemWordChange {
-                    old_limb_bytes: vec![],
+                    prev_limb_bytes: vec![],
                     rs2_limb_bytes: vec![],
                     expected_changes: vec![expected_change],
                 })
@@ -130,7 +132,7 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordChange<N_ZEROS> {
         }
     }
 
-    pub(crate) fn value(&self) -> Expression<E> {
+    pub(crate) fn value<E: ExtensionField>(&self) -> Expression<E> {
         assert!(N_ZEROS <= 1);
 
         self.expected_changes[1 - N_ZEROS].expr()

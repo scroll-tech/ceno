@@ -19,7 +19,7 @@ pub struct SInstructionConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     rs1: ReadRS1<E>,
     rs2: ReadRS2<E>,
-    mem_write: WriteMEM<E>,
+    mem_write: WriteMEM,
 }
 
 impl<E: ExtensionField> SInstructionConfig<E> {
@@ -78,7 +78,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         self.rs1.assign_instance(instance, lk_multiplicity, step)?;
         self.rs2.assign_instance(instance, lk_multiplicity, step)?;
         self.mem_write
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance::<E>(instance, lk_multiplicity, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);

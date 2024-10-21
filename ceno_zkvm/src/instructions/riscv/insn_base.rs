@@ -300,13 +300,13 @@ impl<E: ExtensionField> ReadMEM<E> {
 }
 
 #[derive(Debug)]
-pub struct WriteMEM<E: ExtensionField> {
+pub struct WriteMEM {
     pub prev_ts: WitIn,
     pub lt_cfg: AssertLTConfig,
 }
 
-impl<E: ExtensionField> WriteMEM<E> {
-    pub fn construct_circuit(
+impl WriteMEM {
+    pub fn construct_circuit<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: AddressExpr<E>,
         prev_value: MemoryExpr<E>,
@@ -327,7 +327,7 @@ impl<E: ExtensionField> WriteMEM<E> {
         Ok(WriteMEM { prev_ts, lt_cfg })
     }
 
-    pub fn assign_instance(
+    pub fn assign_instance<E: ExtensionField>(
         &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,

@@ -2,10 +2,9 @@ mod store_base;
 
 use crate::{
     Value,
-    chip_handler::MemoryChipOperations,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::ToExpr,
+    expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{
@@ -13,6 +12,8 @@ use crate::{
             memory::store_base::MemWordChange, s_insn::SInstructionConfig,
         },
     },
+    set_val,
+    tables::InsnRecord,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
@@ -24,7 +25,7 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
-    imm: UInt<E>,
+    imm: WitIn,
 
     word_change: Option<MemWordChange<N_ZEROS>>,
 }
@@ -99,7 +100,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let s_insn = SInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &imm.value(),
+            &imm.expr(),
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.expr_align4(),
@@ -124,14 +125,14 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     ) -> Result<(), ZKVMError> {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
-        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
+        let imm: E::BaseField = InsnRecord::imm_or_funct7_field(&step.insn());
 
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs1_read.assign_value(instance, rs1);
         config.rs2_read.assign_value(instance, rs2);
-        config.imm.assign_value(instance, imm);
+        set_val!(instance, config.imm, imm);
 
         Ok(())
     }
