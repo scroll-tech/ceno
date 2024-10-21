@@ -637,7 +637,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             Self::run(cb, wits_in, programs, lkm)
         };
 
-        let constraint_eq = constraint_name.len() > 0;
+        let constraint_eq = !constraint_name.is_empty();
         match result {
             Ok(_) => {
                 println!("======================================================");

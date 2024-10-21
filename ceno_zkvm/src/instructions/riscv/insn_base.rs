@@ -553,18 +553,35 @@ mod test {
             cb.require_equal(|| "", mem_addr.expr_align4(), (addr >> 2 << 2).into())?;
         }
 
-        let res = MockProver::run(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            &[],
-            None,
-        );
-        assert_eq!(res.is_ok(), is_ok, "{:?}", res);
+        if is_ok {
+            MockProver::assert_satisfied(
+                &cb,
+                &raw_witin
+                    .de_interleaving()
+                    .into_mles()
+                    .into_iter()
+                    .map(|v| v.into())
+                    .collect_vec(),
+                &[],
+                None,
+                None,
+            );
+        } else {
+            MockProver::assert_unsatisfied(
+                &cb,
+                &raw_witin
+                    .de_interleaving()
+                    .into_mles()
+                    .into_iter()
+                    .map(|v| v.into())
+                    .collect_vec(),
+                &[],
+                "mid_u14",
+                None,
+                None,
+            );
+        }
+
         Ok(())
     }
 }
