@@ -628,17 +628,17 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
-        let groups = (if let Some(challenge) = challenge {
+        let error_groups = if let Some(challenge) = challenge {
             Self::run_with_challenge(cb, wits_in, challenge, lkm)
         } else {
             Self::run(cb, wits_in, programs, lkm)
-        })
+        }
         .err()
         .into_iter()
         .flatten()
         .into_group_map_by(|error| constraint_names.iter().find(|&name| error.contains(name)));
         // Unexpected errors
-        if let Some(errors) = groups.get(&None) {
+        if let Some(errors) = error_groups.get(&None) {
             println!("======================================================");
 
             println!(
@@ -663,7 +663,7 @@ Hints:
         }
         for constraint_name in constraint_names {
             // Expected errors didn't happen:
-            groups.get(&Some(constraint_name)).unwrap_or_else(|| {
+            error_groups.get(&Some(constraint_name)).unwrap_or_else(|| {
                 println!("======================================================");
                 println!("Error: {} constraint satisfied", constraint_name);
                 println!("======================================================");
