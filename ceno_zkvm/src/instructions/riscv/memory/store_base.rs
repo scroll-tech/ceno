@@ -150,7 +150,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
     ) -> Result<(), ZKVMError> {
         // memory_addr, prev_value, rs2_value,
         let memory_op = step.memory_op().clone().unwrap();
-        let prev_value = Value::new_unchecked(memory_op.value.before);
+        let prev_value = Value::new(memory_op.value.before, lk_multiplicity);
         let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
 
         assert!(memory_op.shift <= 0x03);

@@ -88,7 +88,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             rs1_read.value() + imm.expr(),
         )?;
 
-        let prev_memory_value = UInt::new_unchecked(|| "prev_memory_value", circuit_builder)?;
+        let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
         let (new_memory_value, word_change) = match I::INST_KIND {
             InsnKind::SW => (rs2_read.memory_expr(), None),
             InsnKind::SH | InsnKind::SB => {
