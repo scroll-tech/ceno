@@ -1,11 +1,11 @@
 use std::{panic, time::Instant};
 
 use ceno_zkvm::{
-    Value, declare_program,
+    declare_program,
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
-    tables::{ProgramTableCircuit, RegTableCircuit},
+    tables::{MemFinalRecord, ProgramTableCircuit, RamTable, RegTable, RegTableCircuit},
 };
 use clap::Parser;
 use const_env::from_env;
@@ -129,29 +129,18 @@ fn main() {
 
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
         // vm.x4 += vm.x1
+        let reg_init = {
+            let mut reg_init = RegTable::init_state();
+            reg_init[1].value = 1;
+            reg_init[2].value = u32::MAX;
+            reg_init[3].value = step_loop;
+            reg_init
+        };
+
         zkvm_fixed_traces.register_table_circuit::<RegTableCircuit<E>>(
             &zkvm_cs,
             reg_config.clone(),
-            &Some(
-                vec![
-                    0,         // x0
-                    1,         // x1
-                    u32::MAX,  // x2
-                    step_loop, // x3
-                ]
-                .into_iter()
-                .chain(std::iter::repeat(0u32))
-                .take(32)
-                .flat_map(|v| {
-                    Value::<u32>::new_unchecked(v)
-                        .as_u16_limbs()
-                        .iter()
-                        .map(|v| *v as u32)
-                        .chain(std::iter::once(0))
-                        .collect_vec()
-                })
-                .collect_vec(),
-            ),
+            &Some(reg_init.clone()),
         );
 
         let pk = zkvm_cs
@@ -210,25 +199,23 @@ fn main() {
         config
             .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
             .unwrap();
-        // assign cpu register circuit
+
+        // Find the final register values and cycles.
+        let reg_final = reg_init
+            .iter()
+            .map(|rec| {
+                let index = rec.addr as usize;
+                let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
+                MemFinalRecord {
+                    value: vm.peek_register(index),
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec();
+
+        // assign register finalization.
         zkvm_witness
-            .assign_table_circuit::<RegTableCircuit<E>>(
-                &zkvm_cs,
-                &reg_config,
-                &(0..32)
-                    .flat_map(|reg_id| {
-                        let vma: WordAddr = CENO_PLATFORM.register_vma(reg_id).into();
-                        let reg_value = Value::<u32>::new_unchecked(vm.peek_register(reg_id));
-                        reg_value
-                            .as_u16_limbs()
-                            .iter()
-                            .cloned()
-                            .map(|limb| limb as u32)
-                            .chain(std::iter::once(*final_access.get(&vma).unwrap_or(&0) as u32))
-                            .collect_vec()
-                    })
-                    .collect_vec(),
-            )
+            .assign_table_circuit::<RegTableCircuit<E>>(&zkvm_cs, &reg_config, &reg_final)
             .unwrap();
         // assign program circuit
         zkvm_witness

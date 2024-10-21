@@ -15,31 +15,31 @@ serde.workspace = true
 ceno_emul = { path = "../ceno_emul" }
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
-multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
-sumcheck = { version = "0.1.0", path = "../sumcheck" }
+multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
+sumcheck = { version = "0", path = "../sumcheck" }
 transcript = { path = "../transcript" }
 
-itertools = "0.12.1"
-paste = "1.0.15"
-strum = "0.25.0"
-strum_macros = "0.25.3"
-tracing = "0.1.40"
-tracing-flame = "0.2.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+itertools.workspace = true
+paste.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+tracing.workspace = true
+tracing-flame.workspace = true
+tracing-subscriber.workspace = true
 
-clap = { version = "4.5.20", features = ["derive"] }
-generic_static = "0.2.0"
-rand = "0.8"
-tempfile = "3.13.0"
-thread_local = "1.1.8"
+clap = { version = "4.5", features = ["derive"] }
+generic_static = "0.2"
+rand.workspace = true
+tempfile = "3.13"
+thread_local = "1.1"
 
 [dev-dependencies]
-base64 = "0.22.1"
-cfg-if = "1.0.0"
-const_env = "0.1.2"
-criterion = { version = "0.5", features = ["html_reports"] }
-pprof = { version = "0.13", features = ["flamegraph"] }
-serde_json = "1.0.129"
+base64 = "0.22"
+cfg-if.workspace = true
+const_env.workspace = true
+criterion.workspace = true
+pprof.workspace = true
+serde_json.workspace = true
 
 [build-dependencies]
 glob = "0.3"

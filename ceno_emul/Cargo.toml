@@ -6,12 +6,10 @@ version.workspace = true
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
-elf = { version = "0.7.4" }
-strum = "0.25.0"
-strum_macros = "0.25.3"
-tracing = { version = "0.1", default-features = false, features = [
-  "attributes",
-] }
+elf = "0.7"
+strum.workspace = true
+strum_macros.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 ceno-examples = { path = "../examples-builder" }

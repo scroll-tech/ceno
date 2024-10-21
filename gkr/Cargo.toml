@@ -9,26 +9,26 @@ ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true
 
-const_env = "0.1.2"
-crossbeam-channel = "0.5.13"
+const_env.workspace = true
+crossbeam-channel.workspace = true
 ff_ext = { path = "../ff_ext" }
-itertools = "0.12.1"
+itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 rayon.workspace = true
 serde.workspace = true
-serde_json = "1.0.129"
+serde_json.workspace = true
 simple-frontend = { path = "../simple-frontend" }
 sumcheck = { path = "../sumcheck" }
-tracing = "0.1.40"
-tracing-flame = "0.2.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing.workspace = true
+tracing-flame.workspace = true
+tracing-subscriber.workspace = true
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
-cfg-if = "1.0.0"
-criterion = { version = "0.5", features = ["html_reports"] }
-pprof = { version = "0.13", features = ["flamegraph"] }
-tiny-keccak = { version = "2.0.2", features = ["keccak"] }
+cfg-if.workspace = true
+criterion.workspace = true
+pprof.workspace = true
+tiny-keccak = { version = "2.0", features = ["keccak"] }
 
 [features]
 default = []

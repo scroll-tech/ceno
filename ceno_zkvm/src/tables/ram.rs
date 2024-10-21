@@ -1,9 +1,10 @@
-use ram_circuit::{RamTable, RamTableCircuit};
+use ram_circuit::RamTableCircuit;
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
 
 mod ram_circuit;
 mod ram_impl;
+pub use ram_circuit::{MemFinalRecord, MemInitRecord, RamTable};
 
 pub struct MemTable;
 
@@ -13,7 +14,7 @@ impl MemTable {
 
 impl RamTable for MemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = UINT_LIMBS + 1; // +1 including timestamp
+    const V_LIMBS: usize = UINT_LIMBS; // See `MemoryExpr`.
     fn len() -> usize {
         // TODO figure out better way to define memory entry count
         1 << 21
@@ -31,7 +32,7 @@ pub struct RegTable;
 
 impl RamTable for RegTable {
     const RAM_TYPE: RAMType = RAMType::Register;
-    const V_LIMBS: usize = UINT_LIMBS + 1; // +1 including timestamp
+    const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
     fn len() -> usize {
         32 // register size 32
     }
