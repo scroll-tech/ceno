@@ -561,7 +561,7 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             &[],
-            if is_ok { &[] } else { &[Some("mid_u14")] },
+            if is_ok { &[] } else { &["mid_u14"] },
             None,
             None,
         );

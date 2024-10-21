@@ -263,12 +263,8 @@ impl<E: ExtensionField> MockProverError<E> {
         }
     }
 
-    fn contains(&self, constraint_name: &Option<&str>) -> bool {
-        if let Some(name) = constraint_name {
-            self.name().contains(name)
-        } else {
-            true
-        }
+    fn contains(&self, constraint_name: &str) -> bool {
+        self.name().contains(constraint_name)
     }
 }
 
@@ -634,7 +630,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         programs: &[u32],
-        constraint_names: &[Option<&str>],
+        constraint_names: &[&str],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
@@ -648,7 +644,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let groups = errors.into_iter().into_group_map_by(|error| {
             for constraint_name in constraint_names {
                 if error.contains(constraint_name) {
-                    return *constraint_name;
+                    return Some(constraint_name);
                 }
             }
             None
@@ -693,12 +689,9 @@ Hints:
         }
         for constraint_name in constraint_names {
             // Expected errors didn't happen:
-            groups.get(&constraint_name).unwrap_or_else(|| {
+            groups.get(&Some(constraint_name)).unwrap_or_else(|| {
                 println!("======================================================");
-                println!(
-                    "Error: {} constraint satisfied",
-                    constraint_name.unwrap_or("[all]")
-                );
+                println!("Error: {} constraint satisfied", constraint_name);
                 println!("======================================================");
                 panic!("Constraints unexpectedly satisfied");
             });
