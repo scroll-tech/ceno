@@ -659,6 +659,7 @@ Hints:
                     println!("Error: {} duplicates hidden.", count - 1);
                 }
             }
+            println!("Error: {} constraints not satisfied", errors.len());
             println!("======================================================");
             panic!("(Unexpected) Constraints not satisfied");
         }
