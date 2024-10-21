@@ -196,7 +196,9 @@ impl InnerLtConfig {
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
-        let diff_abs = (rhs as i64 - lhs as i64).abs() as u64;
+        // convert to i64 to avoid substract overflow
+        // convert to abs to simplify ((diff_abs as u32) as u64)
+        let diff_abs = (rhs as i64 - lhs as i64).unsigned_abs();
         let diff = if is_signed_lt {
             Self::range(self.diff.len()) - diff_abs
         } else {
