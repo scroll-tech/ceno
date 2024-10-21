@@ -5,11 +5,9 @@ name = "transcript"
 version.workspace = true
 
 [dependencies]
-ark-std.workspace = true
 crossbeam-channel.workspace = true
 ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 goldilocks.workspace = true
 poseidon.workspace = true
-rayon.workspace = true
 serde.workspace = true
