@@ -319,7 +319,7 @@ impl WriteMEM {
             || "write_memory",
             &mem_addr,
             prev_ts.expr(),
-            cur_ts.expr() + (Tracer::SUBCYCLE_RD as usize).into(),
+            cur_ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
             prev_value,
             new_value,
         )?;

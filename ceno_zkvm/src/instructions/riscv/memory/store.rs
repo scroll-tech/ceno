@@ -24,6 +24,7 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
     imm: WitIn,
+    prev_memory_value: UInt<E>,
 
     memory_addr: MemAddr<E>,
     word_change: Option<MemWordChange<N_ZEROS>>,
@@ -72,6 +73,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+        let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
         let imm = circuit_builder.create_witin(|| "imm")?;
 
         let memory_addr = match I::INST_KIND {
@@ -86,7 +88,6 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             rs1_read.value() + imm.expr(),
         )?;
 
-        let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
         let (new_memory_value, word_change) = match I::INST_KIND {
             InsnKind::SW => (rs2_read.memory_expr(), None),
             InsnKind::SH | InsnKind::SB => {
@@ -117,6 +118,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             rs1_read,
             rs2_read,
             imm,
+            prev_memory_value,
             memory_addr,
             word_change,
         })
@@ -132,6 +134,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         let memory_op = step.memory_op().unwrap();
         let imm: E::BaseField = InsnRecord::imm_or_funct7_field(&step.insn());
+        let prev_mem_value = Value::new(memory_op.value.before, lk_multiplicity);
 
         config
             .s_insn
@@ -139,6 +142,9 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         config.rs1_read.assign_value(instance, rs1);
         config.rs2_read.assign_value(instance, rs2);
         set_val!(instance, config.imm, imm);
+        config
+            .prev_memory_value
+            .assign_value(instance, prev_mem_value);
 
         let addr_unaligned = memory_op.addr.baddr().0 + memory_op.shift;
         config

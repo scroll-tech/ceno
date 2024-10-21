@@ -8,6 +8,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
+use ff::Field;
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
@@ -33,13 +34,26 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     + (E::BaseField::from(1).expr() - bit.clone()) * when_false.clone()
             };
 
-        let mut decompose_limb = |limb_anno: &str,
-                                  limb: &Expression<E>,
-                                  num_bytes: usize|
+        let alloc_bytes = |cb: &mut CircuitBuilder<E>,
+                           anno: &str,
+                           num_bytes: usize|
          -> Result<Vec<WitIn>, ZKVMError> {
-            let bytes = (0..num_bytes)
-                .map(|i| cb.create_witin(|| format!("{}.le_bytes[{}]", limb_anno, i)))
-                .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
+            (0..num_bytes)
+                .map(|i| {
+                    let byte = cb.create_witin(|| format!("{}.le_bytes[{}]", anno, i))?;
+                    cb.assert_ux::<_, _, 8>(|| "byte range check", byte.expr())?;
+
+                    Ok(byte)
+                })
+                .collect::<Result<Vec<WitIn>, ZKVMError>>()
+        };
+
+        let decompose_limb = |cb: &mut CircuitBuilder<E>,
+                              limb_anno: &str,
+                              limb: &Expression<E>,
+                              num_bytes: usize|
+         -> Result<Vec<WitIn>, ZKVMError> {
+            let bytes = alloc_bytes(cb, limb_anno, num_bytes)?;
 
             cb.require_equal(
                 || format!("decompose {} into {} bytes", limb_anno, num_bytes),
@@ -66,10 +80,14 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
 
                 // degree == 2
                 let prev_target_limb = select(&low_bits[1], &prev_limbs[1], &prev_limbs[0]);
-                let rs2_target_limb = select(&low_bits[1], &rs2_limbs[1], &rs2_limbs[0]);
 
-                let prev_limb_bytes = decompose_limb("prev_limb", &prev_target_limb, 2)?;
-                let rs2_limb_bytes = decompose_limb("rs2_limb", &rs2_target_limb, 2)?;
+                let prev_limb_bytes = decompose_limb(cb, "prev_limb", &prev_target_limb, 2)?;
+                let rs2_limb_bytes = alloc_bytes(cb, "rs2_limb[0]", 1)?;
+                let u8_base_inv = E::BaseField::from(1 << 8).invert().unwrap();
+                cb.assert_ux::<_, _, 8>(
+                    || "rs2_limb[0].le_bytes[1]",
+                    u8_base_inv.expr() * (rs2_limbs[0].clone() - rs2_limb_bytes[0].expr()),
+                )?;
 
                 let expected_limb_change = cb.create_witin(|| "expected_limb_change")?;
                 cb.require_equal(
@@ -78,7 +96,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     select(
                         &low_bits[0],
                         &(E::BaseField::from(1 << 8).expr()
-                            * (rs2_limb_bytes[1].expr() - prev_limb_bytes[1].expr())),
+                            * (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr())),
                         &(E::BaseField::from(1).expr()
                             * (rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr())),
                     ),
@@ -150,14 +168,14 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
     ) -> Result<(), ZKVMError> {
         // memory_addr, prev_value, rs2_value,
         let memory_op = step.memory_op().clone().unwrap();
-        let prev_value = Value::new(memory_op.value.before, lk_multiplicity);
+        let prev_value = Value::new_unchecked(memory_op.value.before);
         let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
 
         assert!(memory_op.shift <= 0x03);
 
         let low_bits = [memory_op.shift & 1, (memory_op.shift >> 1) & 1];
         let prev_limb = prev_value.as_u16_limbs()[low_bits[1] as usize];
-        let rs2_limb = rs2_value.as_u16_limbs()[low_bits[1] as usize];
+        let rs2_limb = rs2_value.as_u16_limbs()[0];
 
         self.prev_limb_bytes
             .iter()
@@ -167,13 +185,15 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 lk_multiplicity.assert_ux::<8>(byte as u64);
             });
 
-        self.rs2_limb_bytes
-            .iter()
-            .zip(rs2_limb.to_le_bytes())
-            .for_each(|(col, byte)| {
-                set_val!(instance, *col, E::BaseField::from(byte as u64));
-                lk_multiplicity.assert_ux::<8>(byte as u64);
-            });
+        set_val!(
+            instance,
+            self.rs2_limb_bytes[0],
+            E::BaseField::from(rs2_limb.to_le_bytes()[0] as u64)
+        );
+
+        rs2_limb.to_le_bytes().into_iter().for_each(|byte| {
+            lk_multiplicity.assert_ux::<8>(byte as u64);
+        });
 
         match N_ZEROS {
             0 => {
@@ -181,8 +201,8 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     E::BaseField::from(rs2_limb.to_le_bytes()[0] as u64)
                         - E::BaseField::from(prev_limb.to_le_bytes()[0] as u64)
                 } else {
-                    E::BaseField::from((rs2_limb.to_le_bytes()[1] as u64) << 8)
-                        - E::BaseField::from((rs2_limb.to_le_bytes()[1] as u64) << 8)
+                    E::BaseField::from((rs2_limb.to_le_bytes()[0] as u64) << 8)
+                        - E::BaseField::from((prev_limb.to_le_bytes()[1] as u64) << 8)
                 };
                 let final_change = if low_bits[1] == 0 {
                     change

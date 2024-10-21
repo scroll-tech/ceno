@@ -4,3 +4,6 @@ pub mod store;
 
 #[allow(unused_imports)]
 pub use store::{StoreByte, StoreConfig, StoreHalf, StoreWord};
+
+#[cfg(test)]
+mod test;
