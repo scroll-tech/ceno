@@ -262,6 +262,14 @@ impl<E: ExtensionField> MockProverError<E> {
             _ => "",
         }
     }
+
+    fn contains(&self, constraint_name: Option<&str>) -> bool {
+        if let Some(name) = constraint_name {
+            self.name().contains(name)
+        } else {
+            true
+        }
+    }
 }
 
 pub(crate) struct MockProver<E: ExtensionField> {
@@ -621,13 +629,12 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
     }
 
-    /// assert if all the constraints are statisfied.
-    /// If `constraint_name` is specified, assert when the failed constraint doesn't match.
+    /// assertion there are errors in the circuit, and panic once all success.
     pub fn assert_unsatisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         programs: &[u32],
-        constraint_name: &str,
+        constraint_name: Option<&str>,
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
@@ -637,7 +644,6 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             Self::run(cb, wits_in, programs, lkm)
         };
 
-        let constraint_eq = !constraint_name.is_empty();
         match result {
             Ok(_) => {
                 println!("======================================================");
@@ -646,13 +652,32 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 panic!();
             }
             Err(errors) => {
-                for error in &errors {
-                    if constraint_eq && !error.name().contains(constraint_name) {
-                        println!("======================================================");
-                        println!("Error: {} constraint satisfied", error.name());
-                        println!("======================================================");
-                        panic!("Constraints satisfied");
+                let mut duplicates = 0;
+                let mut unexpected_errors: Vec<MockProverError<E>> = vec![];
+                for error in errors {
+                    if error.contains(constraint_name) {
+                        duplicates += 1;
+                    } else {
+                        unexpected_errors.push(error);
                     }
+                }
+
+                // if un-expected errors happen
+                if !unexpected_errors.is_empty() {
+                    println!("======================================================");
+                    for error in unexpected_errors {
+                        println!("Error: {} constraint not satisfied", error.name());
+                    }
+                    println!("======================================================");
+                    panic!("Constraints not satisfied");
+                }
+
+                // if expected error doesn't happen
+                if duplicates == 0 {
+                    println!("======================================================");
+                    println!("Error: {} constraint satisfied", constraint_name.unwrap());
+                    println!("======================================================");
+                    panic!("Constraints satisfied");
                 }
             }
         }

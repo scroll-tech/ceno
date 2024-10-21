@@ -237,7 +237,7 @@ mod test {
                         .map(|v| v.into())
                         .collect_vec(),
                     &[insn_code],
-                    name,
+                    Some(name),
                     None,
                     Some(lkm),
                 );
